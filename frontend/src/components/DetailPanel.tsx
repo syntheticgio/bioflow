@@ -10,11 +10,13 @@ import {
   shortHash,
 } from "../lib/format";
 import { notify } from "../stores/messageStore";
+import { AssemblyFacts } from "./AssemblyFacts";
 import { FactsTable } from "./FactsTable";
 import { IngestProgress } from "./IngestProgress";
 import { BaseCompositionChart, QualityChart } from "./SequenceCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
+import { RoleConverter } from "./RoleConverter";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { SraPanel } from "./SraPanel";
 import { TagEditor } from "./TagEditor";
@@ -280,10 +282,12 @@ function ObjectDetail({ id }: { id: string }) {
     obj.format.extension_says &&
     obj.format.magic_says !== obj.format.extension_says;
 
+  const isReference = obj.role === "reference";
+
   return (
     <div className="panel">
       <div className="panel-header">
-        <span className="panel-title">File</span>
+        <span className="panel-title">{isReference ? "Reference" : "File"}</span>
         <span className={`badge ${obj.status}`} style={{ marginLeft: "auto" }}>
           {obj.status}
         </span>
@@ -339,7 +343,7 @@ function ObjectDetail({ id }: { id: string }) {
             className="section-title"
             style={{ display: "flex", alignItems: "center", gap: 8 }}
           >
-            <span>Parsed facts</span>
+            <span>{isReference ? "Assembly" : "Parsed facts"}</span>
             <button
               type="button"
               onClick={() => reingest.mutate()}
@@ -359,7 +363,11 @@ function ObjectDetail({ id }: { id: string }) {
 
           {Object.keys(obj.facts).length > 0 ? (
             <>
-              <FactsTable facts={obj.facts} />
+              {isReference ? (
+                <AssemblyFacts facts={obj.facts} />
+              ) : (
+                <FactsTable facts={obj.facts} />
+              )}
               <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
                 {Array.isArray(obj.facts.base_composition) && (
                   <div style={{ flex: "0 1 auto" }}>
@@ -380,7 +388,9 @@ function ObjectDetail({ id }: { id: string }) {
                     />
                   </div>
                 )}
-                {Array.isArray(obj.facts.quality_per_position) && (
+                {/* A FASTA carries no per-base qualities, so the quality curve
+                    is meaningless for a reference. */}
+                {!isReference && Array.isArray(obj.facts.quality_per_position) && (
                   <div style={{ flex: "1 1 auto", minWidth: 300 }}>
                     <div
                       style={{
@@ -438,11 +448,17 @@ function ObjectDetail({ id }: { id: string }) {
           </dl>
         </div>
 
-        <SraPanel facts={obj.facts} formatKind={obj.format.kind} />
+        {/* SRA run/experiment accessions are the wrong archive for an
+            assembly; assembly_accession links to NCBI Datasets instead. */}
+        {!isReference && <SraPanel facts={obj.facts} formatKind={obj.format.kind} />}
 
         <div className="section">
           <div className="section-title">Metadata</div>
+          {/* Keyed on the role so a conversion remounts the editor: its schema
+              changes underneath, and in-progress edits belong to the previous
+              role's fields. Without this its dirty guard would keep them. */}
           <SchemaMetadataEditor
+            key={obj.role ?? "none"}
             value={obj.metadata}
             formatKind={obj.format.kind}
             role={obj.role}
@@ -471,6 +487,8 @@ function ObjectDetail({ id }: { id: string }) {
             <dd className="mono">{obj.id}</dd>
           </dl>
         </div>
+
+        <RoleConverter obj={obj} />
 
         <div className="section">
           <div className="section-title">Delete</div>
