@@ -247,3 +247,8 @@ class TestReferenceFieldDefinitions:
             {"reference_build": "not-a-real-build"}, FormatKind.BAM
         )
         assert result.warnings, "a BAM's reference_build should still be enum-checked"
+
+    def test_every_role_has_a_field_group(self):
+        """A new ObjectRole without a ROLE_FIELDS entry would silently fall
+        back to common fields only. Fail loudly instead."""
+        assert set(ObjectRole) == set(schemas.ROLE_FIELDS)

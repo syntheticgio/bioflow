@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.api.v1.schemas import ObjectOut
 from app.errors import ValidationError
 from app.metadata import schemas as meta_schemas
-from app.models import FormatKind
+from app.models import FormatKind, ObjectRole
 from app.services import search_service
 
 router = APIRouter(tags=["search"])
@@ -95,8 +95,8 @@ async def list_schemas() -> dict:
 
 
 @router.get("/metadata/schemas/{kind}")
-async def get_schema(kind: str) -> dict:
-    """Suggested fields for one format.
+async def get_schema(kind: str, role: str | None = None) -> dict:
+    """Suggested fields for one format, optionally narrowed by role.
 
     These are suggestions, not restrictions: arbitrary keys remain allowed and
     are stored as-is.
@@ -108,7 +108,18 @@ async def get_schema(kind: str) -> dict:
             f"Unknown format kind: {kind!r}",
             details={"known": [k.value for k in FormatKind]},
         ) from e
-    return meta_schemas.schema_for_api(format_kind)
+
+    object_role: ObjectRole | None = None
+    if role:
+        try:
+            object_role = ObjectRole(role)
+        except ValueError as e:
+            raise ValidationError(
+                f"Unknown role: {role!r}",
+                details={"known": [r.value for r in ObjectRole]},
+            ) from e
+
+    return meta_schemas.schema_for_api(format_kind, role=object_role)
 
 
 class BulkMetadata(BaseModel):
