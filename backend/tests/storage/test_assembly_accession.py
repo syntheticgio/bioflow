@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app.metadata import assembly
+from app.metadata import assembly, enrich
+from app.models import FormatKind
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -183,3 +184,93 @@ class TestToMetadata:
         assert facts["ncbi_gc_percent"] == 46.5
         assert facts["ncbi_total_length"] == 26075494
         assert facts["ncbi_assembly_name"] == "ASM244v1"
+
+
+def _fixture_metadata() -> assembly.AssemblyMetadata:
+    return assembly.parse_report(json.loads(FIXTURE.read_text()))
+
+
+class TestEnrichFromAssembly:
+    """Enrichment fills gaps and never overwrites a person's entry."""
+
+    def test_fills_empty_fields_from_the_filename(self):
+        with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000002445.2_ASM244v1_genomic.fna",
+                existing_metadata={},
+                format_kind=FormatKind.FASTA,
+            )
+        assert result.accession == "GCF_000002445.2"
+        assert result.source == "filename"
+        assert result.values["organism"] == "Trypanosoma brucei brucei TREU927"
+        assert result.values["reference_build"] == "ASM244v1"
+
+    def test_never_overwrites_a_user_value(self):
+        """A correction must survive re-ingest -- the whole point of the rule."""
+        with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000002445.2_genomic.fna",
+                existing_metadata={"organism": "Trypanosoma brucei (my correction)"},
+                format_kind=FormatKind.FASTA,
+            )
+        assert "organism" not in result.values
+        assert any(c["key"] == "organism" for c in result.conflicts)
+
+    def test_explicit_metadata_accession_beats_the_filename(self):
+        with patch.object(assembly, "lookup", return_value=_fixture_metadata()) as m:
+            result = enrich.enrich_from_assembly(
+                filename="GCA_000001405.29_something.fna",
+                existing_metadata={"assembly_accession": "GCF_000002445.2"},
+                format_kind=FormatKind.FASTA,
+            )
+        assert result.source == "metadata"
+        m.assert_called_once_with("GCF_000002445.2")
+
+    def test_ignores_a_fastq(self):
+        """Only an assembly carries an assembly accession."""
+        result = enrich.enrich_from_assembly(
+            filename="GCF_000002445.2_genomic.fastq",
+            existing_metadata={},
+            format_kind=FormatKind.FASTQ,
+        )
+        assert result.accession is None
+        assert result.values == {}
+
+    def test_no_accession_is_a_quiet_no_op(self):
+        result = enrich.enrich_from_assembly(
+            filename="random_genome.fna",
+            existing_metadata={},
+            format_kind=FormatKind.FASTA,
+        )
+        assert result.accession is None
+        assert result.error is None
+
+    def test_a_lookup_failure_never_raises(self):
+        """Enrichment is a bonus; a network problem must not fail an ingest."""
+        with patch.object(assembly, "lookup", side_effect=OSError("network down")):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000002445.2_genomic.fna",
+                existing_metadata={},
+                format_kind=FormatKind.FASTA,
+            )
+        assert result.values == {}
+        assert result.error and "network down" in result.error
+
+    def test_disabled_returns_nothing(self):
+        result = enrich.enrich_from_assembly(
+            filename="GCF_000002445.2_genomic.fna",
+            existing_metadata={},
+            format_kind=FormatKind.FASTA,
+            enabled=False,
+        )
+        assert result.accession is None
+
+    def test_stats_are_returned_as_facts(self):
+        with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000002445.2_genomic.fna",
+                existing_metadata={},
+                format_kind=FormatKind.FASTA,
+            )
+        assert result.facts["ncbi_sequence_count"] == 12
+        assert "ncbi_gc_percent" in result.facts
