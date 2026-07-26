@@ -49,6 +49,21 @@ class Compression(StrEnum):
     BZIP2 = "bzip2"
 
 
+class ObjectRole(StrEnum):
+    """How a file is *used*, when that cannot be read from its bytes.
+
+    A reference genome and a set of reads can both be FASTA or FASTQ; which one
+    a file is depends on the user's intent. Role records that intent, and is
+    left unset for the common case where the detected format already implies
+    the answer (a BAM is an alignment, a VCF is variants).
+
+    Left as an enum rather than a boolean because formats such as WIG have more
+    than two plausible roles; those extend this enum without a schema change.
+    """
+
+    REFERENCE = "reference"
+
+
 class FormatConfidence(StrEnum):
     MAGIC = "magic"  # identified from file contents
     EXTENSION = "extension"  # guessed from the filename only
@@ -101,6 +116,10 @@ class DataObject(TimestampedDocument):
     metadata: dict = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
 
+    # None means "derive the category from the format". Only exceptions carry
+    # a value, so re-ingest can never fight a user's explicit choice.
+    role: ObjectRole | None = None
+
     source: SourceInfo = Field(default_factory=SourceInfo)
 
     class Settings:
@@ -114,6 +133,7 @@ class DataObject(TimestampedDocument):
             # Reverse lookup: which objects reference this blob (refcount audit).
             IndexModel([("blob_sha256", ASCENDING)], name="by_blob"),
             IndexModel([("owner", ASCENDING), ("status", ASCENDING)], name="by_status"),
+            IndexModel([("project_id", ASCENDING), ("role", ASCENDING)], name="by_role"),
             IndexModel(
                 [("format.kind", ASCENDING), ("project_id", ASCENDING)],
                 name="by_format",
