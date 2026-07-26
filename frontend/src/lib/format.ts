@@ -95,6 +95,12 @@ const ACCESSION_LINKS: Record<
     url: (v) => `https://www.ncbi.nlm.nih.gov/biosample/${v}`,
     label: "BioSample",
   },
+  assembly_accession: {
+    // GCA_ (GenBank) or GCF_ (RefSeq), nine digits, dot, version.
+    pattern: /^GC[AF]_\d{9}\.\d+$/i,
+    url: (v) => `https://www.ncbi.nlm.nih.gov/datasets/genome/${v}`,
+    label: "Assembly",
+  },
 };
 
 /** External URL for an accession field, or null if it does not look valid. */
