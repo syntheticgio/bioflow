@@ -141,6 +141,16 @@ def _float(value) -> float | None:
         return None
 
 
+def _text(value) -> str | None:
+    """A string, or None for anything else.
+
+    The `_obj` guards keep a wrong-typed *container* from raising, but a leaf
+    that arrives as a dict or list would otherwise be written straight into
+    user-editable metadata -- a dict in a text field nobody can correct by hand.
+    """
+    return value if isinstance(value, str) and value.strip() else None
+
+
 def _obj(value) -> dict:
     """A mapping, or an empty one.
 
@@ -173,16 +183,18 @@ def parse_report(payload: dict) -> AssemblyMetadata | None:
     infra = _obj(organism.get("infraspecific_names"))
 
     return AssemblyMetadata(
-        accession=r.get("current_accession") or r.get("accession"),
-        organism=organism.get("organism_name"),
+        # Every text field goes through _text: these land in user-editable
+        # metadata, where a stray dict or list would be uncorrectable by hand.
+        accession=_text(r.get("current_accession")) or _text(r.get("accession")),
+        organism=_text(organism.get("organism_name")),
         tax_id=_int(organism.get("tax_id")),
-        strain=infra.get("strain"),
-        assembly_name=info.get("assembly_name"),
-        assembly_level=info.get("assembly_level"),
-        submitter=info.get("submitter"),
-        release_date=info.get("release_date"),
-        bioproject=info.get("bioproject_accession"),
-        paired_accession=r.get("paired_accession"),
+        strain=_text(infra.get("strain")),
+        assembly_name=_text(info.get("assembly_name")),
+        assembly_level=_text(info.get("assembly_level")),
+        submitter=_text(info.get("submitter")),
+        release_date=_text(info.get("release_date")),
+        bioproject=_text(info.get("bioproject_accession")),
+        paired_accession=_text(r.get("paired_accession")),
         total_length=_int(stats.get("total_sequence_length")),
         scaffold_count=_int(stats.get("number_of_scaffolds")),
         contig_count=_int(stats.get("number_of_contigs")),

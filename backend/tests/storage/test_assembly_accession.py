@@ -111,6 +111,41 @@ class TestParseReport:
         assert meta.organism is None
         assert meta.contig_count is None
 
+    def test_a_wrong_typed_leaf_is_dropped_not_passed_through(self):
+        """A dict where a string belongs must not reach user-editable metadata.
+
+        The _obj guards stop a wrong-typed *container* from raising, but a leaf
+        arriving as a dict would otherwise be written into a text field that
+        nobody can correct by hand.
+        """
+        meta = assembly.parse_report(
+            {
+                "reports": [
+                    {
+                        "accession": "GCA_000000001.1",
+                        "organism": {
+                            "organism_name": ["not", "a", "string"],
+                            "infraspecific_names": {"strain": {"nested": "dict"}},
+                        },
+                        "assembly_info": {"submitter": {"also": "wrong"}},
+                    }
+                ]
+            }
+        )
+        assert meta.strain is None
+        assert meta.organism is None
+        assert meta.submitter is None
+        # Nothing wrong-typed leaks into the metadata a user would edit.
+        assert meta.to_metadata() == {"assembly_accession": "GCA_000000001.1"}
+
+    def test_a_blank_string_is_treated_as_absent(self):
+        """An empty submitter should read as missing, not as an empty field."""
+        meta = assembly.parse_report(
+            {"reports": [{"accession": "GCA_000000001.1",
+                          "assembly_info": {"submitter": "   "}}]}
+        )
+        assert meta.submitter is None
+
     @pytest.mark.parametrize(
         "payload",
         [
@@ -224,6 +259,21 @@ class TestEnrichFromAssembly:
                 format_kind=FormatKind.FASTA,
             )
         assert result.source == "metadata"
+        m.assert_called_once_with("GCF_000002445.2")
+
+    def test_a_malformed_manual_accession_falls_back_to_the_filename(self):
+        """A typo in the manual field must not black-hole enrichment.
+
+        Mirrors the SRA path's test_invalid_manual_accession_falls_back: a
+        perfectly good accession in the filename should still be used.
+        """
+        with patch.object(assembly, "lookup", return_value=_fixture_metadata()) as m:
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000002445.2_ASM244v1_genomic.fna",
+                existing_metadata={"assembly_accession": "GCF_123"},
+                format_kind=FormatKind.FASTA,
+            )
+        assert result.source == "filename"
         m.assert_called_once_with("GCF_000002445.2")
 
     def test_ignores_a_fastq(self):
