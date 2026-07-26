@@ -445,6 +445,7 @@ function ObjectDetail({ id }: { id: string }) {
           <SchemaMetadataEditor
             value={obj.metadata}
             formatKind={obj.format.kind}
+            role={obj.role}
             onSave={(m) => save.mutate(m)}
             saving={save.isPending}
           />
