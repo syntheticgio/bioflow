@@ -146,12 +146,12 @@ type FileCategory =
 type CategorizedFiles = Record<FileCategory, DataObject[]>;
 
 function categorizeFile(obj: DataObject): FileCategory {
-  const kind = obj.format.kind.toLowerCase();
-  const isReference = obj.metadata?.is_reference === true;
+  // Role is an override: when set it decides outright, because the format
+  // cannot tell a reference genome from a pile of reads.
+  if (obj.role === "reference") return "references";
 
-  if (kind === "fastq" || kind === "fasta") {
-    return isReference ? "references" : "reads";
-  }
+  const kind = obj.format.kind.toLowerCase();
+  if (kind === "fastq" || kind === "fasta") return "reads";
   if (["bam", "sam", "cram"].includes(kind)) return "alignments";
   if (["vcf", "bcf"].includes(kind)) return "variants";
   if (["bed", "gff", "gtf"].includes(kind)) return "annotations";
@@ -343,7 +343,11 @@ function ProjectView({ projectId }: { projectId: string }) {
                       onClick={() => select(`object:${o.id}`)}
                     >
                       <span className="row-icon">
-                        {o.status === "ready" ? "📄" : "⏳"}
+                        {o.status !== "ready"
+                          ? "⏳"
+                          : o.role === "reference"
+                            ? "📗"
+                            : "📄"}
                       </span>
                       <div className="row-main">
                         <div className="row-name">{o.name}</div>
