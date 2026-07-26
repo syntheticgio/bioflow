@@ -7,6 +7,7 @@ import type {
   JobSummary,
   MetadataSchema,
   ObjectDetail,
+  ObjectRole,
   OverdueSchedule,
   Project,
   ProjectDetail,
@@ -172,8 +173,11 @@ export const api = {
         (projectId ? `?project_id=${encodeURIComponent(projectId)}` : ""),
     ),
 
-  metadataSchema: (kind: string) =>
-    request<MetadataSchema>(`/metadata/schemas/${encodeURIComponent(kind)}`),
+  metadataSchema: (kind: string, role?: ObjectRole | null) =>
+    request<MetadataSchema>(
+      `/metadata/schemas/${encodeURIComponent(kind)}` +
+        (role ? `?role=${encodeURIComponent(role)}` : ""),
+    ),
 
   bulkMetadata: (objectIds: string[], set: Record<string, unknown>, unset: string[] = []) =>
     request<BulkResult>("/objects/bulk-metadata", {
