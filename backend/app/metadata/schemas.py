@@ -267,6 +267,20 @@ REFERENCE_FIELDS: tuple[FieldDef, ...] = (
              group="Reference", suggested=True),
     FieldDef("masked", "Masked", type=FieldType.BOOLEAN,
              help="Repeat-masked sequence.", group="Reference"),
+
+    # Filled by the NCBI assembly lookup rather than by hand, so none are
+    # suggested -- they appear once enrichment has run.
+    FieldDef("tax_id", "NCBI taxonomy ID", type=FieldType.INTEGER,
+             help="e.g. 9606 for human. Set from the assembly record.",
+             group="Reference"),
+    FieldDef("assembly_level", "Assembly level", type=FieldType.ENUM,
+             options=("Complete Genome", "Chromosome", "Scaffold", "Contig"),
+             help="How finished the assembly is.", group="Reference"),
+    FieldDef("assembly_date", "Release date", type=FieldType.DATE,
+             help="When NCBI published this assembly.", group="Reference"),
+    FieldDef("paired_accession", "Paired accession",
+             help="The GenBank counterpart of a RefSeq assembly, or vice versa.",
+             group="Reference"),
 )
 
 INTERVAL_FIELDS: tuple[FieldDef, ...] = (
