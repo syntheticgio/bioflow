@@ -94,9 +94,11 @@ export function AssemblyFacts({ facts }: Props) {
               gap: "4px 10px",
             }}
           >
+            {/* Indexed key: a malformed or concatenated FASTA can repeat a
+                contig name, and duplicate keys would misrender on toggle. */}
             {(showAllContigs ? names : names.slice(0, MAX_VISIBLE_CONTIGS)).map(
-              (n) => (
-                <span key={n}>{n}</span>
+              (n, i) => (
+                <span key={`${i}-${n}`}>{n}</span>
               ),
             )}
           </div>
