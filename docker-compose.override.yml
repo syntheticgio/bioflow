@@ -1,0 +1,28 @@
+# Development overrides: hot reload for both backend and frontend.
+# Compose loads this automatically. For a production-shaped run use:
+#   docker compose -f docker-compose.yml up
+services:
+  api:
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      - ./backend/app:/srv/app:ro
+      - ./backend/tests:/srv/tests:ro
+    environment:
+      LOG_LEVEL: DEBUG
+
+  worker:
+    volumes:
+      - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      - ./backend/app:/srv/app:ro
+    environment:
+      LOG_LEVEL: DEBUG
+
+  web:
+    build:
+      target: dev
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
+    volumes:
+      - ./frontend/src:/srv/src
+      - ./frontend/index.html:/srv/index.html
+      - ./frontend/vite.config.ts:/srv/vite.config.ts

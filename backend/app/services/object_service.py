@@ -1,0 +1,357 @@
+"""Object lifecycle: ingest, metadata edits, deletion."""
+
+import asyncio
+from datetime import UTC, datetime
+from pathlib import Path
+
+from beanie import PydanticObjectId
+
+from app.config import settings
+from app.errors import ConflictError, NotFoundError, PayloadTooLargeError, ValidationError
+from app.logging import get_logger
+from app.models import (
+    Blob,
+    BlobStorage,
+    DataObject,
+    IoClass,
+    JobClass,
+    JobResources,
+    ObjectStatus,
+    Project,
+    SourceInfo,
+    SourceMode,
+)
+from app.services import blob_service, project_service
+from app.storage import cas, detect
+from app.storage.home import require_home
+
+log = get_logger(__name__)
+
+
+async def get_object(object_id: PydanticObjectId) -> DataObject:
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+    return obj
+
+
+async def list_objects(
+    project_id: PydanticObjectId,
+    *,
+    limit: int = 200,
+    status: ObjectStatus | None = None,
+) -> list[DataObject]:
+    query: dict = {"project_id": project_id}
+    if status is not None:
+        query["status"] = status.value
+    return await DataObject.find(query).sort("-created_at").limit(limit).to_list()
+
+
+async def ingest_stream(
+    *,
+    project_id: PydanticObjectId,
+    filename: str,
+    stream,
+    max_bytes: int | None = None,
+) -> DataObject:
+    """Phase 0 upload: stream a request body into the store, hashing as we go.
+
+    Deliberately capped -- resumable chunked upload is Phase 2. A failure here
+    loses the whole transfer, which is acceptable for small files and not for
+    the multi-GB ones this tool exists to handle.
+
+    The file write runs in a worker thread: writing to a VirtioFS mount can
+    block for tens of milliseconds, which on the event loop would stall every
+    other request and, in the worker, the heartbeat.
+    """
+    require_home()
+    max_bytes = max_bytes or settings.max_simple_upload_bytes
+
+    project = await Project.get(project_id)
+    if project is None:
+        raise NotFoundError(f"Project not found: {project_id}")
+
+    name = Path(filename).name.strip()
+    if not name or name in (".", ".."):
+        raise ValidationError(f"Unsafe filename: {filename!r}")
+
+    obj = DataObject(
+        project_id=project_id,
+        name=name,
+        status=ObjectStatus.UPLOADING,
+        source=SourceInfo(mode=SourceMode.UPLOAD, original_name=name),
+    )
+    await obj.insert()
+
+    try:
+        tmp_path, digest, size = await asyncio.to_thread(
+            _drain_to_temp, stream, max_bytes, name
+        )
+    except BaseException:
+        await obj.delete()
+        raise
+
+    try:
+        await obj.set({DataObject.status: ObjectStatus.HASHING, DataObject.size: size})
+
+        existing = await blob_service.find_present_blob(digest)
+        if existing is not None and _blob_bytes_present(existing):
+            # Identical content already stored; discard the copy we just made.
+            tmp_path.unlink(missing_ok=True)
+            log.info("upload_deduplicated", digest=digest, name=name)
+        else:
+            await asyncio.to_thread(cas.place_blob, tmp_path, digest, size)
+
+        await blob_service.attach_blob_to_object(
+            object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+        )
+        await project_service.bump_counters(project_id, objects=1, total_bytes=size)
+        await enqueue_ingest(obj, digest=digest)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        await obj.set(
+            {
+                DataObject.status: ObjectStatus.ERROR,
+                DataObject.updated_at: datetime.now(UTC),
+            }
+        )
+        raise
+
+    return await get_object(obj.id)
+
+
+def _drain_to_temp(stream, max_bytes: int, name: str) -> tuple[Path, str, int]:
+    """Consume a sync iterable of chunks, enforcing the size ceiling as we go.
+
+    The limit is checked during the transfer rather than from Content-Length,
+    which a client controls and may omit entirely.
+    """
+    total = 0
+
+    def limited():
+        nonlocal total
+        for chunk in stream:
+            total += len(chunk)
+            if total > max_bytes:
+                raise PayloadTooLargeError(
+                    f"Upload exceeds the {max_bytes // (1024 * 1024)} MB limit for simple "
+                    "uploads. Resumable chunked upload arrives in Phase 2.",
+                    details={"filename": name, "max_bytes": max_bytes},
+                )
+            yield chunk
+
+    return cas.write_stream_to_temp(limited())
+
+
+def _blob_bytes_present(blob: Blob) -> bool:
+    if blob.storage is BlobStorage.EXTERNAL:
+        return bool(blob.external_path and Path(blob.external_path).exists())
+    from app.storage.paths import blob_path
+
+    return blob_path(blob.id).exists()
+
+
+async def enqueue_ingest(
+    obj: DataObject,
+    *,
+    digest: str | None = None,
+    path: Path | None = None,
+    job_class: JobClass = JobClass.USER_BACKGROUND,
+) -> str:
+    """Queue header parsing for an object.
+
+    Detection and parsing move off the request path: opening a CRAM header or a
+    heavily-scaffolded BAM is slow enough to hurt a response, and a malformed
+    file must not take the upload down with it.
+    """
+    from app.queue import queue
+
+    # Current metadata rides along so the handler can honour a manually-entered
+    # SRA accession and avoid overwriting anything the user has set.
+    payload: dict = {
+        "object_id": str(obj.id),
+        "name": obj.name,
+        "metadata": obj.metadata,
+    }
+    if path is not None:
+        payload["path"] = str(path)
+    elif digest is not None:
+        payload["sha256"] = digest
+    else:
+        raise ValidationError("enqueue_ingest requires a digest or a path")
+
+    await obj.set({DataObject.status: ObjectStatus.INGESTING})
+
+    job = await queue.enqueue(
+        "ingest_headers",
+        payload=payload,
+        job_class=job_class,
+        resources=JobResources(cpu=1, mem_mb=256, io=IoClass.LIGHT),
+        dedup_key=f"ingest_headers:{obj.id}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    return str(job.id) if job else ""
+
+
+async def _apply_detection_external(obj: DataObject, path: Path) -> None:
+    """Detect format for a file at an arbitrary path (register-in-place)."""
+    try:
+        result = await asyncio.to_thread(detect.detect, path, obj.name)
+    except Exception as e:  # noqa: BLE001 - detection must never fail ingest
+        log.warning("detection_failed", object_id=str(obj.id), error=str(e))
+        await obj.set({DataObject.status: ObjectStatus.READY})
+        return
+
+    await obj.set(
+        {
+            DataObject.format: result.to_format_info(),
+            DataObject.status: ObjectStatus.READY,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+
+async def _apply_detection(obj: DataObject, digest: str) -> None:
+    """Detect the format inline.
+
+    Phase 3 moves this to a queued job; at Phase 0 sizes, reading 64 KiB is
+    cheaper than the round trip through the queue.
+    """
+    from app.storage.paths import blob_path
+
+    path = blob_path(digest)
+    try:
+        result = await asyncio.to_thread(detect.detect, path, obj.name)
+    except Exception as e:  # noqa: BLE001 - detection must never fail an upload
+        log.warning("detection_failed", object_id=str(obj.id), error=str(e))
+        await obj.set({DataObject.status: ObjectStatus.READY})
+        return
+
+    await obj.set(
+        {
+            DataObject.format: result.to_format_info(),
+            DataObject.status: ObjectStatus.READY,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+
+async def register_in_place(
+    *,
+    project_id: PydanticObjectId,
+    path_str: str,
+    name: str | None = None,
+) -> tuple[DataObject, str]:
+    """Register a file that already exists on disk, without copying it.
+
+    Zero bytes are moved: the object records a pointer to the file where it
+    already lives. This is the realistic path for the multi-GB files that are
+    already on the drive -- copying them would double the storage for nothing.
+
+    The tradeoff is ownership. We do not control an external file: it can be
+    moved, edited, or deleted behind our back. So the blob is marked EXTERNAL,
+    GC never unlinks it, and verification watches size and mtime for drift.
+    """
+    from app.queue import queue
+    from app.storage.paths import resolve_registerable
+
+    require_home()
+
+    project = await Project.get(project_id)
+    if project is None:
+        raise NotFoundError(f"Project not found: {project_id}")
+
+    # Resolves symlinks *before* checking containment, so a link pointing
+    # outside the allowlist is rejected rather than followed.
+    resolved = resolve_registerable(path_str)
+
+    if not resolved.exists():
+        raise ValidationError(f"File does not exist: {resolved}")
+    if not resolved.is_file():
+        raise ValidationError(f"Not a regular file: {resolved}")
+
+    stat = resolved.stat()
+
+    existing = await Blob.find_one(Blob.external_path == str(resolved))
+    if existing is not None:
+        raise ConflictError(
+            "That file is already registered",
+            details={"path": str(resolved), "sha256": existing.id},
+        )
+
+    obj = DataObject(
+        project_id=project_id,
+        name=name or resolved.name,
+        status=ObjectStatus.HASHING,
+        size=stat.st_size,
+        source=SourceInfo(
+            mode=SourceMode.REGISTER_IN_PLACE,
+            original_path=str(resolved),
+            original_name=resolved.name,
+        ),
+    )
+    await obj.insert()
+
+    # Hashing a 100 GB file cannot happen in a request, so it goes to the queue.
+    job = await queue.enqueue(
+        "register_hash",
+        payload={
+            "object_id": str(obj.id),
+            "path": str(resolved),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+        },
+        job_class=JobClass.USER_BACKGROUND,
+        resources=JobResources(cpu=1, mem_mb=128, io=IoClass.HEAVY),
+        dedup_key=f"register_hash:{obj.id}",
+        project_id=project_id,
+        object_id=obj.id,
+    )
+
+    await project_service.bump_counters(project_id, objects=1, total_bytes=stat.st_size)
+    log.info("registered_in_place", path=str(resolved), size=stat.st_size)
+    return obj, str(job.id) if job else ""
+
+
+async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObject:
+    obj = await get_object(object_id)
+
+    if updates.get("name") is not None:
+        new_name = Path(updates["name"]).name.strip()
+        if not new_name:
+            raise ValidationError("Object name cannot be empty")
+        obj.name = new_name
+    if updates.get("tags") is not None:
+        obj.tags = [t.strip() for t in updates["tags"] if t and t.strip()]
+    if updates.get("metadata") is not None:
+        from app.metadata import schemas
+
+        # Coerced against the schema for this file's format, so numbers sort as
+        # numbers and dates compare correctly. Unknown keys pass through
+        # untouched -- the schema suggests, it does not restrict.
+        validated = schemas.coerce_and_validate(updates["metadata"], obj.format.kind)
+        merged = {**obj.metadata, **validated.values}
+        # A null means "clear this field", which is how the UI removes a value.
+        obj.metadata = {k: v for k, v in merged.items() if v is not None}
+        if validated.warnings:
+            log.info(
+                "metadata_warnings",
+                object_id=str(obj.id),
+                warnings=validated.warnings,
+            )
+
+    obj.touch()
+    await obj.save()
+    return obj
+
+
+async def delete_object(object_id: PydanticObjectId) -> None:
+    await get_object(object_id)
+    await blob_service.detach_blob_from_object(object_id)
+
+
+async def object_with_blob(object_id: PydanticObjectId) -> tuple[DataObject, Blob | None]:
+    obj = await get_object(object_id)
+    blob = await Blob.get(obj.blob_sha256) if obj.blob_sha256 else None
+    return obj, blob

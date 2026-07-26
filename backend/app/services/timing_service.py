@@ -1,0 +1,176 @@
+"""Duration prediction from recorded run history.
+
+The model is deliberately simple: a least-squares fit of duration against
+input size, per job type. Ingest cost really is close to linear in bytes
+(hashing dominates and runs at mount speed), so a straight line captures most
+of it and nothing more elaborate is justified by the sample sizes involved.
+
+Two properties matter more than accuracy:
+
+  * **Silence before confidence.** With fewer than MIN_SAMPLES runs there is no
+    estimate at all. A progress bar that is confidently wrong is worse than an
+    honest spinner.
+  * **Outlier resistance.** Page-cache hits, a busy governor, or a competing
+    job make individual runs wildly unrepresentative. Samples beyond 3x the
+    median are dropped before fitting.
+"""
+
+from datetime import UTC, datetime
+
+from app.logging import get_logger
+from app.models.timing import JobRunTiming
+
+log = get_logger(__name__)
+
+# Below this, report no estimate. Five points is the minimum at which a slope
+# means anything; the UI says how many more are needed.
+MIN_SAMPLES = 5
+# Only recent runs: hardware and code both change over time.
+MAX_SAMPLES = 200
+OUTLIER_FACTOR = 3.0
+
+
+async def record(
+    *,
+    job_type: str,
+    input_bytes: int,
+    duration_ms: int,
+    format_kind: str | None = None,
+    compression: str | None = None,
+    worker_id: str | None = None,
+) -> None:
+    """Store one completed run. Never raises -- telemetry must not fail a job."""
+    try:
+        await JobRunTiming(
+            job_type=job_type,
+            input_bytes=max(0, input_bytes),
+            duration_ms=max(0, duration_ms),
+            format_kind=format_kind,
+            compression=compression,
+            worker_id=worker_id,
+            finished_at=datetime.now(UTC),
+        ).insert()
+    except Exception as e:  # noqa: BLE001
+        log.debug("timing_record_failed", job_type=job_type, error=str(e))
+
+
+async def _samples(job_type: str) -> list[tuple[int, int]]:
+    docs = (
+        await JobRunTiming.find(JobRunTiming.job_type == job_type)
+        .sort("-finished_at")
+        .limit(MAX_SAMPLES)
+        .to_list()
+    )
+    return [(d.input_bytes, d.duration_ms) for d in docs if d.duration_ms > 0]
+
+
+def _fit(samples: list[tuple[int, int]]) -> dict | None:
+    """Least-squares fit of duration = intercept + slope * bytes.
+
+    Returns None when the data cannot support a fit.
+    """
+    if len(samples) < MIN_SAMPLES:
+        return None
+
+    # Drop outliers first: one cached run at 10x speed would drag the slope
+    # far more than it deserves.
+    durations = sorted(d for _, d in samples)
+    median = durations[len(durations) // 2]
+    if median > 0:
+        samples = [
+            (b, d)
+            for b, d in samples
+            if d <= median * OUTLIER_FACTOR and d >= median / OUTLIER_FACTOR
+        ]
+    if len(samples) < MIN_SAMPLES:
+        return None
+
+    n = len(samples)
+    sum_x = sum(b for b, _ in samples)
+    sum_y = sum(d for _, d in samples)
+    sum_xx = sum(b * b for b, _ in samples)
+    sum_xy = sum(b * d for b, d in samples)
+
+    denom = n * sum_xx - sum_x * sum_x
+    if denom == 0:
+        # Every sample is the same size, so no slope is derivable -- but the
+        # mean is still a perfectly good estimate for that size.
+        mean = sum_y / n
+        return {"slope": 0.0, "intercept": mean, "n": n, "flat": True}
+
+    slope = (n * sum_xy - sum_x * sum_y) / denom
+    intercept = (sum_y - slope * sum_x) / n
+
+    # A negative slope means bigger files finish faster, which is noise rather
+    # than signal. Fall back to the mean.
+    if slope < 0:
+        return {"slope": 0.0, "intercept": sum_y / n, "n": n, "flat": True}
+
+    return {"slope": slope, "intercept": max(0.0, intercept), "n": n, "flat": False}
+
+
+def _r_squared(samples: list[tuple[int, int]], model: dict) -> float:
+    """How much of the variance the fit explains -- surfaced so a poor model
+    can be shown as a rough estimate rather than a confident one."""
+    if not samples:
+        return 0.0
+    mean_y = sum(d for _, d in samples) / len(samples)
+    ss_tot = sum((d - mean_y) ** 2 for _, d in samples)
+    ss_res = sum(
+        (d - (model["intercept"] + model["slope"] * b)) ** 2 for b, d in samples
+    )
+    if ss_tot == 0:
+        return 1.0
+    return max(0.0, min(1.0, 1 - ss_res / ss_tot))
+
+
+async def estimate(job_type: str, input_bytes: int) -> dict | None:
+    """Predicted duration in ms for a run of this type and size.
+
+    None means "not enough history" -- callers should show no estimate rather
+    than guessing.
+    """
+    samples = await _samples(job_type)
+    model = _fit(samples)
+    if model is None:
+        return {
+            "known": False,
+            "samples": len(samples),
+            "needed": max(0, MIN_SAMPLES - len(samples)),
+        }
+
+    predicted = model["intercept"] + model["slope"] * max(0, input_bytes)
+    return {
+        "known": True,
+        "estimate_ms": int(max(100, predicted)),
+        "samples": model["n"],
+        "r_squared": round(_r_squared(samples, model), 3),
+        "throughput_mb_s": (
+            round(1000 / (model["slope"] * 1024 * 1024), 1)
+            if model["slope"] > 0
+            else None
+        ),
+    }
+
+
+async def stats() -> list[dict]:
+    """Per-job-type model summary, for a diagnostics view."""
+    types = await JobRunTiming.distinct("job_type")
+    out = []
+    for t in types:
+        samples = await _samples(t)
+        model = _fit(samples)
+        out.append(
+            {
+                "job_type": t,
+                "samples": len(samples),
+                "model": None
+                if model is None
+                else {
+                    "slope_ms_per_byte": model["slope"],
+                    "intercept_ms": round(model["intercept"]),
+                    "r_squared": round(_r_squared(samples, model), 3),
+                },
+            }
+        )
+    return out

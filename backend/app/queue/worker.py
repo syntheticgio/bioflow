@@ -1,0 +1,411 @@
+"""The worker: claim loop, heartbeat, cancellation watch, leader duties, drain."""
+
+import asyncio
+import contextlib
+import json
+import os
+import socket
+from datetime import UTC, datetime, timedelta
+
+import psutil
+from beanie import PydanticObjectId
+
+from app.config import settings
+from app.db.redis_client import get_redis
+from app.logging import get_logger
+from app.models import Job, JobClass, JobState
+from app.queue import governor, keys, queue
+from app.queue.executor import JobExecutor
+from app.queue.registry import JobContext, get_handler, load_handlers
+
+log = get_logger(__name__)
+
+CLAIM_BACKOFF_MIN = 0.05
+CLAIM_BACKOFF_MAX = 2.0
+LEADER_LOCK_TTL_MS = 15000
+# The loop is expected to be responsive; a stall beyond this means blocking work
+# leaked onto it, which is what silently causes leases to expire.
+LOOP_STALL_WARN_SECONDS = 0.25
+
+
+class Worker:
+    def __init__(self, worker_id: str | None = None):
+        self.worker_id = worker_id or settings.worker_id or f"{socket.gethostname()}:{os.getpid()}"
+        self.max_concurrent = settings.worker_max_concurrent
+        self.shutdown = asyncio.Event()
+        self.executor = JobExecutor(self.worker_id)
+
+        # job_id -> (task, context, epoch)
+        self._running: dict[str, tuple[asyncio.Task, JobContext, int]] = {}
+        self._tasks: list[asyncio.Task] = []
+
+        # Only the leader samples and publishes; followers read the decision.
+        # Independent decisions would disagree at the margins, with half the
+        # workers admitting while the other half refused.
+        self._local_governor: governor.LoadGovernor | None = None
+        self._starvation_checked_at = 0.0
+        self._starvation_cached = False
+
+    # ---------- lifecycle ----------
+
+    async def start(self) -> None:
+        load_handlers()
+        self.executor.bind_loop(asyncio.get_running_loop())
+
+        restored = await queue.reconcile()
+        log.info(
+            "worker_starting",
+            worker_id=self.worker_id,
+            max_concurrent=self.max_concurrent,
+            restored_jobs=restored,
+        )
+
+        self._tasks = [
+            asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
+            asyncio.create_task(self._cancel_watch_loop(), name="cancel-watch"),
+            asyncio.create_task(self._leader_loop(), name="leader"),
+            asyncio.create_task(self._load_sampler_loop(), name="load-sampler"),
+            asyncio.create_task(self._loop_watchdog(), name="watchdog"),
+        ]
+
+        try:
+            await self._claim_loop()
+        finally:
+            await self._drain()
+
+    def request_shutdown(self) -> None:
+        log.info("shutdown_requested", worker_id=self.worker_id)
+        self.shutdown.set()
+
+    # ---------- claim loop ----------
+
+    async def _claim_loop(self) -> None:
+        backoff = CLAIM_BACKOFF_MIN
+
+        while not self.shutdown.is_set():
+            if len(self._running) >= self.max_concurrent:
+                await self._sleep_interruptible(0.1)
+                continue
+
+            try:
+                claimed = await self._try_claim()
+            except Exception as e:  # noqa: BLE001 - a claim failure must not kill the worker
+                log.error("claim_failed", error=str(e))
+                await self._sleep_interruptible(1.0)
+                continue
+
+            if claimed is None:
+                await self._sleep_interruptible(backoff)
+                backoff = min(backoff * 2, CLAIM_BACKOFF_MAX)
+                continue
+
+            backoff = CLAIM_BACKOFF_MIN
+            await self._start_job(claimed)
+
+    async def _try_claim(self):
+        state = await governor.read_state(get_redis())
+        allowed = set(governor.allowed_classes(state))
+
+        # Escape hatch: sustained *external* load (an aligner running in a
+        # terminal) would otherwise hold the governor closed indefinitely, and
+        # maintenance would never run. A verify_files that never runs is a
+        # silent failure, so long-starved maintenance gets admitted anyway.
+        if state is not governor.AdmissionState.OPEN and await self._maintenance_starving():
+            allowed.add(JobClass.MAINTENANCE.value)
+
+        # During ramp-up after a reopen, admit gradually rather than launching
+        # everything at once and immediately re-saturating the machine.
+        if self._local_governor is not None and not self._local_governor.may_admit_now():
+            return None
+
+        free = self._free_resources()
+        claimed = await queue.claim(
+            self.worker_id,
+            allowed_classes=sorted(allowed),
+            cpu_free=free["cpu"],
+            mem_mb_free=free["mem_mb"],
+            io_heavy_free=free["io_heavy"],
+        )
+        if claimed is not None and self._local_governor is not None:
+            self._local_governor.record_admission()
+        return claimed
+
+    async def _maintenance_starving(self) -> bool:
+        """True when the oldest queued maintenance job has waited too long.
+
+        Checked at most once every 30s: it is a Mongo query on a path that runs
+        several times a second otherwise.
+        """
+        now = datetime.now(UTC).timestamp()
+        if now - self._starvation_checked_at < 30:
+            return self._starvation_cached
+        self._starvation_checked_at = now
+
+        cutoff = datetime.now(UTC) - timedelta(seconds=governor.STARVATION_ESCAPE_SECONDS)
+        oldest = await Job.find(
+            Job.job_class == JobClass.MAINTENANCE,
+            Job.state == JobState.QUEUED,
+            Job.created_at < cutoff,
+        ).first_or_none()
+
+        self._starvation_cached = oldest is not None
+        if self._starvation_cached:
+            log.warning("starvation_override", job_id=str(oldest.id), type=oldest.type)
+            await queue.publish_event(
+                "system.starvation_override",
+                {"job_id": str(oldest.id), "type": oldest.type},
+            )
+        return self._starvation_cached
+
+    def _free_resources(self) -> dict:
+        """Capacity headroom this worker will admit against.
+
+        Budgets come from the governor, which reads cgroup limits where Docker
+        sets them and falls back to the VM's own resources otherwise.
+        """
+        if self._local_governor is not None:
+            cpu_budget = self._local_governor.cpu_budget()
+            mem_budget = self._local_governor.mem_budget_bytes()
+        else:
+            cpu_budget = float(psutil.cpu_count() or 4)
+            mem_budget = psutil.virtual_memory().total
+
+        in_flight = len(self._running)
+        available_mb = int(psutil.virtual_memory().available / (1024 * 1024))
+        # Never hand out the last of memory: leave headroom so a job that
+        # slightly overshoots its declared demand does not push into swap.
+        budget_mb = int(mem_budget / (1024 * 1024) * 0.7)
+
+        return {
+            "cpu": max(int(cpu_budget) - in_flight, 1),
+            "mem_mb": max(min(available_mb, budget_mb), 128),
+            # More than two concurrent heavy readers on a FUSE mount is slower
+            # in aggregate than two, so this is a throughput cap as much as a
+            # safety valve.
+            "io_heavy": max(2 - in_flight, 0),
+        }
+
+    async def _start_job(self, claimed) -> None:
+        job = await queue.mark_running(claimed.job_id, self.worker_id, claimed.epoch)
+        if job is None:
+            # Deleted or cancelled between claim and start.
+            await queue.release(claimed.job_id, requeue=False)
+            return
+
+        spec = get_handler(job.type)
+        if spec is None:
+            await queue.complete(
+                claimed.job_id,
+                claimed.epoch,
+                state=JobState.FAILED,
+                error={
+                    "code": "unknown_handler",
+                    "message": f"No handler registered for job type {job.type!r}",
+                    "retryable": False,
+                },
+            )
+            return
+
+        ctx = JobContext(
+            job_id=claimed.job_id,
+            payload=job.payload,
+            epoch=claimed.epoch,
+            attempts=job.attempts,
+        )
+        ctx._progress_cb = lambda upd: self.executor._schedule_progress(
+            claimed.job_id, claimed.epoch, upd
+        )
+
+        task = asyncio.create_task(self._run_and_cleanup(job, spec, claimed.epoch, ctx))
+        self._running[claimed.job_id] = (task, ctx, claimed.epoch)
+
+    async def _run_and_cleanup(self, job: Job, spec, epoch: int, ctx: JobContext) -> None:
+        try:
+            # The worker owns the context so the cancel watcher can signal this
+            # exact job; the executor runs against it rather than making its own.
+            await self.executor.run(job, spec, epoch, ctx=ctx)
+        finally:
+            self._running.pop(str(job.id), None)
+
+    # ---------- heartbeat ----------
+
+    async def _heartbeat_loop(self) -> None:
+        interval = max(settings.lease_ttl_seconds / 3, 2)
+        while not self.shutdown.is_set() or self._running:
+            try:
+                if self._running:
+                    ids = list(self._running)
+                    epochs = {jid: e for jid, (_, _, e) in self._running.items()}
+                    await queue.heartbeat(ids, epochs)
+                await self._register_worker()
+            except Exception as e:  # noqa: BLE001
+                log.warning("heartbeat_failed", error=str(e))
+            await asyncio.sleep(interval)
+
+    async def _register_worker(self) -> None:
+        await get_redis().hset(
+            keys.WORKERS,
+            self.worker_id,
+            json.dumps(
+                {
+                    "last_seen": datetime.now(UTC).isoformat(),
+                    "slots": self.max_concurrent,
+                    "running": list(self._running),
+                    "draining": self.shutdown.is_set(),
+                }
+            ),
+        )
+
+    # ---------- cancellation ----------
+
+    async def _cancel_watch_loop(self) -> None:
+        """Poll for cancellation requests affecting this worker's jobs.
+
+        Polling rather than pub/sub: the set is authoritative and survives a
+        dropped message, and at one-second granularity the cost is trivial.
+        """
+        while not self.shutdown.is_set():
+            try:
+                if self._running:
+                    cancelled = await get_redis().smembers(keys.CANCEL)
+                    for job_id in cancelled:
+                        entry = self._running.get(job_id)
+                        if entry is not None and not entry[1].cancel_event.is_set():
+                            log.info("cancelling_job", job_id=job_id)
+                            entry[1].cancel_event.set()
+            except Exception as e:  # noqa: BLE001
+                log.warning("cancel_watch_failed", error=str(e))
+            await asyncio.sleep(1.0)
+
+    # ---------- load sampling ----------
+
+    async def _load_sampler_loop(self) -> None:
+        """Sample system load and publish one shared decision.
+
+        Sampling happens on every worker (it is cheap and keeps each EWMA warm
+        for the local ramp limiter), but only the leader publishes the state
+        that everyone acts on.
+        """
+        self._local_governor = governor.LoadGovernor()
+
+        while not self.shutdown.is_set():
+            try:
+                self._local_governor.sample()
+                self._local_governor.evaluate()
+                if await self._acquire_leadership():
+                    await governor.publish(get_redis(), self._local_governor)
+            except Exception as e:  # noqa: BLE001 - sampling must never kill the worker
+                log.warning("load_sample_failed", error=str(e))
+            await asyncio.sleep(governor.SAMPLE_INTERVAL)
+
+    # ---------- leader duties ----------
+
+    async def _leader_loop(self) -> None:
+        """Reaper, promotion, and the schedule beat run on exactly one worker.
+
+        Running them everywhere would multiply the work and let two reapers
+        requeue the same job twice.
+        """
+        while not self.shutdown.is_set():
+            try:
+                if await self._acquire_leadership():
+                    await queue.promote_delayed()
+                    await queue.reap_expired()
+                    await queue.rescue_orphans()
+                    await self._maybe_promote_aged()
+                    await self._tick_schedules()
+            except Exception as e:  # noqa: BLE001
+                log.warning("leader_duties_failed", error=str(e))
+            await asyncio.sleep(settings.reaper_interval_seconds)
+
+    async def _tick_schedules(self) -> None:
+        from app.queue import scheduler
+
+        try:
+            await scheduler.tick()
+        except Exception as e:  # noqa: BLE001
+            log.warning("schedule_tick_failed", error=str(e))
+
+    async def _acquire_leadership(self) -> bool:
+        return bool(
+            await get_redis().set(
+                keys.LEADER, self.worker_id, nx=True, px=LEADER_LOCK_TTL_MS
+            )
+            or await get_redis().get(keys.LEADER) == self.worker_id
+        )
+
+    _last_promote: float = 0.0
+
+    async def _maybe_promote_aged(self) -> None:
+        now = datetime.now(UTC).timestamp()
+        if now - self._last_promote < settings.promote_interval_seconds:
+            return
+        self._last_promote = now
+        await queue.promote_aged()
+
+    # ---------- watchdog ----------
+
+    async def _loop_watchdog(self) -> None:
+        """Detect event-loop stalls.
+
+        A blocked loop stops heartbeats, which expires leases, which double-runs
+        jobs. Surfacing the stall makes that chain diagnosable instead of
+        mysterious.
+        """
+        while not self.shutdown.is_set():
+            before = datetime.now(UTC).timestamp()
+            await asyncio.sleep(1.0)
+            drift = datetime.now(UTC).timestamp() - before - 1.0
+            if drift > LOOP_STALL_WARN_SECONDS:
+                log.warning("event_loop_stalled", drift_seconds=round(drift, 3))
+
+    # ---------- shutdown ----------
+
+    async def _drain(self) -> None:
+        """Finish in-flight work, then requeue whatever did not finish.
+
+        Jobs still running at the timeout are requeued *without* incrementing
+        attempts: a deliberate shutdown is not the job's fault, and counting it
+        would eventually mark a perfectly good job dead.
+        """
+        log.info("draining", running=len(self._running))
+
+        # Wait on the tasks themselves rather than polling, so shutdown finishes
+        # the instant the last job does instead of up to half a second later.
+        if self._running:
+            tasks = [entry[0] for entry in self._running.values()]
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=settings.drain_timeout_seconds,
+                )
+
+        if self._running:
+            log.warning("drain_timeout_requeueing", count=len(self._running))
+            for job_id, (task, _, epoch) in list(self._running.items()):
+                task.cancel()
+                job = await Job.get(PydanticObjectId(job_id))
+                score = None
+                if job is not None:
+                    from app.queue.priority import compute_score
+
+                    score = compute_score(job.job_class, job.timing.enqueued_at)
+                    await job.set({Job.state: JobState.QUEUED, Job.lease: None})
+                await queue.release(job_id, requeue=True, score=score)
+                log.info("requeued_on_shutdown", job_id=job_id, epoch=epoch)
+
+        for task in self._tasks:
+            task.cancel()
+        for task in self._tasks:
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        with contextlib.suppress(Exception):
+            await get_redis().hdel(keys.WORKERS, self.worker_id)
+
+        log.info("worker_stopped", worker_id=self.worker_id)
+
+    async def _sleep_interruptible(self, seconds: float) -> None:
+        """Sleep, but wake immediately on shutdown."""
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(self.shutdown.wait(), timeout=seconds)

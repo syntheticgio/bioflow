@@ -1,0 +1,131 @@
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { api } from "../api/client";
+
+/**
+ * Estimated progress for a running ingest.
+ *
+ * There is no honest a-priori percentage: ingest phases have very different
+ * throughput, so a byte-progress bar sprints to 90% then stalls. Instead the
+ * bar is driven by elapsed time against a duration predicted from previous
+ * runs of the same job type.
+ *
+ * Until enough runs have been recorded, no bar is shown at all -- it says how
+ * many more are needed. A confidently wrong progress bar is worse than none.
+ */
+export function IngestProgress({ objectId }: { objectId: string }) {
+  const [now, setNow] = useState(Date.now());
+
+  const { data: jobs } = useQuery({
+    queryKey: ["jobs", "object", objectId],
+    queryFn: () => api.listJobs({ limit: 20 }),
+    refetchInterval: 2000,
+  });
+
+  const active = jobs?.find(
+    (j) =>
+      j.object_id === objectId &&
+      (j.state === "running" || j.state === "queued" || j.state === "pending"),
+  );
+
+  const { data: detail } = useQuery({
+    queryKey: ["job", active?.id],
+    queryFn: () => api.getJob(active!.id),
+    enabled: !!active,
+    refetchInterval: 2000,
+  });
+
+  // Local ticker so the bar advances smoothly between the 2s polls.
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [active]);
+
+  if (!active) return null;
+
+  const estimate = detail?.timing_estimate;
+  const startedAt = active.timing.started_at
+    ? new Date(active.timing.started_at).getTime()
+    : null;
+  const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
+
+  // The handler's own phase reporting is more accurate than any prediction, so
+  // prefer it when the job publishes real progress.
+  const reportedPct = active.progress?.pct ?? 0;
+  const hasReported = reportedPct > 0;
+
+  let pct: number | null = null;
+  let label = active.progress?.phase || active.state;
+
+  if (hasReported) {
+    pct = Math.min(100, reportedPct * 100);
+  } else if (estimate?.known && estimate.estimate_ms && startedAt) {
+    // Cap at 95%: overshooting to 100% and then sitting there is exactly the
+    // failure mode this design avoids.
+    pct = Math.min(95, (elapsedMs / estimate.estimate_ms) * 100);
+    const remainMs = Math.max(0, estimate.estimate_ms - elapsedMs);
+    label = remainMs > 1000 ? `~${formatDuration(remainMs)} remaining` : "finishing…";
+  }
+
+  return (
+    <div
+      style={{
+        padding: "8px 10px",
+        borderRadius: "var(--radius)",
+        background: "var(--bg-elevated)",
+        marginBottom: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 12,
+          marginBottom: 5,
+        }}
+      >
+        <span>
+          <span className="spinner" style={{ marginRight: 6 }} />
+          {active.type.replace(/_/g, " ")}
+        </span>
+        <span style={{ color: "var(--text-faint)" }}>{label}</span>
+      </div>
+
+      {pct != null ? (
+        <div className="progress">
+          <div className="progress-bar" style={{ width: `${pct}%` }} />
+        </div>
+      ) : (
+        // Indeterminate: we genuinely do not know, and say so.
+        <div className="progress">
+          <div
+            className="progress-bar"
+            style={{ width: "100%", opacity: 0.25 }}
+          />
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
+        {formatDuration(elapsedMs)} elapsed
+        {estimate && !estimate.known && (
+          <>
+            {" · no estimate yet ("}
+            {estimate.needed} more run{estimate.needed === 1 ? "" : "s"} needed
+            {")"}
+          </>
+        )}
+        {estimate?.known && estimate.r_squared != null && estimate.r_squared < 0.5 && (
+          <> · rough estimate, timings vary</>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+}
