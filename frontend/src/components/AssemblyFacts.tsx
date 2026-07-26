@@ -62,6 +62,9 @@ export function AssemblyFacts({ facts }: Props) {
 
   return (
     <div>
+      {/* Suppressed entirely when nothing was measured, so a file that failed
+          to parse shows the published block alone rather than an empty list. */}
+      {hasAnything && (
       <dl className="kv">
         {count !== undefined && (
           <>
@@ -98,6 +101,7 @@ export function AssemblyFacts({ facts }: Props) {
           </>
         )}
       </dl>
+      )}
 
       {names.length > 0 && (
         <div style={{ marginTop: 12 }}>

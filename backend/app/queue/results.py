@@ -118,12 +118,21 @@ async def _apply_ingest_headers(result: dict) -> None:
             "assembly_error": assembly_enrichment["error"],
         }
 
+    await obj.set(update)
+
+    # Role is assigned separately, and conditionally, because `obj` was read
+    # before a network lookup that can take seconds. A user who converted the
+    # file in that window would otherwise be silently overruled by a stale
+    # snapshot -- the exact thing "never overrule a person" forbids. Matching
+    # on role=None means the write lands only if nobody has decided since.
     if should_assign_reference_role(
         current_role=obj.role, enrichment=assembly_enrichment
     ):
-        update[DataObject.role] = ObjectRole.REFERENCE
-
-    await obj.set(update)
+        assigned = await DataObject.find_one(
+            DataObject.id == obj.id, DataObject.role == None  # noqa: E711
+        ).update({"$set": {DataObject.role: ObjectRole.REFERENCE}})
+        if not getattr(assigned, "modified_count", 0):
+            log.info("assembly_role_skipped_raced", object_id=object_id)
     log.info(
         "ingest_applied",
         object_id=object_id,
