@@ -1,6 +1,7 @@
 """Object role: the override that distinguishes a reference from reads."""
 
 import pytest
+from app.api.v1.schemas import ObjectOut, ObjectUpdate
 from app.config import settings
 from app.models import ALL_MODELS, FormatKind, ObjectRole
 from app.models.object import DataObject
@@ -53,3 +54,30 @@ class TestObjectRole:
         o.format.kind = FormatKind.FASTQ
         assert o.role is ObjectRole.REFERENCE
         assert o.format.kind is FormatKind.FASTQ
+
+
+class TestRoleSerialization:
+    def test_object_out_exposes_role(self):
+        out = ObjectOut.of(_obj(role=ObjectRole.REFERENCE))
+        assert out.role == "reference"
+
+    def test_object_out_role_is_none_when_unset(self):
+        assert ObjectOut.of(_obj()).role is None
+
+    def test_update_distinguishes_omitted_from_explicit_null(self):
+        """The whole reversibility story rests on this distinction.
+
+        An omitted role must not appear in the dump (so a rename leaves role
+        alone), while an explicit null must appear (so 'convert back' can clear
+        it).
+        """
+        omitted = ObjectUpdate(name="x").model_dump(exclude_unset=True)
+        assert "role" not in omitted
+
+        explicit = ObjectUpdate(role=None).model_dump(exclude_unset=True)
+        assert "role" in explicit
+        assert explicit["role"] is None
+
+    def test_update_accepts_a_role_value(self):
+        dumped = ObjectUpdate(role=ObjectRole.REFERENCE).model_dump(exclude_unset=True)
+        assert dumped["role"] is ObjectRole.REFERENCE

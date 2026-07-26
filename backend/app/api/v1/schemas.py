@@ -8,7 +8,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models import Blob, DataObject, Project
+from app.models import Blob, DataObject, ObjectRole, Project
 
 
 # --- Projects ---
@@ -69,6 +69,10 @@ class ObjectUpdate(BaseModel):
     name: str | None = None
     metadata: dict | None = None
     tags: list[str] | None = None
+    # An explicit null clears the role ("convert back to reads"); omitting the
+    # key leaves it untouched. exclude_unset=True in the route preserves the
+    # difference.
+    role: ObjectRole | None = None
 
 
 class BlobOut(BaseModel):
@@ -108,6 +112,7 @@ class ObjectOut(BaseModel):
     tags: list[str]
     source: dict
     error: dict | None
+    role: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -126,6 +131,7 @@ class ObjectOut(BaseModel):
             tags=o.tags,
             source=o.source.model_dump(mode="json"),
             error=o.error.model_dump(mode="json") if o.error else None,
+            role=o.role.value if o.role else None,
             created_at=o.created_at,
             updated_at=o.updated_at,
         )
