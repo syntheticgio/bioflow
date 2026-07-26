@@ -16,6 +16,7 @@ from app.models import (
     IoClass,
     JobClass,
     JobResources,
+    ObjectRole,
     ObjectStatus,
     Project,
     SourceInfo,
@@ -314,6 +315,19 @@ async def register_in_place(
     return obj, str(job.id) if job else ""
 
 
+def apply_role_update(obj: DataObject, updates: dict) -> None:
+    """Apply a role change, distinguishing an explicit null from an omission.
+
+    Every other field in update_object uses `.get(k) is not None`, which treats
+    null and absent alike. Role cannot: clearing it is how a reference is
+    converted back to reads, so the *presence of the key* is what matters.
+    """
+    if "role" not in updates:
+        return
+    raw = updates["role"]
+    obj.role = ObjectRole(raw) if raw is not None else None
+
+
 async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObject:
     obj = await get_object(object_id)
 
@@ -324,13 +338,19 @@ async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObjec
         obj.name = new_name
     if updates.get("tags") is not None:
         obj.tags = [t.strip() for t in updates["tags"] if t and t.strip()]
+    apply_role_update(obj, updates)
     if updates.get("metadata") is not None:
         from app.metadata import schemas
 
         # Coerced against the schema for this file's format, so numbers sort as
         # numbers and dates compare correctly. Unknown keys pass through
-        # untouched -- the schema suggests, it does not restrict.
-        validated = schemas.coerce_and_validate(updates["metadata"], obj.format.kind)
+        # untouched -- the schema suggests, it does not restrict. Role rides
+        # along because role is applied above, before metadata: a single PATCH
+        # carrying both must validate against the incoming role, not the
+        # outgoing one.
+        validated = schemas.coerce_and_validate(
+            updates["metadata"], obj.format.kind, role=obj.role
+        )
         merged = {**obj.metadata, **validated.values}
         # A null means "clear this field", which is how the UI removes a value.
         obj.metadata = {k: v for k, v in merged.items() if v is not None}

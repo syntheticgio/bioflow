@@ -4,7 +4,7 @@ import pytest
 
 from app.metadata import schemas
 from app.metadata.schemas import FieldType
-from app.models import FormatKind
+from app.models import FormatKind, ObjectRole
 
 
 class TestFieldResolution:
@@ -138,3 +138,117 @@ class TestApiShape:
         flat = {f["key"]: f for g in out["groups"] for f in g["fields"]}
         assert "GATK HaplotypeCaller" in flat["variant_caller"]["options"]
         assert flat["variant_caller"]["type"] == FieldType.ENUM.value
+
+
+class TestRoleAwareFields:
+    def test_reference_role_replaces_format_fields(self):
+        """A reference FASTQ is a genome build, not a sequencing run: library
+        and flowcell questions stop being meaningful."""
+        keys = {f.key for f in schemas.fields_for(FormatKind.FASTQ, role=ObjectRole.REFERENCE)}
+        assert "reference_build" in keys
+        assert "assembly_accession" in keys
+        assert "library_prep" not in keys
+        assert "flowcell" not in keys
+
+    def test_reference_role_keeps_common_fields(self):
+        keys = {f.key for f in schemas.fields_for(FormatKind.FASTQ, role=ObjectRole.REFERENCE)}
+        assert {"sample_id", "organism", "notes"} <= keys
+
+    def test_reference_role_applies_regardless_of_format(self):
+        fastq = {f.key for f in schemas.fields_for(FormatKind.FASTQ, role=ObjectRole.REFERENCE)}
+        fasta = {f.key for f in schemas.fields_for(FormatKind.FASTA, role=ObjectRole.REFERENCE)}
+        assert fastq == fasta
+
+    def test_plain_fasta_is_no_longer_assumed_to_be_a_reference(self):
+        """Reference fields now come from role, not from the format."""
+        keys = {f.key for f in schemas.fields_for(FormatKind.FASTA)}
+        assert keys == {f.key for f in schemas.COMMON_FIELDS}
+        assert "assembly_accession" not in keys
+
+    def test_fastq_without_a_role_is_unaffected(self):
+        keys = {f.key for f in schemas.fields_for(FormatKind.FASTQ)}
+        assert "library_prep" in keys
+
+    def test_schema_for_api_accepts_a_role(self):
+        out = schemas.schema_for_api(FormatKind.FASTQ, role=ObjectRole.REFERENCE)
+        groups = {g["group"] for g in out["groups"]}
+        assert "Reference" in groups
+        assert "Library" not in groups
+
+
+class TestMetadataSurvivesConversion:
+    """Reversibility depends on old-role values not being destroyed."""
+
+    def test_previous_role_values_are_kept_as_unknown_keys(self):
+        result = schemas.coerce_and_validate(
+            {"flowcell": "HXXXDSX3", "lane": 4, "reference_build": "GRCh38"},
+            FormatKind.FASTQ,
+            role=ObjectRole.REFERENCE,
+        )
+        assert result.values["flowcell"] == "HXXXDSX3"
+        assert result.values["reference_build"] == "GRCh38"
+
+    def test_round_trip_conversion_preserves_values(self):
+        original = {"flowcell": "HXXXDSX3", "library_prep": "TruSeq"}
+        as_reference = schemas.coerce_and_validate(
+            original, FormatKind.FASTQ, role=ObjectRole.REFERENCE
+        ).values
+        back_to_reads = schemas.coerce_and_validate(
+            as_reference, FormatKind.FASTQ, role=None
+        ).values
+        assert back_to_reads["flowcell"] == "HXXXDSX3"
+        assert back_to_reads["library_prep"] == "TruSeq"
+
+    def test_leftover_keys_from_a_previous_role_still_coerce(self):
+        """A flowcell left on a converted reference should still type-coerce."""
+        result = schemas.coerce_and_validate(
+            {"lane": "4"}, FormatKind.FASTQ, role=ObjectRole.REFERENCE
+        )
+        assert result.values["lane"] == 4  # int, not the string "4"
+
+
+class TestReferenceFieldDefinitions:
+    def test_new_reference_fields_exist_with_expected_types(self):
+        fields = schemas.field_map(None, role=ObjectRole.REFERENCE)
+        assert fields["assembly_accession"].type is FieldType.TEXT
+        assert fields["is_primary_assembly"].type is FieldType.BOOLEAN
+        assert fields["has_decoy"].type is FieldType.BOOLEAN
+        assert fields["index_types"].type is FieldType.TEXT
+        assert fields["masked"].type is FieldType.BOOLEAN
+
+    def test_reference_build_stays_free_text(self):
+        """Builds are open-ended (custom assemblies, patches), so no enum."""
+        spec = schemas.field_map(None, role=ObjectRole.REFERENCE)["reference_build"]
+        assert spec.type is FieldType.TEXT
+        assert spec.options == ()
+
+    def test_reference_fields_are_grouped_together(self):
+        fields = schemas.field_map(None, role=ObjectRole.REFERENCE)
+        for key in ("reference_build", "source", "assembly_accession", "has_decoy"):
+            assert fields[key].group == "Reference"
+
+    def test_reference_build_is_not_validated_against_the_alignment_enum(self):
+        """reference_build is free text for a reference but an enum for a BAM.
+
+        The scoped definition must win over the global fallback, or a custom
+        assembly name produces a spurious 'not a suggested option' warning.
+        """
+        result = schemas.coerce_and_validate(
+            {"reference_build": "T2T-CHM13-patch1"},
+            FormatKind.FASTQ,
+            role=ObjectRole.REFERENCE,
+        )
+        assert result.values["reference_build"] == "T2T-CHM13-patch1"
+        assert result.warnings == []
+
+    def test_alignment_reference_build_still_warns_on_an_unknown_option(self):
+        """The enum behavior must survive for formats that legitimately use it."""
+        result = schemas.coerce_and_validate(
+            {"reference_build": "not-a-real-build"}, FormatKind.BAM
+        )
+        assert result.warnings, "a BAM's reference_build should still be enum-checked"
+
+    def test_every_role_has_a_field_group(self):
+        """A new ObjectRole without a ROLE_FIELDS entry would silently fall
+        back to common fields only. Fail loudly instead."""
+        assert set(ObjectRole) == set(schemas.ROLE_FIELDS)

@@ -742,7 +742,10 @@ Expected: `1`
 curl -s -o /dev/null -w "%{http_code}\n" "http://localhost:8000/api/v1/metadata/schemas/fastq?role=nonsense"
 ```
 
-Expected: `400`
+Expected: `422`. (`ValidationError` maps to 422 app-wide — see
+`backend/app/errors.py:39` — not 400. An earlier draft of this plan said 400,
+which was wrong; the bad-format case on the same route already returned 422
+before this feature.)
 
 - [ ] **Step 4: Commit**
 

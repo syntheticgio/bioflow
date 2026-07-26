@@ -39,6 +39,9 @@ export interface FormatInfo {
   detected_at: string | null;
 }
 
+/** How a file is used, when its format cannot say. Null = derive from format. */
+export type ObjectRole = "reference";
+
 export interface DataObject {
   id: string;
   project_id: string;
@@ -50,6 +53,7 @@ export interface DataObject {
   facts: Record<string, unknown>;
   metadata: Record<string, unknown>;
   tags: string[];
+  role: ObjectRole | null;
   source: Record<string, unknown>;
   error: { code: string; message: string; at: string } | null;
   created_at: string;
@@ -240,6 +244,7 @@ export interface MetadataField {
 
 export interface MetadataSchema {
   kind: string | null;
+  role: ObjectRole | null;
   groups: { group: string; fields: MetadataField[] }[];
 }
 

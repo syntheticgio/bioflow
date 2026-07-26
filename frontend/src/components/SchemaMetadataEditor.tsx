@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { MetadataField, MetadataSchema } from "../api/types";
+import type { MetadataField, MetadataSchema, ObjectRole } from "../api/types";
 import { accessionUrl } from "../lib/format";
 
 interface Props {
   value: Record<string, unknown>;
   formatKind: string;
+  role: ObjectRole | null;
   onSave: (next: Record<string, unknown>) => void;
   saving?: boolean;
 }
@@ -21,10 +22,12 @@ type Custom = { key: string; value: string };
  * a free key/value pair. The schema is a convenience, never a restriction — no
  * fixed vocabulary survives contact with a real lab.
  */
-export function SchemaMetadataEditor({ value, formatKind, onSave, saving }: Props) {
+export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving }: Props) {
   const { data: schema } = useQuery({
-    queryKey: ["metadata", "schema", formatKind],
-    queryFn: () => api.metadataSchema(formatKind),
+    // Role is part of the key: a conversion changes which fields apply, and a
+    // stale cache would serve the previous role's form.
+    queryKey: ["metadata", "schema", formatKind, role],
+    queryFn: () => api.metadataSchema(formatKind, role),
     staleTime: 5 * 60 * 1000, // schemas are static within a release
   });
 

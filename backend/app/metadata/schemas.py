@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 
-from app.models import FormatKind
+from app.models import FormatKind, ObjectRole
 
 
 class FieldType(StrEnum):
@@ -247,9 +247,24 @@ VARIANT_FIELDS: tuple[FieldDef, ...] = (
 )
 
 REFERENCE_FIELDS: tuple[FieldDef, ...] = (
+    # Free text rather than an enum: reference builds are open-ended, including
+    # custom assemblies and patch releases that no fixed list would cover.
     FieldDef("reference_build", "Build", group="Reference", suggested=True),
     FieldDef("source", "Source", help="e.g. Ensembl release 110, UCSC, NCBI RefSeq.",
-             group="Reference"),
+             group="Reference", suggested=True),
+    FieldDef("assembly_accession", "Assembly accession",
+             help="e.g. GCA_000001405.29. The unambiguous identifier for this assembly.",
+             group="Reference", suggested=True),
+    FieldDef("is_primary_assembly", "Primary assembly only", type=FieldType.BOOLEAN,
+             help="Alt and patch contigs excluded. Mixing this up is a common "
+                  "source of surprising alignment results.",
+             group="Reference", suggested=True),
+    FieldDef("has_decoy", "Includes decoy contigs", type=FieldType.BOOLEAN,
+             help="e.g. hs38d1. Affects aligner choice and mapping rates.",
+             group="Reference", suggested=True),
+    FieldDef("index_types", "Aligner indexes",
+             help="Which indexes have been built, e.g. BWA, bowtie2, STAR.",
+             group="Reference", suggested=True),
     FieldDef("masked", "Masked", type=FieldType.BOOLEAN,
              help="Repeat-masked sequence.", group="Reference"),
 )
@@ -271,18 +286,30 @@ FORMAT_FIELDS: dict[FormatKind, tuple[FieldDef, ...]] = {
     FormatKind.CRAM: ALIGNMENT_FIELDS,
     FormatKind.VCF: VARIANT_FIELDS,
     FormatKind.BCF: VARIANT_FIELDS,
-    FormatKind.FASTA: REFERENCE_FIELDS,
+    # A FASTA is no longer assumed to be a reference -- that now comes from the
+    # object's role, so a FASTA of reads is not asked reference questions.
+    FormatKind.FASTA: (),
     FormatKind.BED: INTERVAL_FIELDS,
     FormatKind.GFF: INTERVAL_FIELDS,
     FormatKind.GTF: INTERVAL_FIELDS,
 }
 
+# Keyed by role rather than format, and consulted first: see fields_for. Kept as
+# a dict so a new role-specific field group is a one-line entry that both
+# fields_for and all_known_fields pick up automatically.
+ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
+    ObjectRole.REFERENCE: REFERENCE_FIELDS,
+}
 
-def fields_for(kind: FormatKind | str | None) -> list[FieldDef]:
-    """Common fields plus anything specific to this format.
 
-    Format-specific definitions win on key collisions (a BAM's
-    `reference_build` carries more specific help than a generic one).
+def fields_for(
+    kind: FormatKind | str | None, role: ObjectRole | str | None = None
+) -> list[FieldDef]:
+    """Common fields plus anything specific to this file.
+
+    Role wins outright over format when set: once a file is declared a
+    reference, its library and sequencing fields are noise rather than context.
+    Format-specific definitions win on key collisions with common ones.
     """
     if isinstance(kind, str):
         try:
@@ -290,20 +317,37 @@ def fields_for(kind: FormatKind | str | None) -> list[FieldDef]:
         except ValueError:
             kind = None
 
-    specific = FORMAT_FIELDS.get(kind, ()) if kind else ()
+    if isinstance(role, str):
+        try:
+            role = ObjectRole(role)
+        except ValueError:
+            role = None
+
+    if role:
+        specific: tuple[FieldDef, ...] = ROLE_FIELDS.get(role, ())
+    else:
+        specific = FORMAT_FIELDS.get(kind, ()) if kind else ()
+
     by_key: dict[str, FieldDef] = {f.key: f for f in COMMON_FIELDS}
     by_key.update({f.key: f for f in specific})
     return list(by_key.values())
 
 
-def field_map(kind: FormatKind | str | None = None) -> dict[str, FieldDef]:
-    return {f.key: f for f in fields_for(kind)}
+def field_map(
+    kind: FormatKind | str | None = None, role: ObjectRole | str | None = None
+) -> dict[str, FieldDef]:
+    return {f.key: f for f in fields_for(kind, role)}
 
 
 def all_known_fields() -> dict[str, FieldDef]:
-    """Every field across every format, for validating unscoped edits."""
+    """Every field across every format and role, for validating unscoped edits."""
     out: dict[str, FieldDef] = {f.key: f for f in COMMON_FIELDS}
     for group in FORMAT_FIELDS.values():
+        for f in group:
+            out.setdefault(f.key, f)
+    # Role-specific fields are not reachable through FORMAT_FIELDS, so without
+    # this they would be treated as unknown keys and skip coercion.
+    for group in ROLE_FIELDS.values():
         for f in group:
             out.setdefault(f.key, f)
     return out
@@ -319,7 +363,9 @@ class ValidationResult:
 
 
 def coerce_and_validate(
-    metadata: dict, kind: FormatKind | str | None = None
+    metadata: dict,
+    kind: FormatKind | str | None = None,
+    role: ObjectRole | str | None = None,
 ) -> ValidationResult:
     """Coerce values to their declared types, warning rather than rejecting.
 
@@ -327,8 +373,11 @@ def coerce_and_validate(
     compares correctly. But a value that will not coerce is still kept: losing
     what someone typed is worse than storing it in the wrong type.
     """
-    known = field_map(kind) or {}
-    known.update(all_known_fields())
+    # all_known_fields covers keys left over from a previous role or format so
+    # they still coerce correctly; the scoped definitions must win on
+    # collisions, or a reference's free-text reference_build would be validated
+    # against the alignment enum.
+    known = {**all_known_fields(), **field_map(kind, role)}
 
     result = ValidationResult()
     for key, raw in metadata.items():
@@ -396,9 +445,11 @@ def _coerce_date(raw) -> str:
     raise ValueError(f"Unrecognized date: {s!r}")
 
 
-def schema_for_api(kind: FormatKind | str | None = None) -> dict:
+def schema_for_api(
+    kind: FormatKind | str | None = None, role: ObjectRole | str | None = None
+) -> dict:
     """Grouped field definitions, ordered for rendering."""
-    fields = fields_for(kind)
+    fields = fields_for(kind, role)
     groups: dict[str, list[dict]] = {}
     for f in fields:
         groups.setdefault(f.group, []).append(f.to_dict())
@@ -414,5 +465,6 @@ def schema_for_api(kind: FormatKind | str | None = None) -> dict:
     ]
     return {
         "kind": kind.value if isinstance(kind, FormatKind) else kind,
+        "role": role.value if isinstance(role, ObjectRole) else role,
         "groups": ordered,
     }
