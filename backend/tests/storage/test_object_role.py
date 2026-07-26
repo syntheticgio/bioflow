@@ -5,6 +5,7 @@ from app.api.v1.schemas import ObjectOut, ObjectUpdate
 from app.config import settings
 from app.models import ALL_MODELS, FormatKind, ObjectRole
 from app.models.object import DataObject
+from app.services.object_service import apply_role_update
 from beanie import PydanticObjectId, init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -81,3 +82,34 @@ class TestRoleSerialization:
     def test_update_accepts_a_role_value(self):
         dumped = ObjectUpdate(role=ObjectRole.REFERENCE).model_dump(exclude_unset=True)
         assert dumped["role"] is ObjectRole.REFERENCE
+
+
+class TestApplyRoleUpdate:
+    """Role is the one field where explicit-null differs from omitted."""
+
+    def test_omitted_role_leaves_the_existing_value(self):
+        obj = _obj(role=ObjectRole.REFERENCE)
+        apply_role_update(obj, {"name": "renamed.fa"})
+        assert obj.role is ObjectRole.REFERENCE
+
+    def test_explicit_null_clears_the_role(self):
+        obj = _obj(role=ObjectRole.REFERENCE)
+        apply_role_update(obj, {"role": None})
+        assert obj.role is None
+
+    def test_setting_a_role(self):
+        obj = _obj()
+        apply_role_update(obj, {"role": ObjectRole.REFERENCE})
+        assert obj.role is ObjectRole.REFERENCE
+
+    def test_string_role_is_coerced_to_the_enum(self):
+        """The route hands over whatever survived Pydantic; accept both."""
+        obj = _obj()
+        apply_role_update(obj, {"role": "reference"})
+        assert obj.role is ObjectRole.REFERENCE
+
+    def test_round_trip_conversion_returns_to_the_starting_state(self):
+        obj = _obj()
+        apply_role_update(obj, {"role": ObjectRole.REFERENCE})
+        apply_role_update(obj, {"role": None})
+        assert obj.role is None
