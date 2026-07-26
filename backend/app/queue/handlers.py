@@ -298,10 +298,25 @@ def ingest_headers(ctx: JobContext) -> dict:
             format_kind=detection.kind,
         ).to_dict()
 
+    # Assembly enrichment: a reference genome from NCBI carries its accession in
+    # the filename (GCF_000002445.2_ASM244v1_genomic.fna), which yields the
+    # organism, assembly level and sequence stats -- and marks the file as a
+    # reference.
+    assembly_enrichment = None
+    if settings.assembly_enrichment_enabled:
+        from app.metadata import enrich
+
+        assembly_enrichment = enrich.enrich_from_assembly(
+            filename=name,
+            existing_metadata=ctx.payload.get("metadata") or {},
+            format_kind=detection.kind,
+        ).to_dict()
+
     ctx.progress(phase="done", pct=1.0)
     return {
         "object_id": object_id,
         "enrichment": enrichment,
+        "assembly_enrichment": assembly_enrichment,
         "format": {
             "kind": detection.kind.value,
             "compression": detection.compression.value,

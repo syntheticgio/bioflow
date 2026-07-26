@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from beanie import PydanticObjectId
 
 from app.logging import get_logger
-from app.models import DataObject, FormatInfo, ObjectStatus
+from app.models import DataObject, FormatInfo, ObjectRole, ObjectStatus
 
 log = get_logger(__name__)
 
@@ -20,6 +20,18 @@ async def apply(job_type: str, result: dict) -> None:
     handler = _APPLIERS.get(job_type)
     if handler is not None:
         await handler(result)
+
+
+def should_assign_reference_role(*, current_role, enrichment: dict | None) -> bool:
+    """Whether an ingest should mark this object a reference.
+
+    Only when an assembly accession was found *and* no role is set. A role the
+    user chose is never overruled: they may be running something unusual, or
+    know something about the file that its name does not say.
+    """
+    if current_role is not None:
+        return False
+    return bool((enrichment or {}).get("accession"))
 
 
 async def _apply_ingest_headers(result: dict) -> None:
@@ -76,6 +88,41 @@ async def _apply_ingest_headers(result: dict) -> None:
         merged_facts = update.get(DataObject.facts, obj.facts)
         update[DataObject.facts] = {**merged_facts, "sra_error": enrichment["error"]}
 
+    assembly_enrichment = result.get("assembly_enrichment") or {}
+    if assembly_enrichment.get("values"):
+        # Already filtered against what the user set, so this cannot clobber.
+        merged_metadata = update.get(DataObject.metadata, obj.metadata)
+        update[DataObject.metadata] = {
+            **merged_metadata,
+            **assembly_enrichment["values"],
+        }
+    if assembly_enrichment.get("facts"):
+        merged_facts = update.get(DataObject.facts, obj.facts)
+        update[DataObject.facts] = {
+            **merged_facts,
+            **assembly_enrichment["facts"],
+        }
+    if assembly_enrichment.get("accession"):
+        merged_facts = update.get(DataObject.facts, obj.facts)
+        provenance = {
+            "assembly_accession_source": assembly_enrichment.get("source"),
+            "assembly_fields_applied": sorted(assembly_enrichment.get("values", {})),
+        }
+        if assembly_enrichment.get("conflicts"):
+            provenance["assembly_conflicts"] = assembly_enrichment["conflicts"]
+        update[DataObject.facts] = {**merged_facts, **provenance}
+    if assembly_enrichment.get("error"):
+        merged_facts = update.get(DataObject.facts, obj.facts)
+        update[DataObject.facts] = {
+            **merged_facts,
+            "assembly_error": assembly_enrichment["error"],
+        }
+
+    if should_assign_reference_role(
+        current_role=obj.role, enrichment=assembly_enrichment
+    ):
+        update[DataObject.role] = ObjectRole.REFERENCE
+
     await obj.set(update)
     log.info(
         "ingest_applied",
@@ -83,6 +130,8 @@ async def _apply_ingest_headers(result: dict) -> None:
         kind=fmt.get("kind"),
         sra=enrichment.get("accession"),
         sra_fields=len(enrichment.get("values", {})),
+        assembly=assembly_enrichment.get("accession"),
+        assembly_fields=len(assembly_enrichment.get("values", {})),
     )
 
 

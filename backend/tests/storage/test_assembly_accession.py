@@ -8,6 +8,7 @@ import pytest
 
 from app.metadata import assembly, enrich
 from app.models import FormatKind
+from app.queue.results import should_assign_reference_role
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -324,3 +325,31 @@ class TestEnrichFromAssembly:
             )
         assert result.facts["ncbi_sequence_count"] == 12
         assert "ncbi_gc_percent" in result.facts
+
+
+class TestAutoRoleAssignment:
+    """Auto-assignment fills a gap; it never overrules a person."""
+
+    def test_assigns_when_an_accession_was_found_and_role_is_unset(self):
+        assert should_assign_reference_role(
+            current_role=None, enrichment={"accession": "GCF_000002445.2"}
+        )
+
+    def test_does_not_assign_without_an_accession(self):
+        assert not should_assign_reference_role(current_role=None, enrichment={})
+
+    def test_never_overrides_an_existing_role(self):
+        """A user who set a role may know something the filename does not say."""
+        assert not should_assign_reference_role(
+            current_role="reference", enrichment={"accession": "GCF_000002445.2"}
+        )
+
+    def test_handles_a_missing_enrichment_block(self):
+        assert not should_assign_reference_role(current_role=None, enrichment=None)
+
+    def test_an_enrichment_error_does_not_assign(self):
+        """A failed lookup still found an accession in the name -- but we only
+        assign on a real find, not on an attempt."""
+        assert not should_assign_reference_role(
+            current_role=None, enrichment={"error": "No assembly record found"}
+        )
