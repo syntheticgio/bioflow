@@ -8,6 +8,7 @@ from app.api.v1 import (
     objects,
     pipelines,
     projects,
+    runs,
     schedules,
     search,
     system,
@@ -23,6 +24,7 @@ api_router.include_router(objects.router)
 api_router.include_router(uploads.router)
 api_router.include_router(jobs.router)
 api_router.include_router(pipelines.router)
+api_router.include_router(runs.router)
 api_router.include_router(schedules.router)
 api_router.include_router(system.router)
 api_router.include_router(events.router)

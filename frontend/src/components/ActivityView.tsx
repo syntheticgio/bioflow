@@ -1,11 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../api/client";
 import { formatDate, formatDuration } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import type { JobSummary, SystemLoad } from "../api/types";
+import type { JobSummary, RunSummary, SystemLoad } from "../api/types";
 import { JobLogView } from "./JobLogView";
+import { RunRow } from "./RunRow";
 
 const RUNNING = new Set(["running"]);
 const WAITING = new Set(["pending", "queued", "delayed"]);
@@ -35,6 +36,29 @@ export function ActivityView() {
     },
   });
 
+  const { data: runs = [] } = useQuery({
+    queryKey: ["runs", "activity"],
+    queryFn: () => api.listRuns({ limit: 50 }),
+    refetchInterval: (q) => {
+      const list = q.state.data as RunSummary[] | undefined;
+      return list?.some((r) => r.status === "running" || r.status === "waiting")
+        ? 2000
+        : false;
+    },
+  });
+
+  // Membership, so a job shown inside its run is not also listed loose. Every
+  // run is fetched rather than only the expanded ones -- the collapsed rows
+  // still need to know which jobs they own.
+  const runDetails = useQueries({
+    queries: runs.map((run) => ({
+      queryKey: ["runs", run.id],
+      queryFn: () => api.getRun(run.id),
+      refetchInterval:
+        run.status === "running" || run.status === "waiting" ? 2000 : false,
+    })),
+  }).map((q) => q.data);
+
   const { data: load } = useQuery({
     queryKey: ["system", "load"],
     queryFn: api.systemLoad,
@@ -63,9 +87,30 @@ export function ActivityView() {
     onError: (e: Error) => notify.error(e.message),
   });
 
-  const running = jobs.filter((j) => RUNNING.has(j.state));
-  const waiting = jobs.filter((j) => WAITING.has(j.state));
-  const recent = jobs.filter((j) => !RUNNING.has(j.state) && !WAITING.has(j.state));
+  // Jobs that belong to a run are shown inside it, not loose. The set is built
+  // from the runs rather than from a flag on the job, so a job whose run has
+  // been deleted falls back to being listed individually rather than vanishing.
+  const grouped = new Set<string>();
+  for (const detail of runDetails) {
+    for (const job of detail?.jobs ?? []) grouped.add(job.job_id);
+  }
+
+  const loose = jobs.filter((j) => !grouped.has(j.id));
+  const running = loose.filter((j) => RUNNING.has(j.state));
+  const waiting = loose.filter((j) => WAITING.has(j.state));
+  const recent = loose.filter(
+    (j) => !RUNNING.has(j.state) && !WAITING.has(j.state),
+  );
+
+  const activeRuns = runs.filter(
+    (r) => r.status === "running" || r.status === "waiting",
+  );
+  const finishedRuns = runs.filter(
+    (r) => r.status !== "running" && r.status !== "waiting",
+  );
+
+  const selectObject = (objectId: string, projectId: string) =>
+    navigate(`/p/${projectId}?sel=object:${objectId}`);
 
   // Navigates rather than just setting the selection: the detail panel lives
   // in the explorer, and this view deliberately does not render beside it.
@@ -83,7 +128,31 @@ export function ActivityView() {
       </div>
 
       <div className="activity-body">
-        <Section title="Running" count={running.length} empty="Nothing running.">
+        {/* Runs first: one row per action the user took, rather than the seven
+            jobs an alignment decomposes into. */}
+        {activeRuns.length > 0 && (
+          <Section title="Runs in progress" count={activeRuns.length} empty="">
+            {activeRuns.map((run) => (
+              <RunRow key={run.id} run={run} onSelect={selectObject} />
+            ))}
+          </Section>
+        )}
+
+        {finishedRuns.length > 0 && (
+          <Section
+            title="Recent runs"
+            count={finishedRuns.length}
+            empty="No finished runs."
+          >
+            {finishedRuns.slice(0, 20).map((run) => (
+              <RunRow key={run.id} run={run} onSelect={selectObject} />
+            ))}
+          </Section>
+        )}
+
+        {/* Everything below is work that belongs to no run: verification
+            sweeps, reaping, a manual re-ingest. */}
+        <Section title="Other running" count={running.length} empty="Nothing running.">
           {running.map((job) => (
             <JobRow
               key={job.id}
@@ -97,7 +166,7 @@ export function ActivityView() {
         </Section>
 
         <Section
-          title="Waiting"
+          title="Other waiting"
           count={waiting.length}
           empty="Nothing queued."
         >
@@ -112,7 +181,7 @@ export function ActivityView() {
           ))}
         </Section>
 
-        <Section title="Recent" count={recent.length} empty="No finished jobs.">
+        <Section title="Other recent" count={recent.length} empty="No finished jobs.">
           {recent.slice(0, 40).map((job) => (
             <JobRow
               key={job.id}

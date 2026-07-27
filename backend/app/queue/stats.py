@@ -27,7 +27,12 @@ async def snapshot() -> dict:
 
     # Grouped server-side: iterating documents just to count them would scale
     # with queue depth on an endpoint the footer polls continuously.
-    active = [JobState.QUEUED.value, JobState.DELAYED.value, JobState.RUNNING.value]
+    active = [
+        JobState.QUEUED.value,
+        JobState.DELAYED.value,
+        JobState.BLOCKED.value,
+        JobState.RUNNING.value,
+    ]
     by_class = {
         row["_id"]: row["count"]
         async for row in get_db().jobs.aggregate(

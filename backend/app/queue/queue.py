@@ -18,6 +18,7 @@ from app.db.redis_client import get_redis, get_script
 from app.logging import get_logger
 from app.models import (
     ACTIVE_STATES,
+    TERMINAL_STATES,
     Job,
     JobClass,
     JobLease,
@@ -60,16 +61,26 @@ async def enqueue(
     resources: JobResources | None = None,
     max_attempts: int | None = None,
     delay_seconds: float = 0,
+    depends_on: list[PydanticObjectId] | None = None,
+    parent_job_id: PydanticObjectId | None = None,
 ) -> Job | None:
     """Create and dispatch a job. Returns None if deduplicated away.
 
     The Mongo insert is the deduplication guard: a unique partial index over
     non-terminal states means a concurrent duplicate raises DuplicateKeyError
     rather than producing two jobs.
+
+    `depends_on` holds the job back until every listed job has *succeeded*.
+    Such a job is never pushed to Redis; `_release_dependents` puts it there
+    when its last dependency finishes. If any dependency fails, the dependent
+    fails too, with that dependency named as the reason -- an alignment whose
+    index build died must not sit queued forever waiting for a file that is
+    never coming.
     """
     now = datetime.now(UTC)
     resources = resources or JobResources()
     available_at = now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else None
+    depends_on = list(depends_on or [])
 
     job = Job(
         type=job_type,
@@ -82,6 +93,8 @@ async def enqueue(
         resources=resources,
         max_attempts=max_attempts or settings.job_max_attempts,
         available_at=available_at,
+        depends_on=depends_on,
+        parent_job_id=parent_job_id,
         timing=JobTiming(enqueued_at=now),
     )
 
@@ -91,9 +104,155 @@ async def enqueue(
         log.debug("job_deduplicated", type=job_type, dedup_key=dedup_key)
         return None
 
+    if depends_on:
+        # Re-read the dependencies *after* inserting, never before. A dependency
+        # that finished during the insert would otherwise be missed by both
+        # sides: `_release_dependents` could not see a job that did not exist
+        # yet, and a pre-insert check would not have seen it finish. Checking
+        # afterwards means the job is already visible to any concurrent
+        # completion, so at worst both paths try to release it -- which the
+        # conditional state update in `_release_dependents` makes safe.
+        outstanding = await _unfinished_dependencies(depends_on)
+        failed = await _failed_dependencies(depends_on)
+        if failed:
+            await _fail_blocked_job(job, failed)
+            return job
+        if outstanding:
+            await job.set({Job.state: JobState.BLOCKED})
+            log.info(
+                "job_blocked",
+                job_id=str(job.id),
+                type=job_type,
+                waiting_on=[str(d) for d in outstanding],
+            )
+            await publish_event("job.enqueued", {"job_id": str(job.id), "type": job_type})
+            return job
+
     await _push_to_redis(job, delay_seconds=delay_seconds)
     await publish_event("job.enqueued", {"job_id": str(job.id), "type": job_type})
     return job
+
+
+def classify_dependencies(jobs: list[Job]) -> tuple[list[Job], list[Job]]:
+    """Split dependency jobs into (unfinished, failed).
+
+    Pure, so the release decision can be tested without a database -- the
+    decision itself is the part worth getting right, and it is easy to get
+    subtly wrong in a way only a rare interleaving reveals.
+
+    A dependency id with no job behind it is neither unfinished nor failed: the
+    record was pruned by the 30-day TTL, or never existed. Treating a missing
+    job as blocking would strand otherwise-ready work forever, and treating it
+    as failed would kill work whose input very likely did get produced.
+    """
+    unfinished = [j for j in jobs if j.state in ACTIVE_STATES]
+    failed = [
+        j for j in jobs if j.state in TERMINAL_STATES and j.state is not JobState.SUCCEEDED
+    ]
+    return unfinished, failed
+
+
+async def _dependency_jobs(depends_on: list[PydanticObjectId]) -> list[Job]:
+    return await Job.find({"_id": {"$in": depends_on}}).to_list()
+
+
+async def _unfinished_dependencies(
+    depends_on: list[PydanticObjectId],
+) -> list[PydanticObjectId]:
+    unfinished, _ = classify_dependencies(await _dependency_jobs(depends_on))
+    return [j.id for j in unfinished]
+
+
+async def _failed_dependencies(depends_on: list[PydanticObjectId]) -> list[Job]:
+    _, failed = classify_dependencies(await _dependency_jobs(depends_on))
+    return failed
+
+
+async def _fail_blocked_job(job: Job, failed: list[Job]) -> None:
+    """Fail a dependent because something it needed did not succeed.
+
+    The dependency's own error is quoted rather than summarised, because "the
+    index build failed" without saying *how* sends the user hunting through
+    job history for the real message.
+    """
+    from app.db.client import get_db
+
+    culprit = failed[0]
+    detail = culprit.error.message if culprit.error else f"it ended as {culprit.state.value}"
+    message = f"Dependency {culprit.type} ({culprit.id}) did not succeed: {detail}"
+
+    now = datetime.now(UTC)
+    await get_db().jobs.update_one(
+        {"_id": job.id, "state": {"$in": [JobState.BLOCKED.value, JobState.PENDING.value]}},
+        {
+            "$set": {
+                "state": JobState.FAILED.value,
+                "error": {
+                    "code": "dependency_failed",
+                    "message": message,
+                    "traceback_tail": "",
+                    # Retrying cannot help: the missing input is still missing.
+                    "retryable": False,
+                },
+                "lease": None,
+                "timing.finished_at": now,
+                "updated_at": now,
+                "expires_at": now + timedelta(days=30),
+            }
+        },
+    )
+    log.warning(
+        "job_dependency_failed",
+        job_id=str(job.id),
+        type=job.type,
+        dependency_id=str(culprit.id),
+        dependency_type=culprit.type,
+    )
+    await publish_event("job.failed", {"job_id": str(job.id)})
+
+    # Cascade: anything waiting on *this* job now cannot run either.
+    await _release_dependents(str(job.id), succeeded=False)
+
+
+async def _release_dependents(job_id: str, *, succeeded: bool) -> None:
+    """Unblock (or fail) the jobs waiting on a job that just finished.
+
+    Called on every terminal outcome. On success a dependent is dispatched only
+    once *all* its dependencies are done, so a job waiting on two index builds
+    is released by the second one to finish, not the first.
+    """
+    dependents = await Job.find(
+        {"depends_on": PydanticObjectId(job_id), "state": JobState.BLOCKED.value}
+    ).to_list()
+    if not dependents:
+        return
+
+    for dep in dependents:
+        if not succeeded:
+            failed = await _failed_dependencies(dep.depends_on)
+            if failed:
+                await _fail_blocked_job(dep, failed)
+            continue
+
+        if await _unfinished_dependencies(dep.depends_on):
+            continue  # still waiting on a sibling dependency
+
+        # Conditional on the job still being BLOCKED, so two dependencies
+        # finishing at once cannot both dispatch it.
+        from app.db.client import get_db
+
+        claimed = await get_db().jobs.update_one(
+            {"_id": dep.id, "state": JobState.BLOCKED.value},
+            {"$set": {"state": JobState.PENDING.value, "updated_at": datetime.now(UTC)}},
+        )
+        if claimed.modified_count == 0:
+            continue
+
+        fresh = await Job.get(dep.id)
+        if fresh is None:
+            continue
+        await _push_to_redis(fresh)
+        log.info("job_unblocked", job_id=str(dep.id), type=dep.type, after=job_id)
 
 
 async def _push_to_redis(job: Job, *, delay_seconds: float = 0) -> None:
@@ -267,6 +426,10 @@ async def complete(
 
     await release(job_id, requeue=False)
     await publish_event(f"job.{state.value}", {"job_id": job_id})
+
+    # After the terminal write lands, so a dependent that dispatches
+    # immediately cannot observe its dependency as still running.
+    await _release_dependents(job_id, succeeded=state is JobState.SUCCEEDED)
     return True
 
 
@@ -321,7 +484,9 @@ async def request_cancel(job_id: str) -> str:
     await r.sadd(keys.CANCEL, job_id)
     await job.set({Job.cancel_requested: True, Job.updated_at: now})
 
-    if job.state in (JobState.QUEUED, JobState.DELAYED, JobState.PENDING):
+    # BLOCKED included: such a job has no Redis presence to clear, but it is
+    # cancellable exactly like a queued one, and its dependents must be told.
+    if job.state in (JobState.QUEUED, JobState.DELAYED, JobState.PENDING, JobState.BLOCKED):
         pipe = r.pipeline()
         pipe.zrem(keys.READY, job_id)
         pipe.zrem(keys.DELAYED, job_id)
@@ -336,6 +501,9 @@ async def request_cancel(job_id: str) -> str:
             }
         )
         await publish_event("job.cancelled", {"job_id": job_id})
+        # Cancelling an index build must not leave the alignment behind it
+        # queued forever waiting for a file nobody is going to write.
+        await _release_dependents(job_id, succeeded=False)
         return "cancelled"
 
     await publish_event("job.cancel_requested", {"job_id": job_id})
@@ -412,6 +580,9 @@ async def reap_expired(max_batch: int = 100) -> list[tuple[str, int]]:
             )
             await get_redis().zrem(keys.READY, job_id)
             log.error("job_dead_after_lease_expiry", job_id=job_id, attempts=attempts)
+            # A job that died here never went through `complete`, so this is
+            # the only place its dependents learn they will never run.
+            await _release_dependents(job_id, succeeded=False)
         else:
             await get_db().jobs.update_one(
                 {"_id": PydanticObjectId(job_id)},
@@ -479,6 +650,25 @@ async def reconcile() -> int:
         if await r.zscore(keys.DELAYED, job_id) is not None:
             continue
         if job.state is JobState.RUNNING and await r.zscore(keys.RUNNING, job_id) is not None:
+            continue
+
+        if job.state is JobState.BLOCKED:
+            # A blocked job has no Redis presence by design, so it is not
+            # "missing" and must not be restored into the ready set -- doing so
+            # would dispatch it ahead of the inputs it is waiting for.
+            #
+            # It does still need checking: its dependencies may have finished
+            # while Redis was down, and the completion that would have released
+            # it is long gone. Re-running the release decision here is what
+            # stops a restart from stranding it forever.
+            failed = await _failed_dependencies(job.depends_on)
+            if failed:
+                await _fail_blocked_job(job, failed)
+            elif not await _unfinished_dependencies(job.depends_on):
+                await job.set({Job.state: JobState.PENDING})
+                await _push_to_redis(job)
+                restored += 1
+                log.info("blocked_job_released_on_reconcile", job_id=job_id, type=job.type)
             continue
 
         score = compute_score(job.job_class, job.timing.enqueued_at)

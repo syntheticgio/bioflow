@@ -1,0 +1,134 @@
+"""Pipeline runs: the action a user asked for, and the jobs that served it.
+
+Clicking Align once produces seven jobs -- an index build, the alignment, a BAM
+index, and one header parse per produced file. The activity view showed that
+decomposition rather than the work requested, and the information needed to
+describe the request was stranded in one job's payload.
+
+A run is a *user intent*, deliberately not an execution graph. It records what
+was asked for and which jobs served it; it does not describe ordering, express
+fan-out, or schedule anything -- `Job.depends_on` already does the scheduling
+and is untouched by this. The test for anything added here is whether it
+describes a user's request or the machine's plan; only the former belongs.
+"""
+
+from enum import StrEnum
+
+from beanie import PydanticObjectId
+from pydantic import BaseModel, Field
+from pymongo import ASCENDING, DESCENDING, IndexModel
+
+from app.models.base import TimestampedDocument
+
+
+class RunKind(StrEnum):
+    ALIGNMENT = "alignment"
+    TRIM = "trim"
+
+
+class RunStatus(StrEnum):
+    """Derived from member job states, never stored.
+
+    A stored status would be a second source of truth about something the jobs
+    already know, and it drifts the first time a write is lost -- the failure
+    mode the queue's own reconciler exists for. This enum is the vocabulary of
+    the API rather than a column.
+    """
+
+    WAITING = "waiting"  # nothing started yet
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    # Finished, but an optional member did not succeed. An alignment whose BAM
+    # was produced and whose header parse failed is not a failed alignment: the
+    # file is there and can be re-ingested.
+    PARTIAL = "partial"
+
+
+class RunInputRole(StrEnum):
+    READS = "reads"
+    MATE = "mate"
+    REFERENCE = "reference"
+
+
+class RunInput(BaseModel):
+    object_id: PydanticObjectId
+    # Copied rather than looked up. A run must stay readable after its inputs
+    # are deleted; a record whose description dissolves with its inputs is not
+    # a record. The id rides along so a still-present input can be linked.
+    name: str
+    role: RunInputRole
+
+
+class PipelineRun(TimestampedDocument):
+    kind: RunKind
+    project_id: PydanticObjectId
+
+    # "specimen_R1.fastq.gz -> ecoli_ref.fna". Built at launch, when every part
+    # is known and present.
+    label: str
+    inputs: list[RunInput] = Field(default_factory=list)
+    # Denormalized for the same reason as the input names: jobs are TTL-pruned
+    # after 30 days, and a run described only by its jobs stops being
+    # describable exactly when a record of what was run is most valuable.
+    params: dict = Field(default_factory=dict)
+    outputs: list[PydanticObjectId] = Field(default_factory=list)
+
+    class Settings:
+        name = "pipeline_runs"
+        indexes = [
+            IndexModel(
+                [("project_id", ASCENDING), ("created_at", DESCENDING)],
+                name="project_listing",
+            ),
+            IndexModel([("created_at", DESCENDING)], name="recent"),
+        ]
+
+
+class RunJobRole(StrEnum):
+    INDEX = "index"
+    ALIGN = "align"
+    TRIM = "trim"
+    INDEX_BAM = "index_bam"
+    INGEST = "ingest"
+
+
+# Roles whose failure does not fail the run. Only ingest: the expensive work
+# succeeded and produced its file, and a failed header parse is recoverable by
+# re-ingesting rather than by running the pipeline again.
+OPTIONAL_ROLES: frozenset[RunJobRole] = frozenset({RunJobRole.INGEST})
+
+
+class RunJob(TimestampedDocument):
+    """One job's membership in one run.
+
+    A link collection rather than a list of job ids on the run, because a job
+    can belong to more than one run: `build_index` is deduplicated by content,
+    so a second alignment against the same reference reuses the first one's
+    build. An array could not express that, which is the same reason a simple
+    `run_id` field on Job was rejected.
+    """
+
+    run_id: PydanticObjectId
+    job_id: PydanticObjectId
+    role: RunJobRole
+    # True when this run reused a job another run created. The run depended on
+    # the work but did not cause it, and the UI shows it as reused rather than
+    # omitting it or claiming credit.
+    shared: bool = False
+
+    class Settings:
+        name = "run_jobs"
+        indexes = [
+            IndexModel([("run_id", ASCENDING)], name="by_run"),
+            # "Which run does this job belong to?" -- how a job enqueued later
+            # (index_bam, an ingest) finds the run it should join.
+            IndexModel([("job_id", ASCENDING)], name="by_job"),
+            # One membership per (run, job): re-linking on a retry must not
+            # duplicate a member and double-count it in the derived status.
+            IndexModel(
+                [("run_id", ASCENDING), ("job_id", ASCENDING)],
+                name="uniq_run_job",
+                unique=True,
+            ),
+        ]

@@ -2,6 +2,64 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+## The align dialog's submit button needs scrolling when expanded
+
+Raised: 2026-07-27, during alignment, found by driving the real UI.
+
+With "Aligner and performance" expanded, `.trim-modal` is 822px of content in
+a 633px `max-height`. It scrolls, so nothing is unreachable, but the primary
+action leaves the viewport at the moment the user is most likely to want it --
+they have just finished changing settings.
+
+The trim dialog has the same structure and never hit this because it has fewer
+advanced fields. Worth fixing for both at once rather than tuning one modal:
+pinning `.modal-actions` to the bottom of the modal with the body scrolling
+between the heading and the actions would fix the class of problem.
+
+Not urgent -- the flow works, and the section is collapsed by default.
+
+Touches: `frontend/src/styles.css`, `frontend/src/components/AlignDialog.tsx`.
+
+## Changing an index definition is a hard startup failure
+
+Raised: 2026-07-27, during alignment. **The migration below has been applied to
+this machine's `biopipe` and `biopipe_test` databases; it is recorded because
+any other database predating the change still needs it.**
+
+The job dependency gate added a `blocked` state, and `uniq_active_dedup_key` --
+the durable guard against enqueueing the same logical work twice -- filters on
+an explicit list of non-terminal states. That list now includes `"blocked"`.
+
+`init_beanie` does not silently keep the old definition, which is what this
+entry originally claimed. It calls `createIndexes` with the new
+`partialFilterExpression` under a name that already exists, MongoDB rejects it
+with `IndexKeySpecsConflict` (code 86), and **the API exits during startup**.
+Not a quiet inconsistency: the container will not boot at all against a
+database that predates the change.
+
+A fresh database is unaffected -- the index is created correctly the first time
+-- which is exactly why this does not show up until an existing deployment is
+upgraded.
+
+The fix is to drop the index so Beanie recreates it:
+
+```js
+db.jobs.dropIndex("uniq_active_dedup_key")
+```
+
+Note it must be run against **every** database carrying the collection, not
+just the application's. `biopipe_test` also had a copy, created by the
+`init_beanie` fixture in `tests/storage/test_object_role.py` and
+`test_sidecars.py` -- and because the app and the tests share one Mongo, the
+stale test-database index kept the API down after the real one was fixed.
+
+The general lesson is larger than this one index: **any** change to an index
+definition on a collection with existing data is a breaking deployment without
+a migration step, and this project has no migrations mechanism. Worth building
+one before the next schema change rather than after.
+
+Touches: `backend/app/models/job.py`, `backend/app/db/client.py`.
+
 ## The load governor watches the wrong disk
 
 Raised: 2026-07-27, during read preparation follow-up.
@@ -123,52 +181,6 @@ the reaper both already write there. Deferred because it is a correctness
 cleanup in code this feature only read.
 
 Touches: `backend/app/queue/queue.py`, `backend/app/queue/worker.py`.
-
-## Claim-time resource accounting ignores its own reservations
-
-Raised: 2026-07-27, during read preparation.
-
-`claim.lua` reserves a job's declared cpu/mem into `bp:conc:cpu` and
-`bp:conc:mem_mb`, and `release` gives them back. But `worker._free_resources`
-computes headroom from `in_flight` -- a *count of running jobs* -- and never
-reads those counters. So the reservation is maintained and never consulted.
-
-Before this feature every handler declared `cpu=1`, which made the count and the
-sum identical and the discrepancy invisible. `trim_reads` declares the user's
-thread count (4 by default, up to 16), so they now diverge: four single-CPU jobs
-and one 16-thread fastp look the same to admission.
-
-The fix is to read `bp:conc:cpu` in `_free_resources` rather than deriving from
-`in_flight`. The reason to be careful: the counters are the thing that can leak
-if a release is ever missed, whereas a job count cannot -- which may be why it
-was written this way. Any change wants a test that a crashed worker's
-reservations do not permanently shrink capacity.
-
-Touches: `backend/app/queue/worker.py`, `backend/app/queue/scripts/claim.lua`,
-`backend/app/queue/scripts/release.lua`.
-
-## The `io_heavy` cap counts all jobs, not heavy ones
-
-Raised: 2026-07-27, during read preparation.
-
-`worker._free_resources` computes `io_heavy` free capacity as
-`max(2 - in_flight, 0)`, where `in_flight` is every running job of any kind. The
-intent (documented on `IoClass.HEAVY`) is a throughput cap: more than two
-concurrent heavy readers on a FUSE mount is slower in aggregate than two.
-
-But with `worker_max_concurrent` at 4, four running *light* jobs -- header
-parsing, verification -- drive `io_heavy` to zero and block heavy claims
-entirely. A trim job can be starved by four trivial ones. The
-`reap_pipeline_scratch` and `verify_files` schedules make that combination
-routine rather than hypothetical.
-
-The fix is to track heavy jobs separately, either by counting them in the worker
-or by reading `bp:conc:io_heavy` (which `claim.lua` already maintains, and which
-has the same leak consideration as the entry above). Deferred because it is a
-pre-existing scheduling flaw rather than something this feature introduced --
-though this feature is what makes it reachable.
-
-Touches: `backend/app/queue/worker.py`.
 
 ## Mate detection is filename-only
 

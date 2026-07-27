@@ -19,6 +19,10 @@ import { MetadataEditor } from "./MetadataEditor";
 import { RoleConverter } from "./RoleConverter";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { DerivedFiles } from "./DerivedFiles";
+import { ActivePipelineJobs } from "./ActivePipelineJobs";
+import { AlignDialog } from "./AlignDialog";
+import { AlignmentReport } from "./AlignmentReport";
+import { IndexStatus } from "./IndexStatus";
 import { TrimDialog } from "./TrimDialog";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
@@ -213,6 +217,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [params, setParams] = useSearchParams();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [trimOpen, setTrimOpen] = useState(false);
+  const [alignOpen, setAlignOpen] = useState(false);
 
   const clearSelection = () => {
     const next = new URLSearchParams(params);
@@ -293,6 +298,14 @@ function ObjectDetail({ id }: { id: string }) {
   // and the dedup key stops an accidental repeat of the same settings.
   const canTrim = obj.status === "ready" && obj.format.kind === "fastq";
 
+  // Same eligibility as trimming: reads are reads, trimmed or not. Aligning
+  // untrimmed reads is a real choice rather than a mistake, so it is offered.
+  const canAlign = canTrim;
+
+  // A reference can be indexed ahead of time, rather than discovering the cost
+  // as part of the first alignment against it.
+  const canIndex = obj.status === "ready" && obj.format.kind === "fasta";
+
   return (
     <div className="panel">
       <div className="panel-header">
@@ -308,6 +321,20 @@ function ObjectDetail({ id }: { id: string }) {
             Trim
           </button>
         )}
+        {canAlign && (
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
+            onClick={() => setAlignOpen(true)}
+            title="Align these reads against a reference"
+          >
+            Align
+          </button>
+        )}
+        {/* A reminder, not a guard: a second run with different settings is
+            legitimate, and the dedup key already stops an identical repeat. */}
+        <ActivePipelineJobs objectId={obj.id} />
         <span className={`badge ${obj.status}`} style={{ marginLeft: "auto" }}>
           {obj.status}
         </span>
@@ -472,6 +499,14 @@ function ObjectDetail({ id }: { id: string }) {
             "what did trimming do to my reads" is a question about the input. */}
         <TrimReport facts={obj.facts} />
 
+        {/* On the BAM itself: whether an alignment is worth keeping is a
+            question about the output, not about the reads that went in. */}
+        <AlignmentReport facts={obj.facts} />
+
+        {/* Indexes are hidden from the explorer listing -- five files per
+            reference would bury real work -- so they surface here instead. */}
+        {canIndex && <IndexStatus object={obj} />}
+
         <DerivedFiles object={obj} />
 
         {/* SRA run/experiment accessions are the wrong archive for an
@@ -567,6 +602,7 @@ function ObjectDetail({ id }: { id: string }) {
       </div>
 
       {trimOpen && <TrimDialog object={obj} onClose={() => setTrimOpen(false)} />}
+      {alignOpen && <AlignDialog object={obj} onClose={() => setAlignOpen(false)} />}
     </div>
   );
 }

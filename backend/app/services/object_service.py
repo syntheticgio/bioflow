@@ -19,6 +19,8 @@ from app.models import (
     ObjectRole,
     ObjectStatus,
     Project,
+    RunJobRole,
+    SidecarRole,
     SourceInfo,
     SourceMode,
 )
@@ -41,11 +43,32 @@ async def list_objects(
     *,
     limit: int = 200,
     status: ObjectStatus | None = None,
+    include_sidecars: bool = False,
 ) -> list[DataObject]:
+    """Objects in a project, newest first.
+
+    Sidecars are excluded by default. Filtering here rather than in the client
+    is deliberate: a bwa-mem2 index is five files, so a handful of references
+    would otherwise crowd out the files a user actually works with *and* eat
+    the result limit before the interesting ones are reached.
+
+    They remain real objects with real verification and GC -- they are hidden
+    from this listing, not from the system. `sidecar_of` is how the explorer
+    surfaces them on their parent instead.
+    """
     query: dict = {"project_id": project_id}
     if status is not None:
         query["status"] = status.value
+    if not include_sidecars:
+        # Matches both a missing field and an explicit null, so objects that
+        # predate sidecars are listed exactly as before.
+        query["sidecar_of"] = None
     return await DataObject.find(query).sort("-created_at").limit(limit).to_list()
+
+
+async def list_sidecars(parent_id: PydanticObjectId) -> list[DataObject]:
+    """The scaffolding attached to one object."""
+    return await DataObject.find(DataObject.sidecar_of == parent_id).to_list()
 
 
 async def ingest_stream(
@@ -131,6 +154,8 @@ async def ingest_local_file(
     produced_by_job: PydanticObjectId | None = None,
     facts: dict | None = None,
     metadata: dict | None = None,
+    sidecar_of: PydanticObjectId | None = None,
+    sidecar_role: SidecarRole | None = None,
 ) -> DataObject:
     """Take ownership of a file this application produced.
 
@@ -168,6 +193,8 @@ async def ingest_local_file(
         produced_by_job=produced_by_job,
         facts=facts or {},
         metadata=metadata or {},
+        sidecar_of=sidecar_of,
+        sidecar_role=sidecar_role,
         # The bytes originate here, so there is no upload and no external path
         # to record. Mode stays UPLOAD: the object store owns the content, and
         # provenance lives in derived_from rather than in source.
@@ -193,7 +220,21 @@ async def ingest_local_file(
             object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
         )
         await project_service.bump_counters(project_id, objects=1, total_bytes=size)
-        await enqueue_ingest(obj, digest=digest)
+        ingest_job_id = await enqueue_ingest(obj, digest=digest)
+
+        # Join the run that produced this file, so its header parse groups with
+        # the alignment or trim that caused it rather than appearing loose.
+        # `produced_by_job` identifies the causing job; an ordinary upload has
+        # none and stays ungrouped, which is correct -- it was not part of a
+        # pipeline run.
+        if produced_by_job and ingest_job_id:
+            from app.services import run_service
+
+            await run_service.link_job_to_run_of(
+                cause_job_id=str(produced_by_job),
+                job_id=PydanticObjectId(ingest_job_id),
+                role=RunJobRole.INGEST,
+            )
     except BaseException:
         await _discard(path)
         await obj.set(
@@ -462,7 +503,34 @@ async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObjec
 
 
 async def delete_object(object_id: PydanticObjectId) -> None:
+    """Delete an object, and any sidecars that exist only to accompany it.
+
+    The cascade is required rather than tidy. Blob GC is refcount-driven, and a
+    sidecar's only reason to exist is its parent: nothing else will ever
+    reference an orphaned index, so it would sit at refcount 1 forever and
+    never be collected.
+
+    Safe precisely because sidecars are scaffolding -- an index is rebuildable
+    from the reference, so nothing is lost that cannot be recreated. Derived
+    files (`derived_from`) deliberately do *not* cascade: a trimmed FASTQ
+    outlives its source, and deleting reads must not silently destroy the
+    alignments made from them.
+    """
     await get_object(object_id)
+
+    sidecars = await DataObject.find(DataObject.sidecar_of == object_id).to_list()
+    for sidecar in sidecars:
+        # Sidecars of sidecars are not a shape this produces today (a .bai
+        # attaches to a BAM, not to another sidecar), but recursing costs
+        # nothing and means a future two-level artifact cannot strand a blob.
+        await delete_object(sidecar.id)
+        log.info(
+            "sidecar_deleted_with_parent",
+            object_id=str(sidecar.id),
+            parent_id=str(object_id),
+            role=sidecar.sidecar_role.value if sidecar.sidecar_role else None,
+        )
+
     await blob_service.detach_blob_from_object(object_id)
 
 

@@ -48,11 +48,19 @@ class Settings(BaseSettings):
     # to pin a specific build.
     fastp_path: str = "fastp"
     fastqc_path: str = "fastqc"
+    bwa_mem2_path: str = "bwa-mem2"
+    minimap2_path: str = "minimap2"
+    samtools_path: str = "samtools"
 
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own
     # scaling flattens out past a handful of threads while the IO cost does not.
     pipeline_default_threads: int = 4
+
+    # Memory per samtools sort thread. samtools spills to disk when it runs out,
+    # and its own default (768M) is conservative enough to make a large sort
+    # thrash on a machine that had memory to spare.
+    samtools_sort_mem_mb: int = 1024
 
     # Captured job output is the only record of how a run actually went, but it
     # is not worth keeping forever on a drive holding sequencing data.

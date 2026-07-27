@@ -27,6 +27,64 @@ LEADER_LOCK_TTL_MS = 15000
 # leaked onto it, which is what silently causes leases to expire.
 LOOP_STALL_WARN_SECONDS = 0.25
 
+# More than two concurrent heavy readers on a FUSE mount is slower in aggregate
+# than two, so this is a throughput cap as much as a safety valve.
+IO_HEAVY_LIMIT = 2
+
+
+def _as_int(value) -> int:
+    """A counter value as a non-negative int.
+
+    Counters are clamped at zero because a missed release makes them drift
+    *down* past zero, and a negative reservation would otherwise read as extra
+    free capacity -- turning a leak into over-admission.
+    """
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def compute_free_resources(
+    *,
+    cpu_budget: int,
+    mem_mb: int,
+    reserved_cpu: int,
+    reserved_io_heavy: int,
+    in_flight: int,
+) -> dict:
+    """Headroom to admit against, from budgets and current reservations.
+
+    Pure, because the failure this guards is not observable in a normal test
+    run: reservation counters can only leak *upward* if a release is missed --
+    a crashed worker, a lost lease -- and a leak permanently shrinks capacity
+    until someone notices the queue has stopped moving.
+
+    The defence is the `in_flight` clamp. Reservations are cluster-wide, but a
+    worker also knows how many jobs it is actually running, and a single worker
+    cannot be responsible for more reserved CPU than the jobs it holds. Taking
+    the smaller of the two means a leaked counter costs at most the capacity of
+    the jobs genuinely in flight, and an idle worker always recovers full
+    headroom no matter what the counters claim.
+
+    At least 1 CPU is always offered so a fully-reserved queue still drains
+    rather than deadlocking against its own bookkeeping.
+    """
+    if in_flight == 0:
+        # Nothing running here, so nothing this worker reserved can still be
+        # outstanding. This is the line that makes a leak self-healing.
+        effective_cpu_reserved = 0
+        effective_io_reserved = 0
+    else:
+        effective_cpu_reserved = reserved_cpu
+        effective_io_reserved = reserved_io_heavy
+
+    return {
+        "cpu": max(cpu_budget - effective_cpu_reserved, 1),
+        "mem_mb": mem_mb,
+        "io_heavy": max(IO_HEAVY_LIMIT - effective_io_reserved, 0),
+    }
+
 
 class Worker:
     def __init__(self, worker_id: str | None = None):
@@ -118,7 +176,7 @@ class Worker:
         if self._local_governor is not None and not self._local_governor.may_admit_now():
             return None
 
-        free = self._free_resources()
+        free = await self._free_resources()
         claimed = await queue.claim(
             self.worker_id,
             allowed_classes=sorted(allowed),
@@ -157,11 +215,18 @@ class Worker:
             )
         return self._starvation_cached
 
-    def _free_resources(self) -> dict:
+    async def _free_resources(self) -> dict:
         """Capacity headroom this worker will admit against.
 
         Budgets come from the governor, which reads cgroup limits where Docker
         sets them and falls back to the VM's own resources otherwise.
+
+        Reserved amounts come from the `bp:conc:*` counters that `claim.lua`
+        maintains, not from a count of running jobs. The counters are what the
+        reservation actually is: with every handler declaring cpu=1 the two
+        agreed, but `trim_reads` and `align_reads` declare the user's thread
+        count, so a 16-thread alignment and a single-CPU job are the same
+        number to a count and very different to the machine.
         """
         if self._local_governor is not None:
             cpu_budget = self._local_governor.cpu_budget()
@@ -170,19 +235,37 @@ class Worker:
             cpu_budget = float(psutil.cpu_count() or 4)
             mem_budget = psutil.virtual_memory().total
 
-        in_flight = len(self._running)
         available_mb = int(psutil.virtual_memory().available / (1024 * 1024))
         # Never hand out the last of memory: leave headroom so a job that
         # slightly overshoots its declared demand does not push into swap.
         budget_mb = int(mem_budget / (1024 * 1024) * 0.7)
 
+        reserved = await self._read_reservations()
+        return compute_free_resources(
+            cpu_budget=int(cpu_budget),
+            mem_mb=max(min(available_mb, budget_mb), 128),
+            reserved_cpu=reserved["cpu"],
+            reserved_io_heavy=reserved["io_heavy"],
+            in_flight=len(self._running),
+        )
+
+    async def _read_reservations(self) -> dict:
+        """Current cluster-wide reservations, or zeroes if Redis cannot say.
+
+        A failed read must not stall dispatch: falling back to zero reserved
+        lets this worker admit against its own in-flight clamp, which is the
+        pre-existing behaviour and never over-admits by more than one job.
+        """
+        try:
+            values = await get_redis().mget(
+                keys.conc_key("cpu"), keys.conc_key("io_heavy")
+            )
+        except Exception as e:  # noqa: BLE001 - dispatch must survive a Redis blip
+            log.warning("reservation_read_failed", error=str(e))
+            return {"cpu": 0, "io_heavy": 0}
         return {
-            "cpu": max(int(cpu_budget) - in_flight, 1),
-            "mem_mb": max(min(available_mb, budget_mb), 128),
-            # More than two concurrent heavy readers on a FUSE mount is slower
-            # in aggregate than two, so this is a throughput cap as much as a
-            # safety valve.
-            "io_heavy": max(2 - in_flight, 0),
+            "cpu": _as_int(values[0]),
+            "io_heavy": _as_int(values[1]),
         }
 
     async def _start_job(self, claimed) -> None:

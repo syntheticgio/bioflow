@@ -320,9 +320,16 @@ ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
 # platform questions a raw FASTQ gets, and answering them twice with different
 # vocabularies would be worse than answering them once.
 #
+# ALIGNMENT is here for the same reason. A BAM this pipeline produced and a BAM
+# someone uploaded describe the same biology and deserve the same questions --
+# the role records that the provenance is known, which is a fact about where
+# the file came from rather than a reason to ask about it differently.
+#
 # Listed explicitly rather than left implicit so that a role added without
 # thought still fails the "every role is accounted for" test.
-FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset({ObjectRole.TRIMMED_READS})
+FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
+    {ObjectRole.TRIMMED_READS, ObjectRole.ALIGNMENT}
+)
 
 
 def fields_for(

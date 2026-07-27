@@ -1,4 +1,6 @@
 import type {
+  AlignDefaults,
+  AlignRequest,
   BulkResult,
   CompleteAccepted,
   DataObject,
@@ -14,7 +16,10 @@ import type {
   PipelineTools,
   Project,
   ProjectDetail,
+  ReferenceOption,
   RegisterAccepted,
+  RunDetail,
+  RunSummary,
   ScheduleInfo,
   TimingEstimate,
   TrimDefaults,
@@ -222,6 +227,8 @@ export const api = {
       /** Comma-separated states, or "active" for everything in flight. */
       states?: string;
       type?: string;
+      /** Jobs launched against one file. */
+      objectId?: string;
       limit?: number;
     } = {},
   ) => {
@@ -230,12 +237,29 @@ export const api = {
     if (opts.states) params.set("states", opts.states);
     else if (opts.state) params.set("state", opts.state);
     if (opts.type) params.set("type", opts.type);
+    if (opts.objectId) params.set("object_id", opts.objectId);
     params.set("limit", String(opts.limit ?? 50));
     return request<JobSummary[]>(`/jobs?${params}`);
   },
 
   getJobLog: (id: string, tail = 200) =>
     request<JobLog>(`/jobs/${id}/log?tail=${tail}`),
+
+  /** Pipeline runs -- one per user action -- newest first, with derived status. */
+  listRuns: (opts: { projectId?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.projectId) params.set("project_id", opts.projectId);
+    params.set("limit", String(opts.limit ?? 50));
+    return request<RunSummary[]>(`/runs?${params}`);
+  },
+
+  getRun: (id: string) => request<RunDetail>(`/runs/${id}`),
+
+  cancelRun: (id: string) =>
+    request<{ run_id: string; jobs: Record<string, string> }>(
+      `/runs/${id}/cancel`,
+      { method: "POST" },
+    ),
 
   getJob: (id: string) =>
     request<JobSummary & { timing_estimate?: TimingEstimate }>(`/jobs/${id}`),
@@ -261,6 +285,26 @@ export const api = {
 
   launchTrim: (body: TrimRequest) =>
     request<JobSummary>("/pipelines/trim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** Alignment defaults for one file, including a read group from its metadata. */
+  alignDefaults: (objectId: string) =>
+    request<AlignDefaults>(`/pipelines/align/defaults/${objectId}`),
+
+  /** Candidate references in a project, each with its index status. */
+  references: (projectId: string) =>
+    request<{ references: ReferenceOption[] }>(`/pipelines/references/${projectId}`),
+
+  buildIndex: (body: { reference_id: string; aligner: string }) =>
+    request<JobSummary>("/pipelines/index", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  launchAlignment: (body: AlignRequest) =>
+    request<JobSummary>("/pipelines/align", {
       method: "POST",
       body: JSON.stringify(body),
     }),

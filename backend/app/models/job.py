@@ -32,6 +32,12 @@ class JobState(StrEnum):
     PENDING = "pending"  # written to Mongo, not yet in Redis
     QUEUED = "queued"
     DELAYED = "delayed"  # awaiting backoff or a scheduled time
+    # Held until every job in `depends_on` has succeeded. Distinct from DELAYED,
+    # which is a timer: a blocked job has no scheduled release time and is
+    # freed by an event (its last dependency finishing) rather than the clock.
+    # Conflating them would make the delayed-promotion sweep dispatch a job
+    # whose inputs do not exist yet.
+    BLOCKED = "blocked"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
@@ -40,7 +46,13 @@ class JobState(StrEnum):
 
 
 TERMINAL_STATES = {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED, JobState.DEAD}
-ACTIVE_STATES = {JobState.PENDING, JobState.QUEUED, JobState.DELAYED, JobState.RUNNING}
+ACTIVE_STATES = {
+    JobState.PENDING,
+    JobState.QUEUED,
+    JobState.DELAYED,
+    JobState.BLOCKED,
+    JobState.RUNNING,
+}
 
 
 class IoClass(StrEnum):
@@ -119,7 +131,18 @@ class Job(TimestampedDocument):
     timing: JobTiming = Field(default_factory=JobTiming)
     resources: JobResources = Field(default_factory=JobResources)
 
-    parent_job_id: PydanticObjectId | None = None  # pipeline DAG, Phase 6
+    parent_job_id: PydanticObjectId | None = None  # the job that enqueued this one
+
+    # Jobs that must succeed before this one may dispatch. A list rather than a
+    # single id because a step can need several independent inputs -- aligning
+    # against a reference that needs both an aligner index and a .fai is the
+    # case that exists today, and neither ordering between them is meaningful.
+    #
+    # Enforced in MongoDB rather than in claim.lua: a blocked job is simply
+    # never pushed to Redis, so it is not a dispatch candidate at all. Teaching
+    # the claim script to skip blocked jobs would put a per-candidate lookup on
+    # the hot path to enforce something the enqueue side already knows.
+    depends_on: list[PydanticObjectId] = Field(default_factory=list)
 
     # TTL field: terminal jobs are pruned after ~30 days. Only set on completion,
     # so active jobs are never eligible for expiry.
@@ -139,13 +162,20 @@ class Job(TimestampedDocument):
                 unique=True,
                 partialFilterExpression={
                     "dedup_key": {"$type": "string"},
-                    "state": {"$in": ["pending", "queued", "delayed", "running"]},
+                    # Must list every non-terminal state, "blocked" included:
+                    # a state missing here is one where the same logical work
+                    # could be enqueued twice.
+                    "state": {"$in": ["pending", "queued", "delayed", "blocked", "running"]},
                 },
             ),
             IndexModel(
                 [("project_id", ASCENDING), ("created_at", DESCENDING)], name="by_project"
             ),
             IndexModel([("object_id", ASCENDING), ("created_at", DESCENDING)], name="by_object"),
+            # "Which blocked jobs was this one holding up?" -- the reverse
+            # lookup `complete` runs on every terminal outcome. Multikey over
+            # the array, so a finished job finds its dependents by its own id.
+            IndexModel([("depends_on", ASCENDING)], name="by_depends_on"),
             # Reaper scan: only running jobs have leases.
             IndexModel(
                 [("lease.expires_at", ASCENDING)],
