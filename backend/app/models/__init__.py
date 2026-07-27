@@ -27,6 +27,7 @@ from app.models.object import (
     ObjectError,
     ObjectRole,
     ObjectStatus,
+    SidecarRole,
     SourceInfo,
     SourceMode,
 )
@@ -65,6 +66,7 @@ __all__ = [
     "Project",
     "ProjectCounters",
     "Schedule",
+    "SidecarRole",
     "SourceInfo",
     "SourceMode",
     "UploadSession",

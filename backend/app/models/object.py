@@ -66,6 +66,24 @@ class ObjectRole(StrEnum):
     # trimmed output is FASTQ exactly like its input, and feeding raw reads to
     # an aligner when you meant to feed trimmed ones is a silent error.
     TRIMMED_READS = "trimmed_reads"
+    # A BAM this pipeline produced. Format alone cannot carry it either: a BAM
+    # from an alignment run and a BAM someone uploaded are the same format and
+    # differ only in whether their provenance is known.
+    ALIGNMENT = "alignment"
+
+
+class SidecarRole(StrEnum):
+    """What kind of scaffolding a sidecar is.
+
+    Not an `ObjectRole`: role answers "how is this file used", and a sidecar is
+    not used by a person at all. Keeping them separate is what lets the
+    explorer filter scaffolding out by asking a single question.
+    """
+
+    BWA_MEM2_INDEX = "bwa-mem2-index"
+    MINIMAP2_INDEX = "minimap2-index"
+    FAI = "fai"
+    BAI = "bai"
 
 
 class FormatConfidence(StrEnum):
@@ -131,6 +149,17 @@ class DataObject(TimestampedDocument):
     derived_from: list[PydanticObjectId] = Field(default_factory=list)
     produced_by_job: PydanticObjectId | None = None
 
+    # The file this one accompanies. Distinct from derived_from, and the
+    # distinction is what keeps the explorer usable: a trimmed FASTQ is a
+    # specimen you search, annotate and align, while a `.bwt` is biologically
+    # inert and means nothing away from its reference. Conflating them would
+    # bury the files a user works with under scaffolding and make "what came
+    # from this sample" unanswerable.
+    #
+    # The test for a future artifact is whether it is a specimen or scaffolding.
+    sidecar_of: PydanticObjectId | None = None
+    sidecar_role: SidecarRole | None = None
+
     # The other half of a paired-end run. Symmetric: both mates point at each
     # other. Inferred from the R1/R2 filename convention at ingest and
     # overridable, since the convention is only a convention.
@@ -153,6 +182,9 @@ class DataObject(TimestampedDocument):
             # "What did this file produce?" -- multikey over the array, so a
             # lookup by any one parent finds every descendant.
             IndexModel([("derived_from", ASCENDING)], name="by_derived_from"),
+            # "Does this reference have an index yet?" -- asked on every
+            # alignment launch and to render index status in the explorer.
+            IndexModel([("sidecar_of", ASCENDING)], name="by_sidecar_of"),
             IndexModel(
                 [("format.kind", ASCENDING), ("project_id", ASCENDING)],
                 name="by_format",
