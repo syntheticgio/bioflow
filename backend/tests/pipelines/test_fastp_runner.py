@@ -354,3 +354,74 @@ class TestOutputName:
 
     def test_is_case_insensitive_about_suffixes(self):
         assert fastp_runner.output_name("Sample.FASTQ.GZ") == "Sample.trimmed.FASTQ.GZ"
+
+
+class TestBlobExtensionHazard:
+    """Managed blobs are stored under their hash with no extension, and fastp
+    decides whether an input is gzipped from the filename alone -- it has no
+    flag to force decompression. Handing it a blob path directly makes it read
+    gzip bytes as text and die with a parse error.
+
+    These pin the symlink workaround in the handler. Found by running the real
+    thing end to end; no unit test of build_command would have caught it,
+    because the command it produces is perfectly well-formed.
+    """
+
+    def test_handler_links_inputs_under_their_real_names(self):
+        import inspect
+
+        from app.queue import pipeline_handlers
+
+        source = inspect.getsource(pipeline_handlers.trim_reads)
+        assert "_named_link" in source, (
+            "inputs must be symlinked under their user-facing name, or fastp "
+            "will misread a compressed blob"
+        )
+
+    def test_named_link_preserves_the_extension(self, tmp_path):
+        from app.queue.pipeline_handlers import _named_link
+
+        blob = tmp_path / "46ac3c6acd6cb40b3b2dc9d4b88b0a76"
+        blob.write_bytes(b"\x1f\x8b\x08\x00")
+        work = tmp_path / "work"
+        work.mkdir()
+
+        link = _named_link(work, blob, "sample_R1.fastq.gz")
+        assert link.name.endswith(".fastq.gz")
+        assert link.resolve() == blob.resolve()
+        assert link.read_bytes() == b"\x1f\x8b\x08\x00"
+
+    def test_named_link_without_a_name_uses_the_target(self, tmp_path):
+        from app.queue.pipeline_handlers import _named_link
+
+        blob = tmp_path / "somefile.fastq.gz"
+        blob.write_bytes(b"x")
+        assert _named_link(tmp_path / "work", blob, None) == blob
+
+    def test_named_link_is_idempotent(self, tmp_path):
+        """A retry reuses the scratch directory name, so relinking must not
+        fail on an existing link."""
+        from app.queue.pipeline_handlers import _named_link
+
+        blob = tmp_path / "abc123"
+        blob.write_bytes(b"y")
+        work = tmp_path / "work"
+        work.mkdir()
+
+        first = _named_link(work, blob, "r.fastq.gz")
+        second = _named_link(work, blob, "r.fastq.gz")
+        assert first == second
+        assert second.read_bytes() == b"y"
+
+    def test_named_link_rejects_a_path_in_the_name(self, tmp_path):
+        """The name comes from a payload; it must not be able to place a link
+        outside the working directory."""
+        from app.queue.pipeline_handlers import _named_link
+
+        blob = tmp_path / "abc123"
+        blob.write_bytes(b"z")
+        work = tmp_path / "work"
+        work.mkdir()
+
+        link = _named_link(work, blob, "../../escape.fastq.gz")
+        assert link.parent == work
