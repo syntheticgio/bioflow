@@ -40,7 +40,13 @@ export interface FormatInfo {
 }
 
 /** How a file is used, when its format cannot say. Null = derive from format. */
-export type ObjectRole = "reference" | "trimmed_reads";
+export type ObjectRole = "reference" | "trimmed_reads" | "alignment";
+
+/**
+ * What kind of scaffolding a sidecar is. Distinct from ObjectRole: a role says
+ * how a file is *used*, and a sidecar is not used by a person at all.
+ */
+export type SidecarRole = "bwa-mem2-index" | "minimap2-index" | "fai" | "bai";
 
 export interface DataObject {
   id: string;
@@ -59,6 +65,9 @@ export interface DataObject {
   produced_by_job: string | null;
   /** The other half of a paired-end run, if known. */
   mate_object_id: string | null;
+  /** The file this one accompanies. Set only on scaffolding such as indexes. */
+  sidecar_of: string | null;
+  sidecar_role: SidecarRole | null;
   source: Record<string, unknown>;
   error: { code: string; message: string; at: string } | null;
   created_at: string;
@@ -344,6 +353,67 @@ export interface MateSuggestion {
   object_id: string;
   name: string;
   mate: "R1" | "R2" | null;
+}
+
+export type AlignerName = "bwa-mem2" | "minimap2";
+
+/** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */
+export type AlignPreset = "map-ont" | "map-pb" | "sr";
+
+/** Mirrors align_runner.AlignParams. */
+export interface AlignParams {
+  aligner: AlignerName;
+  preset: AlignPreset | "";
+  threads: number;
+  sort_memory_mb: number;
+  mark_duplicates: boolean;
+}
+
+/** Mirrors align_runner.ReadGroup: the @RG fields a variant caller requires. */
+export interface ReadGroup {
+  sample: string;
+  library: string;
+  platform: string;
+}
+
+export interface AlignDefaults {
+  params: AlignParams;
+  read_group: ReadGroup;
+  aligners: { name: AlignerName; available: boolean }[];
+  presets: AlignPreset[];
+}
+
+/** Which indexes a reference has. Keys are aligner names, plus "fai". */
+export type IndexStatus = Record<string, boolean>;
+
+export interface ReferenceOption {
+  object_id: string;
+  name: string;
+  size: number;
+  role: ObjectRole | null;
+  indexes: IndexStatus;
+}
+
+export interface AlignRequest {
+  object_id: string;
+  reference_id: string;
+  mate_object_id?: string | null;
+  paired: boolean;
+  read_group: ReadGroup;
+  params: Partial<AlignParams>;
+}
+
+/** Alignment statistics read from `samtools flagstat` during index_bam. */
+export interface AlignmentFacts {
+  total_reads?: number;
+  mapped_reads?: number;
+  mapped_pct?: number;
+  properly_paired_reads?: number;
+  properly_paired_pct?: number;
+  duplicate_reads?: number;
+  duplicate_pct?: number;
+  aligned_by?: string;
+  aligner_version?: string;
 }
 
 /** One side of the before/after comparison in a fastp report. */

@@ -1,4 +1,6 @@
 import type {
+  AlignDefaults,
+  AlignRequest,
   BulkResult,
   CompleteAccepted,
   DataObject,
@@ -14,6 +16,7 @@ import type {
   PipelineTools,
   Project,
   ProjectDetail,
+  ReferenceOption,
   RegisterAccepted,
   ScheduleInfo,
   TimingEstimate,
@@ -261,6 +264,26 @@ export const api = {
 
   launchTrim: (body: TrimRequest) =>
     request<JobSummary>("/pipelines/trim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** Alignment defaults for one file, including a read group from its metadata. */
+  alignDefaults: (objectId: string) =>
+    request<AlignDefaults>(`/pipelines/align/defaults/${objectId}`),
+
+  /** Candidate references in a project, each with its index status. */
+  references: (projectId: string) =>
+    request<{ references: ReferenceOption[] }>(`/pipelines/references/${projectId}`),
+
+  buildIndex: (body: { reference_id: string; aligner: string }) =>
+    request<JobSummary>("/pipelines/index", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  launchAlignment: (body: AlignRequest) =>
+    request<JobSummary>("/pipelines/align", {
       method: "POST",
       body: JSON.stringify(body),
     }),

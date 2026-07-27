@@ -1059,6 +1059,55 @@ textarea:focus {
   font-weight: 400;
 }
 
+/* --- Alignment --- */
+
+/* A mapping rate this low usually means a wrong reference or the wrong preset
+   for long reads, rather than merely a poor run -- worth colouring rather than
+   leaving as a number to interpret. */
+.align-warn {
+  color: var(--warn);
+}
+
+.align-provenance {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* --- Reference indexes --- */
+
+.index-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.index-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.index-name {
+  min-width: 108px;
+  color: var(--text-dim);
+}
+
+.index-built {
+  color: var(--success);
+}
+
+.index-missing {
+  color: var(--text-faint);
+}
+
+.index-note {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 /* --- Derived files --- */
 
 .derived-row {
