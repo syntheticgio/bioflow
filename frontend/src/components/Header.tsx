@@ -28,7 +28,7 @@ export function Header() {
           is the only one from a full-width view like /activity. */}
       <Link to="/" className="header-brand" title="Back to projects">
         <span className="header-logo">B</span>
-        <span>BioinfoHelper</span>
+        <span>BioFlow</span>
       </Link>
 
       <nav className="header-menu">

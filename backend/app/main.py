@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="BioinfoHelper",
+        title="BioFlow",
         description="Local bioinformatics data manager",
         version="0.1.0",
         lifespan=lifespan,
