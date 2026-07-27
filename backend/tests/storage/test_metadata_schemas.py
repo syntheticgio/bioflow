@@ -252,3 +252,19 @@ class TestReferenceFieldDefinitions:
         """A new ObjectRole without a ROLE_FIELDS entry would silently fall
         back to common fields only. Fail loudly instead."""
         assert set(ObjectRole) == set(schemas.ROLE_FIELDS)
+
+    def test_ncbi_enrichment_fields_exist(self):
+        """Fields the NCBI assembly lookup fills in."""
+        fields = schemas.field_map(None, role=ObjectRole.REFERENCE)
+        assert fields["tax_id"].type is FieldType.INTEGER
+        assert fields["assembly_level"].type is FieldType.ENUM
+        assert fields["assembly_date"].type is FieldType.DATE
+        assert fields["paired_accession"].type is FieldType.TEXT
+        for key in ("tax_id", "assembly_level", "assembly_date", "paired_accession"):
+            assert fields[key].group == "Reference"
+
+    def test_enrichment_fields_are_not_suggested(self):
+        """They are filled by lookup, so they should not clutter the form."""
+        fields = schemas.field_map(None, role=ObjectRole.REFERENCE)
+        for key in ("tax_id", "assembly_level", "assembly_date", "paired_accession"):
+            assert not fields[key].suggested

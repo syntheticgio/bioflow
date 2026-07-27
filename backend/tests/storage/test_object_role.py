@@ -1,13 +1,14 @@
 """Object role: the override that distinguishes a reference from reads."""
 
 import pytest
+from beanie import PydanticObjectId, init_beanie
+from motor.motor_asyncio import AsyncIOMotorClient
+
 from app.api.v1.schemas import ObjectOut, ObjectUpdate
 from app.config import settings
 from app.models import ALL_MODELS, FormatKind, ObjectRole
 from app.models.object import DataObject
 from app.services.object_service import apply_role_update
-from beanie import PydanticObjectId, init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
 
 
 @pytest.fixture(scope="module", autouse=True)

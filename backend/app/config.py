@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     # set false to keep the stack fully offline.
     sra_enrichment_enabled: bool = True
 
+    # Looks up GCA/GCF assembly accessions at NCBI during ingest. Outbound
+    # network call; set false to keep the stack fully offline.
+    assembly_enrichment_enabled: bool = True
+
     log_level: str = "INFO"
     owner: str = "local"
 

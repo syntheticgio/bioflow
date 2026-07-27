@@ -2,6 +2,28 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+## Re-ingest re-asserts a reference role the user cleared
+
+Raised: 2026-07-26, during assembly-accession enrichment.
+
+`should_assign_reference_role` in `backend/app/queue/results.py` assigns the
+reference role when an assembly accession is found and `role is None`. A role
+the user *cleared* is indistinguishable from one never set, so converting a
+reference back to reads and then re-ingesting will silently re-assign it.
+
+Rare in practice — it needs a deliberate conversion plus a re-ingest of a file
+whose name carries a GCA/GCF accession — but it quietly contradicts the promise
+that an explicit choice is never overruled.
+
+The fix needs a way to record that a user has touched the role: either a
+nullable `role_set_by` field (`"user"` vs `"ingest"`), or a general
+`user_touched: list[str]` on the object. The second generalizes to the same
+problem for metadata fields, so it is probably the better shape. Deferred
+because it is a schema change that this feature does not otherwise need.
+
+Touches: `backend/app/models/object.py`, `backend/app/queue/results.py`,
+`backend/app/services/object_service.py`.
+
 ## Warn before a role conversion discards in-progress metadata edits
 
 Raised: 2026-07-26, during the object-role implementation.

@@ -31,7 +31,28 @@ export function AssemblyFacts({ facts }: Props) {
   const hasAnything =
     count !== undefined || totalBases !== undefined || gc !== undefined;
 
-  if (!hasAnything) {
+  const ncbiTotal = facts.ncbi_total_length as number | undefined;
+  // Sequences, not contigs: a FASTA's records are scaffolds, and the two
+  // counts differ sharply for a chromosome-level assembly (12 vs 50 for
+  // GCF_000002445.2). Comparing against contigs would invent a divergence.
+  const ncbiSequences = facts.ncbi_sequence_count as number | undefined;
+  const ncbiGc = facts.ncbi_gc_percent as number | undefined;
+  const ncbiName = facts.ncbi_assembly_name as string | undefined;
+  const assemblyError = facts.assembly_error as string | undefined;
+  const hasNcbi =
+    ncbiTotal !== undefined || ncbiSequences !== undefined || ncbiGc !== undefined;
+
+  // A file named for a full assembly that holds one chromosome is a real and
+  // easily-missed problem. Compare only when both sides are known.
+  const countDiverges =
+    count !== undefined && ncbiSequences !== undefined && count !== ncbiSequences;
+  const lengthDiverges =
+    totalBases !== undefined &&
+    ncbiTotal !== undefined &&
+    Math.abs(totalBases - ncbiTotal) / ncbiTotal > 0.01;
+  const diverges = countDiverges || lengthDiverges;
+
+  if (!hasAnything && !hasNcbi && !assemblyError) {
     return (
       <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
         No assembly facts extracted yet.
@@ -41,6 +62,9 @@ export function AssemblyFacts({ facts }: Props) {
 
   return (
     <div>
+      {/* Suppressed entirely when nothing was measured, so a file that failed
+          to parse shows the published block alone rather than an empty list. */}
+      {hasAnything && (
       <dl className="kv">
         {count !== undefined && (
           <>
@@ -77,6 +101,7 @@ export function AssemblyFacts({ facts }: Props) {
           </>
         )}
       </dl>
+      )}
 
       {names.length > 0 && (
         <div style={{ marginTop: 12 }}>
@@ -120,6 +145,57 @@ export function AssemblyFacts({ facts }: Props) {
               than are recorded here.
             </div>
           )}
+        </div>
+      )}
+
+      {hasNcbi && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            Published assembly (NCBI){ncbiName ? ` · ${ncbiName}` : ""}
+          </div>
+          <dl className="kv">
+            {ncbiSequences !== undefined && (
+              <>
+                <dt>Sequences</dt>
+                <dd>{ncbiSequences.toLocaleString()}</dd>
+              </>
+            )}
+            {ncbiTotal !== undefined && (
+              <>
+                <dt>Total bases</dt>
+                <dd>{formatBases(ncbiTotal)}</dd>
+              </>
+            )}
+            {ncbiGc !== undefined && (
+              <>
+                <dt>GC content</dt>
+                <dd>{ncbiGc}%</dd>
+              </>
+            )}
+          </dl>
+          {diverges && (
+            <div className="warn-box" style={{ marginTop: 8 }}>
+              This file{" "}
+              {count !== undefined && <>has {count.toLocaleString()} sequences</>}
+              {count !== undefined && totalBases !== undefined && " "}
+              {totalBases !== undefined && <>totalling {formatBases(totalBases)}</>};
+              the published assembly has{" "}
+              {ncbiSequences !== undefined && (
+                <>{ncbiSequences.toLocaleString()} sequences</>
+              )}
+              {ncbiSequences !== undefined && ncbiTotal !== undefined && " "}
+              {ncbiTotal !== undefined && <>totalling {formatBases(ncbiTotal)}</>}. It
+              may be a subset, or a different patch level.
+            </div>
+          )}
+        </div>
+      )}
+
+      {assemblyError && (
+        <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 10 }}>
+          NCBI lookup: {assemblyError}
         </div>
       )}
     </div>

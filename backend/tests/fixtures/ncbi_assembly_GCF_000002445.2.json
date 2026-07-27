@@ -1,0 +1,128 @@
+{
+ "reports": [
+  {
+   "accession": "GCF_000002445.2",
+   "current_accession": "GCF_000002445.2",
+   "paired_accession": "GCA_000002445.1",
+   "source_database": "SOURCE_DATABASE_REFSEQ",
+   "organism": {
+    "tax_id": 185431,
+    "organism_name": "Trypanosoma brucei brucei TREU927",
+    "infraspecific_names": {
+     "strain": "927/4 GUTat10.1"
+    }
+   },
+   "assembly_info": {
+    "assembly_level": "Chromosome",
+    "assembly_status": "current",
+    "paired_assembly": {
+     "accession": "GCA_000002445.1",
+     "status": "current",
+     "annotation_name": "Annotation submitted by Trypanosoma brucei consortium"
+    },
+    "assembly_name": "ASM244v1",
+    "assembly_type": "haploid",
+    "bioproject_lineage": [
+     {
+      "bioprojects": [
+       {
+        "accession": "PRJNA11756",
+        "title": "A genome sequencing project from the Trypanosoma brucei consortium",
+        "parent_accessions": [
+         "PRJNA13998"
+        ]
+       },
+       {
+        "accession": "PRJNA13998",
+        "title": "Comparative genomics project of three trypanosomatid protozoa"
+       }
+      ]
+     }
+    ],
+    "bioproject_accession": "PRJNA11756",
+    "release_date": "2005-12-14",
+    "submitter": "Trypanosoma brucei consortium",
+    "refseq_category": "reference genome",
+    "biosample": {
+     "accession": "SAMN02953625",
+     "last_updated": "2026-06-21T02:09:09.803",
+     "publication_date": "2014-08-06T00:00:00.000",
+     "submission_date": "2014-08-06T15:32:56.180",
+     "sample_ids": [
+      {
+       "db": "GenBank",
+       "value": "gb|AAGZ00000000.1"
+      }
+     ],
+     "description": {
+      "title": "Sample from Trypanosoma brucei brucei TREU927",
+      "organism": {
+       "tax_id": 185431,
+       "organism_name": "Trypanosoma brucei brucei TREU927"
+      }
+     },
+     "owner": {
+      "name": "The Wellcome Trust Sanger Institute, Wellcome Trust Genome Campus"
+     },
+     "models": [
+      "Generic"
+     ],
+     "bioprojects": [
+      {
+       "accession": "PRJNA11756"
+      }
+     ],
+     "package": "Generic.1.0",
+     "attributes": [
+      {
+       "name": "strain",
+       "value": "927/4 GUTat10.1"
+      },
+      {
+       "name": "orgmod_note",
+       "value": "single VAT derivative of TREU (Trypanosomiasis Research Edinburgh University) 927/4 (GPAL/KE/70/EATRO 1534)"
+      }
+     ],
+     "status": {
+      "status": "live",
+      "when": "2014-08-06T15:32:56.180"
+     },
+     "strain": "927/4 GUTat10.1"
+    },
+    "blast_url": "https://blast.ncbi.nlm.nih.gov/Blast.cgi?PAGE_TYPE=BlastSearch&PROG_DEF=blastn&BLAST_SPEC=GDH_GCF_000002445.2",
+    "comments": "Trypanosoma brucei chromosomes 9 to 11 were isolated and then sequenced by the Wellcome Trust Sanger Institute, using a whole chromosome shotgun approach. The sequences are therefore, likely to represent a 'mosaic' assembly of both chromosomal homologs. Details of Trypanosoma sequencing at the Sanger Institute are available on the World Wide Web. (URL, http://www.sanger.ac.uk/Projects/T_brucei/) and via the GeneDB database (www.genedb.org).\nPredicted protein coding regions (>30 codons) were manually revised in the light of similarity data, domain information and orthology to Leishmania major and Trypanosoma cruzi. Gene products were assigned putative functions based on similarity with experimentally characterized gene products or the presence of predicted protein domains. Products were labelled either 'hypothetical protein', or 'hypothetical protein, conserved' when showing significant similarity with proteins or domains of unknown function from other organisms. Short predicted coding sequences (less than 150 codons) with no additional evidence of coding potential were labeled 'hypothetical protein, unlikely'."
+   },
+   "assembly_stats": {
+    "total_number_of_chromosomes": 11,
+    "total_sequence_length": "26075494",
+    "total_ungapped_length": "26071904",
+    "number_of_contigs": 50,
+    "contig_n50": 1653115,
+    "contig_l50": 6,
+    "number_of_scaffolds": 12,
+    "scaffold_n50": 2481190,
+    "scaffold_l50": 4,
+    "number_of_component_sequences": 134,
+    "atgc_count": "27984184",
+    "gc_count": "12997297",
+    "gc_percent": 46.5
+   },
+   "annotation_info": {
+    "name": "Annotation submitted by Trypanosoma brucei consortium",
+    "provider": "Trypanosoma brucei consortium",
+    "release_date": "2018-04-13",
+    "stats": {
+     "gene_counts": {
+      "total": 10221,
+      "protein_coding": 8758,
+      "non_coding": 556,
+      "pseudogene": 907
+     }
+    },
+    "pipeline": "NCBI Eukaryotic Annotation Propagation Pipeline",
+    "status": "Full annotation"
+   }
+  }
+ ],
+ "total_count": 1
+}
