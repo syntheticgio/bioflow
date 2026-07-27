@@ -200,7 +200,7 @@ def _named_link(work: Path, target: Path, name: str | None) -> Path:
     return link
 
 
-def _prepare_workdir(ctx: JobContext) -> Path:
+def _prepare_workdir(ctx: JobContext, kind: str = "trim") -> Path:
     """A clean scratch directory for this job, under tmp/.
 
     tmp/ shares a filesystem with objects/ (asserted at startup in
@@ -210,22 +210,22 @@ def _prepare_workdir(ctx: JobContext) -> Path:
     Removed and recreated on entry, so a retry after a crashed attempt starts
     from nothing rather than inheriting a half-written file.
     """
-    work = settings.tmp_dir / "trim" / ctx.job_id
+    work = settings.tmp_dir / kind / ctx.job_id
     if work.exists():
-        log.info("trim_workdir_reset", job_id=ctx.job_id, path=str(work))
+        log.info("workdir_reset", job_id=ctx.job_id, kind=kind, path=str(work))
         shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
     return work
 
 
-def _failure(code: int, log_path: Path) -> Exception:
-    """Classify a non-zero fastp exit.
+def _failure(code: int, log_path: Path, tool: str = "fastp") -> Exception:
+    """Classify a non-zero exit from an external tool.
 
     The tail of the log goes into the message because the job record is where
     the user looks first, and "fastp exited 1" on its own tells them nothing.
     """
     tail = _log_tail(log_path)
-    detail = f"fastp exited {code}"
+    detail = f"{tool} exited {code}"
     if tail:
         detail = f"{detail}: {tail}"
 
@@ -280,13 +280,18 @@ async def reap_pipeline_scratch(ctx: JobContext) -> dict:
     )
 
     now = datetime.now(UTC)
-    removed_dirs = await _reap_dir(
-        ctx,
-        settings.tmp_dir / "trim",
-        cutoff=now - timedelta(hours=scratch_grace_hours),
-        remove=lambda p: shutil.rmtree(p, ignore_errors=True),
-        want_dirs=True,
-    )
+    removed_dirs = 0
+    # Every scratch root a pipeline handler writes into. An alignment workdir
+    # holds a whole BAM plus samtools' sort spills, so one left behind by a
+    # crashed run is tens of gigabytes that nothing else would reclaim.
+    for kind in ("trim", "align"):
+        removed_dirs += await _reap_dir(
+            ctx,
+            settings.tmp_dir / kind,
+            cutoff=now - timedelta(hours=scratch_grace_hours),
+            remove=lambda p: shutil.rmtree(p, ignore_errors=True),
+            want_dirs=True,
+        )
     removed_logs = await _reap_dir(
         ctx,
         settings.logs_dir,

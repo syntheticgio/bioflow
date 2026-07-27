@@ -12,7 +12,16 @@ from pathlib import Path
 from beanie import PydanticObjectId
 
 from app.logging import get_logger
-from app.models import DataObject, FormatInfo, ObjectRole, ObjectStatus
+from app.models import (
+    DataObject,
+    FormatInfo,
+    IoClass,
+    JobClass,
+    JobResources,
+    ObjectRole,
+    ObjectStatus,
+    SidecarRole,
+)
 
 log = get_logger(__name__)
 
@@ -320,7 +329,196 @@ async def _apply_trim_reads(result: dict) -> None:
     )
 
 
+async def _apply_build_index(result: dict) -> None:
+    """Turn a finished index build into sidecar objects on the reference.
+
+    Every produced file becomes an object in its own right -- verified,
+    refcounted and garbage-collected like anything else -- but attached via
+    `sidecar_of` rather than `derived_from`, so the explorer can keep
+    scaffolding out of the listing.
+    """
+    from app.services import object_service
+
+    reference_id = result.get("reference_object_id")
+    outputs = result.get("outputs") or []
+    if not reference_id or not outputs:
+        return
+
+    reference = await DataObject.get(PydanticObjectId(reference_id))
+    if reference is None:
+        log.warning("index_reference_missing", object_id=reference_id)
+        return
+
+    job_id = result.get("job_id")
+    provenance = {
+        "index_built_by": result.get("aligner"),
+        "index_tool_version": result.get("tool_version"),
+    }
+
+    created = []
+    for output in outputs:
+        role = _SIDECAR_ROLES.get(output.get("role"))
+        if role is None:
+            log.warning("unknown_sidecar_role", role=output.get("role"))
+            continue
+        try:
+            obj = await object_service.ingest_local_file(
+                project_id=reference.project_id,
+                path=Path(output["tmp_path"]),
+                name=output["name"],
+                derived_from=[reference.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts=dict(provenance),
+                sidecar_of=reference.id,
+                sidecar_role=role,
+            )
+        except Exception as e:  # noqa: BLE001 - one bad file must not lose the rest
+            log.error(
+                "index_output_ingest_failed",
+                reference_id=reference_id,
+                name=output.get("name"),
+                error=str(e),
+            )
+            continue
+        created.append(obj)
+
+    log.info(
+        "index_applied",
+        reference_id=reference_id,
+        aligner=result.get("aligner"),
+        sidecars=len(created),
+    )
+
+
+async def _apply_align_reads(result: dict) -> None:
+    """Turn a finished alignment into a BAM object, and chain its indexing.
+
+    The BAM descends from both the reads and the reference: all three are
+    biologically meaningful, so this is `derived_from` rather than a sidecar
+    relationship.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    output = result.get("output")
+    object_id = result.get("object_id")
+    if not output or not object_id:
+        return
+
+    reads = await DataObject.get(PydanticObjectId(object_id))
+    if reads is None:
+        log.warning("align_reads_parent_missing", object_id=object_id)
+        return
+
+    parents = [reads.id]
+    for key in ("mate_object_id", "reference_object_id"):
+        value = result.get(key)
+        if value:
+            parents.append(PydanticObjectId(value))
+
+    job_id = result.get("job_id")
+    provenance = {
+        "aligned_by": result.get("aligner"),
+        "aligner_version": result.get("tool_version"),
+        "samtools_version": result.get("samtools_version"),
+        "align_params": result.get("params") or {},
+        "read_group": result.get("read_group") or {},
+    }
+
+    try:
+        bam = await object_service.ingest_local_file(
+            project_id=reads.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ALIGNMENT,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=dict(provenance),
+            # Sample-level metadata describes the biology, which aligning does
+            # not change -- so the BAM stays findable by the sample it came from.
+            metadata=dict(reads.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("align_output_ingest_failed", object_id=object_id, error=str(e))
+        return
+
+    log.info("align_applied", object_id=object_id, bam_id=str(bam.id))
+
+    # Chain the follow-on index. Enqueued here rather than at launch because it
+    # needs the BAM's digest, which does not exist until the alignment has run.
+    if bam.blob_sha256:
+        await queue.enqueue(
+            "index_bam",
+            payload={
+                "bam_object_id": str(bam.id),
+                "bam_sha256": bam.blob_sha256,
+                "bam_name": bam.name,
+                "project_id": str(bam.project_id),
+            },
+            job_class=JobClass.COMPUTE,
+            resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.LIGHT),
+            max_attempts=2,
+            dedup_key=f"index_bam:{bam.blob_sha256}",
+            project_id=bam.project_id,
+            object_id=bam.id,
+            parent_job_id=PydanticObjectId(job_id) if job_id else None,
+        )
+
+
+async def _apply_index_bam(result: dict) -> None:
+    """Attach a `.bai` to its BAM and record the flagstat numbers."""
+    from app.services import object_service
+
+    bam_id = result.get("bam_object_id")
+    output = result.get("output")
+    if not bam_id or not output:
+        return
+
+    bam = await DataObject.get(PydanticObjectId(bam_id))
+    if bam is None:
+        log.warning("index_bam_parent_missing", object_id=bam_id)
+        return
+
+    job_id = result.get("job_id")
+    try:
+        await object_service.ingest_local_file(
+            project_id=bam.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            derived_from=[bam.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            sidecar_of=bam.id,
+            sidecar_role=SidecarRole.BAI,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("bai_ingest_failed", object_id=bam_id, error=str(e))
+
+    facts = result.get("facts") or {}
+    if facts:
+        # On the BAM itself: this is where a user looks to decide whether the
+        # alignment is worth keeping.
+        await bam.set(
+            {
+                DataObject.facts: {**bam.facts, **facts},
+                DataObject.updated_at: datetime.now(UTC),
+            }
+        )
+
+    log.info("index_bam_applied", object_id=bam_id, mapped_pct=facts.get("mapped_pct"))
+
+
+_SIDECAR_ROLES = {
+    "fai": SidecarRole.FAI,
+    "bai": SidecarRole.BAI,
+    SidecarRole.BWA_MEM2_INDEX.value: SidecarRole.BWA_MEM2_INDEX,
+    SidecarRole.MINIMAP2_INDEX.value: SidecarRole.MINIMAP2_INDEX,
+}
+
+
 _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
     "trim_reads": _apply_trim_reads,
+    "build_index": _apply_build_index,
+    "align_reads": _apply_align_reads,
+    "index_bam": _apply_index_bam,
 }
