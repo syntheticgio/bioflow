@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { LoadIndicator } from "./LoadIndicator";
@@ -25,10 +25,12 @@ export function Header() {
 
   return (
     <header className="header">
-      <div className="header-brand">
+      {/* The brand is the conventional way back to the file explorer, and it
+          is the only one from a full-width view like /activity. */}
+      <Link to="/" className="header-brand" title="Back to projects">
         <span className="header-logo">B</span>
         <span>BioinfoHelper</span>
-      </div>
+      </Link>
 
       <nav className="header-menu">
         {LINKS.map((l) => (

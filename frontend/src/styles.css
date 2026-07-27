@@ -101,6 +101,14 @@ textarea:focus {
   gap: 8px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  color: var(--text);
+  text-decoration: none;
+}
+
+/* Only the wordmark shifts on hover -- the logo keeps its gradient, which
+   dimming would muddy. */
+.header-brand:hover span:last-child {
+  color: var(--accent);
 }
 
 .header-logo {
