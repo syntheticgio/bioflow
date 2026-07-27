@@ -248,10 +248,30 @@ class TestReferenceFieldDefinitions:
         )
         assert result.warnings, "a BAM's reference_build should still be enum-checked"
 
-    def test_every_role_has_a_field_group(self):
-        """A new ObjectRole without a ROLE_FIELDS entry would silently fall
-        back to common fields only. Fail loudly instead."""
-        assert set(ObjectRole) == set(schemas.ROLE_FIELDS)
+    def test_every_role_is_accounted_for(self):
+        """A new ObjectRole must either carry its own field group or be
+        explicitly recorded as deferring to the format's. Neither one is a
+        silent default, which is the point: an unconsidered role would
+        otherwise quietly narrow the form the user sees."""
+        assert set(ObjectRole) == set(schemas.ROLE_FIELDS) | schemas.FORMAT_DERIVED_ROLES
+
+    def test_a_role_and_its_field_group_are_mutually_exclusive(self):
+        """Listing a role in both places would make fields_for's precedence
+        ambiguous."""
+        assert not set(schemas.ROLE_FIELDS) & schemas.FORMAT_DERIVED_ROLES
+
+    def test_trimmed_reads_still_get_the_fastq_fields(self):
+        """The regression this exists for: trimmed output is FASTQ exactly like
+        its input, so declaring the role must not strip the library-prep
+        questions a raw FASTQ is asked."""
+        raw = schemas.field_map(FormatKind.FASTQ)
+        trimmed = schemas.field_map(FormatKind.FASTQ, role=ObjectRole.TRIMMED_READS)
+        assert set(raw) == set(trimmed)
+
+    def test_reference_role_still_overrides_the_format(self):
+        """A role that *does* have a field group keeps winning outright."""
+        fields = schemas.field_map(FormatKind.FASTA, role=ObjectRole.REFERENCE)
+        assert "reference_build" in fields
 
     def test_ncbi_enrichment_fields_exist(self):
         """Fields the NCBI assembly lookup fills in."""

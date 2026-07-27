@@ -121,6 +121,101 @@ async def ingest_stream(
     return await get_object(obj.id)
 
 
+async def ingest_local_file(
+    *,
+    project_id: PydanticObjectId,
+    path: Path,
+    name: str,
+    role: ObjectRole | None = None,
+    derived_from: list[PydanticObjectId] | None = None,
+    produced_by_job: PydanticObjectId | None = None,
+    facts: dict | None = None,
+    metadata: dict | None = None,
+) -> DataObject:
+    """Take ownership of a file this application produced.
+
+    The third ingest path, and the one a pipeline uses. `ingest_stream` is
+    capped at `max_simple_upload_bytes` because a failed transfer loses
+    everything; that does not apply to a file already sitting on our own
+    filesystem, and trimmed reads routinely exceed the cap. `register_in_place`
+    is closer but marks the blob EXTERNAL, which means garbage collection will
+    never reclaim it -- wrong for bytes we generated and own.
+
+    `path` is consumed: on success it is renamed into the object store, and on
+    dedup it is unlinked. Callers pass a file under `tmp_dir`, which shares a
+    filesystem with `objects/` so the placement is an atomic rename rather than
+    a copy.
+    """
+    require_home()
+
+    project = await Project.get(project_id)
+    if project is None:
+        raise NotFoundError(f"Project not found: {project_id}")
+
+    safe_name = Path(name).name.strip()
+    if not safe_name or safe_name in (".", ".."):
+        raise ValidationError(f"Unsafe filename: {name!r}")
+
+    if not await asyncio.to_thread(path.exists):
+        raise NotFoundError(f"Produced file is missing: {path}")
+
+    obj = DataObject(
+        project_id=project_id,
+        name=safe_name,
+        status=ObjectStatus.HASHING,
+        role=role,
+        derived_from=derived_from or [],
+        produced_by_job=produced_by_job,
+        facts=facts or {},
+        metadata=metadata or {},
+        # The bytes originate here, so there is no upload and no external path
+        # to record. Mode stays UPLOAD: the object store owns the content, and
+        # provenance lives in derived_from rather than in source.
+        source=SourceInfo(mode=SourceMode.UPLOAD, original_name=safe_name),
+    )
+    await obj.insert()
+
+    try:
+        digest, size = await asyncio.to_thread(cas.hash_file, path)
+        await obj.set({DataObject.size: size})
+
+        existing = await blob_service.find_present_blob(digest)
+        if existing is not None and _blob_bytes_present(existing):
+            # A trim run that produced byte-identical output to something
+            # already stored -- re-running the same job on the same input, most
+            # likely. Keep the record, drop the duplicate bytes.
+            await _discard(path)
+            log.info("produced_file_deduplicated", digest=digest, name=safe_name)
+        else:
+            await asyncio.to_thread(cas.place_blob, path, digest, size)
+
+        await blob_service.attach_blob_to_object(
+            object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+        )
+        await project_service.bump_counters(project_id, objects=1, total_bytes=size)
+        await enqueue_ingest(obj, digest=digest)
+    except BaseException:
+        await _discard(path)
+        await obj.set(
+            {
+                DataObject.status: ObjectStatus.ERROR,
+                DataObject.updated_at: datetime.now(UTC),
+            }
+        )
+        raise
+
+    return await get_object(obj.id)
+
+
+async def _discard(path: Path) -> None:
+    """Remove scratch output, off the loop. Never raises: this runs on cleanup
+    paths where the original failure is what matters."""
+    try:
+        await asyncio.to_thread(path.unlink, True)
+    except OSError as e:
+        log.warning("discard_failed", path=str(path), error=str(e))
+
+
 def _drain_to_temp(stream, max_bytes: int, name: str) -> tuple[Path, str, int]:
     """Consume a sync iterable of chunks, enforcing the size ceiling as we go.
 
