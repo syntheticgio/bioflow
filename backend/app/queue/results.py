@@ -7,6 +7,7 @@ dicts, and the writes happen here on the loop.
 """
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 from beanie import PydanticObjectId
 
@@ -133,6 +134,8 @@ async def _apply_ingest_headers(result: dict) -> None:
         ).update({"$set": {DataObject.role: ObjectRole.REFERENCE}})
         if not getattr(assigned, "modified_count", 0):
             log.info("assembly_role_skipped_raced", object_id=object_id)
+    await _link_mate(obj)
+
     log.info(
         "ingest_applied",
         object_id=object_id,
@@ -144,6 +147,180 @@ async def _apply_ingest_headers(result: dict) -> None:
     )
 
 
+async def _link_mate(obj: DataObject) -> None:
+    """Find this file's paired-end partner and link them to each other.
+
+    Runs after every ingest because the second half of a pair usually arrives
+    after the first: whichever lands last is the one that finds the match, and
+    it links both sides.
+
+    A link the user set is never overwritten -- same principle as role. The
+    filename convention is a strong hint, not a fact, and someone who corrected
+    it knows something the name does not say.
+    """
+    from app.pipelines import pairing
+
+    if obj.mate_object_id is not None:
+        return
+
+    split = pairing.split_mate(obj.name)
+    if split is None or not split[0]:
+        return
+
+    # Narrowed to the project, and to files that are not already paired. The
+    # candidate set is small enough that filtering names in Python beats
+    # encoding the convention as a database query.
+    candidates = await DataObject.find(
+        DataObject.project_id == obj.project_id,
+        DataObject.id != obj.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).to_list()
+
+    matches = [c for c in candidates if pairing.is_mate_of(obj.name, c.name)]
+    if len(matches) != 1:
+        # Zero is the common case (the mate has not been uploaded, or the file
+        # is single-end). More than one is genuinely ambiguous -- two files
+        # with the same name in one project -- and guessing would be worse than
+        # leaving it for the launch dialog to ask about.
+        if len(matches) > 1:
+            log.info(
+                "mate_ambiguous",
+                object_id=str(obj.id),
+                name=obj.name,
+                candidates=[str(m.id) for m in matches],
+            )
+        return
+
+    mate = matches[0]
+
+    # Conditional on both sides still being unpaired, so two ingests finishing
+    # at once cannot produce a half-formed link. Whichever write lands first
+    # wins; the loser sees a modified_count of zero and stops.
+    linked = await DataObject.find_one(
+        DataObject.id == mate.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).update({"$set": {DataObject.mate_object_id: obj.id}})
+    if not getattr(linked, "modified_count", 0):
+        log.info("mate_link_skipped_raced", object_id=str(obj.id), mate_id=str(mate.id))
+        return
+
+    await DataObject.find_one(
+        DataObject.id == obj.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).update({"$set": {DataObject.mate_object_id: mate.id}})
+
+    log.info("mate_linked", object_id=str(obj.id), mate_id=str(mate.id), name=obj.name)
+
+
+async def _apply_trim_reads(result: dict) -> None:
+    """Turn a finished trim run into objects.
+
+    The handler ran in a worker thread and could not touch the database, so
+    everything persistent happens here: the produced files are taken into the
+    object store, linked to the reads they came from, and the before/after
+    report is recorded on the source so the comparison is visible from the file
+    the user started with.
+
+    Ordering matters. Outputs are ingested first and the parent is updated
+    afterwards, because the parent's report is what the UI keys on to show that
+    a trim happened. Writing it before the outputs exist would offer a
+    comparison with nothing to compare against.
+    """
+    from app.services import object_service
+
+    object_id = result.get("object_id")
+    outputs = result.get("outputs") or []
+    if not object_id or not outputs:
+        return
+
+    parent = await DataObject.get(PydanticObjectId(object_id))
+    if parent is None:
+        log.warning("trim_parent_missing", object_id=object_id)
+        return
+
+    mate_id = result.get("mate_object_id")
+    parents = [parent.id]
+    if mate_id:
+        parents.append(PydanticObjectId(mate_id))
+
+    job_id = result.get("job_id")
+    report = result.get("report") or {}
+    params = result.get("params") or {}
+
+    # Recorded on every output: the parameters alone do not describe a run
+    # without the version of the tool that applied them.
+    provenance = {
+        "trimmed_by": result.get("tool", "fastp"),
+        "trim_tool_version": result.get("tool_version"),
+        "trim_params": params,
+    }
+
+    created: list[DataObject] = []
+    for output in outputs:
+        tmp_path = Path(output["tmp_path"])
+        try:
+            obj = await object_service.ingest_local_file(
+                project_id=parent.project_id,
+                path=tmp_path,
+                name=output["name"],
+                role=ObjectRole.TRIMMED_READS,
+                derived_from=parents,
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts=dict(provenance),
+                # Sample-level metadata describes the biology, which trimming
+                # does not change. Carrying it over means a trimmed file is
+                # still findable by the sample it came from.
+                metadata=dict(parent.metadata),
+            )
+        except Exception as e:  # noqa: BLE001 - one bad output must not lose the rest
+            log.error(
+                "trim_output_ingest_failed",
+                object_id=object_id,
+                name=output.get("name"),
+                error=str(e),
+            )
+            continue
+        created.append(obj)
+
+    # Link the produced mates to each other, mirroring how the inputs are
+    # paired. Done here rather than at ingest because the pairing is known
+    # exactly -- there is no need to infer it from the filenames.
+    if len(created) == 2:
+        await created[0].set({DataObject.mate_object_id: created[1].id})
+        await created[1].set({DataObject.mate_object_id: created[0].id})
+
+    if not created:
+        log.error("trim_produced_nothing", object_id=object_id)
+        return
+
+    # The report goes on both inputs: either half of a pair is a reasonable
+    # place for a user to look for what trimming did.
+    trim_facts = {
+        "trim_report": report,
+        "trim_outputs": [str(o.id) for o in created],
+        **provenance,
+    }
+    for parent_id in parents:
+        target = await DataObject.get(parent_id)
+        if target is None:
+            continue
+        await target.set(
+            {
+                DataObject.facts: {**target.facts, **trim_facts},
+                DataObject.updated_at: datetime.now(UTC),
+            }
+        )
+
+    log.info(
+        "trim_applied",
+        object_id=object_id,
+        outputs=[str(o.id) for o in created],
+        reads_before=report.get("before", {}).get("total_reads"),
+        reads_after=report.get("after", {}).get("total_reads"),
+    )
+
+
 _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
+    "trim_reads": _apply_trim_reads,
 }

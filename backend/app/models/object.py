@@ -62,6 +62,10 @@ class ObjectRole(StrEnum):
     """
 
     REFERENCE = "reference"
+    # Reads that a pipeline has already trimmed. Format alone cannot say this:
+    # trimmed output is FASTQ exactly like its input, and feeding raw reads to
+    # an aligner when you meant to feed trimmed ones is a silent error.
+    TRIMMED_READS = "trimmed_reads"
 
 
 class FormatConfidence(StrEnum):
@@ -120,6 +124,18 @@ class DataObject(TimestampedDocument):
     # a value, so re-ingest can never fight a user's explicit choice.
     role: ObjectRole | None = None
 
+    # Provenance. A typed field rather than a metadata key because metadata is
+    # user-owned and user-editable, and provenance that can be silently retyped
+    # is not provenance. A list because paired trimming takes two inputs and
+    # produces two outputs, each descending from both mates.
+    derived_from: list[PydanticObjectId] = Field(default_factory=list)
+    produced_by_job: PydanticObjectId | None = None
+
+    # The other half of a paired-end run. Symmetric: both mates point at each
+    # other. Inferred from the R1/R2 filename convention at ingest and
+    # overridable, since the convention is only a convention.
+    mate_object_id: PydanticObjectId | None = None
+
     source: SourceInfo = Field(default_factory=SourceInfo)
 
     class Settings:
@@ -134,6 +150,9 @@ class DataObject(TimestampedDocument):
             IndexModel([("blob_sha256", ASCENDING)], name="by_blob"),
             IndexModel([("owner", ASCENDING), ("status", ASCENDING)], name="by_status"),
             IndexModel([("project_id", ASCENDING), ("role", ASCENDING)], name="by_role"),
+            # "What did this file produce?" -- multikey over the array, so a
+            # lookup by any one parent finds every descendant.
+            IndexModel([("derived_from", ASCENDING)], name="by_derived_from"),
             IndexModel(
                 [("format.kind", ASCENDING), ("project_id", ASCENDING)],
                 name="by_format",

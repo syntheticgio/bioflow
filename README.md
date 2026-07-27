@@ -73,14 +73,19 @@ being marked missing.
 
 ## Job queue
 
-Four priority classes; lowest score dispatches first. Within a class, FIFO.
+Five priority classes; lowest score dispatches first. Within a class, FIFO.
 
 | Class | Use |
 |---|---|
 | `user_interactive` | UI-initiated actions, upload assembly |
 | `user_background` | header parsing after the user's own upload |
 | `maintenance` | file verification, blob GC |
+| `compute` | pipeline runs (trimming, later alignment) |
 | `bulk` | full-library sweeps |
+
+**`compute` never promotes.** A trim job can run for hours; ageing one into the
+tier the user is watching would crowd out the interactive work it is meant to
+yield to. `bulk` is excluded for the same reason.
 
 Jobs are **at-least-once, never exactly-once — every handler must be idempotent.**
 
@@ -103,6 +108,9 @@ ramp-up after reopening.
 | `THROTTLED` | user work only |
 | `CLOSED` | `user_interactive` only |
 
+Pipeline work is admitted only at `OPEN` — it is the heaviest thing the system
+does, so it is the first shed.
+
 **`user_interactive` is admitted in every state, including CLOSED.** A UI that goes dead
 under load is a worse outcome than a briefly oversubscribed machine.
 
@@ -110,6 +118,9 @@ Only the leader worker samples and publishes the decision, so all workers act on
 consistent state. Sustained *external* load (an aligner running in your terminal) would
 otherwise hold the governor closed forever and maintenance would never run — so any
 maintenance job starved past 30 minutes is admitted anyway, with a visible event.
+That escape is deliberately limited to maintenance: a `verify_files` that never
+runs fails *silently*, whereas a waiting pipeline run is visible as waiting in
+the activity view.
 
 ### Periodic jobs
 
@@ -118,6 +129,7 @@ maintenance job starved past 30 minutes is admitted anyway, with a visible event
 | `verify_files` | 60s | confirm stored files still exist |
 | `reap_uploads` | 300s | delete abandoned staging directories |
 | `gc_blobs` | 600s | unlink unreferenced blobs past the grace window |
+| `reap_pipeline_scratch` | 3600s | reclaim trim scratch dirs and expired job logs |
 
 Manage these at `/api/v1/schedules` — enable, disable, change interval, or force a run.
 Exactly one worker wins each tick via an atomic compare-and-advance in Lua, and
@@ -239,6 +251,8 @@ broke the running stack:
 - **Phase 3** — format detection and header parsing (pysam) surfaced as file facts
 - **Phase 4** — periodic jobs and the load-aware admission governor
 - **Phase 5** — metadata schemas, search, and bulk editing
+- **Phase 6a** — read preparation: adapter trimming and QC (fastp), with an
+  activity view and object lineage
 
 All three phases are verified running under `docker compose` against the real
 drive. Phase 0/1: an uploaded FASTQ lands at `objects/a3/a31741…` with a matching
@@ -299,8 +313,63 @@ Where the filename and the file contents disagree about format — a `.bam` that
 is really gzipped FASTQ — both signals are recorded and the conflict is shown in
 the UI rather than silently resolved. Click **re-ingest** on any file to re-run
 detection and parsing after a parser improves.
+
+## Read preparation
+
+Select a FASTQ and click **Trim** to adapter-trim and quality-filter it with
+[fastp](https://github.com/OpenGene/fastp), which is installed in the backend
+image along with FastQC.
+
+**Paired reads are trimmed together.** Mates must stay synchronized or
+downstream alignment breaks, so the launch dialog detects the R1/R2 partner and
+selects it by default. Trimming them separately is allowed but warns first.
+Pairing is inferred from the filename convention at ingest, stored on the
+object, and never overwritten once you have set it by hand.
+
+**Trimmed reads are first-class objects, not sidecar files.** They land in CAS
+with their own format detection, facts, metadata, and search, and they record
+where they came from: `derived_from` names both parents, `produced_by_job` names
+the run. The detail panel shows lineage in both directions.
+
+### The before/after comparison
+
+fastp measures the same statistics before and after filtering in a single pass,
+so the comparison is free — no separate FastQC run over the same bytes. The
+report lands on the *source* file, since "what did trimming do to my reads" is a
+question about the input, and shows read and base counts, mean length, Q20/Q30,
+GC, duplication, and how many reads carried adapter.
+
+FastQC is available for its canonical HTML report but is never run
+automatically: three passes over a 30 GB file to learn what one pass already
+reported is not a good trade.
+
+### Watching it run
+
+**Activity** in the header shows what is running, what is waiting, and what
+finished. Queued jobs say *why* they are waiting — a job deferred because the
+machine is busy is indistinguishable from a stuck one otherwise, and the load
+governor defers work deliberately. Captured tool output is readable inline.
+
+Progress comes from fastp's own `--verbose` reporting rather than a time
+estimate. **The bar deliberately stops at 95% while a job runs.** fastp counts
+reads *loaded*, which runs ahead of processing, against a total that was itself
+extrapolated from the first 1000 records at ingest — an upper bound on an
+approximation. A bar pinned at 100% while work continues would be a lie about a
+measurement.
+
+### Resources
+
+Pipeline jobs run in their own `compute` priority class, below maintenance and
+never promoted: a multi-hour trim that aged into the tier you are watching would
+crowd out the UI. They are admitted only when the governor is fully open, and
+unlike maintenance they get no starvation escape — a waiting trim is visible in
+the activity view, so it fails loudly rather than silently.
+
+A run's scratch directory and captured log are reclaimed by
+`reap_pipeline_scratch`; without it a cancelled run would strand whole FASTQ
+files.
 - Phase 2 — chunked/resumable uploads, register-in-place, GC
 - Phase 3 — format detection and header parsing (pysam)
 - Phase 4 — periodic jobs and the load-aware governor
 - Phase 5 — metadata schemas and search
-- Phase 6 — pipeline execution (alignment, variant calling)
+- Phase 6a — read preparation: adapter trimming and QC (fastp)

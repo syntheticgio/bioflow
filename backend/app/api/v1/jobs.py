@@ -30,6 +30,7 @@ class JobOut(BaseModel):
     cancel_requested: bool
     project_id: str | None
     object_id: str | None
+    parent_job_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -51,6 +52,7 @@ class JobOut(BaseModel):
             cancel_requested=j.cancel_requested,
             project_id=str(j.project_id) if j.project_id else None,
             object_id=str(j.object_id) if j.object_id else None,
+            parent_job_id=str(j.parent_job_id) if j.parent_job_id else None,
             created_at=j.created_at,
             updated_at=j.updated_at,
         )
@@ -64,16 +66,52 @@ class JobCreate(BaseModel):
     dedup_key: str | None = None
 
 
+def _parse_states(raw: str) -> list[str]:
+    """Expand a states filter into state values.
+
+    `active` is spelled out rather than left to the caller because the set of
+    non-terminal states is the queue's business, and a UI that hardcoded it
+    would silently miss a state added later.
+    """
+    from app.models.job import ACTIVE_STATES
+
+    wanted: list[str] = []
+    for part in (p.strip() for p in raw.split(",")):
+        if not part:
+            continue
+        if part == "active":
+            wanted.extend(sorted(s.value for s in ACTIVE_STATES))
+            continue
+        try:
+            wanted.append(JobState(part).value)
+        except ValueError:
+            raise ValidationError(
+                f"Unknown job state: {part!r}",
+                details={"known": [s.value for s in JobState] + ["active"]},
+            ) from None
+    return sorted(set(wanted))
+
+
 @router.get("", response_model=list[JobOut])
 async def list_jobs(
     state: JobState | None = None,
+    states: str | None = Query(
+        None,
+        description=(
+            "Comma-separated states, or the alias 'active'. Lets the activity "
+            "view fetch everything in flight in one request rather than one "
+            "call per state."
+        ),
+    ),
     job_type: str | None = Query(None, alias="type"),
     job_class: JobClass | None = Query(None, alias="class"),
     project_id: str | None = None,
     limit: int = Query(100, le=500),
 ) -> list[JobOut]:
     query: dict = {}
-    if state:
+    if states:
+        query["state"] = {"$in": _parse_states(states)}
+    elif state:
         query["state"] = state.value
     if job_type:
         query["type"] = job_type
@@ -198,3 +236,66 @@ async def retry_job(job_id: PydanticObjectId) -> JobOut:
     refreshed = await Job.get(job_id)
     await queue._push_to_redis(refreshed)  # type: ignore[arg-type]
     return JobOut.of(await Job.get(job_id))  # type: ignore[arg-type]
+
+
+# Bounded so a request can never pull an unbounded file into memory: a fastp
+# run on a large library writes a lot, and this endpoint is polled.
+MAX_LOG_TAIL_LINES = 2000
+LOG_READ_BYTES = 256 * 1024
+
+
+@router.get("/{job_id}/log")
+async def get_job_log(
+    job_id: PydanticObjectId,
+    tail: int = Query(200, ge=1, le=MAX_LOG_TAIL_LINES),
+) -> dict:
+    """The tail of a job's captured output.
+
+    Only jobs that shell out to an external tool write one, so an absent log is
+    a normal answer rather than an error -- most job types have nothing to say.
+    """
+    import asyncio
+
+    from app.config import settings
+
+    job = await Job.get(job_id)
+    if job is None:
+        raise NotFoundError(f"Job not found: {job_id}")
+
+    path = settings.logs_dir / f"{job_id}.log"
+    if not await asyncio.to_thread(path.exists):
+        return {"job_id": str(job_id), "exists": False, "lines": [], "truncated": False}
+
+    lines, truncated, size = await asyncio.to_thread(_read_tail, path, tail)
+    return {
+        "job_id": str(job_id),
+        "exists": True,
+        "lines": lines,
+        "truncated": truncated,
+        "size": size,
+    }
+
+
+def _read_tail(path, tail: int) -> tuple[list[str], bool, int]:
+    """Last `tail` lines, reading only the end of the file.
+
+    Seeks rather than reading the whole file: a long-running job's log can
+    reach hundreds of megabytes, and this endpoint is polled while the job runs.
+    """
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as f:
+            offset = max(0, size - LOG_READ_BYTES)
+            f.seek(offset)
+            chunk = f.read()
+    except OSError:
+        return [], False, 0
+
+    text = chunk.decode("utf-8", errors="replace")
+    # A mid-line seek leaves a partial first line; drop it rather than showing
+    # a fragment that looks like real output.
+    if offset > 0 and "\n" in text:
+        text = text.split("\n", 1)[1]
+
+    all_lines = text.splitlines()
+    return all_lines[-tail:], (offset > 0 or len(all_lines) > tail), size

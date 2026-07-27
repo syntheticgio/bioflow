@@ -113,6 +113,9 @@ class ObjectOut(BaseModel):
     source: dict
     error: dict | None
     role: str | None
+    derived_from: list[str]
+    produced_by_job: str | None
+    mate_object_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -132,6 +135,9 @@ class ObjectOut(BaseModel):
             source=o.source.model_dump(mode="json"),
             error=o.error.model_dump(mode="json") if o.error else None,
             role=o.role.value if o.role else None,
+            derived_from=[str(p) for p in o.derived_from],
+            produced_by_job=str(o.produced_by_job) if o.produced_by_job else None,
+            mate_object_id=str(o.mate_object_id) if o.mate_object_id else None,
             created_at=o.created_at,
             updated_at=o.updated_at,
         )

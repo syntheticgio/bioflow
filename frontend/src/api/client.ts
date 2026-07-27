@@ -4,16 +4,21 @@ import type {
   DataObject,
   FacetValue,
   Facets,
+  JobLog,
   JobSummary,
+  MateSuggestion,
   MetadataSchema,
   ObjectDetail,
   ObjectRole,
   OverdueSchedule,
+  PipelineTools,
   Project,
   ProjectDetail,
   RegisterAccepted,
   ScheduleInfo,
   TimingEstimate,
+  TrimDefaults,
+  TrimRequest,
   SearchParams,
   SearchResults,
   SystemLoad,
@@ -210,13 +215,27 @@ export const api = {
       method: "POST",
     }),
 
-  listJobs: (opts: { projectId?: string; state?: string; limit?: number } = {}) => {
+  listJobs: (
+    opts: {
+      projectId?: string;
+      state?: string;
+      /** Comma-separated states, or "active" for everything in flight. */
+      states?: string;
+      type?: string;
+      limit?: number;
+    } = {},
+  ) => {
     const params = new URLSearchParams();
     if (opts.projectId) params.set("project_id", opts.projectId);
-    if (opts.state) params.set("state", opts.state);
+    if (opts.states) params.set("states", opts.states);
+    else if (opts.state) params.set("state", opts.state);
+    if (opts.type) params.set("type", opts.type);
     params.set("limit", String(opts.limit ?? 50));
     return request<JobSummary[]>(`/jobs?${params}`);
   },
+
+  getJobLog: (id: string, tail = 200) =>
+    request<JobLog>(`/jobs/${id}/log?tail=${tail}`),
 
   getJob: (id: string) =>
     request<JobSummary & { timing_estimate?: TimingEstimate }>(`/jobs/${id}`),
@@ -229,6 +248,22 @@ export const api = {
   retryJob: (id: string) => request<JobSummary>(`/jobs/${id}/retry`, { method: "POST" }),
 
   jobTypes: () => request<Record<string, unknown>>("/jobs/types"),
+
+  // --- Pipelines ---
+
+  pipelineTools: () => request<PipelineTools>("/pipelines/tools"),
+
+  trimDefaults: () => request<TrimDefaults>("/pipelines/defaults"),
+
+  /** The file this one would be trimmed alongside, or null. */
+  detectMate: (objectId: string) =>
+    request<MateSuggestion | null>(`/pipelines/mate/${objectId}`),
+
+  launchTrim: (body: TrimRequest) =>
+    request<JobSummary>("/pipelines/trim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,

@@ -11,3 +11,5 @@ dist/
 *.log
 .idea/
 .vscode/
+tsconfig.tsbuildinfo
+backend/.venv/

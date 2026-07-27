@@ -40,7 +40,7 @@ export interface FormatInfo {
 }
 
 /** How a file is used, when its format cannot say. Null = derive from format. */
-export type ObjectRole = "reference";
+export type ObjectRole = "reference" | "trimmed_reads";
 
 export interface DataObject {
   id: string;
@@ -54,6 +54,11 @@ export interface DataObject {
   metadata: Record<string, unknown>;
   tags: string[];
   role: ObjectRole | null;
+  /** Objects this one was produced from. Two entries for a paired trim. */
+  derived_from: string[];
+  produced_by_job: string | null;
+  /** The other half of a paired-end run, if known. */
+  mate_object_id: string | null;
   source: Record<string, unknown>;
   error: { code: string; message: string; at: string } | null;
   created_at: string;
@@ -113,6 +118,7 @@ export type JobClass =
   | "user_interactive"
   | "user_background"
   | "maintenance"
+  | "compute"
   | "bulk";
 
 export interface JobSummary {
@@ -142,6 +148,7 @@ export interface JobSummary {
   cancel_requested: boolean;
   project_id: string | null;
   object_id: string | null;
+  parent_job_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -288,4 +295,93 @@ export interface ApiError {
   code: string;
   message: string;
   details?: Record<string, unknown>;
+}
+
+// --- Pipelines ---
+
+export interface PipelineTool {
+  name: string;
+  path: string | null;
+  version: string | null;
+  available: boolean;
+  error: string | null;
+}
+
+export interface PipelineTools {
+  tools: PipelineTool[];
+  all_available: boolean;
+}
+
+/** Mirrors fastp_runner.TrimParams. Nulls mean "let fastp decide". */
+export interface TrimParams {
+  quality_threshold: number;
+  unqualified_percent_limit: number;
+  min_length: number;
+  trim_poly_g: boolean | null;
+  trim_poly_x: boolean;
+  dedup: boolean;
+  detect_adapter_for_pe: boolean;
+  adapter_r1: string | null;
+  adapter_r2: string | null;
+  threads: number;
+  compression: number;
+}
+
+export interface TrimDefaults {
+  params: TrimParams;
+  max_threads: number;
+}
+
+export interface MateSuggestion {
+  object_id: string;
+  name: string;
+  mate: "R1" | "R2" | null;
+}
+
+/** One side of the before/after comparison in a fastp report. */
+export interface TrimSide {
+  total_reads: number | null;
+  total_bases: number | null;
+  q20_rate: number | null;
+  q30_rate: number | null;
+  gc_content: number | null;
+  read1_mean_length: number | null;
+  read2_mean_length: number | null;
+}
+
+export interface TrimReport {
+  tool: string;
+  tool_version: string | null;
+  sequencing: string | null;
+  before: TrimSide;
+  after: TrimSide;
+  filtering: {
+    passed_reads: number | null;
+    low_quality_reads: number | null;
+    too_many_n_reads: number | null;
+    too_short_reads: number | null;
+  };
+  duplication_rate: number | null;
+  insert_size_peak: number | null;
+  adapters?: {
+    trimmed_reads: number | null;
+    trimmed_bases: number | null;
+    read1_sequence: string | null;
+    read2_sequence: string | null;
+  };
+}
+
+export interface TrimRequest {
+  object_id: string;
+  mate_object_id?: string | null;
+  paired?: boolean;
+  params?: Partial<TrimParams>;
+}
+
+export interface JobLog {
+  job_id: string;
+  exists: boolean;
+  lines: string[];
+  truncated: boolean;
+  size?: number;
 }

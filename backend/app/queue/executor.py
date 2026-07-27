@@ -5,7 +5,9 @@ import contextlib
 import os
 import signal
 import subprocess
+import threading
 import traceback
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 from beanie import PydanticObjectId
@@ -215,13 +217,24 @@ def run_subprocess(
     cwd: str | None = None,
     env: dict | None = None,
     log_path: str | None = None,
+    on_line: Callable[[str], None] | None = None,
 ) -> int:
     """Run a subprocess that dies with the job.
 
     start_new_session puts the child in its own process group, so cancellation
     can signal the whole group. That matters for pipelines: killing only the
     direct child of `bwa | samtools sort` orphans the rest.
+
+    Without `on_line` the child's output is redirected straight to the log file
+    descriptor: the kernel does the copying and this process never sees the
+    bytes. Pass `on_line` to additionally observe output as it streams -- the
+    only way to turn a tool's own progress reporting into `ctx.progress()`.
+    Lines are still written to `log_path`, so enabling it costs a pipe and a
+    reader thread but loses nothing.
     """
+    if on_line is not None:
+        return _run_streaming(ctx, cmd, cwd=cwd, env=env, log_path=log_path, on_line=on_line)
+
     log_file = open(log_path, "ab") if log_path else subprocess.DEVNULL
 
     proc = subprocess.Popen(
@@ -234,17 +247,86 @@ def run_subprocess(
     )
 
     try:
-        while True:
-            try:
-                return proc.wait(timeout=1.0)
-            except subprocess.TimeoutExpired as e:
-                if ctx.is_cancelled():
-                    _terminate_group(proc)
-                    raise JobCancelled(f"Job {ctx.job_id} cancelled") from e
+        return _wait_cancellable(ctx, proc)
     finally:
         if log_path and log_file is not subprocess.DEVNULL:
             with contextlib.suppress(Exception):
                 log_file.close()
+
+
+def _run_streaming(
+    ctx: JobContext,
+    cmd: list[str],
+    *,
+    cwd: str | None,
+    env: dict | None,
+    log_path: str | None,
+    on_line: Callable[[str], None],
+) -> int:
+    """run_subprocess with the output piped through a reader thread.
+
+    The reader runs on its own thread rather than in the wait loop because a
+    tool that goes quiet for minutes (fastp reads a long stretch before it says
+    anything) would otherwise block cancellation polling behind a read that
+    never returns.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env={**os.environ, **(env or {})},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        bufsize=1,
+        text=True,
+        errors="replace",  # tool output is not guaranteed to be valid UTF-8
+    )
+
+    log_file = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
+
+    def pump() -> None:
+        try:
+            for line in proc.stdout:
+                line = line.rstrip("\n")
+                if log_file is not None:
+                    with contextlib.suppress(Exception):
+                        log_file.write(line + "\n")
+                        log_file.flush()
+                # A parser that raises must not kill the job: the work itself
+                # is still valid, and progress is advisory everywhere else too.
+                try:
+                    on_line(line)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("on_line_failed", job_id=ctx.job_id, error=str(e))
+        except Exception as e:  # noqa: BLE001 - the pipe dies when the child is killed
+            log.debug("output_pump_ended", job_id=ctx.job_id, error=str(e))
+
+    reader = threading.Thread(target=pump, name=f"subproc-out-{ctx.job_id}", daemon=True)
+    reader.start()
+
+    try:
+        return _wait_cancellable(ctx, proc)
+    finally:
+        # The child is gone by now, so the pipe is at EOF and the reader is
+        # finishing. Bounded join: a wedged reader must not hold the worker.
+        reader.join(timeout=5)
+        with contextlib.suppress(Exception):
+            if proc.stdout is not None:
+                proc.stdout.close()
+        if log_file is not None:
+            with contextlib.suppress(Exception):
+                log_file.close()
+
+
+def _wait_cancellable(ctx: JobContext, proc: subprocess.Popen) -> int:
+    """Wait for the child, checking for cancellation once a second."""
+    while True:
+        try:
+            return proc.wait(timeout=1.0)
+        except subprocess.TimeoutExpired as e:
+            if ctx.is_cancelled():
+                _terminate_group(proc)
+                raise JobCancelled(f"Job {ctx.job_id} cancelled") from e
 
 
 def _terminate_group(proc: subprocess.Popen) -> None:

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { formatDuration } from "../lib/format";
 
 /**
  * Estimated progress for a running ingest.
@@ -121,11 +122,4 @@ export function IngestProgress({ objectId }: { objectId: string }) {
       </div>
     </div>
   );
-}
-
-function formatDuration(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${String(s % 60).padStart(2, "0")}s`;
 }

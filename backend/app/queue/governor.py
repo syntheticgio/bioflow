@@ -45,6 +45,7 @@ ADMITTED_CLASSES: dict[AdmissionState, set[JobClass]] = {
         JobClass.USER_INTERACTIVE,
         JobClass.USER_BACKGROUND,
         JobClass.MAINTENANCE,
+        JobClass.COMPUTE,
         JobClass.BULK,
     },
     AdmissionState.THROTTLED: {JobClass.USER_INTERACTIVE, JobClass.USER_BACKGROUND},
@@ -77,6 +78,12 @@ RAMP_COUNT = 3  # consecutive clean admissions before normal operation
 # Sustained *external* load (an aligner running in a terminal) would otherwise
 # hold the governor CLOSED forever, and maintenance would never run. A
 # verify_files job that never runs is a silent failure, so it gets a way out.
+#
+# The escape is deliberately limited to maintenance (see worker._maintenance_
+# starving). Compute does not qualify: a waiting pipeline run is *visible* as
+# waiting in the activity view, so it fails loudly rather than silently, and
+# forcing a multi-hour job onto an already-strained machine is the outcome the
+# governor exists to prevent.
 STARVATION_ESCAPE_SECONDS = 30 * 60
 
 

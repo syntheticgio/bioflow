@@ -315,15 +315,26 @@ ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
     ObjectRole.REFERENCE: REFERENCE_FIELDS,
 }
 
+# Roles that deliberately have no field group of their own and defer to the
+# format's. Trimmed reads are still reads: they want the same library-prep and
+# platform questions a raw FASTQ gets, and answering them twice with different
+# vocabularies would be worse than answering them once.
+#
+# Listed explicitly rather than left implicit so that a role added without
+# thought still fails the "every role is accounted for" test.
+FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset({ObjectRole.TRIMMED_READS})
+
 
 def fields_for(
     kind: FormatKind | str | None, role: ObjectRole | str | None = None
 ) -> list[FieldDef]:
     """Common fields plus anything specific to this file.
 
-    Role wins outright over format when set: once a file is declared a
-    reference, its library and sequencing fields are noise rather than context.
-    Format-specific definitions win on key collisions with common ones.
+    A role with its own field group wins outright over format: once a file is
+    declared a reference, its library and sequencing fields are noise rather
+    than context. A role *without* one falls back to the format's fields --
+    trimmed reads are still reads, and should still be asked about library
+    prep. Format-specific definitions win on key collisions with common ones.
     """
     if isinstance(kind, str):
         try:
@@ -337,9 +348,8 @@ def fields_for(
         except ValueError:
             role = None
 
-    if role:
-        specific: tuple[FieldDef, ...] = ROLE_FIELDS.get(role, ())
-    else:
+    specific: tuple[FieldDef, ...] = ROLE_FIELDS.get(role, ()) if role else ()
+    if not specific:
         specific = FORMAT_FIELDS.get(kind, ()) if kind else ()
 
     by_key: dict[str, FieldDef] = {f.key: f for f in COMMON_FIELDS}

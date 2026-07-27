@@ -20,6 +20,7 @@ BASE_SCORES: dict[JobClass, int] = {
     JobClass.USER_INTERACTIVE: 0,
     JobClass.USER_BACKGROUND: 1_000_000,
     JobClass.MAINTENANCE: 5_000_000,
+    JobClass.COMPUTE: 7_000_000,
     JobClass.BULK: 9_000_000,
 }
 
@@ -37,6 +38,10 @@ MAX_AGE_COMPONENT = 999_000
 
 # How long a job may wait in its class before being promoted one tier.
 # Bulk is deliberately absent: whole-library sweeps should yield indefinitely.
+# Compute is absent for the same reason: a pipeline run is long and expensive,
+# and aging it up the tiers would let it crowd out the interactive work the
+# user is actually watching. A waiting compute job is visible in the activity
+# view, so nothing about it fails silently.
 PROMOTION_AFTER_SECONDS: dict[JobClass, int] = {
     JobClass.USER_BACKGROUND: 300,  # 5 min behind user-interactive work
     JobClass.MAINTENANCE: 900,  # 15 min
@@ -68,8 +73,17 @@ def compute_score(job_class: JobClass, enqueued_at: datetime | None = None) -> f
 
 
 def class_of_score(score: float) -> JobClass:
-    """Recover the effective class from a score, including after promotion."""
-    for job_class in (JobClass.BULK, JobClass.MAINTENANCE, JobClass.USER_BACKGROUND):
+    """Recover the effective class from a score, including after promotion.
+
+    Walked in descending band order, so a new class must be inserted at its
+    numeric position or every score above it resolves to the wrong tier.
+    """
+    for job_class in (
+        JobClass.BULK,
+        JobClass.COMPUTE,
+        JobClass.MAINTENANCE,
+        JobClass.USER_BACKGROUND,
+    ):
         if score >= BASE_SCORES[job_class]:
             return job_class
     return JobClass.USER_INTERACTIVE
