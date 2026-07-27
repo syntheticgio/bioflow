@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import type { ObjectDetail as ObjectDetailData } from "../api/types";
 import {
   compressionLabel,
   formatBytes,
@@ -26,6 +27,7 @@ import { IndexStatus } from "./IndexStatus";
 import { TrimDialog } from "./TrimDialog";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
+import { TabPanel, Tabs, type TabDef } from "./Tabs";
 import { TagEditor } from "./TagEditor";
 
 /** The right panel: details of whatever is selected in the left panel. */
@@ -212,6 +214,13 @@ function ProjectDetail({ id }: { id: string }) {
   );
 }
 
+/** Ordered so the panel opens on the question people ask most: is this file good? */
+const TABS: TabDef[] = [
+  { id: "qc", label: "QC" },
+  { id: "metadata", label: "Metadata" },
+  { id: "actions", label: "Actions" },
+];
+
 function ObjectDetail({ id }: { id: string }) {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
@@ -222,6 +231,19 @@ function ObjectDetail({ id }: { id: string }) {
   const clearSelection = () => {
     const next = new URLSearchParams(params);
     next.delete("sel");
+    setParams(next, { replace: true });
+  };
+
+  // In the URL alongside ?sel=, so the tab survives selecting another file and
+  // a link can point at a particular view. An unrecognised value falls back
+  // rather than rendering an empty panel.
+  const raw = params.get("tab");
+  const tab = TABS.some((t) => t.id === raw) ? raw! : "qc";
+  const setTab = (id: string) => {
+    const next = new URLSearchParams(params);
+    next.set("tab", id);
+    // Matches clearSelection: switching tabs is not a navigation step people
+    // expect the back button to undo.
     setParams(next, { replace: true });
   };
 
@@ -293,6 +315,13 @@ function ObjectDetail({ id }: { id: string }) {
 
   const isReference = obj.role === "reference";
 
+  // Free-form key inside the metadata blob rather than a column, so it is often
+  // absent and is not necessarily one of the schema's enum options -- the enum
+  // deliberately stores off-list values. Render whatever string is there.
+  const organism = obj.metadata.organism;
+  const species =
+    typeof organism === "string" && organism.trim() ? organism.trim() : null;
+
   // Offered for reads that are ready to run. Already-trimmed output is
   // deliberately still eligible -- trimming twice is unusual but legitimate,
   // and the dedup key stops an accidental repeat of the same settings.
@@ -346,6 +375,22 @@ function ObjectDetail({ id }: { id: string }) {
           {formatBytes(obj.size)}
           {obj.format.kind !== "unknown" && ` · ${formatKindLabel(obj.format.kind)}`}
           {compression && ` · ${compression}`}
+          {/* Read-only here: the species is identifying enough to belong at the
+              top, but one editable control per field is enough, and it already
+              lives in the metadata form. Italic is the convention for a
+              scientific name and separates it from the format tokens without
+              changing the type. */}
+          {species && (
+            <>
+              {" · "}
+              <span
+                style={{ fontStyle: "italic" }}
+                title="Change under Metadata → Sample → Organism"
+              >
+                {species}
+              </span>
+            </>
+          )}
         </div>
 
         {obj.status !== "ready" && obj.status !== "error" && (
@@ -367,242 +412,333 @@ function ObjectDetail({ id }: { id: string }) {
           </div>
         )}
 
-        <div className="section">
-          <div className="section-title">Format</div>
-          <dl className="kv">
-            <dt>Detected</dt>
-            <dd>{formatKindLabel(obj.format.kind)}</dd>
-            <dt>Compression</dt>
-            <dd>{compression ?? "None"}</dd>
-            <dt>Confidence</dt>
-            <dd>{obj.format.confidence}</dd>
-            {obj.format.detected_at && (
-              <>
-                <dt>Detected at</dt>
-                <dd>{formatDate(obj.format.detected_at)}</dd>
-              </>
-            )}
-          </dl>
-        </div>
+        <Tabs tabs={TABS} active={tab} onChange={setTab} idPrefix="obj" />
 
-        <div className="section">
-          <div
-            className="section-title"
-            style={{ display: "flex", alignItems: "center", gap: 8 }}
-          >
-            <span>{isReference ? "Assembly" : "Parsed facts"}</span>
-            <button
-              type="button"
-              onClick={() => reingest.mutate()}
-              disabled={reingest.isPending || !obj.blob_sha256}
-              style={{
-                marginLeft: "auto",
-                color: "var(--accent)",
-                fontSize: 11,
-                textTransform: "none",
-                letterSpacing: 0,
-              }}
-              title="Re-run format detection and header parsing"
-            >
-              {reingest.isPending ? "queued…" : "re-ingest"}
-            </button>
-          </div>
+        {tab === "qc" && (
+          <TabPanel id="qc" idPrefix="obj">
+            <QcTab obj={obj} isReference={isReference} reingest={reingest} />
+          </TabPanel>
+        )}
 
-          {Object.keys(obj.facts).length > 0 ? (
-            <>
-              {isReference ? (
-                <AssemblyFacts facts={obj.facts} />
-              ) : (
-                <FactsTable facts={obj.facts} />
-              )}
-              <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
-                {Array.isArray(obj.facts.base_composition) && (
-                  <div style={{ flex: "0 1 auto" }}>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-faint)",
-                        marginBottom: 6,
-                      }}
-                    >
-                      Base composition
-                    </div>
-                    <BaseCompositionChart
-                      composition={obj.facts.base_composition as never}
-                      sampledReads={obj.facts.stats_sampled_reads as number | undefined}
-                      sampledBases={obj.facts.stats_sampled_bases as number | undefined}
-                      gcPercent={obj.facts.gc_content_percent as number | undefined}
-                    />
-                  </div>
-                )}
-                {/* A FASTA carries no per-base qualities, so the quality curve
-                    is meaningless for a reference. */}
-                {!isReference && Array.isArray(obj.facts.quality_per_position) && (
-                  <div style={{ flex: "1 1 auto", minWidth: 300 }}>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        color: "var(--text-faint)",
-                        marginBottom: 6,
-                      }}
-                    >
-                      Quality per position
-                    </div>
-                    <QualityChart curve={obj.facts.quality_per_position as never} />
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-              {obj.status === "ingesting"
-                ? "Parsing headers…"
-                : "No header facts extracted for this format."}
-            </div>
-          )}
-        </div>
+        {tab === "metadata" && (
+          <TabPanel id="metadata" idPrefix="obj">
+            <MetadataTab
+              obj={obj}
+              isReference={isReference}
+              canIndex={canIndex}
+              onSave={(m) => save.mutate(m)}
+              saving={save.isPending}
+            />
+          </TabPanel>
+        )}
 
-        <div className="section">
-          <div className="section-title">Storage</div>
-          <dl className="kv">
-            <dt>SHA-256</dt>
-            <dd className="mono" title={obj.blob_sha256 ?? ""}>
-              {shortHash(obj.blob_sha256, 16)}
-            </dd>
-            {obj.blob && (
-              <>
-                <dt>State</dt>
-                <dd>
-                  <span className={`badge ${obj.blob.state}`}>{obj.blob.state}</span>
-                </dd>
-                <dt>Mode</dt>
-                <dd>{obj.blob.storage}</dd>
-                <dt>Path</dt>
-                <dd className="mono">
-                  {obj.blob.external_path ?? obj.blob.rel_path ?? "—"}
-                </dd>
-                <dt>References</dt>
-                <dd>
-                  {obj.blob.ref_count}
-                  {obj.blob.ref_count > 1 && (
-                    <span style={{ color: "var(--text-faint)" }}> (deduplicated)</span>
-                  )}
-                </dd>
-                <dt>Verified</dt>
-                <dd>{formatDate(obj.blob.last_verified_at)}</dd>
-              </>
-            )}
-          </dl>
-        </div>
-
-        {/* Before/after comparison, on the source file rather than the output:
-            "what did trimming do to my reads" is a question about the input. */}
-        <TrimReport facts={obj.facts} />
-
-        {/* On the BAM itself: whether an alignment is worth keeping is a
-            question about the output, not about the reads that went in. */}
-        <AlignmentReport facts={obj.facts} />
-
-        {/* Indexes are hidden from the explorer listing -- five files per
-            reference would bury real work -- so they surface here instead. */}
-        {canIndex && <IndexStatus object={obj} />}
-
-        <DerivedFiles object={obj} />
-
-        {/* SRA run/experiment accessions are the wrong archive for an
-            assembly; assembly_accession links to NCBI Datasets instead. */}
-        {!isReference && <SraPanel facts={obj.facts} formatKind={obj.format.kind} />}
-
-        <div className="section">
-          <div className="section-title">Metadata</div>
-          {/* Keyed on the role so a conversion remounts the editor: its schema
-              changes underneath, and in-progress edits belong to the previous
-              role's fields. Without this its dirty guard would keep them. */}
-          <SchemaMetadataEditor
-            key={obj.role ?? "none"}
-            value={obj.metadata}
-            formatKind={obj.format.kind}
-            role={obj.role}
-            onSave={(m) => save.mutate(m)}
-            saving={save.isPending}
-          />
-        </div>
-
-        <div className="section">
-          <div className="section-title">Tags</div>
-          <TagEditor
-            objectId={obj.id}
-            tags={obj.tags}
-            onChanged={() => qc.invalidateQueries({ queryKey: ["object", id] })}
-          />
-        </div>
-
-        <div className="section">
-          <div className="section-title">Record</div>
-          <dl className="kv">
-            <dt>Created</dt>
-            <dd>{formatDate(obj.created_at)}</dd>
-            <dt>Updated</dt>
-            <dd>{formatDate(obj.updated_at)}</dd>
-            <dt>ID</dt>
-            <dd className="mono">{obj.id}</dd>
-          </dl>
-        </div>
-
-        <RoleConverter obj={obj} />
-
-        <div className="section">
-          <div className="section-title">Delete</div>
-
-          {!confirmingDelete ? (
-            <div>
-              <button
-                type="button"
-                className="btn danger"
-                onClick={() => setConfirmingDelete(true)}
-              >
-                Delete file
-              </button>
-              <div
-                style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}
-              >
-                {obj.blob?.storage === "external"
-                  ? "Removes this entry. The original file on disk is left untouched."
-                  : (obj.blob?.ref_count ?? 0) > 1
-                    ? `Removes this entry. ${obj.blob!.ref_count - 1} other file(s) share the same content, so the stored data is kept.`
-                    : "Removes this entry. The stored data is reclaimed later by garbage collection."}
-              </div>
-            </div>
-          ) : (
-            <div className="error-box" style={{ marginBottom: 0 }}>
-              <div style={{ marginBottom: 8 }}>
-                Delete <strong>{obj.name}</strong>? This cannot be undone.
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="btn danger"
-                  onClick={() => remove.mutate()}
-                  disabled={remove.isPending}
-                >
-                  {remove.isPending ? "Deleting…" : "Yes, delete"}
-                </button>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => setConfirmingDelete(false)}
-                  disabled={remove.isPending}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        {tab === "actions" && (
+          <TabPanel id="actions" idPrefix="obj">
+            <ActionsTab
+              obj={obj}
+              confirmingDelete={confirmingDelete}
+              setConfirmingDelete={setConfirmingDelete}
+              remove={remove}
+              onTagsChanged={() => qc.invalidateQueries({ queryKey: ["object", id] })}
+            />
+          </TabPanel>
+        )}
       </div>
 
       {trimOpen && <TrimDialog object={obj} onClose={() => setTrimOpen(false)} />}
       {alignOpen && <AlignDialog object={obj} onClose={() => setAlignOpen(false)} />}
     </div>
+  );
+}
+
+/**
+ * Whether the file is any good: what the parser found in it, and what the
+ * pipeline steps did to it. Trim and alignment reports render nothing when
+ * their facts are absent, so an untrimmed FASTQ shows only facts and charts.
+ */
+function QcTab({
+  obj,
+  isReference,
+  reingest,
+}: {
+  obj: ObjectDetailData;
+  isReference: boolean;
+  reingest: { mutate: () => void; isPending: boolean };
+}) {
+  return (
+    <>
+      <div className="section">
+        <div
+          className="section-title"
+          style={{ display: "flex", alignItems: "center", gap: 8 }}
+        >
+          <span>{isReference ? "Assembly" : "Parsed facts"}</span>
+          <button
+            type="button"
+            onClick={() => reingest.mutate()}
+            disabled={reingest.isPending || !obj.blob_sha256}
+            style={{
+              marginLeft: "auto",
+              color: "var(--accent)",
+              fontSize: 11,
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+            title="Re-run format detection and header parsing"
+          >
+            {reingest.isPending ? "queued…" : "re-ingest"}
+          </button>
+        </div>
+
+        {Object.keys(obj.facts).length > 0 ? (
+          <>
+            {isReference ? (
+              <AssemblyFacts facts={obj.facts} />
+            ) : (
+              <FactsTable facts={obj.facts} />
+            )}
+            <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
+              {Array.isArray(obj.facts.base_composition) && (
+                <div style={{ flex: "0 1 auto" }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-faint)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Base composition
+                  </div>
+                  <BaseCompositionChart
+                    composition={obj.facts.base_composition as never}
+                    sampledReads={obj.facts.stats_sampled_reads as number | undefined}
+                    sampledBases={obj.facts.stats_sampled_bases as number | undefined}
+                    gcPercent={obj.facts.gc_content_percent as number | undefined}
+                  />
+                </div>
+              )}
+              {/* A FASTA carries no per-base qualities, so the quality curve
+                  is meaningless for a reference. */}
+              {!isReference && Array.isArray(obj.facts.quality_per_position) && (
+                <div style={{ flex: "1 1 auto", minWidth: 300 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "var(--text-faint)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    Quality per position
+                  </div>
+                  <QualityChart curve={obj.facts.quality_per_position as never} />
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+            {obj.status === "ingesting"
+              ? "Parsing headers…"
+              : "No header facts extracted for this format."}
+          </div>
+        )}
+      </div>
+
+      {/* Before/after comparison, on the source file rather than the output:
+          "what did trimming do to my reads" is a question about the input. */}
+      <TrimReport facts={obj.facts} />
+
+      {/* On the BAM itself: whether an alignment is worth keeping is a
+          question about the output, not about the reads that went in. */}
+      <AlignmentReport facts={obj.facts} />
+    </>
+  );
+}
+
+/** What the file is and where it came from. */
+function MetadataTab({
+  obj,
+  isReference,
+  canIndex,
+  onSave,
+  saving,
+}: {
+  obj: ObjectDetailData;
+  isReference: boolean;
+  canIndex: boolean;
+  onSave: (metadata: Record<string, unknown>) => void;
+  saving: boolean;
+}) {
+  const compression = compressionLabel(obj.format.compression);
+
+  return (
+    <>
+      <div className="section">
+        <div className="section-title">Format</div>
+        <dl className="kv">
+          <dt>Detected</dt>
+          <dd>{formatKindLabel(obj.format.kind)}</dd>
+          <dt>Compression</dt>
+          <dd>{compression ?? "None"}</dd>
+          <dt>Confidence</dt>
+          <dd>{obj.format.confidence}</dd>
+          {obj.format.detected_at && (
+            <>
+              <dt>Detected at</dt>
+              <dd>{formatDate(obj.format.detected_at)}</dd>
+            </>
+          )}
+        </dl>
+      </div>
+
+      <div className="section">
+        <div className="section-title">Storage</div>
+        <dl className="kv">
+          <dt>SHA-256</dt>
+          <dd className="mono" title={obj.blob_sha256 ?? ""}>
+            {shortHash(obj.blob_sha256, 16)}
+          </dd>
+          {obj.blob && (
+            <>
+              <dt>State</dt>
+              <dd>
+                <span className={`badge ${obj.blob.state}`}>{obj.blob.state}</span>
+              </dd>
+              <dt>Mode</dt>
+              <dd>{obj.blob.storage}</dd>
+              <dt>Path</dt>
+              <dd className="mono">
+                {obj.blob.external_path ?? obj.blob.rel_path ?? "—"}
+              </dd>
+              <dt>References</dt>
+              <dd>
+                {obj.blob.ref_count}
+                {obj.blob.ref_count > 1 && (
+                  <span style={{ color: "var(--text-faint)" }}> (deduplicated)</span>
+                )}
+              </dd>
+              <dt>Verified</dt>
+              <dd>{formatDate(obj.blob.last_verified_at)}</dd>
+            </>
+          )}
+        </dl>
+      </div>
+
+      {/* Indexes are hidden from the explorer listing -- five files per
+          reference would bury real work -- so they surface here instead. */}
+      {canIndex && <IndexStatus object={obj} />}
+
+      <DerivedFiles object={obj} />
+
+      {/* SRA run/experiment accessions are the wrong archive for an
+          assembly; assembly_accession links to NCBI Datasets instead. */}
+      {!isReference && <SraPanel facts={obj.facts} formatKind={obj.format.kind} />}
+
+      <div className="section">
+        <div className="section-title">Metadata</div>
+        {/* Keyed on the role so a conversion remounts the editor: its schema
+            changes underneath, and in-progress edits belong to the previous
+            role's fields. Without this its dirty guard would keep them. */}
+        <SchemaMetadataEditor
+          key={obj.role ?? "none"}
+          value={obj.metadata}
+          formatKind={obj.format.kind}
+          role={obj.role}
+          onSave={onSave}
+          saving={saving}
+        />
+      </div>
+
+      <div className="section">
+        <div className="section-title">Record</div>
+        <dl className="kv">
+          <dt>Created</dt>
+          <dd>{formatDate(obj.created_at)}</dd>
+          <dt>Updated</dt>
+          <dd>{formatDate(obj.updated_at)}</dd>
+          <dt>ID</dt>
+          <dd className="mono">{obj.id}</dd>
+        </dl>
+      </div>
+    </>
+  );
+}
+
+/** The operations that change the record rather than describe it. */
+function ActionsTab({
+  obj,
+  confirmingDelete,
+  setConfirmingDelete,
+  remove,
+  onTagsChanged,
+}: {
+  obj: ObjectDetailData;
+  confirmingDelete: boolean;
+  setConfirmingDelete: (v: boolean) => void;
+  remove: { mutate: () => void; isPending: boolean };
+  onTagsChanged: () => void;
+}) {
+  return (
+    <>
+      <div className="section">
+        <div className="section-title">Tags</div>
+        <TagEditor
+          objectId={obj.id}
+          tags={obj.tags}
+          onChanged={onTagsChanged}
+        />
+      </div>
+
+      <RoleConverter obj={obj} />
+
+      <div className="section">
+        <div className="section-title">Delete</div>
+
+        {!confirmingDelete ? (
+          <div>
+            <button
+              type="button"
+              className="btn danger"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              Delete file
+            </button>
+            <div
+              style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}
+            >
+              {obj.blob?.storage === "external"
+                ? "Removes this entry. The original file on disk is left untouched."
+                : (obj.blob?.ref_count ?? 0) > 1
+                  ? `Removes this entry. ${obj.blob!.ref_count - 1} other file(s) share the same content, so the stored data is kept.`
+                  : "Removes this entry. The stored data is reclaimed later by garbage collection."}
+            </div>
+          </div>
+        ) : (
+          <div className="error-box" style={{ marginBottom: 0 }}>
+            <div style={{ marginBottom: 8 }}>
+              Delete <strong>{obj.name}</strong>? This cannot be undone.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn danger"
+                onClick={() => remove.mutate()}
+                disabled={remove.isPending}
+              >
+                {remove.isPending ? "Deleting…" : "Yes, delete"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setConfirmingDelete(false)}
+                disabled={remove.isPending}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
   );
 }

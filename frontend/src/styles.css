@@ -429,6 +429,60 @@ textarea:focus {
   margin-bottom: 18px;
 }
 
+/* Tab strip in the detail panel. The panel body is the only scroll container,
+   so the strip sticks to its top rather than scrolling away from the sections
+   it switches between. It needs an opaque background of its own for that -- the
+   content scrolls underneath it. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* Cancels .detail's padding so the bottom rule spans the full panel width,
+     then puts it back on the buttons. */
+  margin: 0 -16px 16px;
+  padding: 0 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+  cursor: pointer;
+  /* Sits on top of the strip's own rule rather than below it. */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  color: var(--text-dim);
+}
+
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+/* The panel is focusable so keyboard users can scroll it, but it is a container
+   rather than a control -- a ring around the whole tab body reads as an error. */
+[role="tabpanel"]:focus {
+  outline: none;
+}
+
 .section {
   margin-bottom: 22px;
 }
