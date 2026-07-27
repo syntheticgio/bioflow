@@ -21,6 +21,10 @@ class JobClass(StrEnum):
     USER_INTERACTIVE = "user_interactive"  # the user is watching
     USER_BACKGROUND = "user_background"  # follow-up to the user's own action
     MAINTENANCE = "maintenance"  # verification, GC
+    # Pipeline execution: trimming, alignment. Deliberately below maintenance
+    # and never promoted -- a multi-hour fastp run that ages into the
+    # user-interactive tier would be exactly backwards.
+    COMPUTE = "compute"
     BULK = "bulk"  # whole-library sweeps
 
 

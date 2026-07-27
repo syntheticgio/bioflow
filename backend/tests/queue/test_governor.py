@@ -9,6 +9,8 @@ A fake clock is injected throughout -- no sleep() anywhere, so the suite stays
 fast and deterministic.
 """
 
+import inspect
+
 import pytest
 
 from app.models import JobClass
@@ -24,6 +26,7 @@ from app.queue.governor import (
     LoadGovernor,
     LoadSample,
 )
+from app.queue.worker import Worker
 
 
 class FakeClock:
@@ -174,6 +177,32 @@ class TestUserInteractiveNeverBlocked:
         assert JobClass.MAINTENANCE.value not in allowed
         assert JobClass.BULK.value not in allowed
         assert JobClass.USER_BACKGROUND.value in allowed
+
+
+class TestComputeAdmission:
+    def test_admitted_only_when_open(self, gov):
+        """A pipeline run is the heaviest thing the system does, so it is the
+        first work shed when the machine is under any strain."""
+        gov.state = AdmissionState.OPEN
+        assert JobClass.COMPUTE.value in gov.allowed_classes()
+
+        for state in (AdmissionState.THROTTLED, AdmissionState.CLOSED):
+            gov.state = state
+            assert JobClass.COMPUTE.value not in gov.allowed_classes(), state
+
+    def test_starvation_escape_is_limited_to_maintenance(self):
+        """Compute must not inherit the escape hatch.
+
+        The 30-minute override exists because a verify_files that never runs
+        fails *silently*. A waiting pipeline run is visible as waiting in the
+        activity view, and forcing a multi-hour job onto an already-strained
+        machine is precisely what the governor is for. Asserted against the
+        source because the alternative -- generalizing the escape to "any
+        deferred class" -- is a plausible future edit that reads as a cleanup.
+        """
+        source = inspect.getsource(Worker._try_claim)
+        assert "JobClass.MAINTENANCE.value" in source
+        assert "JobClass.COMPUTE" not in source
 
 
 class TestRampUp:

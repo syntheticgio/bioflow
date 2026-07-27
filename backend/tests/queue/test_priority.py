@@ -27,6 +27,7 @@ class TestOrdering:
             scores[JobClass.USER_INTERACTIVE]
             < scores[JobClass.USER_BACKGROUND]
             < scores[JobClass.MAINTENANCE]
+            < scores[JobClass.COMPUTE]
             < scores[JobClass.BULK]
         )
 
@@ -117,3 +118,38 @@ class TestPromotion:
                 job_class, NOW - timedelta(seconds=threshold + 1)
             )
             assert waited <= promotion_cutoff_score(job_class, NOW), job_class
+
+
+class TestComputeClass:
+    """Compute sits below maintenance and never ages upward.
+
+    Pipeline runs are long and expensive. Promoting one into the tier the user
+    is actively watching would let a multi-hour fastp job crowd out the UI --
+    the opposite of what the tiering is for.
+    """
+
+    def test_compute_yields_to_maintenance(self):
+        assert compute_score(JobClass.MAINTENANCE, NOW) < compute_score(JobClass.COMPUTE, NOW)
+
+    def test_compute_outranks_bulk(self):
+        """A run the user launched still beats a whole-library sweep."""
+        assert compute_score(JobClass.COMPUTE, NOW) < compute_score(JobClass.BULK, NOW)
+
+    def test_compute_does_not_promote(self):
+        assert promoted_score(compute_score(JobClass.COMPUTE, NOW), JobClass.COMPUTE) is None
+
+    def test_compute_has_no_promotion_threshold(self):
+        assert JobClass.COMPUTE not in PROMOTION_AFTER_SECONDS
+
+    def test_an_ancient_compute_job_still_loses_to_fresh_user_work(self):
+        """The consequence of never promoting: no amount of waiting lets a
+        pipeline run jump the queue ahead of the user."""
+        ancient = compute_score(JobClass.COMPUTE, datetime(2026, 1, 1, tzinfo=UTC))
+        fresh = compute_score(JobClass.USER_INTERACTIVE, datetime(2099, 1, 1, tzinfo=UTC))
+        assert fresh < ancient
+
+    def test_bulk_promotion_skips_the_compute_band(self):
+        """Bulk promotes to maintenance, not into compute. Promotion is an
+        escape from starvation, so it must land in a tier that actually runs."""
+        promoted = promoted_score(compute_score(JobClass.BULK, NOW), JobClass.BULK)
+        assert class_of_score(promoted) is JobClass.MAINTENANCE
