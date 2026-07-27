@@ -68,6 +68,13 @@ const SUPPRESSED = new Set([
   "quality_per_position",
   "stats_sampled_reads",
   "stats_sampled_bases",
+  // Trimming has its own before/after section; see TrimReport. The raw report
+  // is a nested object that the generic renderer would print as [object Object].
+  "trim_report",
+  "trim_outputs",
+  "trim_params",
+  "trimmed_by",
+  "trim_tool_version",
 ]);
 
 const ORDER = [

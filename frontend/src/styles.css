@@ -931,3 +931,150 @@ textarea:focus {
   color: var(--text-faint);
   font-weight: 400;
 }
+
+/* --- Trim dialog --- */
+
+.trim-modal {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.trim-inputs {
+  background: var(--bg-elevated);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin-bottom: 12px;
+}
+
+.trim-file {
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.trim-mate-note {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+
+.trim-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  margin-top: 6px;
+  cursor: pointer;
+}
+
+.trim-check input {
+  margin-top: 2px;
+  width: auto;
+}
+
+.trim-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  margin-bottom: 10px;
+}
+
+.trim-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.trim-fields label small {
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.trim-fields .trim-wide {
+  grid-column: 1 / -1;
+}
+
+.trim-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 4px 0;
+  margin-bottom: 6px;
+}
+
+.trim-chevron {
+  display: inline-block;
+  width: 10px;
+  color: var(--text-faint);
+}
+
+.trim-advanced-toggle:hover {
+  color: var(--text);
+}
+
+/* --- Trim report --- */
+
+.trim-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.trim-table th,
+.trim-table td {
+  text-align: right;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trim-table thead th {
+  color: var(--text-faint);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.trim-table tbody th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 400;
+}
+
+/* --- Derived files --- */
+
+.derived-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  text-align: left;
+}
+
+.derived-row:hover {
+  background: var(--bg-hover);
+}
+
+.derived-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+.derived-meta {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}

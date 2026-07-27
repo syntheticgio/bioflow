@@ -18,6 +18,9 @@ import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { RoleConverter } from "./RoleConverter";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
+import { DerivedFiles } from "./DerivedFiles";
+import { TrimDialog } from "./TrimDialog";
+import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
 import { TagEditor } from "./TagEditor";
 
@@ -209,6 +212,7 @@ function ObjectDetail({ id }: { id: string }) {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [trimOpen, setTrimOpen] = useState(false);
 
   const clearSelection = () => {
     const next = new URLSearchParams(params);
@@ -284,10 +288,26 @@ function ObjectDetail({ id }: { id: string }) {
 
   const isReference = obj.role === "reference";
 
+  // Offered for reads that are ready to run. Already-trimmed output is
+  // deliberately still eligible -- trimming twice is unusual but legitimate,
+  // and the dedup key stops an accidental repeat of the same settings.
+  const canTrim = obj.status === "ready" && obj.format.kind === "fastq";
+
   return (
     <div className="panel">
       <div className="panel-header">
         <span className="panel-title">{isReference ? "Reference" : "File"}</span>
+        {canTrim && (
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 8 }}
+            onClick={() => setTrimOpen(true)}
+            title="Adapter-trim and quality-filter these reads"
+          >
+            Trim
+          </button>
+        )}
         <span className={`badge ${obj.status}`} style={{ marginLeft: "auto" }}>
           {obj.status}
         </span>
@@ -448,6 +468,12 @@ function ObjectDetail({ id }: { id: string }) {
           </dl>
         </div>
 
+        {/* Before/after comparison, on the source file rather than the output:
+            "what did trimming do to my reads" is a question about the input. */}
+        <TrimReport facts={obj.facts} />
+
+        <DerivedFiles object={obj} />
+
         {/* SRA run/experiment accessions are the wrong archive for an
             assembly; assembly_accession links to NCBI Datasets instead. */}
         {!isReference && <SraPanel facts={obj.facts} formatKind={obj.format.kind} />}
@@ -539,6 +565,8 @@ function ObjectDetail({ id }: { id: string }) {
           )}
         </div>
       </div>
+
+      {trimOpen && <TrimDialog object={obj} onClose={() => setTrimOpen(false)} />}
     </div>
   );
 }
