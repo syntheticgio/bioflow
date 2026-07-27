@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
@@ -37,25 +38,34 @@ function Shell() {
     window.addEventListener("mouseup", up);
   };
 
+  // The activity view is a single full-width list: there is no left-hand tree
+  // to sit beside, and squeezing it into the explorer's column truncates every
+  // filename it exists to show. Selecting a row navigates to the explorer,
+  // which is where the detail panel lives.
+  const singleColumn = useLocation().pathname === "/activity";
+
   return (
     <div className="shell">
       <Header />
       <div
-        className="main"
+        className={`main${singleColumn ? " main-single" : ""}`}
         style={{ ["--left-w" as string]: `${panelWidth}px` }}
       >
         <Routes>
           <Route path="/" element={<ProjectExplorer />} />
           <Route path="/p/:projectId" element={<ProjectExplorer />} />
           <Route path="/search" element={<SearchView />} />
+          <Route path="/activity" element={<ActivityView />} />
         </Routes>
-        <DetailPanel />
+        {!singleColumn && <DetailPanel />}
       </div>
-      <div
-        className="splitter"
-        style={{ left: panelWidth - 2 }}
-        onMouseDown={startResize}
-      />
+      {!singleColumn && (
+        <div
+          className="splitter"
+          style={{ left: panelWidth - 2 }}
+          onMouseDown={startResize}
+        />
+      )}
       <Footer streamConnected={connected} />
       <UploadTray />
     </div>

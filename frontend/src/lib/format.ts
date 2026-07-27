@@ -115,3 +115,18 @@ export function accessionUrl(key: string, value: unknown): string | null {
 export function isAccessionField(key: string): boolean {
   return key in ACCESSION_LINKS;
 }
+
+/**
+ * Elapsed or remaining time, at a resolution that suits the magnitude.
+ *
+ * Carries hours because pipeline runs reach them; "184m 12s" is technically
+ * correct and useless at a glance.
+ */
+export function formatDuration(ms: number): string {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, "0")}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+}

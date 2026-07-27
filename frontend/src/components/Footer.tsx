@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useMessageStore } from "../stores/messageStore";
 
@@ -22,9 +23,13 @@ export function Footer({ streamConnected = false }: { streamConnected?: boolean 
       </span>
 
       {queue && (
-        <span title="Queued / running jobs">
+        <Link
+          to="/activity"
+          className="footer-link"
+          title="Show running and queued jobs"
+        >
           {queue.ready + queue.delayed} queued · {queue.running} running
-        </span>
+        </Link>
       )}
 
       {data && (

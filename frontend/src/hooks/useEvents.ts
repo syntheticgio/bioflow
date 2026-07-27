@@ -24,7 +24,12 @@ export function useEvents() {
       const keys = Array.from(pending.current);
       pending.current.clear();
       for (const key of keys) {
-        if (key === "jobs") qc.invalidateQueries({ queryKey: ["jobs"] });
+        if (key === "jobs") {
+          qc.invalidateQueries({ queryKey: ["jobs"] });
+          // Singular too: IngestProgress and the activity view watch one job
+          // at a time, and without this a running job's detail never refreshes.
+          qc.invalidateQueries({ queryKey: ["job"] });
+        }
         if (key === "objects") {
           qc.invalidateQueries({ queryKey: ["objects"] });
           qc.invalidateQueries({ queryKey: ["object"] });
