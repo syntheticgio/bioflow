@@ -214,19 +214,39 @@ def _params_fingerprint(params: dict) -> str:
 ALIGNABLE_KINDS = {FormatKind.FASTQ}
 REFERENCE_KINDS = {FormatKind.FASTA}
 
-# The metadata vocabulary is human-facing ("Illumina NovaSeq"); SAM's PL field
-# has its own controlled vocabulary, and a value outside it makes downstream
-# callers behave inconsistently -- GATK warns and some tools silently treat the
-# platform as unknown. Mapped rather than passed through for that reason.
-_SAM_PLATFORMS: dict[str, str] = {
-    "illumina novaseq": "ILLUMINA",
-    "illumina nextseq": "ILLUMINA",
-    "illumina miseq": "ILLUMINA",
-    "illumina hiseq": "ILLUMINA",
-    "oxford nanopore": "ONT",
-    "pacbio": "PACBIO",
-    "element": "ELEMENT",
-}
+# The metadata vocabulary is human-facing; SAM's PL field has its own
+# controlled vocabulary, and a value outside it makes downstream callers behave
+# inconsistently -- GATK warns and some tools silently treat the platform as
+# unknown. Mapped rather than passed through for that reason.
+#
+# Matched on *substrings* rather than by exact label, because the values that
+# actually land in `metadata.platform` are instrument models, not dropdown
+# entries: SRA enrichment writes INSTRUMENT_MODEL, so a real file says
+# "NextSeq 550" and never "Illumina NextSeq". An exact-match table read every
+# such file as OTHER.
+#
+# Ordered, and specific before general: "DNBSEQ" has to be tested before the
+# bare "seq" family names it contains, and "Illumina" last so a model name that
+# happens to mention the vendor does not outrank its own instrument family.
+_SAM_PLATFORM_PATTERNS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("nanopore", "minion", "gridion", "promethion", "flongle"), "ONT"),
+    (("pacbio", "sequel", "revio", "rs ii"), "PACBIO"),
+    (("dnbseq", "mgiseq", "bgiseq"), "BGI"),
+    (("ion torrent", "ion proton", "ion s5", "ion gene"), "IONTORRENT"),
+    (("454 gs", "gs flx", "gs junior"), "LS454"),
+    (("solid",), "SOLID"),
+    (("helicos",), "HELICOS"),
+    (("element", "aviti"), "ELEMENT"),
+    (("ultima",), "ULTIMA"),
+    (("singular", "g4"), "SINGULAR"),
+    (
+        (
+            "illumina", "novaseq", "nextseq", "miseq", "hiseq", "miniseq",
+            "iseq", "genome analyzer", "nova x",
+        ),
+        "ILLUMINA",
+    ),
+)
 
 # Which preset suits a platform's reads. The wrong one produces silently poor
 # alignments rather than an error, so this is a real default rather than a
@@ -238,10 +258,21 @@ _PLATFORM_PRESETS: dict[str, str] = {
 
 
 def sam_platform(metadata_platform: str | None) -> str:
-    """A SAM `PL` value from the user-facing platform label."""
+    """A SAM `PL` value from a platform label or instrument model.
+
+    Falls back to ILLUMINA when nothing is recorded -- the overwhelmingly
+    common case here, and a wrong guess is visible in the BAM header rather
+    than silent. An unrecognized *non-empty* value becomes OTHER, which is in
+    the SAM vocabulary; passing the raw label through would not be.
+    """
     if not metadata_platform:
         return "ILLUMINA"
-    return _SAM_PLATFORMS.get(metadata_platform.strip().lower(), "OTHER")
+
+    text = metadata_platform.strip().lower()
+    for needles, sam_value in _SAM_PLATFORM_PATTERNS:
+        if any(needle in text for needle in needles):
+            return sam_value
+    return "OTHER"
 
 
 def suggested_preset(sam_pl: str) -> str:
@@ -259,12 +290,38 @@ def default_read_group(obj: DataObject) -> dict:
     """
     metadata = obj.metadata or {}
     sample = metadata.get("sample_id") or Path(obj.name).name.split(".")[0]
-    library = metadata.get("library_prep") or metadata.get("library_id") or str(sample)
     return {
         "sample": str(sample),
-        "library": str(library),
+        "library": default_library(metadata, sample=str(sample)),
         "platform": sam_platform(metadata.get("platform")),
     }
+
+
+def default_library(metadata: dict, *, sample: str) -> str:
+    """The @RG `LB` value to offer, best available first.
+
+    An explicit library prep or id wins. Failing that the sequencing platform
+    stands in: reads off one instrument are normally one library, so the
+    instrument is a better guess than the sample name -- and it is the value
+    that distinguishes two libraries of the same sample, which is exactly what
+    LB exists to record.
+
+    The human-readable instrument is used rather than the SAM `PL` tag, since
+    "NextSeq 550" identifies a library run far better than "ILLUMINA" does.
+
+    The sample remains the last resort: LB is required, and a duplicate of the
+    sample name is at least honest about carrying no extra information.
+    """
+    for key in ("library_prep", "library_id"):
+        value = metadata.get(key)
+        if value:
+            return str(value)
+
+    platform = metadata.get("platform")
+    if platform and str(platform).strip():
+        return str(platform).strip()
+
+    return sample
 
 
 def default_align_params(obj: DataObject | None = None) -> dict:

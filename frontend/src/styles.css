@@ -1059,6 +1059,68 @@ textarea:focus {
   font-weight: 400;
 }
 
+/* --- Active pipeline jobs --- */
+
+.active-jobs {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.active-job {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.active-job:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.active-job-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* Only a running job pulses. A queued one is not doing anything yet, and
+   animating it would overstate what is happening. */
+.active-job.running .active-job-dot {
+  animation: active-job-pulse 1.6s ease-in-out infinite;
+}
+
+/* Blocked reads as waiting rather than working: it is held behind another
+   job, which is a different thing from being queued for capacity. */
+.active-job.blocked {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+}
+
+@keyframes active-job-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active-job.running .active-job-dot {
+    animation: none;
+  }
+}
+
 /* --- Alignment --- */
 
 /* A mapping rate this low usually means a wrong reference or the wrong preset

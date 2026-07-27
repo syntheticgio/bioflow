@@ -225,6 +225,8 @@ export const api = {
       /** Comma-separated states, or "active" for everything in flight. */
       states?: string;
       type?: string;
+      /** Jobs launched against one file. */
+      objectId?: string;
       limit?: number;
     } = {},
   ) => {
@@ -233,6 +235,7 @@ export const api = {
     if (opts.states) params.set("states", opts.states);
     else if (opts.state) params.set("state", opts.state);
     if (opts.type) params.set("type", opts.type);
+    if (opts.objectId) params.set("object_id", opts.objectId);
     params.set("limit", String(opts.limit ?? 50));
     return request<JobSummary[]>(`/jobs?${params}`);
   },

@@ -125,6 +125,8 @@ export type JobState =
   | "pending"
   | "queued"
   | "delayed"
+  /** Held until every job it depends on has succeeded. */
+  | "blocked"
   | "running"
   | "succeeded"
   | "failed"

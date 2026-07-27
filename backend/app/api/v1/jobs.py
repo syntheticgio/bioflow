@@ -106,6 +106,14 @@ async def list_jobs(
     job_type: str | None = Query(None, alias="type"),
     job_class: JobClass | None = Query(None, alias="class"),
     project_id: str | None = None,
+    object_id: str | None = Query(
+        None,
+        description=(
+            "Jobs launched against one file. Backed by the by_object index, so "
+            "the detail panel can ask 'is anything running on this?' without "
+            "scanning the queue."
+        ),
+    ),
     limit: int = Query(100, le=500),
 ) -> list[JobOut]:
     query: dict = {}
@@ -119,6 +127,8 @@ async def list_jobs(
         query["job_class"] = job_class.value
     if project_id:
         query["project_id"] = PydanticObjectId(project_id)
+    if object_id:
+        query["object_id"] = PydanticObjectId(object_id)
 
     jobs = await Job.find(query).sort("-created_at").limit(limit).to_list()
     return [JobOut.of(j) for j in jobs]

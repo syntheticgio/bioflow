@@ -19,6 +19,7 @@ import { MetadataEditor } from "./MetadataEditor";
 import { RoleConverter } from "./RoleConverter";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { DerivedFiles } from "./DerivedFiles";
+import { ActivePipelineJobs } from "./ActivePipelineJobs";
 import { AlignDialog } from "./AlignDialog";
 import { AlignmentReport } from "./AlignmentReport";
 import { IndexStatus } from "./IndexStatus";
@@ -331,6 +332,9 @@ function ObjectDetail({ id }: { id: string }) {
             Align
           </button>
         )}
+        {/* A reminder, not a guard: a second run with different settings is
+            legitimate, and the dedup key already stops an identical repeat. */}
+        <ActivePipelineJobs objectId={obj.id} />
         <span className={`badge ${obj.status}`} style={{ marginLeft: "auto" }}>
           {obj.status}
         </span>

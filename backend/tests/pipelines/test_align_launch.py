@@ -89,6 +89,47 @@ class TestSamPlatform:
         """Metadata is user-editable free text in practice."""
         assert pipeline_service.sam_platform("illumina novaseq") == "ILLUMINA"
 
+    @pytest.mark.parametrize(
+        ("model", "expected"),
+        [
+            # The bug this class of test exists for. SRA enrichment writes
+            # INSTRUMENT_MODEL into metadata.platform, so real files say
+            # "NextSeq 550" and never "Illumina NextSeq". An exact-match table
+            # read every SRA-enriched file as OTHER, and the BAM header said
+            # PL:OTHER for a perfectly ordinary Illumina run.
+            ("NextSeq 550", "ILLUMINA"),
+            ("NovaSeq X Plus", "ILLUMINA"),
+            ("HiSeq 2500", "ILLUMINA"),
+            ("MiSeq", "ILLUMINA"),
+            ("iSeq 100", "ILLUMINA"),
+            ("Illumina Genome Analyzer II", "ILLUMINA"),
+            ("MinION", "ONT"),
+            ("PromethION", "ONT"),
+            ("PacBio Sequel IIe", "PACBIO"),
+            ("Revio", "PACBIO"),
+            ("DNBSEQ-T7", "BGI"),
+            ("Ion Torrent S5", "IONTORRENT"),
+            ("454 GS FLX+", "LS454"),
+            ("AVITI", "ELEMENT"),
+        ],
+    )
+    def test_maps_instrument_models(self, model, expected):
+        assert pipeline_service.sam_platform(model) == expected
+
+    def test_a_long_read_instrument_selects_a_long_read_preset(self):
+        """The consequence of getting the mapping wrong: a PromethION run read
+        as OTHER would be aligned with the short-read preset, which produces
+        silently poor alignments rather than an error."""
+        assert (
+            pipeline_service.suggested_preset(
+                pipeline_service.sam_platform("PromethION")
+            )
+            == Preset.MAP_ONT
+        )
+
+    def test_whitespace_is_tolerated(self):
+        assert pipeline_service.sam_platform("  NextSeq 550  ") == "ILLUMINA"
+
     def test_unset_platform_defaults_to_illumina(self):
         """The overwhelmingly common case, and a defensible default: a wrong
         guess here is visible in the BAM header rather than silent."""
@@ -134,9 +175,49 @@ class TestDefaultReadGroup:
         rg = pipeline_service.default_read_group(FakeObject("SRR123456_R1.fastq.gz"))
         assert rg["sample"] == "SRR123456_R1"
 
-    def test_library_falls_back_to_the_sample(self):
-        """@RG requires LB, and one library per sample is the common case."""
+    def test_library_falls_back_to_the_platform(self):
+        """Reads off one instrument are normally one library, so the instrument
+        is a better guess than repeating the sample name -- and it is what
+        distinguishes two libraries of the same sample, which is what LB is
+        for."""
+        rg = pipeline_service.default_read_group(
+            FakeObject(metadata={"sample_id": "S1", "platform": "NextSeq 550"})
+        )
+        assert rg["library"] == "NextSeq 550"
+
+    def test_library_prefers_an_explicit_prep_over_the_platform(self):
+        rg = pipeline_service.default_read_group(
+            FakeObject(metadata={"sample_id": "S1", "library_prep": "TruSeq",
+                                 "platform": "NextSeq 550"})
+        )
+        assert rg["library"] == "TruSeq"
+
+    def test_library_prefers_a_library_id_over_the_platform(self):
+        rg = pipeline_service.default_read_group(
+            FakeObject(metadata={"sample_id": "S1", "library_id": "LIB-7",
+                                 "platform": "NextSeq 550"})
+        )
+        assert rg["library"] == "LIB-7"
+
+    def test_library_uses_the_readable_instrument_not_the_sam_tag(self):
+        """"NextSeq 550" identifies a library run; "ILLUMINA" does not."""
+        rg = pipeline_service.default_read_group(
+            FakeObject(metadata={"platform": "NextSeq 550"})
+        )
+        assert rg["library"] == "NextSeq 550"
+        assert rg["platform"] == "ILLUMINA"
+
+    def test_library_falls_back_to_the_sample_with_nothing_else(self):
+        """LB is required, and a duplicate of the sample name is at least
+        honest about carrying no extra information."""
         rg = pipeline_service.default_read_group(FakeObject(metadata={"sample_id": "S1"}))
+        assert rg["library"] == "S1"
+
+    def test_a_blank_platform_does_not_become_the_library(self):
+        """Whitespace-only metadata is an empty field, not a library name."""
+        rg = pipeline_service.default_read_group(
+            FakeObject(metadata={"sample_id": "S1", "platform": "   "})
+        )
         assert rg["library"] == "S1"
 
     def test_every_required_field_is_populated(self):
