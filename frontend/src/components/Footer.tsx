@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { useState } from "react";
 import { api } from "../api/client";
 import { useMessageStore } from "../stores/messageStore";
+import { QueuePanel } from "./QueuePanel";
 
 export function Footer({ streamConnected = false }: { streamConnected?: boolean }) {
   const latest = useMessageStore((s) => s.latest);
+  const [queueOpen, setQueueOpen] = useState(false);
 
   const { data, isError } = useQuery({
     queryKey: ["system", "stats"],
@@ -17,19 +19,22 @@ export function Footer({ streamConnected = false }: { streamConnected?: boolean 
   const queue = data?.queue;
 
   return (
+    <>
+      {queueOpen && <QueuePanel onClose={() => setQueueOpen(false)} />}
     <footer className="footer">
       <span className={`footer-message ${latest?.level ?? ""}`}>
         {latest?.text ?? "Ready"}
       </span>
 
       {queue && (
-        <Link
-          to="/activity"
+        <button
+          type="button"
           className="footer-link"
           title="Show running and queued jobs"
+          onClick={() => setQueueOpen((o) => !o)}
         >
           {queue.ready + queue.delayed} queued · {queue.running} running
-        </Link>
+        </button>
       )}
 
       {data && (
@@ -60,5 +65,6 @@ export function Footer({ streamConnected = false }: { streamConnected?: boolean 
               : "Connected"}
       </span>
     </footer>
+    </>
   );
 }

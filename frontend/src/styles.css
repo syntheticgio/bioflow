@@ -882,9 +882,14 @@ textarea:focus {
   flex-wrap: wrap;
 }
 
+/* A button, not a link: it toggles the queue panel rather than navigating.
+   Font and colour are set explicitly because a button inherits neither. */
 .footer-link {
-  color: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
   text-decoration: none;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .footer-link:hover {
@@ -1085,4 +1090,113 @@ textarea:focus {
   gap: 6px;
   color: var(--text-faint);
   flex-shrink: 0;
+}
+
+/* --- Queue slide-out --- */
+
+.queue-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.queue-panel {
+  position: fixed;
+  right: 12px;
+  bottom: calc(var(--footer-h) + 6px);
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  animation: queue-rise 0.12s ease-out;
+}
+
+@keyframes queue-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.queue-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.queue-panel-counts {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-rows {
+  overflow-y: auto;
+  /* Bounded so the panel cannot outgrow the window; the overflow count and
+     the activity link cover the rest. */
+  max-height: 46vh;
+}
+
+.queue-row {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.queue-row:last-child {
+  border-bottom: none;
+}
+
+.queue-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queue-row-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-row-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 3px;
+}
+
+.queue-empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.queue-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.queue-panel-foot a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.queue-panel-foot a:hover {
+  text-decoration: underline;
 }

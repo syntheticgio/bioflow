@@ -5,6 +5,7 @@ import shutil
 from fastapi import APIRouter
 
 from app.config import settings
+from app.db.client import get_db
 from app.logging import get_logger
 from app.models import Blob, DataObject, Project
 from app.storage.home import check_home
@@ -18,6 +19,16 @@ router = APIRouter(prefix="/system", tags=["system"])
 async def system_stats() -> dict:
     home = check_home()
 
+    # Free space is reported but not trusted for display. Under Docker
+    # Desktop's VirtioFS every path below BIOINFO_HOME returns the statfs of
+    # the filesystem hosting the *share root* (/Volumes), which is the Mac's
+    # boot disk rather than the external drive the data actually sits on --
+    # verified: 995 GB "total" against a drive that is really 3.7 TB. There is
+    # no path inside the container that reports otherwise.
+    #
+    # The governor still consults it, which is safe because the boot disk is
+    # the smaller of the two: the figure errs toward closing, never toward
+    # admitting work onto a full drive.
     disk = None
     if home.ok:
         try:
@@ -27,9 +38,20 @@ async def system_stats() -> dict:
                 "used_bytes": usage.used,
                 "free_bytes": usage.free,
                 "percent_used": round(usage.used / usage.total * 100, 1),
+                # Tells the UI not to present these as the drive's numbers.
+                "reliable": False,
             }
         except OSError:
             disk = None
+
+    # What the library itself occupies, which we can count exactly. Blobs are
+    # deduplicated, so summing blob sizes is the true on-disk cost -- summing
+    # object sizes would double-count shared content.
+    library_bytes = 0
+    async for row in get_db().blobs.aggregate(
+        [{"$group": {"_id": None, "total": {"$sum": "$size"}}}]
+    ):
+        library_bytes = row.get("total") or 0
 
     stats: dict = {
         "storage": {
@@ -37,6 +59,7 @@ async def system_stats() -> dict:
             "detail": home.detail,
             "path": home.path,
             "disk": disk,
+            "library_bytes": library_bytes,
         },
         "counts": {
             "projects": await Project.find(Project.archived == False).count(),  # noqa: E712

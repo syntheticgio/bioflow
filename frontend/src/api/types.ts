@@ -85,12 +85,20 @@ export interface SystemStats {
     ok: boolean;
     detail: string;
     path: string;
+    /**
+     * Docker Desktop's VirtioFS reports the statfs of the share root, not the
+     * external drive, so `reliable` is false and these are not shown as the
+     * drive's numbers. See system.py.
+     */
     disk: {
       total_bytes: number;
       used_bytes: number;
       free_bytes: number;
       percent_used: number;
+      reliable: boolean;
     } | null;
+    /** Bytes this library occupies. Summed over blobs, so dedup is accounted for. */
+    library_bytes: number;
   };
   counts: { projects: number; objects: number; blobs: number };
   queue: QueueStats | null;

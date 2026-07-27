@@ -21,7 +21,6 @@ export function Header() {
     refetchInterval: 15000,
   });
 
-  const disk = data?.storage.disk;
 
   return (
     <header className="header">
@@ -52,11 +51,16 @@ export function Header() {
 
       <div className="header-right">
         <LoadIndicator />
-        {disk && (
-          <div className="load-indicator" title={`Storage at ${data?.storage.path}`}>
-            <span>{formatBytes(disk.free_bytes)} free</span>
-            <span style={{ color: "var(--text-faint)" }}>·</span>
-            <span>{disk.percent_used}% used</span>
+        {/* Library size rather than free space: under Docker Desktop the
+            container cannot see the external drive's real capacity, and a
+            confidently wrong "192 GB free" is worse than not saying. This we
+            can count exactly. */}
+        {data && (
+          <div
+            className="load-indicator"
+            title={`${data.counts.objects} files at ${data.storage.path}`}
+          >
+            <span>{formatBytes(data.storage.library_bytes)} stored</span>
           </div>
         )}
       </div>
