@@ -655,3 +655,9 @@ async def reap_uploads(ctx: JobContext) -> dict:
     if removed:
         log.info("staging_reaped", removed=removed)
     return {"removed": removed}
+
+
+# Pipeline handlers live in their own module -- they shell out to external
+# tools and carry a different failure model -- but must be imported here, since
+# registry.load_handlers() imports only this one.
+from app.queue import pipeline_handlers  # noqa: E402, F401
