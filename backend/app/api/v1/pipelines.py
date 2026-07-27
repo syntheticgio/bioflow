@@ -7,8 +7,9 @@ from pydantic import BaseModel, Field
 from app.api.v1.jobs import JobOut
 from app.config import settings
 from app.errors import NotFoundError
-from app.models import DataObject
-from app.pipelines import tools
+from app.models import DataObject, ObjectStatus
+from app.pipelines import align_runner, tools
+from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
@@ -77,6 +78,106 @@ async def launch_trim(body: TrimRequest) -> JobOut:
     job = await pipeline_service.launch_trim(
         object_id=body.object_id,
         mate_object_id=body.mate_object_id,
+        params=body.params,
+        paired=body.paired,
+    )
+    return JobOut.of(job)
+
+
+class AlignRequest(BaseModel):
+    object_id: PydanticObjectId
+    reference_id: PydanticObjectId
+    mate_object_id: PydanticObjectId | None = None
+    paired: bool = True
+    read_group: dict = Field(default_factory=dict)
+    params: dict = Field(default_factory=dict)
+
+
+class BuildIndexRequest(BaseModel):
+    reference_id: PydanticObjectId
+    aligner: str = "minimap2"
+
+
+@router.get("/align/defaults/{object_id}")
+async def align_defaults(object_id: PydanticObjectId) -> dict:
+    """Defaults for the alignment dialog, including the read group.
+
+    Read-group fields come from the reads' own metadata, so the dialog is
+    usually a confirmation rather than data entry -- and the aligner defaults
+    to one that is actually installed, since bwa-mem2 is x86-64 only.
+    """
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    return {
+        "params": pipeline_service.default_align_params(obj),
+        "read_group": pipeline_service.default_read_group(obj),
+        "aligners": [
+            {
+                "name": a.value,
+                "available": (
+                    tools.bwa_mem2() if a.value == "bwa-mem2" else tools.minimap2()
+                ).available,
+            }
+            for a in Aligner
+        ],
+        "presets": list(align_runner.Preset.ALL),
+    }
+
+
+@router.get("/references/{project_id}")
+async def list_references(project_id: PydanticObjectId) -> dict:
+    """Candidate references in a project, each with its index status.
+
+    Index status rides along so the dialog can say "this will build an index
+    first" rather than surprising the user with a long job.
+    """
+    from app.services import object_service
+
+    objects = await object_service.list_objects(project_id, limit=500)
+    references = [
+        o
+        for o in objects
+        if o.format.kind in pipeline_service.REFERENCE_KINDS
+        and o.status is ObjectStatus.READY
+    ]
+
+    return {
+        "references": [
+            {
+                "object_id": str(o.id),
+                "name": o.name,
+                "size": o.size,
+                "role": o.role.value if o.role else None,
+                "indexes": await pipeline_service.reference_index_status(o),
+            }
+            for o in references
+        ]
+    }
+
+
+@router.post("/index", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def build_index(body: BuildIndexRequest) -> JobOut:
+    """Build an aligner index for a reference, eagerly.
+
+    The same job the alignment path queues when an index is missing, so there
+    is no second code path to keep correct.
+    """
+    job = await pipeline_service.launch_build_index(
+        reference_id=body.reference_id, aligner=body.aligner
+    )
+    return JobOut.of(job)
+
+
+@router.post("/align", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_alignment(body: AlignRequest) -> JobOut:
+    """Queue an alignment, building the reference index first if needed."""
+    job = await pipeline_service.launch_alignment(
+        object_id=body.object_id,
+        reference_id=body.reference_id,
+        mate_object_id=body.mate_object_id,
+        read_group=body.read_group,
         params=body.params,
         paired=body.paired,
     )

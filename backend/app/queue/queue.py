@@ -18,13 +18,13 @@ from app.db.redis_client import get_redis, get_script
 from app.logging import get_logger
 from app.models import (
     ACTIVE_STATES,
+    TERMINAL_STATES,
     Job,
     JobClass,
     JobLease,
     JobResources,
     JobState,
     JobTiming,
-    TERMINAL_STATES,
 )
 from app.queue import keys
 from app.queue.priority import (

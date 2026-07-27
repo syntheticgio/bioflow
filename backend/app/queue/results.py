@@ -18,10 +18,12 @@ from app.models import (
     IoClass,
     JobClass,
     JobResources,
+    JobState,
     ObjectRole,
     ObjectStatus,
     SidecarRole,
 )
+from app.pipelines.aligners import Aligner
 
 log = get_logger(__name__)
 
@@ -388,6 +390,61 @@ async def _apply_build_index(result: dict) -> None:
         aligner=result.get("aligner"),
         sidecars=len(created),
     )
+
+    await _supply_sidecars_to_blocked_alignments(reference, result.get("aligner"))
+
+
+async def _supply_sidecars_to_blocked_alignments(
+    reference: DataObject, aligner: str | None
+) -> None:
+    """Fill in the sidecar paths for alignments waiting on this index build.
+
+    An alignment queued against an unindexed reference is enqueued *before* the
+    index exists, so its payload cannot name sidecars that have not been built
+    yet. The handler runs in a worker thread and cannot query the database, so
+    the paths have to be written into the payload from here -- on the event
+    loop, after the sidecar objects exist and before the dependency gate
+    releases the job.
+
+    Without this the alignment materializes a reference with no index beside it
+    and fails with "Reference has no index available to this job".
+    """
+    from app.db.client import get_db
+    from app.services import pipeline_service
+
+    if not aligner:
+        return
+
+    try:
+        sidecars = await pipeline_service.sidecar_payload(
+            reference, Aligner(aligner)
+        )
+    except Exception as e:  # noqa: BLE001 - a bad lookup must not fail the index
+        log.error("sidecar_payload_failed", reference_id=str(reference.id), error=str(e))
+        return
+
+    if not sidecars:
+        return
+
+    # Every blocked alignment against this reference, whichever job it is
+    # waiting on: a second alignment queued behind the same build needs the
+    # same paths, and neither knows about the other.
+    result = await get_db().jobs.update_many(
+        {
+            "type": "align_reads",
+            "state": JobState.BLOCKED.value,
+            "payload.reference_object_id": str(reference.id),
+            "payload.aligner": aligner,
+        },
+        {"$set": {"payload.sidecars": sidecars}},
+    )
+    if result.modified_count:
+        log.info(
+            "sidecars_supplied",
+            reference_id=str(reference.id),
+            aligner=aligner,
+            jobs=result.modified_count,
+        )
 
 
 async def _apply_align_reads(result: dict) -> None:

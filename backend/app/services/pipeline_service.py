@@ -6,22 +6,29 @@ handler expects. Kept out of the router so the launch rules are testable
 without HTTP.
 """
 
+from pathlib import Path
+
 from beanie import PydanticObjectId
 
 from app.config import settings
 from app.errors import ConflictError, NotFoundError, ValidationError
 from app.logging import get_logger
 from app.models import (
+    ACTIVE_STATES,
     BlobStorage,
     DataObject,
     FormatKind,
     IoClass,
+    Job,
     JobClass,
     JobResources,
     ObjectStatus,
+    SidecarRole,
 )
-from app.pipelines import fastp_runner, pairing, tools
+from app.pipelines import align_runner, aligners, fastp_runner, pairing, tools
+from app.pipelines.aligners import Aligner
 from app.services import blob_service
+from app.storage.paths import blob_path
 
 log = get_logger(__name__)
 
@@ -200,3 +207,393 @@ def _params_fingerprint(params: dict) -> str:
 
     encoded = "|".join(f"{k}={params[k]}" for k in sorted(params))
     return hashlib.sha256(encoded.encode()).hexdigest()[:12]
+
+
+# --- Alignment --------------------------------------------------------------
+
+ALIGNABLE_KINDS = {FormatKind.FASTQ}
+REFERENCE_KINDS = {FormatKind.FASTA}
+
+# The metadata vocabulary is human-facing ("Illumina NovaSeq"); SAM's PL field
+# has its own controlled vocabulary, and a value outside it makes downstream
+# callers behave inconsistently -- GATK warns and some tools silently treat the
+# platform as unknown. Mapped rather than passed through for that reason.
+_SAM_PLATFORMS: dict[str, str] = {
+    "illumina novaseq": "ILLUMINA",
+    "illumina nextseq": "ILLUMINA",
+    "illumina miseq": "ILLUMINA",
+    "illumina hiseq": "ILLUMINA",
+    "oxford nanopore": "ONT",
+    "pacbio": "PACBIO",
+    "element": "ELEMENT",
+}
+
+# Which preset suits a platform's reads. The wrong one produces silently poor
+# alignments rather than an error, so this is a real default rather than a
+# convenience.
+_PLATFORM_PRESETS: dict[str, str] = {
+    "ONT": align_runner.Preset.MAP_ONT,
+    "PACBIO": align_runner.Preset.MAP_PB,
+}
+
+
+def sam_platform(metadata_platform: str | None) -> str:
+    """A SAM `PL` value from the user-facing platform label."""
+    if not metadata_platform:
+        return "ILLUMINA"
+    return _SAM_PLATFORMS.get(metadata_platform.strip().lower(), "OTHER")
+
+
+def suggested_preset(sam_pl: str) -> str:
+    """The minimap2 preset matching a platform, defaulting to short-read."""
+    return _PLATFORM_PRESETS.get(sam_pl, align_runner.Preset.SHORT_READ)
+
+
+def default_read_group(obj: DataObject) -> dict:
+    """Read-group fields defaulted from the reads' own metadata.
+
+    `sample_id` and `library_prep` are already in the schema, so this is
+    usually a confirmation rather than data entry. Falling back to the filename
+    for the sample keeps the dialog answerable for a file nobody has annotated
+    -- a placeholder the user can see and correct beats an empty required field.
+    """
+    metadata = obj.metadata or {}
+    sample = metadata.get("sample_id") or Path(obj.name).name.split(".")[0]
+    library = metadata.get("library_prep") or metadata.get("library_id") or str(sample)
+    return {
+        "sample": str(sample),
+        "library": str(library),
+        "platform": sam_platform(metadata.get("platform")),
+    }
+
+
+def default_align_params(obj: DataObject | None = None) -> dict:
+    """Server-owned alignment defaults, so the form does not encode its own.
+
+    The aligner defaults to whichever is actually usable: bwa-mem2 is x86-64
+    only, so on an arm64 host minimap2 is not merely preferred but the only
+    option, and offering a default that cannot run would be a dialog the user
+    has to fail at before learning that.
+    """
+    bwa = tools.bwa_mem2()
+    aligner = Aligner.BWA_MEM2 if bwa.available else Aligner.MINIMAP2
+
+    platform = sam_platform((obj.metadata or {}).get("platform")) if obj else "ILLUMINA"
+    preset = suggested_preset(platform)
+
+    # Long reads are minimap2's domain regardless of what else is installed:
+    # bwa-mem2 is a short-read aligner and would produce poor alignments.
+    if preset != align_runner.Preset.SHORT_READ:
+        aligner = Aligner.MINIMAP2
+
+    return align_runner.AlignParams(
+        aligner=aligner,
+        preset=preset if aligner is Aligner.MINIMAP2 else "",
+        threads=settings.pipeline_default_threads,
+        sort_memory_mb=settings.samtools_sort_mem_mb,
+    ).as_dict()
+
+
+def _check_alignable(obj: DataObject) -> None:
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready to align (status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind not in ALIGNABLE_KINDS:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not FASTQ reads",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+
+def _check_reference(obj: DataObject) -> None:
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready to use as a reference "
+            f"(status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind not in REFERENCE_KINDS:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not a FASTA reference",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+
+async def reference_index_status(reference: DataObject) -> dict:
+    """Which indexes a reference already has.
+
+    Keyed by content: sidecars attach to the reference object, and the same
+    genome registered twice shares one index because the blob is shared. That
+    falls out of content addressing rather than being designed in.
+    """
+    from app.services import object_service
+
+    sidecars = await object_service.list_sidecars(reference.id)
+    have = {s.sidecar_role for s in sidecars if s.sidecar_role}
+    return {
+        aligner.value: aligners.INDEX_ROLE[aligner] in have for aligner in Aligner
+    } | {"fai": SidecarRole.FAI in have}
+
+
+async def sidecar_payload(reference: DataObject, aligner: Aligner) -> dict:
+    """{stored name: blob path} for the sidecars an alignment needs.
+
+    Includes the `.fai` alongside the aligner's own index: samtools wants it
+    beside the reference, and materializing one without the other produces a
+    workdir that looks right and fails partway through.
+    """
+    from app.services import object_service
+
+    wanted = {aligners.INDEX_ROLE[aligner], SidecarRole.FAI}
+    payload: dict = {}
+    for sidecar in await object_service.list_sidecars(reference.id):
+        if sidecar.sidecar_role not in wanted or not sidecar.blob_sha256:
+            continue
+        digest, path = await _resolve_readable(sidecar)
+        payload[sidecar.name] = path or str(blob_path(digest))
+    return payload
+
+
+async def launch_build_index(
+    *, reference_id: PydanticObjectId, aligner: str | Aligner = Aligner.MINIMAP2
+):
+    """Queue an index build for one (reference, aligner) pair.
+
+    The eager entry point behind the explorer's **Build index** button. The
+    same job type the alignment path queues, so there is no second code path to
+    keep correct.
+    """
+    aligner = Aligner(aligner)
+    tools.require(_aligner_tool(aligner))
+    tools.require(tools.samtools())
+
+    reference = await DataObject.get(reference_id)
+    if reference is None:
+        raise NotFoundError(f"Reference not found: {reference_id}")
+    _check_reference(reference)
+
+    job = await _enqueue_build_index(reference, aligner)
+    if job is None:
+        raise ConflictError(
+            "An index for this reference is already being built",
+            details={"reference_id": str(reference.id), "aligner": aligner.value},
+        )
+    return job
+
+
+async def _enqueue_build_index(reference: DataObject, aligner: Aligner):
+    """Queue the index build, deduplicated on (reference blob, aligner)."""
+    from app.queue import queue
+
+    digest, path = await _resolve_readable(reference)
+    payload: dict = {
+        "reference_object_id": str(reference.id),
+        "project_id": str(reference.project_id),
+        "reference_name": reference.name,
+        "aligner": aligner.value,
+    }
+    if digest:
+        payload["reference_sha256"] = digest
+    if path:
+        payload["reference_path"] = path
+
+    # Keyed on the blob rather than the object: the same genome registered in
+    # two projects is one index, with no cross-project bookkeeping.
+    dedup_key = f"build_index:{digest or path}:{aligner.value}"
+
+    return await queue.enqueue(
+        "build_index",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=dedup_key,
+        project_id=reference.project_id,
+        object_id=reference.id,
+    )
+
+
+def _aligner_tool(aligner: Aligner):
+    return tools.bwa_mem2() if aligner is Aligner.BWA_MEM2 else tools.minimap2()
+
+
+async def launch_alignment(
+    *,
+    object_id: PydanticObjectId,
+    reference_id: PydanticObjectId,
+    mate_object_id: PydanticObjectId | None = None,
+    read_group: dict | None = None,
+    params: dict | None = None,
+    paired: bool = True,
+):
+    """Queue an alignment, building the reference index first if it is missing.
+
+    An alignment against an unindexed reference enqueues `build_index` and then
+    the alignment *behind it*, using the queue's dependency gate rather than a
+    delay: the alignment waits on the index job's completion, so a failed index
+    fails the alignment with a comprehensible reason instead of leaving it
+    queued forever.
+    """
+    from app.queue import queue
+
+    align_params = align_runner.AlignParams.from_dict(
+        {**default_align_params(), **(params or {})}
+    )
+    aligner = align_params.aligner
+    tools.require(_aligner_tool(aligner))
+    tools.require(tools.samtools())
+
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+    _check_alignable(obj)
+
+    reference = await DataObject.get(reference_id)
+    if reference is None:
+        raise NotFoundError(f"Reference not found: {reference_id}")
+    _check_reference(reference)
+    if reference.project_id != obj.project_id:
+        raise ValidationError("Reads and reference must be in the same project")
+
+    mate: DataObject | None = None
+    if paired:
+        mate = (
+            await DataObject.get(mate_object_id)
+            if mate_object_id is not None
+            else await suggest_mate(obj)
+        )
+        if mate_object_id is not None and mate is None:
+            raise NotFoundError(f"Mate object not found: {mate_object_id}")
+
+    if mate is not None:
+        if mate.id == obj.id:
+            raise ValidationError("A file cannot be its own mate")
+        if mate.project_id != obj.project_id:
+            raise ValidationError("Paired reads must be in the same project")
+        _check_alignable(mate)
+        # R1 leads, so the mates reach the aligner in the order it expects.
+        if pairing.mate_of(obj.name) == "R2" and pairing.mate_of(mate.name) == "R1":
+            obj, mate = mate, obj
+
+    rg = align_runner.ReadGroup.from_dict(
+        {**default_read_group(obj), **(read_group or {})}
+    )
+
+    # Build the index first if it is missing, and hold the alignment behind it.
+    status = await reference_index_status(reference)
+    needs_index = not status.get(aligner.value) or not status.get("fai")
+    depends_on = []
+    index_job = None
+    if needs_index:
+        index_job = await _enqueue_build_index(reference, aligner)
+        if index_job is not None:
+            depends_on.append(index_job.id)
+        else:
+            # Deduplicated away: an identical build is already queued or
+            # running. Wait on *that* job rather than racing it.
+            existing = await Job.find_one(
+                Job.type == "build_index",
+                Job.state.in_(list(ACTIVE_STATES)),
+                Job.object_id == reference.id,
+            )
+            if existing is not None:
+                depends_on.append(existing.id)
+
+    r1_digest, r1_path = await _resolve_readable(obj)
+    payload: dict = {
+        "object_id": str(obj.id),
+        "project_id": str(obj.project_id),
+        "reference_object_id": str(reference.id),
+        "reference_name": reference.name,
+        "r1_name": obj.name,
+        "aligner": aligner.value,
+        "params": align_params.as_dict(),
+        "read_group": rg.as_dict(),
+        "output_name": _bam_name(obj.name, rg.sample),
+    }
+    ref_digest, ref_path = await _resolve_readable(reference)
+    if ref_digest:
+        payload["reference_sha256"] = ref_digest
+    if ref_path:
+        payload["reference_path"] = ref_path
+    if r1_digest:
+        payload["r1_sha256"] = r1_digest
+    if r1_path:
+        payload["r1_path"] = r1_path
+
+    expected = obj.facts.get("read_count_estimate")
+    if isinstance(expected, int) and expected > 0:
+        payload["expected_reads"] = expected
+
+    if mate is not None:
+        r2_digest, r2_path = await _resolve_readable(mate)
+        payload["mate_object_id"] = str(mate.id)
+        payload["r2_name"] = mate.name
+        if r2_digest:
+            payload["r2_sha256"] = r2_digest
+        if r2_path:
+            payload["r2_path"] = r2_path
+
+    # Sidecars are resolved at launch when they already exist. When the index
+    # is being built in this same request they do not exist yet, so the handler
+    # re-resolves them -- see `align_reads`, which fails loudly rather than
+    # aligning against a reference whose index never materialized.
+    if not needs_index:
+        payload["sidecars"] = await sidecar_payload(reference, aligner)
+
+    dedup_key = "align:" + ":".join(
+        [
+            str(obj.id),
+            str(mate.id) if mate else "-",
+            str(reference.id),
+            _params_fingerprint(payload["params"]),
+        ]
+    )
+
+    job = await queue.enqueue(
+        "align_reads",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # The user's thread count, exactly as trim_reads declares it.
+        resources=JobResources(
+            cpu=align_params.threads, mem_mb=8192, io=IoClass.HEAVY
+        ),
+        max_attempts=2,
+        dedup_key=dedup_key,
+        project_id=obj.project_id,
+        object_id=obj.id,
+        depends_on=depends_on,
+    )
+    if job is None:
+        raise ConflictError(
+            "An identical alignment is already queued or running",
+            details={"object_id": str(obj.id)},
+        )
+
+    log.info(
+        "align_launched",
+        job_id=str(job.id),
+        object_id=str(obj.id),
+        reference_id=str(reference.id),
+        aligner=aligner.value,
+        index_job_id=str(index_job.id) if index_job else None,
+        waiting_on=[str(d) for d in depends_on],
+    )
+    return job
+
+
+def _bam_name(reads_name: str, sample: str) -> str:
+    """A BAM filename derived from the reads it came from.
+
+    The reads' stem is kept rather than the sample name alone, so two libraries
+    from one sample do not produce two files with the same name.
+    """
+    stem = Path(reads_name).name
+    for suffix in (".gz", ".bz2", ".zst"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+    stem = Path(stem).stem
+    stem = pairing.split_mate(stem)[0] if pairing.split_mate(stem) else stem
+    return f"{stem or sample}.bam"

@@ -17,7 +17,7 @@ from app.models import IoClass, JobClass, JobResources
 from app.pipelines import align_runner, aligners, tools
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
-from app.queue.pipeline_handlers import _failure, _log_tail, _prepare_workdir
+from app.queue.pipeline_handlers import _failure, _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.paths import blob_path
 
