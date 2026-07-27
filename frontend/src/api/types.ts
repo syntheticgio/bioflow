@@ -357,6 +357,58 @@ export interface MateSuggestion {
   mate: "R1" | "R2" | null;
 }
 
+/** What a user asked for, and the jobs that served it. */
+export type RunKind = "alignment" | "trim";
+
+/** Derived from member job states on the server, never stored. */
+export type RunStatus =
+  | "waiting"
+  | "running"
+  | "succeeded"
+  | "failed"
+  /** Finished, but an optional step (a header parse) did not succeed. */
+  | "partial";
+
+export type RunInputRole = "reads" | "mate" | "reference";
+
+export type RunJobRole = "index" | "align" | "trim" | "index_bam" | "ingest";
+
+export interface RunInput {
+  object_id: string;
+  name: string;
+  role: RunInputRole;
+}
+
+export interface RunSummary {
+  id: string;
+  kind: RunKind;
+  project_id: string;
+  label: string;
+  status: RunStatus;
+  inputs: RunInput[];
+  params: Record<string, unknown>;
+  outputs: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RunMemberJob {
+  job_id: string;
+  role: RunJobRole;
+  /** True when this run reused a job another run created. */
+  shared: boolean;
+  /** Null once the job has been pruned by the 30-day TTL. */
+  type: string | null;
+  state: JobState | null;
+  progress: JobSummary["progress"] | null;
+  error: { code: string; message: string; retryable: boolean } | null;
+  created_at: string | null;
+}
+
+export interface RunDetail extends RunSummary {
+  jobs: RunMemberJob[];
+}
+
 export type AlignerName = "bwa-mem2" | "minimap2";
 
 /** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */

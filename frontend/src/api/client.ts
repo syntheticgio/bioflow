@@ -18,6 +18,8 @@ import type {
   ProjectDetail,
   ReferenceOption,
   RegisterAccepted,
+  RunDetail,
+  RunSummary,
   ScheduleInfo,
   TimingEstimate,
   TrimDefaults,
@@ -242,6 +244,22 @@ export const api = {
 
   getJobLog: (id: string, tail = 200) =>
     request<JobLog>(`/jobs/${id}/log?tail=${tail}`),
+
+  /** Pipeline runs -- one per user action -- newest first, with derived status. */
+  listRuns: (opts: { projectId?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.projectId) params.set("project_id", opts.projectId);
+    params.set("limit", String(opts.limit ?? 50));
+    return request<RunSummary[]>(`/runs?${params}`);
+  },
+
+  getRun: (id: string) => request<RunDetail>(`/runs/${id}`),
+
+  cancelRun: (id: string) =>
+    request<{ run_id: string; jobs: Record<string, string> }>(
+      `/runs/${id}/cancel`,
+      { method: "POST" },
+    ),
 
   getJob: (id: string) =>
     request<JobSummary & { timing_estimate?: TimingEstimate }>(`/jobs/${id}`),
