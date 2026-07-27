@@ -134,6 +134,8 @@ async def _apply_ingest_headers(result: dict) -> None:
         ).update({"$set": {DataObject.role: ObjectRole.REFERENCE}})
         if not getattr(assigned, "modified_count", 0):
             log.info("assembly_role_skipped_raced", object_id=object_id)
+    await _link_mate(obj)
+
     log.info(
         "ingest_applied",
         object_id=object_id,
@@ -143,6 +145,71 @@ async def _apply_ingest_headers(result: dict) -> None:
         assembly=assembly_enrichment.get("accession"),
         assembly_fields=len(assembly_enrichment.get("values", {})),
     )
+
+
+async def _link_mate(obj: DataObject) -> None:
+    """Find this file's paired-end partner and link them to each other.
+
+    Runs after every ingest because the second half of a pair usually arrives
+    after the first: whichever lands last is the one that finds the match, and
+    it links both sides.
+
+    A link the user set is never overwritten -- same principle as role. The
+    filename convention is a strong hint, not a fact, and someone who corrected
+    it knows something the name does not say.
+    """
+    from app.pipelines import pairing
+
+    if obj.mate_object_id is not None:
+        return
+
+    split = pairing.split_mate(obj.name)
+    if split is None or not split[0]:
+        return
+
+    # Narrowed to the project, and to files that are not already paired. The
+    # candidate set is small enough that filtering names in Python beats
+    # encoding the convention as a database query.
+    candidates = await DataObject.find(
+        DataObject.project_id == obj.project_id,
+        DataObject.id != obj.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).to_list()
+
+    matches = [c for c in candidates if pairing.is_mate_of(obj.name, c.name)]
+    if len(matches) != 1:
+        # Zero is the common case (the mate has not been uploaded, or the file
+        # is single-end). More than one is genuinely ambiguous -- two files
+        # with the same name in one project -- and guessing would be worse than
+        # leaving it for the launch dialog to ask about.
+        if len(matches) > 1:
+            log.info(
+                "mate_ambiguous",
+                object_id=str(obj.id),
+                name=obj.name,
+                candidates=[str(m.id) for m in matches],
+            )
+        return
+
+    mate = matches[0]
+
+    # Conditional on both sides still being unpaired, so two ingests finishing
+    # at once cannot produce a half-formed link. Whichever write lands first
+    # wins; the loser sees a modified_count of zero and stops.
+    linked = await DataObject.find_one(
+        DataObject.id == mate.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).update({"$set": {DataObject.mate_object_id: obj.id}})
+    if not getattr(linked, "modified_count", 0):
+        log.info("mate_link_skipped_raced", object_id=str(obj.id), mate_id=str(mate.id))
+        return
+
+    await DataObject.find_one(
+        DataObject.id == obj.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).update({"$set": {DataObject.mate_object_id: mate.id}})
+
+    log.info("mate_linked", object_id=str(obj.id), mate_id=str(mate.id), name=obj.name)
 
 
 async def _apply_trim_reads(result: dict) -> None:
