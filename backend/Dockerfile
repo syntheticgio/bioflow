@@ -6,8 +6,24 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
+# Bioinformatics tools come from Debian rather than bioconda: the versions are
+# current (fastp 0.24.0, FastQC 0.12.1) and it avoids carrying a conda
+# installation for two binaries.
+#
+# fastqc needs a JRE, which is ~200MB of the image on its own. It earns that
+# only because its HTML report is the artifact people expect to hand to a
+# collaborator -- the before/after numbers the UI shows come from fastp's JSON
+# in a single pass, so nothing on the default path depends on it.
+#
+# Versions are recorded at build time and surfaced through the API: a set of
+# trimming parameters means nothing without the version of the tool that ran
+# them, and that ends up in a methods section.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        fastp \
+        fastqc \
+        default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # Dependencies first so the layer caches across source edits.

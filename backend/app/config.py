@@ -43,6 +43,21 @@ class Settings(BaseSettings):
     # network call; set false to keep the stack fully offline.
     assembly_enrichment_enabled: bool = True
 
+    # --- Pipelines ---
+    # Bare names by default, resolved on PATH; override with an absolute path
+    # to pin a specific build.
+    fastp_path: str = "fastp"
+    fastqc_path: str = "fastqc"
+
+    # Threads a single trim run may use. Deliberately well below the core count:
+    # the queue admits more than one compute job at a time, and fastp's own
+    # scaling flattens out past a handful of threads while the IO cost does not.
+    pipeline_default_threads: int = 4
+
+    # Captured job output is the only record of how a run actually went, but it
+    # is not worth keeping forever on a drive holding sequencing data.
+    pipeline_log_retention_days: int = 30
+
     log_level: str = "INFO"
     owner: str = "local"
 
