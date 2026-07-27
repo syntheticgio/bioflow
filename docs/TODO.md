@@ -2,6 +2,35 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+## The dedup index needs a manual rebuild to cover `blocked`
+
+Raised: 2026-07-27, during alignment.
+
+The job dependency gate added a `blocked` state, and `uniq_active_dedup_key` --
+the durable guard against enqueueing the same logical work twice -- filters on
+an explicit list of non-terminal states. That list now includes `"blocked"`.
+
+The catch is that `init_beanie` does not alter an index that already exists: it
+compares by name, sees `uniq_active_dedup_key` present, and leaves the old
+`partialFilterExpression` in place. A deployment with existing data therefore
+keeps an index that does not cover blocked jobs, and two identical alignments
+queued behind an index build would both be admitted rather than deduplicated.
+
+A fresh database is unaffected -- the index is created correctly the first time
+-- which is exactly why this will not show up in development.
+
+The fix is a one-line migration dropping the index so it is recreated:
+
+```js
+db.jobs.dropIndex("uniq_active_dedup_key")
+```
+
+Worth doing properly as the first entry in a migrations mechanism, which this
+project does not yet have. Until then it must be run by hand against any
+database that predates this change.
+
+Touches: `backend/app/models/job.py`, `backend/app/db/client.py`.
+
 ## The load governor watches the wrong disk
 
 Raised: 2026-07-27, during read preparation follow-up.
@@ -123,52 +152,6 @@ the reaper both already write there. Deferred because it is a correctness
 cleanup in code this feature only read.
 
 Touches: `backend/app/queue/queue.py`, `backend/app/queue/worker.py`.
-
-## Claim-time resource accounting ignores its own reservations
-
-Raised: 2026-07-27, during read preparation.
-
-`claim.lua` reserves a job's declared cpu/mem into `bp:conc:cpu` and
-`bp:conc:mem_mb`, and `release` gives them back. But `worker._free_resources`
-computes headroom from `in_flight` -- a *count of running jobs* -- and never
-reads those counters. So the reservation is maintained and never consulted.
-
-Before this feature every handler declared `cpu=1`, which made the count and the
-sum identical and the discrepancy invisible. `trim_reads` declares the user's
-thread count (4 by default, up to 16), so they now diverge: four single-CPU jobs
-and one 16-thread fastp look the same to admission.
-
-The fix is to read `bp:conc:cpu` in `_free_resources` rather than deriving from
-`in_flight`. The reason to be careful: the counters are the thing that can leak
-if a release is ever missed, whereas a job count cannot -- which may be why it
-was written this way. Any change wants a test that a crashed worker's
-reservations do not permanently shrink capacity.
-
-Touches: `backend/app/queue/worker.py`, `backend/app/queue/scripts/claim.lua`,
-`backend/app/queue/scripts/release.lua`.
-
-## The `io_heavy` cap counts all jobs, not heavy ones
-
-Raised: 2026-07-27, during read preparation.
-
-`worker._free_resources` computes `io_heavy` free capacity as
-`max(2 - in_flight, 0)`, where `in_flight` is every running job of any kind. The
-intent (documented on `IoClass.HEAVY`) is a throughput cap: more than two
-concurrent heavy readers on a FUSE mount is slower in aggregate than two.
-
-But with `worker_max_concurrent` at 4, four running *light* jobs -- header
-parsing, verification -- drive `io_heavy` to zero and block heavy claims
-entirely. A trim job can be starved by four trivial ones. The
-`reap_pipeline_scratch` and `verify_files` schedules make that combination
-routine rather than hypothetical.
-
-The fix is to track heavy jobs separately, either by counting them in the worker
-or by reading `bp:conc:io_heavy` (which `claim.lua` already maintains, and which
-has the same leak consideration as the entry above). Deferred because it is a
-pre-existing scheduling flaw rather than something this feature introduced --
-though this feature is what makes it reachable.
-
-Touches: `backend/app/queue/worker.py`.
 
 ## Mate detection is filename-only
 
