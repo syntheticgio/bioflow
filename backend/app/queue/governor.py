@@ -180,6 +180,16 @@ class LoadGovernor:
         return (delta / elapsed) / (1024 * 1024)
 
     def _disk(self) -> dict:
+        """Free space at BIOINFO_HOME.
+
+        Known wrong under Docker Desktop: VirtioFS answers statfs from the
+        filesystem hosting the share root (/Volumes), so this measures the
+        Mac's boot disk rather than the drive the data is on. That misreads in
+        both directions -- a full boot disk stops pipeline work needlessly, and
+        a full data drive goes unnoticed. Nothing inside the container can see
+        past the share; the fix is a host-side reporter, sketched in
+        docs/TODO.md.
+        """
         try:
             usage = shutil.disk_usage(settings.bioinfo_home)
             return {

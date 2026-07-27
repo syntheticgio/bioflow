@@ -2,6 +2,81 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+## The load governor watches the wrong disk
+
+Raised: 2026-07-27, during read preparation follow-up.
+
+`governor._sample_disk` calls `shutil.disk_usage(settings.bioinfo_home)` and
+feeds the result into two admission thresholds: `DISK_FREE_CLOSE_PCT` (5%) and
+`DISK_FREE_CLOSE_BYTES` (20 GB). Under Docker Desktop those numbers describe
+the wrong filesystem.
+
+Docker Desktop bind-mounts the *share root* (`/Volumes`) rather than the volume
+beneath it, and VirtioFS answers `statfs` from the filesystem hosting that root
+-- the Mac's boot disk. Measured on this machine: the container reports 995 GB
+total / 205 GB free for `/data`, while the drive the data actually sits on is
+3.7 TB with 712 GB free. Every path under `BIOINFO_HOME` reports the same wrong
+figure (`/data`, `/data/objects`, `/data/tmp`, `/data/.biopipe` were all
+checked), so there is no sub-path trick that recovers the real value.
+
+This was first described as "safe because it errs conservative", which is not
+right. It is wrong in both directions:
+
+- The boot disk filling up -- Xcode caches, a large download, Docker's own
+  images -- would close the governor and stop pipeline work while the drive
+  holding the data has terabytes free.
+- The *external* drive filling up is invisible. Free space there could reach
+  zero and the governor would keep admitting alignment jobs, because it is
+  watching a disk that still looks healthy. Given that a single alignment run
+  can write hundreds of gigabytes, this is the direction that actually costs
+  something.
+
+The API already returns `storage.disk.reliable: false` and the UI shows library
+size instead of a free-space claim, so nothing untrue is displayed. The
+governor is the remaining consumer that acts on the number.
+
+### The fix: a host-side capacity reporter
+
+The container cannot see past VirtioFS, so the value has to come from outside
+it. Sketch:
+
+A small process on the host -- a launchd agent, or a `make`-managed script --
+runs `statvfs` against the real `BIOINFO_HOME` path every 30s or so and
+publishes the result where the container can read it. Two plausible channels:
+
+1. **Through the mount itself.** Write `.biopipe/capacity.json` holding
+   `{total_bytes, free_bytes, measured_at}`. The container already reads
+   `.biopipe/VERSION` as its mount sentinel, so this adds no new plumbing and
+   inherits the same "is the drive actually there" guarantee. Cost: a file the
+   application reads but does not own.
+2. **Into Redis.** The agent `SET`s a key with a TTL that the governor reads.
+   No filesystem involvement, and staleness self-corrects through expiry. Cost:
+   the agent needs a Redis client and connection details, which is more setup
+   than a file write.
+
+The first is simpler and matches the existing mount-sentinel pattern; prefer it
+unless staleness handling proves awkward.
+
+Whichever channel, the governor needs a freshness rule, and the direction of
+its failure matters. A report older than a few minutes must be treated as
+*absent*, and absent must mean "do not apply disk thresholds" rather than
+"assume zero free" -- otherwise a stopped agent silently halts all compute
+work. Same principle as the mount sentinel: an unavailable signal aborts the
+check rather than being read as bad news.
+
+Also worth handling: `BIOINFO_HOME` on a path that is *not* a separate volume
+(someone running without an external drive) should keep using `shutil.disk_usage`
+directly, since there is nothing wrong with it there. The host agent is a
+Docker-Desktop-on-macOS workaround, not the general path.
+
+Deferred because it introduces a host-side component this application has so
+far avoided entirely -- a real architectural addition for a threshold that has
+not yet fired. Worth doing before alignment starts writing files large enough
+to genuinely fill the drive.
+
+Touches: `backend/app/queue/governor.py`, `backend/app/storage/home.py`,
+`backend/app/api/v1/system.py`, `Makefile`, `ops/`.
+
 ## `JobContext.extend_lease` is inert
 
 Raised: 2026-07-27, during read preparation.

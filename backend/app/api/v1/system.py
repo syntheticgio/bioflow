@@ -26,9 +26,10 @@ async def system_stats() -> dict:
     # verified: 995 GB "total" against a drive that is really 3.7 TB. There is
     # no path inside the container that reports otherwise.
     #
-    # The governor still consults it, which is safe because the boot disk is
-    # the smaller of the two: the figure errs toward closing, never toward
-    # admitting work onto a full drive.
+    # The governor still consults it, and that is wrong in both directions --
+    # a full boot disk would stop pipeline work needlessly, and a full data
+    # drive would go unnoticed. Fixing it needs a host-side reporter, since
+    # nothing inside the container can see past the share; see docs/TODO.md.
     disk = None
     if home.ok:
         try:
