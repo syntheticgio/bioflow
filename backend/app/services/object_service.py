@@ -19,6 +19,7 @@ from app.models import (
     ObjectRole,
     ObjectStatus,
     Project,
+    RunJobRole,
     SidecarRole,
     SourceInfo,
     SourceMode,
@@ -219,7 +220,21 @@ async def ingest_local_file(
             object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
         )
         await project_service.bump_counters(project_id, objects=1, total_bytes=size)
-        await enqueue_ingest(obj, digest=digest)
+        ingest_job_id = await enqueue_ingest(obj, digest=digest)
+
+        # Join the run that produced this file, so its header parse groups with
+        # the alignment or trim that caused it rather than appearing loose.
+        # `produced_by_job` identifies the causing job; an ordinary upload has
+        # none and stays ungrouped, which is correct -- it was not part of a
+        # pipeline run.
+        if produced_by_job and ingest_job_id:
+            from app.services import run_service
+
+            await run_service.link_job_to_run_of(
+                cause_job_id=str(produced_by_job),
+                job_id=PydanticObjectId(ingest_job_id),
+                role=RunJobRole.INGEST,
+            )
     except BaseException:
         await _discard(path)
         await obj.set(

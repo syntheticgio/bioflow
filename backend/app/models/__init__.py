@@ -32,11 +32,31 @@ from app.models.object import (
     SourceMode,
 )
 from app.models.project import Project, ProjectCounters
+from app.models.run import (
+    OPTIONAL_ROLES,
+    PipelineRun,
+    RunInput,
+    RunInputRole,
+    RunJob,
+    RunJobRole,
+    RunKind,
+    RunStatus,
+)
 from app.models.schedule import Schedule
 from app.models.timing import JobRunTiming
 from app.models.upload_session import UploadSession, UploadState
 
-ALL_MODELS = [Project, Blob, DataObject, Job, UploadSession, Schedule, JobRunTiming]
+ALL_MODELS = [
+    Project,
+    Blob,
+    DataObject,
+    Job,
+    UploadSession,
+    Schedule,
+    JobRunTiming,
+    PipelineRun,
+    RunJob,
+]
 
 __all__ = [
     "ACTIVE_STATES",
@@ -60,11 +80,19 @@ __all__ = [
     "JobRunTiming",
     "JobState",
     "JobTiming",
+    "OPTIONAL_ROLES",
     "ObjectError",
     "ObjectRole",
     "ObjectStatus",
+    "PipelineRun",
     "Project",
     "ProjectCounters",
+    "RunInput",
+    "RunInputRole",
+    "RunJob",
+    "RunJobRole",
+    "RunKind",
+    "RunStatus",
     "Schedule",
     "SidecarRole",
     "SourceInfo",

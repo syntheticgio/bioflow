@@ -23,11 +23,15 @@ from app.models import (
     JobClass,
     JobResources,
     ObjectStatus,
+    RunInput,
+    RunInputRole,
+    RunJobRole,
+    RunKind,
     SidecarRole,
 )
 from app.pipelines import align_runner, aligners, fastp_runner, pairing, tools
 from app.pipelines.aligners import Aligner
-from app.services import blob_service
+from app.services import blob_service, run_service
 from app.storage.paths import blob_path
 
 log = get_logger(__name__)
@@ -191,14 +195,42 @@ async def launch_trim(
             details={"object_id": str(obj.id)},
         )
 
+    # A trim produces three rows for one action -- the trim plus an ingest per
+    # output -- so it has the same grouping problem in miniature.
+    run = await run_service.create_run(
+        kind=RunKind.TRIM,
+        project_id=obj.project_id,
+        label=_trim_label(obj, mate),
+        inputs=_trim_inputs(obj, mate),
+        params=payload["params"],
+    )
+    await run_service.link_job(run.id, job.id, RunJobRole.TRIM)
+
     log.info(
         "trim_launched",
         job_id=str(job.id),
+        run_id=str(run.id),
         object_id=str(obj.id),
         mate_id=str(mate.id) if mate else None,
         threads=payload["params"]["threads"],
     )
     return job
+
+
+def _trim_label(reads: DataObject, mate: DataObject | None) -> str:
+    if mate is None:
+        return f"Trim {reads.name}"
+    stem = pairing.split_mate(reads.name)
+    if stem and stem[0]:
+        return f"Trim {stem[0]} (paired)"
+    return f"Trim {reads.name} + {mate.name}"
+
+
+def _trim_inputs(reads: DataObject, mate: DataObject | None) -> list[RunInput]:
+    inputs = [RunInput(object_id=reads.id, name=reads.name, role=RunInputRole.READS)]
+    if mate is not None:
+        inputs.append(RunInput(object_id=mate.id, name=mate.name, role=RunInputRole.MATE))
+    return inputs
 
 
 def _params_fingerprint(params: dict) -> str:
@@ -476,6 +508,24 @@ def _aligner_tool(aligner: Aligner):
     return tools.bwa_mem2() if aligner is Aligner.BWA_MEM2 else tools.minimap2()
 
 
+def active_index_job_query(reference_id: PydanticObjectId) -> dict:
+    """The in-flight index build for a reference, if there is one.
+
+    A raw Mongo query rather than Beanie's field expressions. `Job.state` is
+    not resolvable as an attribute outside a query context and has no `.in_()`,
+    so the expression form raised on every call -- and this branch only runs
+    when two alignments race for one index, so it shipped broken and stayed
+    that way until a test forced the race.
+
+    Extracted and named so the query shape is assertable without a database.
+    """
+    return {
+        "type": "build_index",
+        "state": {"$in": [s.value for s in ACTIVE_STATES]},
+        "object_id": reference_id,
+    }
+
+
 async def launch_alignment(
     *,
     object_id: PydanticObjectId,
@@ -538,6 +588,16 @@ async def launch_alignment(
         {**default_read_group(obj), **(read_group or {})}
     )
 
+    # The record of what was asked for, created before anything is enqueued so
+    # every job the launch produces can be linked to it as it is created.
+    run = await run_service.create_run(
+        kind=RunKind.ALIGNMENT,
+        project_id=obj.project_id,
+        label=_alignment_label(obj, mate, reference),
+        inputs=_alignment_inputs(obj, mate, reference),
+        params={**align_params.as_dict(), "read_group": rg.as_dict()},
+    )
+
     # Build the index first if it is missing, and hold the alignment behind it.
     status = await reference_index_status(reference)
     needs_index = not status.get(aligner.value) or not status.get("fai")
@@ -547,16 +607,19 @@ async def launch_alignment(
         index_job = await _enqueue_build_index(reference, aligner)
         if index_job is not None:
             depends_on.append(index_job.id)
+            await run_service.link_job(run.id, index_job.id, RunJobRole.INDEX)
         else:
             # Deduplicated away: an identical build is already queued or
             # running. Wait on *that* job rather than racing it.
-            existing = await Job.find_one(
-                Job.type == "build_index",
-                Job.state.in_(list(ACTIVE_STATES)),
-                Job.object_id == reference.id,
-            )
+            existing = await Job.find_one(active_index_job_query(reference.id))
             if existing is not None:
                 depends_on.append(existing.id)
+                # Linked as shared: this run depends on the build but did not
+                # cause it. Showing it as reused beats omitting it (a gap where
+                # the index came from) or claiming credit for another run's work.
+                await run_service.link_job(
+                    run.id, existing.id, RunJobRole.INDEX, shared=True
+                )
 
     r1_digest, r1_path = await _resolve_readable(obj)
     payload: dict = {
@@ -624,14 +687,21 @@ async def launch_alignment(
         depends_on=depends_on,
     )
     if job is None:
+        # The run describes work that will not happen, so it must not linger in
+        # the activity view claiming otherwise. The index build it may have
+        # queued is left alone: that work is real and the earlier run owns it.
+        await run_service.discard_run(run.id)
         raise ConflictError(
             "An identical alignment is already queued or running",
             details={"object_id": str(obj.id)},
         )
 
+    await run_service.link_job(run.id, job.id, RunJobRole.ALIGN)
+
     log.info(
         "align_launched",
         job_id=str(job.id),
+        run_id=str(run.id),
         object_id=str(obj.id),
         reference_id=str(reference.id),
         aligner=aligner.value,
@@ -639,6 +709,36 @@ async def launch_alignment(
         waiting_on=[str(d) for d in depends_on],
     )
     return job
+
+
+def _alignment_label(
+    reads: DataObject, mate: DataObject | None, reference: DataObject
+) -> str:
+    """A one-line description of what this run does.
+
+    Built at launch, when every part is known and present, and stored rather
+    than derived so it survives the deletion of its inputs.
+    """
+    left = reads.name
+    if mate is not None:
+        # The pair reads as one input, which is what it is to the aligner.
+        stem = pairing.split_mate(reads.name)
+        left = f"{stem[0]} (paired)" if stem and stem[0] else f"{reads.name} + {mate.name}"
+    return f"{left} → {reference.name}"
+
+
+def _alignment_inputs(
+    reads: DataObject, mate: DataObject | None, reference: DataObject
+) -> list[RunInput]:
+    inputs = [RunInput(object_id=reads.id, name=reads.name, role=RunInputRole.READS)]
+    if mate is not None:
+        inputs.append(RunInput(object_id=mate.id, name=mate.name, role=RunInputRole.MATE))
+    inputs.append(
+        RunInput(
+            object_id=reference.id, name=reference.name, role=RunInputRole.REFERENCE
+        )
+    )
+    return inputs
 
 
 def _bam_name(reads_name: str, sample: str) -> str:

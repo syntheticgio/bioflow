@@ -6,9 +6,10 @@ HTTP, mirroring test_launch_rules.py for trimming.
 """
 
 import pytest
+from beanie import PydanticObjectId
 
 from app.errors import ValidationError
-from app.models import FormatKind, ObjectStatus
+from app.models import ACTIVE_STATES, FormatKind, ObjectStatus
 from app.pipelines.align_runner import Preset
 from app.services import pipeline_service
 
@@ -225,6 +226,45 @@ class TestDefaultReadGroup:
         omits one would block the user rather than help them."""
         rg = pipeline_service.default_read_group(FakeObject())
         assert all(rg.get(k) for k in ("sample", "library", "platform"))
+
+
+class TestActiveIndexJobQuery:
+    """The lookup that finds an in-flight index build to wait on.
+
+    It runs only when two alignments race for the same unindexed reference, so
+    it had no coverage and shipped broken: it used `Job.state.in_(...)`, and a
+    Beanie ExpressionField has neither `.in_()` nor a resolvable `state`
+    attribute outside a query context. Every call raised. Asserting the query
+    shape here is what makes the branch checkable without staging the race.
+    """
+
+    def test_matches_only_index_builds(self):
+        q = pipeline_service.active_index_job_query(PydanticObjectId())
+        assert q["type"] == "build_index"
+
+    def test_matches_only_jobs_still_in_flight(self):
+        q = pipeline_service.active_index_job_query(PydanticObjectId())
+        states = set(q["state"]["$in"])
+        assert states == {s.value for s in ACTIVE_STATES}
+        assert "succeeded" not in states
+        assert "failed" not in states
+
+    def test_includes_blocked(self):
+        """An index build is never blocked today, but deriving the list from
+        ACTIVE_STATES means a state added later is covered without an edit."""
+        q = pipeline_service.active_index_job_query(PydanticObjectId())
+        assert "blocked" in q["state"]["$in"]
+
+    def test_scoped_to_the_reference(self):
+        ref = PydanticObjectId()
+        assert pipeline_service.active_index_job_query(ref)["object_id"] == ref
+
+    def test_is_a_plain_mongo_query(self):
+        """Values must be primitives Mongo understands, not Beanie expression
+        objects -- the specific mistake that broke this."""
+        q = pipeline_service.active_index_job_query(PydanticObjectId())
+        assert isinstance(q, dict)
+        assert all(isinstance(s, str) for s in q["state"]["$in"])
 
 
 class TestBamNaming:

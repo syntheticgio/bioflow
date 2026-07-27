@@ -21,6 +21,7 @@ from app.models import (
     JobState,
     ObjectRole,
     ObjectStatus,
+    RunJobRole,
     SidecarRole,
 )
 from app.pipelines.aligners import Aligner
@@ -322,6 +323,13 @@ async def _apply_trim_reads(result: dict) -> None:
             }
         )
 
+    if job_id:
+        from app.services import run_service
+
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [o.id for o in created])
+
     log.info(
         "trim_applied",
         object_id=object_id,
@@ -383,6 +391,13 @@ async def _apply_build_index(result: dict) -> None:
             )
             continue
         created.append(obj)
+
+    if job_id and created:
+        from app.services import run_service
+
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [o.id for o in created])
 
     log.info(
         "index_applied",
@@ -501,10 +516,16 @@ async def _apply_align_reads(result: dict) -> None:
 
     log.info("align_applied", object_id=object_id, bam_id=str(bam.id))
 
+    from app.services import run_service
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [bam.id])
+
     # Chain the follow-on index. Enqueued here rather than at launch because it
     # needs the BAM's digest, which does not exist until the alignment has run.
     if bam.blob_sha256:
-        await queue.enqueue(
+        index_job = await queue.enqueue(
             "index_bam",
             payload={
                 "bam_object_id": str(bam.id),
@@ -520,6 +541,11 @@ async def _apply_align_reads(result: dict) -> None:
             object_id=bam.id,
             parent_job_id=PydanticObjectId(job_id) if job_id else None,
         )
+        # Joins the alignment's run: it was caused by this run and finishes the
+        # work the user asked for, even though it could not be enqueued until
+        # the BAM existed.
+        if index_job is not None and run_id is not None:
+            await run_service.link_job(run_id, index_job.id, RunJobRole.INDEX_BAM)
 
 
 async def _apply_index_bam(result: dict) -> None:
