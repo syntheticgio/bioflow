@@ -121,6 +121,7 @@ export function TrimDialog({
           )}
         </h2>
 
+        <div className="modal-body">
         {activeToolInfo && !activeToolInfo.available && (
           <div className="error-box" style={{ marginBottom: 12 }}>
             {activeToolInfo.error ?? `${activeTool} is not available`}
@@ -338,6 +339,7 @@ export function TrimDialog({
             </label>
           </div>
         )}
+        </div>
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>
