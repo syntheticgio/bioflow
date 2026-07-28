@@ -451,7 +451,7 @@ export interface RunDetail extends RunSummary {
 export type AlignerName = "bwa-mem2" | "minimap2";
 
 /** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */
-export type AlignPreset = "map-ont" | "map-pb" | "sr";
+export type AlignPreset = "map-ont" | "map-pb" | "map-hifi" | "lr:hq" | "sr";
 
 /** Mirrors align_runner.AlignParams. */
 export interface AlignParams {

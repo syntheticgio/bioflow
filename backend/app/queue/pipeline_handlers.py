@@ -499,12 +499,15 @@ def _run_short_read_qc(
 
     if html_out.exists():
         shutil.copyfile(html_out, report_dir / "fastp.html")
-        facts["qc_fastp_report"] = f"{object_id}/fastp.html"
+        # Relative to report_dir, which is already qc_reports_dir/<object_id> --
+        # get_qc_report's `root` includes the object_id once, so a fact that
+        # repeats it produces a path nothing was ever written to.
+        facts["qc_fastp_report"] = "fastp.html"
 
     ctx.progress(phase="fastqc", pct=fastp_runner.MAX_MEASURED_PCT, message="running FastQC")
     fastqc_name = _run_fastqc(ctx, reads_in, report_dir, log_path)
     if fastqc_name:
-        facts["qc_fastqc_report"] = f"{object_id}/{fastqc_name}"
+        facts["qc_fastqc_report"] = fastqc_name
 
     # Present on every QC'd file, not only long ones, so a consumer never has
     # to treat its absence as "short read" by default.
@@ -576,7 +579,9 @@ def _run_long_read_qc(
 
     report = next(iter(sorted(out_dir.glob("NanoPlot-report.html"))), None)
     if report is not None:
-        facts["qc_nanoplot_report"] = f"{object_id}/nanoplot/{report.name}"
+        # Relative to report_dir (qc_reports_dir/<object_id>), matching
+        # qc_fastp_report/qc_fastqc_report -- see the comment there.
+        facts["qc_nanoplot_report"] = f"nanoplot/{report.name}"
 
     chemistry, reason = qc_stats.infer_chemistry(
         platform=_QC_STATS_PLATFORM.get(platform, platform),
