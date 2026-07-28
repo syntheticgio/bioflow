@@ -151,6 +151,7 @@ export function AlignDialog({
           )}
         </h2>
 
+        <div className="modal-body">
         {alignerInfo && !alignerInfo.available && (
           <div className="error-box" style={{ marginBottom: 12 }}>
             {alignerInfo.name} is not available on this machine.
@@ -319,6 +320,7 @@ export function AlignDialog({
             </label>
           </div>
         )}
+        </div>
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>
