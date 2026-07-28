@@ -156,6 +156,160 @@ def trim_reads(ctx: JobContext) -> dict:
     }
 
 
+@handler(
+    "run_qc",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # HEAVY io, not light: QC streams the whole FASTQ exactly as a trim does,
+    # and the governor's cap on concurrent heavy readers is what keeps a
+    # handful of QC runs from being slower in aggregate than two. (The plan
+    # said MEDIUM, which is not one of the three classes the model defines.)
+    resources=JobResources(cpu=2, mem_mb=1024, io=IoClass.HEAVY),
+    # Same reasoning as trim_reads: a QC failure is deterministic -- bad input
+    # or a missing binary -- and retries only delay the error.
+    max_attempts=2,
+)
+def run_qc(ctx: JobContext) -> dict:
+    """Run fastp (report-only) and FastQC over one FASTQ.
+
+    Read-only, unlike trim: it derives no files, only a description of one.
+    The structured numbers come back as facts for `_apply_run_qc` to persist;
+    the HTML lands under qc_reports/<object_id>/ and is referenced by path.
+
+    Synchronous -- SUBPROCESS runs this off the event loop, so the body must
+    not await. Database work happens in the applier.
+
+    FastQC's failure is not the job's failure. fastp produces every number the
+    UI charts, and FastQC is the optional extra that needs a JRE; letting a
+    broken Java install fail a QC run would deny the user the facts that did
+    parse.
+    """
+    fastp_tool = tools.require(tools.fastp())
+
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("run_qc requires an 'object_id'")
+
+    reads_in = _resolve_input(ctx.payload, "r1")
+    work = _prepare_workdir(ctx, kind="qc")
+
+    # Same reason as trim: fastp infers gzip from the filename, and a managed
+    # blob is stored under its hash with no extension.
+    name = ctx.payload.get("name")
+    reads_in = _named_link(work, reads_in, name)
+
+    json_out = work / "fastp_qc.json"
+    html_out = work / "fastp_qc.html"
+
+    cmd = fastp_runner.build_qc_command(
+        fastp_path=fastp_tool.path,
+        r1_in=reads_in,
+        json_out=json_out,
+        html_out=html_out,
+        threads=min(settings.pipeline_default_threads, 2),
+    )
+
+    progress = fastp_runner.TrimProgress(expected_reads=ctx.payload.get("expected_reads"))
+    ctx.progress(phase="starting", pct=0.0, message="starting fastp")
+
+    def on_line(line: str) -> None:
+        if progress.feed(line):
+            ctx.progress(pct=progress.pct, phase=progress.phase, message=progress.message())
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    log.info("qc_started", job_id=ctx.job_id, object_id=object_id, cmd=" ".join(cmd))
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
+    if code != 0:
+        raise _failure(code, log_path)
+
+    facts = fastp_runner.parse_qc_facts(json_out)
+
+    # Reports are keyed by object rather than by job: a re-run replaces the
+    # previous report rather than accumulating one directory per attempt, and
+    # the path stored in facts stays valid without an update.
+    report_dir = settings.qc_reports_dir / str(object_id)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    if html_out.exists():
+        shutil.copyfile(html_out, report_dir / "fastp.html")
+        facts["qc_fastp_report"] = f"{object_id}/fastp.html"
+
+    ctx.progress(phase="fastqc", pct=fastp_runner.MAX_MEASURED_PCT, message="running FastQC")
+    fastqc_name = _run_fastqc(ctx, reads_in, report_dir, log_path)
+    if fastqc_name:
+        facts["qc_fastqc_report"] = f"{object_id}/{fastqc_name}"
+
+    facts["qc_status"] = "ok"
+
+    ctx.progress(phase="done", pct=1.0, message="QC complete")
+    log.info(
+        "qc_finished",
+        job_id=ctx.job_id,
+        object_id=object_id,
+        reads=facts.get("qc_before_filtering", {}).get("total_reads"),
+        fastqc=bool(fastqc_name),
+    )
+
+    return {
+        "object_id": object_id,
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
+        "workdir": str(work),
+    }
+
+
+def _run_fastqc(
+    ctx: JobContext, reads_in: Path, report_dir: Path, log_path: Path
+) -> str | None:
+    """Run FastQC into `report_dir`, returning the HTML's filename or None.
+
+    Every failure here is swallowed to a warning. FastQC is the optional half
+    of the QC pair -- it needs a JRE, and on a host missing one the fastp facts
+    are still worth keeping.
+    """
+    fastqc_tool = tools.fastqc()
+    if not fastqc_tool.available:
+        log.info("qc_fastqc_unavailable", job_id=ctx.job_id, error=fastqc_tool.error)
+        return None
+
+    out_dir = report_dir / "fastqc"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # FastQC names its output after the input file, and the input here is the
+    # `in_`-prefixed symlink that exists only to give fastp a filename it can
+    # read the compression from. Linking the bare name beside it keeps that
+    # implementation detail out of a report title the user reads.
+    if reads_in.name.startswith("in_"):
+        clean = reads_in.parent / reads_in.name[len("in_") :]
+        if not clean.exists():
+            try:
+                clean.symlink_to(reads_in.resolve())
+                reads_in = clean
+            except OSError as e:
+                # Cosmetic only -- a report named after the symlink is still a
+                # correct report, so this must not fail the run.
+                log.debug("qc_name_link_failed", error=str(e))
+
+    code = run_subprocess(
+        ctx,
+        [fastqc_tool.path, "--outdir", str(out_dir), "--quiet", str(reads_in)],
+        log_path=str(log_path),
+    )
+    if code != 0:
+        log.warning("qc_fastqc_failed", job_id=ctx.job_id, code=code)
+        return None
+
+    html = next(iter(sorted(out_dir.glob("*_fastqc.html"))), None)
+    if html is None:
+        log.warning("qc_fastqc_no_report", job_id=ctx.job_id)
+        return None
+    return f"fastqc/{html.name}"
+
+
 def _resolve_input(payload: dict, side: str) -> Path:
     """Locate an input read file from its digest or explicit path."""
     digest = payload.get(f"{side}_sha256")
@@ -166,7 +320,7 @@ def _resolve_input(payload: dict, side: str) -> Path:
     elif digest:
         path = blob_path(digest)
     else:
-        raise PermanentError(f"trim_reads requires '{side}_sha256' or '{side}_path'")
+        raise PermanentError(f"No input given: expected '{side}_sha256' or '{side}_path'")
 
     if not path.exists():
         # Permanent rather than retryable: a blob that is missing now will
@@ -284,7 +438,7 @@ async def reap_pipeline_scratch(ctx: JobContext) -> dict:
     # Every scratch root a pipeline handler writes into. An alignment workdir
     # holds a whole BAM plus samtools' sort spills, so one left behind by a
     # crashed run is tens of gigabytes that nothing else would reclaim.
-    for kind in ("trim", "align"):
+    for kind in ("trim", "align", "qc"):
         removed_dirs += await _reap_dir(
             ctx,
             settings.tmp_dir / kind,

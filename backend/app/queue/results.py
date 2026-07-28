@@ -339,6 +339,39 @@ async def _apply_trim_reads(result: dict) -> None:
     )
 
 
+async def _apply_run_qc(result: dict) -> None:
+    """Record a QC run's numbers on the object it described.
+
+    QC derives no files, so unlike trim or align there is nothing to ingest --
+    the whole result is facts merged onto the object the user ran it against.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("qc_object_missing", object_id=object_id)
+        return
+
+    # Merged rather than replaced, like every other fact write: a QC run must
+    # not discard what ingest or a trim established about the same file.
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "qc_applied",
+        object_id=object_id,
+        tool=facts.get("qc_tool"),
+        q30=facts.get("qc_before_filtering", {}).get("q30_rate"),
+    )
+
+
 async def _apply_build_index(result: dict) -> None:
     """Turn a finished index build into sidecar objects on the reference.
 
@@ -601,6 +634,7 @@ _SIDECAR_ROLES = {
 _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
     "trim_reads": _apply_trim_reads,
+    "run_qc": _apply_run_qc,
     "build_index": _apply_build_index,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,

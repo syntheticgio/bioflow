@@ -425,3 +425,97 @@ class TestBlobExtensionHazard:
 
         link = _named_link(work, blob, "../../escape.fastq.gz")
         assert link.parent == work
+
+
+class TestBuildQcCommand:
+    """Report-only mode: fastp inspects a file without deriving one."""
+
+    def qc_cmd(self, **kw):
+        defaults = dict(
+            fastp_path="/usr/bin/fastp",
+            r1_in="reads.fastq.gz",
+            json_out="qc.json",
+            html_out="qc.html",
+        )
+        defaults.update(kw)
+        return fastp_runner.build_qc_command(
+            **{k: v for k, v in defaults.items()}
+        )
+
+    def test_writes_no_reads(self):
+        """The whole point: no -o/-O means fastp reports and writes nothing.
+        A QC run that quietly produced a trimmed FASTQ would be a surprise
+        file in the project and an hour of IO nobody asked for."""
+        cmd = self.qc_cmd()
+        assert "-o" not in cmd
+        assert "-O" not in cmd
+
+    def test_disables_every_filter(self):
+        """Filtering defaults would be applied to the *reported* numbers, so
+        the file would look like it had fewer reads than it has. QC describes
+        the file as it is."""
+        cmd = self.qc_cmd()
+        assert "--disable_quality_filtering" in cmd
+        assert "--disable_length_filtering" in cmd
+        assert "--disable_adapter_trimming" in cmd
+
+    def test_requests_both_report_formats(self):
+        cmd = self.qc_cmd()
+        assert cmd[cmd.index("--json") + 1] == "qc.json"
+        assert cmd[cmd.index("--html") + 1] == "qc.html"
+
+    def test_reads_the_input(self):
+        cmd = self.qc_cmd()
+        assert cmd[cmd.index("-i") + 1] == "reads.fastq.gz"
+
+    def test_verbose_so_progress_can_be_parsed(self):
+        """Same reason as the trim path: without it fastp says nothing until
+        the run is over, and TrimProgress has nothing to feed on."""
+        assert "--verbose" in self.qc_cmd()
+
+    def test_a_mate_is_passed_as_the_second_input(self):
+        cmd = self.qc_cmd(r2_in="reads_R2.fastq.gz")
+        assert cmd[cmd.index("-I") + 1] == "reads_R2.fastq.gz"
+
+    def test_single_end_passes_no_second_input(self):
+        assert "-I" not in self.qc_cmd()
+
+
+class TestParseQcFacts:
+    @pytest.fixture
+    def facts(self, tmp_path):
+        p = tmp_path / "qc.json"
+        p.write_text(json.dumps(SAMPLE_REPORT))
+        return fastp_runner.parse_qc_facts(p)
+
+    def test_reports_the_measured_state(self, facts):
+        """`before_filtering` with filtering disabled is simply the file."""
+        assert facts["qc_before_filtering"]["total_reads"] == 40000
+
+    def test_prefixes_keys_so_they_merge_into_facts(self, facts):
+        """These land in the same dict as the ingest's parsed facts, so an
+        unprefixed `total_reads` would collide with a different measurement."""
+        assert all(k.startswith("qc_") for k in facts)
+
+    def test_captures_the_tool_version(self, facts):
+        assert facts["qc_tool"] == "fastp"
+        assert facts["qc_tool_version"] == "0.24.0"
+
+    def test_captures_duplication(self, facts):
+        assert facts["qc_duplication_rate"] == pytest.approx(0.012)
+
+    def test_unspecified_adapter_becomes_none(self, facts):
+        assert facts["qc_adapters"]["read2_sequence"] is None
+
+    def test_drops_the_per_cycle_curves(self, facts):
+        """The charts already render these from the ingest's own facts; a
+        second copy per QC run would bloat every object document."""
+        assert "histogram" not in json.dumps(facts)
+
+    def test_a_missing_report_is_not_fatal(self, tmp_path):
+        assert fastp_runner.parse_qc_facts(tmp_path / "absent.json") == {}
+
+    def test_malformed_json_is_not_fatal(self, tmp_path):
+        p = tmp_path / "qc.json"
+        p.write_text("{ truncated")
+        assert fastp_runner.parse_qc_facts(p) == {}

@@ -59,6 +59,7 @@ def initialize_home() -> None:
         settings.staging_dir,
         settings.tmp_dir,
         settings.logs_dir,
+        settings.qc_reports_dir,
         settings.meta_dir,
     ):
         try:

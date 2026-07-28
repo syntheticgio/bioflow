@@ -318,12 +318,18 @@ export interface ApiError {
 
 // --- Pipelines ---
 
+export type PipelineType = "trim" | "align" | "qc" | "utility";
+
 export interface PipelineTool {
   name: string;
   path: string | null;
   version: string | null;
   available: boolean;
   error: string | null;
+  /** Plural: fastp is both a trimmer and a QC tool. Mirrors TOOL_META. */
+  pipelines: PipelineType[];
+  summary: string;
+  strengths: string[];
 }
 
 export interface PipelineTools {
@@ -501,6 +507,31 @@ export interface TrimReport {
     read1_sequence: string | null;
     read2_sequence: string | null;
   };
+}
+
+/**
+ * QC facts written onto an object by a `run_qc` job.
+ *
+ * Flat and `qc_`-prefixed rather than nested under one key, because they are
+ * merged into the same `facts` dict as everything else the ingest and the
+ * pipelines record. `TrimSide` is reused for the measurements: with filtering
+ * disabled there is only the one state, but it is the same set of numbers.
+ */
+export interface QcFacts {
+  qc_tool?: string;
+  qc_tool_version?: string | null;
+  qc_sequencing?: string | null;
+  qc_before_filtering?: TrimSide;
+  qc_duplication_rate?: number | null;
+  qc_insert_size_peak?: number | null;
+  qc_adapters?: {
+    read1_sequence: string | null;
+    read2_sequence: string | null;
+  };
+  /** Paths relative to the report route, absent when the tool did not run. */
+  qc_fastp_report?: string;
+  qc_fastqc_report?: string;
+  qc_status?: string;
 }
 
 export interface TrimRequest {

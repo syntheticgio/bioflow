@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # to pin a specific build.
     fastp_path: str = "fastp"
     fastqc_path: str = "fastqc"
+    cutadapt_path: str = "cutadapt"
+    # Debian ships no bare `trimmomatic`: the package installs TrimmomaticPE
+    # and TrimmomaticSE as separate entry points around the JAR. SE is the one
+    # probed for a version; a runner would pick the entry point per layout.
+    trimmomatic_path: str = "TrimmomaticSE"
     bwa_mem2_path: str = "bwa-mem2"
     minimap2_path: str = "minimap2"
     samtools_path: str = "samtools"
@@ -89,6 +94,16 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.bioinfo_home / "logs"
+
+    @property
+    def qc_reports_dir(self) -> Path:
+        """Generated QC reports, keyed by object id.
+
+        Outside objects/ deliberately: a FastQC report is derivative and
+        regenerable, so content-addressing it would buy deduplication of
+        something that is never shared and cost a blob record per run.
+        """
+        return self.bioinfo_home / "qc_reports"
 
     @property
     def meta_dir(self) -> Path:

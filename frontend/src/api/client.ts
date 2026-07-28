@@ -289,6 +289,23 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  /** Queue a QC run. Read-only: produces a report, derives no files. */
+  launchQC: (objectId: string) =>
+    request<JobSummary>("/pipelines/qc", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
+  /**
+   * URL of a generated QC report.
+   *
+   * Not fetched through `request`: the report is an HTML page opened in a new
+   * tab, not JSON. The server sandboxes it via CSP -- see `get_qc_report` --
+   * because FastQC embeds sequence data taken straight from the reads.
+   */
+  qcReportUrl: (objectId: string, reportPath: string) =>
+    `${BASE}/pipelines/qc/report/${objectId}/${reportPath}`,
+
   /** Alignment defaults for one file, including a read group from its metadata. */
   alignDefaults: (objectId: string) =>
     request<AlignDefaults>(`/pipelines/align/defaults/${objectId}`),

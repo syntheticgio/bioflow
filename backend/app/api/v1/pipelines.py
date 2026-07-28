@@ -1,7 +1,10 @@
 """Pipeline endpoints: launching runs and reporting tool availability."""
 
+from pathlib import PurePosixPath
+
 from beanie import PydanticObjectId
 from fastapi import APIRouter, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.api.v1.jobs import JobOut
@@ -37,10 +40,19 @@ async def list_tools() -> dict:
 
     Lets the launch dialog say "fastp is not installed" before a user commits
     to a run, rather than surfacing it as a job that dies minutes later.
+
+    Each entry carries its static description alongside the probe result, so
+    the tool selector can explain what a tool is for without a second request.
+
+    `all_available` spans every probed tool, including the optional trimmers.
+    That is deliberately coarse and is reported rather than acted on -- no
+    caller gates behaviour on it, and a per-pipeline readiness flag should be
+    derived from the `pipelines` field rather than added here.
     """
+    tools_list = tools.all_tools_with_meta()
     return {
-        "tools": [t.as_dict() for t in tools.all_tools()],
-        "all_available": all(t.available for t in tools.all_tools()),
+        "tools": tools_list,
+        "all_available": all(t["available"] for t in tools_list),
     }
 
 
@@ -82,6 +94,74 @@ async def launch_trim(body: TrimRequest) -> JobOut:
         paired=body.paired,
     )
     return JobOut.of(job)
+
+
+class QCRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.post("/qc", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_qc(body: QCRequest) -> JobOut:
+    """Queue a QC run over a FASTQ file. Read-only: produces a report."""
+    job = await pipeline_service.launch_qc(object_id=body.object_id)
+    return JobOut.of(job)
+
+
+@router.get("/qc/report/{object_id}/{report_path:path}")
+async def get_qc_report(object_id: PydanticObjectId, report_path: str) -> FileResponse:
+    """Serve a generated QC report (FastQC or fastp HTML).
+
+    Reports are not content-addressed objects -- they are regenerable
+    derivatives -- so they live under qc_reports/ and are served from here
+    rather than through the blob routes.
+
+    **These pages are not trusted.** FastQC embeds overrepresented sequences
+    taken verbatim from the reads, so a crafted FASTQ can put attacker-chosen
+    bytes into the HTML. Two things follow, and both are load-bearing:
+
+    - `sandbox` in the CSP drops the page into a unique opaque origin with
+      scripting disabled, so it cannot reach this API's session even though it
+      is served from this API's origin. `default-src 'none'` stops it fetching
+      anything at all. fastp's charts are scripted and will not render under
+      this; that is the accepted cost, and the numbers the UI charts come from
+      facts rather than from this page.
+    - The frontend opens it in a new tab rather than an inline iframe, so the
+      report never shares a document with the application.
+    """
+    # Rejected outright rather than resolved away. The ASGI layer collapses
+    # `..` before routing, so a path that reaches here still containing one is
+    # not a browser fetching a report -- and relying on that normalization
+    # would be relying on a layer whose job is not security. Note what the
+    # collapsing does on its own: `/report/AAA/../BBB/x.html` arrives with
+    # object_id already rewritten to BBB, so the id in the URL is not by itself
+    # evidence of which directory is being read.
+    parts = PurePosixPath(report_path).parts
+    if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
+        raise NotFoundError(f"No such QC report: {report_path}")
+
+    root = (settings.qc_reports_dir / str(object_id)).resolve()
+
+    # Belt and braces: resolved and re-checked against the root, so a symlink
+    # inside the report tree cannot point out of it either. FastQC does not
+    # create symlinks, but the check costs a stat and does not depend on that
+    # staying true.
+    target = (root / report_path).resolve()
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No such QC report: {report_path}")
+
+    return FileResponse(
+        target,
+        headers={
+            "Content-Security-Policy": (
+                "sandbox; default-src 'none'; "
+                # FastQC's plots are inlined images and its layout is inline
+                # CSS, so the report is blank without these two. Neither can
+                # execute, which is what the sandbox is there to prevent.
+                "img-src 'self' data:; style-src 'unsafe-inline'"
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 class AlignRequest(BaseModel):

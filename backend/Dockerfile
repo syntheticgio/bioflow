@@ -15,6 +15,14 @@ WORKDIR /srv
 # binary tar shells out to for `-j`, so `tar --help` advertises support that
 # fails at runtime.
 #
+# cutadapt comes from apt rather than pip despite being a Python package, and
+# that is not a style preference: it ships Cython extension modules with no
+# prebuilt aarch64 wheels, so `pip install cutadapt` compiles from source and
+# fails in this image for want of gcc. Adding a toolchain to carry one trimmer
+# is not worth ~200MB, and Debian's build is the same code. trimmomatic is
+# beside it because both are trim alternatives to fastp -- see TOOL_META in
+# pipelines/tools.py for what each is actually good at.
+#
 # fastqc needs a JRE, which is ~200MB of the image on its own. It earns that
 # only because its HTML report is the artifact people expect to hand to a
 # collaborator -- the before/after numbers the UI shows come from fastp's JSON
@@ -31,6 +39,8 @@ RUN apt-get update \
         default-jre-headless \
         minimap2 \
         samtools \
+        cutadapt \
+        trimmomatic \
         bzip2 \
     && rm -rf /var/lib/apt/lists/*
 

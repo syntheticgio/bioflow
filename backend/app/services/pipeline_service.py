@@ -84,10 +84,16 @@ async def _resolve_readable(obj: DataObject) -> tuple[str | None, str | None]:
     return obj.blob_sha256, None
 
 
-def _check_trimmable(obj: DataObject) -> None:
+def _check_fastq_ready(obj: DataObject, *, verb: str = "trim") -> None:
+    """Assert an object is a FASTQ that is ready to be read.
+
+    Shared by trim and QC, which have identical input requirements. `verb` only
+    shapes the message: "not ready to trim" on a QC run would send the user
+    looking for a trim they never started.
+    """
     if obj.status is not ObjectStatus.READY:
         raise ValidationError(
-            f"{obj.name!r} is not ready to trim (status={obj.status.value})",
+            f"{obj.name!r} is not ready to {verb} (status={obj.status.value})",
             details={"object_id": str(obj.id), "status": obj.status.value},
         )
     if obj.format.kind not in TRIMMABLE_KINDS:
@@ -116,7 +122,7 @@ async def launch_trim(
     obj = await DataObject.get(object_id)
     if obj is None:
         raise NotFoundError(f"Object not found: {object_id}")
-    _check_trimmable(obj)
+    _check_fastq_ready(obj)
 
     mate: DataObject | None = None
     if paired:
@@ -132,7 +138,7 @@ async def launch_trim(
             raise ValidationError("A file cannot be its own mate")
         if mate.project_id != obj.project_id:
             raise ValidationError("Paired reads must be in the same project")
-        _check_trimmable(mate)
+        _check_fastq_ready(mate)
 
         # R1 leads, so the outputs come back in the order fastp was given them
         # and the -i/-I assignment is not left to whichever the user clicked.
@@ -231,6 +237,66 @@ def _trim_inputs(reads: DataObject, mate: DataObject | None) -> list[RunInput]:
     if mate is not None:
         inputs.append(RunInput(object_id=mate.id, name=mate.name, role=RunInputRole.MATE))
     return inputs
+
+
+async def launch_qc(*, object_id: PydanticObjectId):
+    """Queue a QC run over a single FASTQ file.
+
+    Read-only: it produces a description of the file rather than a new file,
+    so unlike trim there is no output to name and no mate to pair with. A
+    paired-end library is two files and gets two QC runs, which is what the
+    per-file reports describe anyway.
+
+    No `PipelineRun` is created. A run groups the several jobs one click
+    produces; QC is a single job, and a run wrapping one job would add a row to
+    the activity view that says nothing the job does not.
+    """
+    from app.queue import queue
+
+    tools.require(tools.fastp())
+
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+    _check_fastq_ready(obj, verb="QC")
+
+    digest, path = await _resolve_readable(obj)
+    payload: dict = {
+        "object_id": str(obj.id),
+        "project_id": str(obj.project_id),
+        "name": obj.name,
+    }
+    if digest:
+        payload["r1_sha256"] = digest
+    if path:
+        payload["r1_path"] = path
+
+    expected = obj.facts.get("read_count_estimate")
+    if isinstance(expected, int) and expected > 0:
+        payload["expected_reads"] = expected
+
+    # Keyed on the object alone, with no parameter fingerprint: QC takes no
+    # parameters, so a second run over unchanged content would produce an
+    # identical report. This is the same key the post-download QC in the SRA
+    # path uses, so a manual click and an automatic run collapse into one job.
+    job = await queue.enqueue(
+        "run_qc",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=2, mem_mb=1024, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"qc:{obj.id}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "QC is already queued or running for this file",
+            details={"object_id": str(obj.id)},
+        )
+
+    log.info("qc_launched", job_id=str(job.id), object_id=str(obj.id))
+    return job
 
 
 def _params_fingerprint(params: dict) -> str:

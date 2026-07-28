@@ -25,6 +25,7 @@ import { AlignDialog } from "./AlignDialog";
 import { AlignmentReport } from "./AlignmentReport";
 import { IndexStatus } from "./IndexStatus";
 import { TrimDialog } from "./TrimDialog";
+import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
 import { TabPanel, Tabs, type TabDef } from "./Tabs";
@@ -275,6 +276,17 @@ function ObjectDetail({ id }: { id: string }) {
     onError: (e: Error) => notify.error(e.message),
   });
 
+  // No dialog: QC takes no parameters, so a button that opened a form with
+  // nothing in it would be a step for its own sake.
+  const runQC = useMutation({
+    mutationFn: () => api.launchQC(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.info("QC queued");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
   const remove = useMutation({
     mutationFn: () => api.deleteObject(id),
     onSuccess: () => {
@@ -331,6 +343,11 @@ function ObjectDetail({ id }: { id: string }) {
   // untrimmed reads is a real choice rather than a mistake, so it is offered.
   const canAlign = canTrim;
 
+  // Likewise: QC reads a FASTQ and reports on it, which is exactly the same
+  // input requirement. Running it on trimmed output is the normal way to check
+  // that trimming did what was wanted.
+  const canQC = canTrim;
+
   // A reference can be indexed ahead of time, rather than discovering the cost
   // as part of the first alignment against it.
   const canIndex = obj.status === "ready" && obj.format.kind === "fasta";
@@ -359,6 +376,22 @@ function ObjectDetail({ id }: { id: string }) {
             title="Align these reads against a reference"
           >
             Align
+          </button>
+        )}
+        {/* Same eligibility as trimming, and in the header rather than the QC
+            tab so it stays reachable from whichever tab is open -- including
+            from Metadata, where noticing that QC has never been run is most
+            likely. */}
+        {canQC && (
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
+            onClick={() => runQC.mutate()}
+            disabled={runQC.isPending}
+            title="Measure read quality with fastp and FastQC"
+          >
+            {runQC.isPending ? "QC…" : "QC"}
           </button>
         )}
         {/* A reminder, not a guard: a second run with different settings is
@@ -543,6 +576,11 @@ function QcTab({
           </div>
         )}
       </div>
+
+      {/* The file as it is, before anything was done to it. Above the trim
+          comparison because it describes the starting point that comparison
+          is against. */}
+      <QcReport facts={obj.facts} objectId={obj.id} />
 
       {/* Before/after comparison, on the source file rather than the output:
           "what did trimming do to my reads" is a question about the input. */}
