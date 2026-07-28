@@ -402,6 +402,8 @@ export interface RunSummary {
   status: RunStatus;
   inputs: RunInput[];
   params: Record<string, unknown>;
+  /** Which tool ran a trim run. Null for non-trim runs. */
+  tool: string | null;
   outputs: string[];
   created_at: string;
   updated_at: string;
