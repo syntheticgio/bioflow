@@ -44,16 +44,45 @@ X first if the shape isn't obvious from the code shown here.
   `quality_trimmed`). This plan's `parse_report` reads only these scalars,
   matching how `fastp_runner.parse_report` keeps only the scalar summary and
   not fastp's per-cycle curves.
-- **Trimmomatic has no structured report at all** — no JSON, no fixed-format
-  summary file. It prints one human-readable completion line to stderr, e.g.
-  `Input Read Pairs: 100000 Both Surviving: 97688 (97.69%) Forward Only
-  Surviving: 1200 (1.20%) Reverse Only Surviving: 800 (0.80%) Dropped: 312
-  (0.31%)` for PE, or `Input Reads: 100000 Surviving: 97688 (97.69%) Dropped:
-  2312 (2.31%)` for SE. This plan's Trimmomatic report parser regex-matches
-  that line rather than reading a file. **Verify the exact wording against the
-  Docker image's installed version in Task 1** before trusting the regex in
-  Task 5 — Trimmomatic's stdout format is not contractually stable across
-  versions the way fastp's JSON is.
+- **Trimmomatic has no JSON report, but it does have a `-summary <file>`
+  flag** that writes a clean `Key: Value`-per-line file — confirmed against
+  the real binary in the Docker image (`biopipe-api:latest`, Trimmomatic
+  bundled with the Debian `trimmomatic` package) during planning, both PE and
+  SE. This is what this plan's Trimmomatic report parser reads, **not** a
+  stdout/stderr regex — a real file beats parsing conversational text the
+  same way fastp's and cutadapt's JSON reports do. Confirmed SE shape:
+
+  ```
+  Input Reads: 200
+  Surviving Reads: 200
+  Surviving Read Percent: 100.00
+  Dropped Reads: 0
+  Dropped Read Percent: 0.00
+  ```
+
+  Confirmed PE shape:
+
+  ```
+  Input Read Pairs: 200
+  Both Surviving Reads: 200
+  Both Surviving Read Percent: 100.00
+  Forward Only Surviving Reads: 0
+  Forward Only Surviving Read Percent: 0.00
+  Reverse Only Surviving Reads: 0
+  Reverse Only Surviving Read Percent: 0.00
+  Dropped Reads: 0
+  Dropped Read Percent: 0.00
+  ```
+
+  Both were produced by real invocations (`TrimmomaticSE -phred33 -summary
+  summary.txt in.fastq out.fastq SLIDINGWINDOW:4:15 MINLEN:10` and the PE
+  equivalent with `ILLUMINACLIP:/usr/share/trimmomatic/TruSeq3-PE.fa:2:30:10`
+  added) against `biopipe-api:latest`, not invented from the upstream
+  quick-start doc — Task 5 builds `parse_summary` to read this file format.
+  The stdout completion line (`Input Read Pairs: 200 Both Surviving: 200
+  (100.00%) ... Dropped: 0 (0.00%)`) was also confirmed verbatim in the same
+  run and is unused by the parser, kept only as context in case `-summary`
+  is ever unavailable.
 - `PipelineRun`/`RunJob` (`backend/app/models/run.py`) have **no existing
   tool-identity field**. `RunJobRole.TRIM` is a role, not a tool name. This
   plan adds `tool: str` to `PipelineRun` (Task 8).
@@ -76,7 +105,7 @@ X first if the shape isn't obvious from the code shown here.
 | File | Change |
 |---|---|
 | `backend/app/pipelines/cutadapt_runner.py` | **Create.** Command builder, `CutadaptParams`, JSON report parser. |
-| `backend/app/pipelines/trimmomatic_runner.py` | **Create.** Command builder, `TrimmomaticParams`, stdout summary parser. |
+| `backend/app/pipelines/trimmomatic_runner.py` | **Create.** Command builder, `TrimmomaticParams`, `-summary` file parser. |
 | `backend/app/config.py` | Add `trimmomatic_pe_path`, `trimmomatic_se_path`, `trimmomatic_adapters_dir`. |
 | `backend/app/pipelines/tools.py` | Flip `cutadapt`/`trimmomatic` `TOOL_META.runnable` to `True`; delete stale comments. |
 | `backend/app/queue/pipeline_handlers.py` | `trim_reads` dispatches on `ctx.payload.get("tool")` to one of three private per-tool functions. |
@@ -93,41 +122,51 @@ X first if the shape isn't obvious from the code shown here.
 
 ---
 
-## Task 1: Confirm the Docker image's cutadapt version supports `--json`
+## Task 1: Confirm the Docker image's cutadapt/Trimmomatic versions — ALREADY DONE
 
-**Files:**
-- Read: `backend/Dockerfile`
+**This task was completed during planning, against the already-built
+`biopipe-api:latest` image (no rebuild needed — it was already running via
+docker-compose). Findings, for the record:**
 
-- [ ] **Step 1: Check the installed cutadapt version**
+```
+$ docker run --rm biopipe-api:latest cutadapt --version
+4.7
 
-The `--json` report flag was added in cutadapt 3.5. Debian trixie's `cutadapt`
-apt package version must be at or above that. Build the image and check:
+$ docker run --rm biopipe-api:latest sh -c "TrimmomaticPE 2>&1 | head -5"
+Usage: [-version] [-threads <threads>] [-phred33|-phred64] [-trimlog <trimLogFile>]
+  [-summary <statsSummaryFile>] [-quiet] [-validatePairs]
+  [-basein <inputBase> | <inputFile1> <inputFile2>]
+  [-baseout <outputBase> | <outputFile1P> <outputFile1U> <outputFile2P> <outputFile2U>]
+  <trimmer1>...
 
-```bash
-docker build -t bio-pipeliner-backend -f backend/Dockerfile backend
-docker run --rm bio-pipeliner-backend cutadapt --version
-docker run --rm bio-pipeliner-backend sh -c "TrimmomaticPE 2>&1 | head -5; echo ---; TrimmomaticSE 2>&1 | head -5"
-docker run --rm bio-pipeliner-backend ls /usr/share/trimmomatic/
+$ docker run --rm biopipe-api:latest sh -c "TrimmomaticSE 2>&1 | head -5"
+Usage: TrimmomaticSE [-version] [-threads <threads>] [-phred33|-phred64]
+  [-trimlog <trimLogFile>] [-summary <statsSummaryFile>] [-quiet]
+  <inputFile> <outputFile> <trimmer1>...
+
+$ docker run --rm biopipe-api:latest ls /usr/share/trimmomatic/
+NexteraPE-PE.fa  TruSeq2-PE.fa  TruSeq2-SE.fa  TruSeq3-PE-2.fa  TruSeq3-PE.fa  TruSeq3-SE.fa
 ```
 
-Expected: a cutadapt version ≥ 3.5 (Debian trixie ships 4.x as of this
-writing), and the adapter FASTA listing from `/usr/share/trimmomatic/`
-matching what's documented above (`TruSeq3-PE.fa` etc — confirm the exact
-filenames present, since this plan's `TrimmomaticParams` default references
-one by name).
+- cutadapt 4.7 ≥ 3.5 — `--json` is supported. Confirmed.
+- `TrimmomaticPE`/`TrimmomaticSE` both exist as separate binaries, both
+  support `-summary <file>` — a real structured report file, better than the
+  stdout-regex approach originally planned. See the "Before you start" facts
+  block above for the exact confirmed PE/SE summary-file shapes; Task 5 is
+  written against this file format, not stdout.
+- Adapter FASTA filenames match exactly: `TruSeq3-PE.fa`, `TruSeq3-SE.fa`,
+  etc. `TrimmomaticParams.adapter_file` defaults (Task 5) are valid filenames
+  under `/usr/share/trimmomatic/`.
+- cutadapt's JSON report was also confirmed against a real run in this same
+  session (see Task 4, likewise already done) — schema matches
+  `SAMPLE_REPORT` in Task 3's tests exactly (`cutadapt_version`,
+  `read_counts.input/output/filtered.too_short/read1_with_adapter`,
+  `basepair_counts.input/output`).
 
-- [ ] **Step 2: Capture one real completion line from each tool for the test fixtures**
-
-Run a tiny real trim inside the container (a handful of reads is enough) and
-capture stdout/stderr verbatim — Task 5's Trimmomatic stdout parser and Task
-3's cutadapt JSON parser tests must be built from real tool output, the same
-way `test_fastp_runner.py`'s docstring insists ("copied from real fastp 0.24.0
-runs rather than invented"). If you don't have a FASTQ fixture handy, `printf`
-a few synthetic reads into a `.fastq` file — the exact sequence content
-doesn't matter, only that the tool runs and prints its real summary format.
-
-No commit for this task — it's a recon step whose output (the confirmed
-version numbers and captured stdout) feeds directly into Tasks 3 and 5.
+**No Dockerfile rebuild is needed to execute this plan** — `biopipe-api:latest`
+already has both tools with everything this plan assumes. Task 14's
+end-to-end verification should still confirm against whatever image is
+current at that point, since a rebuild could happen between now and then.
 
 ---
 
@@ -524,34 +563,49 @@ git commit -m "feat: add cutadapt command builder and report parser"
 
 ---
 
-## Task 4: Verify the cutadapt JSON schema against the real Docker binary
+## Task 4: Verify the cutadapt JSON schema against the real Docker binary — ALREADY DONE
 
-**Files:**
-- None modified — verification only, folds into Task 3 if done first.
+**This task was completed during planning, against `biopipe-api:latest`.**
+Real invocation and output:
 
-- [ ] **Step 1: Run cutadapt for real inside the built image and diff its JSON against `SAMPLE_REPORT`**
+```
+$ cutadapt --json=out.json -j 1 -q 20 -m 1 -a AGATCGGAAGAGC -o trimmed.fastq in.fastq
+  (200 synthetic 75bp reads)
 
-```bash
-docker run --rm -v "$PWD/backend/tests/fixtures:/data" bio-pipeliner-backend \
-  sh -c "cd /tmp && printf '@r1\nACGTACGTACGT\n+\nIIIIIIIIIIII\n' > in.fastq && \
-         cutadapt --json=out.json -q 20 -m 1 -o out.fastq in.fastq && cat out.json"
+$ cat out.json
+{
+  "tag": "Cutadapt report",
+  "schema_version": [0, 3],
+  "cutadapt_version": "4.7",
+  ...
+  "read_counts": {
+    "input": 200,
+    "filtered": {"too_short": 0, ...},
+    "output": 200,
+    "read1_with_adapter": 3,
+    "read2_with_adapter": null
+  },
+  "basepair_counts": {
+    "input": 15000,
+    "quality_trimmed": 0,
+    "output": 14989,
+    ...
+  },
+  ...
+}
 ```
 
-Confirm `read_counts.input`, `read_counts.output`, `basepair_counts.input`,
-`basepair_counts.output`, and `cutadapt_version` are present with the same
-shape assumed in Task 3's `SAMPLE_REPORT`. If the installed cutadapt version
-uses a different schema (`schema_version` other than `[0, 3]`), update
-`parse_report` and the test fixture together before moving on — do not let
-Task 3's tests pass against invented JSON that the real binary doesn't
-produce.
-
-No commit — this step only confirms Task 3's assumptions; if it uncovers a
-mismatch, fix it as part of Task 3 and note the correction in that commit
-instead of creating a new one here.
+Confirmed: `schema_version: [0, 3]`, and every field Task 3's `parse_report`
+and `SAMPLE_REPORT` fixture assume (`cutadapt_version`, `read_counts.input`,
+`read_counts.output`, `read_counts.filtered.too_short`,
+`read_counts.read1_with_adapter`, `read_counts.read2_with_adapter`,
+`basepair_counts.input`, `basepair_counts.output`) is present with the
+expected shape. **No changes needed to Task 3's `parse_report` or
+`SAMPLE_REPORT`** — proceed with Task 3 as written.
 
 ---
 
-## Task 5: Trimmomatic runner — params, command builder, stdout summary parser
+## Task 5: Trimmomatic runner — params, command builder, `-summary` file parser
 
 **Files:**
 - Create: `backend/app/pipelines/trimmomatic_runner.py`
@@ -560,13 +614,13 @@ instead of creating a new one here.
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-"""Trimmomatic command construction and stdout summary parsing.
+"""Trimmomatic command construction and -summary file parsing.
 
-Trimmomatic has no structured report format -- no JSON, no fixed-layout
-stats file -- so parse_summary reads the one completion line it prints to
-stderr. The sample lines here are Trimmomatic's own documented wording;
-confirm them against the Docker image's installed version before trusting
-this in production (see plans/cutadapt-trimmomatic-runners.md Task 1).
+Trimmomatic has no JSON report, but both TrimmomaticPE and TrimmomaticSE
+support `-summary <file>`, which writes a clean Key: Value-per-line file --
+confirmed against a real run in the Docker image during planning (see
+plans/cutadapt-trimmomatic-runners.md Task 1). parse_summary reads that file,
+not stdout -- a real file beats parsing conversational completion-line text.
 """
 
 from pathlib import Path
@@ -584,6 +638,7 @@ def cmd_for(**kw):
         adapters_dir="/usr/share/trimmomatic",
         r1_in=Path("in_R1.fastq.gz"),
         r1_out=Path("out_R1.fastq.gz"),
+        summary_out=Path("summary.txt"),
         params=TrimmomaticParams(),
     )
     defaults.update(kw)
@@ -621,6 +676,15 @@ class TestBuildCommand:
         cmd = cmd_for(params=TrimmomaticParams(threads=6))
         assert "-threads" in cmd
         assert cmd[cmd.index("-threads") + 1] == "6"
+
+    def test_phred33_and_summary_path_are_always_passed(self):
+        """-phred33 avoids Trimmomatic's "Unable to detect quality encoding"
+        failure on inputs too short to autodetect from -- confirmed against a
+        real run during planning. -summary is what parse_summary reads."""
+        cmd = cmd_for(summary_out=Path("run_summary.txt"))
+        assert "-phred33" in cmd
+        assert "-summary" in cmd
+        assert cmd[cmd.index("-summary") + 1] == "run_summary.txt"
 
     def test_illuminaclip_step_uses_the_configured_adapter_file(self):
         cmd = cmd_for(params=TrimmomaticParams(adapter_file="TruSeq3-SE.fa"))
@@ -664,32 +728,104 @@ class TestTrimmomaticParams:
         assert TrimmomaticParams.from_dict({"bogus": 1}) == TrimmomaticParams()
 
 
-# Wording per Trimmomatic's own documented output. Reconfirm against the
-# Docker image's installed version -- see the module docstring.
-PE_SUMMARY_LINE = (
-    "Input Read Pairs: 100000 Both Surviving: 97688 (97.69%) Forward Only "
-    "Surviving: 1200 (1.20%) Reverse Only Surviving: 800 (0.80%) Dropped: "
-    "312 (0.31%)"
-)
-SE_SUMMARY_LINE = "Input Reads: 100000 Surviving: 97688 (97.69%) Dropped: 2312 (2.31%)"
+# Both fixtures are byte-for-byte what `-summary <file>` wrote in a real
+# TrimmomaticSE/PE run against biopipe-api:latest during planning -- not
+# invented from the upstream doc. See plans/cutadapt-trimmomatic-runners.md
+# Task 1 for the exact commands that produced these.
+SE_SUMMARY_FILE = """\
+Input Reads: 200
+Surviving Reads: 200
+Surviving Read Percent: 100.00
+Dropped Reads: 0
+Dropped Read Percent: 0.00
+"""
+
+PE_SUMMARY_FILE = """\
+Input Read Pairs: 200
+Both Surviving Reads: 200
+Both Surviving Read Percent: 100.00
+Forward Only Surviving Reads: 0
+Forward Only Surviving Read Percent: 0.00
+Reverse Only Surviving Reads: 0
+Reverse Only Surviving Read Percent: 0.00
+Dropped Reads: 0
+Dropped Read Percent: 0.00
+"""
+
+# A realistic non-trivial SE run, to exercise Surviving < Input.
+SE_SUMMARY_WITH_DROPS = """\
+Input Reads: 100000
+Surviving Reads: 97688
+Surviving Read Percent: 97.69
+Dropped Reads: 2312
+Dropped Read Percent: 2.31
+"""
+
+PE_SUMMARY_WITH_DROPS = """\
+Input Read Pairs: 100000
+Both Surviving Reads: 97688
+Both Surviving Read Percent: 97.69
+Forward Only Surviving Reads: 1200
+Forward Only Surviving Read Percent: 1.20
+Reverse Only Surviving Reads: 800
+Reverse Only Surviving Read Percent: 0.80
+Dropped Reads: 312
+Dropped Read Percent: 0.31
+"""
 
 
 class TestParseSummary:
-    def test_paired_end_line(self):
-        report = trimmomatic_runner.parse_summary(PE_SUMMARY_LINE, paired=True)
-        assert report["tool"] == "trimmomatic"
-        assert report["before"]["total_reads"] == 100000
-        assert report["after"]["total_reads"] == 97688
-        assert report["filtering"]["dropped_reads"] == 312
+    def test_single_end_file(self, tmp_path):
+        path = tmp_path / "summary.txt"
+        path.write_text(SE_SUMMARY_WITH_DROPS)
 
-    def test_single_end_line(self):
-        report = trimmomatic_runner.parse_summary(SE_SUMMARY_LINE, paired=False)
+        report = trimmomatic_runner.parse_summary(path, paired=False)
+
+        assert report["tool"] == "trimmomatic"
         assert report["before"]["total_reads"] == 100000
         assert report["after"]["total_reads"] == 97688
         assert report["filtering"]["dropped_reads"] == 2312
 
-    def test_unmatched_text_returns_empty_dict(self):
-        assert trimmomatic_runner.parse_summary("garbage output", paired=False) == {}
+    def test_paired_end_file(self, tmp_path):
+        path = tmp_path / "summary.txt"
+        path.write_text(PE_SUMMARY_WITH_DROPS)
+
+        report = trimmomatic_runner.parse_summary(path, paired=True)
+
+        assert report["tool"] == "trimmomatic"
+        # "Both Surviving" is the pair-level survival count, which is what
+        # `after.total_reads` means for every other tool's report too: reads
+        # that came out the far end usable, not a per-mate tally.
+        assert report["before"]["total_reads"] == 100000
+        assert report["after"]["total_reads"] == 97688
+        assert report["filtering"]["dropped_reads"] == 312
+
+    def test_zero_drops_file(self, tmp_path):
+        path = tmp_path / "summary.txt"
+        path.write_text(SE_SUMMARY_FILE)
+
+        report = trimmomatic_runner.parse_summary(path, paired=False)
+
+        assert report["before"]["total_reads"] == 200
+        assert report["after"]["total_reads"] == 200
+        assert report["filtering"]["dropped_reads"] == 0
+
+    def test_paired_zero_drops_file(self, tmp_path):
+        path = tmp_path / "summary.txt"
+        path.write_text(PE_SUMMARY_FILE)
+
+        report = trimmomatic_runner.parse_summary(path, paired=True)
+
+        assert report["after"]["total_reads"] == 200
+        assert report["filtering"]["dropped_reads"] == 0
+
+    def test_missing_file_returns_empty_dict(self, tmp_path):
+        assert trimmomatic_runner.parse_summary(tmp_path / "nope.txt", paired=False) == {}
+
+    def test_malformed_file_returns_empty_dict(self, tmp_path):
+        path = tmp_path / "summary.txt"
+        path.write_text("not a summary file\njust some text\n")
+        assert trimmomatic_runner.parse_summary(path, paired=False) == {}
 
 
 class TestOutputName:
@@ -714,12 +850,13 @@ Expected: `ModuleNotFoundError: No module named 'app.pipelines.trimmomatic_runne
 """Building and observing a Trimmomatic run.
 
 Trimmomatic ships as two separate binaries -- TrimmomaticPE and
-TrimmomaticSE -- around one JAR, with no combined entry point and no
-structured report; both differences from fastp/cutadapt are real, not
-oversights, and drive the shape below.
+TrimmomaticSE -- around one JAR, with no combined entry point and no JSON
+report; both differences from fastp/cutadapt are real, not oversights, and
+drive the shape below. It does have a `-summary <file>` flag, though --
+confirmed against a real run during planning -- so parse_summary reads that
+file rather than regexing stdout.
 """
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -727,18 +864,18 @@ from app.logging import get_logger
 
 log = get_logger(__name__)
 
-# Trimmomatic prints exactly one of these to stderr on completion, depending
-# on PE vs SE mode. Reconfirm this wording against the Docker image's
-# installed version before relying on it -- see the module's test file.
-_PE_SUMMARY_RE = re.compile(
-    r"Input Read Pairs:\s*(\d+)\s+Both Surviving:\s*(\d+)\s*\([\d.]+%\)"
-    r".*?Dropped:\s*(\d+)",
-    re.IGNORECASE | re.DOTALL,
-)
-_SE_SUMMARY_RE = re.compile(
-    r"Input Reads:\s*(\d+)\s+Surviving:\s*(\d+)\s*\([\d.]+%\)\s+Dropped:\s*(\d+)",
-    re.IGNORECASE,
-)
+# Key names as they appear in a -summary file, mapped to where each value
+# lands in the report dict. Confirmed against a real TrimmomaticSE/PE run
+# during planning -- see the module's test file for the exact byte-for-byte
+# fixtures. PE and SE use different key names for the same concept ("Both
+# Surviving Reads" vs "Surviving Reads"), so both are listed; whichever is
+# present for the given `paired` value is read.
+_SE_KEYS = {"input": "Input Reads", "surviving": "Surviving Reads", "dropped": "Dropped Reads"}
+_PE_KEYS = {
+    "input": "Input Read Pairs",
+    "surviving": "Both Surviving Reads",
+    "dropped": "Dropped Reads",
+}
 
 
 @dataclass
@@ -780,6 +917,7 @@ def build_command(
     adapters_dir: str,
     r1_in: Path,
     r1_out: Path,
+    summary_out: Path,
     params: TrimmomaticParams,
     r2_in: Path | None = None,
     r2_out: Path | None = None,
@@ -792,6 +930,13 @@ def build_command(
     adapter file used on single-end reads (or vice versa) matches nothing and
     silently does no clipping, which is worse than an error -- so the default
     tracks `paired` rather than being one fixed filename.
+
+    -phred33 is always passed rather than left to autodetection: Trimmomatic
+    fails outright ("Unable to detect quality encoding") on inputs too short
+    for it to guess from, confirmed against a real run during planning, and
+    every FASTQ this application handles is phred+33 -- autodetection buys
+    nothing and adds a failure mode. -summary writes the file parse_summary
+    reads; there is no flag to send it to stdout instead.
     """
     paired = r2_in is not None
     if paired and (unpaired_r1_out is None or unpaired_r2_out is None):
@@ -802,11 +947,25 @@ def build_command(
         adapter_file = "TruSeq3-PE.fa"
 
     if paired:
-        cmd = [trimmomatic_pe_path, "-threads", str(params.threads)]
+        cmd = [
+            trimmomatic_pe_path,
+            "-threads",
+            str(params.threads),
+            "-phred33",
+            "-summary",
+            str(summary_out),
+        ]
         cmd += [str(r1_in), str(r2_in)]
         cmd += [str(r1_out), str(unpaired_r1_out), str(r2_out), str(unpaired_r2_out)]
     else:
-        cmd = [trimmomatic_se_path, "-threads", str(params.threads)]
+        cmd = [
+            trimmomatic_se_path,
+            "-threads",
+            str(params.threads),
+            "-phred33",
+            "-summary",
+            str(summary_out),
+        ]
         cmd += [str(r1_in), str(r1_out)]
 
     if adapter_file:
@@ -824,21 +983,39 @@ def build_command(
     return cmd
 
 
-def parse_summary(text: str, *, paired: bool) -> dict:
-    """Extract read counts from Trimmomatic's one completion line.
+def parse_summary(path: Path, *, paired: bool) -> dict:
+    """Extract read counts from a Trimmomatic `-summary` file.
 
-    No JSON, no stats file -- this is the only structured-ish output
-    Trimmomatic produces, so the report is built by regex over the process's
-    captured stderr rather than by reading a file, unlike every other
-    runner's parse_report/parse_summary.
+    The file is `Key: Value` per line. PE and SE name the survival count
+    differently ("Both Surviving Reads" vs "Surviving Reads") for the same
+    concept, so which keys to read is chosen by `paired` -- matching how the
+    handler already knows its own read layout rather than sniffing the file.
     """
-    pattern = _PE_SUMMARY_RE if paired else _SE_SUMMARY_RE
-    match = pattern.search(text)
-    if not match:
-        log.warning("trimmomatic_summary_unparsed", paired=paired)
+    try:
+        lines = path.read_text().splitlines()
+    except OSError as e:
+        log.warning("trimmomatic_summary_unreadable", path=str(path), error=str(e))
         return {}
 
-    total_in, total_out, dropped = (int(g) for g in match.groups())
+    values: dict[str, int] = {}
+    for line in lines:
+        if ":" not in line:
+            continue
+        key, _, raw_value = line.partition(":")
+        try:
+            values[key.strip()] = int(raw_value.strip())
+        except ValueError:
+            continue  # a *_Percent line, or anything else non-integer
+
+    keys = _PE_KEYS if paired else _SE_KEYS
+    total_in = values.get(keys["input"])
+    total_out = values.get(keys["surviving"])
+    dropped = values.get(keys["dropped"])
+
+    if total_in is None or total_out is None or dropped is None:
+        log.warning("trimmomatic_summary_missing_keys", path=str(path), paired=paired)
+        return {}
+
     return {
         "tool": "trimmomatic",
         "before": {"total_reads": total_in},
@@ -879,7 +1056,7 @@ Expected: all PASS.
 
 ```bash
 git add backend/app/pipelines/trimmomatic_runner.py backend/tests/pipelines/test_trimmomatic_runner.py
-git commit -m "feat: add Trimmomatic command builder and stdout summary parser"
+git commit -m "feat: add Trimmomatic command builder and -summary file parser"
 ```
 
 ---
@@ -1244,6 +1421,7 @@ def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
         unpaired_r2_out = out_dir / f"unpaired.{r2_name}"
 
     params = trimmomatic_runner.TrimmomaticParams.from_dict(ctx.payload.get("params"))
+    summary_out = work / "summary.txt"
 
     cmd = trimmomatic_runner.build_command(
         trimmomatic_pe_path=settings.trimmomatic_pe_path,
@@ -1251,6 +1429,7 @@ def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
         adapters_dir=settings.trimmomatic_adapters_dir,
         r1_in=r1_in,
         r1_out=r1_out,
+        summary_out=summary_out,
         r2_in=r2_in,
         r2_out=r2_out,
         unpaired_r1_out=unpaired_r1_out,
@@ -1273,8 +1452,7 @@ def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
             raise RetryableError(f"Trimmomatic exited 0 but produced no output at {produced.name}")
 
     ctx.progress(phase="reporting", pct=0.95, message="reading summary")
-    log_text = _log_tail(log_path, lines=20, max_chars=4000)
-    report = trimmomatic_runner.parse_summary(log_text, paired=paired)
+    report = trimmomatic_runner.parse_summary(summary_out, paired=paired)
 
     outputs = [{"tmp_path": str(r1_out), "name": r1_name, "mate": "R1" if paired else None}]
     if paired:
@@ -1312,16 +1490,7 @@ to:
 from app.pipelines import cutadapt_runner, fastp_runner, tools, trimmomatic_runner
 ```
 
-- [ ] **Step 4: Note on `_log_tail`'s existing signature**
-
-`_log_tail(path, *, lines=5, max_chars=600)` already exists
-(`pipeline_handlers.py:540-546`) and is reused verbatim above with wider
-`lines`/`max_chars` — Trimmomatic's completion line can be preceded by
-per-step progress text, so a 600-char/5-line tail risks truncating the
-summary line itself. No change needed to `_log_tail`'s definition, only to
-how `_run_trimmomatic_trim` calls it.
-
-- [ ] **Step 5: Run the pipeline handler tests plus the full pipelines test directory**
+- [ ] **Step 4: Run the pipeline handler tests plus the full pipelines test directory**
 
 ```bash
 cd backend && python -m pytest tests/pipelines/ tests/queue/ -v
@@ -1332,7 +1501,7 @@ Expected: all PASS. (There is no dedicated
 Task 10 — so this mainly re-runs the runner unit tests and confirms nothing
 else broke on import.)
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/queue/pipeline_handlers.py
@@ -2231,16 +2400,23 @@ fix the underlying task and re-run from Step 1.
   launched today" banner was standing in for (Task 13).
 - **What this plan deliberately does not build:** an HTML report for cutadapt
   or Trimmomatic (neither tool produces one the way fastp/FastQC do — Task
-  7's handlers set `html_path: None` for both), and a Trimmomatic JSON/stats
-  file (does not exist — Task 5's regex-over-stdout approach is the ceiling
-  of what's available, not a shortcut taken under time pressure). If a
-  methods-section-grade Trimmomatic report ever matters, the fix is a
-  `-trimlog` file parse (documented format: read name, surviving length,
-  first/last surviving base, amount trimmed from each end, per read) rather
-  than a JSON report, since Trimmomatic has no JSON mode to add.
-- **Risk flagged explicitly in the plan text:** Trimmomatic's stdout
-  completion-line wording is not a versioned, stable contract the way
-  fastp's JSON schema or cutadapt's `--json` schema are. Task 1 and Task 5's
-  module docstring both call out that the regex must be checked against the
-  actual Docker-image binary before this is trusted in production, not just
-  against the upstream doc's quick-start example used to write the tests.
+  7's handlers set `html_path: None` for both), and per-read detail
+  (Trimmomatic's `-trimlog` — read name, surviving length, first/last
+  surviving base, amount trimmed from each end, per read — is not requested;
+  `-summary` gives the aggregate numbers this plan's report shape needs, and
+  a per-read log is a different, heavier artifact this plan has no consumer
+  for). Trimmomatic has no JSON mode, but `-summary <file>` (Task 5) covers
+  the same aggregate-numbers need JSON serves for the other two tools — this
+  is not a lesser fallback, it was verified against a real run during
+  planning and is exactly as reliable as reading any other tool's report
+  file.
+- **Verified, not assumed:** every field name in Task 5's `-summary` file
+  parsing (`Input Reads`, `Surviving Reads`, `Dropped Reads` for SE; `Input
+  Read Pairs`, `Both Surviving Reads`, `Dropped Reads` for PE) and every test
+  fixture built from it came from a real `TrimmomaticSE`/`TrimmomaticPE -summary`
+  run against `biopipe-api:latest` during planning (Task 1), not from the
+  upstream quick-start doc's prose. Same for cutadapt's JSON schema (Task 4).
+  The only remaining risk is drift if the Docker image's Trimmomatic version
+  changes and renames a `-summary` key — low probability (the flag and its
+  output format have been stable across Trimmomatic releases), but Task 14's
+  end-to-end run against the then-current image is what would catch it.
