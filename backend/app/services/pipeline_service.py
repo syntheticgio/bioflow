@@ -83,8 +83,6 @@ def default_params(tool: str = "fastp") -> dict:
     params_cls = _TRIM_PARAM_TYPES.get(tool)
     if params_cls is None:
         raise ValidationError(f"Unknown trim tool: {tool!r}")
-    if params_cls is fastp_runner.TrimParams:
-        return params_cls(threads=settings.pipeline_default_threads).as_dict()
     return params_cls(threads=settings.pipeline_default_threads).as_dict()
 
 
@@ -101,6 +99,11 @@ def _check_tool_runnable(tool: str) -> None:
 
 
 def _trim_tool(tool: str):
+    """Look up the probed `Tool` for a trim tool name.
+
+    Assumes `tool` was already validated by `_check_tool_runnable` -- an
+    unrecognized name raises `KeyError` here, not `ValidationError`.
+    """
     return {
         "fastp": tools.fastp,
         "cutadapt": tools.cutadapt,
