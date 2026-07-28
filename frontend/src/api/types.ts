@@ -318,7 +318,7 @@ export interface ApiError {
 
 // --- Pipelines ---
 
-export type PipelineType = "trim" | "align" | "qc" | "utility";
+export type PipelineType = "trim" | "align" | "qc" | "utility" | "download";
 
 export interface PipelineTool {
   name: string;

@@ -15,6 +15,18 @@ WORKDIR /srv
 # binary tar shells out to for `-j`, so `tar --help` advertises support that
 # fails at runtime.
 #
+# sra-toolkit provides fasterq-dump and prefetch, which is how sequencing runs
+# are pulled from NCBI. Deliberately not pinned to an exact Debian revision:
+# `=3.2.1+dfsg-4` breaks the build the moment the archive supersedes that
+# revision, which it does routinely. Pin the base image digest instead if
+# reproducibility matters -- that pins every package at once and does not rot.
+#
+# Its config directory is handled at *runtime*, not here. `vdb-config` writes
+# to the invoking user's home, which at build time is not necessarily the
+# runtime user's, so doing it in this file would not prevent the first-run
+# failure it appears to. NCBI_SETTINGS points at a path under BIOINFO_HOME and
+# the download handler ensures it exists before shelling out.
+#
 # cutadapt comes from apt rather than pip despite being a Python package, and
 # that is not a style preference: it ships Cython extension modules with no
 # prebuilt aarch64 wheels, so `pip install cutadapt` compiles from source and
@@ -41,6 +53,7 @@ RUN apt-get update \
         samtools \
         cutadapt \
         trimmomatic \
+        sra-toolkit \
         bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -82,6 +95,17 @@ RUN curl -fsSL \
 # Dependencies first so the layer caches across source edits.
 # Installed from pyproject.toml rather than a duplicated list: two copies of the
 # dependency set drift, and the version that matters is the one in the image.
+# NanoPlot for long-read QC. FastQC's per-base model is meaningless for reads
+# that vary from 200 bp to 100 kb within one file, so Nanopore and PacBio runs
+# get this instead -- see the platform dispatch in run_qc.
+#
+# Its own layer, and pinned, because it is expensive: it pulls numpy, pandas,
+# scipy, pyarrow and plotly, which is the largest single addition to this
+# image. Keeping it separate means an application source edit does not
+# reinstall it. Installed globally rather than in a venv because the worker
+# already runs in the system Python.
+RUN pip install --no-cache-dir NanoPlot==1.45.0
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \

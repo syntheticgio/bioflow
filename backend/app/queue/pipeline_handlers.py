@@ -23,6 +23,11 @@ from app.storage.paths import blob_path
 
 log = get_logger(__name__)
 
+# Platforms whose reads NanoPlot describes and FastQC does not. Matched against
+# the SRA `PLATFORM` element's tag name, which is what the resolver records --
+# so these are NCBI's spellings, not free text.
+LONG_READ_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
+
 
 @handler(
     "trim_reads",
@@ -164,28 +169,37 @@ def trim_reads(ctx: JobContext) -> dict:
     # and the governor's cap on concurrent heavy readers is what keeps a
     # handful of QC runs from being slower in aggregate than two. (The plan
     # said MEDIUM, which is not one of the three classes the model defines.)
-    resources=JobResources(cpu=2, mem_mb=1024, io=IoClass.HEAVY),
+    # 2048 rather than 1024: this is the ceiling for either path, and NanoPlot
+    # loads read lengths and qualities into pandas before plotting, so a large
+    # ONT run needs more headroom than fastp's streaming pass ever does. The
+    # short-read path simply does not use what it reserves here.
+    resources=JobResources(cpu=2, mem_mb=2048, io=IoClass.HEAVY),
     # Same reasoning as trim_reads: a QC failure is deterministic -- bad input
     # or a missing binary -- and retries only delay the error.
     max_attempts=2,
 )
 def run_qc(ctx: JobContext) -> dict:
-    """Run fastp (report-only) and FastQC over one FASTQ.
+    """Measure read quality, with the tool that suits the platform.
 
     Read-only, unlike trim: it derives no files, only a description of one.
     The structured numbers come back as facts for `_apply_run_qc` to persist;
-    the HTML lands under qc_reports/<object_id>/ and is referenced by path.
+    the reports land under qc_reports/<object_id>/ and are referenced by path.
+
+    Two paths, chosen by the payload's `platform`:
+
+    - **Long reads** (Nanopore, PacBio) get NanoPlot. FastQC's per-base model
+      assumes every read is the same length, which is meaningless for a file
+      whose reads run from 200 bp to 100 kb -- its per-position plots would be
+      dominated by the handful of longest reads.
+    - **Everything else** gets fastp + FastQC, the standard short-read pair.
+
+    Absent or unrecognized platforms take the short-read path: it is the
+    overwhelmingly common case, and fastp reports something useful for any
+    FASTQ where NanoPlot on short reads is merely uninformative.
 
     Synchronous -- SUBPROCESS runs this off the event loop, so the body must
     not await. Database work happens in the applier.
-
-    FastQC's failure is not the job's failure. fastp produces every number the
-    UI charts, and FastQC is the optional extra that needs a JRE; letting a
-    broken Java install fail a QC run would deny the user the facts that did
-    parse.
     """
-    fastp_tool = tools.require(tools.fastp())
-
     object_id = ctx.payload.get("object_id")
     if not object_id:
         raise PermanentError("run_qc requires an 'object_id'")
@@ -197,6 +211,56 @@ def run_qc(ctx: JobContext) -> dict:
     # blob is stored under its hash with no extension.
     name = ctx.payload.get("name")
     reads_in = _named_link(work, reads_in, name)
+
+    report_dir = settings.qc_reports_dir / str(object_id)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    platform = (ctx.payload.get("platform") or "UNKNOWN").upper()
+    if platform in LONG_READ_PLATFORMS:
+        facts = _run_long_read_qc(ctx, reads_in, work, report_dir, log_path, object_id)
+    else:
+        facts = _run_short_read_qc(ctx, reads_in, work, report_dir, log_path, object_id)
+
+    facts["qc_status"] = "ok"
+    facts["qc_platform"] = platform
+
+    ctx.progress(phase="done", pct=1.0, message="QC complete")
+    log.info(
+        "qc_finished",
+        job_id=ctx.job_id,
+        object_id=object_id,
+        platform=platform,
+        tool=facts.get("qc_tool"),
+    )
+
+    return {
+        "object_id": object_id,
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
+        "workdir": str(work),
+    }
+
+
+def _run_short_read_qc(
+    ctx: JobContext,
+    reads_in: Path,
+    work: Path,
+    report_dir: Path,
+    log_path: Path,
+    object_id: str,
+) -> dict:
+    """fastp (report-only) plus FastQC: the standard short-read pair.
+
+    FastQC's failure is not the job's failure. fastp produces every number the
+    UI charts, and FastQC is the optional extra that needs a JRE; letting a
+    broken Java install fail a QC run would deny the user the facts that did
+    parse.
+    """
+    fastp_tool = tools.require(tools.fastp())
 
     json_out = work / "fastp_qc.json"
     html_out = work / "fastp_qc.html"
@@ -216,9 +280,6 @@ def run_qc(ctx: JobContext) -> dict:
         if progress.feed(line):
             ctx.progress(pct=progress.pct, phase=progress.phase, message=progress.message())
 
-    log_path = settings.logs_dir / f"{ctx.job_id}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-
     log.info("qc_started", job_id=ctx.job_id, object_id=object_id, cmd=" ".join(cmd))
 
     code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
@@ -226,12 +287,6 @@ def run_qc(ctx: JobContext) -> dict:
         raise _failure(code, log_path)
 
     facts = fastp_runner.parse_qc_facts(json_out)
-
-    # Reports are keyed by object rather than by job: a re-run replaces the
-    # previous report rather than accumulating one directory per attempt, and
-    # the path stored in facts stays valid without an update.
-    report_dir = settings.qc_reports_dir / str(object_id)
-    report_dir.mkdir(parents=True, exist_ok=True)
 
     if html_out.exists():
         shutil.copyfile(html_out, report_dir / "fastp.html")
@@ -242,24 +297,116 @@ def run_qc(ctx: JobContext) -> dict:
     if fastqc_name:
         facts["qc_fastqc_report"] = f"{object_id}/{fastqc_name}"
 
-    facts["qc_status"] = "ok"
+    return facts
 
-    ctx.progress(phase="done", pct=1.0, message="QC complete")
-    log.info(
-        "qc_finished",
-        job_id=ctx.job_id,
-        object_id=object_id,
-        reads=facts.get("qc_before_filtering", {}).get("total_reads"),
-        fastqc=bool(fastqc_name),
-    )
 
-    return {
-        "object_id": object_id,
-        "project_id": ctx.payload.get("project_id"),
-        "job_id": ctx.job_id,
-        "facts": facts,
-        "workdir": str(work),
+def _run_long_read_qc(
+    ctx: JobContext,
+    reads_in: Path,
+    work: Path,
+    report_dir: Path,
+    log_path: Path,
+    object_id: str,
+) -> dict:
+    """NanoPlot: read-length and quality distributions for Nanopore/PacBio.
+
+    Unlike the short-read path there is no second tool to fall back on, so a
+    NanoPlot failure fails the job. That is the right outcome: the alternative
+    would be running FastQC on long reads and recording numbers whose per-base
+    model does not apply, which is worse than no QC at all.
+    """
+    nanoplot = tools.require(tools.nanoplot())
+
+    out_dir = report_dir / "nanoplot"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        nanoplot.path,
+        "--fastq",
+        str(reads_in),
+        "--outdir",
+        str(out_dir),
+        "-t",
+        str(min(settings.pipeline_default_threads, 2)),
+        # A machine-readable stats file beside the HTML. Without it the summary
+        # numbers would have to be scraped back out of the report.
+        "--tsv_stats",
+        # N50 is the headline number for a long-read run, the way Q30 is for a
+        # short-read one.
+        "--N50",
+    ]
+
+    ctx.progress(phase="nanoplot", pct=0.1, message="running NanoPlot")
+    log.info("qc_started", job_id=ctx.job_id, object_id=object_id, cmd=" ".join(cmd))
+
+    # NanoPlot reads the whole file before plotting and says little meanwhile,
+    # so a large ONT run can sit quiet long enough to worry the reaper.
+    ctx.extend_lease(1800)
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, tool="NanoPlot")
+
+    facts = _parse_nanoplot_stats(out_dir)
+    facts["qc_tool"] = "NanoPlot"
+    facts["qc_tool_version"] = nanoplot.version
+
+    report = next(iter(sorted(out_dir.glob("NanoPlot-report.html"))), None)
+    if report is not None:
+        facts["qc_nanoplot_report"] = f"{object_id}/nanoplot/{report.name}"
+
+    return facts
+
+
+def _parse_nanoplot_stats(out_dir: Path) -> dict:
+    """Summary numbers from NanoPlot's TSV.
+
+    The file is two columns of `Metric<TAB>value` with human-facing metric
+    names ("Mean read length"). Only the handful worth showing are mapped;
+    an unreadable file costs the numbers but keeps the HTML report.
+    """
+    # NanoStats.txt, not .tsv: `--tsv_stats` selects the *format* of this file
+    # rather than renaming it, so the extension stays .txt either way.
+    stats = out_dir / "NanoStats.txt"
+    if not stats.exists():
+        log.warning("nanoplot_stats_missing", path=str(stats))
+        return {}
+
+    # NanoPlot already emits snake_case metric names, so these are its keys
+    # verbatim. Only the scalar summary is kept: the file also carries ranked
+    # lists ("longest_read_(with_Q):1" through :5) and per-threshold yield
+    # rows, which belong in the HTML report rather than on every object.
+    wanted = {
+        "number_of_reads": "qc_total_reads",
+        "number_of_bases": "qc_total_bases",
+        "mean_read_length": "qc_mean_read_length",
+        "median_read_length": "qc_median_read_length",
+        "read_length_stdev": "qc_read_length_stdev",
+        "n50": "qc_read_length_n50",
+        "mean_qual": "qc_mean_quality",
+        "median_qual": "qc_median_quality",
     }
+
+    facts: dict = {}
+    try:
+        for line in stats.read_text().splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            target = wanted.get(parts[0].strip().lower())
+            if target is None:
+                continue
+            try:
+                facts[target] = float(parts[1].replace(",", ""))
+            except ValueError:
+                # A metric NanoPlot rendered as text rather than a number is
+                # still worth showing.
+                facts[target] = parts[1].strip()
+    except OSError as e:
+        log.warning("nanoplot_stats_unreadable", path=str(stats), error=str(e))
+        return {}
+
+    return facts
 
 
 def _run_fastqc(

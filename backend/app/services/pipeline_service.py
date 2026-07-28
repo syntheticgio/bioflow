@@ -239,6 +239,31 @@ def _trim_inputs(reads: DataObject, mate: DataObject | None) -> list[RunInput]:
     return inputs
 
 
+# SAM platform codes to the SRA platform names run_qc dispatches on. Only the
+# long-read pair needs mapping; everything else takes the short-read path by
+# default, so listing it would add nothing.
+_SAM_TO_SRA_PLATFORM = {"ONT": "OXFORD_NANOPORE", "PACBIO": "PACBIO_SMRT"}
+
+
+def _qc_platform(obj: DataObject) -> str:
+    """Which QC tool family this file's reads call for.
+
+    Goes through `sam_platform` rather than reading `metadata.platform`
+    directly, because that field holds an instrument model -- "PromethION",
+    "Sequel IIe" -- not a platform name. The substring table that already
+    exists for read groups is the thing that knows those models.
+
+    An SRA download stamps `sra_platform` in facts, which is NCBI's own
+    spelling and needs no inference; it wins when present.
+    """
+    recorded = (obj.facts or {}).get("sra_platform")
+    if isinstance(recorded, str) and recorded.strip():
+        return recorded.strip().upper()
+
+    sam = sam_platform((obj.metadata or {}).get("platform"))
+    return _SAM_TO_SRA_PLATFORM.get(sam, "ILLUMINA")
+
+
 async def launch_qc(*, object_id: PydanticObjectId):
     """Queue a QC run over a single FASTQ file.
 
@@ -265,6 +290,11 @@ async def launch_qc(*, object_id: PydanticObjectId):
         "object_id": str(obj.id),
         "project_id": str(obj.project_id),
         "name": obj.name,
+        # Chooses the QC tool. Recovered from the file's own metadata so a
+        # manual QC on a long-read file reaches NanoPlot exactly as an
+        # automatic post-download one does -- the download path passes the
+        # resolver's value directly, but a hand-uploaded file only has this.
+        "platform": _qc_platform(obj),
     }
     if digest:
         payload["r1_sha256"] = digest
@@ -283,7 +313,8 @@ async def launch_qc(*, object_id: PydanticObjectId):
         "run_qc",
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=2, mem_mb=1024, io=IoClass.HEAVY),
+        # Matches the handler's declaration -- see run_qc for why 2048.
+        resources=JobResources(cpu=2, mem_mb=2048, io=IoClass.HEAVY),
         max_attempts=2,
         dedup_key=f"qc:{obj.id}",
         project_id=obj.project_id,

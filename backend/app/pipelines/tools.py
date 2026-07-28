@@ -184,15 +184,33 @@ def samtools() -> Tool:
     return _probe("samtools", settings.samtools_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def nanoplot() -> Tool:
+    return _probe("nanoplot", settings.nanoplot_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def fasterq_dump() -> Tool:
+    return _probe("fasterq-dump", settings.fasterq_dump_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def prefetch() -> Tool:
+    return _probe("prefetch", settings.prefetch_path, ["--version"])
+
+
 def all_tools() -> list[Tool]:
     return [
         fastp(),
         fastqc(),
         cutadapt(),
         trimmomatic(),
+        nanoplot(),
         bwa_mem2(),
         minimap2(),
         samtools(),
+        fasterq_dump(),
+        prefetch(),
     ]
 
 
@@ -208,6 +226,10 @@ class PipelineType(StrEnum):
     ALIGN = "align"
     QC = "qc"
     UTILITY = "utility"
+    # Acquisition rather than analysis: these fetch data instead of
+    # transforming it, so they belong on no analysis screen and would be
+    # misleading listed as utilities beside samtools.
+    DOWNLOAD = "download"
 
 
 @dataclass(frozen=True)
@@ -281,6 +303,47 @@ TOOL_META: dict[str, ToolMeta] = {
             "Rich per-base visualizations (quality, GC, N)",
             "Overrepresented sequence detection",
             "Zero configuration: runs on any FASTQ",
+        ),
+    ),
+    "nanoplot": ToolMeta(
+        pipelines=(PipelineType.QC,),
+        summary=(
+            "QC for long reads. Plots read-length and quality distributions "
+            "for Nanopore and PacBio data, where the per-base model FastQC "
+            "assumes does not apply -- reads in one file can range from a few "
+            "hundred bases to over 100 kb."
+        ),
+        strengths=(
+            "Read-length distribution, the primary long-read quality signal",
+            "Quality-vs-length plots that reveal truncated or degraded runs",
+            "Handles Nanopore and PacBio HiFi alike",
+            "Reads FASTQ, BAM, or a sequencing summary file",
+        ),
+    ),
+    "fasterq-dump": ToolMeta(
+        pipelines=(PipelineType.DOWNLOAD,),
+        summary=(
+            "Converts an SRA run into FASTQ. The multi-threaded successor to "
+            "fastq-dump, and how sequencing data is pulled out of NCBI once a "
+            "run accession is known."
+        ),
+        strengths=(
+            "Multi-threaded: far faster than fastq-dump on large runs",
+            "Splits paired-end runs into R1/R2 automatically",
+            "Handles Illumina, PacBio, and Nanopore submissions alike",
+        ),
+    ),
+    "prefetch": ToolMeta(
+        pipelines=(PipelineType.DOWNLOAD,),
+        summary=(
+            "Fetches an SRA run into the local cache ahead of conversion. "
+            "Some NCBI configurations require it before fasterq-dump, and it "
+            "is a no-op when the run is already cached."
+        ),
+        strengths=(
+            "Resumable: an interrupted fetch continues rather than restarting",
+            "Validates the downloaded archive against its checksum",
+            "A no-op on an already-cached run, so it is safe to always run",
         ),
     ),
     "bwa-mem2": ToolMeta(
@@ -367,6 +430,9 @@ def reset_cache() -> None:
     fastqc.cache_clear()
     cutadapt.cache_clear()
     trimmomatic.cache_clear()
+    nanoplot.cache_clear()
     bwa_mem2.cache_clear()
     minimap2.cache_clear()
     samtools.cache_clear()
+    fasterq_dump.cache_clear()
+    prefetch.cache_clear()

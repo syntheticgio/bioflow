@@ -201,9 +201,12 @@ class TestSerialization:
             "fastqc",
             "cutadapt",
             "trimmomatic",
+            "nanoplot",
             "bwa-mem2",
             "minimap2",
             "samtools",
+            "fasterq-dump",
+            "prefetch",
         }
 
 

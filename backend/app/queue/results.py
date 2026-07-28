@@ -339,6 +339,122 @@ async def _apply_trim_reads(result: dict) -> None:
     )
 
 
+async def _apply_sra_download(result: dict) -> None:
+    """Take a finished SRA download into the project, and chain its QC.
+
+    The handler ran in a worker thread and could not touch the database, so
+    everything persistent happens here: the staged FASTQs become objects, the
+    mates are linked to each other, and QC is queued per file.
+
+    One failed file does not lose the rest. A run that produced R1 and R2 where
+    only R2 fails to ingest should still yield R1 -- the transfer is the
+    expensive part and it already succeeded.
+    """
+    from app.queue import queue
+    from app.services import object_service, run_service
+
+    staged = result.get("staged") or []
+    project_id = result.get("project_id")
+    if not staged or not project_id:
+        return
+
+    project_id = PydanticObjectId(project_id)
+    accession = result.get("accession")
+    job_id = result.get("job_id")
+    platform = result.get("platform") or "UNKNOWN"
+
+    # Provenance, distinct from the sample metadata below: this records where
+    # the bytes came from, which is not a searchable property of the biology.
+    provenance = {
+        "sra_downloaded_from": accession,
+        "sra_download_source": "ncbi",
+        "sra_platform": platform,
+    }
+    metadata = dict(result.get("metadata") or {})
+
+    created: dict[str, DataObject] = {}
+    for entry in staged:
+        try:
+            obj = await object_service.ingest_local_file(
+                project_id=project_id,
+                path=Path(entry["path"]),
+                name=entry["name"],
+                # No role. `ObjectRole` marks files that are something *other*
+                # than plain reads -- a reference, a trim output, an
+                # alignment -- and a freshly downloaded FASTQ is exactly the
+                # untransformed input the absence of a role denotes.
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts=dict(provenance),
+                metadata=dict(metadata),
+            )
+        except Exception as e:  # noqa: BLE001 - one bad file must not lose the rest
+            log.error(
+                "sra_ingest_failed",
+                accession=accession,
+                name=entry.get("name"),
+                error=str(e),
+            )
+            continue
+        created[entry.get("mate") or "single"] = obj
+
+    if not created:
+        log.error("sra_download_ingested_nothing", accession=accession)
+        return
+
+    # Linked from what fasterq-dump reported rather than inferred from the
+    # filenames. `_link_mate` runs at ingest and would usually reach the same
+    # answer, but here the pairing is known exactly -- there is nothing to
+    # guess, and `<acc>_1.fastq` is not a shape its R1/R2 convention detects.
+    r1, r2 = created.get("R1"), created.get("R2")
+    if r1 is not None and r2 is not None:
+        await r1.set({DataObject.mate_object_id: r2.id})
+        await r2.set({DataObject.mate_object_id: r1.id})
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [o.id for o in created.values()])
+
+    log.info(
+        "sra_download_applied",
+        accession=accession,
+        objects=[str(o.id) for o in created.values()],
+        paired=bool(r1 and r2),
+    )
+
+    if not result.get("run_qc"):
+        return
+
+    for obj in created.values():
+        qc_job = await queue.enqueue(
+            "run_qc",
+            payload={
+                "object_id": str(obj.id),
+                "project_id": str(project_id),
+                "name": obj.name,
+                # Chooses the QC tool: NanoPlot for long reads, fastp+FastQC
+                # otherwise. Passed from the resolver's metadata rather than
+                # re-derived, since the handler cannot query for it.
+                "platform": platform,
+                "r1_sha256": obj.blob_sha256,
+                "sra_accession": accession,
+            },
+            job_class=JobClass.COMPUTE,
+            resources=JobResources(cpu=2, mem_mb=2048, io=IoClass.HEAVY),
+            max_attempts=2,
+            # Identical to launch_qc's key, so a manual QC click and this
+            # automatic run collapse into one job rather than running twice.
+            dedup_key=f"qc:{obj.id}",
+            project_id=project_id,
+            object_id=obj.id,
+            parent_job_id=PydanticObjectId(job_id) if job_id else None,
+        )
+        # Joins the download's run: caused by it, and part of finishing what
+        # the user asked for, though it could not be queued until the file
+        # existed. Optional, so a QC failure leaves the run PARTIAL not FAILED.
+        if qc_job is not None and run_id is not None:
+            await run_service.link_job(run_id, qc_job.id, RunJobRole.QC)
+
+
 async def _apply_run_qc(result: dict) -> None:
     """Record a QC run's numbers on the object it described.
 
@@ -635,6 +751,7 @@ _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
     "trim_reads": _apply_trim_reads,
     "run_qc": _apply_run_qc,
+    "download_sra_run": _apply_sra_download,
     "build_index": _apply_build_index,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,

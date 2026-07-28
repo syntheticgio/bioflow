@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     bwa_mem2_path: str = "bwa-mem2"
     minimap2_path: str = "minimap2"
     samtools_path: str = "samtools"
+    fasterq_dump_path: str = "fasterq-dump"
+    prefetch_path: str = "prefetch"
+    nanoplot_path: str = "NanoPlot"
+
 
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own
@@ -94,6 +98,24 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.bioinfo_home / "logs"
+
+    @property
+    def ncbi_dir(self) -> Path:
+        """Where the SRA Toolkit keeps its configuration and its cache.
+
+        Set explicitly because the toolkit otherwise writes under $HOME, which
+        in a container is whatever the runtime user happens to have -- often
+        unwritable, and the resulting failure ("cannot open configuration")
+        looks nothing like its cause. Derived from BIOINFO_HOME rather than
+        hardcoded to /data so it follows a relocated home, and kept under tmp/
+        because everything in it is a cache that can be rebuilt.
+        """
+        return self.tmp_dir / "ncbi"
+
+    @property
+    def ncbi_settings_path(self) -> Path:
+        """The file `NCBI_SETTINGS` points at. See `ncbi_dir`."""
+        return self.ncbi_dir / "user-settings.mkfg"
 
     @property
     def qc_reports_dir(self) -> Path:
