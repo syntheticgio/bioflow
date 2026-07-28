@@ -26,6 +26,7 @@ class TrimRequest(BaseModel):
     mate_object_id: PydanticObjectId | None = None
     paired: bool = True
     params: dict = Field(default_factory=dict)
+    tool: str = "fastp"
 
 
 class MateSuggestion(BaseModel):
@@ -57,11 +58,11 @@ async def list_tools() -> dict:
 
 
 @router.get("/defaults")
-async def trim_defaults() -> dict:
-    """Default trim parameters, owned by the server so the form does not
-    encode its own copy."""
+async def trim_defaults(tool: str = "fastp") -> dict:
+    """Default trim parameters for the given tool, owned by the server so the
+    form does not encode its own copy."""
     return {
-        "params": pipeline_service.default_params(),
+        "params": pipeline_service.default_params(tool),
         "max_threads": settings.pipeline_default_threads,
     }
 
@@ -92,6 +93,7 @@ async def launch_trim(body: TrimRequest) -> JobOut:
         mate_object_id=body.mate_object_id,
         params=body.params,
         paired=body.paired,
+        tool=body.tool,
     )
     return JobOut.of(job)
 
