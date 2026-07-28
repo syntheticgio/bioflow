@@ -16,7 +16,8 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import cutadapt_runner, fastp_runner, tools, trimmomatic_runner
+from app.pipelines import cutadapt_runner, fastp_runner, qc_stats, tools, trimmomatic_runner
+from app.pipelines.align_runner import ReadChemistry
 from app.queue.executor import run_subprocess
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.paths import blob_path
@@ -426,7 +427,9 @@ def run_qc(ctx: JobContext) -> dict:
 
     platform = (ctx.payload.get("platform") or "UNKNOWN").upper()
     if platform in LONG_READ_PLATFORMS:
-        facts = _run_long_read_qc(ctx, reads_in, work, report_dir, log_path, object_id)
+        facts = _run_long_read_qc(
+            ctx, reads_in, work, report_dir, log_path, object_id, platform
+        )
     else:
         facts = _run_short_read_qc(ctx, reads_in, work, report_dir, log_path, object_id)
 
@@ -503,7 +506,20 @@ def _run_short_read_qc(
     if fastqc_name:
         facts["qc_fastqc_report"] = f"{object_id}/{fastqc_name}"
 
+    # Present on every QC'd file, not only long ones, so a consumer never has
+    # to treat its absence as "short read" by default.
+    facts["qc_read_chemistry"] = ReadChemistry.SHORT.value
+
     return facts
+
+
+#  qc_stats.infer_chemistry speaks sam_platform's short vocabulary (ONT,
+#  PACBIO), not SRA's PLATFORM tag names (OXFORD_NANOPORE, PACBIO_SMRT) that
+#  LONG_READ_PLATFORMS is keyed on -- this is the translation between them.
+_QC_STATS_PLATFORM: dict[str, str] = {
+    "OXFORD_NANOPORE": "ONT",
+    "PACBIO_SMRT": "PACBIO",
+}
 
 
 def _run_long_read_qc(
@@ -513,6 +529,7 @@ def _run_long_read_qc(
     report_dir: Path,
     log_path: Path,
     object_id: str,
+    platform: str,
 ) -> dict:
     """NanoPlot: read-length and quality distributions for Nanopore/PacBio.
 
@@ -560,6 +577,14 @@ def _run_long_read_qc(
     report = next(iter(sorted(out_dir.glob("NanoPlot-report.html"))), None)
     if report is not None:
         facts["qc_nanoplot_report"] = f"{object_id}/nanoplot/{report.name}"
+
+    chemistry, reason = qc_stats.infer_chemistry(
+        platform=_QC_STATS_PLATFORM.get(platform, platform),
+        mean_read_length=facts.get("qc_mean_read_length"),
+        mean_quality=facts.get("qc_mean_quality"),
+    )
+    facts["qc_read_chemistry"] = chemistry.value
+    facts["qc_read_chemistry_reason"] = reason
 
     return facts
 
