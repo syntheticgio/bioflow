@@ -10,7 +10,7 @@ from beanie import PydanticObjectId
 
 from app.errors import ValidationError
 from app.models import ACTIVE_STATES, FormatKind, ObjectStatus
-from app.pipelines.align_runner import Preset
+from app.pipelines.align_runner import Preset, ReadChemistry
 from app.services import pipeline_service
 
 
@@ -24,11 +24,13 @@ class FakeObject:
         kind=FormatKind.FASTQ,
         status=ObjectStatus.READY,
         metadata=None,
+        facts=None,
     ):
         self.name = name
         self.format = type("F", (), {"kind": kind})()
         self.status = status
         self.metadata = metadata or {}
+        self.facts = facts or {}
         self.id = name
 
 
@@ -157,6 +159,81 @@ class TestPresetSelection:
 
     def test_unknown_platforms_get_short_read(self):
         assert pipeline_service.suggested_preset("OTHER") == Preset.SHORT_READ
+
+    def test_no_chemistry_argument_still_works(self):
+        """Existing callers that only know the platform must keep working
+        unchanged."""
+        assert pipeline_service.suggested_preset("PACBIO") == Preset.MAP_PB
+
+    def test_hifi_chemistry_overrides_the_pacbio_platform_default(self):
+        """The regression guard for the actual bug: a PacBio file must not
+        keep getting map-pb once its chemistry is known to be HiFi."""
+        assert (
+            pipeline_service.suggested_preset("PACBIO", chemistry=ReadChemistry.HIFI)
+            == Preset.MAP_HIFI
+        )
+
+    def test_clr_chemistry_keeps_the_pacbio_preset(self):
+        assert (
+            pipeline_service.suggested_preset("PACBIO", chemistry=ReadChemistry.CLR)
+            == Preset.MAP_PB
+        )
+
+    def test_ont_duplex_chemistry_overrides_the_ont_platform_default(self):
+        assert (
+            pipeline_service.suggested_preset("ONT", chemistry=ReadChemistry.ONT_DUPLEX)
+            == Preset.LR_HQ
+        )
+
+    def test_unknown_chemistry_on_pacbio_falls_back_to_the_platform_default(self):
+        """map-pb is the conservative choice when chemistry can't be
+        determined: running CLR parameters on HiFi loses sensitivity, but
+        running HiFi parameters on genuinely noisy CLR reads loses far
+        more."""
+        assert (
+            pipeline_service.suggested_preset("PACBIO", chemistry=ReadChemistry.UNKNOWN)
+            == Preset.MAP_PB
+        )
+
+    def test_none_chemistry_falls_back_to_the_platform_default(self):
+        assert (
+            pipeline_service.suggested_preset("PACBIO", chemistry=None) == Preset.MAP_PB
+        )
+
+
+class TestDefaultAlignParams:
+    """default_align_params reads facts.qc_read_chemistry when present, and
+    stays conservative (map-pb, not map-hifi) when it isn't."""
+
+    def test_reads_chemistry_from_facts_when_present(self):
+        obj = FakeObject(
+            metadata={"platform": "PacBio Sequel IIe"},
+            facts={"qc_read_chemistry": ReadChemistry.HIFI.value},
+        )
+        params = pipeline_service.default_align_params(obj)
+        assert params["preset"] == Preset.MAP_HIFI
+
+    def test_falls_back_to_platform_when_facts_have_no_chemistry(self):
+        obj = FakeObject(metadata={"platform": "PacBio Sequel IIe"})
+        params = pipeline_service.default_align_params(obj)
+        assert params["preset"] == Preset.MAP_PB
+
+    def test_falls_back_to_platform_when_object_is_none(self):
+        """No object means no chemistry to read, so this must behave exactly
+        as it did before chemistry existed: Illumina/short-read defaults."""
+        params = pipeline_service.default_align_params(None)
+        assert params["preset"] in (Preset.SHORT_READ, "")
+
+    def test_an_unrecognized_chemistry_value_in_facts_does_not_raise(self):
+        """Facts are attacker- and tool-controlled data, not a validated enum
+        -- a stale or malformed value must degrade to the platform default
+        rather than crash the align dialog."""
+        obj = FakeObject(
+            metadata={"platform": "PacBio Sequel IIe"},
+            facts={"qc_read_chemistry": "not-a-real-chemistry"},
+        )
+        params = pipeline_service.default_align_params(obj)
+        assert params["preset"] == Preset.MAP_PB
 
 
 class TestDefaultReadGroup:

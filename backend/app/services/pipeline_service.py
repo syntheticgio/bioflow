@@ -456,8 +456,20 @@ def sam_platform(metadata_platform: str | None) -> str:
     return "OTHER"
 
 
-def suggested_preset(sam_pl: str) -> str:
-    """The minimap2 preset matching a platform, defaulting to short-read."""
+def suggested_preset(
+    sam_pl: str, *, chemistry: align_runner.ReadChemistry | None = None
+) -> str:
+    """The minimap2 preset matching a platform, defaulting to short-read.
+
+    Chemistry, when known, wins over the platform default: it is the axis
+    that actually determines read accuracy (HiFi vs. CLR are both PACBIO),
+    while platform only says who made the file. UNKNOWN chemistry is treated
+    the same as no chemistry at all -- map-pb stays the PacBio fallback,
+    since running HiFi parameters on genuinely noisy CLR reads loses far more
+    than running CLR parameters on HiFi loses.
+    """
+    if chemistry is not None and chemistry is not align_runner.ReadChemistry.UNKNOWN:
+        return align_runner.preset_for_chemistry(chemistry)
     return _PLATFORM_PRESETS.get(sam_pl, align_runner.Preset.SHORT_READ)
 
 
@@ -505,6 +517,23 @@ def default_library(metadata: dict, *, sample: str) -> str:
     return sample
 
 
+def _read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None:
+    """The chemistry QC already inferred, read from facts rather than
+    recomputed -- QC runs before alignment, so the fact is known by the time
+    the align dialog opens. Facts are tool-written data, not a validated
+    enum, so an unrecognized or stale value degrades to None (the platform
+    default) rather than raising in the middle of building a dialog."""
+    if obj is None:
+        return None
+    value = (obj.facts or {}).get("qc_read_chemistry")
+    if not value:
+        return None
+    try:
+        return align_runner.ReadChemistry(value)
+    except ValueError:
+        return None
+
+
 def default_align_params(obj: DataObject | None = None) -> dict:
     """Server-owned alignment defaults, so the form does not encode its own.
 
@@ -517,7 +546,7 @@ def default_align_params(obj: DataObject | None = None) -> dict:
     aligner = Aligner.BWA_MEM2 if bwa.available else Aligner.MINIMAP2
 
     platform = sam_platform((obj.metadata or {}).get("platform")) if obj else "ILLUMINA"
-    preset = suggested_preset(platform)
+    preset = suggested_preset(platform, chemistry=_read_chemistry(obj))
 
     # Long reads are minimap2's domain regardless of what else is installed:
     # bwa-mem2 is a short-read aligner and would produce poor alignments.
