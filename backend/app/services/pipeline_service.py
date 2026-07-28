@@ -29,7 +29,15 @@ from app.models import (
     RunKind,
     SidecarRole,
 )
-from app.pipelines import align_runner, aligners, fastp_runner, pairing, tools
+from app.pipelines import (
+    align_runner,
+    aligners,
+    cutadapt_runner,
+    fastp_runner,
+    pairing,
+    tools,
+    trimmomatic_runner,
+)
 from app.pipelines.aligners import Aligner
 from app.services import blob_service, run_service
 from app.storage.paths import blob_path
@@ -59,10 +67,45 @@ async def suggest_mate(obj: DataObject) -> DataObject | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def default_params() -> dict:
-    """Server-owned defaults, so the form does not encode its own."""
-    params = fastp_runner.TrimParams(threads=settings.pipeline_default_threads)
-    return params.as_dict()
+_TRIM_PARAM_TYPES = {
+    "fastp": fastp_runner.TrimParams,
+    "cutadapt": cutadapt_runner.CutadaptParams,
+    "trimmomatic": trimmomatic_runner.TrimmomaticParams,
+}
+
+
+def default_params(tool: str = "fastp") -> dict:
+    """Server-owned defaults for the named trim tool, so the form does not
+    encode its own copy. Raises for any tool this application has no runner
+    for -- the same "does this application call it" question TOOL_META's
+    `runnable` flag answers, checked here rather than trusted from the
+    caller."""
+    params_cls = _TRIM_PARAM_TYPES.get(tool)
+    if params_cls is None:
+        raise ValidationError(f"Unknown trim tool: {tool!r}")
+    if params_cls is fastp_runner.TrimParams:
+        return params_cls(threads=settings.pipeline_default_threads).as_dict()
+    return params_cls(threads=settings.pipeline_default_threads).as_dict()
+
+
+def _check_tool_runnable(tool: str) -> None:
+    """Assert a trim tool both exists and has an actual code path.
+
+    Distinct from `tools.require`, which only checks the binary is usable --
+    an unrecognized tool name would pass that check trivially (it is simply
+    absent from `all_tools()`) and reach the queue with no handler branch to
+    run it.
+    """
+    if tool not in _TRIM_PARAM_TYPES:
+        raise ValidationError(f"Unknown trim tool: {tool!r}")
+
+
+def _trim_tool(tool: str):
+    return {
+        "fastp": tools.fastp,
+        "cutadapt": tools.cutadapt,
+        "trimmomatic": tools.trimmomatic,
+    }[tool]()
 
 
 async def _resolve_readable(obj: DataObject) -> tuple[str | None, str | None]:
@@ -109,6 +152,7 @@ async def launch_trim(
     mate_object_id: PydanticObjectId | None = None,
     params: dict | None = None,
     paired: bool = True,
+    tool: str = "fastp",
 ):
     """Queue a trim run over one object, or an R1/R2 pair.
 
@@ -117,7 +161,8 @@ async def launch_trim(
     """
     from app.queue import queue
 
-    tools.require(tools.fastp())
+    _check_tool_runnable(tool)
+    tools.require(_trim_tool(tool))
 
     obj = await DataObject.get(object_id)
     if obj is None:
@@ -146,13 +191,16 @@ async def launch_trim(
             obj, mate = mate, obj
 
     r1_digest, r1_path = await _resolve_readable(obj)
+    params_cls = _TRIM_PARAM_TYPES[tool]
+    merged_params = params_cls.from_dict(
+        {"threads": settings.pipeline_default_threads, **(params or {})}
+    ).as_dict()
     payload: dict = {
         "object_id": str(obj.id),
         "project_id": str(obj.project_id),
         "r1_name": obj.name,
-        "params": fastp_runner.TrimParams.from_dict(
-            {"threads": settings.pipeline_default_threads, **(params or {})}
-        ).as_dict(),
+        "tool": tool,
+        "params": merged_params,
     }
     if r1_digest:
         payload["r1_sha256"] = r1_digest
