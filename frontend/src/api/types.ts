@@ -361,8 +361,30 @@ export interface TrimParams {
   compression: number;
 }
 
+/** Mirrors cutadapt_runner.CutadaptParams. */
+export interface CutadaptParams {
+  quality_cutoff: number;
+  min_length: number;
+  adapter_r1: string | null;
+  adapter_r2: string | null;
+  threads: number;
+}
+
+/** Mirrors trimmomatic_runner.TrimmomaticParams. */
+export interface TrimmomaticParams {
+  quality_leading: number;
+  quality_trailing: number;
+  sliding_window_size: number;
+  sliding_window_quality: number;
+  min_length: number;
+  adapter_file: string | null;
+  threads: number;
+}
+
+export type TrimToolParams = TrimParams | CutadaptParams | TrimmomaticParams;
+
 export interface TrimDefaults {
-  params: TrimParams;
+  params: TrimToolParams;
   max_threads: number;
 }
 
@@ -616,7 +638,8 @@ export interface TrimRequest {
   object_id: string;
   mate_object_id?: string | null;
   paired?: boolean;
-  params?: Partial<TrimParams>;
+  params?: Partial<TrimToolParams>;
+  tool?: string;
 }
 
 export interface JobLog {
