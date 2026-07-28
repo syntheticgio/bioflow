@@ -37,6 +37,23 @@ If a future change happens to break the override-based setup, that's an
 acceptable, fixable cost of this tradeoff -- not a reason to add process
 around it now.
 
+**`worker` does not hot-reload.** `api` runs `uvicorn --reload` and `web`
+runs `vite dev`, so editing their bind-mounted source takes effect on the
+next request with no restart needed. `worker` bind-mounts `./backend/app`
+too but runs `python -m app.worker_main` directly with no reload mechanism,
+so it keeps running whatever was loaded at process start. After a change
+that affects a queue handler (`app/queue/pipeline_handlers.py` and anything
+it imports), run:
+
+```bash
+docker compose restart worker
+```
+
+before re-testing a pipeline job (QC, trim, align, etc.) -- otherwise the
+job appears to run with the fix but is silently still executing the old
+in-memory code, which reads as "the fix didn't work" when it actually just
+never got picked up.
+
 ## Verifying changes
 
 Manual testing in the browser at localhost:5173 is the actual verification
