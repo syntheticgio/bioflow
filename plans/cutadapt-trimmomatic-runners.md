@@ -1614,6 +1614,9 @@ git commit -m "feat: dispatch trim_reads across fastp, cutadapt, and Trimmomatic
 **Files:**
 - Modify: `backend/app/models/run.py`
 - Modify: `backend/app/services/pipeline_service.py` (`launch_trim`)
+- Modify: `backend/app/services/run_service.py`
+- Modify: `backend/app/api/v1/runs.py` (Step 7)
+- Modify: `frontend/src/api/types.ts` (Step 7)
 
 - [ ] **Step 1: Read the current `PipelineRun` model**
 
@@ -1679,6 +1682,116 @@ nothing should break; Task 11 adds coverage for the new field).
 ```bash
 git add backend/app/models/run.py backend/app/services/pipeline_service.py backend/app/services/run_service.py
 git commit -m "feat: record which tool a trim run used on PipelineRun"
+```
+
+- [ ] **Step 7: Surface `tool` through the runs API and its frontend type**
+
+Added after code review caught that Steps 1-6 make `tool` a real, persisted
+field but never expose it anywhere a caller can read it: `RunOut.of()`
+(`backend/app/api/v1/runs.py`) enumerates every field it returns by hand, and
+`tool` was not among them, so `GET /runs`, `GET /runs/{id}`, and
+`GET /runs/for-job/{job_id}` all silently drop it. The field's entire purpose
+-- making which tool ran a trim queryable rather than buried in `params` --
+is unmet until this is fixed.
+
+In `backend/app/api/v1/runs.py`, add `tool: str | None = None` to `RunOut`:
+
+```python
+class RunOut(BaseModel):
+    id: str
+    kind: str
+    project_id: str
+    label: str
+    status: str
+    inputs: list[dict]
+    params: dict
+    tool: str | None = None
+    outputs: list[str]
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, run: PipelineRun, status: str) -> "RunOut":
+        return cls(
+            id=str(run.id),
+            kind=run.kind.value,
+            project_id=str(run.project_id),
+            label=run.label,
+            status=status,
+            inputs=[
+                {
+                    "object_id": str(i.object_id),
+                    "name": i.name,
+                    "role": i.role.value,
+                }
+                for i in run.inputs
+            ],
+            params=run.params,
+            tool=run.tool,
+            outputs=[str(o) for o in run.outputs],
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+        )
+```
+
+`RunDetail(RunOut)` inherits the field with no further change needed --
+`get_run` already builds it via `RunDetail(**RunOut.of(run, status.value).model_dump(), jobs=jobs)`,
+so `tool` rides along automatically once `RunOut.of` sets it.
+
+In `frontend/src/api/types.ts`, add the same field to `RunSummary`:
+
+```typescript
+export interface RunSummary {
+  id: string;
+  kind: RunKind;
+  project_id: string;
+  label: string;
+  status: RunStatus;
+  inputs: RunInput[];
+  params: Record<string, unknown>;
+  tool: string | null;
+  outputs: string[];
+  created_at: string;
+  updated_at: string;
+}
+```
+
+`RunDetail extends RunSummary` needs no change -- it inherits the field.
+
+Add a test to `backend/tests/api/test_runs.py` if that file exists (check
+first; if it doesn't, find whatever test file already covers `RunOut`/`GET
+/runs` and add there, matching its existing fixture conventions):
+
+```python
+async def test_run_out_includes_the_tool_that_ran_it(self):
+    """Regression test for the field added in this step: RunOut.of() used
+    to enumerate fields by hand and silently drop `tool`."""
+    run = await run_service.create_run(
+        kind=RunKind.TRIM,
+        project_id=some_project_id,  # match whatever fixture the file uses
+        label="Trim test.fastq.gz",
+        inputs=[],
+        params={},
+        tool="cutadapt",
+    )
+    out = RunOut.of(run, "succeeded")
+    assert out.tool == "cutadapt"
+```
+
+(Adapt the exact fixture/setup to match the test file's real conventions --
+read it first rather than guessing at `some_project_id`.)
+
+Run:
+```bash
+cd backend && .venv/bin/pytest tests/api/ tests/pipelines/test_launch_rules.py -v
+cd frontend && npx tsc --noEmit
+```
+Expected: all PASS, tsc clean.
+
+Commit:
+```bash
+git add backend/app/api/v1/runs.py frontend/src/api/types.ts backend/tests/api/
+git commit -m "fix: surface PipelineRun.tool through the runs API and its frontend type"
 ```
 
 ---
