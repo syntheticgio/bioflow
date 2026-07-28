@@ -76,7 +76,11 @@ Touches when built: `backend/app/models/run.py`, `backend/app/models/object.py`
 split between command construction and progress parsing), and the
 corresponding frontend dialogs alongside `AlignDialog.tsx`/`TrimDialog.tsx`.
 
-## The align dialog's submit button needs scrolling when expanded
+## The align dialog's submit button needs scrolling when expanded — FIXED
+
+Fixed in `d4d9f2a` (merged to main). `.trim-modal` converted from
+`overflow-y: auto` to a flex column; `.modal-body` scrolls, `.modal-actions`
+pins to the bottom via `margin-top: auto`.
 
 Raised: 2026-07-27, during alignment, found by driving the real UI.
 
