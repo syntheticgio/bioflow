@@ -260,6 +260,7 @@ async def launch_trim(
         label=_trim_label(obj, mate),
         inputs=_trim_inputs(obj, mate),
         params=payload["params"],
+        tool=tool,
     )
     await run_service.link_job(run.id, job.id, RunJobRole.TRIM)
 

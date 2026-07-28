@@ -73,6 +73,10 @@ class PipelineRun(TimestampedDocument):
     # after 30 days, and a run described only by its jobs stops being
     # describable exactly when a record of what was run is most valuable.
     params: dict = Field(default_factory=dict)
+    # Which tool actually ran this trim. None for non-trim runs (alignment
+    # already names its tool via `params["aligner"]`, so this would be
+    # redundant there rather than merely unset).
+    tool: str | None = None
     outputs: list[PydanticObjectId] = Field(default_factory=list)
 
     class Settings:
