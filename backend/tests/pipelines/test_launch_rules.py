@@ -204,3 +204,30 @@ class TestIsLongRead:
             facts={"qc_read_chemistry": "not-a-real-chemistry"},
         )
         assert pipeline_service.is_long_read(obj) is True
+
+
+class TestShortReadTunedTrimTools:
+    """The long-read advisory in launch_trim fires only for tools whose
+    *default* filters actually risk discarding long reads -- not for every
+    tool is_long_read happens to be true for. fastp's min_length defaults to
+    15 and Trimmomatic's to 36 (its own documented default), both tuned for
+    Illumina. cutadapt's min_length defaults to 1 and its own tools.py
+    summary advertises cross-platform support, so warning about it would be
+    a false alarm: a user picking cutadapt specifically because it works on
+    any platform should not be told it doesn't."""
+
+    def test_fastp_is_short_read_tuned(self):
+        assert "fastp" in pipeline_service._SHORT_READ_TUNED_TRIM_TOOLS
+
+    def test_trimmomatic_is_short_read_tuned(self):
+        assert "trimmomatic" in pipeline_service._SHORT_READ_TUNED_TRIM_TOOLS
+
+    def test_cutadapt_is_not_short_read_tuned(self):
+        assert "cutadapt" not in pipeline_service._SHORT_READ_TUNED_TRIM_TOOLS
+
+    def test_every_short_read_tuned_tool_is_a_real_trim_tool(self):
+        """Guards against a typo silently disabling the advisory for a tool
+        that actually needs it."""
+        assert pipeline_service._SHORT_READ_TUNED_TRIM_TOOLS <= set(
+            pipeline_service._TRIM_PARAM_TYPES
+        )

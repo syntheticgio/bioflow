@@ -73,6 +73,14 @@ _TRIM_PARAM_TYPES = {
     "trimmomatic": trimmomatic_runner.TrimmomaticParams,
 }
 
+# Tools whose *default* length/quality filters were tuned for Illumina reads
+# and can discard most of a long-read run -- fastp's min_length defaults to
+# 15, Trimmomatic's to 36 (its own documented default). cutadapt's own
+# summary in tools.py advertises cross-platform support and its min_length
+# defaults to 1, so it does not share this failure mode and is deliberately
+# excluded: warning about it here would be a false alarm, not a caution.
+_SHORT_READ_TUNED_TRIM_TOOLS = {"fastp", "trimmomatic"}
+
 
 def default_params(tool: str = "fastp") -> dict:
     """Server-owned defaults for the named trim tool, so the form does not
@@ -172,17 +180,19 @@ async def launch_trim(
         raise NotFoundError(f"Object not found: {object_id}")
     _check_fastq_ready(obj)
 
-    # fastp's adapter detection and length filters are built for short reads
-    # and can discard most of a long-read run under default settings -- wrong
-    # by default, but not never legitimate, so this warns rather than blocks
+    # fastp's and Trimmomatic's default length/quality filters are tuned for
+    # short reads and can discard most of a long-read run -- wrong by
+    # default, but not never legitimate, so this warns rather than blocks
     # (the same choice already made for desynchronizing an unpaired mate).
-    long_read_advisory = is_long_read(obj)
+    # cutadapt does not share this failure mode (see
+    # _SHORT_READ_TUNED_TRIM_TOOLS) and is deliberately excluded.
+    long_read_advisory = tool in _SHORT_READ_TUNED_TRIM_TOOLS and is_long_read(obj)
     if long_read_advisory:
         log.warning(
             "trim_long_read_advisory",
             object_id=str(obj.id),
             tool=tool,
-            message="fastp's short-read assumptions may discard most of this run",
+            message=f"{tool}'s short-read-tuned defaults may discard most of this run",
         )
 
     mate: DataObject | None = None

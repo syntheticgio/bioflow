@@ -11,7 +11,7 @@ import type { CutadaptParams, DataObject, TrimmomaticParams, TrimParams } from "
 const LONG_READ_CHEMISTRIES = new Set(["hifi", "clr", "ont_simplex", "ont_duplex"]);
 
 /**
- * Whether fastp's short-read assumptions are the wrong tool for this file.
+ * Whether this file is long-read, independent of which trim tool is active.
  *
  * Mirrors `is_long_read` on the backend: chemistry, when QC has already
  * inferred it, is the more specific fact and wins; a file nobody has QC'd
@@ -28,6 +28,14 @@ function isLongRead(object: DataObject): boolean {
   const platform = String(object.metadata?.platform ?? "").toLowerCase();
   return /nanopore|minion|gridion|promethion|flongle|pacbio|sequel|revio/.test(platform);
 }
+
+// Tools whose *default* length/quality filters were tuned for Illumina
+// reads and can discard most of a long-read run -- fastp's min_length
+// defaults to 15, Trimmomatic's to 36 (its own documented default).
+// cutadapt's own summary advertises cross-platform support and its
+// min_length defaults to 1, so it does not share this failure mode.
+// Mirrors _SHORT_READ_TUNED_TRIM_TOOLS in pipeline_service.py.
+const SHORT_READ_TUNED_TOOLS = new Set(["fastp", "trimmomatic"]);
 
 /**
  * Launch adapter trimming over a FASTQ file, or an R1/R2 pair.
@@ -99,7 +107,7 @@ export function TrimDialog({
   });
 
   const ready = defaults != null && activeToolInfo?.available === true;
-  const longRead = isLongRead(object);
+  const longRead = SHORT_READ_TUNED_TOOLS.has(activeTool) && isLongRead(object);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -121,10 +129,10 @@ export function TrimDialog({
 
         {longRead && (
           <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
-            This looks like a long-read file. {activeTool}'s adapter detection
-            and length filters are built for short reads, and default
-            settings can discard most of an ONT or PacBio run — QC with
-            NanoPlot is usually a better next step than trimming here.
+            This looks like a long-read file. {activeTool}'s default
+            length/quality filters are tuned for short reads and can discard
+            most of an ONT or PacBio run — QC with NanoPlot is usually a
+            better next step than trimming here.
           </div>
         )}
 
