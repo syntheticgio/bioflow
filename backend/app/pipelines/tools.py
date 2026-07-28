@@ -285,10 +285,6 @@ TOOL_META: dict[str, ToolMeta] = {
             "Poly-A tail trimming for RNA-seq",
             "Works on any platform (Illumina, PacBio, ONT)",
         ),
-        # Probed and described so the tool selector can preview it, but
-        # trim_reads has no cutadapt code path yet -- see tool-selector-
-        # implementation.md and pipeline-tool-additions-qc.md §1.6.
-        runnable=False,
     ),
     "trimmomatic": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -303,7 +299,6 @@ TOOL_META: dict[str, ToolMeta] = {
             "Simple paired-end model: keeps R1/R2 in sync",
             "Plays well with Nextera/TruSeq adapter FASTA files",
         ),
-        runnable=False,  # same reason as cutadapt, above
     ),
     "fastqc": ToolMeta(
         pipelines=(PipelineType.QC,),
