@@ -57,40 +57,82 @@ RUN apt-get update \
         bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
-# bwa-mem2 is the exception: it is not packaged for Debian, so it comes from the
-# project's own release. The upstream binary is the recommended way to install
-# it -- it is built with the Intel compiler and dispatches at runtime to the
-# SSE/AVX2/AVX512 variant the CPU supports, which is most of the ~2x speedup
-# over bwa that makes it worth carrying at all.
+# bwa-mem2 is the exception: it is not packaged for Debian, so it comes from
+# the project's own release. On x86-64 the upstream prebuilt binary is the
+# recommended way to install it -- it is built with the Intel compiler and
+# dispatches at runtime to the SSE/AVX2/AVX512 variant the CPU supports, which
+# is most of the ~2x speedup over bwa that makes it worth carrying at all.
+#
+# On arm64 (Apple Silicon, linux/arm64 Docker), the upstream binaries are
+# x86-64 only and fail under Rosetta with "failed to open elf". Instead of
+# leaving bwa-mem2 unavailable on arm64, we build from source using sse2neon
+# (https://github.com/DLTcollab/sse2neon), which translates Intel SSE/AVX
+# intrinsics to ARM NEON at compile time. This is the same technique the
+# Homebrew formula (brewsci/bio/bwa-mem2) uses for macOS ARM, adapted here
+# for Linux arm64 containers. The build logic is in scripts/build-bwa-mem2-arm64.sh
+# to keep this file readable.
 #
 # Pinned to an exact version rather than "latest": the aligner version is half
 # of a run's provenance, and an image that silently changed aligners between
 # builds would make two runs of the same pipeline incomparable.
 #
-# x86-64 only, and genuinely so: on an arm64 host these binaries fail under
-# Rosetta with "failed to open elf". The `bwa_mem2()` probe reports that as an
-# unavailable tool in the launch dialog rather than letting it become a job
-# that dies minutes in -- build for linux/amd64 to use bwa-mem2 on Apple
-# Silicon. minimap2 is packaged for both and works either way.
-#
 # Note the release tag and the reported version disagree: the v2.3 tarball
 # ships binaries that self-report 2.2.1. The probe records what the binary
-# says, since that is what actually ran.
+# says, since that is what actually ran. The source build patches the version
+# string to 2.3 to match the tag.
+ARG TARGETARCH
 ARG BWA_MEM2_VERSION=2.3
-RUN curl -fsSL \
-      "https://github.com/bwa-mem2/bwa-mem2/releases/download/v${BWA_MEM2_VERSION}/bwa-mem2-${BWA_MEM2_VERSION}_x64-linux.tar.bz2" \
-      -o /tmp/bwa-mem2.tar.bz2 \
-    && tar -xjf /tmp/bwa-mem2.tar.bz2 -C /opt \
-    && rm /tmp/bwa-mem2.tar.bz2 \
-# A wrapper, not a symlink. The `bwa-mem2` entrypoint is a dispatcher that
-# picks a SIMD variant (.avx512bw/.avx2/.avx/.sse42/.sse41) and looks for it
-# beside *its own argv[0]* -- so a symlink into /usr/local/bin sends it hunting
-# for /usr/local/bin/bwa-mem2.avx2, which does not exist. It then walks the
-# whole list, fails every one, and still exits 0. Execing the real path keeps
-# the variants beside it where the dispatcher expects them.
-    && printf '#!/bin/sh\nexec "/opt/bwa-mem2-%s_x64-linux/bwa-mem2" "$@"\n' "${BWA_MEM2_VERSION}" \
-       > /usr/local/bin/bwa-mem2 \
-    && chmod +x /usr/local/bin/bwa-mem2
+COPY scripts/build-bwa-mem2-arm64.sh /srv/scripts/build-bwa-mem2-arm64.sh
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+      set -e \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends \
+          git cmake dos2unix build-essential ca-certificates zlib1g-dev \
+      # Download sources and patches
+      && git clone https://github.com/bwa-mem2/bwa-mem2.git /tmp/bwa-mem2 \
+      && cd /tmp/bwa-mem2 \
+      && git checkout "v${BWA_MEM2_VERSION}" \
+      && curl -fsSL \
+           "https://raw.githubusercontent.com/DLTcollab/sse2neon/v1.8.0/sse2neon.h" \
+           -o src/sse2neon.h \
+      && curl -fsSL \
+           "https://github.com/intel/safestringlib/archive/refs/tags/v1.2.0.tar.gz" \
+           -o /tmp/safestringlib.tar.gz \
+      && tar -xzf /tmp/safestringlib.tar.gz -C /tmp \
+      && rm /tmp/safestringlib.tar.gz \
+      && curl -fsSL \
+           "https://gist.githubusercontent.com/YoshitakaMo/eb6e6df7a621a9c9737bcc9363cf9bfc/raw/5936f4884daac3c961c6c9a62d9a0c676f578bbb/fastmap.patch" \
+           -o /tmp/fastmap.patch \
+      && curl -fsSL \
+           "https://gist.githubusercontent.com/YoshitakaMo/c4cabc8e1e4b618047507bc354dbb51e/raw/1265ecf70a976476bd3e55d06804b94f9969310e/bandedSWA.cpp.patch" \
+           -o /tmp/bandedSWA.patch \
+      # Run the build script (patches source, builds safestringlib, compiles)
+      && chmod +x /srv/scripts/build-bwa-mem2-arm64.sh \
+      && BWA_MEM2_VERSION="${BWA_MEM2_VERSION}" /srv/scripts/build-bwa-mem2-arm64.sh \
+      # Clean up build dependencies and sources
+      && rm -rf /tmp/bwa-mem2 /tmp/fastmap.patch /tmp/bandedSWA.patch /tmp/safestringlib-1.2.0 \
+      && apt-get purge -y \
+             git cmake dos2unix build-essential ca-certificates zlib1g-dev \
+      && apt-get autoremove -y \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*; \
+    else \
+      curl -fsSL \
+        "https://github.com/bwa-mem2/bwa-mem2/releases/download/v${BWA_MEM2_VERSION}/bwa-mem2-${BWA_MEM2_VERSION}_x64-linux.tar.bz2" \
+        -o /tmp/bwa-mem2.tar.bz2 \
+      && tar -xjf /tmp/bwa-mem2.tar.bz2 -C /opt \
+      && rm /tmp/bwa-mem2.tar.bz2 \
+      # A wrapper, not a symlink. The `bwa-mem2` entrypoint is a dispatcher that
+      # picks a SIMD variant (.avx512bw/.avx2/.avx/.sse42/.sse41) and looks for
+      # it beside *its own argv[0]* -- so a symlink into /usr/local/bin sends
+      # it hunting for /usr/local/bin/bwa-mem2.avx2, which does not exist. It
+      # then walks the whole list, fails every one, and still exits 0. Execing
+      # the real path keeps the variants beside it where the dispatcher
+      # expects them.
+      && printf '#!/bin/sh\nexec "/opt/bwa-mem2-%s_x64-linux/bwa-mem2" "$@"\n' "${BWA_MEM2_VERSION}" \
+         > /usr/local/bin/bwa-mem2 \
+      && chmod +x /usr/local/bin/bwa-mem2; \
+    fi
 
 # Dependencies first so the layer caches across source edits.
 # Installed from pyproject.toml rather than a duplicated list: two copies of the

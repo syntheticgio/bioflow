@@ -366,7 +366,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "Gold standard for Illumina WGS/WES/resequencing",
             "Handles mated reads with proper insert-size modeling",
             "2x faster than original bwa-mem with the same accuracy",
-            "x86-64 only (Intel compiler dispatch)",
+            "x86-64 (prebuilt) and arm64 (sse2neon build) supported",
         ),
     ),
     "minimap2": ToolMeta(
