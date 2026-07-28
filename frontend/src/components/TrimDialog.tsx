@@ -5,6 +5,38 @@ import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { CutadaptParams, DataObject, TrimmomaticParams, TrimParams } from "../api/types";
 
+// Chemistries qc_stats.infer_chemistry can report for a long-read file. Kept
+// in sync with ReadChemistry on the backend rather than imported, since the
+// frontend has no access to backend enums.
+const LONG_READ_CHEMISTRIES = new Set(["hifi", "clr", "ont_simplex", "ont_duplex"]);
+
+/**
+ * Whether this file is long-read, independent of which trim tool is active.
+ *
+ * Mirrors `is_long_read` on the backend: chemistry, when QC has already
+ * inferred it, is the more specific fact and wins; a file nobody has QC'd
+ * yet falls back to a coarse read of the platform label. Not the full
+ * substring table `sam_platform` uses server-side -- this only needs to
+ * catch the common instrument names well enough to warn, not to be the
+ * source of truth the alignment preset relies on.
+ */
+function isLongRead(object: DataObject): boolean {
+  const chemistry = object.facts?.qc_read_chemistry;
+  if (typeof chemistry === "string" && chemistry) {
+    return LONG_READ_CHEMISTRIES.has(chemistry);
+  }
+  const platform = String(object.metadata?.platform ?? "").toLowerCase();
+  return /nanopore|minion|gridion|promethion|flongle|pacbio|sequel|revio/.test(platform);
+}
+
+// Tools whose *default* length/quality filters were tuned for Illumina
+// reads and can discard most of a long-read run -- fastp's min_length
+// defaults to 15, Trimmomatic's to 36 (its own documented default).
+// cutadapt's own summary advertises cross-platform support and its
+// min_length defaults to 1, so it does not share this failure mode.
+// Mirrors _SHORT_READ_TUNED_TRIM_TOOLS in pipeline_service.py.
+const SHORT_READ_TUNED_TOOLS = new Set(["fastp", "trimmomatic"]);
+
 /**
  * Launch adapter trimming over a FASTQ file, or an R1/R2 pair.
  *
@@ -75,6 +107,7 @@ export function TrimDialog({
   });
 
   const ready = defaults != null && activeToolInfo?.available === true;
+  const longRead = SHORT_READ_TUNED_TOOLS.has(activeTool) && isLongRead(object);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -91,6 +124,15 @@ export function TrimDialog({
         {activeToolInfo && !activeToolInfo.available && (
           <div className="error-box" style={{ marginBottom: 12 }}>
             {activeToolInfo.error ?? `${activeTool} is not available`}
+          </div>
+        )}
+
+        {longRead && (
+          <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
+            This looks like a long-read file. {activeTool}'s default
+            length/quality filters are tuned for short reads and can discard
+            most of an ONT or PacBio run — QC with NanoPlot is usually a
+            better next step than trimming here.
           </div>
         )}
 

@@ -8,6 +8,7 @@ strings and dicts, with no queue or filesystem involved.
 import re
 import shlex
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from app.errors import ValidationError
@@ -36,9 +37,48 @@ class Preset:
 
     MAP_ONT = "map-ont"
     MAP_PB = "map-pb"
+    MAP_HIFI = "map-hifi"  # PacBio HiFi/CCS: ~Q30, since minimap2 2.19
+    LR_HQ = "lr:hq"  # ONT duplex / Q20+ chemistry
     SHORT_READ = "sr"
 
-    ALL = (MAP_ONT, MAP_PB, SHORT_READ)
+    ALL = (MAP_ONT, MAP_PB, MAP_HIFI, LR_HQ, SHORT_READ)
+
+
+class ReadChemistry(StrEnum):
+    """How accurate a long-read file actually is, independent of who made it.
+
+    `sam_platform` answers "who made this" (ONT/PACBIO/ILLUMINA); it cannot
+    answer "how accurate is it", which is the question the minimap2 preset
+    actually needs. HiFi and CLR are both PACBIO_SMRT in SRA and both PACBIO
+    in SAM, so this has to be a separate axis rather than folded into platform.
+    """
+
+    HIFI = "hifi"
+    CLR = "clr"
+    ONT_SIMPLEX = "ont_simplex"
+    ONT_DUPLEX = "ont_duplex"
+    SHORT = "short"
+    UNKNOWN = "unknown"
+
+
+_CHEMISTRY_PRESETS: dict[ReadChemistry, str] = {
+    ReadChemistry.HIFI: Preset.MAP_HIFI,
+    ReadChemistry.CLR: Preset.MAP_PB,
+    ReadChemistry.ONT_SIMPLEX: Preset.MAP_ONT,
+    ReadChemistry.ONT_DUPLEX: Preset.LR_HQ,
+    ReadChemistry.SHORT: Preset.SHORT_READ,
+}
+
+
+def preset_for_chemistry(chemistry: ReadChemistry) -> str:
+    """The minimap2 preset for a read chemistry, defaulting to short-read.
+
+    UNKNOWN falls back to short-read here; callers that have a platform to
+    fall back on (see `suggested_preset`) should prefer that over this
+    default, since "unknown chemistry on a PacBio file" should stay map-pb,
+    not become sr.
+    """
+    return _CHEMISTRY_PRESETS.get(chemistry, Preset.SHORT_READ)
 
 
 @dataclass(frozen=True)

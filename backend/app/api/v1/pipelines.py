@@ -186,7 +186,7 @@ async def align_defaults(object_id: PydanticObjectId) -> dict:
 
     Read-group fields come from the reads' own metadata, so the dialog is
     usually a confirmation rather than data entry -- and the aligner defaults
-    to one that is actually installed, since bwa-mem2 is x86-64 only.
+    to one that is actually installed.
     """
     obj = await DataObject.get(object_id)
     if obj is None:

@@ -14,7 +14,14 @@ import pytest
 
 from app.errors import ValidationError
 from app.pipelines import align_runner
-from app.pipelines.align_runner import AlignParams, AlignProgress, Preset, ReadGroup
+from app.pipelines.align_runner import (
+    AlignParams,
+    AlignProgress,
+    Preset,
+    ReadChemistry,
+    ReadGroup,
+    preset_for_chemistry,
+)
 from app.pipelines.aligners import Aligner
 
 
@@ -183,6 +190,42 @@ class TestAlignParams:
     def test_round_trips(self):
         params = AlignParams(aligner=Aligner.BWA_MEM2, preset="", threads=8)
         assert AlignParams.from_dict(params.as_dict()).threads == 8
+
+
+class TestPresetForChemistry:
+    """HiFi and CLR are both PACBIO_SMRT in SRA and both PACBIO in SAM, so
+    platform alone cannot pick the right preset -- this is the piece that
+    actually distinguishes them, and getting HiFi wrong is the bug this plan
+    exists to fix."""
+
+    @pytest.mark.parametrize("chemistry", list(ReadChemistry))
+    def test_every_chemistry_maps_to_a_validated_preset(self, chemistry):
+        assert preset_for_chemistry(chemistry) in Preset.ALL
+
+    def test_hifi_gets_the_hifi_preset_not_pacbio_clr(self):
+        """The regression guard for the actual bug: today every PacBio file
+        gets map-pb, which is tuned for CLR's 10-15% error rate and silently
+        wastes HiFi's ~99.9% accuracy."""
+        assert preset_for_chemistry(ReadChemistry.HIFI) == Preset.MAP_HIFI
+        assert preset_for_chemistry(ReadChemistry.HIFI) != Preset.MAP_PB
+
+    def test_clr_keeps_the_pacbio_preset(self):
+        assert preset_for_chemistry(ReadChemistry.CLR) == Preset.MAP_PB
+
+    def test_ont_simplex_gets_the_ont_preset(self):
+        assert preset_for_chemistry(ReadChemistry.ONT_SIMPLEX) == Preset.MAP_ONT
+
+    def test_ont_duplex_gets_the_high_accuracy_preset(self):
+        assert preset_for_chemistry(ReadChemistry.ONT_DUPLEX) == Preset.LR_HQ
+
+    def test_short_gets_the_short_read_preset(self):
+        assert preset_for_chemistry(ReadChemistry.SHORT) == Preset.SHORT_READ
+
+    @pytest.mark.parametrize(
+        "chemistry", [ReadChemistry.ONT_SIMPLEX, ReadChemistry.ONT_DUPLEX]
+    )
+    def test_an_ont_chemistry_never_yields_short_read(self, chemistry):
+        assert preset_for_chemistry(chemistry) != Preset.SHORT_READ
 
 
 class TestIndexCommands:

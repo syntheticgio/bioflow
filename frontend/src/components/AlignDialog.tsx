@@ -14,7 +14,9 @@ import type {
 const PRESET_LABELS: Record<AlignPreset, string> = {
   sr: "Short read (Illumina)",
   "map-ont": "Oxford Nanopore",
-  "map-pb": "PacBio",
+  "map-pb": "PacBio (CLR)",
+  "map-hifi": "PacBio (HiFi/CCS)",
+  "lr:hq": "Oxford Nanopore (duplex / Q20+)",
 };
 
 /**

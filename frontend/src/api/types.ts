@@ -451,7 +451,7 @@ export interface RunDetail extends RunSummary {
 export type AlignerName = "bwa-mem2" | "minimap2";
 
 /** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */
-export type AlignPreset = "map-ont" | "map-pb" | "sr";
+export type AlignPreset = "map-ont" | "map-pb" | "map-hifi" | "lr:hq" | "sr";
 
 /** Mirrors align_runner.AlignParams. */
 export interface AlignParams {
@@ -565,6 +565,22 @@ export interface QcFacts {
   qc_fastp_report?: string;
   qc_fastqc_report?: string;
   qc_status?: string;
+
+  // NanoPlot facts, written by the long-read QC path (Nanopore/PacBio)
+  // instead of the fastp/FastQC pair above. N50 is this run's headline
+  // number the way Q30 is for a short-read one.
+  qc_total_reads?: number | null;
+  qc_total_bases?: number | null;
+  qc_mean_read_length?: number | null;
+  qc_median_read_length?: number | null;
+  qc_read_length_n50?: number | null;
+  qc_read_length_stdev?: number | null;
+  qc_mean_quality?: number | null;
+  qc_median_quality?: number | null;
+  qc_nanoplot_report?: string;
+  /** Inferred by qc_stats.infer_chemistry; see ReadChemistry on the backend. */
+  qc_read_chemistry?: string;
+  qc_read_chemistry_reason?: string;
 }
 
 // --- NCBI SRA ---

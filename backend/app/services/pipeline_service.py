@@ -73,6 +73,14 @@ _TRIM_PARAM_TYPES = {
     "trimmomatic": trimmomatic_runner.TrimmomaticParams,
 }
 
+# Tools whose *default* length/quality filters were tuned for Illumina reads
+# and can discard most of a long-read run -- fastp's min_length defaults to
+# 15, Trimmomatic's to 36 (its own documented default). cutadapt's own
+# summary in tools.py advertises cross-platform support and its min_length
+# defaults to 1, so it does not share this failure mode and is deliberately
+# excluded: warning about it here would be a false alarm, not a caution.
+_SHORT_READ_TUNED_TRIM_TOOLS = {"fastp", "trimmomatic"}
+
 
 def default_params(tool: str = "fastp") -> dict:
     """Server-owned defaults for the named trim tool, so the form does not
@@ -172,6 +180,21 @@ async def launch_trim(
         raise NotFoundError(f"Object not found: {object_id}")
     _check_fastq_ready(obj)
 
+    # fastp's and Trimmomatic's default length/quality filters are tuned for
+    # short reads and can discard most of a long-read run -- wrong by
+    # default, but not never legitimate, so this warns rather than blocks
+    # (the same choice already made for desynchronizing an unpaired mate).
+    # cutadapt does not share this failure mode (see
+    # _SHORT_READ_TUNED_TRIM_TOOLS) and is deliberately excluded.
+    long_read_advisory = tool in _SHORT_READ_TUNED_TRIM_TOOLS and is_long_read(obj)
+    if long_read_advisory:
+        log.warning(
+            "trim_long_read_advisory",
+            object_id=str(obj.id),
+            tool=tool,
+            message=f"{tool}'s short-read-tuned defaults may discard most of this run",
+        )
+
     mate: DataObject | None = None
     if paired:
         if mate_object_id is not None:
@@ -209,6 +232,8 @@ async def launch_trim(
         payload["r1_sha256"] = r1_digest
     if r1_path:
         payload["r1_path"] = r1_path
+    if long_read_advisory:
+        payload["long_read_advisory"] = True
 
     # The read total drives the progress bar. The parser only ever produces an
     # estimate -- extrapolated from the first 1000 records, with
@@ -314,6 +339,30 @@ def _qc_platform(obj: DataObject) -> str:
 
     sam = sam_platform((obj.metadata or {}).get("platform"))
     return _SAM_TO_SRA_PLATFORM.get(sam, "ILLUMINA")
+
+
+_LONG_READ_QC_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
+
+
+def is_long_read(obj: DataObject) -> bool:
+    """Whether fastp's short-read assumptions are the wrong tool for this file.
+
+    Chemistry, when QC has already inferred it, is the more specific fact --
+    it is what actually determines whether the reads are long, not who made
+    them (a chemistry of SHORT means QC found a mislabelled short-read file
+    even on nominally long-read metadata). Absent or unrecognized chemistry
+    falls back to platform, the same way `suggested_preset` does, since most
+    files reach the trim dialog before anyone has run QC on them.
+    """
+    chemistry = _read_chemistry(obj)
+    if chemistry is not None and chemistry is not align_runner.ReadChemistry.UNKNOWN:
+        return chemistry in (
+            align_runner.ReadChemistry.HIFI,
+            align_runner.ReadChemistry.CLR,
+            align_runner.ReadChemistry.ONT_SIMPLEX,
+            align_runner.ReadChemistry.ONT_DUPLEX,
+        )
+    return _qc_platform(obj) in _LONG_READ_QC_PLATFORMS
 
 
 async def launch_qc(*, object_id: PydanticObjectId):
@@ -456,8 +505,20 @@ def sam_platform(metadata_platform: str | None) -> str:
     return "OTHER"
 
 
-def suggested_preset(sam_pl: str) -> str:
-    """The minimap2 preset matching a platform, defaulting to short-read."""
+def suggested_preset(
+    sam_pl: str, *, chemistry: align_runner.ReadChemistry | None = None
+) -> str:
+    """The minimap2 preset matching a platform, defaulting to short-read.
+
+    Chemistry, when known, wins over the platform default: it is the axis
+    that actually determines read accuracy (HiFi vs. CLR are both PACBIO),
+    while platform only says who made the file. UNKNOWN chemistry is treated
+    the same as no chemistry at all -- map-pb stays the PacBio fallback,
+    since running HiFi parameters on genuinely noisy CLR reads loses far more
+    than running CLR parameters on HiFi loses.
+    """
+    if chemistry is not None and chemistry is not align_runner.ReadChemistry.UNKNOWN:
+        return align_runner.preset_for_chemistry(chemistry)
     return _PLATFORM_PRESETS.get(sam_pl, align_runner.Preset.SHORT_READ)
 
 
@@ -505,6 +566,23 @@ def default_library(metadata: dict, *, sample: str) -> str:
     return sample
 
 
+def _read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None:
+    """The chemistry QC already inferred, read from facts rather than
+    recomputed -- QC runs before alignment, so the fact is known by the time
+    the align dialog opens. Facts are tool-written data, not a validated
+    enum, so an unrecognized or stale value degrades to None (the platform
+    default) rather than raising in the middle of building a dialog."""
+    if obj is None:
+        return None
+    value = (obj.facts or {}).get("qc_read_chemistry")
+    if not value:
+        return None
+    try:
+        return align_runner.ReadChemistry(value)
+    except ValueError:
+        return None
+
+
 def default_align_params(obj: DataObject | None = None) -> dict:
     """Server-owned alignment defaults, so the form does not encode its own.
 
@@ -517,7 +595,7 @@ def default_align_params(obj: DataObject | None = None) -> dict:
     aligner = Aligner.BWA_MEM2 if bwa.available else Aligner.MINIMAP2
 
     platform = sam_platform((obj.metadata or {}).get("platform")) if obj else "ILLUMINA"
-    preset = suggested_preset(platform)
+    preset = suggested_preset(platform, chemistry=_read_chemistry(obj))
 
     # Long reads are minimap2's domain regardless of what else is installed:
     # bwa-mem2 is a short-read aligner and would produce poor alignments.
