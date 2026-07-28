@@ -2,6 +2,80 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+## Variant calling and assembly: designed, not built
+
+Raised: 2026-07-28, during long-read QC and alignment-correctness work
+(`ReadChemistry`, `preset_for_chemistry`, `qc_stats.infer_chemistry`,
+`is_long_read`).
+
+Nothing here is built. This is recorded so the model added for HiFi/CLR
+correctness -- `ReadChemistry` on `align_runner`, inferred by
+`qc_stats.infer_chemistry` and stamped onto QC facts as `qc_read_chemistry`
+-- does not have to be reshaped later to fit either pipeline. Both are real
+consumers of that same fact, which is the reason it is worth having designed
+now rather than after the fact.
+
+### Variant calling
+
+Wants a new `RunKind.VARIANT_CALLING` (alongside the existing `ALIGNMENT`,
+`TRIM`, `SRA_DOWNLOAD` in `backend/app/models/run.py`), a `variants` object
+role, and a VCF/BCF output with a `.tbi` index as a sidecar -- the sidecar
+model already handles exactly this shape for `.bai` (`SidecarRole.BAI` in
+`backend/app/models/object.py`), so a `SidecarRole.TBI` is the only new
+enum member needed, not new machinery. `FormatKind.VCF`/`FormatKind.BCF`
+already exist as recognized file kinds; there is no `call_variants` handler,
+job role, or `.tbi` sidecar anywhere in the codebase yet.
+
+Caller choice is chemistry-driven, which is the concrete reason
+`ReadChemistry` earns its keep beyond alignment:
+
+- ONT -> Clair3, with the model selected per chemistry (ONT_SIMPLEX vs.
+  ONT_DUPLEX) -- another consumer of the same inferred fact, not a new
+  inference.
+- PacBio HiFi -> DeepVariant or Clair3. CLR is not a good target for either;
+  this is arguably a case where the UI should warn or refuse rather than
+  offer a caller, mirroring how `is_long_read` warns rather than blocks for
+  trimming -- worth deciding explicitly when this is actually built rather
+  than assumed.
+- Short reads -> bcftools or GATK.
+
+Job shape mirrors alignment exactly: a `call_variants` job depends on a
+completed `index_bam`, which the existing `Job.depends_on` gate
+(`backend/app/models/job.py`, exercised today by `align_reads` waiting on
+`build_index` in `pipeline_service.launch_alignment`) already handles with
+no queue changes. This is a real, exercised pattern to extend, not a new one
+to invent.
+
+### Assembly
+
+Wants `RunKind.ASSEMBLY`. Its output -- a FASTA -- is itself a candidate
+reference, so it should feed back into the existing reference/index
+machinery (`REFERENCE_KINDS`, `_check_reference`, `build_index_command`)
+rather than needing a new storage concept. Tool choice is chemistry-driven
+again: hifiasm for HiFi, Flye for ONT/CLR.
+
+Both tools are memory-hungry enough to need a real `JobResources` declaration
+(`backend/app/models/job.py`, `cpu`/`mem_mb`/`io`) rather than the small
+defaults trim and QC use today -- and doing so would be the first real
+exercise of the `mem_mb` side of the load governor's admission checks, not
+just `cpu`.
+
+### What this does not need
+
+Neither pipeline needs a queue change (`depends_on` already exists) or a
+storage-model change beyond one new `SidecarRole` member. The design cost was
+almost entirely in making sure `ReadChemistry` lived on `align_runner`
+(shared by alignment, and by extension anything chemistry-driven) rather than
+being invented fresh, and that it is inferred once in QC and read everywhere
+else rather than recomputed per consumer.
+
+Touches when built: `backend/app/models/run.py`, `backend/app/models/object.py`
+(`SidecarRole.TBI`), `backend/app/services/pipeline_service.py`,
+`backend/app/queue/pipeline_handlers.py`, `backend/app/pipelines/` (new
+`variant_runner.py` / `assembly_runner.py`, mirroring `align_runner.py`'s
+split between command construction and progress parsing), and the
+corresponding frontend dialogs alongside `AlignDialog.tsx`/`TrimDialog.tsx`.
+
 ## The align dialog's submit button needs scrolling when expanded
 
 Raised: 2026-07-27, during alignment, found by driving the real UI.
