@@ -1164,6 +1164,7 @@ preferred, nothing here depends on Task 7's code existing yet.
 
 **Files:**
 - Modify: `backend/app/queue/pipeline_handlers.py`
+- Create: `backend/tests/queue/test_pipeline_handlers.py`
 
 - [ ] **Step 1: Understand the current handler shape**
 
@@ -1219,6 +1220,34 @@ def trim_reads(ctx: JobContext) -> dict:
         raise PermanentError(f"trim_reads has no code path for tool {tool!r}")
 
     return run(ctx, object_id)
+
+
+# The real filenames the Debian `trimmomatic` package installs under
+# settings.trimmomatic_adapters_dir -- confirmed against the Docker image
+# during planning. adapter_file is user-controllable (it rides in through
+# TrimmomaticParams.from_dict from a job payload), and build_command
+# concatenates it unescaped into an ILLUMINACLIP:<dir>/<file>:2:30:10
+# argument, so an unlisted value is rejected here rather than trusted --
+# see _run_trimmomatic_trim's docstring for why.
+_TRIMMOMATIC_ADAPTER_FILES = frozenset({
+    "NexteraPE-PE.fa",
+    "TruSeq2-PE.fa",
+    "TruSeq2-SE.fa",
+    "TruSeq3-PE-2.fa",
+    "TruSeq3-PE.fa",
+    "TruSeq3-SE.fa",
+})
+
+
+def _check_trimmomatic_adapter_file(adapter_file: str | None) -> None:
+    """Reject any adapter_file that is not a real file this app ships.
+
+    A pure, directly testable check, pulled out of _run_trimmomatic_trim so a
+    unit test can exercise it without spinning up a job context. See
+    _run_trimmomatic_trim's docstring for why this exists.
+    """
+    if adapter_file is not None and adapter_file not in _TRIMMOMATIC_ADAPTER_FILES:
+        raise PermanentError(f"Unknown Trimmomatic adapter file: {adapter_file!r}")
 
 
 def _resolve_trim_inputs(ctx: JobContext, work: Path) -> tuple[Path, Path | None, bool]:
@@ -1395,10 +1424,17 @@ def _run_cutadapt_trim(ctx: JobContext, object_id: str) -> dict:
 def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
     """Trimmomatic trim.
 
-    No JSON, no progress stream: the report comes from regexing the one
-    completion line Trimmomatic writes to stderr on exit, captured into the
-    same log file run_subprocess already writes -- see
-    trimmomatic_runner.parse_summary.
+    No JSON, no progress stream: the report comes from a `-summary <file>`
+    Trimmomatic writes on exit, read by trimmomatic_runner.parse_summary.
+
+    adapter_file is allowlisted against the real contents of
+    settings.trimmomatic_adapters_dir before it ever reaches
+    trimmomatic_runner.build_command, which concatenates it unescaped into an
+    `ILLUMINACLIP:<dir>/<file>:2:30:10` argument -- an unvalidated value
+    could path-traverse outside that directory or, since Trimmomatic steps
+    are colon-delimited, inject an unrelated step (e.g. `CROP:1`) into the
+    command. The params dataclass has no opinion on this; validating what a
+    caller supplies is this handler's job, not the pure command builder's.
     """
     tool = tools.require(tools.trimmomatic())
 
@@ -1421,6 +1457,7 @@ def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
         unpaired_r2_out = out_dir / f"unpaired.{r2_name}"
 
     params = trimmomatic_runner.TrimmomaticParams.from_dict(ctx.payload.get("params"))
+    _check_trimmomatic_adapter_file(params.adapter_file)
     summary_out = work / "summary.txt"
 
     cmd = trimmomatic_runner.build_command(
@@ -1490,21 +1527,83 @@ to:
 from app.pipelines import cutadapt_runner, fastp_runner, tools, trimmomatic_runner
 ```
 
-- [ ] **Step 4: Run the pipeline handler tests plus the full pipelines test directory**
+- [ ] **Step 4: Add a test for the new adapter-file allowlist**
 
-```bash
-cd backend && python -m pytest tests/pipelines/ tests/queue/ -v
+Create `backend/tests/queue/test_pipeline_handlers.py` (this file does not
+exist yet in this codebase — see the note under Task 10 about why handler
+bodies otherwise go untested directly; this one pure function is worth a
+direct test since it is new validation logic, not a restructuring of
+existing tested behavior):
+
+```python
+"""Direct tests for pipeline_handlers.py's pure helper functions.
+
+Most of trim_reads/run_qc's behavior is covered indirectly through the
+runner modules' own tests (fastp_runner, cutadapt_runner,
+trimmomatic_runner) plus TestBlobExtensionHazard's source-inspection trick
+in test_fastp_runner.py. This file is for the handful of validation
+functions that live in pipeline_handlers.py itself and have no other home.
+"""
+
+import pytest
+
+from app.errors import PermanentError
+from app.queue import pipeline_handlers
+
+
+class TestCheckTrimmomaticAdapterFile:
+    @pytest.mark.parametrize(
+        "adapter_file",
+        [
+            "NexteraPE-PE.fa",
+            "TruSeq2-PE.fa",
+            "TruSeq2-SE.fa",
+            "TruSeq3-PE-2.fa",
+            "TruSeq3-PE.fa",
+            "TruSeq3-SE.fa",
+        ],
+    )
+    def test_known_adapter_files_are_accepted(self, adapter_file):
+        pipeline_handlers._check_trimmomatic_adapter_file(adapter_file)  # no raise
+
+    def test_none_is_accepted(self):
+        """None means "no ILLUMINACLIP step" -- a legitimate configuration,
+        not something to reject."""
+        pipeline_handlers._check_trimmomatic_adapter_file(None)
+
+    def test_unknown_filename_is_rejected(self):
+        with pytest.raises(PermanentError, match="Unknown Trimmomatic adapter file"):
+            pipeline_handlers._check_trimmomatic_adapter_file("not-a-real-file.fa")
+
+    def test_path_traversal_is_rejected(self):
+        with pytest.raises(PermanentError, match="Unknown Trimmomatic adapter file"):
+            pipeline_handlers._check_trimmomatic_adapter_file("../../etc/passwd")
+
+    def test_step_injection_is_rejected(self):
+        """A value crafted to smuggle an extra Trimmomatic step through the
+        colon-delimited ILLUMINACLIP argument must be rejected, not merely
+        an unrecognized filename -- both fail the same allowlist check."""
+        with pytest.raises(PermanentError, match="Unknown Trimmomatic adapter file"):
+            pipeline_handlers._check_trimmomatic_adapter_file("x.fa:2:30:10 CROP:1")
 ```
 
-Expected: all PASS. (There is no dedicated
-`tests/queue/test_pipeline_handlers.py` in this codebase — see the note under
-Task 10 — so this mainly re-runs the runner unit tests and confirms nothing
-else broke on import.)
+Run: `cd backend && .venv/bin/pytest tests/queue/test_pipeline_handlers.py -v`
+Expected: all PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Run the pipeline handler tests plus the full pipelines test directory**
 
 ```bash
-git add backend/app/queue/pipeline_handlers.py
+cd backend && .venv/bin/pytest tests/pipelines/ tests/queue/ -v
+```
+
+Expected: all PASS. This now includes the new `test_pipeline_handlers.py`
+from Step 4, plus the runner unit tests and a confirmation that nothing else
+broke on import.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add backend/app/queue/pipeline_handlers.py backend/tests/queue/test_pipeline_handlers.py
 git commit -m "feat: dispatch trim_reads across fastp, cutadapt, and Trimmomatic"
 ```
 
