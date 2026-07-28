@@ -381,3 +381,77 @@ already do this mapping for align defaults. That would mean minimap2 for
 ONT/PacBio and bwa-mem2 for Illumina when available.
 
 Deferred: it needs a per-object endpoint, and the plain list is enough for v1.
+
+---
+
+## Implementation notes (2026-07-28)
+
+Built and verified in the browser against the live tools API. Two things
+changed from the plan, both settled with the user before building.
+
+**Never skips, even for one available tool.** §4 recommended skipping the
+selector whenever exactly one *available* tool matched. On this arm64 host
+that rule inverts: bwa-mem2 cannot run, so align has exactly one available
+tool and the selector would be skipped for the pipeline the plan was
+principally written for -- hiding the one card whose greyed-out reason (an
+x86-64 binary under Rosetta) is the plan's stated goal #3. Trim, meanwhile,
+gained a third tool from the QC plan's Phase 1 and would show its selector
+under that same rule. The user chose to always show it: one extra click for a
+pipeline that happens to have no real choice today, in exchange for the
+explanation always being reachable.
+
+**`runnable`, not just `available`.** cutadapt and Trimmomatic probe as
+`available: true` -- real, working binaries -- but `trim_reads` has no code
+path for either; the QC plan's Phase 1 described them without building their
+runners (deferred to its own §1.6 / Phase 3). `available` cannot express that
+distinction: a selector gating only on it would offer cutadapt as a real
+choice that silently does nothing once launched. Added a `runnable: bool`
+field to `ToolMeta` (defaulting `True`, set `False` on cutadapt and
+Trimmomatic) and threaded it through `tool_with_meta`/`all_tools_with_meta` to
+`GET /pipelines/tools`. A card is selectable only when both `available` and
+`runnable` are true; the reason shown distinguishes "not installed" (points at
+the environment) from "this application does not run it yet" (points at the
+codebase) -- conflating them would send a user chasing the wrong fix.
+
+**A real bug caught before it shipped, not just a style question.** The first
+draft of `AlignDialog`'s `selectedTool` wiring used a `useEffect` to seed
+`overrides.aligner` once from the prop. That is wrong, not just inelegant:
+`alignerInfo` and `needsIndex` are derived from `params.aligner` synchronously
+during render, and an effect fires *after* the dialog has already painted --
+a real window (not merely a flicker) where the ready/index-build state
+reflects whatever `defaults.params.aligner` was, not the aligner the user
+actually chose. Fixed by folding `selectedTool` directly into the `params`
+object's spread, so it wins deterministically on every render with no timing
+window: `{ ...defaults?.params, ...overrides, ...(selectedTool ? {aligner:
+selectedTool} : {}) }`.
+
+**Also found in verification, not assumed:** FastQC's roving-tabindex pattern
+(`Tabs.tsx`) needed one addition for a radiogroup that tabs strip did not: the
+tab stop and arrow-key search must both skip disabled cards entirely, wrapping
+around rather than landing on something unusable -- confirmed in the browser
+with `ArrowUp`/`ArrowDown`/`Home`/`End` dispatched at the align selector
+(bwa-mem2 disabled, minimap2 the only choosable card) and the trim selector
+(cutadapt/Trimmomatic disabled, fastp the only choosable one). Every key
+stayed on the sole choosable card in both cases.
+
+**Not built:** the optional `GET /pipelines/tools/{pipeline}` endpoint from
+§2.2. The plan itself calls client-side filtering the simpler start, and
+`PipelineToolSelector` does exactly that against the existing `GET
+/pipelines/tools`, which already carries `pipelines` per tool.
+
+**No frontend test suite exists in this repo** (no runner configured, no
+`.test.ts` files anywhere), consistent with every other frontend feature
+shipped so far. Verified instead through direct browser interaction: card
+states, ARIA attributes (`role="radiogroup"`/`"radio"`, `aria-checked`,
+`aria-disabled`), keyboard navigation, Continue/Cancel/Back transitions, and
+the parameter dialogs' `selectedTool` wiring, all exercised against the live
+app with real probe results (bwa-mem2's actual Rosetta error string visible on
+its card).
+
+**Verified:** 918 backend tests pass (4 new, for `runnable`), ruff and tsc
+clean, no browser console errors. Align selector shows minimap2 selectable and
+bwa-mem2 greyed with its live probe error; trim selector shows fastp
+selectable with cutadapt/Trimmomatic greyed as "not yet supported"; keyboard
+navigation on both skips disabled cards; the parameter dialogs open with the
+chosen tool applied and "change tool" returns to the selector with the prior
+choice still highlighted.

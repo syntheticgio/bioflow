@@ -241,6 +241,16 @@ class ToolMeta:
     pipelines: tuple[PipelineType, ...]
     summary: str
     strengths: tuple[str, ...]
+    # Whether a job handler actually branches on this tool, independent of
+    # whether the binary is installed. cutadapt and Trimmomatic probe cleanly
+    # -- they are real, working binaries -- but trim_reads only knows fastp;
+    # there is no cutadapt/Trimmomatic code path for it to dispatch into yet.
+    # `available` (on `Tool`, not here) answers "is the binary usable"; this
+    # answers "does anything in this application call it". A tool selector
+    # conflating the two would offer a card that fails not with "not
+    # installed" but with a confusing error from a handler that silently
+    # ignored the choice.
+    runnable: bool = True
 
 
 TOOL_META: dict[str, ToolMeta] = {
@@ -275,6 +285,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "Poly-A tail trimming for RNA-seq",
             "Works on any platform (Illumina, PacBio, ONT)",
         ),
+        # Probed and described so the tool selector can preview it, but
+        # trim_reads has no cutadapt code path yet -- see tool-selector-
+        # implementation.md and pipeline-tool-additions-qc.md §1.6.
+        runnable=False,
     ),
     "trimmomatic": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -289,6 +303,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "Simple paired-end model: keeps R1/R2 in sync",
             "Plays well with Nextera/TruSeq adapter FASTA files",
         ),
+        runnable=False,  # same reason as cutadapt, above
     ),
     "fastqc": ToolMeta(
         pipelines=(PipelineType.QC,),
@@ -402,6 +417,11 @@ def tool_with_meta(tool: Tool) -> dict:
         "pipelines": [p.value for p in meta.pipelines] if meta else [],
         "summary": meta.summary if meta else "",
         "strengths": list(meta.strengths) if meta else [],
+        # Absent metadata defaults runnable to False too: a tool this
+        # application does not describe is not one it has a code path for
+        # either, and offering it as selectable would be worse than omitting
+        # the summary text.
+        "runnable": meta.runnable if meta else False,
     }
 
 

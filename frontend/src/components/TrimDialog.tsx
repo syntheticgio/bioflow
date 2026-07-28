@@ -12,7 +12,25 @@ import type { DataObject, TrimParams } from "../api/types";
  * fastp's own, and a second copy in the form would drift from the ones a run
  * actually uses.
  */
-export function TrimDialog({ object, onClose }: { object: DataObject; onClose: () => void }) {
+export function TrimDialog({
+  object,
+  selectedTool,
+  onBack,
+  onClose,
+}: {
+  object: DataObject;
+  /**
+   * The tool chosen in `PipelineToolSelector`. Display-only for now: fastp is
+   * the only trimmer with a parameter model and a job handler, so this names
+   * what will actually run rather than steering anything -- see
+   * tool-selector-implementation.md §3.4 and pipeline-tool-additions-qc.md
+   * §1.6 for the runners this is waiting on.
+   */
+  selectedTool?: string;
+  /** Returns to the tool selector, keeping the chosen tool highlighted. */
+  onBack?: () => void;
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const navigate = useNavigate();
 
@@ -67,7 +85,24 @@ export function TrimDialog({ object, onClose }: { object: DataObject; onClose: (
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Trim reads</h2>
+        <h2>
+          Trim reads
+          {selectedTool && selectedTool !== "fastp" && (
+            <span className="dialog-tool-subtitle"> — {selectedTool}</span>
+          )}
+          {onBack && (
+            <button type="button" className="dialog-tool-back" onClick={onBack}>
+              change tool
+            </button>
+          )}
+        </h2>
+
+        {selectedTool && selectedTool !== "fastp" && (
+          <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
+            {selectedTool} was selected, but only fastp can be launched today
+            — its parameters are shown below instead.
+          </div>
+        )}
 
         {fastp && !fastp.available && (
           <div className="error-box" style={{ marginBottom: 12 }}>

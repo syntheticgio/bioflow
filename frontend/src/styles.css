@@ -1793,3 +1793,133 @@ textarea:focus {
   background: var(--bg-hover, rgba(127, 127, 127, 0.14));
   color: var(--accent);
 }
+
+/* --- Pipeline tool selector --- */
+
+.modal.tool-selector {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.tool-card-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.tool-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  background: var(--bg-elevated);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tool-card:hover:not(.disabled) {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.tool-card.selected {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.tool-card.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tool-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.tool-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+
+.tool-card.selected .tool-radio {
+  border-color: var(--accent);
+}
+
+.tool-radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.tool-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.tool-version {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.tool-card-summary {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.tool-card-strengths {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.tool-card-error {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  /* Same treatment as .warn-box so an unusable card reads the same as every
+     other warning in the app. */
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--warn);
+}
+
+/* The chosen tool's name in a parameter dialog's title -- see
+   TrimDialog.tsx / AlignDialog.tsx. Muted rather than the heading's own
+   weight, since it is a qualifier ("Trim reads — cutadapt") not a second
+   heading. */
+.dialog-tool-subtitle {
+  font-weight: 400;
+  color: var(--text-dim);
+}
+
+/* Back-to-selector affordance in a parameter dialog's title -- see
+   TrimDialog.tsx / AlignDialog.tsx. A plain inline button styled to read as
+   part of the heading rather than a separate action. */
+.dialog-tool-back {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--accent);
+  margin-left: 8px;
+}
+
+.dialog-tool-back:hover {
+  text-decoration: underline;
+}
