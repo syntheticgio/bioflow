@@ -3,14 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
-import type { DataObject, TrimParams } from "../api/types";
+import type { CutadaptParams, DataObject, TrimmomaticParams, TrimParams } from "../api/types";
 
 /**
  * Launch adapter trimming over a FASTQ file, or an R1/R2 pair.
  *
  * Defaults come from the server rather than being duplicated here: they are
- * fastp's own, and a second copy in the form would drift from the ones a run
- * actually uses.
+ * the active tool's own, and a second copy in the form would drift from the
+ * ones a run actually uses.
  */
 export function TrimDialog({
   object,
@@ -19,13 +19,7 @@ export function TrimDialog({
   onClose,
 }: {
   object: DataObject;
-  /**
-   * The tool chosen in `PipelineToolSelector`. Display-only for now: fastp is
-   * the only trimmer with a parameter model and a job handler, so this names
-   * what will actually run rather than steering anything -- see
-   * tool-selector-implementation.md §3.4 and pipeline-tool-additions-qc.md
-   * §1.6 for the runners this is waiting on.
-   */
+  /** The tool chosen in `PipelineToolSelector`. Defaults to fastp. */
   selectedTool?: string;
   /** Returns to the tool selector, keeping the chosen tool highlighted. */
   onBack?: () => void;
@@ -40,9 +34,11 @@ export function TrimDialog({
     staleTime: 60_000,
   });
 
+  const activeTool = selectedTool ?? "fastp";
+
   const { data: defaults } = useQuery({
-    queryKey: ["pipelines", "defaults"],
-    queryFn: api.trimDefaults,
+    queryKey: ["pipelines", "defaults", activeTool],
+    queryFn: () => api.trimDefaults(activeTool),
     staleTime: 60_000,
   });
 
@@ -55,8 +51,8 @@ export function TrimDialog({
   const [overrides, setOverrides] = useState<Partial<TrimParams>>({});
   const [advanced, setAdvanced] = useState(false);
 
-  const params = { ...defaults?.params, ...overrides } as TrimParams;
-  const fastp = tools?.tools.find((t) => t.name === "fastp");
+  const params = { ...defaults?.params, ...overrides };
+  const activeToolInfo = tools?.tools.find((t) => t.name === activeTool);
   const usePair = paired && mate != null;
 
   const launch = useMutation({
@@ -66,6 +62,7 @@ export function TrimDialog({
         mate_object_id: usePair ? mate!.object_id : null,
         paired: usePair,
         params: overrides,
+        tool: activeTool,
       }),
     onSuccess: (job) => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -77,19 +74,13 @@ export function TrimDialog({
     onError: (e: Error) => notify.error(e.message),
   });
 
-  const set = <K extends keyof TrimParams>(key: K, value: TrimParams[K]) =>
-    setOverrides((o) => ({ ...o, [key]: value }));
-
-  const ready = defaults != null && fastp?.available === true;
+  const ready = defaults != null && activeToolInfo?.available === true;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Trim reads
-          {selectedTool && selectedTool !== "fastp" && (
-            <span className="dialog-tool-subtitle"> — {selectedTool}</span>
-          )}
           {onBack && (
             <button type="button" className="dialog-tool-back" onClick={onBack}>
               change tool
@@ -97,16 +88,9 @@ export function TrimDialog({
           )}
         </h2>
 
-        {selectedTool && selectedTool !== "fastp" && (
-          <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
-            {selectedTool} was selected, but only fastp can be launched today
-            — its parameters are shown below instead.
-          </div>
-        )}
-
-        {fastp && !fastp.available && (
+        {activeToolInfo && !activeToolInfo.available && (
           <div className="error-box" style={{ marginBottom: 12 }}>
-            {fastp.error ?? "fastp is not available"}
+            {activeToolInfo.error ?? `${activeTool} is not available`}
           </div>
         )}
 
@@ -138,93 +122,177 @@ export function TrimDialog({
           )}
         </div>
 
-        <div className="trim-fields">
-          <label>
-            <span>Min length</span>
-            <input
-              type="number"
-              min={1}
-              value={params.min_length ?? 15}
-              onChange={(e) => set("min_length", Number(e.target.value))}
-            />
-            <small>Reads shorter than this after trimming are discarded.</small>
-          </label>
+        {activeTool === "fastp" && (
+          <>
+            <div className="trim-fields">
+              <label>
+                <span>Min length</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={(params as TrimParams).min_length ?? 15}
+                  onChange={(e) => setOverrides((o) => ({ ...o, min_length: Number(e.target.value) }))}
+                />
+                <small>Reads shorter than this after trimming are discarded.</small>
+              </label>
+              <label>
+                <span>Quality threshold</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={40}
+                  value={(params as TrimParams).quality_threshold ?? 15}
+                  onChange={(e) => setOverrides((o) => ({ ...o, quality_threshold: Number(e.target.value) }))}
+                />
+                <small>Phred score below which a base counts as unqualified.</small>
+              </label>
+              <label>
+                <span>Threads</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={(params as TrimParams).threads ?? 4}
+                  onChange={(e) => setOverrides((o) => ({ ...o, threads: Number(e.target.value) }))}
+                />
+                <small>More threads finish sooner but compete with other work.</small>
+              </label>
+            </div>
 
-          <label>
-            <span>Quality threshold</span>
-            <input
-              type="number"
-              min={0}
-              max={40}
-              value={params.quality_threshold ?? 15}
-              onChange={(e) => set("quality_threshold", Number(e.target.value))}
-            />
-            <small>Phred score below which a base counts as unqualified.</small>
-          </label>
+            <button
+              type="button"
+              className="trim-advanced-toggle"
+              onClick={() => setAdvanced((a) => !a)}
+              aria-expanded={advanced}
+            >
+              <span className="trim-chevron">{advanced ? "▾" : "▸"}</span>
+              Adapters and filtering
+            </button>
 
-          <label>
-            <span>Threads</span>
-            <input
-              type="number"
-              min={1}
-              max={16}
-              value={params.threads ?? 4}
-              onChange={(e) => set("threads", Number(e.target.value))}
-            />
-            <small>More threads finish sooner but compete with other work.</small>
-          </label>
-        </div>
+            {advanced && (
+              <div className="trim-fields">
+                <label className="trim-wide">
+                  <span>Adapter sequence (read 1)</span>
+                  <input
+                    type="text"
+                    placeholder={usePair ? "auto-detected by overlap analysis" : "auto-detected"}
+                    value={(params as TrimParams).adapter_r1 ?? ""}
+                    onChange={(e) => setOverrides((o) => ({ ...o, adapter_r1: e.target.value || null }))}
+                  />
+                  <small>
+                    Leave empty unless you know the sequence — for paired reads
+                    fastp detects it from the overlap, which is more reliable.
+                  </small>
+                </label>
+                <label className="trim-check trim-wide">
+                  <input
+                    type="checkbox"
+                    checked={(params as TrimParams).dedup ?? false}
+                    onChange={(e) => setOverrides((o) => ({ ...o, dedup: e.target.checked }))}
+                  />
+                  <span>Remove duplicate reads</span>
+                </label>
+                <label className="trim-check trim-wide">
+                  <input
+                    type="checkbox"
+                    checked={(params as TrimParams).trim_poly_g === true}
+                    onChange={(e) => setOverrides((o) => ({ ...o, trim_poly_g: e.target.checked ? true : null }))}
+                  />
+                  <span>
+                    Force polyG trimming
+                    <small style={{ display: "block" }}>
+                      Off by default because fastp enables it automatically for
+                      two-colour instruments.
+                    </small>
+                  </span>
+                </label>
+              </div>
+            )}
+          </>
+        )}
 
-        <button
-          type="button"
-          className="trim-advanced-toggle"
-          onClick={() => setAdvanced((a) => !a)}
-          aria-expanded={advanced}
-        >
-          <span className="trim-chevron">{advanced ? "▾" : "▸"}</span>
-          Adapters and filtering
-        </button>
-
-        {advanced && (
+        {activeTool === "cutadapt" && (
           <div className="trim-fields">
+            <label>
+              <span>Min length</span>
+              <input
+                type="number"
+                min={1}
+                value={(params as CutadaptParams).min_length ?? 1}
+                onChange={(e) => setOverrides((o) => ({ ...o, min_length: Number(e.target.value) }))}
+              />
+              <small>Reads shorter than this after trimming are discarded.</small>
+            </label>
+            <label>
+              <span>Quality cutoff</span>
+              <input
+                type="number"
+                min={0}
+                max={40}
+                value={(params as CutadaptParams).quality_cutoff ?? 20}
+                onChange={(e) => setOverrides((o) => ({ ...o, quality_cutoff: Number(e.target.value) }))}
+              />
+              <small>3' quality trimming threshold (cutadapt's -q).</small>
+            </label>
             <label className="trim-wide">
               <span>Adapter sequence (read 1)</span>
               <input
                 type="text"
-                placeholder={
-                  usePair ? "auto-detected by overlap analysis" : "auto-detected"
-                }
-                value={params.adapter_r1 ?? ""}
-                onChange={(e) => set("adapter_r1", e.target.value || null)}
+                placeholder="required — cutadapt has no auto-detection"
+                value={(params as CutadaptParams).adapter_r1 ?? ""}
+                onChange={(e) => setOverrides((o) => ({ ...o, adapter_r1: e.target.value || null }))}
               />
               <small>
-                Leave empty unless you know the sequence — for paired reads
-                fastp detects it from the overlap, which is more reliable.
+                Unlike fastp, cutadapt does not detect adapters automatically —
+                leave empty only if you want quality trimming with no adapter
+                search.
               </small>
             </label>
-
-            <label className="trim-check trim-wide">
+            <label>
+              <span>Threads</span>
               <input
-                type="checkbox"
-                checked={params.dedup ?? false}
-                onChange={(e) => set("dedup", e.target.checked)}
+                type="number"
+                min={1}
+                max={16}
+                value={(params as CutadaptParams).threads ?? 4}
+                onChange={(e) => setOverrides((o) => ({ ...o, threads: Number(e.target.value) }))}
               />
-              <span>Remove duplicate reads</span>
             </label>
+          </div>
+        )}
 
-            <label className="trim-check trim-wide">
+        {activeTool === "trimmomatic" && (
+          <div className="trim-fields">
+            <label>
+              <span>Min length</span>
               <input
-                type="checkbox"
-                checked={params.trim_poly_g === true}
-                onChange={(e) => set("trim_poly_g", e.target.checked ? true : null)}
+                type="number"
+                min={1}
+                value={(params as TrimmomaticParams).min_length ?? 36}
+                onChange={(e) => setOverrides((o) => ({ ...o, min_length: Number(e.target.value) }))}
               />
-              <span>
-                Force polyG trimming
-                <small style={{ display: "block" }}>
-                  Off by default because fastp enables it automatically for
-                  two-colour instruments.
-                </small>
-              </span>
+              <small>Reads shorter than this are dropped (MINLEN).</small>
+            </label>
+            <label>
+              <span>Sliding window quality</span>
+              <input
+                type="number"
+                min={0}
+                max={40}
+                value={(params as TrimmomaticParams).sliding_window_quality ?? 15}
+                onChange={(e) => setOverrides((o) => ({ ...o, sliding_window_quality: Number(e.target.value) }))}
+              />
+              <small>Average quality required within the sliding window.</small>
+            </label>
+            <label>
+              <span>Threads</span>
+              <input
+                type="number"
+                min={1}
+                max={16}
+                value={(params as TrimmomaticParams).threads ?? 4}
+                onChange={(e) => setOverrides((o) => ({ ...o, threads: Number(e.target.value) }))}
+              />
             </label>
           </div>
         )}
