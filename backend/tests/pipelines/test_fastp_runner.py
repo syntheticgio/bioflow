@@ -372,7 +372,10 @@ class TestBlobExtensionHazard:
 
         from app.queue import pipeline_handlers
 
-        source = inspect.getsource(pipeline_handlers.trim_reads)
+        # trim_reads dispatches to _run_fastp_trim, which resolves its inputs
+        # (and thus fastp's) via the shared _resolve_trim_inputs helper -- that
+        # is where the symlink workaround now lives.
+        source = inspect.getsource(pipeline_handlers._resolve_trim_inputs)
         assert "_named_link" in source, (
             "inputs must be symlinked under their user-facing name, or fastp "
             "will misread a compressed blob"
