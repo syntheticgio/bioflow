@@ -13,6 +13,13 @@ import type { QcFacts } from "../api/types";
  * Self-suppressing when the facts are absent, like its neighbours, so a file
  * nobody has run QC on renders nothing rather than an empty section.
  *
+ * Two shapes of facts land here, chosen by which tool actually ran rather
+ * than by platform: fastp/FastQC for short reads, NanoPlot for long reads
+ * (Nanopore/PacBio) -- see `run_qc`'s platform dispatch on the backend. They
+ * measure different things (a per-base curve makes no sense for a file whose
+ * reads run from 200bp to 100kb), so this renders a different block for
+ * each rather than forcing NanoPlot's numbers through fastp's layout.
+ *
  * Deliberately does not repeat the per-base quality and composition curves:
  * `BaseCompositionChart` and `QualityChart` already render those from the same
  * facts blob and are already mounted alongside this in the QC tab.
@@ -25,9 +32,19 @@ export function QcReport({
   objectId: string;
 }) {
   const qc = facts as QcFacts;
-  const measured = qc.qc_before_filtering;
-  if (!qc.qc_tool || !measured) return null;
+  if (!qc.qc_tool) return null;
 
+  if (qc.qc_before_filtering) {
+    return <ShortReadQcReport qc={qc} objectId={objectId} />;
+  }
+  if (qc.qc_read_length_n50 != null) {
+    return <LongReadQcReport qc={qc} objectId={objectId} />;
+  }
+  return null;
+}
+
+function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
+  const measured = qc.qc_before_filtering!;
   const fastqcPath = qc.qc_fastqc_report;
   const fastpPath = qc.qc_fastp_report;
 
@@ -117,6 +134,96 @@ export function QcReport({
                   fastp
                 </a>
               )}
+            </dd>
+          </>
+        )}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * N50 leads, the way Q30 leads the short-read block: it is the number a
+ * long-read run is actually judged by, not an also-ran statistic.
+ */
+function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
+  const nanoplotPath = qc.qc_nanoplot_report;
+
+  return (
+    <div className="section">
+      <div className="section-title">Quality control</div>
+
+      <dl className="kv">
+        <dt>N50</dt>
+        <dd>{count(qc.qc_read_length_n50)} bp</dd>
+
+        <dt>Reads</dt>
+        <dd>{count(qc.qc_total_reads)}</dd>
+
+        <dt>Bases</dt>
+        <dd>{count(qc.qc_total_bases)}</dd>
+
+        {qc.qc_mean_read_length != null && (
+          <>
+            <dt>Mean length</dt>
+            <dd>{count(qc.qc_mean_read_length)} bp</dd>
+          </>
+        )}
+
+        {qc.qc_median_read_length != null && (
+          <>
+            <dt>Median length</dt>
+            <dd>{count(qc.qc_median_read_length)} bp</dd>
+          </>
+        )}
+
+        {qc.qc_mean_quality != null && (
+          <>
+            <dt>Mean quality</dt>
+            <dd>Q{count(qc.qc_mean_quality)}</dd>
+          </>
+        )}
+
+        {qc.qc_median_quality != null && (
+          <>
+            <dt>Median quality</dt>
+            <dd>Q{count(qc.qc_median_quality)}</dd>
+          </>
+        )}
+
+        {qc.qc_read_chemistry && (
+          <>
+            <dt>Chemistry</dt>
+            <dd>
+              {qc.qc_read_chemistry}
+              {qc.qc_read_chemistry_reason && (
+                <span style={{ color: "var(--text-dim)" }}>
+                  {" "}
+                  — {qc.qc_read_chemistry_reason}
+                </span>
+              )}
+            </dd>
+          </>
+        )}
+
+        <dt>Tool</dt>
+        <dd>
+          {qc.qc_tool} {qc.qc_tool_version}
+        </dd>
+
+        {nanoplotPath && (
+          <>
+            <dt>Reports</dt>
+            <dd>
+              {/* Same untrusted-content treatment as the fastp/FastQC links:
+                  new tab, noopener, CSP-sandboxed on the server. */}
+              <a
+                href={api.qcReportUrl(objectId, nanoplotPath)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                NanoPlot
+              </a>
             </dd>
           </>
         )}
