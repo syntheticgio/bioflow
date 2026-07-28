@@ -26,6 +26,9 @@ class RunOut(BaseModel):
     status: str
     inputs: list[dict]
     params: dict
+    # Which tool actually ran a trim run. None for non-trim runs -- see
+    # PipelineRun.tool.
+    tool: str | None = None
     outputs: list[str]
     created_at: datetime
     updated_at: datetime
@@ -47,6 +50,7 @@ class RunOut(BaseModel):
                 for i in run.inputs
             ],
             params=run.params,
+            tool=run.tool,
             outputs=[str(o) for o in run.outputs],
             created_at=run.created_at,
             updated_at=run.updated_at,

@@ -16,7 +16,7 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import fastp_runner, tools
+from app.pipelines import cutadapt_runner, fastp_runner, tools, trimmomatic_runner
 from app.queue.executor import run_subprocess
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.paths import blob_path
@@ -46,38 +46,86 @@ def trim_reads(ctx: JobContext) -> dict:
     database: it resolves its inputs from the payload and returns a plain dict
     for `results._apply_trim_reads` to persist. See queue/results.py.
 
+    Dispatches on the payload's `tool` (default "fastp") to one of three
+    private functions below, each of which owns its own tool's command
+    construction, progress reporting, and report parsing -- mirroring how
+    run_qc dispatches on `platform`.
+
     Idempotent by construction. Delivery is at-least-once, and a drain during
     shutdown requeues a running job, so a second attempt must converge rather
     than collide with the first. Each attempt gets its own scratch directory,
     which is removed on entry -- a partial run leaves nothing behind that a
     retry could mistake for its own output.
     """
-    fastp = tools.require(tools.fastp())
-
     object_id = ctx.payload.get("object_id")
     if not object_id:
         raise PermanentError("trim_reads requires an 'object_id'")
 
+    tool = (ctx.payload.get("tool") or "fastp").lower()
+    dispatch = {
+        "fastp": _run_fastp_trim,
+        "cutadapt": _run_cutadapt_trim,
+        "trimmomatic": _run_trimmomatic_trim,
+    }
+    run = dispatch.get(tool)
+    if run is None:
+        raise PermanentError(f"trim_reads has no code path for tool {tool!r}")
+
+    return run(ctx, object_id)
+
+
+# The real filenames the Debian `trimmomatic` package installs under
+# settings.trimmomatic_adapters_dir -- confirmed against the Docker image
+# during planning. adapter_file is user-controllable (it rides in through
+# TrimmomaticParams.from_dict from a job payload), and build_command
+# concatenates it unescaped into an ILLUMINACLIP:<dir>/<file>:2:30:10
+# argument, so an unlisted value is rejected here rather than trusted --
+# see _run_trimmomatic_trim's docstring for why.
+_TRIMMOMATIC_ADAPTER_FILES = frozenset({
+    "NexteraPE-PE.fa",
+    "TruSeq2-PE.fa",
+    "TruSeq2-SE.fa",
+    "TruSeq3-PE-2.fa",
+    "TruSeq3-PE.fa",
+    "TruSeq3-SE.fa",
+})
+
+
+def _check_trimmomatic_adapter_file(adapter_file: str | None) -> None:
+    """Reject any adapter_file that is not a real file this app ships.
+
+    A pure, directly testable check, pulled out of _run_trimmomatic_trim so a
+    unit test can exercise it without spinning up a job context. See
+    _run_trimmomatic_trim's docstring for why this exists.
+    """
+    if adapter_file is not None and adapter_file not in _TRIMMOMATIC_ADAPTER_FILES:
+        raise PermanentError(f"Unknown Trimmomatic adapter file: {adapter_file!r}")
+
+
+def _resolve_trim_inputs(ctx: JobContext, work: Path) -> tuple[Path, Path | None, bool]:
+    """Resolve and name-link R1 (and R2, if present) for any trim tool.
+
+    Shared across all three tool paths: every one of them needs its input
+    symlinked under its real filename for the same reason fastp does --
+    gzip-vs-text sniffing from a managed blob's extensionless hash name.
+    """
     r1_in = _resolve_input(ctx.payload, "r1")
     r2_in = _resolve_input(ctx.payload, "r2") if ctx.payload.get("r2_sha256") else None
     paired = r2_in is not None
 
-    params = fastp_runner.TrimParams.from_dict(ctx.payload.get("params"))
-    work = _prepare_workdir(ctx)
-
-    # fastp decides whether an input is gzipped from its *filename*, and offers
-    # no flag to override that. Managed blobs are stored under their hash with
-    # no extension, so handing fastp the blob path directly makes it read gzip
-    # bytes as plain text and fail with a parse error. Symlinking the original
-    # name into the scratch directory costs nothing and keeps the command
-    # readable in the log besides.
     r1_in = _named_link(work, r1_in, ctx.payload.get("r1_name"))
     if paired:
         r2_in = _named_link(work, r2_in, ctx.payload.get("r2_name"))
+    return r1_in, r2_in, paired
 
-    # Outputs go in an `out/` subdirectory so a trimmed file can never collide
-    # with the input symlink it was derived from -- `output_name` preserves the
-    # stem, and only the `.trimmed` marker separates them.
+
+def _run_fastp_trim(ctx: JobContext, object_id: str) -> dict:
+    """fastp trim -- the original trim_reads body, unchanged in behavior."""
+    fastp = tools.require(tools.fastp())
+
+    work = _prepare_workdir(ctx)
+    r1_in, r2_in, paired = _resolve_trim_inputs(ctx, work)
+
     out_dir = work / "out"
     out_dir.mkdir(exist_ok=True)
 
@@ -91,6 +139,7 @@ def trim_reads(ctx: JobContext) -> dict:
 
     json_out = work / "fastp.json"
     html_out = work / "fastp.html"
+    params = fastp_runner.TrimParams.from_dict(ctx.payload.get("params"))
 
     cmd = fastp_runner.build_command(
         fastp_path=fastp.path,
@@ -110,21 +159,15 @@ def trim_reads(ctx: JobContext) -> dict:
         if progress.feed(line):
             ctx.progress(pct=progress.pct, phase=progress.phase, message=progress.message())
 
-    # logs/ is created at startup, but this is the first code to write into it
-    # and a worker that somehow started without it must not lose a run over a
-    # missing directory.
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    log.info("trim_started", job_id=ctx.job_id, paired=paired, cmd=" ".join(cmd))
+    log.info("trim_started", job_id=ctx.job_id, tool="fastp", paired=paired, cmd=" ".join(cmd))
 
     code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
     if code != 0:
-        raise _failure(code, log_path)
+        raise _failure(code, log_path, tool="fastp")
 
-    # fastp reports success by exit code, but a zero exit with no output means
-    # something went wrong in a way it did not consider fatal. Catching it here
-    # beats creating an empty object and discovering it downstream.
     for produced in filter(None, (r1_out, r2_out)):
         if not produced.exists() or produced.stat().st_size == 0:
             raise RetryableError(f"fastp exited 0 but produced no output at {produced.name}")
@@ -137,19 +180,12 @@ def trim_reads(ctx: JobContext) -> dict:
         outputs.append({"tmp_path": str(r2_out), "name": r2_name, "mate": "R2"})
 
     ctx.progress(phase="done", pct=1.0, message="trimming complete")
-    log.info(
-        "trim_finished",
-        job_id=ctx.job_id,
-        outputs=len(outputs),
-        reads_in=report.get("before", {}).get("total_reads"),
-        reads_out=report.get("after", {}).get("total_reads"),
-    )
+    log.info("trim_finished", job_id=ctx.job_id, tool="fastp", outputs=len(outputs))
 
     return {
         "object_id": object_id,
         "mate_object_id": ctx.payload.get("mate_object_id"),
         "project_id": ctx.payload.get("project_id"),
-        # Rides along so the produced objects can record which run made them.
         "job_id": ctx.job_id,
         "outputs": outputs,
         "report": report,
@@ -157,6 +193,176 @@ def trim_reads(ctx: JobContext) -> dict:
         "tool": "fastp",
         "tool_version": fastp.version,
         "html_path": str(html_out) if html_out.exists() else None,
+        "workdir": str(work),
+    }
+
+
+def _run_cutadapt_trim(ctx: JobContext, object_id: str) -> dict:
+    """cutadapt trim.
+
+    No --verbose progress stream exists for cutadapt, so ctx.progress only
+    reports "starting" and "done" -- the same as run_qc's NanoPlot path,
+    which has the same limitation for the same reason (no line-oriented
+    progress output to parse).
+    """
+    tool = tools.require(tools.cutadapt())
+
+    work = _prepare_workdir(ctx)
+    r1_in, r2_in, paired = _resolve_trim_inputs(ctx, work)
+
+    out_dir = work / "out"
+    out_dir.mkdir(exist_ok=True)
+
+    r1_name = cutadapt_runner.output_name(ctx.payload.get("r1_name") or r1_in.name)
+    r1_out = out_dir / r1_name
+    r2_out = None
+    r2_name = None
+    if paired:
+        r2_name = cutadapt_runner.output_name(ctx.payload.get("r2_name") or r2_in.name)
+        r2_out = out_dir / r2_name
+
+    json_out = work / "cutadapt.json"
+    params = cutadapt_runner.CutadaptParams.from_dict(ctx.payload.get("params"))
+
+    cmd = cutadapt_runner.build_command(
+        cutadapt_path=tool.path,
+        r1_in=r1_in,
+        r1_out=r1_out,
+        r2_in=r2_in,
+        r2_out=r2_out,
+        json_out=json_out,
+        params=params,
+    )
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="starting", pct=0.0, message="starting cutadapt")
+    log.info("trim_started", job_id=ctx.job_id, tool="cutadapt", paired=paired, cmd=" ".join(cmd))
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, tool="cutadapt")
+
+    for produced in filter(None, (r1_out, r2_out)):
+        if not produced.exists() or produced.stat().st_size == 0:
+            raise RetryableError(f"cutadapt exited 0 but produced no output at {produced.name}")
+
+    ctx.progress(phase="reporting", pct=0.95, message="reading report")
+    report = cutadapt_runner.parse_report(json_out)
+
+    outputs = [{"tmp_path": str(r1_out), "name": r1_name, "mate": "R1" if paired else None}]
+    if paired:
+        outputs.append({"tmp_path": str(r2_out), "name": r2_name, "mate": "R2"})
+
+    ctx.progress(phase="done", pct=1.0, message="trimming complete")
+    log.info("trim_finished", job_id=ctx.job_id, tool="cutadapt", outputs=len(outputs))
+
+    return {
+        "object_id": object_id,
+        "mate_object_id": ctx.payload.get("mate_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "outputs": outputs,
+        "report": report,
+        "params": params.as_dict(),
+        "tool": "cutadapt",
+        "tool_version": tool.version,
+        "html_path": None,
+        "workdir": str(work),
+    }
+
+
+def _run_trimmomatic_trim(ctx: JobContext, object_id: str) -> dict:
+    """Trimmomatic trim.
+
+    No JSON, no progress stream: the report comes from a `-summary <file>`
+    Trimmomatic writes on exit, read by trimmomatic_runner.parse_summary.
+
+    adapter_file is allowlisted against the real contents of
+    settings.trimmomatic_adapters_dir before it ever reaches
+    trimmomatic_runner.build_command, which concatenates it unescaped into an
+    `ILLUMINACLIP:<dir>/<file>:2:30:10` argument -- an unvalidated value
+    could path-traverse outside that directory or, since Trimmomatic steps
+    are colon-delimited, inject an unrelated step (e.g. `CROP:1`) into the
+    command. The params dataclass has no opinion on this; validating what a
+    caller supplies is this handler's job, not the pure command builder's.
+    """
+    tool = tools.require(tools.trimmomatic())
+
+    work = _prepare_workdir(ctx)
+    r1_in, r2_in, paired = _resolve_trim_inputs(ctx, work)
+
+    out_dir = work / "out"
+    out_dir.mkdir(exist_ok=True)
+
+    r1_name = trimmomatic_runner.output_name(ctx.payload.get("r1_name") or r1_in.name)
+    r1_out = out_dir / r1_name
+    r2_out = None
+    r2_name = None
+    unpaired_r1_out = None
+    unpaired_r2_out = None
+    if paired:
+        r2_name = trimmomatic_runner.output_name(ctx.payload.get("r2_name") or r2_in.name)
+        r2_out = out_dir / r2_name
+        unpaired_r1_out = out_dir / f"unpaired.{r1_name}"
+        unpaired_r2_out = out_dir / f"unpaired.{r2_name}"
+
+    params = trimmomatic_runner.TrimmomaticParams.from_dict(ctx.payload.get("params"))
+    _check_trimmomatic_adapter_file(params.adapter_file)
+    summary_out = work / "summary.txt"
+
+    cmd = trimmomatic_runner.build_command(
+        trimmomatic_pe_path=settings.trimmomatic_pe_path,
+        trimmomatic_se_path=settings.trimmomatic_se_path,
+        adapters_dir=settings.trimmomatic_adapters_dir,
+        r1_in=r1_in,
+        r1_out=r1_out,
+        summary_out=summary_out,
+        r2_in=r2_in,
+        r2_out=r2_out,
+        unpaired_r1_out=unpaired_r1_out,
+        unpaired_r2_out=unpaired_r2_out,
+        params=params,
+    )
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="starting", pct=0.0, message="starting Trimmomatic")
+    log.info(
+        "trim_started", job_id=ctx.job_id, tool="trimmomatic", paired=paired, cmd=" ".join(cmd)
+    )
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, tool="trimmomatic")
+
+    for produced in filter(None, (r1_out, r2_out)):
+        if not produced.exists() or produced.stat().st_size == 0:
+            raise RetryableError(f"Trimmomatic exited 0 but produced no output at {produced.name}")
+
+    ctx.progress(phase="reporting", pct=0.95, message="reading summary")
+    report = trimmomatic_runner.parse_summary(summary_out, paired=paired)
+
+    outputs = [{"tmp_path": str(r1_out), "name": r1_name, "mate": "R1" if paired else None}]
+    if paired:
+        outputs.append({"tmp_path": str(r2_out), "name": r2_name, "mate": "R2"})
+
+    ctx.progress(phase="done", pct=1.0, message="trimming complete")
+    log.info("trim_finished", job_id=ctx.job_id, tool="trimmomatic", outputs=len(outputs))
+
+    return {
+        "object_id": object_id,
+        "mate_object_id": ctx.payload.get("mate_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "outputs": outputs,
+        "report": report,
+        "params": params.as_dict(),
+        "tool": "trimmomatic",
+        "tool_version": tool.version,
+        "html_path": None,
         "workdir": str(work),
     }
 

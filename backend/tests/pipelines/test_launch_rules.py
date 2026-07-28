@@ -123,3 +123,22 @@ class TestDefaults:
         """None means 'let fastp decide from the instrument', which is better
         than anything this application can guess."""
         assert pipeline_service.default_params()["trim_poly_g"] is None
+
+
+class TestToolAwareDefaults:
+    def test_fastp_is_the_default_tool(self):
+        assert pipeline_service.default_params() == pipeline_service.default_params("fastp")
+
+    def test_cutadapt_defaults_have_cutadapt_shaped_keys(self):
+        params = pipeline_service.default_params("cutadapt")
+        assert "quality_cutoff" in params
+        assert "unqualified_percent_limit" not in params  # fastp-only key
+
+    def test_trimmomatic_defaults_have_trimmomatic_shaped_keys(self):
+        params = pipeline_service.default_params("trimmomatic")
+        assert "sliding_window_size" in params
+        assert "quality_cutoff" not in params  # cutadapt-only key
+
+    def test_unknown_tool_raises(self):
+        with pytest.raises(ValidationError, match="Unknown trim tool"):
+            pipeline_service.default_params("not-a-real-tool")

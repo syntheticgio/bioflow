@@ -50,9 +50,13 @@ class Settings(BaseSettings):
     fastqc_path: str = "fastqc"
     cutadapt_path: str = "cutadapt"
     # Debian ships no bare `trimmomatic`: the package installs TrimmomaticPE
-    # and TrimmomaticSE as separate entry points around the JAR. SE is the one
-    # probed for a version; a runner would pick the entry point per layout.
-    trimmomatic_path: str = "TrimmomaticSE"
+    # and TrimmomaticSE as separate entry points around the JAR. The runner
+    # picks between them by read layout (paired vs single-end).
+    trimmomatic_path: str = "TrimmomaticSE"  # kept for the version probe only
+    trimmomatic_pe_path: str = "TrimmomaticPE"
+    trimmomatic_se_path: str = "TrimmomaticSE"
+    # Adapter FASTA files the Debian package installs alongside the binaries.
+    trimmomatic_adapters_dir: str = "/usr/share/trimmomatic"
     bwa_mem2_path: str = "bwa-mem2"
     minimap2_path: str = "minimap2"
     samtools_path: str = "samtools"

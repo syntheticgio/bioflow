@@ -76,6 +76,7 @@ async def create_run(
     label: str,
     inputs: list[RunInput],
     params: dict,
+    tool: str | None = None,
 ) -> PipelineRun:
     """Record what a user asked for, before any of it is enqueued."""
     run = PipelineRun(
@@ -84,6 +85,7 @@ async def create_run(
         label=label,
         inputs=inputs,
         params=params,
+        tool=tool,
     )
     await run.insert()
     log.info("run_created", run_id=str(run.id), kind=kind.value, label=label)
