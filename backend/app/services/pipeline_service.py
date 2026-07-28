@@ -172,6 +172,19 @@ async def launch_trim(
         raise NotFoundError(f"Object not found: {object_id}")
     _check_fastq_ready(obj)
 
+    # fastp's adapter detection and length filters are built for short reads
+    # and can discard most of a long-read run under default settings -- wrong
+    # by default, but not never legitimate, so this warns rather than blocks
+    # (the same choice already made for desynchronizing an unpaired mate).
+    long_read_advisory = is_long_read(obj)
+    if long_read_advisory:
+        log.warning(
+            "trim_long_read_advisory",
+            object_id=str(obj.id),
+            tool=tool,
+            message="fastp's short-read assumptions may discard most of this run",
+        )
+
     mate: DataObject | None = None
     if paired:
         if mate_object_id is not None:
@@ -209,6 +222,8 @@ async def launch_trim(
         payload["r1_sha256"] = r1_digest
     if r1_path:
         payload["r1_path"] = r1_path
+    if long_read_advisory:
+        payload["long_read_advisory"] = True
 
     # The read total drives the progress bar. The parser only ever produces an
     # estimate -- extrapolated from the first 1000 records, with
@@ -314,6 +329,30 @@ def _qc_platform(obj: DataObject) -> str:
 
     sam = sam_platform((obj.metadata or {}).get("platform"))
     return _SAM_TO_SRA_PLATFORM.get(sam, "ILLUMINA")
+
+
+_LONG_READ_QC_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
+
+
+def is_long_read(obj: DataObject) -> bool:
+    """Whether fastp's short-read assumptions are the wrong tool for this file.
+
+    Chemistry, when QC has already inferred it, is the more specific fact --
+    it is what actually determines whether the reads are long, not who made
+    them (a chemistry of SHORT means QC found a mislabelled short-read file
+    even on nominally long-read metadata). Absent or unrecognized chemistry
+    falls back to platform, the same way `suggested_preset` does, since most
+    files reach the trim dialog before anyone has run QC on them.
+    """
+    chemistry = _read_chemistry(obj)
+    if chemistry is not None and chemistry is not align_runner.ReadChemistry.UNKNOWN:
+        return chemistry in (
+            align_runner.ReadChemistry.HIFI,
+            align_runner.ReadChemistry.CLR,
+            align_runner.ReadChemistry.ONT_SIMPLEX,
+            align_runner.ReadChemistry.ONT_DUPLEX,
+        )
+    return _qc_platform(obj) in _LONG_READ_QC_PLATFORMS
 
 
 async def launch_qc(*, object_id: PydanticObjectId):

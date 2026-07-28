@@ -8,6 +8,7 @@ import pytest
 
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus
+from app.pipelines.align_runner import ReadChemistry
 from app.services import pipeline_service
 
 
@@ -15,10 +16,12 @@ class FakeObject:
     """Enough of a DataObject for the checks under test."""
 
     def __init__(self, name="sample_R1.fastq.gz", *, kind=FormatKind.FASTQ,
-                 status=ObjectStatus.READY):
+                 status=ObjectStatus.READY, metadata=None, facts=None):
         self.name = name
         self.format = type("F", (), {"kind": kind})()
         self.status = status
+        self.metadata = metadata or {}
+        self.facts = facts or {}
         self.id = name
 
 
@@ -142,3 +145,62 @@ class TestToolAwareDefaults:
     def test_unknown_tool_raises(self):
         with pytest.raises(ValidationError, match="Unknown trim tool"):
             pipeline_service.default_params("not-a-real-tool")
+
+
+class TestIsLongRead:
+    """fastp's adapter detection and length filters are built for short
+    reads; this is what TrimDialog's warning and launch_trim's advisory key
+    off of. Chemistry, when QC has already inferred it, wins over platform
+    -- it is the more specific fact -- but a file nobody has QC'd yet still
+    needs an answer from platform alone."""
+
+    def test_a_hifi_chemistry_fact_is_long_read(self):
+        obj = FakeObject(facts={"qc_read_chemistry": ReadChemistry.HIFI.value})
+        assert pipeline_service.is_long_read(obj) is True
+
+    def test_an_ont_duplex_chemistry_fact_is_long_read(self):
+        obj = FakeObject(facts={"qc_read_chemistry": ReadChemistry.ONT_DUPLEX.value})
+        assert pipeline_service.is_long_read(obj) is True
+
+    def test_a_short_chemistry_fact_is_not_long_read(self):
+        """A file whose chemistry was inferred as SHORT (mislabelled length)
+        is not long-read regardless of what platform it claims."""
+        obj = FakeObject(
+            metadata={"platform": "PacBio Sequel IIe"},
+            facts={"qc_read_chemistry": ReadChemistry.SHORT.value},
+        )
+        assert pipeline_service.is_long_read(obj) is False
+
+    def test_unknown_chemistry_falls_back_to_platform(self):
+        obj = FakeObject(
+            metadata={"platform": "Oxford Nanopore"},
+            facts={"qc_read_chemistry": ReadChemistry.UNKNOWN.value},
+        )
+        assert pipeline_service.is_long_read(obj) is True
+
+    def test_no_chemistry_fact_falls_back_to_platform_ont(self):
+        """The common case before QC has run: only the platform is known."""
+        obj = FakeObject(metadata={"platform": "PromethION"})
+        assert pipeline_service.is_long_read(obj) is True
+
+    def test_no_chemistry_fact_falls_back_to_platform_pacbio(self):
+        obj = FakeObject(metadata={"platform": "PacBio Sequel IIe"})
+        assert pipeline_service.is_long_read(obj) is True
+
+    def test_illumina_is_not_long_read(self):
+        obj = FakeObject(metadata={"platform": "Illumina NovaSeq"})
+        assert pipeline_service.is_long_read(obj) is False
+
+    def test_an_unannotated_file_is_not_long_read(self):
+        """Absent metadata defaults to Illumina, the overwhelmingly common
+        case -- the same default sam_platform itself uses."""
+        assert pipeline_service.is_long_read(FakeObject()) is False
+
+    def test_an_unrecognized_chemistry_value_falls_back_to_platform(self):
+        """Facts are tool-written data, not a validated enum: a stale or
+        malformed value must not crash the trim dialog."""
+        obj = FakeObject(
+            metadata={"platform": "Oxford Nanopore"},
+            facts={"qc_read_chemistry": "not-a-real-chemistry"},
+        )
+        assert pipeline_service.is_long_read(obj) is True
