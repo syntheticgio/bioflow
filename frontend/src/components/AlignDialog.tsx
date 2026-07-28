@@ -27,9 +27,20 @@ const PRESET_LABELS: Record<AlignPreset, string> = {
  */
 export function AlignDialog({
   object,
+  selectedTool,
+  onBack,
   onClose,
 }: {
   object: DataObject;
+  /**
+   * The aligner chosen in `PipelineToolSelector`. Unlike TrimDialog's prop,
+   * this one steers the run: both minimap2 and bwa-mem2 have working handlers
+   * (see align_handlers.py), so the choice is real -- it overrides
+   * `params.aligner` below, taking the place of the `<select>` this replaced.
+   */
+  selectedTool?: AlignerName;
+  /** Returns to the tool selector, keeping the chosen aligner highlighted. */
+  onBack?: () => void;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
@@ -56,7 +67,18 @@ export function AlignDialog({
   const [rgOverrides, setRgOverrides] = useState<Partial<ReadGroup>>({});
   const [advanced, setAdvanced] = useState(false);
 
-  const params = { ...defaults?.params, ...overrides } as AlignParams;
+  // `selectedTool` wins over both the server default and the advanced
+  // override, and does so on every render rather than via an effect that
+  // seeds `overrides` once: `alignerInfo` and `needsIndex` below are derived
+  // from `params.aligner` synchronously, and an effect fires after the
+  // dialog has already painted with whatever `defaults.params.aligner` was --
+  // a real window where the ready/index state reflects the wrong aligner,
+  // not just a cosmetic flicker.
+  const params = {
+    ...defaults?.params,
+    ...overrides,
+    ...(selectedTool ? { aligner: selectedTool } : {}),
+  } as AlignParams;
   const readGroup = { ...defaults?.read_group, ...rgOverrides } as ReadGroup;
 
   const references = refs?.references ?? [];
@@ -117,7 +139,15 @@ export function AlignDialog({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Align reads</h2>
+        <h2>
+          Align reads
+          {aligner && <span className="dialog-tool-subtitle"> — {aligner}</span>}
+          {onBack && (
+            <button type="button" className="dialog-tool-back" onClick={onBack}>
+              change tool
+            </button>
+          )}
+        </h2>
 
         {alignerInfo && !alignerInfo.available && (
           <div className="error-box" style={{ marginBottom: 12 }}>
@@ -224,21 +254,10 @@ export function AlignDialog({
 
         {advanced && (
           <div className="trim-fields">
-            <label>
-              <span>Aligner</span>
-              <select
-                value={params?.aligner ?? "minimap2"}
-                onChange={(e) => set("aligner", e.target.value as AlignerName)}
-              >
-                {defaults?.aligners.map((a) => (
-                  <option key={a.name} value={a.name} disabled={!a.available}>
-                    {a.name}
-                    {a.available ? "" : " (not installed)"}
-                  </option>
-                ))}
-              </select>
-            </label>
-
+            {/* No aligner <select> here: the tool selector is now where that
+                choice is made (PipelineToolSelector, via `selectedTool`),
+                seeded into `params.aligner` above. `aligner` still drives
+                everything below exactly as the select's value used to. */}
             {params?.aligner === "minimap2" && (
               <label>
                 <span>Read type</span>

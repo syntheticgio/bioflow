@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { ObjectDetail as ObjectDetailData } from "../api/types";
+import type { AlignerName, ObjectDetail as ObjectDetailData } from "../api/types";
 import {
   compressionLabel,
   formatBytes,
@@ -24,6 +24,7 @@ import { ActivePipelineJobs } from "./ActivePipelineJobs";
 import { AlignDialog } from "./AlignDialog";
 import { AlignmentReport } from "./AlignmentReport";
 import { IndexStatus } from "./IndexStatus";
+import { PipelineToolSelector } from "./PipelineToolSelector";
 import { TrimDialog } from "./TrimDialog";
 import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
@@ -222,12 +223,38 @@ const TABS: TabDef[] = [
   { id: "actions", label: "Actions" },
 ];
 
+/**
+ * Where a Trim or Align click currently is: choosing a tool, or running the
+ * parameter dialog with one applied. `tool: null` and the pipeline decided is
+ * the whole vocabulary this two-step flow needs -- a boolean per dialog plus
+ * a boolean per selector plus a separately-tracked tool name would admit
+ * states the flow does not have, like both dialogs open at once.
+ */
+type PipelineFlow = { pipeline: "trim" | "align"; tool: string | null } | null;
+
 function ObjectDetail({ id }: { id: string }) {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [trimOpen, setTrimOpen] = useState(false);
-  const [alignOpen, setAlignOpen] = useState(false);
+
+  // Trim and Align both go through a tool selection step before their
+  // parameter dialog. One piece of state for the whole two-step flow, rather
+  // than a boolean per dialog plus a boolean per selector plus a string for
+  // the chosen tool: that combination admits states the flow does not have
+  // (both dialogs open at once), where this type cannot express them.
+  // `tool: null` means the selector is showing; non-null means the parameter
+  // dialog is, with that tool applied.
+  const [flow, setFlow] = useState<PipelineFlow>(null);
+  // The card highlighted in the selector, before Continue commits it into
+  // `flow.tool`. Separate from `flow` because the selector needs a
+  // provisional choice a user can change their mind about without that
+  // partial state leaking into what actually launches a dialog.
+  const [pendingTool, setPendingTool] = useState<string | null>(null);
+
+  const startFlow = (pipeline: "trim" | "align") => {
+    setPendingTool(null);
+    setFlow({ pipeline, tool: null });
+  };
 
   const clearSelection = () => {
     const next = new URLSearchParams(params);
@@ -361,7 +388,7 @@ function ObjectDetail({ id }: { id: string }) {
             type="button"
             className="btn"
             style={{ padding: "2px 10px", fontSize: 12, marginLeft: 8 }}
-            onClick={() => setTrimOpen(true)}
+            onClick={() => startFlow("trim")}
             title="Adapter-trim and quality-filter these reads"
           >
             Trim
@@ -372,7 +399,7 @@ function ObjectDetail({ id }: { id: string }) {
             type="button"
             className="btn"
             style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
-            onClick={() => setAlignOpen(true)}
+            onClick={() => startFlow("align")}
             title="Align these reads against a reference"
           >
             Align
@@ -478,8 +505,42 @@ function ObjectDetail({ id }: { id: string }) {
         )}
       </div>
 
-      {trimOpen && <TrimDialog object={obj} onClose={() => setTrimOpen(false)} />}
-      {alignOpen && <AlignDialog object={obj} onClose={() => setAlignOpen(false)} />}
+      {flow != null && flow.tool == null && (
+        <PipelineToolSelector
+          pipeline={flow.pipeline}
+          selected={pendingTool}
+          onSelect={setPendingTool}
+          onContinue={() => {
+            if (pendingTool) setFlow({ pipeline: flow.pipeline, tool: pendingTool });
+          }}
+          onClose={() => setFlow(null)}
+        />
+      )}
+      {flow?.pipeline === "trim" && flow.tool != null && (
+        <TrimDialog
+          object={obj}
+          selectedTool={flow.tool}
+          onBack={() => {
+            // Reopens on the previously chosen card rather than nothing
+            // highlighted -- "change your mind" should not look like
+            // "start over".
+            setPendingTool(flow.tool);
+            setFlow({ pipeline: "trim", tool: null });
+          }}
+          onClose={() => setFlow(null)}
+        />
+      )}
+      {flow?.pipeline === "align" && flow.tool != null && (
+        <AlignDialog
+          object={obj}
+          selectedTool={flow.tool as AlignerName}
+          onBack={() => {
+            setPendingTool(flow.tool);
+            setFlow({ pipeline: "align", tool: null });
+          }}
+          onClose={() => setFlow(null)}
+        />
+      )}
     </div>
   );
 }

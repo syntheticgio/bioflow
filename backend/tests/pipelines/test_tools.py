@@ -246,3 +246,30 @@ class TestToolMeta:
         assert enriched["pipelines"] == []
         assert enriched["summary"] == ""
         assert enriched["strengths"] == []
+
+    def test_runnable_defaults_true(self):
+        """Most tools have exactly one code path and it exists, so the common
+        case should need no annotation."""
+        assert tools.TOOL_META["fastp"].runnable is True
+        assert tools.TOOL_META["minimap2"].runnable is True
+
+    def test_cutadapt_and_trimmomatic_are_not_runnable_yet(self):
+        """Both probe as available -- real, working binaries -- but trim_reads
+        has no code path for either. `runnable` is what stops the selector
+        offering a choice that silently does nothing."""
+        assert tools.TOOL_META["cutadapt"].runnable is False
+        assert tools.TOOL_META["trimmomatic"].runnable is False
+
+    def test_runnable_survives_serialization(self):
+        tool = tools.Tool(name="cutadapt", path="/usr/bin/cutadapt", version="4.7")
+        assert tools.tool_with_meta(tool)["runnable"] is False
+
+        tool = tools.Tool(name="fastp", path="/usr/bin/fastp", version="0.24.0")
+        assert tools.tool_with_meta(tool)["runnable"] is True
+
+    def test_an_undescribed_tool_is_not_runnable(self):
+        """A tool this application does not describe is not one it has a code
+        path for either -- the absent-metadata default matches the described
+        default for a tool with no handler, not the default for one with one."""
+        enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
+        assert enriched["runnable"] is False

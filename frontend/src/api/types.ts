@@ -330,6 +330,15 @@ export interface PipelineTool {
   pipelines: PipelineType[];
   summary: string;
   strengths: string[];
+  /**
+   * Whether a job handler actually branches on this tool, independent of
+   * `available` (whether the binary works). cutadapt and Trimmomatic probe
+   * as available -- real, working binaries -- but trim_reads has no code
+   * path for either yet. The selector must use this, not `available`, to
+   * decide whether a card is selectable: `available` alone would offer a
+   * choice that silently does nothing.
+   */
+  runnable: boolean;
 }
 
 export interface PipelineTools {
