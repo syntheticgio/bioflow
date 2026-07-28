@@ -48,9 +48,18 @@ class Settings(BaseSettings):
     # to pin a specific build.
     fastp_path: str = "fastp"
     fastqc_path: str = "fastqc"
+    cutadapt_path: str = "cutadapt"
+    # Debian ships no bare `trimmomatic`: the package installs TrimmomaticPE
+    # and TrimmomaticSE as separate entry points around the JAR. SE is the one
+    # probed for a version; a runner would pick the entry point per layout.
+    trimmomatic_path: str = "TrimmomaticSE"
     bwa_mem2_path: str = "bwa-mem2"
     minimap2_path: str = "minimap2"
     samtools_path: str = "samtools"
+    fasterq_dump_path: str = "fasterq-dump"
+    prefetch_path: str = "prefetch"
+    nanoplot_path: str = "NanoPlot"
+
 
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own
@@ -89,6 +98,34 @@ class Settings(BaseSettings):
     @property
     def logs_dir(self) -> Path:
         return self.bioinfo_home / "logs"
+
+    @property
+    def ncbi_dir(self) -> Path:
+        """Where the SRA Toolkit keeps its configuration and its cache.
+
+        Set explicitly because the toolkit otherwise writes under $HOME, which
+        in a container is whatever the runtime user happens to have -- often
+        unwritable, and the resulting failure ("cannot open configuration")
+        looks nothing like its cause. Derived from BIOINFO_HOME rather than
+        hardcoded to /data so it follows a relocated home, and kept under tmp/
+        because everything in it is a cache that can be rebuilt.
+        """
+        return self.tmp_dir / "ncbi"
+
+    @property
+    def ncbi_settings_path(self) -> Path:
+        """The file `NCBI_SETTINGS` points at. See `ncbi_dir`."""
+        return self.ncbi_dir / "user-settings.mkfg"
+
+    @property
+    def qc_reports_dir(self) -> Path:
+        """Generated QC reports, keyed by object id.
+
+        Outside objects/ deliberately: a FastQC report is derivative and
+        regenerable, so content-addressing it would buy deduplication of
+        something that is never shared and cost a blob record per run.
+        """
+        return self.bioinfo_home / "qc_reports"
 
     @property
     def meta_dir(self) -> Path:

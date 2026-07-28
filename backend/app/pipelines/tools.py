@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import lru_cache
 
 from app.config import settings
@@ -152,6 +153,20 @@ def fastqc() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def cutadapt() -> Tool:
+    return _probe("cutadapt", settings.cutadapt_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def trimmomatic() -> Tool:
+    # Probed through TrimmomaticSE, not a bare `trimmomatic`: the Debian
+    # package installs one wrapper per read layout (TrimmomaticPE and
+    # TrimmomaticSE) around the same JAR and no combined entry point, so the
+    # obvious name does not exist. Either wrapper reports the same version.
+    return _probe("trimmomatic", settings.trimmomatic_path, ["-version"])
+
+
+@lru_cache(maxsize=1)
 def bwa_mem2() -> Tool:
     # bwa-mem2 has no --version flag: it prints usage, including the version,
     # and exits non-zero. `_probe` ignores the exit code and reads whichever
@@ -169,8 +184,229 @@ def samtools() -> Tool:
     return _probe("samtools", settings.samtools_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def nanoplot() -> Tool:
+    return _probe("nanoplot", settings.nanoplot_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def fasterq_dump() -> Tool:
+    return _probe("fasterq-dump", settings.fasterq_dump_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def prefetch() -> Tool:
+    return _probe("prefetch", settings.prefetch_path, ["--version"])
+
+
 def all_tools() -> list[Tool]:
-    return [fastp(), fastqc(), bwa_mem2(), minimap2(), samtools()]
+    return [
+        fastp(),
+        fastqc(),
+        cutadapt(),
+        trimmomatic(),
+        nanoplot(),
+        bwa_mem2(),
+        minimap2(),
+        samtools(),
+        fasterq_dump(),
+        prefetch(),
+    ]
+
+
+# --- Static descriptions ----------------------------------------------------
+#
+# Defined once, here. The tool-selector UI consumes this table rather than
+# carrying its own copy: two lists of tool descriptions drift, and the one in
+# the frontend is the one nobody updates when a tool is added.
+
+
+class PipelineType(StrEnum):
+    TRIM = "trim"
+    ALIGN = "align"
+    QC = "qc"
+    UTILITY = "utility"
+    # Acquisition rather than analysis: these fetch data instead of
+    # transforming it, so they belong on no analysis screen and would be
+    # misleading listed as utilities beside samtools.
+    DOWNLOAD = "download"
+
+
+@dataclass(frozen=True)
+class ToolMeta:
+    # Plural, and a tuple, because membership is genuinely many-to-many: fastp
+    # both trims and reports QC, and samtools is a utility whose flagstat
+    # output is the alignment QC. A singular field would make each of those
+    # disappear from one of the two lists it belongs in.
+    pipelines: tuple[PipelineType, ...]
+    summary: str
+    strengths: tuple[str, ...]
+
+
+TOOL_META: dict[str, ToolMeta] = {
+    "fastp": ToolMeta(
+        pipelines=(PipelineType.TRIM, PipelineType.QC),
+        summary=(
+            "All-in-one Illumina read QC and adapter trimming. Single-pass: "
+            "quality filtering, adapter removal, poly-G tail trimming, length "
+            "filtering, and duplicate detection. Produces structured JSON and "
+            "HTML reports suitable for downstream charts and methods sections."
+        ),
+        strengths=(
+            "Single-pass: trims and reports QC in one invocation",
+            "Auto-detects adapter sequences from read overlap",
+            "Handles NovaSeq/NextSeq two-colour poly-G artefacts",
+            "Built-in per-base quality JSON for downstream visualization",
+            "Fast C++ implementation, low memory footprint",
+        ),
+    ),
+    "cutadapt": ToolMeta(
+        pipelines=(PipelineType.TRIM,),
+        summary=(
+            "Flexible adapter, primer, and barcode trimmer for all sequencing "
+            "platforms. Supports anchored adapters, linked adapters, "
+            "demultiplexing by barcode, and adapter patterns fastp cannot "
+            "express."
+        ),
+        strengths=(
+            "Demultiplexing: split reads by barcode/index",
+            "Linked adapter trimming for paired-end reads",
+            "Anchored 5'/3' adapter matching for amplicon-seq",
+            "Poly-A tail trimming for RNA-seq",
+            "Works on any platform (Illumina, PacBio, ONT)",
+        ),
+    ),
+    "trimmomatic": ToolMeta(
+        pipelines=(PipelineType.TRIM,),
+        summary=(
+            "Classic sliding-window quality trimmer for Illumina paired-end "
+            "and single-end reads. The longest-established tool in the field "
+            "and still widely cited."
+        ),
+        strengths=(
+            "Sliding-window quality trimming: aggressive on trailing bases",
+            "Gold standard for legacy Illumina pipeline comparisons",
+            "Simple paired-end model: keeps R1/R2 in sync",
+            "Plays well with Nextera/TruSeq adapter FASTA files",
+        ),
+    ),
+    "fastqc": ToolMeta(
+        pipelines=(PipelineType.QC,),
+        summary=(
+            "The canonical per-file HTML QC report. Per-base quality, GC "
+            "content, overrepresented sequences, adapter content, sequence "
+            "duplication levels -- the standard artifact for publication "
+            "supplementary materials."
+        ),
+        strengths=(
+            "The publication-standard QC report format",
+            "Rich per-base visualizations (quality, GC, N)",
+            "Overrepresented sequence detection",
+            "Zero configuration: runs on any FASTQ",
+        ),
+    ),
+    "nanoplot": ToolMeta(
+        pipelines=(PipelineType.QC,),
+        summary=(
+            "QC for long reads. Plots read-length and quality distributions "
+            "for Nanopore and PacBio data, where the per-base model FastQC "
+            "assumes does not apply -- reads in one file can range from a few "
+            "hundred bases to over 100 kb."
+        ),
+        strengths=(
+            "Read-length distribution, the primary long-read quality signal",
+            "Quality-vs-length plots that reveal truncated or degraded runs",
+            "Handles Nanopore and PacBio HiFi alike",
+            "Reads FASTQ, BAM, or a sequencing summary file",
+        ),
+    ),
+    "fasterq-dump": ToolMeta(
+        pipelines=(PipelineType.DOWNLOAD,),
+        summary=(
+            "Converts an SRA run into FASTQ. The multi-threaded successor to "
+            "fastq-dump, and how sequencing data is pulled out of NCBI once a "
+            "run accession is known."
+        ),
+        strengths=(
+            "Multi-threaded: far faster than fastq-dump on large runs",
+            "Splits paired-end runs into R1/R2 automatically",
+            "Handles Illumina, PacBio, and Nanopore submissions alike",
+        ),
+    ),
+    "prefetch": ToolMeta(
+        pipelines=(PipelineType.DOWNLOAD,),
+        summary=(
+            "Fetches an SRA run into the local cache ahead of conversion. "
+            "Some NCBI configurations require it before fasterq-dump, and it "
+            "is a no-op when the run is already cached."
+        ),
+        strengths=(
+            "Resumable: an interrupted fetch continues rather than restarting",
+            "Validates the downloaded archive against its checksum",
+            "A no-op on an already-cached run, so it is safe to always run",
+        ),
+    ),
+    "bwa-mem2": ToolMeta(
+        pipelines=(PipelineType.ALIGN,),
+        summary=(
+            "The standard short-read aligner for human and model organism "
+            "genomes. Optimized for Illumina paired-end reads up to ~500 bp."
+        ),
+        strengths=(
+            "Gold standard for Illumina WGS/WES/resequencing",
+            "Handles mated reads with proper insert-size modeling",
+            "2x faster than original bwa-mem with the same accuracy",
+            "x86-64 only (Intel compiler dispatch)",
+        ),
+    ),
+    "minimap2": ToolMeta(
+        pipelines=(PipelineType.ALIGN,),
+        summary=(
+            "Versatile aligner for long reads (PacBio, Nanopore) and "
+            "any-vs-any comparisons. Splice-aware for RNA-seq. Works on short "
+            "reads with the -x sr preset."
+        ),
+        strengths=(
+            "Designed for PacBio CLR/HiFi and ONT reads",
+            "Splice-aware for RNA-seq (junctions in BAM tags)",
+            "Short-read alignment with the -x sr preset",
+            "Runs on all architectures including arm64",
+        ),
+    ),
+    "samtools": ToolMeta(
+        pipelines=(PipelineType.UTILITY, PipelineType.QC),
+        summary=(
+            "Universal BAM/CRAM/SAM toolkit. Sorting, indexing, flagstat, "
+            "depth calculation. The common denominator of every alignment "
+            "workflow."
+        ),
+        strengths=(
+            "Universal BAM/CRAM manipulation",
+            "Fast coordinate sorting and indexing",
+            "Flagstat: comprehensive alignment statistics",
+        ),
+    ),
+}
+
+
+def tool_with_meta(tool: Tool) -> dict:
+    """Probe result plus its static description, for the API.
+
+    Enriched here at the boundary rather than by widening `Tool` itself: the
+    probe result is what the pipeline code needs, and threading a summary
+    string through `require()` would serve nothing but the one endpoint.
+    """
+    meta = TOOL_META.get(tool.name)
+    return {
+        **tool.as_dict(),
+        "pipelines": [p.value for p in meta.pipelines] if meta else [],
+        "summary": meta.summary if meta else "",
+        "strengths": list(meta.strengths) if meta else [],
+    }
+
+
+def all_tools_with_meta() -> list[dict]:
+    return [tool_with_meta(t) for t in all_tools()]
 
 
 def require(tool: Tool) -> Tool:
@@ -192,6 +428,11 @@ def reset_cache() -> None:
     """Forget probed versions. For tests, and for a config change at runtime."""
     fastp.cache_clear()
     fastqc.cache_clear()
+    cutadapt.cache_clear()
+    trimmomatic.cache_clear()
+    nanoplot.cache_clear()
     bwa_mem2.cache_clear()
     minimap2.cache_clear()
     samtools.cache_clear()
+    fasterq_dump.cache_clear()
+    prefetch.cache_clear()

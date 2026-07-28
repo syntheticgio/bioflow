@@ -8,6 +8,11 @@ x-backend-env: &backend-env
   LEASE_TTL_SECONDS: ${LEASE_TTL_SECONDS:-30}
   MAX_SIMPLE_UPLOAD_BYTES: ${MAX_SIMPLE_UPLOAD_BYTES:-104857600}
   SRA_ENRICHMENT_ENABLED: ${SRA_ENRICHMENT_ENABLED:-true}
+  # The SRA Toolkit writes its configuration and cache here rather than under
+  # $HOME, which in a container is often unwritable -- and its failure message
+  # ("cannot open configuration") does not point at the cause. Must agree with
+  # Settings.ncbi_settings_path, which derives the same path from BIOINFO_HOME.
+  NCBI_SETTINGS: /data/tmp/ncbi/user-settings.mkfg
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
 services:

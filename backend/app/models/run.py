@@ -24,6 +24,7 @@ from app.models.base import TimestampedDocument
 class RunKind(StrEnum):
     ALIGNMENT = "alignment"
     TRIM = "trim"
+    SRA_DOWNLOAD = "sra_download"
 
 
 class RunStatus(StrEnum):
@@ -91,12 +92,20 @@ class RunJobRole(StrEnum):
     TRIM = "trim"
     INDEX_BAM = "index_bam"
     INGEST = "ingest"
+    DOWNLOAD = "download"
+    QC = "qc"
 
 
-# Roles whose failure does not fail the run. Only ingest: the expensive work
-# succeeded and produced its file, and a failed header parse is recoverable by
-# re-ingesting rather than by running the pipeline again.
-OPTIONAL_ROLES: frozenset[RunJobRole] = frozenset({RunJobRole.INGEST})
+# Roles whose failure does not fail the run. The test is whether the expensive
+# work survived: a failed header parse is recoverable by re-ingesting, and a
+# failed QC by re-running QC, in both cases without repeating the download or
+# the pipeline that produced the file.
+#
+# DOWNLOAD is deliberately *not* here. A download that fails produced nothing,
+# so a run reporting anything but failure would be claiming a file exists.
+OPTIONAL_ROLES: frozenset[RunJobRole] = frozenset(
+    {RunJobRole.INGEST, RunJobRole.QC}
+)
 
 
 class RunJob(TimestampedDocument):

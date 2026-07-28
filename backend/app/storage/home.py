@@ -59,6 +59,11 @@ def initialize_home() -> None:
         settings.staging_dir,
         settings.tmp_dir,
         settings.logs_dir,
+        settings.qc_reports_dir,
+        # Created here rather than lazily by the download handler: the SRA
+        # Toolkit fails on a missing NCBI_SETTINGS directory with a message
+        # that does not mention the directory.
+        settings.ncbi_dir,
         settings.meta_dir,
     ):
         try:

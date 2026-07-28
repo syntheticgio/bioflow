@@ -24,7 +24,7 @@ class FakeObject:
 
 class TestTrimmable:
     def test_accepts_ready_fastq(self):
-        pipeline_service._check_trimmable(FakeObject())
+        pipeline_service._check_fastq_ready(FakeObject())
 
     @pytest.mark.parametrize(
         "status",
@@ -34,7 +34,7 @@ class TestTrimmable:
     def test_rejects_a_file_that_is_not_ready(self, status):
         """Trimming a file still being written would read a partial archive."""
         with pytest.raises(ValidationError, match="not ready"):
-            pipeline_service._check_trimmable(FakeObject(status=status))
+            pipeline_service._check_fastq_ready(FakeObject(status=status))
 
     @pytest.mark.parametrize(
         "kind", [FormatKind.BAM, FormatKind.VCF, FormatKind.FASTA, FormatKind.BED]
@@ -43,15 +43,41 @@ class TestTrimmable:
         """fastp reads FASTQ. Handing it a BAM produces a confusing parse error
         several minutes into a job rather than an answer now."""
         with pytest.raises(ValidationError, match="not FASTQ"):
-            pipeline_service._check_trimmable(FakeObject(kind=kind))
+            pipeline_service._check_fastq_ready(FakeObject(kind=kind))
 
     def test_the_error_names_the_file(self):
         """The message ends up in a toast; 'an object is not ready' would not
         tell the user which one."""
         with pytest.raises(ValidationError, match="reads_R1"):
-            pipeline_service._check_trimmable(
+            pipeline_service._check_fastq_ready(
                 FakeObject("reads_R1.fastq.gz", status=ObjectStatus.ERROR)
             )
+
+
+class TestQcSharesTheFastqCheck:
+    """QC has the same input requirement as trim, and reuses the same check.
+    What differs is only the verb in the message."""
+
+    def test_accepts_ready_fastq(self):
+        pipeline_service._check_fastq_ready(FakeObject(), verb="QC")
+
+    def test_rejects_a_bam(self):
+        with pytest.raises(ValidationError, match="not FASTQ"):
+            pipeline_service._check_fastq_ready(
+                FakeObject(kind=FormatKind.BAM), verb="QC"
+            )
+
+    def test_the_message_names_the_operation_that_was_asked_for(self):
+        """'not ready to trim' on a QC run would send the user looking for a
+        trim they never started."""
+        with pytest.raises(ValidationError, match="not ready to QC"):
+            pipeline_service._check_fastq_ready(
+                FakeObject(status=ObjectStatus.ERROR), verb="QC"
+            )
+
+    def test_defaults_to_trim_for_the_existing_callers(self):
+        with pytest.raises(ValidationError, match="not ready to trim"):
+            pipeline_service._check_fastq_ready(FakeObject(status=ObjectStatus.ERROR))
 
 
 class TestParamsFingerprint:

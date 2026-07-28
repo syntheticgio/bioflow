@@ -148,6 +148,81 @@ def build_command(
     return cmd
 
 
+def build_qc_command(
+    *,
+    fastp_path: str,
+    r1_in: Path,
+    json_out: Path,
+    html_out: Path,
+    r2_in: Path | None = None,
+    threads: int = 4,
+) -> list[str]:
+    """Assemble a report-only fastp invocation.
+
+    QC is read-only: it inspects a file and reports on it, where trimming
+    derives new ones. Passing no `-o`/`-O` is what makes fastp skip writing
+    reads -- there is no dedicated flag -- so this deliberately builds a
+    command that `build_command` cannot express rather than threading an
+    `output=None` special case through it.
+
+    None of the filtering knobs are passed either. Their defaults would be
+    applied to the *reported* numbers, so a file would appear to have fewer
+    reads than it has; the point of QC is to describe the file as it is.
+    """
+    cmd = [fastp_path, "--verbose", "-i", str(r1_in)]
+    if r2_in is not None:
+        cmd += ["-I", str(r2_in)]
+    cmd += [
+        "--json",
+        str(json_out),
+        "--html",
+        str(html_out),
+        "--thread",
+        str(threads),
+        # Disables every filter, so the report describes the input rather than
+        # what would survive a trim with default settings.
+        "--disable_quality_filtering",
+        "--disable_length_filtering",
+        "--disable_adapter_trimming",
+    ]
+    return cmd
+
+
+def parse_qc_facts(path: Path) -> dict:
+    """QC facts for an object, from fastp's report-only JSON.
+
+    Flatter than `parse_report`: with filtering disabled there is no
+    before/after to compare, so the single measured state is reported directly
+    under the `qc_` prefix the detail panel keys on.
+    """
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        log.warning("fastp_qc_report_unreadable", path=str(path), error=str(e))
+        return {}
+
+    summary = raw.get("summary", {})
+    before = summary.get("before_filtering", {})
+
+    facts = {
+        "qc_tool": "fastp",
+        "qc_tool_version": summary.get("fastp_version"),
+        "qc_sequencing": summary.get("sequencing"),
+        "qc_before_filtering": _side(before),
+        "qc_duplication_rate": raw.get("duplication", {}).get("rate"),
+        "qc_insert_size_peak": raw.get("insert_size", {}).get("peak"),
+    }
+
+    adapters = raw.get("adapter_cutting", {})
+    if adapters:
+        facts["qc_adapters"] = {
+            "read1_sequence": _adapter_or_none(adapters.get("read1_adapter_sequence")),
+            "read2_sequence": _adapter_or_none(adapters.get("read2_adapter_sequence")),
+        }
+
+    return {k: v for k, v in facts.items() if v is not None}
+
+
 @dataclass
 class TrimProgress:
     """Turns fastp's verbose output into a progress fraction.

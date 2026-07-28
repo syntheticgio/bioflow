@@ -21,6 +21,9 @@ import type {
   RunDetail,
   RunSummary,
   ScheduleInfo,
+  SraAccepted,
+  SraDownloadRequest,
+  SraResolveResponse,
   TimingEstimate,
   TrimDefaults,
   TrimRequest,
@@ -285,6 +288,47 @@ export const api = {
 
   launchTrim: (body: TrimRequest) =>
     request<JobSummary>("/pipelines/trim", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** Queue a QC run. Read-only: produces a report, derives no files. */
+  launchQC: (objectId: string) =>
+    request<JobSummary>("/pipelines/qc", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
+  /**
+   * URL of a generated QC report.
+   *
+   * Not fetched through `request`: the report is an HTML page opened in a new
+   * tab, not JSON. The server sandboxes it via CSP -- see `get_qc_report` --
+   * because FastQC embeds sequence data taken straight from the reads.
+   */
+  qcReportUrl: (objectId: string, reportPath: string) =>
+    `${BASE}/pipelines/qc/report/${objectId}/${reportPath}`,
+
+  // --- NCBI SRA ---
+
+  /**
+   * Resolve an accession to its runs. Read-only; starts no download.
+   *
+   * `project_id` is optional and only marks which runs the project already
+   * holds -- resolving is useful before a project is chosen.
+   */
+  sraResolve: (body: {
+    accession: string;
+    platform_filter?: string | null;
+    project_id?: string | null;
+  }) =>
+    request<SraResolveResponse>("/sra/resolve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  sraDownload: (body: SraDownloadRequest) =>
+    request<SraAccepted>("/sra/download", {
       method: "POST",
       body: JSON.stringify(body),
     }),

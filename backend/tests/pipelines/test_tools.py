@@ -199,7 +199,50 @@ class TestSerialization:
         assert {t.name for t in tools.all_tools()} == {
             "fastp",
             "fastqc",
+            "cutadapt",
+            "trimmomatic",
+            "nanoplot",
             "bwa-mem2",
             "minimap2",
             "samtools",
+            "fasterq-dump",
+            "prefetch",
         }
+
+
+class TestToolMeta:
+    def test_every_probed_tool_has_a_description(self):
+        """A tool added to `all_tools` without an entry here would reach the
+        selector as a nameless row with an empty summary -- available to pick
+        and impossible to choose between. Failing at the table is cheaper."""
+        missing = [t.name for t in tools.all_tools() if t.name not in tools.TOOL_META]
+        assert missing == []
+
+    def test_every_tool_belongs_to_at_least_one_pipeline(self):
+        """`pipelines` is what the selector filters on: an empty tuple is a
+        tool that exists but appears on no screen."""
+        for name, meta in tools.TOOL_META.items():
+            assert meta.pipelines, f"{name} belongs to no pipeline"
+
+    def test_fastp_is_both_a_trimmer_and_a_qc_tool(self):
+        """The reason the field is a tuple rather than a single value. A
+        singular `pipeline` would drop fastp from one of the two lists."""
+        assert tools.PipelineType.TRIM in tools.TOOL_META["fastp"].pipelines
+        assert tools.PipelineType.QC in tools.TOOL_META["fastp"].pipelines
+
+    def test_meta_is_merged_onto_the_probe_result(self):
+        tool = tools.Tool(name="fastqc", path="/usr/bin/fastqc", version="0.12.1")
+        enriched = tools.tool_with_meta(tool)
+        assert enriched["name"] == "fastqc"
+        assert enriched["available"] is True
+        assert enriched["pipelines"] == ["qc"]
+        assert enriched["summary"]
+        assert enriched["strengths"]
+
+    def test_an_undescribed_tool_serializes_with_empty_metadata(self):
+        """The API must not 500 over a missing description. The coverage test
+        above is what stops one shipping; this is what stops it being fatal."""
+        enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
+        assert enriched["pipelines"] == []
+        assert enriched["summary"] == ""
+        assert enriched["strengths"] == []
