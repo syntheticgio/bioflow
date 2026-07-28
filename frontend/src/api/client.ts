@@ -280,7 +280,8 @@ export const api = {
 
   pipelineTools: () => request<PipelineTools>("/pipelines/tools"),
 
-  trimDefaults: () => request<TrimDefaults>("/pipelines/defaults"),
+  trimDefaults: (tool: string = "fastp") =>
+    request<TrimDefaults>(`/pipelines/defaults?tool=${encodeURIComponent(tool)}`),
 
   /** The file this one would be trimmed alongside, or null. */
   detectMate: (objectId: string) =>
