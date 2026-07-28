@@ -534,6 +534,73 @@ export interface QcFacts {
   qc_status?: string;
 }
 
+// --- NCBI SRA ---
+
+/** NCBI's own platform spellings, as they appear on the SRA record. */
+export type SraPlatform = "ILLUMINA" | "PACBIO_SMRT" | "OXFORD_NANOPORE";
+
+/** One sequencing run: the unit that can actually be downloaded. */
+export interface SraRunInfo {
+  accession: string;
+  experiment: string | null;
+  sample: string | null;
+  study: string | null;
+  bioproject: string | null;
+  biosample: string | null;
+  platform: string | null;
+  instrument: string | null;
+  library_strategy: string | null;
+  library_layout: string | null;
+  library_source: string | null;
+  spots: number | null;
+  bases: number | null;
+  /** Archive size from NCBI, not an estimate. Drives the size column. */
+  bytes: number | null;
+  organism: string | null;
+  title: string | null;
+  sample_attributes: Record<string, string>;
+  /** Already in this project. Shown greyed out rather than hidden. */
+  already_downloaded: boolean;
+}
+
+export interface SraHierarchyNode {
+  accession: string;
+  kind: string;
+  title: string | null;
+  platform: string | null;
+  organism: string | null;
+  child_count: number;
+  total_bases: number | null;
+}
+
+export interface SraResolveResponse {
+  accession: string;
+  kind: string;
+  title: string | null;
+  organism: string | null;
+  hierarchy: SraHierarchyNode[];
+  runs: SraRunInfo[];
+  total_run_count: number;
+  total_bytes_estimate: number | null;
+  /** The study holds more runs than the server will resolve in one go. */
+  truncated: boolean;
+  /** Set on "nothing found" and on a filter that excluded everything. */
+  error: string | null;
+}
+
+export interface SraDownloadRequest {
+  project_id: string;
+  run_accessions: string[];
+  run_qc?: boolean;
+}
+
+export interface SraAccepted {
+  run_id: string;
+  download_job_ids: string[];
+  /** Runs already in flight, so no new job was created for them. */
+  skipped: string[];
+}
+
 export interface TrimRequest {
   object_id: string;
   mate_object_id?: string | null;

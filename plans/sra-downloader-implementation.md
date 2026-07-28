@@ -650,3 +650,64 @@ listed at all: it belongs to `pipeline-tool-additions-qc.md`.
 | Previously downloaded run | Resolver should check whether any of the resolved SRR accessions already exist as objects in the current project and flag them as "already downloaded" in the run selection checklist (greyed out, pre-deselected). Avoids redundant re-download. |
 | NCBI returns malformed/missing XML | Resolution should wrap XML parsing in try/except; fall back to partial data (whatever fields were parsed successfully) plus an `error` string, rather than failing the entire resolution. Runs with missing fields should still be listable. |
 | `fasterq-dump` needs `prefetch` | Some NCBI configurations require explicit `prefetch {accession}` before `fasterq-dump`. The download handler should catch the vdb error pattern and retry with a `prefetch` step first. Alternatively, always run `prefetch` before `fasterq-dump` — it's a no-op if already cached. |
+
+---
+
+## Implementation notes (2026-07-27)
+
+Built and verified end-to-end against live NCBI. Where the code differs from
+the plan above, the code is right and the reasons are these.
+
+**Resolution needs no `elink` table.** §3 specified a per-type mapping
+(`elink dbfrom=bioproject db=sra`, and so on). A plain
+`esearch db=sra&term=<accession>` resolves every type instead -- run,
+experiment, sample, study, BioProject, BioSample -- because NCBI indexes all of
+them as fields on the SRA record. It is also more robust: `elink` first needs
+the accession resolved to a UID in its *own* database, and returns an empty
+linkset rather than an error when that mapping is missing, which is how the
+planned version would have failed silently. Metadata is fetched in batches of
+50 UIDs; a 288-run study resolves in about five seconds.
+
+**Sizes come from the archive, not from `bases`.** §3 suggested estimating
+FASTQ size as ~2x total_bases. The `RUN` element carries NCBI's own `size`
+attribute, which is the real archived figure; the derived estimate is wrong by
+a compression factor that varies per run, and this number gates the download's
+disk pre-flight.
+
+**`IoClass.MEDIUM` does not exist.** The three classes are NONE, LIGHT, HEAVY.
+QC and download both declare HEAVY -- each streams a whole FASTQ, which is what
+the governor's concurrent-reader cap is for.
+
+**Decisions the plan left open:**
+
+- *Does a failed QC fail the run?* No. `QC` joins `INGEST` in `OPTIONAL_ROLES`:
+  the download produced its file and QC is re-runnable, so the run reports
+  PARTIAL. `DOWNLOAD` is not optional -- a failed download produced nothing.
+- *Mate linking.* Set for real, not as a metadata string. `--split-files` names
+  the mates unambiguously, so the applier writes `mate_object_id` directly
+  rather than leaving `pairing.py` to infer it from `<acc>_1.fastq`, a shape
+  its R1/R2 convention does not match.
+- *Serving HTML reports* (§7, shared with the QC plan). Solved in the QC plan:
+  served from `qc_reports/` under `Content-Security-Policy: sandbox;
+  default-src 'none'` and opened in a new tab, because FastQC embeds
+  overrepresented sequences taken verbatim from the reads. One hazard is
+  documented in `tests/api/test_qc_reports.py`: the ASGI layer collapses `..`
+  before routing, so a crafted URL is served correctly but from a directory the
+  URL does not name. Harmless while the route is unauthenticated; anything that
+  later authorizes it must authorize the resolved object.
+
+**Environment surprises, both caught by building:** `cutadapt` has no prebuilt
+aarch64 wheel and compiles from source, so it comes from apt rather than pip;
+Debian ships no bare `trimmomatic`, only `TrimmomaticPE`/`SE`. NanoPlot writes
+`NanoStats.txt` -- `--tsv_stats` sets that file's format, not its name.
+
+**Not built:** the separate hierarchy screen (§6 screen 2) and the progress
+screen (§6 screen 4). The hierarchy is derived from the same runs the table
+lists, so a separate screen showed one dataset twice and added a "back" that
+discarded the selection; downloads become jobs in a `PipelineRun`, which the
+activity view already renders better than a modal could.
+
+**Verified:** SRR21492715 downloaded from NCBI through the API -- both mates
+ingested and cross-linked, metadata enriched (*Homo sapiens*, NovaSeq 6000,
+paired-end, Bisulfite-seq), QC run on both files (Q30 90.1% / 92.6%), reports
+served with the sandbox CSP, run status `succeeded`. 914 tests pass.

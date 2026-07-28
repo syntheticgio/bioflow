@@ -71,10 +71,9 @@ async def launch_download(
 
     tools.require(tools.fasterq_dump())
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
-
+    # The selection is validated before the project is fetched: these checks
+    # need no database, and answering "no runs selected" should not depend on
+    # a round trip that tells us nothing about the answer.
     accessions = _clean_accessions(run_accessions)
     if not accessions:
         raise ValidationError("No runs selected to download")
@@ -94,6 +93,10 @@ async def launch_download(
             "first.",
             details={"accessions": invalid[:20]},
         )
+
+    project = await Project.get(project_id)
+    if project is None:
+        raise NotFoundError(f"Project not found: {project_id}")
 
     # Resolved once for the whole batch so each job's payload carries its own
     # platform and size. The handler needs the size for its disk pre-flight and

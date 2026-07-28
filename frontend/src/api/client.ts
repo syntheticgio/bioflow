@@ -21,6 +21,9 @@ import type {
   RunDetail,
   RunSummary,
   ScheduleInfo,
+  SraAccepted,
+  SraDownloadRequest,
+  SraResolveResponse,
   TimingEstimate,
   TrimDefaults,
   TrimRequest,
@@ -305,6 +308,30 @@ export const api = {
    */
   qcReportUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/qc/report/${objectId}/${reportPath}`,
+
+  // --- NCBI SRA ---
+
+  /**
+   * Resolve an accession to its runs. Read-only; starts no download.
+   *
+   * `project_id` is optional and only marks which runs the project already
+   * holds -- resolving is useful before a project is chosen.
+   */
+  sraResolve: (body: {
+    accession: string;
+    platform_filter?: string | null;
+    project_id?: string | null;
+  }) =>
+    request<SraResolveResponse>("/sra/resolve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  sraDownload: (body: SraDownloadRequest) =>
+    request<SraAccepted>("/sra/download", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   /** Alignment defaults for one file, including a read group from its metadata. */
   alignDefaults: (objectId: string) =>

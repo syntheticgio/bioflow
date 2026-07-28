@@ -6,6 +6,7 @@ import { formatBytes, formatKindLabel } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
+import { SraDownloadDialog } from "./SraDownloadDialog";
 import type { DataObject } from "../api/types";
 
 /**
@@ -193,6 +194,8 @@ function ProjectView({ projectId }: { projectId: string }) {
   const qc = useQueryClient();
   const { sel, select } = useSelection();
   const [dragging, setDragging] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [sraOpen, setSraOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<FileCategory>>(
     new Set(["reads", "references", "alignments"])
   );
@@ -274,21 +277,60 @@ function ProjectView({ projectId }: { projectId: string }) {
           >
             ⌕
           </button>
-          <label className="icon-btn primary" title="Upload files" style={{ cursor: "pointer" }}>
-            +
-            <input
-              type="file"
-              multiple
-              hidden
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                if (files.length) void uploadFiles(files);
-                e.target.value = "";
-              }}
-            />
-          </label>
+          {/* A split button: uploading is much the commoner action and keeps
+              the one-click path, while the chevron reaches the alternative
+              without turning every upload into a menu choice. */}
+          <div className="split-btn">
+            <label className="icon-btn primary" title="Upload files" style={{ cursor: "pointer" }}>
+              +
+              <input
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) void uploadFiles(files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              className="icon-btn primary split-btn-toggle"
+              title="More ways to add files"
+              aria-haspopup="menu"
+              aria-expanded={addMenuOpen}
+              onClick={() => setAddMenuOpen((v) => !v)}
+            >
+              ▾
+            </button>
+            {addMenuOpen && (
+              <>
+                {/* Click-away rather than a focus trap: the menu holds one
+                    item, and dismissing it must not steal focus from the
+                    dialog it opens. */}
+                <div className="menu-scrim" onClick={() => setAddMenuOpen(false)} />
+                <div className="split-btn-menu" role="menu">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setAddMenuOpen(false);
+                      setSraOpen(true);
+                    }}
+                  >
+                    Download from NCBI SRA…
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
+
+      {sraOpen && (
+        <SraDownloadDialog projectId={projectId} onClose={() => setSraOpen(false)} />
+      )}
 
       <div
         className={`dropzone ${dragging ? "dragging" : ""}`}
