@@ -51,6 +51,9 @@ class JobExecutor:
                 attempts=job.attempts,
             )
             ctx._progress_cb = lambda upd: self._schedule_progress(job_id, epoch, upd)
+            ctx._extend_cb = lambda seconds: self._schedule_lease_extension(
+                job_id, epoch, seconds
+            )
 
         log.info("job_started", job_id=job_id, type=job.type, mode=spec.mode.value)
 
@@ -171,6 +174,34 @@ class JobExecutor:
             return await asyncio.to_thread(spec.fn, ctx)
 
         raise PermanentError(f"Unknown handler mode: {spec.mode}")
+
+    def _schedule_lease_extension(self, job_id: str, epoch: int, seconds: int) -> None:
+        """Renew one job's lease now, from any thread.
+
+        Mirrors `_schedule_progress`'s thread handling: handlers run via
+        `asyncio.to_thread`, so this is usually called off the loop and has to
+        be handed back to it. Unthrottled, unlike progress -- a handler calls
+        this once per long phase, not several times a second.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = getattr(self, "_loop", None)
+            if loop is None:
+                return
+            asyncio.run_coroutine_threadsafe(
+                self._extend_lease(job_id, epoch, seconds), loop
+            )
+            return
+
+        loop.create_task(self._extend_lease(job_id, epoch, seconds))
+
+    async def _extend_lease(self, job_id: str, epoch: int, seconds: int) -> None:
+        try:
+            await queue.heartbeat([job_id], {job_id: epoch}, {job_id: seconds})
+            log.info("lease_extended", job_id=job_id, seconds=seconds)
+        except Exception as e:  # noqa: BLE001 - the periodic heartbeat still covers us
+            log.warning("lease_extension_failed", job_id=job_id, error=str(e))
 
     def _schedule_progress(self, job_id: str, epoch: int, update: dict) -> None:
         """Throttle and persist a progress update from any thread."""

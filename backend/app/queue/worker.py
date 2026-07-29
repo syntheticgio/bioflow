@@ -298,6 +298,12 @@ class Worker:
         ctx._progress_cb = lambda upd: self.executor._schedule_progress(
             claimed.job_id, claimed.epoch, upd
         )
+        # Renew immediately rather than waiting up to a full heartbeat interval:
+        # a handler calls extend_lease *because* it is about to go quiet, and the
+        # gap between the call and the next tick is exactly when it is exposed.
+        ctx._extend_cb = lambda seconds: self.executor._schedule_lease_extension(
+            claimed.job_id, claimed.epoch, seconds
+        )
 
         task = asyncio.create_task(self._run_and_cleanup(job, spec, claimed.epoch, ctx))
         self._running[claimed.job_id] = (task, ctx, claimed.epoch)
@@ -319,7 +325,14 @@ class Worker:
                 if self._running:
                     ids = list(self._running)
                     epochs = {jid: e for jid, (_, _, e) in self._running.items()}
-                    await queue.heartbeat(ids, epochs)
+                    # Handlers that declared a long quiet phase renew to what
+                    # they asked for; everything else takes the global default.
+                    ttls = {
+                        jid: ctx.lease_override_seconds
+                        for jid, (_, ctx, _) in self._running.items()
+                        if ctx.lease_override_seconds is not None
+                    }
+                    await queue.heartbeat(ids, epochs, ttls)
                 await self._register_worker()
             except Exception as e:  # noqa: BLE001
                 log.warning("heartbeat_failed", error=str(e))
