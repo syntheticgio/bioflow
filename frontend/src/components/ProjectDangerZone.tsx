@@ -42,13 +42,16 @@ export function ProjectDangerZone({
   const navigate = useNavigate();
 
   // Only fetched once the user asks, so browsing a project costs no extra
-  // request. Never cached: an active job that ends must not leave a stale
-  // block in place.
+  // request. staleTime: 0 means re-opening the confirm dialog always
+  // refetches, so an active job that ended in the meantime won't leave a
+  // stale block in place. gcTime is left at its default: gcTime: 0 combined
+  // with React.StrictMode's mount-unmount-remount cycle evicts the query the
+  // instant it briefly has zero observers, which restarts the fetch and can
+  // prevent an error from ever settling into view.
   const preview = useQuery({
     queryKey: ["project", projectId, "deletion-preview"],
     queryFn: () => api.deletionPreview(projectId),
     enabled: confirming,
-    gcTime: 0,
     staleTime: 0,
   });
 
