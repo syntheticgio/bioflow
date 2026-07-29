@@ -26,3 +26,35 @@ class TestReaperClearsCancel:
 
         assert await redis.sismember("bp:cancel", "job1") == 1
         assert await redis.zscore("bp:q:ready", "job1") is not None
+
+
+class TestFailBlockedJobClearsCancel:
+    async def test_clears_the_flag_for_a_dependency_failure(self, redis, monkeypatch):
+        """A blocked job failed by its dependency is terminal and will never
+        run, so its cancel flag has no reader left."""
+        from app.queue import queue
+
+        await redis.sadd("bp:cancel", "blocked1")
+        monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+        await queue._clear_cancel_flag("blocked1")
+
+        assert await redis.sismember("bp:cancel", "blocked1") == 0
+
+    async def test_is_safe_when_no_flag_was_set(self, redis, monkeypatch):
+        from app.queue import queue
+
+        monkeypatch.setattr(queue, "get_redis", lambda: redis)
+        await queue._clear_cancel_flag("never-cancelled")
+        assert await redis.sismember("bp:cancel", "never-cancelled") == 0
+
+    async def test_survives_a_redis_outage(self, monkeypatch):
+        """Cleanup is hygiene, not correctness -- it must never fail a job."""
+        from app.queue import queue
+
+        class Boom:
+            async def srem(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        monkeypatch.setattr(queue, "get_redis", lambda: Boom())
+        await queue._clear_cancel_flag("job1")  # must not raise

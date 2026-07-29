@@ -222,6 +222,7 @@ async def _fail_blocked_job(job: Job, failed: list[Job]) -> None:
         dependency_type=culprit.type,
     )
     await publish_event("job.failed", {"job_id": str(job.id)})
+    await _clear_cancel_flag(str(job.id))
 
     # Cascade: anything waiting on *this* job now cannot run either.
     await _release_dependents(str(job.id), succeeded=False)
