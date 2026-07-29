@@ -97,6 +97,64 @@ def index_filenames(reference_name: str, aligner: Aligner) -> tuple[str, ...]:
     return tuple(f"{reference_name}{suffix}" for suffix in index_suffixes(aligner))
 
 
+@dataclass(frozen=True)
+class IndexLayout:
+    """How one aligner's index is shaped on disk, and how it is named.
+
+    Three shapes exist in the wild and this application will eventually need
+    all three:
+
+    - suffix: files named by appending to the reference path, discovered by
+      the tool (bwa-mem2, minimap2)
+    - prefix: files named by appending to a basename that is passed to the
+      tool explicitly via -x (bowtie2, HISAT2)
+    - directory: a fixed set of names inside a directory passed via a flag
+      (STAR) -- specified in the design, not implemented yet
+
+    The distinction that matters for correctness is `owns_sidecar`. Dropping a
+    sidecar that does not belong to a reference is what stops an index built
+    for one genome from being silently materialized beside another; the
+    resulting run would produce a plausible-looking wrong answer rather than
+    an error.
+    """
+
+    suffixes: tuple[str, ...]
+    # The separate binary that builds this index, when there is one. bwa-mem2
+    # uses `bwa-mem2 index` and minimap2 uses `minimap2 -d`, so both are None.
+    builder: str | None = None
+
+    def filenames(self, reference_name: str) -> tuple[str, ...]:
+        return tuple(f"{reference_name}{s}" for s in self.suffixes)
+
+    def reference_argument(self, reference: Path) -> str:
+        """What to hand the aligner to locate the index.
+
+        The same string for both shapes today, and deliberately so: index
+        files are named after the *full* reference filename
+        (`genome.fna.1.bt2`), so bowtie2's basename is the full reference
+        path. Stripping the extension to form a basename would make the tool
+        look for `genome.1.bt2` and find nothing. This method exists so that
+        assumption is stated in one place rather than assumed at each call
+        site, and so a future layout can differ.
+        """
+        return str(reference)
+
+    def owns_sidecar(self, reference_name: str, sidecar_name: str) -> bool:
+        return Path(sidecar_name).name.startswith(reference_name)
+
+
+_LAYOUTS: dict[Aligner, IndexLayout] = {
+    Aligner.BWA_MEM2: IndexLayout(suffixes=BWA_MEM2_SUFFIXES),
+    Aligner.MINIMAP2: IndexLayout(suffixes=(MINIMAP2_SUFFIX,)),
+    Aligner.BOWTIE2: IndexLayout(suffixes=BOWTIE2_SUFFIXES, builder="bowtie2-build"),
+    Aligner.HISAT2: IndexLayout(suffixes=HISAT2_SUFFIXES, builder="hisat2-build"),
+}
+
+
+def layout_for(aligner: Aligner) -> IndexLayout:
+    return _LAYOUTS[aligner]
+
+
 def sidecar_name_for(reference_name: str, produced: str) -> str:
     """The stored name for a produced index file.
 
