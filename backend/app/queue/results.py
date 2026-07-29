@@ -509,8 +509,23 @@ def _component_metadata(base: dict, accession: str, component: str) -> dict:
     Genome-specific keys are withheld from the others. `reference_build` on a
     protein FASTA would assert that the file is an assembly, which is exactly
     the confusion the PROTEIN role exists to prevent.
+
+    This set mirrors `REFERENCE_FIELDS` in `app.metadata.schemas` minus the
+    keys shared with `SEQUENCE_SET_FIELDS` (`organism`, `source`,
+    `assembly_accession` -- the last is added back unconditionally below
+    anyway). `tax_id`, `assembly_date`, and `paired_accession` come from
+    `AssemblyMetadata.to_metadata()` in `app.metadata.assembly` just like
+    `reference_build` and `assembly_level` do, and are exactly as
+    genome-specific.
     """
-    genome_only = {"reference_build", "assembly_level", "is_primary_assembly"}
+    genome_only = {
+        "reference_build",
+        "assembly_level",
+        "is_primary_assembly",
+        "tax_id",
+        "assembly_date",
+        "paired_accession",
+    }
 
     out = {
         k: v

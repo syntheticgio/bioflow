@@ -52,3 +52,36 @@ class TestComponentMetadata:
             {"reference_build": "ASM244v1"}, "GCF_000002445.2", "genome"
         )
         assert meta["reference_build"] == "ASM244v1"
+
+    def test_tax_id_assembly_date_and_paired_accession_are_not_claimed_for_a_protein_set(self):
+        """These three are genome-specific in exactly the way reference_build
+        is: they come from AssemblyMetadata.to_metadata() and are listed in
+        REFERENCE_FIELDS, not SEQUENCE_SET_FIELDS. Leaving them on a protein or
+        CDS FASTA would reintroduce the "genome metadata on a non-genome file"
+        confusion via three different keys."""
+        meta = results._component_metadata(
+            {
+                "tax_id": 9913,
+                "assembly_date": "2018-04-11",
+                "paired_accession": "GCA_000002445.2",
+            },
+            "GCF_000002445.2",
+            "protein",
+        )
+        assert "tax_id" not in meta
+        assert "assembly_date" not in meta
+        assert "paired_accession" not in meta
+
+    def test_the_genome_keeps_tax_id_assembly_date_and_paired_accession(self):
+        meta = results._component_metadata(
+            {
+                "tax_id": 9913,
+                "assembly_date": "2018-04-11",
+                "paired_accession": "GCA_000002445.2",
+            },
+            "GCF_000002445.2",
+            "genome",
+        )
+        assert meta["tax_id"] == 9913
+        assert meta["assembly_date"] == "2018-04-11"
+        assert meta["paired_accession"] == "GCA_000002445.2"
