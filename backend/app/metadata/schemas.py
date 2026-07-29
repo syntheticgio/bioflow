@@ -283,6 +283,23 @@ REFERENCE_FIELDS: tuple[FieldDef, ...] = (
              group="Reference"),
 )
 
+# Protein and CDS FASTA downloaded alongside an assembly. Deliberately not
+# REFERENCE_FIELDS: a protein FASTA has no assembly level, no primary-assembly
+# distinction and no scaffold N50, and asking about them would imply it is a
+# genome -- the exact confusion the PROTEIN role exists to prevent.
+SEQUENCE_SET_FIELDS: tuple[FieldDef, ...] = (
+    FieldDef("organism", "Organism", group="Sequences", suggested=True),
+    FieldDef("assembly_accession", "Assembly accession",
+             help="The assembly these sequences were derived from, "
+                  "e.g. GCF_000002445.2.",
+             group="Sequences", suggested=True),
+    FieldDef("sequence_count", "Sequences", type=FieldType.INTEGER,
+             help="Number of records in the file.", group="Sequences"),
+    FieldDef("source", "Source",
+             help="e.g. NCBI RefSeq annotation release 104.",
+             group="Sequences", suggested=True),
+)
+
 INTERVAL_FIELDS: tuple[FieldDef, ...] = (
     FieldDef("reference_build", "Reference build", group="Intervals", suggested=True),
     FieldDef("interval_type", "Interval type", type=FieldType.ENUM,
@@ -313,6 +330,11 @@ FORMAT_FIELDS: dict[FormatKind, tuple[FieldDef, ...]] = {
 # fields_for and all_known_fields pick up automatically.
 ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
     ObjectRole.REFERENCE: REFERENCE_FIELDS,
+    # Both sequence sets share one vocabulary: they differ in what the
+    # sequences *are*, which the role already records, not in what is worth
+    # asking about them.
+    ObjectRole.PROTEIN: SEQUENCE_SET_FIELDS,
+    ObjectRole.TRANSCRIPT: SEQUENCE_SET_FIELDS,
 }
 
 # Roles that deliberately have no field group of their own and defer to the
@@ -329,10 +351,21 @@ ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
 # the same biology, and which caller produced it is already recorded in facts
 # by the applier rather than being something to ask the user.
 #
+# ANNOTATION joins them for the same reason: a published GFF3 and a
+# user-supplied BED both describe intervals on a reference, and
+# INTERVAL_FIELDS already asks the right questions. The role records that
+# these annotations are NCBI's rather than the user's, which is provenance
+# rather than a different question.
+#
 # Listed explicitly rather than left implicit so that a role added without
 # thought still fails the "every role is accounted for" test.
 FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
-    {ObjectRole.TRIMMED_READS, ObjectRole.ALIGNMENT, ObjectRole.VARIANTS}
+    {
+        ObjectRole.TRIMMED_READS,
+        ObjectRole.ALIGNMENT,
+        ObjectRole.VARIANTS,
+        ObjectRole.ANNOTATION,
+    }
 )
 
 
