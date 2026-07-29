@@ -2051,35 +2051,44 @@ textarea:focus {
   font-weight: 600;
 }
 
-/* Header dropdown ----------------------------------------------------- */
+/* --- Header menu (File/View/Help dropdowns) --- */
 
-.header-dropdown {
-  position: relative;
-}
-
-.header-dropdown-menu {
+.menu-dropdown {
   position: absolute;
-  top: calc(100% + 4px);
+  top: 100%;
   left: 0;
   z-index: 50;
-  min-width: 200px;
+  min-width: 190px;
   padding: 4px;
-  background: var(--bg-elevated);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
-.header-dropdown-menu button {
+.menu-item {
   display: block;
   width: 100%;
-  padding: 7px 10px;
+  padding: 6px 10px;
   text-align: left;
-  font-size: 13px;
+  background: none;
+  border: none;
+  border-radius: 3px;
   color: var(--text);
-  border-radius: 4px;
+  cursor: pointer;
 }
 
-.header-dropdown-menu button:hover {
+.menu-item.active:not(:disabled) {
   background: var(--bg-hover);
+}
+
+.menu-item:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.menu-empty {
+  padding: 6px 10px;
+  color: var(--text-faint);
+  font-size: 11px;
 }

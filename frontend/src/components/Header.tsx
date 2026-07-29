@@ -1,12 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
+import { notify } from "../stores/messageStore";
 import { LoadIndicator } from "./LoadIndicator";
-
-/** Still awaiting real actions. Help is implemented separately below. */
-const MENUS = ["File", "View"];
+import { Menu } from "./Menu";
 
 /** Destinations that exist. Without these, /search and /activity are
  *  reachable only by typing the URL. */
@@ -28,30 +26,17 @@ export function Header() {
   });
 
   const navigate = useNavigate();
-  const [helpOpen, setHelpOpen] = useState(false);
-  const helpRef = useRef<HTMLDivElement>(null);
 
-  // A menu that only closes by re-clicking its button feels broken, so handle
-  // the two things people actually do: click elsewhere, or press Escape.
-  useEffect(() => {
-    if (!helpOpen) return;
-
-    function onPointerDown(e: MouseEvent) {
-      if (helpRef.current && !helpRef.current.contains(e.target as Node)) {
-        setHelpOpen(false);
-      }
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") setHelpOpen(false);
-    }
-
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [helpOpen]);
+  const cleanUp = useMutation({
+    mutationFn: () => api.runScheduleNow("gc_blobs"),
+    onSuccess: () => {
+      // The job is queued, not finished -- gc_blobs runs on the worker, so its
+      // reclaim counts are not available here. Point at Activity instead of
+      // inventing a number.
+      notify.success("Storage cleanup started. Progress is in Activity.");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
 
   return (
     <header className="header">
@@ -73,39 +58,24 @@ export function Header() {
             {l.label}
           </NavLink>
         ))}
-        {MENUS.map((m) => (
-          <button key={m} type="button" title={`${m} menu (not yet implemented)`}>
-            {m}
-          </button>
-        ))}
-
-        <div className="header-dropdown" ref={helpRef}>
-          <button
-            type="button"
-            aria-haspopup="menu"
-            aria-expanded={helpOpen}
-            onClick={() => setHelpOpen((v) => !v)}
-          >
-            Help
-          </button>
-          {helpOpen && (
-            <div className="header-dropdown-menu" role="menu">
-              {HELP_ITEMS.map((item) => (
-                <button
-                  key={item.to}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setHelpOpen(false);
-                    navigate(item.to);
-                  }}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <Menu
+          label="File"
+          items={[
+            {
+              label: "Clean up storage now",
+              onSelect: () => cleanUp.mutate(),
+              disabled: cleanUp.isPending,
+            },
+          ]}
+        />
+        <Menu label="View" items={[]} />
+        <Menu
+          label="Help"
+          items={HELP_ITEMS.map((item) => ({
+            label: item.label,
+            onSelect: () => navigate(item.to),
+          }))}
+        />
       </nav>
 
       <div className="header-right">
