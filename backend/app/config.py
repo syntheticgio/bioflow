@@ -140,6 +140,18 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "qc_reports"
 
     @property
+    def bam_stats_dir(self) -> Path:
+        """Generated BAM Results reports (the full per-contig TSV), keyed by
+        object id.
+
+        Outside objects/ deliberately, same rationale as qc_reports_dir: this
+        is derivative and regenerable from the BAM itself, so content-
+        addressing it would buy deduplication of something never shared and
+        cost a blob record per run.
+        """
+        return self.bioinfo_home / "bam_stats"
+
+    @property
     def meta_dir(self) -> Path:
         return self.bioinfo_home / ".biopipe"
 
