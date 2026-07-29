@@ -4,6 +4,7 @@ import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
+import { HelpCalculations } from "./components/HelpCalculations";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
 import { UploadTray } from "./components/UploadTray";
@@ -38,11 +39,10 @@ function Shell() {
     window.addEventListener("mouseup", up);
   };
 
-  // The activity view is a single full-width list: there is no left-hand tree
-  // to sit beside, and squeezing it into the explorer's column truncates every
-  // filename it exists to show. Selecting a row navigates to the explorer,
-  // which is where the detail panel lives.
-  const singleColumn = useLocation().pathname === "/activity";
+  // Both are single full-width views with no left-hand tree to sit beside:
+  // /activity is one long list, and the help pages are prose.
+  const pathname = useLocation().pathname;
+  const singleColumn = pathname === "/activity" || pathname.startsWith("/help/");
 
   return (
     <div className="shell">
@@ -56,6 +56,7 @@ function Shell() {
           <Route path="/p/:projectId" element={<ProjectExplorer />} />
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
+          <Route path="/help/calculations" element={<HelpCalculations />} />
         </Routes>
         {!singleColumn && <DetailPanel />}
       </div>
