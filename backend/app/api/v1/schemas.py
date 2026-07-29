@@ -157,3 +157,23 @@ class ObjectDetail(ObjectOut):
 class HealthOut(BaseModel):
     status: str
     checks: dict
+
+
+class ActiveJobOut(BaseModel):
+    id: str
+    job_type: str
+    state: str
+
+
+class DeletionPreviewOut(BaseModel):
+    """What deleting a project would destroy, and whether it may proceed."""
+
+    project_ids: list[str]
+    child_project_count: int
+    object_count: int
+    total_bytes: int
+    run_count: int
+    job_count: int
+    upload_session_count: int
+    active_jobs: list[ActiveJobOut]
+    blocked: bool

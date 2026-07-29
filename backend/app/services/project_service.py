@@ -8,7 +8,10 @@ from slugify import slugify
 
 from app.db.client import get_db
 from app.errors import ConflictError, NotFoundError, ValidationError
+from app.logging import get_logger
 from app.models import DataObject, Project
+
+log = get_logger(__name__)
 
 
 async def create_project(
@@ -110,6 +113,13 @@ async def update_project(project_id: PydanticObjectId, updates: dict) -> Project
 
 
 async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False) -> None:
+    """Delete a project, optionally with everything inside it.
+
+    `cascade=True` delegates to delete_project_tree rather than detaching blobs
+    itself. The hand-rolled loop this replaces skipped object_service's sidecar
+    cascade and stranded index blobs at refcount 1, where GC could never reach
+    them.
+    """
     project = await get_project(project_id)
 
     object_count = await DataObject.find(DataObject.project_id == project_id).count()
@@ -122,15 +132,127 @@ async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False)
         )
 
     if cascade:
-        from app.services import blob_service
-
-        # Detach one at a time so each refcount decrement is transactional.
-        for obj in await DataObject.find(DataObject.project_id == project_id).to_list():
-            await blob_service.detach_blob_from_object(obj.id)
-        for child in await Project.find(Project.parent_id == project_id).to_list():
-            await delete_project(child.id, cascade=True)
+        await delete_project_tree(project_id)
+        return
 
     await project.delete()
+
+
+async def collect_subtree(project_id: PydanticObjectId) -> list[PydanticObjectId]:
+    """Every project in this subtree, root first, then breadth-first.
+
+    Both the deletion preview and the delete itself build on this, so the two
+    cannot disagree about what "this project" covers -- a warning that
+    undercounts what is about to be destroyed is worse than no warning.
+    """
+    found = [project_id]
+    frontier = [project_id]
+    while frontier:
+        children = await Project.find({"parent_id": {"$in": frontier}}).to_list()
+        frontier = [c.id for c in children]
+        found.extend(frontier)
+    return found
+
+
+async def deletion_preview(project_id: PydanticObjectId) -> dict:
+    """What deleting this project would destroy, and whether it may proceed.
+
+    Computed from collect_subtree so the numbers shown in the confirmation
+    match what the delete actually removes.
+    """
+    from app.models import Job, PipelineRun, UploadSession
+    from app.models.job import ACTIVE_STATES
+
+    await get_project(project_id)
+    ids = await collect_subtree(project_id)
+
+    objects = await DataObject.find({"project_id": {"$in": ids}}).to_list()
+    active = await Job.find(
+        {"project_id": {"$in": ids}, "state": {"$in": [s.value for s in ACTIVE_STATES]}}
+    ).to_list()
+
+    return {
+        "project_ids": [str(i) for i in ids],
+        "child_project_count": len(ids) - 1,
+        "object_count": len(objects),
+        # Bytes *referenced*, not bytes that will be freed: a blob shared with
+        # an object outside this subtree stays on disk.
+        "total_bytes": sum(o.size for o in objects),
+        "run_count": await PipelineRun.find({"project_id": {"$in": ids}}).count(),
+        "job_count": await Job.find({"project_id": {"$in": ids}}).count(),
+        "upload_session_count": await UploadSession.find(
+            {"project_id": {"$in": ids}}
+        ).count(),
+        "active_jobs": [
+            {"id": str(j.id), "job_type": j.type, "state": j.state.value} for j in active
+        ],
+        "blocked": bool(active),
+    }
+
+
+async def delete_project_tree(project_id: PydanticObjectId) -> dict:
+    """Delete a project and everything belonging to it.
+
+    Delegates each object to object_service.delete_object rather than
+    detaching blobs here. That delegation is load-bearing: delete_object
+    cascades to sidecars, and a sidecar orphaned by its parent holds its blob
+    at refcount 1 forever, where GC can never reach it.
+
+    Bytes are not unlinked here. Refcounts reach zero and the grace-windowed
+    gc_blobs job reclaims them later, which is also the manual-recovery window
+    for a delete the user regrets.
+    """
+    from app.models import Job, PipelineRun, RunJob, UploadSession
+    from app.services import object_service, upload_service
+
+    preview = await deletion_preview(project_id)
+    if preview["blocked"]:
+        raise ConflictError(
+            "Project has jobs that are still active. Wait for them to finish, "
+            "or cancel them, then try again.",
+            details={"active_jobs": preview["active_jobs"]},
+        )
+
+    ids = [PydanticObjectId(i) for i in preview["project_ids"]]
+
+    # Deepest first: if this fails partway, what remains is a valid tree rather
+    # than orphans pointing at a parent that no longer exists.
+    for pid in reversed(ids):
+        for obj in await DataObject.find(DataObject.project_id == pid).to_list():
+            # A sidecar may already be gone, cascaded with its parent above.
+            if await DataObject.get(obj.id) is not None:
+                await object_service.delete_object(obj.id)
+
+        for session in await UploadSession.find(
+            UploadSession.project_id == pid
+        ).to_list():
+            await upload_service.abort_session(session.id)
+            await session.delete()
+
+        for run in await PipelineRun.find(PipelineRun.project_id == pid).to_list():
+            await RunJob.find(RunJob.run_id == run.id).delete()
+            await run.delete()
+
+        # Unlike discard_run, this does not spare shared jobs: a build_index
+        # job is deduped by blob digest and owned by whichever project queued
+        # it first (see _enqueue_build_index in pipeline_service.py), so
+        # deleting that owner here also deletes a job a wholly separate
+        # project's RunJob still points at (linked with shared=True). That's
+        # a silent cross-project side effect, not corruption -- run_detail
+        # already renders a missing job as "expired" rather than erroring.
+        await Job.find(Job.project_id == pid).delete()
+
+        project = await Project.get(pid)
+        if project is not None:
+            await project.delete()
+
+    log.info(
+        "project_tree_deleted",
+        project_id=str(project_id),
+        projects=len(ids),
+        objects=preview["object_count"],
+    )
+    return preview
 
 
 async def bump_counters(project_id: PydanticObjectId, *, objects: int, total_bytes: int) -> None:

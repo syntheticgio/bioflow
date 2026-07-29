@@ -1,17 +1,21 @@
-import { useQuery } from "@tanstack/react-query";
-import { Link, NavLink } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
+import { notify } from "../stores/messageStore";
 import { LoadIndicator } from "./LoadIndicator";
-
-/** Placeholders still awaiting real actions. */
-const MENUS = ["File", "View", "Help"];
+import { Menu } from "./Menu";
 
 /** Destinations that exist. Without these, /search and /activity are
  *  reachable only by typing the URL. */
 const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/search", label: "Search", title: "Search files by metadata" },
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
+];
+
+/** Help menu contents. One entry today; the shape is the point. */
+const HELP_ITEMS: { to: string; label: string }[] = [
+  { to: "/help/calculations", label: "BioFlow Calculations" },
 ];
 
 export function Header() {
@@ -21,6 +25,18 @@ export function Header() {
     refetchInterval: 15000,
   });
 
+  const navigate = useNavigate();
+
+  const cleanUp = useMutation({
+    mutationFn: () => api.runScheduleNow("gc_blobs"),
+    onSuccess: () => {
+      // The job is queued, not finished -- gc_blobs runs on the worker, so its
+      // reclaim counts are not available here. Point at Activity instead of
+      // inventing a number.
+      notify.success("Storage cleanup started. Progress is in Activity.");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
 
   return (
     <header className="header">
@@ -42,11 +58,24 @@ export function Header() {
             {l.label}
           </NavLink>
         ))}
-        {MENUS.map((m) => (
-          <button key={m} type="button" title={`${m} menu (not yet implemented)`}>
-            {m}
-          </button>
-        ))}
+        <Menu
+          label="File"
+          items={[
+            {
+              label: "Clean up storage now",
+              onSelect: () => cleanUp.mutate(),
+              disabled: cleanUp.isPending,
+            },
+          ]}
+        />
+        <Menu label="View" items={[]} />
+        <Menu
+          label="Help"
+          items={HELP_ITEMS.map((item) => ({
+            label: item.label,
+            onSelect: () => navigate(item.to),
+          }))}
+        />
       </nav>
 
       <div className="header-right">
