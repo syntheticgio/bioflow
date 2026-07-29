@@ -86,7 +86,7 @@ export function explain(
   const dominant =
     sortMb >= alignerSideMb
       ? `The sort buffer is ${sortMb.toLocaleString()} MB of that (${opts.threads} threads x ${opts.sortMemoryMb} MB each).`
-      : `Most of it is ${opts.buildingIndex ? "building the index" : "the aligner itself"}: about ${alignerSideMb.toLocaleString()} MB.`;
+      : `Most of it is ${opts.buildingIndex ? "building the index" : "the aligner itself"}: about ${Math.round(alignerSideMb).toLocaleString()} MB.`;
 
   return `Estimated ${total.toLocaleString()} MB${budget}. ${dominant}`;
 }
