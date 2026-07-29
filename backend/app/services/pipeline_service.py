@@ -583,6 +583,37 @@ def _read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None
         return None
 
 
+async def read_chemistry_for_alignment(
+    obj: DataObject | None,
+) -> align_runner.ReadChemistry | None:
+    """The chemistry of the reads behind an alignment.
+
+    Prefers the BAM's own copy, which `align_provenance` stamps on at ingest.
+    Falls back to the FASTQ the BAM descends from: alignments produced before
+    that copy existed carry no chemistry of their own, and re-aligning a BAM
+    purely to learn how accurate its reads were would be absurd.
+
+    Returns None when nothing knows -- QC may simply never have run. Callers
+    treat that as "unknown" and fall back to the conservative short-read
+    default rather than guessing.
+    """
+    if obj is None:
+        return None
+
+    chemistry = _read_chemistry(obj)
+    if chemistry is not None:
+        return chemistry
+
+    for parent_id in obj.derived_from:
+        parent = await DataObject.get(parent_id)
+        if parent is None or parent.format.kind is not FormatKind.FASTQ:
+            continue
+        chemistry = _read_chemistry(parent)
+        if chemistry is not None:
+            return chemistry
+    return None
+
+
 def default_align_params(obj: DataObject | None = None) -> dict:
     """Server-owned alignment defaults, so the form does not encode its own.
 

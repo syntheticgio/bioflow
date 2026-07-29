@@ -611,6 +611,32 @@ async def _supply_sidecars_to_blocked_alignments(
         )
 
 
+def align_provenance(*, result: dict, reads_facts: dict | None) -> dict:
+    """The facts an alignment stamps onto the BAM it produced.
+
+    Chemistry is copied from the reads rather than recorded fresh: aligning
+    does not change how accurate the reads are, and QC already answered that
+    question on the FASTQ. Without the copy the fact is unreachable from a BAM
+    -- `metadata` is carried across but `facts` are not -- and anything
+    downstream that picks a tool by chemistry silently gets the short-read
+    default instead. Variant calling is the first such consumer.
+
+    Absent stays absent: writing `None` would round-trip as the string "None"
+    and parse back as an unrecognized chemistry rather than as "unknown".
+    """
+    provenance = {
+        "aligned_by": result.get("aligner"),
+        "aligner_version": result.get("tool_version"),
+        "samtools_version": result.get("samtools_version"),
+        "align_params": result.get("params") or {},
+        "read_group": result.get("read_group") or {},
+    }
+    chemistry = (reads_facts or {}).get("qc_read_chemistry")
+    if chemistry:
+        provenance["qc_read_chemistry"] = chemistry
+    return provenance
+
+
 async def _apply_align_reads(result: dict) -> None:
     """Turn a finished alignment into a BAM object, and chain its indexing.
 
@@ -638,13 +664,7 @@ async def _apply_align_reads(result: dict) -> None:
             parents.append(PydanticObjectId(value))
 
     job_id = result.get("job_id")
-    provenance = {
-        "aligned_by": result.get("aligner"),
-        "aligner_version": result.get("tool_version"),
-        "samtools_version": result.get("samtools_version"),
-        "align_params": result.get("params") or {},
-        "read_group": result.get("read_group") or {},
-    }
+    provenance = align_provenance(result=result, reads_facts=reads.facts)
 
     try:
         bam = await object_service.ingest_local_file(
