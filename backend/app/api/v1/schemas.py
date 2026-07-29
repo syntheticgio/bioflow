@@ -116,6 +116,7 @@ class ObjectOut(BaseModel):
     derived_from: list[str]
     produced_by_job: str | None
     mate_object_id: str | None
+    read_number: int | None
     sidecar_of: str | None
     sidecar_role: str | None
     created_at: datetime
@@ -140,6 +141,7 @@ class ObjectOut(BaseModel):
             derived_from=[str(p) for p in o.derived_from],
             produced_by_job=str(o.produced_by_job) if o.produced_by_job else None,
             mate_object_id=str(o.mate_object_id) if o.mate_object_id else None,
+            read_number=o.read_number,
             sidecar_of=str(o.sidecar_of) if o.sidecar_of else None,
             sidecar_role=o.sidecar_role.value if o.sidecar_role else None,
             created_at=o.created_at,

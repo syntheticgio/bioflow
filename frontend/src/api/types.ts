@@ -75,6 +75,9 @@ export interface DataObject {
   produced_by_job: string | null;
   /** The other half of a paired-end run, if known. */
   mate_object_id: string | null;
+  /** Which half of the pair: 1 or 2. Null for single-end files, and for pairs
+   *  linked before this field existed. */
+  read_number: number | null;
   /** The file this one accompanies. Set only on scaffolding such as indexes. */
   sidecar_of: string | null;
   sidecar_role: SidecarRole | null;
