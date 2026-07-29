@@ -206,3 +206,46 @@ class TestReconcile:
         new_b = IndexModel([("b", ASCENDING)], name="b_idx")  # unique removed
         dropped = await reconcile_indexes(coll, [new_a, new_b])
         assert set(dropped) == {"a_idx", "b_idx"}
+
+
+class TestInitModelsIntegration:
+    """Verify that _init_models reconciles before init_beanie, so a stale
+    index does not crash startup."""
+
+    async def test_startup_with_stale_index_succeeds(self, _db):
+        """The exact scenario: an index with an old partialFilterExpression
+        exists, and the model declares a new one. _init_models must drop the
+        stale one and let init_beanie create the new one — no crash."""
+        from app.models import ALL_MODELS
+        from beanie import init_beanie
+
+        # Create a stale index directly on the test DB's jobs collection
+        coll = _db["jobs"]
+        stale = IndexModel(
+            [("dedup_key", ASCENDING)],
+            name="uniq_active_dedup_key",
+            unique=True,
+            partialFilterExpression={
+                "dedup_key": {"$type": "string"},
+                "state": {"$in": ["pending", "queued", "delayed", "running"]},
+            },
+        )
+        await coll.create_indexes([stale])
+
+        # Now run the reconcile-then-init_beanie pattern against this db
+        # — it must not crash.  The Job model declares the new
+        # partialFilterExpression with "blocked".
+        for model in ALL_MODELS:
+            model_settings = model.Settings
+            coll_name = getattr(model_settings, "name", model.__name__.lower())
+            indexes = getattr(model_settings, "indexes", [])
+            if indexes:
+                await reconcile_indexes(_db[coll_name], indexes)
+
+        await init_beanie(database=_db, document_models=ALL_MODELS)
+
+        # The index should now have the new definition
+        info = await coll.index_information()
+        pfe = info.get("uniq_active_dedup_key", {}).get("partialFilterExpression")
+        assert pfe is not None
+        assert "blocked" in pfe.get("state", {}).get("$in", [])

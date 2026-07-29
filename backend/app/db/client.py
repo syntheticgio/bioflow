@@ -54,8 +54,17 @@ async def _assert_replica_set(client: AsyncIOMotorClient) -> None:
 
 async def _init_models(client: AsyncIOMotorClient) -> None:
     from app.models import ALL_MODELS
+    from app.db.index_reconcile import reconcile_indexes
 
-    await init_beanie(database=client[settings.mongo_db], document_models=ALL_MODELS)
+    db = client[settings.mongo_db]
+    for model in ALL_MODELS:
+        model_settings = model.Settings
+        coll_name = getattr(model_settings, "name", model.__name__.lower())
+        indexes = getattr(model_settings, "indexes", [])
+        if indexes:
+            await reconcile_indexes(db[coll_name], indexes)
+
+    await init_beanie(database=db, document_models=ALL_MODELS)
 
 
 async def close_mongo() -> None:
