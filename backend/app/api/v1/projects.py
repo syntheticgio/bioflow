@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, Request, status
 from pydantic import BaseModel
 
 from app.api.v1.schemas import (
+    DeletionPreviewOut,
     ObjectOut,
     ProjectCreate,
     ProjectDetail,
@@ -63,6 +64,12 @@ async def update_project(project_id: PydanticObjectId, body: ProjectUpdate) -> P
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: PydanticObjectId, cascade: bool = False) -> None:
     await project_service.delete_project(project_id, cascade=cascade)
+
+
+@router.get("/{project_id}/deletion-preview", response_model=DeletionPreviewOut)
+async def project_deletion_preview(project_id: PydanticObjectId) -> DeletionPreviewOut:
+    """Counts and blockers for a delete, so the confirmation can be specific."""
+    return DeletionPreviewOut(**await project_service.deletion_preview(project_id))
 
 
 @router.get("/{project_id}/objects", response_model=list[ObjectOut])
