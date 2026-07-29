@@ -60,9 +60,10 @@ class TestExtendLease:
 class TestHeartbeatTtls:
     """queue.heartbeat's Redis half, exercised directly.
 
-    The Mongo half needs a database and is covered by the container suite; what
-    matters here is that the RUNNING zset score -- the value reap_expired.lua
-    compares against -- reflects the per-job TTL rather than the global default.
+    The Mongo half needs a database and is out of scope for these tests --
+    `_heartbeat_mongo` is stubbed out below. What matters here is that the
+    RUNNING zset score -- the value reap_expired.lua compares against --
+    reflects the per-job TTL rather than the global default.
     """
 
     async def test_uses_the_default_ttl_when_no_override(self, redis, monkeypatch):
