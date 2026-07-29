@@ -164,3 +164,99 @@ class TestSetPairValidation:
         b = await _saved(pid, "b.trimmed.fastq.gz", role=ObjectRole.TRIMMED_READS)
         result = await object_service.set_pair(a.id, b.id, 1)
         assert result.mate_object_id == b.id
+
+
+class TestSetPairWrites:
+    async def test_sets_both_pointers(self):
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+
+        await object_service.set_pair(a.id, b.id, 1)
+
+        a_after = await DataObject.get(a.id)
+        b_after = await DataObject.get(b.id)
+        assert a_after.mate_object_id == b.id
+        assert b_after.mate_object_id == a.id
+
+    async def test_gives_the_mate_the_opposite_read_number(self):
+        """The collision rule is structural: two R1s are unreachable."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+
+        await object_service.set_pair(a.id, b.id, 1)
+
+        assert (await DataObject.get(a.id)).read_number == 1
+        assert (await DataObject.get(b.id)).read_number == 2
+
+    async def test_read_number_two_flips_the_other_way(self):
+        pid = PydanticObjectId()
+        a = await _saved(pid, "rev.fastq.gz")
+        b = await _saved(pid, "fwd.fastq.gz")
+
+        await object_service.set_pair(a.id, b.id, 2)
+
+        assert (await DataObject.get(a.id)).read_number == 2
+        assert (await DataObject.get(b.id)).read_number == 1
+
+    async def test_marks_both_sides_user_touched(self):
+        """The durable record that stops re-ingest from overriding this."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+
+        await object_service.set_pair(a.id, b.id, 1)
+
+        assert "mate" in (await DataObject.get(a.id)).user_touched
+        assert "mate" in (await DataObject.get(b.id)).user_touched
+
+    async def test_does_not_duplicate_the_touch(self):
+        """$addToSet, so pairing a file that was paired before stays clean."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz", user_touched=["mate"])
+        b = await _saved(pid, "rev.fastq.gz")
+
+        await object_service.set_pair(a.id, b.id, 1)
+
+        assert (await DataObject.get(a.id)).user_touched.count("mate") == 1
+
+    async def test_preserves_an_existing_role_touch(self):
+        """user_touched is shared across fields; pairing must not clobber it."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz", user_touched=["role"])
+        b = await _saved(pid, "rev.fastq.gz")
+
+        await object_service.set_pair(a.id, b.id, 1)
+
+        touched = (await DataObject.get(a.id)).user_touched
+        assert "role" in touched
+        assert "mate" in touched
+
+    async def test_returns_the_updated_subject(self):
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+
+        result = await object_service.set_pair(a.id, b.id, 1)
+
+        assert result.mate_object_id == b.id
+        assert result.read_number == 1
+
+    async def test_a_lost_race_leaves_no_half_link(self):
+        """If the mate gets paired between validation and the write, the
+        subject must not be left pointing at it."""
+        pid = PydanticObjectId()
+        third = await _saved(pid, "third.fastq.gz")
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+
+        # Validation reads both as unpaired, then the mate is taken.
+        obj = await object_service.get_object(a.id)
+        await b.set({DataObject.mate_object_id: third.id})
+
+        with pytest.raises(ValidationError):
+            await object_service.set_pair(obj.id, b.id, 1)
+
+        assert (await DataObject.get(a.id)).mate_object_id is None
+        assert (await DataObject.get(a.id)).read_number is None

@@ -512,7 +512,46 @@ async def set_pair(
     if not _is_reads(obj) or not _is_reads(mate):
         raise ValidationError("Only reads files can be paired")
 
-    return obj
+    # Conditional on the mate still being unpaired, and checked before the
+    # subject is touched -- so losing this race leaves nothing half-written.
+    # Same shape as _link_mate's double write.
+    linked = await DataObject.find_one(
+        DataObject.id == mate.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).update(
+        {
+            "$set": {
+                DataObject.mate_object_id: obj.id,
+                DataObject.read_number: 3 - read_number,
+                DataObject.updated_at: datetime.now(UTC),
+            },
+            "$addToSet": {"user_touched": "mate"},
+        }
+    )
+    if not getattr(linked, "modified_count", 0):
+        raise ValidationError(f"{mate.name} was paired by something else; try again")
+
+    await DataObject.find_one(
+        DataObject.id == obj.id,
+        DataObject.mate_object_id == None,  # noqa: E711
+    ).update(
+        {
+            "$set": {
+                DataObject.mate_object_id: mate.id,
+                DataObject.read_number: read_number,
+                DataObject.updated_at: datetime.now(UTC),
+            },
+            "$addToSet": {"user_touched": "mate"},
+        }
+    )
+
+    log.info(
+        "pair_set_manually",
+        object_id=str(obj.id),
+        mate_id=str(mate.id),
+        read_number=read_number,
+    )
+    return await get_object(object_id)
 
 
 async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObject:
