@@ -231,3 +231,55 @@ class TestShortReadTunedTrimTools:
         assert pipeline_service._SHORT_READ_TUNED_TRIM_TOOLS <= set(
             pipeline_service._TRIM_PARAM_TYPES
         )
+
+
+class TestVariantCallable:
+    def test_accepts_a_ready_bam(self):
+        pipeline_service._check_variant_callable(
+            FakeObject("aligned.bam", kind=FormatKind.BAM)
+        )
+
+    @pytest.mark.parametrize(
+        "kind", [FormatKind.FASTQ, FormatKind.FASTA, FormatKind.VCF, FormatKind.BED]
+    )
+    def test_rejects_anything_that_is_not_a_bam(self, kind):
+        """Both callers read an indexed alignment. Handing bcftools a FASTQ
+        produces a confusing parse error rather than an answer now."""
+        with pytest.raises(ValidationError, match="not a BAM"):
+            pipeline_service._check_variant_callable(FakeObject("x", kind=kind))
+
+    @pytest.mark.parametrize(
+        "status",
+        [ObjectStatus.UPLOADING, ObjectStatus.HASHING, ObjectStatus.ERROR,
+         ObjectStatus.MISSING],
+    )
+    def test_rejects_a_file_that_is_not_ready(self, status):
+        with pytest.raises(ValidationError, match="not ready"):
+            pipeline_service._check_variant_callable(
+                FakeObject("aligned.bam", kind=FormatKind.BAM, status=status)
+            )
+
+
+class TestVariantDedupKey:
+    """Two identical requests must collapse into one job; two genuinely
+    different ones must not."""
+
+    def _key(self, **kw):
+        params = {"caller": "clair3", "threads": 4, **kw.pop("params", {})}
+        return pipeline_service._variant_dedup_key(
+            bam_id=kw.get("bam_id", "bam1"), params=params
+        )
+
+    def test_identical_requests_match(self):
+        assert self._key() == self._key()
+
+    def test_a_different_bam_differs(self):
+        assert self._key() != self._key(bam_id="bam2")
+
+    def test_a_different_caller_differs(self):
+        """Calling the same BAM with Clair3 and with bcftools is two real
+        results to compare, not a double-submit to collapse."""
+        assert self._key() != self._key(params={"caller": "bcftools"})
+
+    def test_a_different_thread_count_differs(self):
+        assert self._key() != self._key(params={"threads": 8})

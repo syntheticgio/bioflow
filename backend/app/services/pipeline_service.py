@@ -22,6 +22,7 @@ from app.models import (
     Job,
     JobClass,
     JobResources,
+    ObjectRole,
     ObjectStatus,
     RunInput,
     RunInputRole,
@@ -37,6 +38,7 @@ from app.pipelines import (
     pairing,
     tools,
     trimmomatic_runner,
+    variant_runner,
 )
 from app.pipelines.aligners import Aligner
 from app.services import blob_service, run_service
@@ -1012,3 +1014,276 @@ def _bam_name(reads_name: str, sample: str) -> str:
     stem = Path(stem).stem
     stem = pairing.split_mate(stem)[0] if pairing.split_mate(stem) else stem
     return f"{stem or sample}.bam"
+
+
+# --- Variant calling --------------------------------------------------------
+
+VARIANT_CALLABLE_KINDS = {FormatKind.BAM}
+
+
+def _check_variant_callable(obj: DataObject) -> None:
+    """Whether a file can have variants called from it.
+
+    Both callers read an indexed alignment; the index is checked separately at
+    launch because it is a fixable condition ("run index_bam first") rather
+    than a wrong-file-type one.
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready for variant calling "
+            f"(status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind not in VARIANT_CALLABLE_KINDS:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not a BAM alignment",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+
+def _variant_dedup_key(*, bam_id, params: dict) -> str:
+    """Identity of a variant calling request.
+
+    Includes the caller: calling one BAM with Clair3 and with bcftools is two
+    results worth comparing, not a double-submit to collapse.
+    """
+    return f"call_variants:{bam_id}:{_params_fingerprint(params)}"
+
+
+async def _reference_for_bam(bam: DataObject) -> DataObject | None:
+    """The reference this BAM was aligned against, from its provenance.
+
+    An alignment records the reference in `derived_from`, so this is a lookup
+    rather than a guess. Prefers an explicit reference role over bare FASTA
+    format, since a BAM's parents may include more than one FASTA in unusual
+    setups. Returns None for an uploaded BAM, which has no provenance at all --
+    the caller asks the user instead.
+    """
+    fallback: DataObject | None = None
+    for parent_id in bam.derived_from:
+        parent = await DataObject.get(parent_id)
+        if parent is None or parent.format.kind is not FormatKind.FASTA:
+            continue
+        if parent.role is ObjectRole.REFERENCE:
+            return parent
+        fallback = fallback or parent
+    return fallback
+
+
+async def default_variant_params(obj: DataObject | None = None) -> dict:
+    """Server-owned variant calling defaults, so the form does not encode its own.
+
+    Async because the chemistry may have to be read from the reads the BAM
+    descends from -- see `read_chemistry_for_alignment`.
+    """
+    chemistry = await read_chemistry_for_alignment(obj)
+    if chemistry is align_runner.ReadChemistry.CLR:
+        # Do not raise while building a dialog: the UI needs to *render* the
+        # refusal, not fail to open. The launch path is what actually blocks.
+        return {"caller": None, "threads": settings.pipeline_default_threads}
+
+    caller = variant_runner.caller_for_chemistry(chemistry or align_runner.ReadChemistry.UNKNOWN)
+    return variant_runner.VariantParams(
+        caller=caller, threads=settings.pipeline_default_threads
+    ).as_dict()
+
+
+async def _sidecar_of_role(obj: DataObject, role: SidecarRole) -> DataObject | None:
+    from app.services import object_service
+
+    for sidecar in await object_service.list_sidecars(obj.id):
+        if sidecar.sidecar_role is role and sidecar.blob_sha256:
+            return sidecar
+    return None
+
+
+async def launch_variant_calling(
+    *,
+    bam_id: PydanticObjectId,
+    reference_id: PydanticObjectId | None = None,
+    caller: str | None = None,
+    params: dict | None = None,
+):
+    """Queue a variant calling run over an aligned BAM.
+
+    Unlike alignment, this does not build its missing indexes: it requires the
+    `.bai` and the reference `.fai` to exist and refuses otherwise. Both are
+    produced by jobs the user has already run (`index_bam`, `build_index`), and
+    an actionable "run index_bam first" beats a job that sits blocked behind
+    work the user did not ask for.
+    """
+    from app.queue import queue
+
+    bam = await DataObject.get(bam_id)
+    if bam is None:
+        raise NotFoundError(f"BAM not found: {bam_id}")
+    _check_variant_callable(bam)
+
+    # Refuse CLR before anything is enqueued. Raises ValidationError naming the
+    # alternative; the dialog renders it rather than offering a caller.
+    chemistry = await read_chemistry_for_alignment(bam)
+    if chemistry is not None:
+        variant_runner.caller_for_chemistry(chemistry)
+
+    reference = await _resolve_variant_reference(bam, reference_id)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    fai = await _sidecar_of_role(reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(reference.id), "needs": "build_index"},
+        )
+
+    merged = variant_runner.VariantParams.from_dict(
+        {
+            **(await default_variant_params(bam)),
+            **({"caller": caller} if caller else {}),
+            **(params or {}),
+        }
+    )
+    if merged.caller is variant_runner.VariantCaller.DEEPVARIANT:
+        raise ValidationError(
+            "DeepVariant is not available in this installation: it has no "
+            "arm64 Linux build. Use Clair3 for long reads, or bcftools for "
+            "short reads."
+        )
+    tools.require(
+        tools.clair3()
+        if merged.caller is variant_runner.VariantCaller.CLAIR3
+        else tools.bcftools()
+    )
+    tools.require(tools.bcftools())  # always: it writes the .tbi
+
+    payload = await _variant_payload(
+        bam=bam,
+        reference=reference,
+        bai=bai,
+        fai=fai,
+        chemistry=chemistry,
+        params=merged,
+    )
+
+    run = await run_service.create_run(
+        kind=RunKind.VARIANT_CALLING,
+        project_id=bam.project_id,
+        label=f"{bam.name} → variants ({merged.caller.value})",
+        inputs=[
+            RunInput(object_id=bam.id, name=bam.name, role=RunInputRole.READS),
+            RunInput(
+                object_id=reference.id,
+                name=reference.name,
+                role=RunInputRole.REFERENCE,
+            ),
+        ],
+        params=merged.as_dict(),
+        tool=merged.caller.value,
+    )
+
+    job = await queue.enqueue(
+        "call_variants",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=merged.threads, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=_variant_dedup_key(bam_id=bam.id, params=merged.as_dict()),
+        project_id=bam.project_id,
+        object_id=bam.id,
+        # No depends_on: the .bai and .fai are required above, so there is
+        # nothing left to wait for.
+    )
+    if job is None:
+        await run_service.discard_run(run.id)
+        raise ConflictError(
+            "An identical variant calling run is already queued or running",
+            details={"bam_id": str(bam.id), "caller": merged.caller.value},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.CALL_VARIANTS)
+    log.info(
+        "variant_calling_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        bam_id=str(bam.id),
+        caller=merged.caller.value,
+    )
+    return job
+
+
+async def _resolve_variant_reference(
+    bam: DataObject, reference_id: PydanticObjectId | None
+) -> DataObject:
+    """The reference to call against: explicit if given, else the BAM's own."""
+    if reference_id is not None:
+        reference = await DataObject.get(reference_id)
+        if reference is None:
+            raise NotFoundError(f"Reference not found: {reference_id}")
+        _check_reference(reference)
+        if reference.project_id != bam.project_id:
+            raise ValidationError("BAM and reference must be in the same project")
+        return reference
+
+    reference = await _reference_for_bam(bam)
+    if reference is None:
+        raise ValidationError(
+            f"Cannot determine which reference {bam.name!r} was aligned "
+            f"against. Choose one -- an uploaded BAM carries no record of it.",
+            details={"bam_id": str(bam.id), "needs": "reference_id"},
+        )
+    return reference
+
+
+async def _variant_payload(
+    *,
+    bam: DataObject,
+    reference: DataObject,
+    bai: DataObject,
+    fai: DataObject,
+    chemistry,
+    params,
+) -> dict:
+    """The call_variants payload, with every input addressed by digest or path."""
+    payload: dict = {
+        "bam_object_id": str(bam.id),
+        "reference_object_id": str(reference.id),
+        "project_id": str(bam.project_id),
+        "bam_name": bam.name,
+        "reference_name": reference.name,
+        "caller": params.caller.value,
+        "params": params.as_dict(),
+        "output_name": variant_runner.output_name(bam.name, params.caller.value),
+    }
+
+    for key, obj in (
+        ("bam", bam),
+        ("reference", reference),
+        ("bai", bai),
+        ("fai", fai),
+    ):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    if chemistry is not None:
+        payload["chemistry"] = chemistry.value
+
+    if params.caller is variant_runner.VariantCaller.CLAIR3:
+        payload["clair3_params"] = variant_runner.Clair3Params(
+            threads=params.threads,
+            platform=variant_runner.clair3_platform_for_chemistry(chemistry),
+        ).as_dict()
+    else:
+        payload["bcftools_params"] = variant_runner.BcftoolsParams(
+            threads=params.threads
+        ).as_dict()
+
+    return payload
