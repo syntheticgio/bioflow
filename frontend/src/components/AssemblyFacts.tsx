@@ -28,6 +28,11 @@ export function AssemblyFacts({ facts }: Props) {
     : [];
   const namesTruncated = facts.sequence_names_truncated === true;
 
+  type NamedLength = { name: string; length: number };
+  const longest = facts.sequence_longest as NamedLength | undefined;
+  const shortest = facts.sequence_shortest as NamedLength | undefined;
+  const lengthsPartial = facts.sequence_lengths_partial === true;
+
   const count = isExact ? exactCount : estimatedCount;
   const hasAnything =
     count !== undefined || totalBases !== undefined || gc !== undefined;
@@ -84,6 +89,20 @@ export function AssemblyFacts({ facts }: Props) {
             <dd>{formatBases(totalBases)}</dd>
           </>
         )}
+        {longest !== undefined && shortest !== undefined && (
+          <>
+            <dt>Longest</dt>
+            <dd>
+              <span className="mono">{longest.name}</span> ·{" "}
+              {formatBases(longest.length)}
+            </dd>
+            <dt>Shortest</dt>
+            <dd>
+              <span className="mono">{shortest.name}</span> ·{" "}
+              {formatBases(shortest.length)}
+            </dd>
+          </>
+        )}
         {gc !== undefined && (
           <>
             {/* What this number means depends on how it was measured: a small
@@ -111,6 +130,20 @@ export function AssemblyFacts({ facts }: Props) {
           </>
         )}
       </dl>
+      )}
+
+      {/* This note's visibility rides on hasAnything, which for a truncated
+          parse depends on sequence_stats.fasta_stats having also set
+          gc_content_percent -- an all-N sampled region or a decode error
+          there leaves hasAnything false, and this caveat silently won't
+          show even though sequence_longest/shortest and
+          sequence_lengths_partial are set. Low-risk (a missing caveat, not
+          wrong data), but worth knowing if this ever gets debugged. */}
+      {hasAnything && lengthsPartial && longest !== undefined && (
+        <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}>
+          Longest and shortest are partial — the file was truncated during
+          parsing, so later sequences were not measured.
+        </div>
       )}
 
       {names.length > 0 && (

@@ -333,22 +333,3 @@ because it is a schema change that this feature does not otherwise need.
 
 Touches: `backend/app/models/object.py`, `backend/app/queue/results.py`,
 `backend/app/services/object_service.py`.
-
-## Extract per-sequence lengths for FASTA
-
-Raised: 2026-07-26, during the object-role design.
-
-`_parse_fasta` collects sequence *names* only, and `fasta_stats` counts bases in
-aggregate, so there is no way to report the longest or shortest sequence in an
-assembly. The reference detail panel wants a longest/shortest row; it was cut
-from the initial implementation rather than adding parser work.
-
-Fix: accumulate per-sequence base counts in the `_parse_fasta` loop and store
-them bounded, mirroring how `reference_lengths` is already capped at
-`MAX_STORED_CONTIGS` for BAM headers. Note the existing 256 MB exact-count
-limit — when parsing truncates, the lengths are partial and must be flagged
-as such rather than reported as final.
-
-Touches: `backend/app/storage/parsers.py`,
-`backend/tests/storage/test_parsers.py`, then add the row to the Assembly
-section of `frontend/src/components/DetailPanel.tsx`.
