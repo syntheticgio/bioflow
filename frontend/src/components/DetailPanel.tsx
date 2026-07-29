@@ -23,6 +23,7 @@ import { BaseCompositionChart, QualityChart } from "./SequenceCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { RoleConverter } from "./RoleConverter";
+import { PairEditor } from "./PairEditor";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { DerivedFiles } from "./DerivedFiles";
 import { ActivePipelineJobs } from "./ActivePipelineJobs";
@@ -861,6 +862,7 @@ function ActionsTab({
       </div>
 
       <RoleConverter obj={obj} metadataDirty={metadataDirty} />
+      <PairEditor obj={obj} />
 
       <div className="section">
         <div className="section-title">Delete</div>

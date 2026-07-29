@@ -6,6 +6,7 @@ wire contract does not drift silently when a storage field is added.
 
 from datetime import datetime
 
+from beanie import PydanticObjectId
 from pydantic import BaseModel, Field
 
 from app.models import Blob, DataObject, ObjectRole, Project
@@ -73,6 +74,20 @@ class ObjectUpdate(BaseModel):
     # key leaves it untouched. exclude_unset=True in the route preserves the
     # difference.
     role: ObjectRole | None = None
+
+
+class PairRequest(BaseModel):
+    """Pairing two reads files by hand.
+
+    Separate from ObjectUpdate because pairing writes *two* documents and its
+    central validation question -- is this candidate already attached to a
+    third file -- cannot be answered from the single object a PATCH fetches.
+    """
+
+    mate_object_id: PydanticObjectId
+    # Which half the *subject* is. The mate is always given the other one, so
+    # two R1s cannot be produced by a well-formed request.
+    read_number: int = Field(ge=1, le=2)
 
 
 class BlobOut(BaseModel):

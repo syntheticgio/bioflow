@@ -113,6 +113,15 @@ export const api = {
   updateObject: (id: string, body: Record<string, unknown>) =>
     request<DataObject>(`/objects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
+  pairObject: (id: string, body: { mate_object_id: string; read_number: number }) =>
+    request<DataObject>(`/objects/${id}/pair`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  unpairObject: (id: string) =>
+    request<DataObject>(`/objects/${id}/pair`, { method: "DELETE" }),
+
   deleteObject: (id: string) => request<void>(`/objects/${id}`, { method: "DELETE" }),
 
   reingestObject: (id: string) =>

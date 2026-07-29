@@ -180,10 +180,16 @@ class DataObject(TimestampedDocument):
     # overridable, since the convention is only a convention.
     mate_object_id: PydanticObjectId | None = None
 
-    # Which half of the pair this file is: 1 or 2. Derived from the same
-    # `pairing.split_mate` call that establishes `mate_object_id`, so the label
-    # can never contradict the link -- see the paired-end design spec. Nullable
-    # for single-end files, and for pairs predating this field.
+    # Which half of the pair this file is: 1 or 2. Set and cleared together
+    # with mate_object_id -- a read number without a mate describes a pair
+    # that does not exist. When inferred, it comes from the same
+    # `pairing.split_mate` call that establishes `mate_object_id`, so the two
+    # can never disagree; a manual pairing sets both explicitly instead.
+    # Nullable for single-end files, and for pairs predating this field.
+    #
+    # A plain int rather than an enum: the domain is closed by biology at
+    # {1, 2}, and an enum whose members are ONE and TWO reads worse at every
+    # use site than the integer does. The request schema does the validating.
     read_number: int | None = None
 
     source: SourceInfo = Field(default_factory=SourceInfo)

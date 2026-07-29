@@ -197,7 +197,11 @@ async def _link_mate(obj: DataObject) -> None:
     """
     from app.pipelines import pairing
 
-    if obj.mate_object_id is not None:
+    # "mate" in user_touched covers the case the pointer cannot: a pairing the
+    # user *cleared* is None, indistinguishable from one never set, so without
+    # this the next re-ingest silently restores what they just removed. Exactly
+    # the hole user_touched was introduced to close for role.
+    if obj.mate_object_id is not None or "mate" in obj.user_touched:
         return
 
     split = pairing.split_mate(obj.name)
@@ -211,6 +215,10 @@ async def _link_mate(obj: DataObject) -> None:
         DataObject.project_id == obj.project_id,
         DataObject.id != obj.id,
         DataObject.mate_object_id == None,  # noqa: E711
+        # Reached from the other side, a file whose pairing was cleared is
+        # still an unpaired name match -- so it has to be excluded here too,
+        # not just by the early return above.
+        {"user_touched": {"$ne": "mate"}},
     ).to_list()
 
     matches = [c for c in candidates if pairing.is_mate_of(obj.name, c.name)]
@@ -244,6 +252,10 @@ async def _link_mate(obj: DataObject) -> None:
     linked = await DataObject.find_one(
         DataObject.id == mate.id,
         DataObject.mate_object_id == None,  # noqa: E711
+        # Re-checked in the query, not just above: a manual pairing landing
+        # between the decision and this write would otherwise be overruled by
+        # a stale snapshot. Same reasoning as the role assignment.
+        {"user_touched": {"$ne": "mate"}},
     ).update(
         {"$set": {DataObject.mate_object_id: obj.id, DataObject.read_number: mate_read}}
     )
@@ -254,11 +266,18 @@ async def _link_mate(obj: DataObject) -> None:
     await DataObject.find_one(
         DataObject.id == obj.id,
         DataObject.mate_object_id == None,  # noqa: E711
+        {"user_touched": {"$ne": "mate"}},
     ).update(
         {"$set": {DataObject.mate_object_id: mate.id, DataObject.read_number: this_read}}
     )
 
-    log.info("mate_linked", object_id=str(obj.id), mate_id=str(mate.id), name=obj.name)
+    log.info(
+        "mate_linked",
+        object_id=str(obj.id),
+        mate_id=str(mate.id),
+        name=obj.name,
+        read_number=obj_read_number,
+    )
 
 
 async def _apply_trim_reads(result: dict) -> None:

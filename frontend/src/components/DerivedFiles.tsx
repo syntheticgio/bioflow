@@ -38,7 +38,13 @@ export function DerivedFiles({ object }: { object: DataObject }) {
       <div className="section-title">Related files</div>
 
       {mate && (
-        <Group label="Paired with">
+        <Group
+          label={
+            object.read_number
+              ? `Paired with (this file is R${object.read_number})`
+              : "Paired with"
+          }
+        >
           <FileRow object={mate} onSelect={select} />
         </Group>
       )}
@@ -85,6 +91,7 @@ function FileRow({
       <span className="derived-name">{object.name}</span>
       <span className="derived-meta">
         {formatBytes(object.size)}
+        {object.read_number && <span className="chip">R{object.read_number}</span>}
         {object.role === "trimmed_reads" && <span className="chip">trimmed</span>}
       </span>
     </button>
