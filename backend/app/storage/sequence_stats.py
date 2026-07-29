@@ -30,6 +30,12 @@ DEFAULT_SAMPLE_READS = 200_000
 MAX_POSITIONS = 1_000
 CANCEL_CHECK_READS = 20_000
 
+# Insert size is binned at 10 bp resolution up to 2 kb -- fine enough to see a
+# library-prep problem's characteristic shape, coarse enough that the array
+# stays small regardless of how many reads are sampled.
+INSERT_SIZE_BIN_WIDTH = 10
+INSERT_SIZE_MAX = 2000
+
 # Phred+33 is effectively universal now. Phred+64 (old Illumina) would report
 # implausibly high scores, which we detect rather than silently mis-scale.
 PHRED_OFFSET = 33
@@ -274,6 +280,9 @@ def alignment_stats(
     total_acgt = 0
     mapq_sum = 0
     mapq_n = 0
+    mapq_histogram: Counter[int] = Counter()
+    insert_size_histogram: Counter[int] = Counter()
+    saw_paired = False
 
     try:
         with pysam.AlignmentFile(str(path), mode, check_sq=False) as af:
@@ -292,8 +301,21 @@ def alignment_stats(
                     mapped += 1
                     mapq_sum += rec.mapping_quality
                     mapq_n += 1
+                    mapq_histogram[rec.mapping_quality] += 1
                 if rec.is_duplicate:
                     duplicates += 1
+
+                if rec.is_paired:
+                    saw_paired = True
+                    # template_length is signed (mate orientation); only
+                    # positive values are counted so each pair's fragment size
+                    # is tallied once rather than twice (the mate's own record
+                    # reports the same length negated).
+                    tlen = rec.template_length
+                    if tlen > 0:
+                        capped = min(tlen, INSERT_SIZE_MAX)
+                        bucket = (capped // INSERT_SIZE_BIN_WIDTH) * INSERT_SIZE_BIN_WIDTH
+                        insert_size_histogram[bucket] += 1
 
                 quals = rec.query_qualities
                 if rec.is_reverse:
@@ -348,6 +370,18 @@ def alignment_stats(
         facts["duplicate_percent"] = round(100.0 * duplicates / reads, 2)
     if mapq_n:
         facts["mean_mapping_quality"] = round(mapq_sum / mapq_n, 2)
+
+    if mapq_histogram:
+        facts["mapq_histogram"] = [
+            {"mapq": mapq, "count": n} for mapq, n in sorted(mapq_histogram.items())
+        ]
+    # Absent rather than a bucket of zeros for an unpaired BAM, so the
+    # frontend can tell "unpaired" from "measured as zero".
+    if saw_paired and insert_size_histogram:
+        facts["insert_size_histogram"] = [
+            {"insert_size": size, "count": n}
+            for size, n in sorted(insert_size_histogram.items())
+        ]
 
     return facts
 

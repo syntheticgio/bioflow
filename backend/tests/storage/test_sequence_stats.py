@@ -330,3 +330,86 @@ class TestAlignmentStats:
         assert "base_composition" in facts
         assert "quality_per_position" in facts
         assert "reference_count" in facts  # pre-existing facts survive
+
+
+def _write_bam(path, records):
+    pysam = pytest.importorskip("pysam")
+    hdr = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "chr1", "LN": 1000}]}
+    with pysam.AlignmentFile(str(path), "wb", header=hdr) as out:
+        for r in records:
+            a = pysam.AlignedSegment()
+            a.query_name = r["name"]
+            seq = r.get("seq", "ACGT")
+            a.query_sequence = seq
+            a.flag = r.get("flag", 0)
+            a.reference_id = 0
+            a.reference_start = r.get("pos", 10)
+            a.mapping_quality = r.get("mapq", 0)
+            a.cigar = [(0, len(seq))]
+            a.query_qualities = pysam.qualitystring_to_array("I" * len(seq))
+            if "template_length" in r:
+                a.template_length = r["template_length"]
+            out.write(a)
+    return path
+
+
+class TestMapqHistogram:
+    def test_bucketed_by_mapping_quality(self, tmp_path):
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "mapq.bam",
+            [
+                {"name": "r1", "mapq": 0},
+                {"name": "r2", "mapq": 0},
+                {"name": "r3", "mapq": 60},
+            ],
+        )
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        histogram = {h["mapq"]: h["count"] for h in facts["mapq_histogram"]}
+        assert histogram[0] == 2
+        assert histogram[60] == 1
+
+    def test_unmapped_reads_are_excluded(self, tmp_path):
+        """Flag 4 is unmapped; mapping_quality on an unmapped read is not a
+        meaningful measurement and must not appear in the histogram."""
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "unmapped.bam",
+            [
+                {"name": "r1", "flag": 4, "mapq": 0},
+                {"name": "r2", "mapq": 30},
+            ],
+        )
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        total = sum(h["count"] for h in facts["mapq_histogram"])
+        assert total == 1
+
+
+class TestInsertSizeHistogram:
+    def test_positive_template_lengths_are_binned(self, tmp_path):
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "insert.bam",
+            [
+                {"name": "r1", "flag": 3, "template_length": 300},
+                {"name": "r2", "flag": 3, "template_length": 305},
+                {"name": "r3", "flag": 3, "template_length": 500},
+            ],
+        )
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        assert "insert_size_histogram" in facts
+        total = sum(h["count"] for h in facts["insert_size_histogram"])
+        assert total == 3
+
+    def test_unpaired_reads_produce_no_insert_size_histogram(self, tmp_path):
+        """A single-end BAM has no meaningful template length -- absent, not a
+        bucket of zeros, so the frontend can tell 'unpaired' from 'measured as
+        zero'."""
+        from app.models import FormatKind
+
+        p = _write_bam(tmp_path / "unpaired.bam", [{"name": "r1", "flag": 0}])
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        assert "insert_size_histogram" not in facts
