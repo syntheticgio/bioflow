@@ -139,6 +139,17 @@ export function AlignDialog({
         })
       : null;
 
+  // The banner below tells the user to change threads/sort_memory_mb, both of
+  // which live in the "performance" disclosure -- so once the resource band
+  // is anything but "ok", that disclosure must be visible or the fix it's
+  // pointing at is hidden. Auto-expand for both warn and block and ignore a
+  // manual collapse while either holds: for "block" the launch button is
+  // disabled, so hiding the very fields needed to unblock it would defeat the
+  // point of showing the banner at all; treating "warn" the same way keeps
+  // the rule a simple one-liner instead of a second state to reason about,
+  // and a user can still collapse the section once the band returns to "ok".
+  const showAdvanced = advanced || band !== "ok";
+
   const launch = useMutation({
     mutationFn: () =>
       api.launchAlignment({
@@ -287,7 +298,16 @@ export function AlignDialog({
             <AlignerParamFields
               fields={schema.fields.filter((f) => f.group === "biology")}
               params={params}
-              onChange={(k, v) => set(k as keyof AlignParams, v as never)}
+              onChange={(k, v) =>
+                // The registry's field metadata is validated server-side (see
+                // test_aligner_registry.py's TestFieldMetadataMatchesParams),
+                // so a field key reaching here is guaranteed to correspond to a
+                // real AlignParams property of a compatible type -- but that
+                // guarantee is enforced by a Python test, not by TypeScript,
+                // since the schema is fetched at runtime. This cast is where
+                // that trust boundary is crossed.
+                set(k as keyof AlignParams, v as AlignParams[keyof AlignParams])
+              }
             />
           </div>
         )}
@@ -296,18 +316,22 @@ export function AlignDialog({
           type="button"
           className="trim-advanced-toggle"
           onClick={() => setAdvanced((a) => !a)}
-          aria-expanded={advanced}
+          aria-expanded={showAdvanced}
         >
-          <span className="trim-chevron">{advanced ? "▾" : "▸"}</span>
+          <span className="trim-chevron">{showAdvanced ? "▾" : "▸"}</span>
           Performance
         </button>
 
-        {advanced && schema && (
+        {showAdvanced && schema && (
           <div className="trim-fields">
             <AlignerParamFields
               fields={schema.fields.filter((f) => f.group === "performance")}
               params={params}
-              onChange={(k, v) => set(k as keyof AlignParams, v as never)}
+              onChange={(k, v) =>
+                // See the comment on the biology-fields onChange above -- same
+                // trust boundary, same registry-vs-TypeScript tradeoff.
+                set(k as keyof AlignParams, v as AlignParams[keyof AlignParams])
+              }
             />
           </div>
         )}
