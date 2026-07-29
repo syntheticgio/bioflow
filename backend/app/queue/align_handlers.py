@@ -8,13 +8,14 @@ provide. `aligners.materialize` is the shared answer, and these are its callers.
 Imported by `handlers.py` for the `@handler` registration side effects.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import align_runner, aligners, tools
+from app.pipelines import align_runner, aligners, bam_stats_runner, tools
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
@@ -372,5 +373,135 @@ def index_bam(ctx: JobContext) -> dict:
         "output": {"tmp_path": str(bai), "name": bai.name, "role": "bai"},
         "facts": facts,
         "tool_version": samtools.version,
+        "workdir": str(work),
+    }
+
+
+@handler(
+    "run_bam_stats",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # LIGHT io: idxstats reads only the .bai, and coverage/depth are each one
+    # sequential pass -- lighter than the random access an alignment does.
+    resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.LIGHT),
+    max_attempts=2,
+)
+def run_bam_stats(ctx: JobContext) -> dict:
+    """Coverage, per-contig, and binned-depth statistics for the Results tab.
+
+    Read-only, like run_qc: derives no files except the regenerable per-contig
+    TSV report. The bounded summary (binned depth, top-N contigs) returns as
+    facts for `_apply_run_bam_stats` to merge onto the object; the complete
+    per-contig table is written straight to settings.bam_stats_dir and
+    referenced by filename.
+
+    Prerequisites (coordinate sort, presence of a .bai) are checked before
+    this job is even enqueued -- see pipeline_service.launch_bam_stats -- so a
+    failure here is an actual tool problem, not a missing precondition.
+    """
+    samtools = tools.require(tools.samtools())
+
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("run_bam_stats requires an 'object_id'")
+
+    work = _prepare_workdir(ctx, "bam_stats")
+
+    bam_name = Path(ctx.payload.get("bam_name") or "aligned.bam").name
+    bam = work / bam_name
+    bam.unlink(missing_ok=True)
+    bam.symlink_to(_resolve_blob(ctx.payload, "bam"))
+
+    # Same convention call_variants uses: the .bai as a sibling of the BAM,
+    # under the name samtools itself expects (<name>.bam.bai).
+    bai = work / f"{bam_name}{aligners.BAI_SUFFIX}"
+    bai.unlink(missing_ok=True)
+    bai.symlink_to(_resolve_blob(ctx.payload, "bai"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="idxstats", pct=0.1, message="reading index statistics")
+    idxstats_path = work / "idxstats.txt"
+    code = run_subprocess(
+        ctx,
+        bam_stats_runner.build_idxstats_command(samtools_path=samtools.path, bam=bam),
+        log_path=str(idxstats_path),
+    )
+    if code != 0:
+        raise _failure(code, idxstats_path, "samtools idxstats")
+    idxstats_rows = bam_stats_runner.parse_idxstats(idxstats_path.read_text(errors="replace"))
+
+    ctx.progress(phase="coverage", pct=0.3, message="computing per-contig coverage")
+    coverage_path = work / "coverage.txt"
+    code = run_subprocess(
+        ctx,
+        bam_stats_runner.build_coverage_command(samtools_path=samtools.path, bam=bam),
+        log_path=str(coverage_path),
+    )
+    if code != 0:
+        raise _failure(code, coverage_path, "samtools coverage")
+    coverage_rows = bam_stats_runner.parse_coverage(coverage_path.read_text(errors="replace"))
+
+    contigs = bam_stats_runner.contigs_from_coverage(
+        idxstats_rows=idxstats_rows, coverage_rows=coverage_rows
+    )
+
+    ctx.progress(phase="depth", pct=0.5, message="binning coverage across the reference")
+    depth_path = work / "depth.txt"
+    code = run_subprocess(
+        ctx,
+        bam_stats_runner.build_depth_command(samtools_path=samtools.path, bam=bam),
+        log_path=str(depth_path),
+    )
+    if code != 0:
+        raise _failure(code, depth_path, "samtools depth")
+
+    contig_lengths = [(c["contig"], c["length"]) for c in contigs]
+    with open(depth_path, errors="replace") as fh:
+        bins, boundaries = bam_stats_runner.bin_depth(
+            contig_lengths=contig_lengths, depth_lines=fh
+        )
+
+    cumulative = bam_stats_runner.cumulative_coverage(
+        bins=bins, thresholds=list(bam_stats_runner.COVERAGE_THRESHOLDS)
+    )
+    summary = bam_stats_runner.genome_summary(contigs=contigs, bins=bins)
+
+    ctx.progress(phase="report", pct=0.9, message="writing the per-contig report")
+    report_dir = settings.bam_stats_dir / str(object_id)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_name = "contigs.tsv"
+    (report_dir / report_name).write_text(bam_stats_runner.contigs_tsv(contigs))
+
+    # Capped for facts storage; the full table is the TSV written above.
+    top_n = contigs[:50]
+
+    facts = {
+        "bam_stats_status": "ok",
+        "bam_stats_tool_version": samtools.version,
+        "bam_stats_computed_at": datetime.now(UTC).isoformat(),
+        "bam_stats_summary": summary,
+        "bam_stats_coverage_bins": bins,
+        "bam_stats_coverage_boundaries": boundaries,
+        "bam_stats_cumulative": cumulative,
+        "bam_stats_contigs_top": top_n,
+        "bam_stats_report": report_name,
+    }
+
+    ctx.progress(phase="done", pct=1.0, message="results complete")
+    log.info(
+        "bam_stats_finished",
+        job_id=ctx.job_id,
+        object_id=object_id,
+        contigs=len(contigs),
+        mean_depth=summary.get("mean_depth"),
+    )
+
+    return {
+        "object_id": object_id,
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
         "workdir": str(work),
     }

@@ -1041,6 +1041,100 @@ def _check_variant_callable(obj: DataObject) -> None:
         )
 
 
+BAM_STATS_CALLABLE_KINDS = {FormatKind.BAM}
+
+
+def _check_bam_stats_callable(obj: DataObject) -> None:
+    """Whether a BAM is eligible for the Results job.
+
+    Coordinate sort is checked here rather than left to samtools to fail on,
+    because `coverage`/`idxstats` on an unsorted BAM do not error -- they
+    quietly produce numbers that look plausible and are wrong. Missing index
+    is checked separately by the caller (see launch_bam_stats), matching how
+    launch_variant_calling separates "wrong file type" from "fixable
+    precondition".
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready for results (status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind not in BAM_STATS_CALLABLE_KINDS:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not a BAM alignment",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+    if obj.facts.get("sort_order") != "coordinate":
+        raise ValidationError(
+            f"{obj.name!r} is not coordinate-sorted. Coverage statistics "
+            f"require a coordinate-sorted BAM.",
+            details={"object_id": str(obj.id)},
+        )
+
+
+async def launch_bam_stats(*, object_id: PydanticObjectId):
+    """Queue the Results computation for a BAM: coverage, idxstats-derived
+    per-contig counts, and binned depth across the reference.
+
+    Read-only, like QC: no derived objects, just facts merged onto the object
+    plus one TSV report on disk. Requires a coordinate-sorted, indexed BAM --
+    checked here rather than left for samtools to fail confusingly on, and
+    refused with an actionable message rather than auto-chaining index_bam,
+    matching launch_variant_calling's documented precedent.
+    """
+    from app.queue import queue
+
+    tools.require(tools.samtools())
+
+    bam = await DataObject.get(object_id)
+    if bam is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+    _check_bam_stats_callable(bam)
+
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"object_id": str(bam.id), "needs": "index_bam"},
+        )
+
+    digest, path = await _resolve_readable(bam)
+    bai_digest, bai_path = await _resolve_readable(bai)
+
+    payload: dict = {
+        "object_id": str(bam.id),
+        "project_id": str(bam.project_id),
+        "bam_name": bam.name,
+    }
+    if digest:
+        payload["bam_sha256"] = digest
+    if path:
+        payload["bam_path"] = path
+    if bai_digest:
+        payload["bai_sha256"] = bai_digest
+    if bai_path:
+        payload["bai_path"] = bai_path
+
+    # No parameters, like QC: a repeat over unchanged content is the same
+    # result, so the object id alone is the dedup key.
+    job = await queue.enqueue(
+        "run_bam_stats",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"bamstats:{bam.id}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Results are already queued or running for this file",
+            details={"object_id": str(bam.id)},
+        )
+    return job
+
+
 def _variant_dedup_key(*, bam_id, params: dict) -> str:
     """Identity of a variant calling request.
 

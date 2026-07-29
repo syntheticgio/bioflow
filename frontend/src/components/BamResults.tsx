@@ -1,0 +1,261 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { notify } from "../stores/messageStore";
+import type {
+  BamStatsFacts,
+  InsertSizeHistogramBucket,
+  MapqHistogramBucket,
+  ObjectDetail as ObjectDetailData,
+} from "../api/types";
+import { AlignmentReport } from "./AlignmentReport";
+import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart";
+import { ContigTable } from "./ContigTable";
+
+/**
+ * What the alignment produced: mapped/unmapped totals, coverage across the
+ * reference at a glance, the complete per-contig table, and the shape of
+ * insert size and mapping quality.
+ *
+ * Works for every BAM, imported or pipeline-produced -- unlike the flagstat
+ * numbers alone, which only exist for a BAM this app aligned. See
+ * AlignmentReport's fallback to bam_stats_summary.
+ */
+export function BamResults({ obj }: { obj: ObjectDetailData }) {
+  const qc = useQueryClient();
+  const f = obj.facts as BamStatsFacts;
+
+  const compute = useMutation({
+    mutationFn: () => api.launchBamStats(obj.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.info("Computing results");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const hasResults = f.bam_stats_status === "ok";
+  const sortedCoordinate = obj.facts.sort_order === "coordinate";
+  const hasIndex = obj.facts.has_index === true;
+
+  return (
+    <>
+      <AlignmentReport facts={obj.facts} />
+
+      {!hasResults && (
+        <div className="section">
+          <div className="section-title">Coverage &amp; per-contig detail</div>
+          {!sortedCoordinate ? (
+            <div className="warn-box">
+              This BAM is not coordinate-sorted, which coverage statistics
+              require.
+            </div>
+          ) : !hasIndex ? (
+            <div className="warn-box">
+              This BAM has no index (.bai). Index it first, from the Align
+              button or the Metadata tab, then compute results.
+            </div>
+          ) : (
+            <div style={{ color: "var(--text-faint)", fontSize: 12, marginBottom: 8 }}>
+              Coverage across the reference, a per-contig breakdown, and
+              insert-size/MAPQ distributions — computed on demand from the
+              BAM and its index.
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn"
+            onClick={() => compute.mutate()}
+            disabled={compute.isPending || !sortedCoordinate || !hasIndex}
+          >
+            {compute.isPending ? "Computing…" : "Compute results"}
+          </button>
+        </div>
+      )}
+
+      {hasResults && (
+        <>
+          <div className="section">
+            {f.bam_stats_coverage_bins && f.bam_stats_coverage_boundaries && (
+              <BirdsEyeCoverageChart
+                bins={f.bam_stats_coverage_bins}
+                boundaries={f.bam_stats_coverage_boundaries}
+              />
+            )}
+            <SummaryRow summary={f.bam_stats_summary} />
+          </div>
+
+          {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
+            <div className="section">
+              <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
+            </div>
+          )}
+
+          {f.bam_stats_report && (
+            <ContigTable objectId={obj.id} reportPath={f.bam_stats_report} />
+          )}
+
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+            {f.insert_size_histogram && f.insert_size_histogram.length > 0 && (
+              <div className="section" style={{ flex: "1 1 300px" }}>
+                <div className="section-title">Insert size</div>
+                <Histogram
+                  data={f.insert_size_histogram}
+                  xKey="insert_size"
+                  yKey="count"
+                  xLabel={(v) => `${v}`}
+                />
+              </div>
+            )}
+            {f.mapq_histogram && f.mapq_histogram.length > 0 && (
+              <div className="section" style={{ flex: "1 1 300px" }}>
+                <div className="section-title">Mapping quality</div>
+                <Histogram
+                  data={f.mapq_histogram}
+                  xKey="mapq"
+                  yKey="count"
+                  xLabel={(v) => `${v}`}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="section">
+            <div className="section-title">Provenance</div>
+            <dl className="kv">
+              {obj.facts.aligned_by != null && (
+                <>
+                  <dt>Aligner</dt>
+                  <dd>
+                    {String(obj.facts.aligned_by)}
+                    {obj.facts.aligner_version ? ` ${obj.facts.aligner_version}` : ""}
+                  </dd>
+                </>
+              )}
+              {Array.isArray(obj.facts.program_chain) && obj.facts.program_chain.length > 0 && (
+                <>
+                  <dt>Program chain</dt>
+                  <dd>{(obj.facts.program_chain as string[]).join(" → ")}</dd>
+                </>
+              )}
+              {Array.isArray(obj.facts.sample_names) && obj.facts.sample_names.length > 0 && (
+                <>
+                  <dt>Samples</dt>
+                  <dd>{(obj.facts.sample_names as string[]).join(", ")}</dd>
+                </>
+              )}
+              {Array.isArray(obj.facts.platforms) && obj.facts.platforms.length > 0 && (
+                <>
+                  <dt>Platforms</dt>
+                  <dd>{(obj.facts.platforms as string[]).join(", ")}</dd>
+                </>
+              )}
+              {obj.facts.sort_order != null && (
+                <>
+                  <dt>Sort order</dt>
+                  <dd>{String(obj.facts.sort_order)}</dd>
+                </>
+              )}
+              <dt>Index</dt>
+              <dd>{hasIndex ? "present" : "missing"}</dd>
+            </dl>
+            <button
+              type="button"
+              onClick={() => compute.mutate()}
+              disabled={compute.isPending}
+              style={{
+                marginTop: 6,
+                color: "var(--accent)",
+                fontSize: 11,
+                textTransform: "none",
+                letterSpacing: 0,
+              }}
+            >
+              {compute.isPending ? "recomputing…" : "recompute results"}
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function SummaryRow({ summary }: { summary?: BamStatsFacts["bam_stats_summary"] }) {
+  if (!summary) return null;
+  return (
+    <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12, marginTop: 8 }}>
+      <Stat label="Contigs" value={summary.total_contigs.toLocaleString()} />
+      <Stat label="Mean depth" value={`${summary.mean_depth.toFixed(1)}×`} />
+      {summary.pct_covered_1x != null && (
+        <Stat label="≥1×" value={`${summary.pct_covered_1x.toFixed(1)}%`} />
+      )}
+      {summary.pct_covered_10x != null && (
+        <Stat label="≥10×" value={`${summary.pct_covered_10x.toFixed(1)}%`} />
+      )}
+      {summary.pct_covered_30x != null && (
+        <Stat label="≥30×" value={`${summary.pct_covered_30x.toFixed(1)}%`} />
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={{ color: "var(--text-faint)", fontSize: 10 }}>{label}</div>
+      <div style={{ fontWeight: 600 }}>{value}</div>
+    </div>
+  );
+}
+
+/** A small inline bar histogram. Single-use and simple enough not to share
+ * SequenceCharts.tsx's more general axis machinery. */
+function Histogram<T extends MapqHistogramBucket | InsertSizeHistogramBucket>({
+  data,
+  xKey,
+  yKey,
+  xLabel,
+}: {
+  data: T[];
+  xKey: keyof T;
+  yKey: keyof T;
+  xLabel: (v: number) => string;
+}) {
+  const w = 320;
+  const h = 120;
+  const pad = { top: 6, right: 6, bottom: 18, left: 6 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const maxCount = Math.max(...data.map((d) => Number(d[yKey])), 1);
+  const barW = plotW / data.length;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ maxWidth: w, display: "block" }}>
+      {data.map((d, i) => {
+        const count = Number(d[yKey]);
+        const barH = (count / maxCount) * plotH;
+        return (
+          <rect
+            key={i}
+            x={pad.left + i * barW}
+            y={pad.top + plotH - barH}
+            width={Math.max(barW - 1, 1)}
+            height={barH}
+            fill="var(--accent)"
+            opacity={0.8}
+          >
+            <title>
+              {xLabel(Number(d[xKey]))}: {count.toLocaleString()}
+            </title>
+          </rect>
+        );
+      })}
+      <text x={pad.left} y={h - 4} fontSize="9" fill="var(--text-faint)">
+        {xLabel(Number(data[0][xKey]))}
+      </text>
+      <text x={w - pad.right} y={h - 4} fontSize="9" fill="var(--text-faint)" textAnchor="end">
+        {xLabel(Number(data[data.length - 1][xKey]))}
+      </text>
+    </svg>
+  );
+}

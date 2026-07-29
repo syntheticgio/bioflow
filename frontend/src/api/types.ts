@@ -568,6 +568,70 @@ export interface AlignmentFacts {
   aligner_version?: string;
 }
 
+export interface ContigCoverage {
+  contig: string;
+  length: number;
+  reads: number;
+  unmapped_reads: number;
+  covered_bases: number;
+  coverage_pct: number;
+  mean_depth: number;
+  mean_baseq: number;
+  mean_mapq: number;
+}
+
+export interface CoverageBoundary {
+  contig: string;
+  bin_start: number;
+}
+
+export interface CumulativeCoveragePoint {
+  depth: number;
+  fraction: number;
+}
+
+export interface BamStatsSummary {
+  total_contigs: number;
+  total_length: number;
+  mapped_reads: number;
+  unmapped_reads: number;
+  mean_depth: number;
+  pct_covered_1x?: number;
+  pct_covered_10x?: number;
+  pct_covered_30x?: number;
+}
+
+export interface MapqHistogramBucket {
+  mapq: number;
+  count: number;
+}
+
+export interface InsertSizeHistogramBucket {
+  insert_size: number;
+  count: number;
+}
+
+/** Facts produced by the run_bam_stats job. Read from ObjectDetail.facts
+ * under the bam_stats_ prefix -- see BamResults.tsx. */
+export interface BamStatsFacts {
+  bam_stats_status?: "ok";
+  bam_stats_tool_version?: string;
+  bam_stats_computed_at?: string;
+  bam_stats_summary?: BamStatsSummary;
+  bam_stats_coverage_bins?: number[];
+  bam_stats_coverage_boundaries?: CoverageBoundary[];
+  bam_stats_cumulative?: CumulativeCoveragePoint[];
+  bam_stats_contigs_top?: ContigCoverage[];
+  bam_stats_report?: string;
+  mapq_histogram?: MapqHistogramBucket[];
+  insert_size_histogram?: InsertSizeHistogramBucket[];
+}
+
+export interface ContigsPage {
+  total: number;
+  rows: ContigCoverage[];
+}
+
 /** One side of the before/after comparison in a fastp report. */
 export interface TrimSide {
   total_reads: number | null;

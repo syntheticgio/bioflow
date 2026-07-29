@@ -3,6 +3,7 @@ import type {
   AlignRequest,
   BulkResult,
   CompleteAccepted,
+  ContigsPage,
   DataObject,
   FacetValue,
   Facets,
@@ -365,6 +366,25 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  /** Queue the Results computation for a BAM. Read-only: produces facts and
+   * one TSV report, no derived objects. */
+  launchBamStats: (objectId: string) =>
+    request<JobSummary>("/pipelines/bamstats", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
+  /** A page of the per-contig table, sorted the same way the job wrote it
+   * (mapped reads descending). */
+  bamStatsContigs: (objectId: string, reportPath: string, offset: number, limit: number) =>
+    request<ContigsPage>(
+      `/pipelines/bamstats/report/${objectId}/${reportPath}?offset=${offset}&limit=${limit}`,
+    ),
+
+  /** URL for downloading the complete per-contig TSV. */
+  bamStatsDownloadUrl: (objectId: string, reportPath: string) =>
+    `${BASE}/pipelines/bamstats/report/${objectId}/${reportPath}?download=1`,
 
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,

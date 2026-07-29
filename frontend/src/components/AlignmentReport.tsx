@@ -1,16 +1,28 @@
-import type { AlignmentFacts } from "../api/types";
+import type { AlignmentFacts, BamStatsSummary } from "../api/types";
 
 /**
  * What an alignment actually produced.
  *
  * The four numbers a person checks before trusting a BAM: how much of the data
  * aligned at all, how much aligned as proper pairs, and how much was duplicate.
- * Read from `samtools flagstat` during indexing, when the file was already
- * being traversed.
+ * Read from `samtools flagstat` when this app produced the BAM (during
+ * indexing, when the file was already being traversed) -- but an imported BAM
+ * has no flagstat facts at all, so mapped/unmapped totals fall back to the
+ * Results job's genome-wide summary, which every BAM gets once Results has
+ * run. Properly-paired and duplicate rates are flagstat-only: bam_stats does
+ * not currently compute them, so they are simply absent on an imported BAM
+ * rather than approximated.
  */
 export function AlignmentReport({ facts }: { facts: Record<string, unknown> }) {
   const f = facts as AlignmentFacts;
-  if (f.total_reads == null) return null;
+  const summary = facts.bam_stats_summary as BamStatsSummary | undefined;
+
+  const totalReads = f.total_reads ?? summaryTotal(summary);
+  if (totalReads == null) return null;
+
+  const mappedReads = f.mapped_reads ?? summary?.mapped_reads;
+  const mappedPct =
+    f.mapped_pct ?? (mappedReads != null ? round1(100 * (mappedReads / totalReads)) : undefined);
 
   const paired = (f.properly_paired_reads ?? 0) > 0;
 
@@ -20,16 +32,16 @@ export function AlignmentReport({ facts }: { facts: Record<string, unknown> }) {
 
       <table className="trim-table">
         <tbody>
-          <Row label="Reads" value={count(f.total_reads)} />
+          <Row label="Reads" value={count(totalReads)} />
           <Row
             label="Mapped"
-            value={count(f.mapped_reads)}
-            pct={f.mapped_pct}
+            value={count(mappedReads)}
+            pct={mappedPct}
             // Below this a run is usually wrong rather than merely poor: the
             // wrong reference, the wrong preset for long reads, or untrimmed
             // adapter. Worth flagging rather than leaving as a number to
             // interpret.
-            warn={f.mapped_pct != null && f.mapped_pct < 70}
+            warn={mappedPct != null && mappedPct < 70}
           />
           {paired && (
             <Row
@@ -57,6 +69,15 @@ export function AlignmentReport({ facts }: { facts: Record<string, unknown> }) {
       )}
     </div>
   );
+}
+
+function summaryTotal(summary: BamStatsSummary | undefined): number | undefined {
+  if (!summary) return undefined;
+  return summary.mapped_reads + summary.unmapped_reads;
+}
+
+function round1(n: number): number {
+  return Math.round(n * 10) / 10;
 }
 
 function Row({
