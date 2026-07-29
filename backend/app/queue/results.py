@@ -35,14 +35,24 @@ async def apply(job_type: str, result: dict) -> None:
         await handler(result)
 
 
-def should_assign_reference_role(*, current_role, enrichment: dict | None) -> bool:
+def should_assign_reference_role(
+    *, current_role, enrichment: dict | None, user_touched: list[str] | None = None
+) -> bool:
     """Whether an ingest should mark this object a reference.
 
-    Only when an assembly accession was found *and* no role is set. A role the
-    user chose is never overruled: they may be running something unusual, or
-    know something about the file that its name does not say.
+    Only when an assembly accession was found, no role is set, *and* the user
+    has never touched the role. A role the user chose is never overruled: they
+    may be running something unusual, or know something about the file that its
+    name does not say.
+
+    The `user_touched` check is what makes that promise hold across a
+    conversion. A role the user *cleared* is `None` -- identical to one never
+    set -- so without it, converting a reference back to reads and re-ingesting
+    silently restores the role the user just removed.
     """
     if current_role is not None:
+        return False
+    if "role" in (user_touched or []):
         return False
     return bool((enrichment or {}).get("accession"))
 
@@ -139,10 +149,16 @@ async def _apply_ingest_headers(result: dict) -> None:
     # snapshot -- the exact thing "never overrule a person" forbids. Matching
     # on role=None means the write lands only if nobody has decided since.
     if should_assign_reference_role(
-        current_role=obj.role, enrichment=assembly_enrichment
+        current_role=obj.role,
+        enrichment=assembly_enrichment,
+        user_touched=obj.user_touched,
     ):
         assigned = await DataObject.find_one(
-            DataObject.id == obj.id, DataObject.role == None  # noqa: E711
+            DataObject.id == obj.id,
+            DataObject.role == None,  # noqa: E711
+            # Re-checked here, not just above: a conversion landing between the
+            # decision and this write would otherwise be overruled by it.
+            {"user_touched": {"$ne": "role"}},
         ).update({"$set": {DataObject.role: ObjectRole.REFERENCE}})
         if not getattr(assigned, "modified_count", 0):
             log.info("assembly_role_skipped_raced", object_id=object_id)

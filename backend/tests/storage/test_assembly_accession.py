@@ -353,3 +353,22 @@ class TestAutoRoleAssignment:
         assert not should_assign_reference_role(
             current_role=None, enrichment={"error": "No assembly record found"}
         )
+
+    def test_does_not_reassign_a_role_the_user_cleared(self):
+        """The bug this fixes: converting a reference back to reads and
+        re-ingesting silently restored the reference role. A cleared role is
+        `None` -- identical to one never set -- so only user_touched can tell
+        "no opinion" from "the user said no"."""
+        assert not should_assign_reference_role(
+            current_role=None,
+            enrichment={"accession": "GCF_000002445.2"},
+            user_touched=["role"],
+        )
+
+    def test_an_unrelated_touch_does_not_block_assignment(self):
+        """Editing metadata says nothing about the user's view of the role."""
+        assert should_assign_reference_role(
+            current_role=None,
+            enrichment={"accession": "GCF_000002445.2"},
+            user_touched=["metadata.organism"],
+        )
