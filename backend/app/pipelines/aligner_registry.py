@@ -77,6 +77,13 @@ class AlignerSpec:
     params_class: type[align_params.BaseAlignParams]
     memory_model: MemoryModel
     fields: tuple[ParamField, ...] = ()
+    # The probe for the separate binary that builds this aligner's index, when
+    # there is one -- bowtie2-build, hisat2-build. None for bwa-mem2 and
+    # minimap2, which index through the same tool that aligns. This is the
+    # single source of truth `align_handlers.build_index` dispatches through;
+    # `index.builder` (on IndexLayout) is only the binary's bare name, kept
+    # for cross-checking and error messages.
+    builder_tool: Callable[[], tools.Tool] | None = None
 
 
 # Threads and sort memory are on every aligner, so they are declared once and
@@ -169,6 +176,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.bowtie2,
         index=aligners.layout_for(Aligner.BOWTIE2),
         params_class=align_params.Bowtie2Params,
+        builder_tool=tools.bowtie2_build,
         # ~1 byte/base: about 3.5 GB for human, matching the published size of
         # the prebuilt GRCh38 bowtie2 index.
         memory_model=MemoryModel(
@@ -264,6 +272,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.hisat2,
         index=aligners.layout_for(Aligner.HISAT2),
         params_class=align_params.Hisat2Params,
+        builder_tool=tools.hisat2_build,
         # HISAT2's graph FM index is notably compact -- about 4 GB for human
         # including the transcript index.
         memory_model=MemoryModel(

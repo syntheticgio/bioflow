@@ -42,17 +42,26 @@ def _aligner_tool(aligner: Aligner):
     return aligner_registry.spec_for(aligner).tool()
 
 
-# bowtie2 and HISAT2 index through a separate binary from the one that
-# aligns (`aligners.layout_for(...).builder` names it), so the tool whose
-# version was probed for `_aligner_tool` is not the one that runs here.
-# Resolved the same way every other tool path in this codebase is -- through
-# a probe over `settings.<name>_path` -- rather than `shutil.which` on the
-# builder's bare name, which would bypass the user-overridable setting Task 5
-# already added for exactly this binary.
-_INDEX_BUILDERS: dict[Aligner, "tools.Tool"] = {
-    Aligner.BOWTIE2: tools.bowtie2_build,
-    Aligner.HISAT2: tools.hisat2_build,
-}
+def _index_tool(aligner: Aligner, aligner_tool: tools.Tool) -> tools.Tool:
+    """Which `Tool` builds this aligner's index.
+
+    bowtie2 and HISAT2 index through a separate binary from the one that
+    aligns (`aligner_registry.spec_for(...).builder_tool`, the callable
+    counterpart of the bare name in `aligners.layout_for(...).builder`), so
+    the tool whose version was probed as `aligner_tool` is not always the one
+    that builds the index. Resolved the same way every other tool path in
+    this codebase is -- through a probe over `settings.<name>_path` -- rather
+    than `shutil.which` on the builder's bare name, which would bypass the
+    user-overridable setting Task 5 already added for exactly this binary.
+
+    Kept separate from command construction so the tool-selection branch --
+    the one place a copy-paste could silently swap in the wrong binary's path
+    -- is unit-testable without building a whole JobContext.
+    """
+    builder_tool = aligner_registry.spec_for(aligner).builder_tool
+    if builder_tool is not None:
+        return tools.require(builder_tool())
+    return aligner_tool
 
 
 def _resolve_blob(payload: dict, key: str) -> Path:
@@ -140,23 +149,18 @@ def build_index(ctx: JobContext) -> dict:
 
     ctx.progress(phase="indexing", pct=0.1, message=f"building {aligner.value} index")
 
-    builder_probe = _INDEX_BUILDERS.get(aligner)
-    if builder_probe is not None:
-        builder = tools.require(builder_probe())
-        cmd = align_runner.build_index_command(
-            aligner=aligner, tool_path=builder.path, reference=ref.reference
-        )
-    elif aligner is Aligner.BWA_MEM2:
-        cmd = align_runner.build_index_command(
-            aligner=aligner, tool_path=tool.path, reference=ref.reference
-        )
-    else:
+    index_tool = _index_tool(aligner, tool)
+    if aligner is Aligner.MINIMAP2:
         cmd = align_runner.build_index_command(
             aligner=aligner,
-            tool_path=tool.path,
+            tool_path=index_tool.path,
             reference=ref.reference,
             output=ref.reference.parent
             / f"{ref.reference.name}{aligners.MINIMAP2_SUFFIX}",
+        )
+    else:
+        cmd = align_runner.build_index_command(
+            aligner=aligner, tool_path=index_tool.path, reference=ref.reference
         )
 
     log.info(

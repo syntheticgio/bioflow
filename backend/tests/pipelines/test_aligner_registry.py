@@ -6,8 +6,6 @@ field the form renders but the params class rejects is a dialog the user
 cannot submit, and it would not be caught by any per-tool test.
 """
 
-import pytest
-
 from app.pipelines import align_params, aligner_registry
 from app.pipelines.aligners import Aligner
 
@@ -26,6 +24,20 @@ class TestCompleteness:
             model = aligner_registry.spec_for(aligner).memory_model
             assert model.fixed_overhead_mb > 0
             assert model.index_bytes_per_ref_base > 0
+
+    def test_builder_tool_matches_which_aligners_have_a_separate_builder(self):
+        """bowtie2 and HISAT2 index through a separate binary (bowtie2-build,
+        hisat2-build); bwa-mem2 and minimap2 do not. `align_handlers.build_index`
+        dispatches on `builder_tool` being set, so a spec that disagrees with
+        `IndexLayout.builder` here would silently point the index build at the
+        wrong binary."""
+        with_builder = {Aligner.BOWTIE2, Aligner.HISAT2}
+        for aligner in Aligner:
+            spec = aligner_registry.spec_for(aligner)
+            has_builder_tool = spec.builder_tool is not None
+            has_builder_name = spec.index.builder is not None
+            assert has_builder_tool == (aligner in with_builder)
+            assert has_builder_tool == has_builder_name
 
 
 class TestFieldMetadataMatchesParams:
