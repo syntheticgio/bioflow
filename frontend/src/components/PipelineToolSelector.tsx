@@ -17,6 +17,7 @@ const PIPELINE_LABEL: Record<PipelineType, string> = {
   qc: "a QC tool",
   utility: "a tool",
   download: "a download tool",
+  variant: "a variant caller",
 };
 
 /**

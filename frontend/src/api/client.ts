@@ -33,6 +33,8 @@ import type {
   SystemStats,
   UploadCreated,
   UploadSessionInfo,
+  VariantDefaults,
+  VariantRequest,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -350,6 +352,16 @@ export const api = {
 
   launchAlignment: (body: AlignRequest) =>
     request<JobSummary>("/pipelines/align", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** Variant calling defaults for one BAM, including the inferred caller. */
+  variantDefaults: (bamId: string) =>
+    request<VariantDefaults>(`/pipelines/variants/defaults/${bamId}`),
+
+  launchVariantCalling: (body: VariantRequest) =>
+    request<JobSummary>("/pipelines/variants", {
       method: "POST",
       body: JSON.stringify(body),
     }),

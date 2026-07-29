@@ -191,9 +191,11 @@ def bcftools() -> Tool:
 
 @lru_cache(maxsize=1)
 def clair3() -> Tool:
-    # `--version` is not supported by the run_clair3.sh wrapper; --help exits 0
-    # and is the cheapest way to prove the entry point resolves and runs.
-    return _probe("clair3", settings.clair3_path, ["--help"])
+    # `--version` prints "Clair3 v2.0.2". `--help` also exits 0 but dumps a
+    # usage block, and _clean_version scrapes a line of that into the version
+    # field -- which then reaches the tool panel and every run's recorded
+    # provenance as a garbled argument list.
+    return _probe("clair3", settings.clair3_path, ["--version"])
 
 
 @lru_cache(maxsize=1)

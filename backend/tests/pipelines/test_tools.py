@@ -1,6 +1,7 @@
 """External tool discovery and version parsing."""
 
 import os
+import re
 import sys
 
 import pytest
@@ -243,6 +244,18 @@ class TestVariantToolProbes:
         tool = tools.bcftools()
         assert tool.name == "bcftools"
         assert isinstance(tool.available, bool)
+
+    def test_clair3_reports_a_plausible_version(self):
+        """Regression: the probe originally used --help, which exits 0 and
+        dumps a usage block -- _clean_version scraped a line of that into the
+        version field, so the tool panel and every run's recorded provenance
+        showed a garbled argument list instead of a version."""
+        tool = tools.clair3()
+        if not tool.available or not tool.version:
+            pytest.skip("clair3 not installed in this environment")
+        assert "usage" not in tool.version.lower()
+        # A version is a short dotted number, not a sentence of flags.
+        assert re.fullmatch(r"[\d.]+", tool.version), tool.version
 
     def test_both_are_variant_tools(self):
         for name in ("clair3", "bcftools"):
