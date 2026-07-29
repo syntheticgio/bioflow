@@ -37,6 +37,15 @@ const PIPELINE_LABEL: Record<PipelineType, string> = {
  * `selected` (which tracks the actual choice). A disabled row can be focused
  * and read, just not selected. `focusedTool` falls back to the selected tool
  * and then the first tool so the pane is never blank once options exist.
+ *
+ * The `listbox`/`option` roles below are a known, deliberate deviation from
+ * the ARIA listbox pattern: that pattern has no state for "focus is here but
+ * this option is not selected," since roving-tabindex focus on an option is
+ * normally the selection act itself. A disabled row breaks that assumption
+ * on purpose. `role="tablist"`/`tab`/`tabpanel` would map more precisely
+ * (its `aria-selected` already tracks "which panel is showing" rather than
+ * a value choice), but that is a larger rework than this redesign -- see
+ * docs/superpowers/specs/2026-07-29-additional-aligners-design.md, section 6.
  */
 export function PipelineToolSelector({
   pipeline,
