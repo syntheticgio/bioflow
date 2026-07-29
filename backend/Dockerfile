@@ -46,6 +46,7 @@ WORKDIR /srv
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
+        ca-certificates \
         fastp \
         fastqc \
         default-jre-headless \
@@ -55,7 +56,13 @@ RUN apt-get update \
         trimmomatic \
         sra-toolkit \
         bzip2 \
+        bcftools \
+        tabix \
     && rm -rf /var/lib/apt/lists/*
+# bcftools and tabix are separate packages from samtools -- installing samtools
+# does not bring htslib's command-line tools along. bcftools does the
+# short-read calling and writes every .tbi index; the tabix package is here for
+# bgzip, which is worth having in the image even though no code path calls it.
 
 # bwa-mem2 is the exception: it is not packaged for Debian, so it comes from
 # the project's own release. On x86-64 the upstream prebuilt binary is the
@@ -111,8 +118,12 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
       && BWA_MEM2_VERSION="${BWA_MEM2_VERSION}" /srv/scripts/build-bwa-mem2-arm64.sh \
       # Clean up build dependencies and sources
       && rm -rf /tmp/bwa-mem2 /tmp/fastmap.patch /tmp/bandedSWA.patch /tmp/safestringlib-1.2.0 \
+      # ca-certificates is deliberately NOT purged here: it is installed in the
+      # base tool layer above and later layers (Clair3) need working HTTPS.
+      # Purging it broke that silently -- curl failed, and the failure only
+      # surfaced as tar choking on an empty stream.
       && apt-get purge -y \
-             git cmake dos2unix build-essential ca-certificates zlib1g-dev \
+             git cmake dos2unix build-essential zlib1g-dev \
       && apt-get autoremove -y \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*; \
@@ -133,6 +144,20 @@ RUN if [ "$TARGETARCH" = "arm64" ]; then \
          > /usr/local/bin/bwa-mem2 \
       && chmod +x /usr/local/bin/bwa-mem2; \
     fi
+
+# Clair3, the long-read variant caller. Its own layer and near the end of the
+# tool section because it is the largest single addition here (~600MB with
+# models) and the slowest to build -- an edit anywhere above should not
+# reinstall it, and an edit below must not either.
+#
+# Bioconda is the only arm64-capable distribution; the install script explains
+# why and normalizes the model directory layout. Models are baked in rather
+# than fetched at job time so a run does not depend on the network.
+ARG CLAIR3_VERSION=2.0.2
+COPY scripts/install-clair3.sh /srv/scripts/install-clair3.sh
+RUN chmod +x /srv/scripts/install-clair3.sh \
+    && CLAIR3_VERSION="${CLAIR3_VERSION}" /srv/scripts/install-clair3.sh \
+    && rm -rf /tmp/bin
 
 # Dependencies first so the layer caches across source edits.
 # Installed from pyproject.toml rather than a duplicated list: two copies of the

@@ -205,6 +205,8 @@ class TestSerialization:
             "bwa-mem2",
             "minimap2",
             "samtools",
+            "bcftools",
+            "clair3",
             "fasterq-dump",
             "prefetch",
         }
@@ -229,6 +231,34 @@ class TestToolMeta:
         singular `pipeline` would drop fastp from one of the two lists."""
         assert tools.PipelineType.TRIM in tools.TOOL_META["fastp"].pipelines
         assert tools.PipelineType.QC in tools.TOOL_META["fastp"].pipelines
+
+
+class TestVariantToolProbes:
+    def test_clair3_probes(self):
+        tool = tools.clair3()
+        assert tool.name == "clair3"
+        assert isinstance(tool.available, bool)
+
+    def test_bcftools_probes(self):
+        tool = tools.bcftools()
+        assert tool.name == "bcftools"
+        assert isinstance(tool.available, bool)
+
+    def test_both_are_variant_tools(self):
+        for name in ("clair3", "bcftools"):
+            assert tools.PipelineType.VARIANT in tools.TOOL_META[name].pipelines
+
+    def test_bcftools_is_also_a_utility(self):
+        """Like samtools, bcftools is a general-purpose toolkit that happens to
+        call variants -- it belongs on the utility list too."""
+        assert tools.PipelineType.UTILITY in tools.TOOL_META["bcftools"].pipelines
+
+    def test_both_are_runnable(self):
+        """`runnable` means a handler actually dispatches on the tool. Both do
+        as of call_variants, so neither should be greyed out for the reason
+        cutadapt once was."""
+        assert tools.TOOL_META["clair3"].runnable
+        assert tools.TOOL_META["bcftools"].runnable
 
     def test_meta_is_merged_onto_the_probe_result(self):
         tool = tools.Tool(name="fastqc", path="/usr/bin/fastqc", version="0.12.1")

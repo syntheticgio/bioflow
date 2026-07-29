@@ -185,6 +185,18 @@ def samtools() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def bcftools() -> Tool:
+    return _probe("bcftools", settings.bcftools_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def clair3() -> Tool:
+    # `--version` is not supported by the run_clair3.sh wrapper; --help exits 0
+    # and is the cheapest way to prove the entry point resolves and runs.
+    return _probe("clair3", settings.clair3_path, ["--help"])
+
+
+@lru_cache(maxsize=1)
 def nanoplot() -> Tool:
     return _probe("nanoplot", settings.nanoplot_path, ["--version"])
 
@@ -209,6 +221,8 @@ def all_tools() -> list[Tool]:
         bwa_mem2(),
         minimap2(),
         samtools(),
+        bcftools(),
+        clair3(),
         fasterq_dump(),
         prefetch(),
     ]
@@ -230,6 +244,7 @@ class PipelineType(StrEnum):
     # transforming it, so they belong on no analysis screen and would be
     # misleading listed as utilities beside samtools.
     DOWNLOAD = "download"
+    VARIANT = "variant"
 
 
 @dataclass(frozen=True)
@@ -396,6 +411,34 @@ TOOL_META: dict[str, ToolMeta] = {
             "Flagstat: comprehensive alignment statistics",
         ),
     ),
+    "bcftools": ToolMeta(
+        pipelines=(PipelineType.VARIANT, PipelineType.UTILITY),
+        summary=(
+            "Pileup-based variant caller and VCF/BCF toolkit. The long-"
+            "established standard for short-read germline calling, and the "
+            "tool that writes and indexes every VCF this pipeline produces."
+        ),
+        strengths=(
+            "Lightweight and fast for single-sample calling",
+            "Works on any aligner's BAM",
+            "Part of the htslib/samtools ecosystem",
+            "Also does the VCF indexing (bcftools index -t)",
+        ),
+    ),
+    "clair3": ToolMeta(
+        pipelines=(PipelineType.VARIANT,),
+        summary=(
+            "Deep-learning small-variant caller for long reads (ONT and "
+            "PacBio HiFi). Combines a fast pileup model with a slower "
+            "full-alignment model for high-accuracy SNV and indel calls."
+        ),
+        strengths=(
+            "State-of-the-art accuracy on ONT and PacBio HiFi",
+            "Calls SNVs and small indels together",
+            "Chemistry-matched models, selected automatically from QC",
+            "CPU-only build: no GPU required",
+        ),
+    ),
 }
 
 
@@ -449,5 +492,7 @@ def reset_cache() -> None:
     bwa_mem2.cache_clear()
     minimap2.cache_clear()
     samtools.cache_clear()
+    bcftools.cache_clear()
+    clair3.cache_clear()
     fasterq_dump.cache_clear()
     prefetch.cache_clear()
