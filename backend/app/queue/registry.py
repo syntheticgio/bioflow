@@ -41,6 +41,11 @@ class JobContext:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     _progress_cb: Callable[[dict], None] | None = None
     _extend_cb: Callable[[int], None] | None = None
+    # The longest lease any handler phase has asked for. Read by the worker's
+    # heartbeat loop, written from handler threads -- a plain int assignment is
+    # atomic under the GIL, and a stale read costs one heartbeat tick, so this
+    # deliberately has no lock.
+    lease_override_seconds: int | None = None
 
     def is_cancelled(self) -> bool:
         return self.cancel_event.is_set()
@@ -78,9 +83,20 @@ class JobContext:
     def extend_lease(self, seconds: int) -> None:
         """Request a longer lease for a known-long phase.
 
-        A multi-hour alignment sets a long lease and keeps heartbeating; without
-        this the reaper would treat it as hung.
+        The heartbeat renews every in-flight job regardless of duration, so a
+        merely slow job is already safe. What this covers is the lease *length*:
+        a paused VM or a stalled event loop stops the heartbeat entirely, and
+        then only the recorded TTL stands between a live job and the reaper
+        requeueing it underneath itself. A handler that knows it will go quiet
+        for an hour says so here.
+
+        The longest request wins. A handler with several long phases would
+        otherwise shorten its own lease by asking for less later on.
         """
+        if seconds <= 0:
+            return
+        if self.lease_override_seconds is None or seconds > self.lease_override_seconds:
+            self.lease_override_seconds = seconds
         if self._extend_cb is not None:
             self._extend_cb(seconds)
 
