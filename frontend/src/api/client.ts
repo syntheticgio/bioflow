@@ -5,6 +5,7 @@ import type {
   CompleteAccepted,
   ContigsPage,
   DataObject,
+  DeletionPreview,
   FacetValue,
   Facets,
   JobLog,
@@ -100,6 +101,9 @@ export const api = {
 
   deleteProject: (id: string, cascade = false) =>
     request<void>(`/projects/${id}?cascade=${cascade}`, { method: "DELETE" }),
+
+  deletionPreview: (id: string) =>
+    request<DeletionPreview>(`/projects/${id}/deletion-preview`),
 
   listObjects: (projectId: string) =>
     request<DataObject[]>(`/projects/${projectId}/objects`),

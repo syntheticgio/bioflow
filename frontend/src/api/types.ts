@@ -788,3 +788,21 @@ export interface JobLog {
   truncated: boolean;
   size?: number;
 }
+
+export interface ActiveJob {
+  id: string;
+  job_type: string;
+  state: string;
+}
+
+export interface DeletionPreview {
+  project_ids: string[];
+  child_project_count: number;
+  object_count: number;
+  total_bytes: number;
+  run_count: number;
+  job_count: number;
+  upload_session_count: number;
+  active_jobs: ActiveJob[];
+  blocked: boolean;
+}
