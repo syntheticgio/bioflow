@@ -6,8 +6,9 @@ next -- reads that one fact rather than re-inferring it. This module covers the
 step that makes it reachable from a BAM.
 """
 
+from app.models import SidecarRole
 from app.pipelines.align_runner import ReadChemistry
-from app.queue.results import align_provenance
+from app.queue.results import _APPLIERS, _SIDECAR_ROLES, align_provenance, variant_provenance
 
 
 class TestAlignProvenance:
@@ -65,3 +66,31 @@ class TestAlignProvenance:
                 reads_facts={"qc_read_chemistry": chemistry.value},
             )
             assert ReadChemistry(prov["qc_read_chemistry"]) is chemistry
+
+
+class TestVariantProvenance:
+    def test_records_the_caller(self):
+        """Clair3 and bcftools disagree about marginal sites, so a VCF whose
+        caller is unrecorded cannot be compared against another."""
+        prov = variant_provenance(
+            {"caller": "clair3", "tool_version": "2.0.2", "params": {"threads": 4}}
+        )
+        assert prov["variants_called_by"] == "clair3"
+        assert prov["variant_caller_version"] == "2.0.2"
+        assert prov["variant_params"] == {"threads": 4}
+
+    def test_missing_params_default_to_empty(self):
+        prov = variant_provenance({"caller": "bcftools"})
+        assert prov["variant_params"] == {}
+
+
+class TestApplierWiring:
+    def test_call_variants_applier_is_registered(self):
+        """A handler whose applier is unregistered runs, succeeds, and silently
+        produces no object -- the failure mode this table exists to prevent."""
+        assert "call_variants" in _APPLIERS
+
+    def test_tbi_maps_to_its_sidecar_role(self):
+        """The handler reports role='tbi' as a plain string; without this entry
+        the .tbi would be ingested with no role at all."""
+        assert _SIDECAR_ROLES["tbi"] is SidecarRole.TBI
