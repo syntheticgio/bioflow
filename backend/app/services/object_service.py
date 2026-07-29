@@ -457,11 +457,18 @@ def apply_role_update(obj: DataObject, updates: dict) -> None:
     Every other field in update_object uses `.get(k) is not None`, which treats
     null and absent alike. Role cannot: clearing it is how a reference is
     converted back to reads, so the *presence of the key* is what matters.
+
+    The same distinction is recorded durably in `user_touched`. Within one
+    request the key's presence says the user had an opinion; afterwards only
+    that list remembers, and re-ingest needs it to avoid re-asserting a role
+    the user removed.
     """
     if "role" not in updates:
         return
     raw = updates["role"]
     obj.role = ObjectRole(raw) if raw is not None else None
+    if "role" not in obj.user_touched:
+        obj.user_touched = [*obj.user_touched, "role"]
 
 
 async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObject:

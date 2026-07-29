@@ -138,3 +138,28 @@ class TestUserTouched:
     def test_records_a_field_name(self):
         obj = _obj(user_touched=["role"])
         assert "role" in obj.user_touched
+
+    def test_setting_a_role_records_the_touch(self):
+        obj = _obj()
+        apply_role_update(obj, {"role": "reference"})
+        assert obj.role is ObjectRole.REFERENCE
+        assert obj.user_touched == ["role"]
+
+    def test_clearing_a_role_records_the_touch(self):
+        """The case the whole field exists for: a cleared role must be
+        distinguishable from one that was never set."""
+        obj = _obj(role=ObjectRole.REFERENCE)
+        apply_role_update(obj, {"role": None})
+        assert obj.role is None
+        assert obj.user_touched == ["role"]
+
+    def test_an_omitted_role_records_nothing(self):
+        obj = _obj()
+        apply_role_update(obj, {"name": "renamed.fasta"})
+        assert obj.user_touched == []
+
+    def test_the_touch_is_not_duplicated(self):
+        obj = _obj()
+        apply_role_update(obj, {"role": "reference"})
+        apply_role_update(obj, {"role": None})
+        assert obj.user_touched == ["role"]
