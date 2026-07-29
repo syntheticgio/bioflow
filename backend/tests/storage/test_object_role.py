@@ -20,8 +20,17 @@ async def _init_beanie_models():
     Mongo the app uses but against a throwaway database, so it never touches
     real data.
     """
+    from app.db.index_reconcile import reconcile_indexes
+
     client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
-    await init_beanie(database=client["biopipe_test"], document_models=ALL_MODELS)
+    db = client["biopipe_test"]
+    for model in ALL_MODELS:
+        model_settings = model.Settings
+        coll_name = getattr(model_settings, "name", model.__name__.lower())
+        indexes = getattr(model_settings, "indexes", [])
+        if indexes:
+            await reconcile_indexes(db[coll_name], indexes)
+    await init_beanie(database=db, document_models=ALL_MODELS)
     yield
     client.close()
 
