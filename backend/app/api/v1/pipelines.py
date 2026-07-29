@@ -11,7 +11,7 @@ from app.api.v1.jobs import JobOut
 from app.config import settings
 from app.errors import NotFoundError
 from app.models import DataObject, ObjectStatus
-from app.pipelines import align_runner, bam_stats_runner, tools
+from app.pipelines import align_runner, aligner_registry, bam_stats_runner, tools
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 
@@ -286,6 +286,35 @@ async def align_defaults(object_id: PydanticObjectId) -> dict:
         ],
         "presets": list(align_runner.Preset.ALL),
     }
+
+
+@router.get("/aligners/{aligner}/schema")
+async def aligner_schema(aligner: str) -> dict:
+    """The parameter fields for one aligner, for the dialog to render.
+
+    Served from the registry rather than duplicated in the frontend: two
+    copies of a tool's knobs drift, and the frontend copy is the one nobody
+    updates when a flag is added.
+    """
+    try:
+        parsed = Aligner(aligner)
+    except ValueError:
+        raise NotFoundError(f"Unknown aligner: {aligner}") from None
+    return aligner_registry.schema_for(parsed)
+
+
+@router.get("/align-envelope")
+async def align_envelope(object_id: PydanticObjectId, reference_id: PydanticObjectId) -> dict:
+    """Everything the dialog needs to estimate memory without a round trip.
+
+    Sent once when the dialog opens; the client then evaluates the same
+    arithmetic locally as sliders move. The formula stays in Python -- only
+    the coefficients ship -- so there is no second implementation to drift,
+    and `launch_alignment` re-runs the authoritative check regardless.
+    """
+    return await pipeline_service.align_envelope(
+        object_id=object_id, reference_id=reference_id
+    )
 
 
 @router.get("/references/{project_id}")

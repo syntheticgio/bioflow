@@ -690,6 +690,52 @@ async def reference_index_status(reference: DataObject) -> dict:
     } | {"fai": SidecarRole.FAI in have}
 
 
+async def align_envelope(
+    *, object_id: PydanticObjectId, reference_id: PydanticObjectId
+) -> dict:
+    """Host budgets, input sizes, and the per-aligner memory coefficients.
+
+    Budgets come from the governor, which reads cgroup limits -- so inside
+    Docker this reports the container's real allocation rather than the
+    host's. That distinction is the whole reason the warning is trustworthy:
+    a machine with 64 GB and an 8 GB Docker allocation will OOM at 8.
+    """
+    from dataclasses import asdict
+
+    from app.queue.governor import LoadGovernor
+
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    reference = await DataObject.get(reference_id)
+    if reference is None:
+        raise NotFoundError(f"Reference not found: {reference_id}")
+
+    governor = LoadGovernor()
+
+    # Reference size in bases, approximated by file size. A FASTA carries
+    # about one byte per base plus headers and newlines, so this overestimates
+    # by a few percent -- the right direction for a memory warning.
+    reference_bases = reference.size or 0
+
+    status = await reference_index_status(reference)
+
+    return {
+        "cpu_budget": governor.cpu_budget(),
+        "mem_budget_mb": int(governor.mem_budget_bytes() / (1024 * 1024)),
+        "reference_bases": reference_bases,
+        "input_bytes": obj.size or 0,
+        "index_status": status,
+        "models": {
+            aligner.value: asdict(
+                aligner_registry.spec_for(aligner).memory_model
+            )
+            for aligner in Aligner
+        },
+    }
+
+
 async def sidecar_payload(reference: DataObject, aligner: Aligner) -> dict:
     """{stored name: blob path} for the sidecars an alignment needs.
 
@@ -833,6 +879,44 @@ async def launch_alignment(
     if reference.project_id != obj.project_id:
         raise ValidationError("Reads and reference must be in the same project")
 
+    # The authoritative check. The dialog runs the same arithmetic for
+    # immediacy, but it can be bypassed -- the API is directly callable -- and
+    # its envelope goes stale if the host's load changes between opening the
+    # dialog and pressing Launch.
+    from app.pipelines import resource_estimator
+    from app.queue.governor import LoadGovernor
+
+    governor = LoadGovernor()
+    mem_budget_mb = int(governor.mem_budget_bytes() / (1024 * 1024))
+    index_status = await reference_index_status(reference)
+    building = not index_status.get(aligner.value) or not index_status.get("fai")
+
+    estimate = resource_estimator.estimate_mb(
+        aligner=aligner,
+        reference_bases=reference.size or 0,
+        threads=align_params.threads,
+        sort_memory_mb=align_params.sort_memory_mb,
+        building_index=building,
+    )
+    band = resource_estimator.classify(
+        estimated_mb=estimate,
+        mem_budget_mb=mem_budget_mb,
+        threads=align_params.threads,
+        cpu_budget=governor.cpu_budget(),
+    )
+    if band is resource_estimator.Band.BLOCK:
+        raise ValidationError(
+            resource_estimator.explain(
+                aligner=aligner,
+                reference_bases=reference.size or 0,
+                threads=align_params.threads,
+                sort_memory_mb=align_params.sort_memory_mb,
+                building_index=building,
+                mem_budget_mb=mem_budget_mb,
+            ),
+            details={"estimate_mb": estimate, "budget_mb": mem_budget_mb},
+        )
+
     mate: DataObject | None = None
     if paired:
         mate = (
@@ -868,8 +952,9 @@ async def launch_alignment(
     )
 
     # Build the index first if it is missing, and hold the alignment behind it.
-    status = await reference_index_status(reference)
-    needs_index = not status.get(aligner.value) or not status.get("fai")
+    # `building` was already computed above for the resource guard -- same
+    # underlying sidecar lookup, so reused here rather than queried twice.
+    needs_index = building
     depends_on = []
     index_job = None
     if needs_index:
