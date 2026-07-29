@@ -180,6 +180,12 @@ class DataObject(TimestampedDocument):
     # overridable, since the convention is only a convention.
     mate_object_id: PydanticObjectId | None = None
 
+    # Which half of the pair this file is: 1 or 2. Derived from the same
+    # `pairing.split_mate` call that establishes `mate_object_id`, so the label
+    # can never contradict the link -- see the paired-end design spec. Nullable
+    # for single-end files, and for pairs predating this field.
+    read_number: int | None = None
+
     source: SourceInfo = Field(default_factory=SourceInfo)
 
     class Settings:
