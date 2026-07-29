@@ -14,6 +14,7 @@ import {
   formatKindLabel,
   shortHash,
 } from "../lib/format";
+import { readQuality } from "../lib/readQuality";
 import { notify } from "../stores/messageStore";
 import { AssemblyFacts } from "./AssemblyFacts";
 import { FactsTable } from "./FactsTable";
@@ -379,6 +380,10 @@ function ObjectDetail({ id }: { id: string }) {
   const species =
     typeof organism === "string" && organism.trim() ? organism.trim() : null;
 
+  // Same function the explorer rows use, so the word here and the word there
+  // can never disagree.
+  const quality = readQuality(obj);
+
   // Offered for reads that are ready to run. Already-trimmed output is
   // deliberately still eligible -- trimming twice is unusual but legitimate,
   // and the dedup key stops an accidental repeat of the same settings.
@@ -482,6 +487,16 @@ function ObjectDetail({ id }: { id: string }) {
                 title="Change under Metadata → Sample → Organism"
               >
                 {species}
+              </span>
+            </>
+          )}
+          {/* Last in the line: it is a judgement about the file rather than
+              an identifying property of it, and it carries the caveats. */}
+          {quality && (
+            <>
+              {" · "}
+              <span title={quality.tooltip} style={{ cursor: "help" }}>
+                {quality.word}
               </span>
             </>
           )}

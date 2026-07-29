@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
+import { readQuality } from "../lib/readQuality";
+import { QualityBadge } from "./QualityBadge";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
@@ -378,43 +380,52 @@ function ProjectView({ projectId }: { projectId: string }) {
                 </button>
 
                 {isExpanded &&
-                  categoryFiles.map((o: DataObject) => (
-                    <div
-                      key={o.id}
-                      className={`row ${sel === `object:${o.id}` ? "selected" : ""}`}
-                      onClick={() => select(`object:${o.id}`)}
-                    >
-                      <span className="row-icon">
-                        {o.status !== "ready"
-                          ? "⏳"
-                          : o.role === "reference"
-                            ? "📗"
-                            : "📄"}
-                      </span>
-                      <div className="row-main">
-                        <div className="row-name">{o.name}</div>
-                        <div className="row-sub">
-                          <span>{formatBytes(o.size)}</span>
-                          {o.format.kind !== "unknown" && (
-                            <span>{formatKindLabel(o.format.kind)}</span>
-                          )}
-                          {o.status !== "ready" && <span>{o.status}</span>}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="icon-btn row-action"
-                        title="Delete file"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Delete "${o.name}"?`))
-                            delObject.mutate(o.id);
-                        }}
+                  categoryFiles.map((o: DataObject) => {
+                    const quality = readQuality(o);
+                    return (
+                      <div
+                        key={o.id}
+                        className={`row ${sel === `object:${o.id}` ? "selected" : ""}`}
+                        onClick={() => select(`object:${o.id}`)}
                       >
-                        ×
-                      </button>
-                    </div>
-                  ))}
+                        <span className="row-icon">
+                          {o.status !== "ready"
+                            ? "⏳"
+                            : o.role === "reference"
+                              ? "📗"
+                              : "📄"}
+                          {quality && <QualityBadge quality={quality} />}
+                        </span>
+                        <div className="row-main">
+                          <div className="row-name">{o.name}</div>
+                          <div className="row-sub">
+                            <span>{formatBytes(o.size)}</span>
+                            {o.format.kind !== "unknown" && (
+                              <span>{formatKindLabel(o.format.kind)}</span>
+                            )}
+                            {/* After size and format, matching the detail
+                                panel's ordering. */}
+                            {quality && (
+                              <span title={quality.tooltip}>{quality.word}</span>
+                            )}
+                            {o.status !== "ready" && <span>{o.status}</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="icon-btn row-action"
+                          title="Delete file"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete "${o.name}"?`))
+                              delObject.mutate(o.id);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
               </div>
             );
           })}

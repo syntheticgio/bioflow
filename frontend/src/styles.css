@@ -311,6 +311,8 @@ textarea:focus {
 }
 
 .row-icon {
+  /* Positioning context so the quality badge dot can sit on its corner. */
+  position: relative;
   flex-shrink: 0;
   width: 20px;
   text-align: center;
@@ -1934,4 +1936,150 @@ textarea:focus {
 
 .dialog-tool-back:hover {
   text-decoration: underline;
+}
+
+/* Read quality badge -------------------------------------------------- */
+
+.q-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  /* Against the row background, so the dot reads as separate from the glyph
+     rather than merging with it on hover. */
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+}
+
+.row.selected .q-badge,
+.row:hover .q-badge {
+  box-shadow: 0 0 0 1.5px var(--bg-hover);
+}
+
+/* Green -> amber -> red. Existing theme vars, so light mode tracks. */
+.q-badge-5 {
+  background: var(--success);
+}
+
+/* Tier 4 is still good; dimmed rather than a different hue. */
+.q-badge-4 {
+  background: var(--success);
+  opacity: 0.65;
+}
+
+.q-badge-3 {
+  background: var(--warn);
+}
+
+/* Deepened rather than a new hue: still "caution", further along. */
+.q-badge-2 {
+  background: color-mix(in srgb, var(--warn) 75%, var(--error));
+}
+
+.q-badge-1 {
+  background: var(--error);
+}
+
+/* Help pages ---------------------------------------------------------- */
+
+.help-page {
+  padding: 24px 32px;
+  max-width: 760px;
+  overflow-y: auto;
+  color: var(--text);
+}
+
+.help-page h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.help-intro {
+  color: var(--text-dim);
+  margin: 0 0 24px;
+}
+
+.help-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.help-section h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
+.help-section h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 24px 0 8px;
+}
+
+.help-section p,
+.help-section li {
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-section ul {
+  padding-left: 20px;
+}
+
+.help-section li {
+  margin-bottom: 6px;
+}
+
+.help-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.help-table th,
+.help-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-table th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+/* Header dropdown ----------------------------------------------------- */
+
+.header-dropdown {
+  position: relative;
+}
+
+.header-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.header-dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+  border-radius: 4px;
+}
+
+.header-dropdown-menu button:hover {
+  background: var(--bg-hover);
 }

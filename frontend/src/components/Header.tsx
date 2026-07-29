@@ -1,17 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, NavLink } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { LoadIndicator } from "./LoadIndicator";
 
-/** Placeholders still awaiting real actions. */
-const MENUS = ["File", "View", "Help"];
+/** Still awaiting real actions. Help is implemented separately below. */
+const MENUS = ["File", "View"];
 
 /** Destinations that exist. Without these, /search and /activity are
  *  reachable only by typing the URL. */
 const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/search", label: "Search", title: "Search files by metadata" },
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
+];
+
+/** Help menu contents. One entry today; the shape is the point. */
+const HELP_ITEMS: { to: string; label: string }[] = [
+  { to: "/help/calculations", label: "BioFlow Calculations" },
 ];
 
 export function Header() {
@@ -21,6 +27,31 @@ export function Header() {
     refetchInterval: 15000,
   });
 
+  const navigate = useNavigate();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpRef = useRef<HTMLDivElement>(null);
+
+  // A menu that only closes by re-clicking its button feels broken, so handle
+  // the two things people actually do: click elsewhere, or press Escape.
+  useEffect(() => {
+    if (!helpOpen) return;
+
+    function onPointerDown(e: MouseEvent) {
+      if (helpRef.current && !helpRef.current.contains(e.target as Node)) {
+        setHelpOpen(false);
+      }
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setHelpOpen(false);
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [helpOpen]);
 
   return (
     <header className="header">
@@ -47,6 +78,34 @@ export function Header() {
             {m}
           </button>
         ))}
+
+        <div className="header-dropdown" ref={helpRef}>
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={helpOpen}
+            onClick={() => setHelpOpen((v) => !v)}
+          >
+            Help
+          </button>
+          {helpOpen && (
+            <div className="header-dropdown-menu" role="menu">
+              {HELP_ITEMS.map((item) => (
+                <button
+                  key={item.to}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setHelpOpen(false);
+                    navigate(item.to);
+                  }}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </nav>
 
       <div className="header-right">
