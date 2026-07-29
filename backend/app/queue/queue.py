@@ -168,6 +168,19 @@ async def _failed_dependencies(depends_on: list[PydanticObjectId]) -> list[Job]:
     return failed
 
 
+async def _clear_cancel_flag(job_id: str) -> None:
+    """Drop a job id from the cancel set once nothing can still read it.
+
+    Every worker polls this set once a second, so a stale entry is a cost paid
+    forever by every worker. Failures are swallowed: this is hygiene, and a
+    Redis blip must not turn into a failed job.
+    """
+    try:
+        await get_redis().srem(keys.CANCEL, job_id)
+    except Exception as e:  # noqa: BLE001
+        log.debug("cancel_flag_clear_failed", job_id=job_id, error=str(e))
+
+
 async def _fail_blocked_job(job: Job, failed: list[Job]) -> None:
     """Fail a dependent because something it needed did not succeed.
 
@@ -610,6 +623,10 @@ async def reap_expired(max_batch: int = 100) -> list[tuple[str, int]]:
                 },
             )
             await get_redis().zrem(keys.READY, job_id)
+            # This job is terminal and will never run again, so nothing will
+            # ever observe its cancel flag. Left behind, the id is polled by
+            # every worker once a second forever.
+            await _clear_cancel_flag(job_id)
             log.error("job_dead_after_lease_expiry", job_id=job_id, attempts=attempts)
             # A job that died here never went through `complete`, so this is
             # the only place its dependents learn they will never run.
