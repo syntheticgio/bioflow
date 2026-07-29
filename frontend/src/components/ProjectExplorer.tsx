@@ -383,47 +383,47 @@ function ProjectView({ projectId }: { projectId: string }) {
                   categoryFiles.map((o: DataObject) => {
                     const quality = readQuality(o);
                     return (
-                    <div
-                      key={o.id}
-                      className={`row ${sel === `object:${o.id}` ? "selected" : ""}`}
-                      onClick={() => select(`object:${o.id}`)}
-                    >
-                      <span className="row-icon">
-                        {o.status !== "ready"
-                          ? "⏳"
-                          : o.role === "reference"
-                            ? "📗"
-                            : "📄"}
-                        {quality && <QualityBadge quality={quality} />}
-                      </span>
-                      <div className="row-main">
-                        <div className="row-name">{o.name}</div>
-                        <div className="row-sub">
-                          <span>{formatBytes(o.size)}</span>
-                          {o.format.kind !== "unknown" && (
-                            <span>{formatKindLabel(o.format.kind)}</span>
-                          )}
-                          {/* After size and format, matching the detail
-                              panel's ordering. */}
-                          {quality && (
-                            <span title={quality.tooltip}>{quality.word}</span>
-                          )}
-                          {o.status !== "ready" && <span>{o.status}</span>}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="icon-btn row-action"
-                        title="Delete file"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm(`Delete "${o.name}"?`))
-                            delObject.mutate(o.id);
-                        }}
+                      <div
+                        key={o.id}
+                        className={`row ${sel === `object:${o.id}` ? "selected" : ""}`}
+                        onClick={() => select(`object:${o.id}`)}
                       >
-                        ×
-                      </button>
-                    </div>
+                        <span className="row-icon">
+                          {o.status !== "ready"
+                            ? "⏳"
+                            : o.role === "reference"
+                              ? "📗"
+                              : "📄"}
+                          {quality && <QualityBadge quality={quality} />}
+                        </span>
+                        <div className="row-main">
+                          <div className="row-name">{o.name}</div>
+                          <div className="row-sub">
+                            <span>{formatBytes(o.size)}</span>
+                            {o.format.kind !== "unknown" && (
+                              <span>{formatKindLabel(o.format.kind)}</span>
+                            )}
+                            {/* After size and format, matching the detail
+                                panel's ordering. */}
+                            {quality && (
+                              <span title={quality.tooltip}>{quality.word}</span>
+                            )}
+                            {o.status !== "ready" && <span>{o.status}</span>}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="icon-btn row-action"
+                          title="Delete file"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete "${o.name}"?`))
+                              delObject.mutate(o.id);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
                     );
                   })}
               </div>
