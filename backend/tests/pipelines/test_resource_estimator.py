@@ -6,9 +6,12 @@ review but decides whether a run is blocked -- so every boundary is tested
 from both sides.
 """
 
+import math
+
 import pytest
 
 from app.pipelines import resource_estimator as est
+from app.pipelines.aligner_registry import spec_for
 from app.pipelines.aligners import Aligner
 
 
@@ -58,6 +61,43 @@ class TestEstimate:
         )
         assert building > loading
 
+    def test_a_fractional_raw_total_rounds_up_not_down(self):
+        """`estimate_mb` must round up, never truncate: classify()'s BLOCK
+        check is a strict `>`, so truncating a raw total like 10000.9 MB down
+        to 10000 against a 10000 MB budget would turn a genuine BLOCK into a
+        WARN -- the opposite of this module's stated bias toward spurious
+        warnings over missed blocks.
+
+        These inputs are chosen so the raw (pre-rounding) total can be
+        computed by hand: bowtie2's index_bytes_per_ref_base is 1.0, so a
+        reference of 1,048,577 bases (one mebibyte plus one base) yields an
+        index_mb with a nonzero fractional part, on top of round
+        fixed_overhead_mb=256 and one thread's worker_mb=200 and no sort
+        contribution.
+        """
+        model = spec_for(Aligner.BOWTIE2).memory_model
+        reference_bases = 1_048_577
+        threads = 1
+        sort_memory_mb = 0
+
+        index_mb = (reference_bases * model.index_bytes_per_ref_base) / (1024 * 1024)
+        worker_mb = threads * model.bytes_per_thread_mb
+        sort_mb = threads * sort_memory_mb
+        raw = model.fixed_overhead_mb + index_mb + worker_mb + sort_mb
+
+        # Sanity check on the hand-computed value: it must actually have a
+        # fractional part, or this test would not distinguish ceil from int.
+        assert raw != int(raw)
+
+        result = est.estimate_mb(
+            aligner=Aligner.BOWTIE2, reference_bases=reference_bases,
+            threads=threads, sort_memory_mb=sort_memory_mb,
+            building_index=False,
+        )
+
+        assert result == math.ceil(raw)
+        assert result != int(raw)
+
 
 class TestBands:
     def test_well_under_budget_is_ok(self):
@@ -98,6 +138,14 @@ class TestBands:
         assert est.classify(estimated_mb=99_999, mem_budget_mb=None,
                             threads=4, cpu_budget=None) is est.Band.OK
 
+    def test_memory_warn_and_thread_overrun_together_is_still_warn(self):
+        """Memory is checked before threads in classify()'s early-return
+        structure, so a configuration that is simultaneously in the memory
+        WARN band and over the CPU budget must still come out WARN, not
+        something else -- this pins the precedence for future refactors."""
+        assert est.classify(estimated_mb=8000, mem_budget_mb=10000,
+                            threads=32, cpu_budget=8) is est.Band.WARN
+
 
 class TestExplain:
     def test_the_message_names_the_dominant_term(self):
@@ -114,3 +162,24 @@ class TestExplain:
             sort_memory_mb=1024, building_index=False, mem_budget_mb=8000,
         )
         assert "8000" in msg or "8,000" in msg or "7.8" in msg
+
+    def test_fixed_and_worker_overhead_can_dominate_over_index_and_sort(self):
+        """A high-thread minimap2 run with a small reference and small sort
+        memory: fixed_overhead_mb (512) plus worker_mb (16 threads x 512 MB
+        = 8192 MB) together dwarf both the raw index (~0.14 MB for a
+        100,000-base reference at 1.5 bytes/base) and the sort term (16
+        threads x 10 MB = 160 MB).
+
+        The old comparison (`sort_mb >= index_mb`) ignored fixed/worker
+        overhead entirely and would have called this "sort buffer is
+        dominant" (160 >= 0.14), which is wrong -- sort is a small fraction
+        of the total. It also should not be described as purely "the index"
+        once worker/fixed overhead make up most of that non-sort share.
+        """
+        msg = est.explain(
+            aligner=Aligner.MINIMAP2, reference_bases=100_000, threads=16,
+            sort_memory_mb=10, building_index=False, mem_budget_mb=None,
+        )
+        lower = msg.lower()
+        assert "sort" not in lower
+        assert "aligner itself" in lower

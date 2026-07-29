@@ -13,12 +13,16 @@ coefficient should cost a spurious warning, never a blocked run that would
 have worked.
 """
 
+import math
 from enum import StrEnum
 
 from app.pipelines.aligner_registry import spec_for
 from app.pipelines.aligners import Aligner
 
 # Below this fraction of the budget, say nothing.
+# A heuristic like the MemoryModel coefficients above -- not a precisely
+# derived number -- chosen to leave headroom before the BLOCK edge without
+# nagging on runs that are comfortably within budget.
 WARN_FRACTION = 0.70
 
 
@@ -51,7 +55,11 @@ def estimate_mb(
     worker_mb = threads * model.bytes_per_thread_mb
     sort_mb = threads * sort_memory_mb
 
-    return int(model.fixed_overhead_mb + index_mb + worker_mb + sort_mb)
+    # Round up, not toward zero: classify()'s BLOCK check is a strict `>`,
+    # so truncating a raw total like 10000.9 down to 10000 against a 10000 MB
+    # budget would turn a genuine BLOCK into a WARN -- the opposite of the
+    # module's stated bias (see docstring above).
+    return math.ceil(model.fixed_overhead_mb + index_mb + worker_mb + sort_mb)
 
 
 def classify(
@@ -79,6 +87,10 @@ def classify(
     if estimated_mb >= mem_budget_mb * WARN_FRACTION:
         return Band.WARN
 
+    # Same "missing data, no opinion" policy as the mem_budget_mb check
+    # above: a cpu_budget of None means we could not read the host's CPU
+    # limit, not that thread count is fine -- so no warning fires regardless
+    # of how many threads are requested.
     if cpu_budget is not None and threads > cpu_budget:
         return Band.WARN
 
@@ -110,6 +122,7 @@ def explain(
     model = spec_for(aligner).memory_model
 
     sort_mb = threads * sort_memory_mb
+    worker_mb = threads * model.bytes_per_thread_mb
     index_mb = int((reference_bases * model.index_bytes_per_ref_base) / (1024 * 1024))
     if building_index:
         index_mb = int(index_mb * model.index_build_multiplier)
@@ -117,13 +130,25 @@ def explain(
     budget_text = f" of {mem_budget_mb:,} MB available" if mem_budget_mb else ""
     parts = [f"Estimated {total:,} MB{budget_text}."]
 
-    if sort_mb >= index_mb:
+    # worker_mb (per-thread buffers) is folded into the non-sort side rather
+    # than compared on its own: it is part of the aligner's own footprint,
+    # conceptually distinct from the sort step, and for a high-thread run it
+    # can rival or exceed the index itself. Comparing sort_mb only against
+    # index_mb (ignoring fixed_overhead_mb and worker_mb entirely) let the
+    # message misattribute the dominant cost -- e.g. calling sort dominant
+    # when the aligner's own overhead was actually the bigger share.
+    aligner_side_mb = index_mb + worker_mb + model.fixed_overhead_mb
+    if sort_mb >= aligner_side_mb:
         parts.append(
             f"The sort buffer is {sort_mb:,} MB of that "
             f"({threads} threads x {sort_memory_mb} MB each)."
         )
     else:
-        what = "building the index" if building_index else "the index"
-        parts.append(f"Most of it is {what}: about {index_mb:,} MB.")
+        # This number includes worker/fixed overhead as well as the raw
+        # index, so it is described as "the aligner itself" rather than
+        # specifically "the index" -- that would overclaim precision the
+        # heuristic doesn't have.
+        what = "building the index" if building_index else "the aligner itself"
+        parts.append(f"Most of it is {what}: about {aligner_side_mb:,.0f} MB.")
 
     return " ".join(parts)
