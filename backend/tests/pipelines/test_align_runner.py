@@ -117,6 +117,73 @@ class TestAlignCommand:
         """samtools sort cannot read PAF, which is minimap2's default output."""
         assert " -a " in align_cmd()[-1]
 
+
+class TestMarkdupCommand:
+    """samtools markdup needs the `ms` mate-score tag that only `fixmate -m`
+    writes -- and fixmate needs name-sorted input while markdup needs
+    coordinate order. Skipping fixmate is exactly the bug this guards:
+    `samtools markdup: error, no ms score tag`."""
+
+    def markdup_cmd(self, **kw):
+        base = dict(
+            samtools_path="samtools",
+            source=Path("/w/sorted.bam"),
+            output=Path("/w/marked.bam"),
+            threads=4,
+            paired=True,
+        )
+        return align_runner.build_markdup_command(**{**base, **kw})
+
+    def test_single_end_runs_markdup_directly(self):
+        """No mate to score, so there is nothing for fixmate to add."""
+        cmd = self.markdup_cmd(paired=False)
+        assert cmd == [
+            "samtools",
+            "markdup",
+            "-@",
+            "4",
+            "/w/sorted.bam",
+            "/w/marked.bam",
+        ]
+
+    def test_paired_runs_fixmate_before_markdup(self):
+        script = self.markdup_cmd()[-1]
+        assert "fixmate" in script
+        assert script.index("fixmate") < script.index("markdup")
+
+    def test_paired_name_sorts_before_fixmate(self):
+        """fixmate requires mates adjacent in the stream, which only a
+        name sort guarantees."""
+        script = self.markdup_cmd()[-1]
+        sort_n_pos = script.index("sort -@ 3 -n")
+        assert sort_n_pos < script.index("fixmate")
+
+    def test_paired_coordinate_sorts_after_fixmate_before_markdup(self):
+        script = self.markdup_cmd()[-1]
+        fixmate_pos = script.index("fixmate")
+        # The second `sort` (coordinate order) must come after fixmate.
+        second_sort_pos = script.index(" sort ", fixmate_pos)
+        assert fixmate_pos < second_sort_pos < script.index("markdup")
+
+    def test_paired_sets_pipefail(self):
+        cmd = self.markdup_cmd()
+        assert cmd[:3] == ["/bin/sh", "-o", "pipefail"]
+
+    def test_paired_uses_tmp_prefix_for_the_coordinate_sort(self):
+        script = self.markdup_cmd(tmp_prefix=Path("/w/tmp/markdup-sort"))[-1]
+        assert "-T /w/tmp/markdup-sort" in script
+
+    def test_paired_pipeline_actually_runs(self, tmp_path):
+        """End to end through /bin/sh with stand-in binaries, so a quoting
+        error in the generated pipeline shows up here rather than as a job
+        failure."""
+        cmd = self.markdup_cmd(
+            samtools_path="true",
+            source=tmp_path / "sorted.bam",
+            output=tmp_path / "marked.bam",
+        )
+        assert subprocess.run(cmd, check=False).returncode == 0
+
     def test_bwa_mem2_uses_mem(self):
         script = align_cmd(aligner=Aligner.BWA_MEM2, aligner_path="bwa-mem2")[-1]
         assert "bwa-mem2 mem" in script

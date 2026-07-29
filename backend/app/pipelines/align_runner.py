@@ -306,15 +306,45 @@ def build_flagstat_command(*, samtools_path: str, bam: Path) -> list[str]:
 
 
 def build_markdup_command(
-    *, samtools_path: str, source: Path, output: Path, threads: int
+    *,
+    samtools_path: str,
+    source: Path,
+    output: Path,
+    threads: int,
+    paired: bool,
+    tmp_prefix: Path | None = None,
 ) -> list[str]:
     """Mark duplicates on a coordinate-sorted BAM.
 
     Standard for DNA-seq variant calling and wrong for RNA-seq and amplicon
     data, where duplicate reads are the expected consequence of the protocol
     rather than a PCR artifact -- so this is a real choice, not a default.
+
+    `markdup` picks which read of a pair to flag using the `ms` (mate score)
+    tag, which only `fixmate -m` writes -- and fixmate needs mates adjacent,
+    i.e. name-sorted input, while markdup needs the usual coordinate order.
+    So for paired data this is name-sort -> fixmate -> coordinate-sort ->
+    markdup, piped together to avoid materializing three intermediate BAMs.
+    Single-end reads have no mate to score, and `markdup` runs directly on
+    the (already coordinate-sorted) input.
     """
-    return [samtools_path, "markdup", "-@", str(threads), str(source), str(output)]
+    worker_threads = str(max(threads - 1, 1))
+    markdup_argv = [samtools_path, "markdup", "-@", str(threads), str(source), str(output)]
+    if not paired:
+        return markdup_argv
+
+    name_sort_argv = [samtools_path, "sort", "-@", worker_threads, "-n", "-o", "-", str(source)]
+    fixmate_argv = [samtools_path, "fixmate", "-@", worker_threads, "-m", "-", "-"]
+    coord_sort_argv = [samtools_path, "sort", "-@", worker_threads, "-o", "-"]
+    if tmp_prefix is not None:
+        coord_sort_argv += ["-T", str(tmp_prefix)]
+    coord_sort_argv.append("-")
+    markdup_argv[-2] = "-"  # read the coordinate-sorted stream, not `source`
+
+    pipeline = " | ".join(
+        _quote(argv) for argv in (name_sort_argv, fixmate_argv, coord_sort_argv, markdup_argv)
+    )
+    return ["/bin/sh", "-o", "pipefail", "-c", pipeline]
 
 
 def _quote(argv: list[str]) -> str:

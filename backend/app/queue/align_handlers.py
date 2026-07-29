@@ -258,6 +258,8 @@ def align_reads(ctx: JobContext) -> dict:
                 source=bam_out,
                 output=marked,
                 threads=params.threads,
+                paired=r2 is not None,
+                tmp_prefix=work / "markdup-sort",
             ),
             log_path=str(log_path),
         )
