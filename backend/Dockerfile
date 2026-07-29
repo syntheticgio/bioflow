@@ -159,6 +159,23 @@ RUN chmod +x /srv/scripts/install-clair3.sh \
     && CLAIR3_VERSION="${CLAIR3_VERSION}" /srv/scripts/install-clair3.sh \
     && rm -rf /tmp/bin
 
+# --- NCBI Datasets CLI ------------------------------------------------------
+#
+# How assemblies are downloaded. A single static Go binary, so unlike
+# bwa-mem2 there is nothing to compile for arm64 -- only a different URL.
+# TARGETARCH is already in scope from the bwa-mem2 ARG above (this is a
+# single-stage build, so it need not be redeclared).
+RUN set -e \
+    && case "$TARGETARCH" in \
+         arm64) DATASETS_ARCH=linux-arm64 ;; \
+         *)     DATASETS_ARCH=linux-amd64 ;; \
+       esac \
+    && curl -fsSL \
+         "https://ftp.ncbi.nlm.nih.gov/pub/datasets/command-line/v2/${DATASETS_ARCH}/datasets" \
+         -o /usr/local/bin/datasets \
+    && chmod +x /usr/local/bin/datasets \
+    && datasets --version
+
 # Dependencies first so the layer caches across source edits.
 # Installed from pyproject.toml rather than a duplicated list: two copies of the
 # dependency set drift, and the version that matters is the one in the image.

@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     fasterq_dump_path: str = "fasterq-dump"
     prefetch_path: str = "prefetch"
     nanoplot_path: str = "NanoPlot"
+    # The NCBI Datasets CLI: how assemblies (GCA/GCF) are downloaded, as
+    # fasterq-dump is how runs are. Installed in the worker image by the
+    # Dockerfile; overridable for a host that has it elsewhere.
+    datasets_path: str = "datasets"
     # bcftools does the short-read calling and all VCF indexing
     # (`bcftools index -t`), so it is the only new binary the code invokes for
     # variant calling besides Clair3 itself.

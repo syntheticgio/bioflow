@@ -210,6 +210,7 @@ class TestSerialization:
             "clair3",
             "fasterq-dump",
             "prefetch",
+            "datasets",
         }
 
 
