@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
@@ -5,6 +6,8 @@ import type { DataObject } from "../api/types";
 
 interface Props {
   obj: DataObject;
+  /** True when the metadata editor holds unsaved edits. */
+  metadataDirty?: boolean;
 }
 
 /** Formats where reference-vs-reads is genuinely ambiguous. */
@@ -14,16 +17,29 @@ const CONVERTIBLE_FORMATS = ["fasta", "fastq"];
  * Converts a file between reads and reference.
  *
  * Both directions are the same PATCH with a different value, and the change is
- * cheap and reversible -- so there is no confirmation step, which would be
- * friction without benefit.
+ * cheap and reversible -- so a clean conversion converts on one click, with no
+ * confirmation step that would be friction without benefit.
+ *
+ * The exception is unsaved metadata: DetailPanel remounts the editor on a role
+ * change (its schema changes underneath), which discards in-progress edits.
+ * That is correct but not something to do silently, so a dirty editor gets a
+ * confirm step.
  */
-export function RoleConverter({ obj }: Props) {
+export function RoleConverter({ obj, metadataDirty = false }: Props) {
   const qc = useQueryClient();
   const isReference = obj.role === "reference";
+  const [confirming, setConfirming] = useState(false);
+
+  // Saving elsewhere in the panel clears the hazard; don't leave a stale
+  // warning on screen.
+  useEffect(() => {
+    if (!metadataDirty) setConfirming(false);
+  }, [metadataDirty]);
 
   const convert = useMutation({
     mutationFn: (role: "reference" | null) => api.updateObject(obj.id, { role }),
     onSuccess: (_r, role) => {
+      setConfirming(false);
       qc.invalidateQueries({ queryKey: ["object", obj.id] });
       // The left panel re-sections off this value.
       qc.invalidateQueries({ queryKey: ["objects", obj.project_id] });
@@ -46,21 +62,49 @@ export function RoleConverter({ obj }: Props) {
     return null;
   }
 
+  const doConvert = () => convert.mutate(isReference ? null : "reference");
+
+  const onClick = () => {
+    if (metadataDirty && !confirming) {
+      setConfirming(true);
+      return;
+    }
+    doConvert();
+  };
+
   return (
     <div className="section">
       <div className="section-title">Role</div>
-      <button
-        type="button"
-        className="btn"
-        onClick={() => convert.mutate(isReference ? null : "reference")}
-        disabled={convert.isPending}
-      >
-        {convert.isPending
-          ? "Converting…"
-          : isReference
-            ? "Convert back to reads"
-            : "Convert to reference"}
-      </button>
+      {confirming && (
+        <div className="warn-box" style={{ marginBottom: 8 }}>
+          You have unsaved metadata edits. Converting will discard them.
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          type="button"
+          className="btn"
+          onClick={onClick}
+          disabled={convert.isPending}
+        >
+          {convert.isPending
+            ? "Converting…"
+            : confirming
+              ? "Convert anyway"
+              : isReference
+                ? "Convert back to reads"
+                : "Convert to reference"}
+        </button>
+        {confirming && !convert.isPending && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setConfirming(false)}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
       <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}>
         {isReference
           ? "Moves this back to the Reads section and restores the sequencing metadata fields. Nothing is lost either way."

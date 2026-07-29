@@ -36,6 +36,11 @@ CANCEL_CHECK_READS = 20_000
 INSERT_SIZE_BIN_WIDTH = 10
 INSERT_SIZE_MAX = 2000
 
+# Blocks a strided FASTA sample is spread across. Enough to cross every
+# chromosome of a human reference, while keeping each block large enough that
+# per-seek overhead stays negligible against the bytes read.
+FASTA_SAMPLE_BLOCKS = 100
+
 # Phred+33 is effectively universal now. Phred+64 (old Illumina) would report
 # implausibly high scores, which we detect rather than silently mis-scale.
 PHRED_OFFSET = 33
@@ -149,33 +154,41 @@ def fasta_stats(
     cancel_event: threading.Event | None = None,
     max_bases: int = 50_000_000,
 ) -> dict:
-    """Base composition for a FASTA file (no quality scores to report)."""
+    """Base composition for a FASTA file (no quality scores to report).
+
+    The cap is a performance guard, not a compromise on correctness -- but a
+    capped read taken from the front of a multi-GB reference describes chr1,
+    not the assembly, and GC varies enough between chromosomes to mislead. For
+    seekable (uncompressed) files the same byte budget is instead spread across
+    the whole file. Gzip and BGZF cannot seek cheaply, so they keep the prefix
+    read and say so in `stats_sampling`.
+    """
     import gzip
 
-    opener = (
-        gzip.open
-        if compression in (Compression.GZIP, Compression.BGZF)
-        else open
-    )
+    is_compressed = compression in (Compression.GZIP, Compression.BGZF)
+    file_size = path.stat().st_size
 
     counts: Counter[str] = Counter()
-    seen = 0
-    lines = 0
 
     try:
-        with opener(path, "rt", errors="replace") as fh:
-            for line in fh:
-                lines += 1
-                if line.startswith(">"):
-                    continue
-                seq = line.rstrip("\n")
-                counts.update(seq)
-                seen += len(seq)
-                if seen >= max_bases:
-                    break
-                if lines % 100_000 == 0 and cancel_event is not None:
-                    if cancel_event.is_set():
-                        raise JobCancelled("Cancelled during sequence statistics")
+        # Striding needs at least one byte of headroom per block to make
+        # distinct seeks; below that, `stride = file_size // FASTA_SAMPLE_BLOCKS`
+        # would truncate to 0 and every block would re-read the same bytes.
+        if (
+            not is_compressed
+            and file_size > max_bases
+            and file_size >= FASTA_SAMPLE_BLOCKS
+        ):
+            seen, mode = _fasta_sample_strided(
+                path, counts, file_size, max_bases, cancel_event
+            )
+        else:
+            opener = gzip.open if is_compressed else open
+            with opener(path, "rt", errors="replace") as fh:
+                seen = _fasta_read_block(fh, counts, max_bases, cancel_event)
+            # A file smaller than the budget was read end to end: the figure is
+            # exact, not an estimate, and should not carry a "sampled" caveat.
+            mode = "prefix" if seen >= max_bases else "complete"
     except JobCancelled:
         raise
     except (OSError, EOFError, UnicodeDecodeError) as e:
@@ -185,7 +198,7 @@ def fasta_stats(
     if seen == 0:
         return {}
 
-    facts: dict = {"stats_sampled_bases": seen}
+    facts: dict = {"stats_sampled_bases": seen, "stats_sampling": mode}
     composition = _composition(counts)
     if composition:
         facts["base_composition"] = composition
@@ -195,6 +208,66 @@ def fasta_stats(
     if acgt:
         facts["gc_content_percent"] = round(100.0 * gc / acgt, 2)
     return facts
+
+
+def _fasta_read_block(
+    fh,
+    counts: Counter[str],
+    budget: int,
+    cancel_event: threading.Event | None,
+) -> int:
+    """Count bases from the current handle position until `budget` is reached.
+
+    Returns the number of bases counted. Header lines are skipped and do not
+    consume budget.
+    """
+    seen = 0
+    lines = 0
+    for line in fh:
+        lines += 1
+        if line.startswith(">"):
+            continue
+        seq = line.rstrip("\n")
+        counts.update(seq)
+        seen += len(seq)
+        if seen >= budget:
+            break
+        if lines % 100_000 == 0 and cancel_event is not None:
+            if cancel_event.is_set():
+                raise JobCancelled("Cancelled during sequence statistics")
+    return seen
+
+
+def _fasta_sample_strided(
+    path: Path,
+    counts: Counter[str],
+    file_size: int,
+    max_bases: int,
+    cancel_event: threading.Event | None,
+) -> tuple[int, str]:
+    """Spend the byte budget in equal blocks spread across the file.
+
+    Same total bytes read as a prefix scan, so the same cost -- but the sample
+    crosses every chromosome instead of stopping inside the first. Callers
+    must ensure `file_size >= FASTA_SAMPLE_BLOCKS` or the stride below
+    truncates to 0 and every block collapses onto the same offset.
+    """
+    per_block = max(1, max_bases // FASTA_SAMPLE_BLOCKS)
+    stride = file_size // FASTA_SAMPLE_BLOCKS
+
+    seen = 0
+    with open(path, errors="replace") as fh:
+        for i in range(FASTA_SAMPLE_BLOCKS):
+            if cancel_event is not None and cancel_event.is_set():
+                raise JobCancelled("Cancelled during sequence statistics")
+            fh.seek(i * stride)
+            if i > 0:
+                # A seek lands mid-line: that partial line would start counting
+                # from an arbitrary column, and could be the tail of a header.
+                # Discard it and start clean on the next line boundary.
+                fh.readline()
+            seen += _fasta_read_block(fh, counts, per_block, cancel_event)
+    return seen, "strided"
 
 
 def _composition(counts: Counter[str]) -> list[dict]:

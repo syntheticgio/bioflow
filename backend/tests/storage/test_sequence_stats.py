@@ -413,3 +413,66 @@ class TestInsertSizeHistogram:
         p = _write_bam(tmp_path / "unpaired.bam", [{"name": "r1", "flag": 0}])
         facts = ss.alignment_stats(p, FormatKind.BAM)
         assert "insert_size_histogram" not in facts
+
+
+class TestFastaSampling:
+    """GC sampling must describe the file, not just its first chromosome."""
+
+    def write_skewed_fasta(self, path, *, line_len=60, lines_per_half=20_000):
+        """High-GC first half, low-GC second half.
+
+        True whole-file GC is 50%: equal halves at 100% and 0%. A prefix read
+        that never reaches the second half reports ~100%.
+        """
+        with open(path, "w") as f:
+            f.write(">high_gc\n")
+            for _ in range(lines_per_half):
+                f.write("GC" * (line_len // 2) + "\n")
+            f.write(">low_gc\n")
+            for _ in range(lines_per_half):
+                f.write("AT" * (line_len // 2) + "\n")
+        return path
+
+    def test_strided_sample_spans_the_file(self, tmp_path):
+        p = self.write_skewed_fasta(tmp_path / "skewed.fasta")
+        # A budget far under the file size forces sampling rather than a full
+        # read; the whole point is what happens when we cannot read it all.
+        r = ss.fasta_stats(p, Compression.NONE, max_bases=100_000)
+        assert r["stats_sampling"] == "strided"
+        # True value is 50%. A prefix read gives ~100%, so a generous window
+        # still fails loudly on the old behavior.
+        assert 40.0 <= r["gc_content_percent"] <= 60.0
+
+    def test_small_file_is_complete_not_sampled(self, tmp_path):
+        p = tmp_path / "small.fasta"
+        p.write_text(">c1\nGCGCATAT\n")
+        r = ss.fasta_stats(p, Compression.NONE)
+        assert r["stats_sampling"] == "complete"
+        assert r["gc_content_percent"] == 50.0
+
+    def test_gzip_falls_back_to_prefix(self, tmp_path):
+        plain = self.write_skewed_fasta(tmp_path / "skewed.fasta")
+        gz = tmp_path / "skewed.fasta.gz"
+        with open(plain, "rb") as src, gzip.open(gz, "wb") as dst:
+            dst.write(src.read())
+        r = ss.fasta_stats(gz, Compression.GZIP, max_bases=100_000)
+        # Gzip cannot seek cheaply, so the prefix read stands -- but it must be
+        # labelled as such rather than claiming to span the file.
+        assert r["stats_sampling"] == "prefix"
+        assert "gc_content_percent" in r
+
+    def test_tiny_file_does_not_overcount_via_degenerate_stride(self, tmp_path):
+        """A file smaller than FASTA_SAMPLE_BLOCKS must not stride.
+
+        `stride = file_size // FASTA_SAMPLE_BLOCKS` truncates to 0 for any
+        file under 100 bytes, which would collapse every seek onto offset 0
+        and re-read the same handful of bytes ~100 times over. `max_bases` is
+        set below the file's own base count so the file still exceeds the
+        sampling budget -- the condition that used to force the strided path.
+        """
+        p = tmp_path / "tiny.fasta"
+        p.write_text(">c1\nGCAT\n")  # 4 bases, well under FASTA_SAMPLE_BLOCKS
+        r = ss.fasta_stats(p, Compression.NONE, max_bases=2)
+        # No ~100x overcounting: sampled bases can't exceed what's in the file.
+        assert r["stats_sampled_bases"] <= 4
+        assert r["stats_sampling"] in ("prefix", "complete")

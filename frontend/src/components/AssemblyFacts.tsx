@@ -22,10 +22,16 @@ export function AssemblyFacts({ facts }: Props) {
   const totalBases = facts.total_bases as number | undefined;
   const gc = facts.gc_content_percent as number | undefined;
   const sampledBases = facts.stats_sampled_bases as number | undefined;
+  const sampling = facts.stats_sampling as string | undefined;
   const names = Array.isArray(facts.sequence_names)
     ? (facts.sequence_names as string[])
     : [];
   const namesTruncated = facts.sequence_names_truncated === true;
+
+  type NamedLength = { name: string; length: number };
+  const longest = facts.sequence_longest as NamedLength | undefined;
+  const shortest = facts.sequence_shortest as NamedLength | undefined;
+  const lengthsPartial = facts.sequence_lengths_partial === true;
 
   const count = isExact ? exactCount : estimatedCount;
   const hasAnything =
@@ -83,15 +89,38 @@ export function AssemblyFacts({ facts }: Props) {
             <dd>{formatBases(totalBases)}</dd>
           </>
         )}
+        {longest !== undefined && shortest !== undefined && (
+          <>
+            <dt>Longest</dt>
+            <dd>
+              <span className="mono">{longest.name}</span> ·{" "}
+              {formatBases(longest.length)}
+            </dd>
+            <dt>Shortest</dt>
+            <dd>
+              <span className="mono">{shortest.name}</span> ·{" "}
+              {formatBases(shortest.length)}
+            </dd>
+          </>
+        )}
         {gc !== undefined && (
           <>
-            {/* Labelled as sampled because fasta_stats caps at 50M bases read
-                from the start of the file -- on a large genome that is chr1,
-                not a representative sample. See docs/TODO.md. */}
-            <dt>GC content (sampled)</dt>
+            {/* What this number means depends on how it was measured: a small
+                file is counted exactly, a large uncompressed one is sampled
+                across the whole file, and a compressed one is still a prefix
+                read because gzip cannot seek cheaply. Objects ingested before
+                strided sampling have no stats_sampling key and keep the
+                original conservative label. */}
+            <dt>
+              {sampling === "complete"
+                ? "GC content"
+                : sampling === "strided"
+                  ? "GC content (sampled across file)"
+                  : "GC content (sampled)"}
+            </dt>
             <dd>
               {gc}%
-              {sampledBases !== undefined && (
+              {sampling !== "complete" && sampledBases !== undefined && (
                 <span style={{ color: "var(--text-faint)" }}>
                   {" "}
                   from {formatBases(sampledBases)} sampled
@@ -101,6 +130,20 @@ export function AssemblyFacts({ facts }: Props) {
           </>
         )}
       </dl>
+      )}
+
+      {/* This note's visibility rides on hasAnything, which for a truncated
+          parse depends on sequence_stats.fasta_stats having also set
+          gc_content_percent -- an all-N sampled region or a decode error
+          there leaves hasAnything false, and this caveat silently won't
+          show even though sequence_longest/shortest and
+          sequence_lengths_partial are set. Low-risk (a missing caveat, not
+          wrong data), but worth knowing if this ever gets debugged. */}
+      {hasAnything && lengthsPartial && longest !== undefined && (
+        <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}>
+          Longest and shortest are partial — the file was truncated during
+          parsing, so later sequences were not measured.
+        </div>
       )}
 
       {names.length > 0 && (

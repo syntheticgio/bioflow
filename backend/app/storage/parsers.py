@@ -422,20 +422,48 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
     exact_limit = 256 * 1024 * 1024
 
     names: list[str] = []
+    lengths: dict[str, int] = {}
     count = 0
     total_bases = 0
     read_bytes = 0
     truncated = False
 
+    # Per-record accumulation. The current record is only committed when the
+    # next header proves it complete, so a record cut by the byte limit is
+    # never reported at a truncated length.
+    current_name: str | None = None
+    current_len = 0
+    longest: tuple[str, int] | None = None
+    shortest: tuple[str, int] | None = None
+
+    def commit() -> None:
+        nonlocal longest, shortest
+        if current_name is None:
+            return
+        if len(lengths) < MAX_STORED_CONTIGS:
+            lengths[current_name] = current_len
+        # Extremes track every record, not just the stored window: capping them
+        # would report the wrong longest contig for most real assemblies.
+        if longest is None or current_len > longest[1]:
+            longest = (current_name, current_len)
+        if shortest is None or current_len < shortest[1]:
+            shortest = (current_name, current_len)
+
     with _open_text(path, compression) as fh:
         for line in fh:
             read_bytes += len(line)
             if line.startswith(">"):
+                commit()
                 count += 1
+                name = line[1:].strip().split()[0] if line[1:].strip() else ""
                 if len(names) < MAX_STORED_CONTIGS:
-                    names.append(line[1:].strip().split()[0] if line[1:].strip() else "")
+                    names.append(name)
+                current_name = name
+                current_len = 0
             else:
-                total_bases += len(line.rstrip("\n"))
+                n = len(line.rstrip("\n"))
+                total_bases += n
+                current_len += n
             if count % 500 == 0:
                 _check(cancel)
             if compression is Compression.NONE and read_bytes > exact_limit:
@@ -443,9 +471,13 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
                 break
 
     if truncated:
+        # The in-progress record is mid-sequence and every later record is
+        # unseen, so it is dropped rather than committed at a partial length.
         facts["sequence_count_estimate"] = int(count * (file_size / read_bytes))
         facts["sequence_count_exact"] = False
+        facts["sequence_lengths_partial"] = True
     else:
+        commit()
         facts["sequence_count"] = count
         facts["sequence_count_exact"] = True
         facts["total_bases"] = total_bases
@@ -454,6 +486,17 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
         facts["sequence_names"] = names
         if count > MAX_STORED_CONTIGS:
             facts["sequence_names_truncated"] = True
+
+    if lengths:
+        facts["sequence_lengths"] = lengths
+    # Emitted even when partial -- they are the true extremes of what was
+    # parsed, and sequence_lengths_partial marks them as not final. Lengths are
+    # never extrapolated: there is no sound way to guess an unseen contig's
+    # length from a byte ratio.
+    if longest is not None:
+        facts["sequence_longest"] = {"name": longest[0], "length": longest[1]}
+    if shortest is not None:
+        facts["sequence_shortest"] = {"name": shortest[0], "length": shortest[1]}
 
     from app.storage import sequence_stats
 

@@ -54,6 +54,35 @@ job appears to run with the fix but is silently still executing the old
 in-memory code, which reads as "the fix didn't work" when it actually just
 never got picked up.
 
+**Always run `docker compose` from the main repo root, never from a
+worktree.** The bind mounts in `docker-compose.override.yml` are relative
+paths (`./backend/app`, `./frontend/src`), so Compose resolves them against
+whatever directory it was invoked from -- while the project name is pinned to
+`biopipe` in `docker-compose.yml`. Running `docker compose up` inside
+`.claude/worktrees/<something>/` therefore does not create a second stack: it
+silently recreates *the* stack with its source pointing at that worktree, with
+no error and no warning. Port 5173 then serves that branch's code, and
+`docker compose restart worker` from anywhere just reloads it again -- so a
+change merged to main appears to be missing from the running app, and the
+handler simply never shows up in the worker's `handlers_loaded` log line.
+
+To check what the stack is actually serving:
+
+```bash
+docker inspect biopipe-worker-1 --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}'
+```
+
+If any source path contains `.claude/worktrees/`, the stack is on the wrong
+tree; fix it by re-running the rebuild from the main repo root:
+
+```bash
+cd /Users/syntheticgio/Programming/local-bio-pipeliner && docker compose up -d --build api web worker
+```
+
+To exercise a worktree's code before it merges, don't repoint the shared
+stack -- use a separate project name and unpublished ports (`docker compose
+-p biopipe-<branch> ...`) so the main instance keeps serving main.
+
 ## Verifying changes
 
 Manual testing in the browser at localhost:5173 is the actual verification

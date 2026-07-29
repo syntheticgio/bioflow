@@ -43,6 +43,8 @@ const LABELS: Record<string, string> = {
   total_bases: "Total bases",
   column_counts: "Columns",
   header_lines: "Header lines",
+  sequence_longest: "Longest sequence",
+  sequence_shortest: "Shortest sequence",
 };
 
 // Rendered as annotations on other rows, or in their own panel — not as rows
@@ -68,6 +70,11 @@ const SUPPRESSED = new Set([
   "quality_per_position",
   "stats_sampled_reads",
   "stats_sampled_bases",
+  "stats_sampling",
+  "sequence_lengths_partial",
+  // Rendered as the Longest/Shortest rows in AssemblyFacts; a 50-entry dict
+  // would swamp the generic table.
+  "sequence_lengths",
   // Trimming has its own before/after section; see TrimReport. The raw report
   // is a nested object that the generic renderer would print as [object Object].
   "trim_report",
@@ -126,6 +133,15 @@ function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number })
 
 function renderValue(key: string, value: unknown, facts: Record<string, unknown>) {
   if (typeof value === "boolean") return value ? "Yes" : "No";
+
+  if (key === "sequence_longest" || key === "sequence_shortest") {
+    const v = value as { name: string; length: number };
+    return (
+      <span>
+        <span className="mono">{v.name}</span> · {formatNumber(v.length)} bp
+      </span>
+    );
+  }
 
   if (key === "read_count_estimate" || key === "sequence_count_estimate") {
     // "~" plus an explicit qualifier: two signals, because this number looks

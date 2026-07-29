@@ -10,6 +10,12 @@ interface Props {
   role: ObjectRole | null;
   onSave: (next: Record<string, unknown>) => void;
   saving?: boolean;
+  /**
+   * Mirrors the editor's internal dirty flag outward so a parent can warn
+   * before an action that would discard in-progress edits. Optional: the
+   * editor is fully functional without it.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 type Custom = { key: string; value: string };
@@ -22,7 +28,7 @@ type Custom = { key: string; value: string };
  * a free key/value pair. The schema is a convenience, never a restriction — no
  * fixed vocabulary survives contact with a real lab.
  */
-export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving }: Props) {
+export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving, onDirtyChange }: Props) {
   const { data: schema } = useQuery({
     // Role is part of the key: a conversion changes which fields apply, and a
     // stale cache would serve the previous role's form.
@@ -52,6 +58,12 @@ export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, schema, dirty]);
+
+  // Mirror dirty outward. Separate from the resync effect above so that
+  // effect's dependency list and its early-bail behavior are untouched.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const setField = (key: string, v: unknown) => {
     setValues((prev) => ({ ...prev, [key]: v }));
