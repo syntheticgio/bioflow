@@ -123,3 +123,18 @@ class TestApplyRoleUpdate:
         apply_role_update(obj, {"role": ObjectRole.REFERENCE})
         apply_role_update(obj, {"role": None})
         assert obj.role is None
+
+
+class TestUserTouched:
+    """Provenance for fields the user has explicitly set or cleared.
+
+    Without this, a cleared role and a never-set role are the same value, and
+    re-ingest cannot tell "no opinion" from "the user said no."
+    """
+
+    def test_defaults_to_empty(self):
+        assert _obj().user_touched == []
+
+    def test_records_a_field_name(self):
+        obj = _obj(user_touched=["role"])
+        assert "role" in obj.user_touched

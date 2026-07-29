@@ -148,6 +148,15 @@ class DataObject(TimestampedDocument):
     # a value, so re-ingest can never fight a user's explicit choice.
     role: ObjectRole | None = None
 
+    # Field names the user has explicitly set *or cleared*. Without it a
+    # cleared role is indistinguishable from one never set, and re-ingest
+    # re-asserts the role the user just removed -- which is precisely the
+    # "never fight a user's explicit choice" promise above, broken.
+    #
+    # A list rather than a per-field `role_set_by` because the same ambiguity
+    # applies to any user-editable field; metadata keys can join it unchanged.
+    user_touched: list[str] = Field(default_factory=list)
+
     # Provenance. A typed field rather than a metadata key because metadata is
     # user-owned and user-editable, and provenance that can be silently retyped
     # is not provenance. A list because paired trimming takes two inputs and
