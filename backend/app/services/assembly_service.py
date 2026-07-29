@@ -89,6 +89,8 @@ async def launch_download(
     components: list[str],
 ):
     """Queue the download and the run that groups it."""
+    import asyncio
+
     from app.queue import queue
 
     tools.require(tools.datasets())
@@ -103,8 +105,13 @@ async def launch_download(
     # Fetched once here so the handler's disk pre-flight and the ingest
     # metadata are both available: the handler runs in a worker thread and can
     # reach neither the database nor an await.
-    meta = assembly.lookup(accession)
-    availability = assembly.component_availability(accession) or []
+    #
+    # Both calls are synchronous and slow enough to block the event loop --
+    # `lookup` is a blocking HTTP request and `component_availability` shells
+    # out with up to a 60-second timeout -- so they run in a worker thread,
+    # matching `sra_resolver.resolve_cached`.
+    meta = await asyncio.to_thread(assembly.lookup, accession)
+    availability = await asyncio.to_thread(assembly.component_availability, accession) or []
     estimate = sum(
         c.size_bytes or 0
         for c in availability
