@@ -12,11 +12,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
-from app.errors import PermanentError, RetryableError, ValidationError
+from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import align_runner, aligners, bam_stats_runner, tools
-from app.pipelines.align_params import ensure_wired
+from app.pipelines import (
+    align_params,
+    align_runner,
+    aligner_registry,
+    aligners,
+    bam_stats_runner,
+    tools,
+)
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
@@ -27,7 +33,26 @@ log = get_logger(__name__)
 
 
 def _aligner_tool(aligner: Aligner):
-    return tools.bwa_mem2() if aligner is Aligner.BWA_MEM2 else tools.minimap2()
+    """The probe for one aligner.
+
+    A registry lookup rather than an if/else: the old form returned minimap2
+    for anything that was not bwa-mem2, so a new aligner would silently run
+    the wrong binary against the right index.
+    """
+    return aligner_registry.spec_for(aligner).tool()
+
+
+# bowtie2 and HISAT2 index through a separate binary from the one that
+# aligns (`aligners.layout_for(...).builder` names it), so the tool whose
+# version was probed for `_aligner_tool` is not the one that runs here.
+# Resolved the same way every other tool path in this codebase is -- through
+# a probe over `settings.<name>_path` -- rather than `shutil.which` on the
+# builder's bare name, which would bypass the user-overridable setting Task 5
+# already added for exactly this binary.
+_INDEX_BUILDERS: dict[Aligner, "tools.Tool"] = {
+    Aligner.BOWTIE2: tools.bowtie2_build,
+    Aligner.HISAT2: tools.hisat2_build,
+}
 
 
 def _resolve_blob(payload: dict, key: str) -> Path:
@@ -115,7 +140,13 @@ def build_index(ctx: JobContext) -> dict:
 
     ctx.progress(phase="indexing", pct=0.1, message=f"building {aligner.value} index")
 
-    if aligner is Aligner.BWA_MEM2:
+    builder_probe = _INDEX_BUILDERS.get(aligner)
+    if builder_probe is not None:
+        builder = tools.require(builder_probe())
+        cmd = align_runner.build_index_command(
+            aligner=aligner, tool_path=builder.path, reference=ref.reference
+        )
+    elif aligner is Aligner.BWA_MEM2:
         cmd = align_runner.build_index_command(
             aligner=aligner, tool_path=tool.path, reference=ref.reference
         )
@@ -179,22 +210,10 @@ def align_reads(ctx: JobContext) -> dict:
     """
     aligner = Aligner(ctx.payload.get("aligner", Aligner.MINIMAP2))
 
-    # TODO(Task 7): AlignParams is still the Minimap2Params alias, whose
-    # from_dict always builds minimap2 params regardless of what `aligner`
-    # names -- it does not dispatch, and `_aligner_tool` below falls back to
-    # minimap2's tool status for any aligner that is not bwa-mem2. Until
-    # Task 7 switches this call site to align_params.from_dict (the
-    # aligner-aware dispatcher), a job payload naming bowtie2/HISAT2 must
-    # fail loudly here rather than silently align with minimap2 instead.
-    try:
-        ensure_wired(aligner.value)
-    except ValidationError as exc:
-        raise PermanentError(str(exc)) from exc
-
     tool = tools.require(_aligner_tool(aligner))
     samtools = tools.require(tools.samtools())
 
-    params = align_runner.AlignParams.from_dict(ctx.payload.get("params"))
+    params = align_params.from_dict(ctx.payload.get("params"))
     read_group = align_runner.ReadGroup.from_dict(ctx.payload.get("read_group"))
 
     work = _prepare_workdir(ctx, "align")

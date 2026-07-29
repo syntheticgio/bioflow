@@ -190,6 +190,20 @@ def hisat2() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def bowtie2_build() -> Tool:
+    # The separate binary that builds a bowtie2 index (`aligners.layout_for`'s
+    # `builder`) -- not a card in the tool panel, since a user never picks it
+    # directly, but resolved the same way as every other tool path rather than
+    # a bare `shutil.which` on a hardcoded name.
+    return _probe("bowtie2-build", settings.bowtie2_build_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def hisat2_build() -> Tool:
+    return _probe("hisat2-build", settings.hisat2_build_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def samtools() -> Tool:
     return _probe("samtools", settings.samtools_path, ["--version"])
 
@@ -557,6 +571,8 @@ def reset_cache() -> None:
     minimap2.cache_clear()
     bowtie2.cache_clear()
     hisat2.cache_clear()
+    bowtie2_build.cache_clear()
+    hisat2_build.cache_clear()
     samtools.cache_clear()
     bcftools.cache_clear()
     clair3.cache_clear()

@@ -31,7 +31,11 @@ from app.models import (
     SidecarRole,
 )
 from app.pipelines import (
+    align_params as align_params_module,
+)
+from app.pipelines import (
     align_runner,
+    aligner_registry,
     aligners,
     cutadapt_runner,
     fastp_runner,
@@ -40,7 +44,6 @@ from app.pipelines import (
     trimmomatic_runner,
     variant_runner,
 )
-from app.pipelines.align_params import ensure_wired
 from app.pipelines.aligners import Aligner
 from app.services import blob_service, run_service
 from app.storage.paths import blob_path
@@ -766,7 +769,13 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner):
 
 
 def _aligner_tool(aligner: Aligner):
-    return tools.bwa_mem2() if aligner is Aligner.BWA_MEM2 else tools.minimap2()
+    """The probe for one aligner.
+
+    A registry lookup rather than an if/else: the old form returned minimap2
+    for anything that was not bwa-mem2, so a new aligner would silently run
+    the wrong binary against the right index.
+    """
+    return aligner_registry.spec_for(aligner).tool()
 
 
 def active_index_job_query(reference_id: PydanticObjectId) -> dict:
@@ -807,14 +816,7 @@ async def launch_alignment(
     from app.queue import queue
 
     merged_params = {**default_align_params(), **(params or {})}
-    # TODO(Task 7): AlignParams is still the Minimap2Params alias, whose
-    # from_dict always builds minimap2 params regardless of the `aligner`
-    # key -- it does not dispatch. Until Task 7 switches this call site to
-    # align_params.from_dict (the aligner-aware dispatcher), a request for
-    # bowtie2/HISAT2 must fail loudly here rather than silently align with
-    # minimap2 instead.
-    ensure_wired(merged_params.get("aligner"))
-    align_params = align_runner.AlignParams.from_dict(merged_params)
+    align_params = align_params_module.from_dict(merged_params)
     aligner = align_params.aligner
     tools.require(_aligner_tool(aligner))
     tools.require(tools.samtools())
