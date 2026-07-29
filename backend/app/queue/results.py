@@ -230,13 +230,21 @@ async def _link_mate(obj: DataObject) -> None:
 
     mate = matches[0]
 
+    # Read numbers come from the same split that matched the pair, so the label
+    # and the link cannot disagree. `is_mate_of` already established that the
+    # two tokens are opposites, so deriving one from the other is sound.
+    this_read = 1 if split[1] == "R1" else 2
+    mate_read = 2 if this_read == 1 else 1
+
     # Conditional on both sides still being unpaired, so two ingests finishing
     # at once cannot produce a half-formed link. Whichever write lands first
     # wins; the loser sees a modified_count of zero and stops.
     linked = await DataObject.find_one(
         DataObject.id == mate.id,
         DataObject.mate_object_id == None,  # noqa: E711
-    ).update({"$set": {DataObject.mate_object_id: obj.id}})
+    ).update(
+        {"$set": {DataObject.mate_object_id: obj.id, DataObject.read_number: mate_read}}
+    )
     if not getattr(linked, "modified_count", 0):
         log.info("mate_link_skipped_raced", object_id=str(obj.id), mate_id=str(mate.id))
         return
@@ -244,7 +252,9 @@ async def _link_mate(obj: DataObject) -> None:
     await DataObject.find_one(
         DataObject.id == obj.id,
         DataObject.mate_object_id == None,  # noqa: E711
-    ).update({"$set": {DataObject.mate_object_id: mate.id}})
+    ).update(
+        {"$set": {DataObject.mate_object_id: mate.id, DataObject.read_number: this_read}}
+    )
 
     log.info("mate_linked", object_id=str(obj.id), mate_id=str(mate.id), name=obj.name)
 
