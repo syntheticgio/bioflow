@@ -113,6 +113,13 @@ async def update_project(project_id: PydanticObjectId, updates: dict) -> Project
 
 
 async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False) -> None:
+    """Delete a project, optionally with everything inside it.
+
+    `cascade=True` delegates to delete_project_tree rather than detaching blobs
+    itself. The hand-rolled loop this replaces skipped object_service's sidecar
+    cascade and stranded index blobs at refcount 1, where GC could never reach
+    them.
+    """
     project = await get_project(project_id)
 
     object_count = await DataObject.find(DataObject.project_id == project_id).count()
@@ -125,13 +132,8 @@ async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False)
         )
 
     if cascade:
-        from app.services import blob_service
-
-        # Detach one at a time so each refcount decrement is transactional.
-        for obj in await DataObject.find(DataObject.project_id == project_id).to_list():
-            await blob_service.detach_blob_from_object(obj.id)
-        for child in await Project.find(Project.parent_id == project_id).to_list():
-            await delete_project(child.id, cascade=True)
+        await delete_project_tree(project_id)
+        return
 
     await project.delete()
 

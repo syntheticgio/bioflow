@@ -247,3 +247,42 @@ class TestDeleteProjectTree:
         await project_service.delete_project_tree(drop.id)
 
         assert (await Blob.get(shared)).ref_count == 1
+
+
+class TestLegacyCascade:
+    async def test_cascade_true_releases_sidecar_blobs(self):
+        """The old cascade leaked here. Re-pointed at delete_project_tree so
+        there is only one delete path to keep correct."""
+        from app.models import Blob
+        from tests.services.helpers import make_object
+
+        root = await make_project("legacy-cascade")
+        bam = await make_object(root, "legacy.bam", digest="d" * 64)
+        await make_object(
+            root,
+            "legacy.bam.bai",
+            digest="e" * 64,
+            sidecar_of=bam.id,
+            sidecar_role=SidecarRole.BAI,
+        )
+
+        await project_service.delete_project(root.id, cascade=True)
+
+        assert (await Blob.get("e" * 64)).ref_count == 0
+
+    async def test_cascade_false_still_refuses_a_non_empty_project(self):
+        from app.errors import ConflictError
+        from tests.services.helpers import make_object
+
+        root = await make_project("legacy-refuse")
+        await make_object(root, "blocker.fastq.gz")
+
+        with pytest.raises(ConflictError):
+            await project_service.delete_project(root.id, cascade=False)
+
+        assert await Project.get(root.id) is not None
+
+    async def test_cascade_false_still_deletes_an_empty_project(self):
+        root = await make_project("legacy-empty")
+        await project_service.delete_project(root.id, cascade=False)
+        assert await Project.get(root.id) is None
