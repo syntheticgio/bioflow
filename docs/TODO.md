@@ -334,27 +334,6 @@ because it is a schema change that this feature does not otherwise need.
 Touches: `backend/app/models/object.py`, `backend/app/queue/results.py`,
 `backend/app/services/object_service.py`.
 
-## Warn before a role conversion discards in-progress metadata edits
-
-Raised: 2026-07-26, during the object-role implementation.
-
-`SchemaMetadataEditor` keeps local form state and its resync effect bails while
-`dirty`, so converting a file mid-edit would otherwise save the previous role's
-values against the new role's schema. The fix shipped is a
-`key={obj.role ?? "none"}` remount in `DetailPanel.tsx`, which discards that
-local state — correct, but **silent**: a user who types into the metadata form
-and then clicks Convert loses the typing with no warning.
-
-The honest fix is a dirty-state confirmation in `RoleConverter` before
-mutating, which needs `SchemaMetadataEditor` to expose its dirty flag (lift it
-to the parent, or accept an `onDirtyChange` callback). Deferred because it
-means re-architecting a component that otherwise works, for an edge case that
-requires an unsaved edit plus a conversion in the same visit.
-
-Touches: `frontend/src/components/SchemaMetadataEditor.tsx`,
-`frontend/src/components/RoleConverter.tsx`,
-`frontend/src/components/DetailPanel.tsx`.
-
 ## Sample GC content across the file instead of a prefix
 
 Raised: 2026-07-26, during the object-role design.

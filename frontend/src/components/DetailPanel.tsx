@@ -526,6 +526,7 @@ function ObjectDetail({ id }: { id: string }) {
               setConfirmingDelete={setConfirmingDelete}
               remove={remove}
               onTagsChanged={() => qc.invalidateQueries({ queryKey: ["object", id] })}
+              metadataDirty={metadataDirty}
             />
           </TabPanel>
         )}
@@ -810,12 +811,14 @@ function ActionsTab({
   setConfirmingDelete,
   remove,
   onTagsChanged,
+  metadataDirty,
 }: {
   obj: ObjectDetailData;
   confirmingDelete: boolean;
   setConfirmingDelete: (v: boolean) => void;
   remove: { mutate: () => void; isPending: boolean };
   onTagsChanged: () => void;
+  metadataDirty: boolean;
 }) {
   return (
     <>
@@ -828,7 +831,7 @@ function ActionsTab({
         />
       </div>
 
-      <RoleConverter obj={obj} />
+      <RoleConverter obj={obj} metadataDirty={metadataDirty} />
 
       <div className="section">
         <div className="section-title">Delete</div>
