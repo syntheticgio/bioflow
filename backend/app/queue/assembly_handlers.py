@@ -295,6 +295,11 @@ def _label_components(work: Path, accession: str) -> list[dict]:
     if catalog.is_file():
         try:
             payload = json.loads(catalog.read_text())
+            if not isinstance(payload, dict):
+                # Valid JSON (e.g. a bare `null`) but not the object shape we
+                # expect -- same "can't trust this catalog" case as a parse
+                # failure, so fall back the same way rather than raising.
+                raise ValueError("dataset_catalog.json did not decode to an object")
             for group in payload.get("assemblies") or []:
                 for entry in group.get("files") or []:
                     spec = by_type.get(entry.get("fileType"))

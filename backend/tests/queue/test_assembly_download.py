@@ -110,6 +110,19 @@ class TestLabelWithoutCatalog:
         assert by_name["cds_from_genomic.fna"] == "cds"
         assert by_name["GCF_000002445.2_ASM244v1_genomic.fna"] == "genome"
 
+    def test_a_non_dict_catalog_falls_back_instead_of_raising(self, extracted: Path):
+        """`dataset_catalog.json` containing valid-but-non-dict JSON (the
+        literal `null`, a bare number, etc.) must not crash the whole job.
+        `json.loads` succeeds, so this only reaches the `.get("assemblies")`
+        call -- which raises AttributeError on a non-dict payload unless that
+        case is explicitly guarded."""
+        (extracted / "ncbi_dataset" / "data" / "dataset_catalog.json").write_text("null")
+        staged = assembly_handlers._label_components(extracted, "GCF_000002445.2")
+        assert {s["component"] for s in staged} == {"genome", "gff3", "protein", "cds"}
+        by_name = {s["name"]: s["component"] for s in staged}
+        assert by_name["cds_from_genomic.fna"] == "cds"
+        assert by_name["GCF_000002445.2_ASM244v1_genomic.fna"] == "genome"
+
 
 class TestDiskPreflight:
     def test_a_download_that_cannot_fit_is_refused_up_front(self, tmp_path: Path):
