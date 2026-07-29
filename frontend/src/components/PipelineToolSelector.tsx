@@ -1,7 +1,8 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { PipelineTool, PipelineType } from "../api/types";
+import { ToolDetailPane } from "./ToolDetailPane";
 
 interface Props {
   pipeline: PipelineType;
@@ -21,19 +22,30 @@ const PIPELINE_LABEL: Record<PipelineType, string> = {
 };
 
 /**
- * A radio group of tool cards for one pipeline, between the panel button and
- * the parameter dialog.
+ * A list-and-detail picker for one pipeline, between the panel button and the
+ * parameter dialog: a compact rail of rows on the left, and everything about
+ * whichever row is focused on the right.
  *
- * Always shown, even when only one tool matches. An earlier draft of this
- * plan skipped the selector whenever exactly one tool was *available* --  but
- * on a host where bwa-mem2 cannot run, that rule hides the align selector
- * entirely (minimap2 is the only available aligner) while showing trim's
- * (fastp, cutadapt, trimmomatic all probe as available). That inverts the
- * plan's own goal of surfacing *why* an installed-but-unrunnable tool is
- * greyed out -- the one case that skip rule would hide it in is the one host
- * where seeing it matters most. Always rendering means the explanation is
- * always reachable, at the cost of one click for a pipeline that happens to
- * have no real choice today.
+ * The rail replaces the older always-rendered card list. That list rendered
+ * every tool's full summary and strengths inline so a disabled tool's
+ * explanation -- "installed, but this application does not run it yet" --
+ * stayed reachable without requiring the tool to be selectable. With 4-5
+ * aligners that became a long vertical scroll of mostly-redundant detail.
+ * This layout keeps the same property -- a disabled row's explanation is
+ * always reachable -- but through *focus* instead of always-rendering:
+ * `focused` tracks which row the detail pane describes, independent of
+ * `selected` (which tracks the actual choice). A disabled row can be focused
+ * and read, just not selected. `focusedTool` falls back to the selected tool
+ * and then the first tool so the pane is never blank once options exist.
+ *
+ * The `listbox`/`option` roles below are a known, deliberate deviation from
+ * the ARIA listbox pattern: that pattern has no state for "focus is here but
+ * this option is not selected," since roving-tabindex focus on an option is
+ * normally the selection act itself. A disabled row breaks that assumption
+ * on purpose. `role="tablist"`/`tab`/`tabpanel` would map more precisely
+ * (its `aria-selected` already tracks "which panel is showing" rather than
+ * a value choice), but that is a larger rework than this redesign -- see
+ * docs/superpowers/specs/2026-07-29-additional-aligners-design.md, section 6.
  */
 export function PipelineToolSelector({
   pipeline,
@@ -52,60 +64,51 @@ export function PipelineToolSelector({
 
   const tools = (data?.tools ?? []).filter((t) => t.pipelines.includes(pipeline));
 
-  // A card is choosable only when the binary works *and* something in this
+  // A row is choosable only when the binary works *and* something in this
   // application actually calls it. `available` alone would offer cutadapt as
   // a choice that silently does nothing once Continue is pressed; `runnable`
   // alone would offer bwa-mem2 on a host where it cannot execute.
   const choosable = (t: PipelineTool) => t.available && t.runnable;
 
+  // Focus is tracked separately from selection because a disabled row can be
+  // focused but not selected -- that is what keeps its "not installed"
+  // explanation reachable in the detail pane. The old card list skipped
+  // disabled entries entirely, which was right for a plain radio group and
+  // wrong once the pane carries the explanation.
+  const [focused, setFocused] = useState<string | null>(null);
+  const focusedTool =
+    tools.find((t) => t.name === (focused ?? selected)) ?? tools[0] ?? null;
+
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (tools.length === 0) return;
-    const current = tools.findIndex((t) => t.name === selected);
+    const current = tools.findIndex((t) => t.name === (focused ?? selected));
 
-    // `start` is the index the search steps *from*; the loop below always
-    // steps at least once, so Home (start just before 0, step forward) and
-    // End (start just past the last, step backward) land correctly without a
-    // special case.
-    let start: number;
-    let step: 1 | -1;
+    let next: number;
     switch (e.key) {
       case "ArrowDown":
       case "ArrowRight":
-        start = current;
-        step = 1;
+        next = (current + 1 + tools.length) % tools.length;
         break;
       case "ArrowUp":
       case "ArrowLeft":
-        start = current;
-        step = -1;
+        next = (current - 1 + tools.length) % tools.length;
         break;
       case "Home":
-        start = -1;
-        step = 1;
+        next = 0;
         break;
       case "End":
-        start = tools.length;
-        step = -1;
+        next = tools.length - 1;
         break;
       default:
         return;
     }
 
     e.preventDefault();
-
-    // Steps past disabled cards rather than landing on one: a radio group
-    // where an arrow key can select an unusable option is worse than one
-    // that skips it, the same reason a browser's own <input type=radio>
-    // group skips disabled members.
-    let candidate = start;
-    for (let tries = 0; tries < tools.length; tries++) {
-      candidate = (candidate + step + tools.length) % tools.length;
-      if (choosable(tools[candidate])) break;
-    }
-    if (!choosable(tools[candidate])) return; // nothing choosable at all
-
-    const tool = tools[candidate];
-    onSelect(tool.name);
+    const tool = tools[next];
+    setFocused(tool.name);
+    // Selection follows focus only for choosable rows; a disabled row can be
+    // read but not chosen.
+    if (choosable(tool)) onSelect(tool.name);
     listRef.current
       ?.querySelector<HTMLDivElement>(`[data-tool="${tool.name}"]`)
       ?.focus();
@@ -138,35 +141,59 @@ export function PipelineToolSelector({
         )}
 
         {tools.length > 0 && (
-          <div
-            className="tool-card-list"
-            role="radiogroup"
-            aria-label={`Select ${label}`}
-            ref={listRef}
-            onKeyDown={onKeyDown}
-          >
-            {tools.map((tool) => {
-              const disabled = !choosable(tool);
-              const isSelected = tool.name === selected;
-              // Roving tabindex, as in Tabs.tsx: the group is one stop in the
-              // page's tab order. Before anything is selected, the stop is
-              // the first choosable card rather than the first card outright
-              // -- landing Tab on a disabled option would require an extra
-              // arrow press just to reach something the group can select.
-              const isTabStop =
-                isSelected ||
-                (!selected && !disabled && tools.findIndex(choosable) === tools.indexOf(tool));
-              return (
-                <ToolCard
-                  key={tool.name}
-                  tool={tool}
-                  selected={isSelected}
-                  disabled={disabled}
-                  tabIndex={isTabStop ? 0 : -1}
-                  onSelect={() => !disabled && onSelect(tool.name)}
-                />
-              );
-            })}
+          <div className="tool-picker">
+            <div
+              className="tool-rail"
+              role="listbox"
+              aria-label={`Select ${label}`}
+              ref={listRef}
+              onKeyDown={onKeyDown}
+            >
+              {tools.map((tool, i) => {
+                const disabled = !choosable(tool);
+                const isSelected = tool.name === selected;
+                const isFocused = tool.name === (focused ?? selected);
+                return (
+                  <div
+                    key={tool.name}
+                    className={`tool-row${isSelected ? " selected" : ""}${
+                      disabled ? " disabled" : ""
+                    }${isFocused ? " focused" : ""}`}
+                    role="option"
+                    aria-selected={isSelected}
+                    aria-disabled={disabled}
+                    data-tool={tool.name}
+                    tabIndex={isFocused || (!focused && !selected && i === 0) ? 0 : -1}
+                    onFocus={() => setFocused(tool.name)}
+                    onClick={() => {
+                      setFocused(tool.name);
+                      if (!disabled) onSelect(tool.name);
+                    }}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === " ") && !disabled) {
+                        e.preventDefault();
+                        onSelect(tool.name);
+                      }
+                    }}
+                  >
+                    <div className="tool-row-main">
+                      <span className="tool-name">{tool.name}</span>
+                      {tool.version && (
+                        <span className="tool-version">v{tool.version}</span>
+                      )}
+                    </div>
+                    <div className="tool-row-line">{tool.one_liner}</div>
+                    {disabled && (
+                      <span className="tool-row-badge">
+                        {!tool.available ? "not installed" : "not supported yet"}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <ToolDetailPane tool={focusedTool} />
           </div>
         )}
 
@@ -184,68 +211,6 @@ export function PipelineToolSelector({
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-function ToolCard({
-  tool,
-  selected,
-  disabled,
-  tabIndex,
-  onSelect,
-}: {
-  tool: PipelineTool;
-  selected: boolean;
-  disabled: boolean;
-  tabIndex: 0 | -1;
-  onSelect: () => void;
-}) {
-  // Two different reasons a card can be unusable, and the message has to say
-  // which: "not installed" points at the environment, "not yet supported"
-  // points at this application. Telling a user to install a binary that
-  // already works would send them chasing the wrong fix.
-  const reason = !tool.available
-    ? tool.error || `${tool.name} is not installed`
-    : !tool.runnable
-      ? `${tool.name} is installed, but this application does not run it yet.`
-      : null;
-
-  return (
-    <div
-      className={`tool-card${selected ? " selected" : ""}${disabled ? " disabled" : ""}`}
-      role="radio"
-      aria-checked={selected}
-      aria-disabled={disabled}
-      data-tool={tool.name}
-      tabIndex={tabIndex}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if ((e.key === "Enter" || e.key === " ") && !disabled) {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-    >
-      <div className="tool-card-header">
-        <span className="tool-radio">
-          {selected && <span className="tool-radio-dot" />}
-        </span>
-        <span className="tool-name">{tool.name}</span>
-        {tool.version && <span className="tool-version">v{tool.version}</span>}
-      </div>
-
-      {tool.summary && <div className="tool-card-summary">{tool.summary}</div>}
-
-      {tool.strengths.length > 0 && (
-        <ul className="tool-card-strengths">
-          {tool.strengths.map((s) => (
-            <li key={s}>{s}</li>
-          ))}
-        </ul>
-      )}
-
-      {reason && <div className="tool-card-error">{reason}</div>}
     </div>
   );
 }

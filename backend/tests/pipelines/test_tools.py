@@ -1,5 +1,6 @@
 """External tool discovery and version parsing."""
 
+import dataclasses
 import os
 import re
 import sys
@@ -205,6 +206,8 @@ class TestSerialization:
             "nanoplot",
             "bwa-mem2",
             "minimap2",
+            "bowtie2",
+            "hisat2",
             "samtools",
             "bcftools",
             "clair3",
@@ -313,3 +316,65 @@ class TestVariantToolProbes:
         default for a tool with no handler, not the default for one with one."""
         enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
         assert enriched["runnable"] is False
+
+
+class TestNewAlignerProbes:
+    def test_bowtie2_probes(self):
+        """Runs against the real binary in the image. An installed-but-broken
+        tool is exactly what `available` exists to report, so this asserts the
+        probe returns a Tool rather than asserting availability."""
+        t = tools.bowtie2()
+        assert t.name == "bowtie2"
+
+    def test_hisat2_probes(self):
+        t = tools.hisat2()
+        assert t.name == "hisat2"
+
+    def test_both_are_in_all_tools(self):
+        names = {t.name for t in tools.all_tools()}
+        assert "bowtie2" in names
+        assert "hisat2" in names
+
+    def test_both_have_metadata(self):
+        """A tool with no TOOL_META entry defaults to runnable=False and would
+        render as a permanently greyed-out card."""
+        assert tools.TOOL_META["bowtie2"].runnable is True
+        assert tools.TOOL_META["hisat2"].runnable is True
+
+    def test_both_are_align_pipeline_tools(self):
+        from app.pipelines.tools import PipelineType
+
+        assert PipelineType.ALIGN in tools.TOOL_META["bowtie2"].pipelines
+        assert PipelineType.ALIGN in tools.TOOL_META["hisat2"].pipelines
+
+    def test_every_tool_meta_has_a_one_liner(self):
+        """The selector rail shows this instead of the full summary."""
+        for name, meta in tools.TOOL_META.items():
+            assert meta.one_liner.strip(), f"{name} has no one_liner"
+
+    def test_one_liner_survives_serialization(self):
+        """Regression: `TOOL_META` carrying a one_liner is not enough --
+        `tool_with_meta` builds the dict the API actually returns, and it
+        silently dropped `one_liner` while forwarding `summary`/`strengths`/
+        `runnable` right next to it. The dict-level test above would not have
+        caught that; this goes through the same serialization boundary the
+        endpoint uses."""
+        tool = tools.Tool(name="bowtie2", path="/usr/bin/bowtie2", version="2.5.4")
+        enriched = tools.tool_with_meta(tool)
+        assert enriched["one_liner"] == tools.TOOL_META["bowtie2"].one_liner
+        assert enriched["one_liner"].strip()
+
+    def test_an_undescribed_tool_serializes_with_an_empty_one_liner(self):
+        """Same fallback as `summary`: no TOOL_META entry means an empty
+        string, not a missing key or a 500."""
+        enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
+        assert enriched["one_liner"] == ""
+
+    def test_every_tool_meta_field_reaches_the_serialized_output(self):
+        """Generic on purpose: this is what should have caught the one_liner
+        bug, and would catch the same class of bug for any future field added
+        to ToolMeta and forgotten in tool_with_meta."""
+        tool = tools.Tool(name="bowtie2", path="/usr/bin/bowtie2", version="2.5.0")
+        enriched = tools.tool_with_meta(tool)
+        for field in dataclasses.fields(tools.ToolMeta):
+            assert field.name in enriched, f"{field.name} missing from serialized output"

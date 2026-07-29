@@ -13,9 +13,30 @@ from pathlib import Path
 
 from app.errors import ValidationError
 from app.logging import get_logger
+from app.pipelines import aligners
 from app.pipelines.aligners import Aligner
 
+# Parameter classes moved to align_params.py when the second and third
+# aligners arrived: one flat class covering four tools would be a union of
+# mostly-inapplicable fields. Re-exported here because this is where every
+# existing call site imports them from.
+from app.pipelines.align_params import (
+    BaseAlignParams,
+    Bowtie2Params,
+    Bwa2Params,
+    Hisat2Params,
+    Minimap2Params,
+)
+
 log = get_logger(__name__)
+
+# AlignParams aliases Minimap2Params rather than BaseAlignParams: every
+# existing direct-construction call site (AlignParams(), AlignParams(preset=...))
+# relies on defaults and fields that only Minimap2Params has, and dataclass
+# `__init__` performs no validation -- that only lives in `from_dict` -- so
+# constructing a Minimap2Params with aligner=Aligner.BWA_MEM2 works exactly
+# like the old flat dataclass did.
+AlignParams = Minimap2Params
 
 # bwa-mem2 reports throughput on stderr as it goes:
 #   [M::mem_process_seqs] Processed 80000 reads in 12.345 CPU sec
@@ -113,6 +134,24 @@ class ReadGroup:
         ]
         return "\\t".join(fields)
 
+    def as_rg_args(self) -> list[str]:
+        """`--rg-id` plus one `--rg` per remaining field.
+
+        bowtie2 and HISAT2 have no single -R taking a whole @RG line. Handing
+        them `as_sam_header()` would embed a literal backslash-t in the BAM
+        header, which reads as a corrupt read group to every downstream tool
+        rather than failing at alignment time.
+        """
+        rg_id = self.identifier or self.sample
+        args = ["--rg-id", rg_id]
+        for field_value in (
+            f"SM:{self.sample}",
+            f"LB:{self.library}",
+            f"PL:{self.platform}",
+        ):
+            args += ["--rg", field_value]
+        return args
+
     def as_dict(self) -> dict:
         return {
             "sample": self.sample,
@@ -138,56 +177,6 @@ class ReadGroup:
         )
 
 
-@dataclass
-class AlignParams:
-    """User-facing knobs for an alignment run."""
-
-    aligner: Aligner = Aligner.MINIMAP2
-    preset: str = Preset.SHORT_READ
-    threads: int = 4
-    sort_memory_mb: int = 1024
-    mark_duplicates: bool = False
-
-    def as_dict(self) -> dict:
-        return {
-            "aligner": self.aligner.value,
-            "preset": self.preset,
-            "threads": self.threads,
-            "sort_memory_mb": self.sort_memory_mb,
-            "mark_duplicates": self.mark_duplicates,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict | None) -> "AlignParams":
-        data = dict(data or {})
-        aligner = Aligner(data.get("aligner", Aligner.MINIMAP2))
-        preset = data.get("preset") or default_preset(aligner)
-
-        if aligner is Aligner.MINIMAP2 and preset not in Preset.ALL:
-            raise ValidationError(
-                f"Unknown minimap2 preset {preset!r}",
-                details={"valid": list(Preset.ALL)},
-            )
-
-        threads = int(data.get("threads", 4))
-        if threads < 1:
-            raise ValidationError("threads must be at least 1")
-
-        sort_memory_mb = int(data.get("sort_memory_mb", 1024))
-        if sort_memory_mb < 64:
-            # samtools spills to disk below this, which is slower than the
-            # memory saved is worth.
-            raise ValidationError("sort_memory_mb must be at least 64")
-
-        return cls(
-            aligner=aligner,
-            preset=preset,
-            threads=threads,
-            sort_memory_mb=sort_memory_mb,
-            mark_duplicates=bool(data.get("mark_duplicates", False)),
-        )
-
-
 def default_preset(aligner: Aligner) -> str:
     """bwa-mem2 has a single short-read mode; minimap2 must be told."""
     return "" if aligner is Aligner.BWA_MEM2 else Preset.SHORT_READ
@@ -198,16 +187,25 @@ def build_index_command(
 ) -> list[str]:
     """The command that builds an aligner's index for a reference.
 
-    bwa-mem2 writes its five files beside the reference and takes no output
-    path; minimap2 writes one file wherever it is told. That asymmetry is why
-    both exist here from the start.
+    Three shapes: bwa-mem2 writes its five files beside the reference and
+    takes no output path, minimap2 writes one file wherever it is told, and
+    bowtie2/HISAT2 take a reference and a basename as two positional
+    arguments. `tool_path` for the latter two is the *builder* binary
+    (bowtie2-build, hisat2-build), not the aligner -- see
+    `aligners.layout_for(...).builder`.
     """
     if aligner is Aligner.BWA_MEM2:
         return [tool_path, "index", str(reference)]
 
-    if output is None:
-        raise ValidationError("minimap2 index requires an output path")
-    return [tool_path, "-d", str(output), str(reference)]
+    if aligner is Aligner.MINIMAP2:
+        if output is None:
+            raise ValidationError("minimap2 index requires an output path")
+        return [tool_path, "-d", str(output), str(reference)]
+
+    # bowtie2-build / hisat2-build: <reference> <basename>. The basename is
+    # the reference path itself, so the index files land beside it as
+    # `genome.fna.1.bt2` and materialize back under names the layout knows.
+    return [tool_path, str(reference), str(reference)]
 
 
 def build_faidx_command(*, samtools_path: str, reference: Path) -> list[str]:
@@ -279,21 +277,90 @@ def _aligner_argv(
     r1: Path,
     r2: Path | None,
     read_group: ReadGroup,
-    params: AlignParams,
+    params,
 ) -> list[str]:
-    """The aligner half of the pipeline, before samtools."""
-    argv = [aligner_path]
+    """The aligner half of the pipeline, before samtools.
 
+    Four tools, three calling conventions. bwa-mem2 and minimap2 take reads
+    positionally and the reference as a path; bowtie2 and HISAT2 take the
+    index basename via -x and the reads via -U or -1/-2. Getting that wrong
+    does not fail cleanly -- bowtie2 reads a stray positional argument as its
+    index basename and reports a missing index.
+    """
     if aligner is Aligner.BWA_MEM2:
-        argv += ["mem", "-t", str(params.threads), "-R", read_group.as_sam_header()]
+        argv = [aligner_path, "mem", "-t", str(params.threads)]
+        argv += ["-R", read_group.as_sam_header()]
         argv += [str(reference), str(r1)]
-    else:
+        if r2 is not None:
+            argv.append(str(r2))
+        return argv
+
+    if aligner is Aligner.MINIMAP2:
         # -a emits SAM rather than PAF, which samtools sort requires.
-        argv += ["-a", "-x", params.preset, "-t", str(params.threads)]
+        argv = [aligner_path, "-a", "-x", params.preset, "-t", str(params.threads)]
         argv += ["-R", read_group.as_sam_header(), str(reference), str(r1)]
+        if r2 is not None:
+            argv.append(str(r2))
+        return argv
+
+    return _prefix_aligner_argv(
+        aligner=aligner,
+        aligner_path=aligner_path,
+        reference=reference,
+        r1=r1,
+        r2=r2,
+        read_group=read_group,
+        params=params,
+    )
+
+
+def _prefix_aligner_argv(
+    *,
+    aligner: Aligner,
+    aligner_path: str,
+    reference: Path,
+    r1: Path,
+    r2: Path | None,
+    read_group: ReadGroup,
+    params,
+) -> list[str]:
+    """bowtie2 and HISAT2, which share a calling convention."""
+    layout = aligners.layout_for(aligner)
+    argv = [aligner_path, "-x", layout.reference_argument(reference)]
 
     if r2 is not None:
-        argv.append(str(r2))
+        argv += ["-1", str(r1), "-2", str(r2)]
+    else:
+        argv += ["-U", str(r1)]
+
+    argv += ["-p", str(params.threads)]
+    argv += read_group.as_rg_args()
+
+    if params.report_k > 0:
+        # 0 means "leave the flag off". `-k 0` tells the tool to report zero
+        # alignments, which produces an empty BAM rather than an error.
+        argv += ["-k", str(params.report_k)]
+
+    if aligner is Aligner.BOWTIE2:
+        argv.append(params.sensitivity)
+        if params.local:
+            argv.append("--local")
+        argv += ["-X", str(params.maxins)]
+        if params.no_mixed:
+            argv.append("--no-mixed")
+        if params.no_discordant:
+            argv.append("--no-discordant")
+    else:
+        if params.rna_strandness:
+            # The flag has no "unstranded" value -- omitting it is how that is
+            # expressed, and an empty string would be rejected as an argument.
+            argv += ["--rna-strandness", params.rna_strandness]
+        argv += ["--max-intronlen", str(params.max_intronlen)]
+        if params.no_spliced_alignment:
+            argv.append("--no-spliced-alignment")
+        if params.dta:
+            argv.append("--dta")
+
     return argv
 
 

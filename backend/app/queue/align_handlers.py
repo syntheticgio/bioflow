@@ -15,7 +15,14 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import align_runner, aligners, bam_stats_runner, tools
+from app.pipelines import (
+    align_params,
+    align_runner,
+    aligner_registry,
+    aligners,
+    bam_stats_runner,
+    tools,
+)
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
@@ -26,7 +33,35 @@ log = get_logger(__name__)
 
 
 def _aligner_tool(aligner: Aligner):
-    return tools.bwa_mem2() if aligner is Aligner.BWA_MEM2 else tools.minimap2()
+    """The probe for one aligner.
+
+    A registry lookup rather than an if/else: the old form returned minimap2
+    for anything that was not bwa-mem2, so a new aligner would silently run
+    the wrong binary against the right index.
+    """
+    return aligner_registry.spec_for(aligner).tool()
+
+
+def _index_tool(aligner: Aligner, aligner_tool: tools.Tool) -> tools.Tool:
+    """Which `Tool` builds this aligner's index.
+
+    bowtie2 and HISAT2 index through a separate binary from the one that
+    aligns (`aligner_registry.spec_for(...).builder_tool`, the callable
+    counterpart of the bare name in `aligners.layout_for(...).builder`), so
+    the tool whose version was probed as `aligner_tool` is not always the one
+    that builds the index. Resolved the same way every other tool path in
+    this codebase is -- through a probe over `settings.<name>_path` -- rather
+    than `shutil.which` on the builder's bare name, which would bypass the
+    user-overridable setting Task 5 already added for exactly this binary.
+
+    Kept separate from command construction so the tool-selection branch --
+    the one place a copy-paste could silently swap in the wrong binary's path
+    -- is unit-testable without building a whole JobContext.
+    """
+    builder_tool = aligner_registry.spec_for(aligner).builder_tool
+    if builder_tool is not None:
+        return tools.require(builder_tool())
+    return aligner_tool
 
 
 def _resolve_blob(payload: dict, key: str) -> Path:
@@ -114,17 +149,18 @@ def build_index(ctx: JobContext) -> dict:
 
     ctx.progress(phase="indexing", pct=0.1, message=f"building {aligner.value} index")
 
-    if aligner is Aligner.BWA_MEM2:
-        cmd = align_runner.build_index_command(
-            aligner=aligner, tool_path=tool.path, reference=ref.reference
-        )
-    else:
+    index_tool = _index_tool(aligner, tool)
+    if aligner is Aligner.MINIMAP2:
         cmd = align_runner.build_index_command(
             aligner=aligner,
-            tool_path=tool.path,
+            tool_path=index_tool.path,
             reference=ref.reference,
             output=ref.reference.parent
             / f"{ref.reference.name}{aligners.MINIMAP2_SUFFIX}",
+        )
+    else:
+        cmd = align_runner.build_index_command(
+            aligner=aligner, tool_path=index_tool.path, reference=ref.reference
         )
 
     log.info(
@@ -177,10 +213,11 @@ def align_reads(ctx: JobContext) -> dict:
     job: it is fast, independently useful, and separable.
     """
     aligner = Aligner(ctx.payload.get("aligner", Aligner.MINIMAP2))
+
     tool = tools.require(_aligner_tool(aligner))
     samtools = tools.require(tools.samtools())
 
-    params = align_runner.AlignParams.from_dict(ctx.payload.get("params"))
+    params = align_params.from_dict(ctx.payload.get("params"))
     read_group = align_runner.ReadGroup.from_dict(ctx.payload.get("read_group"))
 
     work = _prepare_workdir(ctx, "align")

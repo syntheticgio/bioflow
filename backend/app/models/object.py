@@ -86,6 +86,8 @@ class SidecarRole(StrEnum):
 
     BWA_MEM2_INDEX = "bwa-mem2-index"
     MINIMAP2_INDEX = "minimap2-index"
+    BOWTIE2_INDEX = "bowtie2-index"
+    HISAT2_INDEX = "hisat2-index"
     FAI = "fai"
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.

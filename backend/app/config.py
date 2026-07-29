@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     trimmomatic_adapters_dir: str = "/usr/share/trimmomatic"
     bwa_mem2_path: str = "bwa-mem2"
     minimap2_path: str = "minimap2"
+    bowtie2_path: str = "bowtie2"
+    # The index builders are separate binaries rather than subcommands, so
+    # they need their own paths -- `bowtie2 index` is not a thing.
+    bowtie2_build_path: str = "bowtie2-build"
+    hisat2_path: str = "hisat2"
+    hisat2_build_path: str = "hisat2-build"
     samtools_path: str = "samtools"
     fasterq_dump_path: str = "fasterq-dump"
     prefetch_path: str = "prefetch"

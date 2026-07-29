@@ -368,3 +368,15 @@ class TestBamNaming:
         """samtools infers the output format from the filename."""
         for name in ("a_R1.fastq.gz", "b.fq", "c_R2.fastq.bz2"):
             assert pipeline_service._bam_name(name, "S").endswith(".bam")
+
+
+class TestAlignerToolResolution:
+    def test_every_aligner_resolves_to_its_own_tool(self):
+        """_aligner_tool used to be an if/else over two tools, and returned
+        minimap2 for anything that was not bwa-mem2 -- so a bowtie2 job would
+        have silently run minimap2 against a bowtie2 index."""
+        from app.pipelines.aligners import Aligner
+        from app.queue.align_handlers import _aligner_tool
+
+        for aligner in Aligner:
+            assert _aligner_tool(aligner).name == aligner.value

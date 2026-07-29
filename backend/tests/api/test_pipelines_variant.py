@@ -75,3 +75,12 @@ class TestVariantToolsAreListed:
         by_name = {t["name"]: t for t in resp.json()["tools"]}
         assert "variant" in by_name["clair3"]["pipelines"]
         assert "variant" in by_name["bcftools"]["pipelines"]
+
+    def test_tools_endpoint_includes_one_liner(self, client):
+        """Regression: `tool_with_meta` forwarded `summary`/`strengths`/
+        `runnable` from `TOOL_META` but dropped `one_liner`, so the real API
+        response omitted it even though every `TOOL_META` entry has one."""
+        resp = client.get("/pipelines/tools")
+        by_name = {t["name"]: t for t in resp.json()["tools"]}
+        assert by_name["clair3"]["one_liner"]
+        assert by_name["bcftools"]["one_liner"]

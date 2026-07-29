@@ -1,5 +1,7 @@
 import type {
   AlignDefaults,
+  AlignEnvelope,
+  AlignerSchema,
   AlignRequest,
   BulkResult,
   CompleteAccepted,
@@ -353,6 +355,16 @@ export const api = {
   /** Alignment defaults for one file, including a read group from its metadata. */
   alignDefaults: (objectId: string) =>
     request<AlignDefaults>(`/pipelines/align/defaults/${objectId}`),
+
+  alignerSchema: (aligner: string) =>
+    request<AlignerSchema>(
+      `/pipelines/aligners/${encodeURIComponent(aligner)}/schema`,
+    ),
+
+  alignEnvelope: (objectId: string, referenceId: string) =>
+    request<AlignEnvelope>(
+      `/pipelines/align-envelope?object_id=${objectId}&reference_id=${referenceId}`,
+    ),
 
   /** Candidate references in a project, each with its index status. */
   references: (projectId: string) =>

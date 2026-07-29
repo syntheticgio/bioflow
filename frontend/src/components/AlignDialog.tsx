@@ -2,22 +2,15 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { AlignerParamFields } from "./AlignerParamFields";
+import { classify, estimateMb, explain } from "../lib/estimate";
 import { notify } from "../stores/messageStore";
 import type {
   AlignParams,
   AlignerName,
-  AlignPreset,
   DataObject,
   ReadGroup,
 } from "../api/types";
-
-const PRESET_LABELS: Record<AlignPreset, string> = {
-  sr: "Short read (Illumina)",
-  "map-ont": "Oxford Nanopore",
-  "map-pb": "PacBio (CLR)",
-  "map-hifi": "PacBio (HiFi/CCS)",
-  "lr:hq": "Oxford Nanopore (duplex / Q20+)",
-};
 
 /**
  * Launch an alignment of FASTQ reads against a reference.
@@ -103,6 +96,60 @@ export function AlignDialog({
       ? !chosen.indexes[aligner] || !chosen.indexes.fai
       : false;
 
+  const { data: schema } = useQuery({
+    queryKey: ["pipelines", "aligner-schema", params?.aligner],
+    queryFn: () => api.alignerSchema(params.aligner),
+    enabled: !!params?.aligner,
+  });
+
+  const { data: envelope } = useQuery({
+    queryKey: ["pipelines", "align-envelope", object.id, chosenId],
+    queryFn: () => api.alignEnvelope(object.id, chosenId!),
+    enabled: chosenId != null,
+  });
+
+  // The same arithmetic the backend runs at launch. Local so the numbers move
+  // with the sliders; the backend re-checks authoritatively, so a drift here
+  // costs a wrong preview rather than a bad run.
+  const model = envelope?.models[params?.aligner ?? ""] ?? null;
+  const estimate =
+    model && envelope
+      ? estimateMb(model, {
+          referenceBases: envelope.reference_bases,
+          threads: params?.threads ?? 4,
+          sortMemoryMb: params?.sort_memory_mb ?? 1024,
+          buildingIndex: needsIndex,
+        })
+      : null;
+  const band =
+    estimate != null && envelope
+      ? classify({
+          estimateMb: estimate,
+          memBudgetMb: envelope.mem_budget_mb,
+          threads: params?.threads ?? 4,
+          cpuBudget: envelope.cpu_budget,
+        })
+      : "ok";
+  const bandMessage =
+    model && envelope && band !== "ok"
+      ? explain(model, envelope, {
+          threads: params?.threads ?? 4,
+          sortMemoryMb: params?.sort_memory_mb ?? 1024,
+          buildingIndex: needsIndex,
+        })
+      : null;
+
+  // The banner below tells the user to change threads/sort_memory_mb, both of
+  // which live in the "performance" disclosure -- so once the resource band
+  // is anything but "ok", that disclosure must be visible or the fix it's
+  // pointing at is hidden. Auto-expand for both warn and block and ignore a
+  // manual collapse while either holds: for "block" the launch button is
+  // disabled, so hiding the very fields needed to unblock it would defeat the
+  // point of showing the banner at all; treating "warn" the same way keeps
+  // the rule a simple one-liner instead of a second state to reason about,
+  // and a user can still collapse the section once the band returns to "ok".
+  const showAdvanced = advanced || band !== "ok";
+
   const launch = useMutation({
     mutationFn: () =>
       api.launchAlignment({
@@ -136,7 +183,8 @@ export function AlignDialog({
     defaults != null &&
     chosenId != null &&
     rgComplete &&
-    alignerInfo?.available === true;
+    alignerInfo?.available === true &&
+    band !== "block";
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -245,79 +293,58 @@ export function AlignDialog({
           </label>
         </fieldset>
 
+        {schema && (
+          <div className="trim-fields">
+            <AlignerParamFields
+              fields={schema.fields.filter((f) => f.group === "biology")}
+              params={params}
+              onChange={(k, v) =>
+                // The registry's field metadata is validated server-side (see
+                // test_aligner_registry.py's TestFieldMetadataMatchesParams),
+                // so a field key reaching here is guaranteed to correspond to a
+                // real AlignParams property of a compatible type -- but that
+                // guarantee is enforced by a Python test, not by TypeScript,
+                // since the schema is fetched at runtime. This cast is where
+                // that trust boundary is crossed.
+                set(k as keyof AlignParams, v as AlignParams[keyof AlignParams])
+              }
+            />
+          </div>
+        )}
+
         <button
           type="button"
           className="trim-advanced-toggle"
           onClick={() => setAdvanced((a) => !a)}
-          aria-expanded={advanced}
+          aria-expanded={showAdvanced}
         >
-          <span className="trim-chevron">{advanced ? "▾" : "▸"}</span>
-          Aligner and performance
+          <span className="trim-chevron">{showAdvanced ? "▾" : "▸"}</span>
+          Performance
         </button>
 
-        {advanced && (
+        {showAdvanced && schema && (
           <div className="trim-fields">
-            {/* No aligner <select> here: the tool selector is now where that
-                choice is made (PipelineToolSelector, via `selectedTool`),
-                seeded into `params.aligner` above. `aligner` still drives
-                everything below exactly as the select's value used to. */}
-            {params?.aligner === "minimap2" && (
-              <label>
-                <span>Read type</span>
-                <select
-                  value={params?.preset || "sr"}
-                  onChange={(e) => set("preset", e.target.value as AlignPreset)}
-                >
-                  {defaults?.presets.map((p) => (
-                    <option key={p} value={p}>
-                      {PRESET_LABELS[p] ?? p}
-                    </option>
-                  ))}
-                </select>
-                <small>
-                  The wrong choice aligns long reads poorly rather than failing.
-                </small>
-              </label>
+            <AlignerParamFields
+              fields={schema.fields.filter((f) => f.group === "performance")}
+              params={params}
+              onChange={(k, v) =>
+                // See the comment on the biology-fields onChange above -- same
+                // trust boundary, same registry-vs-TypeScript tradeoff.
+                set(k as keyof AlignParams, v as AlignParams[keyof AlignParams])
+              }
+            />
+          </div>
+        )}
+
+        {bandMessage && (
+          <div className={band === "block" ? "error-box" : "warn-box"}>
+            {bandMessage}
+            {band === "block" && (
+              <div style={{ marginTop: 4 }}>
+                Reduce threads or sort memory, or choose an aligner with a
+                smaller index.
+              </div>
             )}
-
-            <label>
-              <span>Threads</span>
-              <input
-                type="number"
-                min={1}
-                max={16}
-                value={params?.threads ?? 4}
-                onChange={(e) => set("threads", Number(e.target.value))}
-              />
-              <small>More threads finish sooner but compete with other work.</small>
-            </label>
-
-            <label>
-              <span>Sort memory (MB per thread)</span>
-              <input
-                type="number"
-                min={64}
-                step={256}
-                value={params?.sort_memory_mb ?? 1024}
-                onChange={(e) => set("sort_memory_mb", Number(e.target.value))}
-              />
-              <small>samtools spills to disk when it runs out, which is slower.</small>
-            </label>
-
-            <label className="trim-check trim-wide">
-              <input
-                type="checkbox"
-                checked={params?.mark_duplicates ?? false}
-                onChange={(e) => set("mark_duplicates", e.target.checked)}
-              />
-              <span>
-                Mark duplicates
-                <small style={{ display: "block" }}>
-                  Standard for DNA-seq variant calling. Wrong for RNA-seq and
-                  amplicon data, where duplicates are expected.
-                </small>
-              </span>
-            </label>
           </div>
         )}
         </div>

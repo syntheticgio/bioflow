@@ -51,6 +51,8 @@ RUN apt-get update \
         fastqc \
         default-jre-headless \
         minimap2 \
+        bowtie2 \
+        hisat2 \
         samtools \
         cutadapt \
         trimmomatic \

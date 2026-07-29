@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.errors import ValidationError
-from app.pipelines import align_runner
+from app.pipelines import align_params, align_runner
 from app.pipelines.align_runner import (
     AlignParams,
     AlignProgress,
@@ -393,3 +393,103 @@ class TestProgress:
         p = AlignProgress()
         assert not p.feed("[M::main] Real time: 12.3 sec")
         assert p.processed == 0
+
+
+class TestBowtie2Command:
+    def cmd(self, **kw):
+        params = align_params.from_dict({"aligner": "bowtie2", **kw})
+        return align_cmd(
+            aligner=Aligner.BOWTIE2, aligner_path="bowtie2", params=params
+        )
+
+    def test_reads_are_passed_with_the_paired_flags(self):
+        """bowtie2 does not take positional read files the way bwa does:
+        R1 goes to -1 and R2 to -2, and a bare positional would be read as
+        the index basename."""
+        params = align_params.from_dict({"aligner": "bowtie2"})
+        cmd = align_cmd(
+            aligner=Aligner.BOWTIE2,
+            aligner_path="bowtie2",
+            params=params,
+            r2=Path("/w/r2.fq.gz"),
+        )
+        joined = " ".join(cmd)
+        assert "-1 /w/r1.fq.gz" in joined
+        assert "-2 /w/r2.fq.gz" in joined
+
+    def test_single_end_reads_use_the_unpaired_flag(self):
+        joined = " ".join(self.cmd())
+        assert "-U /w/r1.fq.gz" in joined
+
+    def test_the_index_is_passed_with_dash_x(self):
+        joined = " ".join(self.cmd())
+        assert "-x /w/genome.fna" in joined
+
+    def test_threads_use_dash_p(self):
+        joined = " ".join(self.cmd(threads=8))
+        assert "-p 8" in joined
+
+    def test_sensitivity_reaches_the_command(self):
+        joined = " ".join(self.cmd(sensitivity="--very-sensitive"))
+        assert "--very-sensitive" in joined
+
+    def test_local_mode_is_a_flag(self):
+        assert "--local" in " ".join(self.cmd(local=True))
+        assert "--local" not in " ".join(self.cmd(local=False))
+
+    def test_maxins_reaches_the_command(self):
+        assert "-X 800" in " ".join(self.cmd(maxins=800))
+
+    def test_report_k_is_omitted_when_zero(self):
+        """0 means 'leave the flag off'. Passing -k 0 tells bowtie2 to report
+        zero alignments, which silently produces an empty BAM."""
+        assert " -k " not in " ".join(self.cmd(report_k=0))
+        assert "-k 4" in " ".join(self.cmd(report_k=4))
+
+    def test_the_read_group_is_split_into_id_and_fields(self):
+        """bowtie2 has no single -R: it takes --rg-id for the ID and one --rg
+        per remaining field. Passing bwa's tab-joined @RG line would put a
+        literal backslash-t into the BAM header."""
+        joined = " ".join(self.cmd())
+        assert "--rg-id" in joined
+        assert "SM:SAMP1" in joined
+        assert "@RG" not in joined
+
+
+class TestHisat2Command:
+    def cmd(self, **kw):
+        params = align_params.from_dict({"aligner": "hisat2", **kw})
+        return align_cmd(
+            aligner=Aligner.HISAT2, aligner_path="hisat2", params=params
+        )
+
+    def test_the_index_is_passed_with_dash_x(self):
+        assert "-x /w/genome.fna" in " ".join(self.cmd())
+
+    def test_strandness_is_omitted_when_unstranded(self):
+        """The flag has no 'unstranded' value -- omitting it is how you say
+        that. Passing an empty string would make HISAT2 reject the argument."""
+        assert "--rna-strandness" not in " ".join(self.cmd(rna_strandness=""))
+        assert "--rna-strandness RF" in " ".join(self.cmd(rna_strandness="RF"))
+
+    def test_max_intronlen_reaches_the_command(self):
+        assert "--max-intronlen 20000" in " ".join(self.cmd(max_intronlen=20000))
+
+    def test_no_spliced_alignment_is_a_flag(self):
+        assert "--no-spliced-alignment" in " ".join(
+            self.cmd(no_spliced_alignment=True)
+        )
+
+    def test_dta_is_a_flag(self):
+        assert "--dta" in " ".join(self.cmd(dta=True))
+
+
+class TestNewAlignersKeepPipefail:
+    """The truncated-BAM failure applies to every aligner, not just the two
+    that existed when the pipe was written."""
+
+    @pytest.mark.parametrize("aligner", [Aligner.BOWTIE2, Aligner.HISAT2])
+    def test_pipefail_is_set(self, aligner):
+        params = align_params.from_dict({"aligner": aligner.value})
+        cmd = align_cmd(aligner=aligner, aligner_path=aligner.value, params=params)
+        assert cmd[:3] == ["/bin/sh", "-o", "pipefail"]

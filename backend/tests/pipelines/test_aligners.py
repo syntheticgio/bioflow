@@ -9,6 +9,8 @@ sidecar linked under a name it does not look for produces "index not found"
 at best and a confusing error deep into a run at worst.
 """
 
+from pathlib import Path
+
 import pytest
 
 from app.models import SidecarRole
@@ -200,3 +202,65 @@ class TestMaterialize:
         )
         assert result.reference.parent == tmp_path / "ref"
         assert not (tmp_path / "escaped.fna").exists()
+
+
+class TestNewAligners:
+    def test_bowtie2_and_hisat2_are_aligners(self):
+        assert Aligner.BOWTIE2.value == "bowtie2"
+        assert Aligner.HISAT2.value == "hisat2"
+
+    def test_every_aligner_has_an_index_role(self):
+        """INDEX_ROLE is indexed by every member in reference_index_status,
+        so a missing entry is a KeyError on an unrelated code path."""
+        for aligner in Aligner:
+            assert aligner in aligners.INDEX_ROLE
+
+    def test_index_roles_are_distinct(self):
+        """Two aligners sharing a role would make one reference's index
+        satisfy the other's check, and the alignment would fail on a
+        malformed index rather than a missing one."""
+        roles = [aligners.INDEX_ROLE[a] for a in Aligner]
+        assert len(set(roles)) == len(roles)
+
+
+class TestIndexLayout:
+    def test_suffix_layout_reference_argument_is_the_reference_path(self):
+        """bwa-mem2 and minimap2 take the reference itself and find the index
+        by appending. The path is what the tool is handed."""
+        layout = aligners.layout_for(Aligner.BWA_MEM2)
+        arg = layout.reference_argument(Path("/w/ref/genome.fna"))
+        assert arg == "/w/ref/genome.fna"
+
+    def test_prefix_layout_reference_argument_drops_nothing_from_the_name(self):
+        """bowtie2 is handed a basename, and its index files are that basename
+        plus a suffix. Since we name the index files after the *full*
+        reference filename (genome.fna.1.bt2), the basename is the full path
+        -- not the path with .fna stripped. Stripping it would make bowtie2
+        look for genome.1.bt2, which does not exist."""
+        layout = aligners.layout_for(Aligner.BOWTIE2)
+        arg = layout.reference_argument(Path("/w/ref/genome.fna"))
+        assert arg == "/w/ref/genome.fna"
+
+    def test_prefix_layout_knows_its_builder_binary(self):
+        assert aligners.layout_for(Aligner.BOWTIE2).builder == "bowtie2-build"
+        assert aligners.layout_for(Aligner.HISAT2).builder == "hisat2-build"
+
+    def test_suffix_layout_has_no_separate_builder(self):
+        """bwa-mem2 indexes through a subcommand and minimap2 through a flag;
+        neither has a separate builder binary."""
+        assert aligners.layout_for(Aligner.MINIMAP2).builder is None
+
+    def test_every_aligner_has_a_layout(self):
+        for aligner in Aligner:
+            assert aligners.layout_for(aligner) is not None
+
+    def test_layout_accepts_its_own_sidecars(self):
+        layout = aligners.layout_for(Aligner.BOWTIE2)
+        assert layout.owns_sidecar("genome.fna", "genome.fna.1.bt2")
+
+    def test_layout_rejects_a_foreign_sidecar(self):
+        """The safety check that survives the refactor: an index attached to
+        the wrong reference produces a plausible-looking wrong result rather
+        than an error, so it must be dropped rather than renamed."""
+        layout = aligners.layout_for(Aligner.BOWTIE2)
+        assert not layout.owns_sidecar("genome.fna", "other.fna.1.bt2")
