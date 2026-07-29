@@ -28,15 +28,24 @@ convention is only a convention.
 
 Nullable default, so existing documents need no backfill: an absent field reads
 as `None`. Pairs already in the database show the spine (which needs only
-`mate_object_id`) but no badges until re-ingested or manually tagged.
+`mate_object_id`) but no badges until re-linked or manually tagged.
 
-Populated in `link_mate` in `app/queue/results.py` (~line 190), which already
+Populated in `_link_mate` in `app/queue/results.py` (~line 190), which already
 calls `pairing.split_mate(obj.name)` and therefore has the mate token in hand at
 no extra cost. Both sides are set within the same conditional updates that
-establish `mate_object_id`, so a pair is never half-labelled -- the existing
-race guard (`mate_object_id == None` on both sides) covers the new field
-unchanged, as does the existing rule that a user-set link is never overwritten
-by later inference.
+establish `mate_object_id`, so a pair `_link_mate` creates is never
+half-labelled -- the existing race guard (`mate_object_id == None` on both
+sides) covers the new field unchanged, as does the existing rule that a
+user-set link is never overwritten by later inference.
+
+Two other call sites also set `mate_object_id` directly, from pairing that is
+already known rather than inferred: trimmed-pair output (~line 337) and
+SRA-downloaded pairs (~line 446). Neither sets `read_number` -- this change
+does not extend to them, so pairs created through those paths show a spine
+with no badge permanently, not just until re-ingested. That is within the
+badge-or-nothing design (a missing badge degrades gracefully) but is worth
+naming precisely: "re-ingest and it'll get a badge" is true only for pairs
+`_link_mate` handles.
 
 `read_number` derives from `pairing.split_mate`, never from
 `facts["paired_hint"]`.

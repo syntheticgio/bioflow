@@ -7,7 +7,7 @@ import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { SraDownloadDialog } from "./SraDownloadDialog";
-import { orderWithPairs } from "../lib/pairing";
+import { orderWithPairs, type OrderedFile } from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
 /**
@@ -365,6 +365,15 @@ function ProjectView({ projectId }: { projectId: string }) {
 
             const isExpanded = expandedCategories.has(category.key);
 
+            // Only Reads carries mate pairs, and the reorder that draws the
+            // spine adjacently is a real change from the API's newest-first
+            // order -- confined to the one category it's meaningful for, so
+            // References/Alignments/Variants/etc. keep their existing order.
+            const displayFiles: OrderedFile[] =
+              category.key === "reads"
+                ? orderWithPairs(categoryFiles)
+                : categoryFiles.map((o) => ({ object: o, pair: null }));
+
             return (
               <div key={category.key}>
                 <button
@@ -379,7 +388,7 @@ function ProjectView({ projectId }: { projectId: string }) {
                 </button>
 
                 {isExpanded &&
-                  orderWithPairs(categoryFiles).map(({ object: o, pair }) => (
+                  displayFiles.map(({ object: o, pair }) => (
                     <div
                       key={o.id}
                       className={`row ${sel === `object:${o.id}` ? "selected" : ""}${
