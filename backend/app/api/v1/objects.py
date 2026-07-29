@@ -5,7 +5,7 @@ from pathlib import Path
 from beanie import PydanticObjectId
 from fastapi import APIRouter, status
 
-from app.api.v1.schemas import BlobOut, ObjectDetail, ObjectOut, ObjectUpdate
+from app.api.v1.schemas import BlobOut, ObjectDetail, ObjectOut, ObjectUpdate, PairRequest
 from app.errors import ValidationError
 from app.models import BlobStorage, JobClass
 from app.services import object_service
@@ -25,6 +25,25 @@ async def get_object(object_id: PydanticObjectId) -> ObjectDetail:
 @router.patch("/{object_id}", response_model=ObjectOut)
 async def update_object(object_id: PydanticObjectId, body: ObjectUpdate) -> ObjectOut:
     obj = await object_service.update_object(object_id, body.model_dump(exclude_unset=True))
+    return ObjectOut.of(obj)
+
+
+@router.post("/{object_id}/pair", response_model=ObjectOut)
+async def pair_object(object_id: PydanticObjectId, body: PairRequest) -> ObjectOut:
+    """Mark two reads files as paired-end mates.
+
+    Its own endpoint rather than a field on PATCH because it writes both
+    documents and validates across them -- a merge endpoint could leave one
+    side pointing at a file that does not point back.
+    """
+    obj = await object_service.set_pair(object_id, body.mate_object_id, body.read_number)
+    return ObjectOut.of(obj)
+
+
+@router.delete("/{object_id}/pair", response_model=ObjectOut)
+async def unpair_object(object_id: PydanticObjectId) -> ObjectOut:
+    """Undo a pairing from either side. Idempotent."""
+    obj = await object_service.clear_pair(object_id)
     return ObjectOut.of(obj)
 
 
