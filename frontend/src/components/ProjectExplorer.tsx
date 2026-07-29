@@ -141,6 +141,9 @@ type FileCategory =
   | "alignments"
   | "variants"
   | "annotations"
+  /** Protein and CDS FASTA: derived from an assembly, not reads and not a
+   * reference. */
+  | "sequences"
   | "hic"
   | "other";
 
@@ -148,8 +151,11 @@ type CategorizedFiles = Record<FileCategory, DataObject[]>;
 
 function categorizeFile(obj: DataObject): FileCategory {
   // Role is an override: when set it decides outright, because the format
-  // cannot tell a reference genome from a pile of reads.
+  // cannot tell a reference genome from a pile of reads -- nor from a protein
+  // or CDS FASTA, which are the same format as both.
   if (obj.role === "reference") return "references";
+  if (obj.role === "annotation") return "annotations";
+  if (obj.role === "protein" || obj.role === "transcript") return "sequences";
 
   const kind = obj.format.kind.toLowerCase();
   if (kind === "fastq" || kind === "fasta") return "reads";
@@ -167,6 +173,7 @@ function categorizeObjects(objects: DataObject[] | undefined): CategorizedFiles 
     alignments: [],
     variants: [],
     annotations: [],
+    sequences: [],
     hic: [],
     other: [],
   };
@@ -185,6 +192,7 @@ const CATEGORIES: { key: FileCategory; label: string }[] = [
   { key: "alignments", label: "Alignments" },
   { key: "variants", label: "Variants" },
   { key: "annotations", label: "Annotations" },
+  { key: "sequences", label: "Protein & CDS" },
   { key: "hic", label: "Hi-C" },
   { key: "other", label: "Other" },
 ];
