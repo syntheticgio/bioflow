@@ -158,7 +158,13 @@ export function AlignDialog({
         mate_object_id: usePair ? mate!.object_id : null,
         paired: usePair,
         read_group: readGroup,
-        params: overrides,
+        // `overrides` alone omits `selectedTool` -- that's merged into the
+        // *display* `params` above (line ~75) but never written back into
+        // `overrides` itself, so a launch sent `overrides` untouched would
+        // carry no `aligner` key at all and the server would silently fall
+        // back to its own default. Send the full merged `params` so the
+        // aligner actually chosen in the tool selector is the one that runs.
+        params,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
