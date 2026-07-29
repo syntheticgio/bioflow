@@ -15,7 +15,28 @@ from app.errors import ValidationError
 from app.logging import get_logger
 from app.pipelines.aligners import Aligner
 
+# Parameter classes moved to align_params.py when the second and third
+# aligners arrived: one flat class covering four tools would be a union of
+# mostly-inapplicable fields. Re-exported here because this is where every
+# existing call site imports them from.
+from app.pipelines.align_params import (
+    BaseAlignParams,
+    Bowtie2Params,
+    Bwa2Params,
+    Hisat2Params,
+    Minimap2Params,
+)
+from app.pipelines.align_params import from_dict as _params_from_dict
+
 log = get_logger(__name__)
+
+# AlignParams aliases Minimap2Params rather than BaseAlignParams: every
+# existing direct-construction call site (AlignParams(), AlignParams(preset=...))
+# relies on defaults and fields that only Minimap2Params has, and dataclass
+# `__init__` performs no validation -- that only lives in `from_dict` -- so
+# constructing a Minimap2Params with aligner=Aligner.BWA_MEM2 works exactly
+# like the old flat dataclass did.
+AlignParams = Minimap2Params
 
 # bwa-mem2 reports throughput on stderr as it goes:
 #   [M::mem_process_seqs] Processed 80000 reads in 12.345 CPU sec
@@ -135,56 +156,6 @@ class ReadGroup:
             library=str(data["library"]),
             platform=str(data["platform"]),
             identifier=str(data["identifier"]) if data.get("identifier") else None,
-        )
-
-
-@dataclass
-class AlignParams:
-    """User-facing knobs for an alignment run."""
-
-    aligner: Aligner = Aligner.MINIMAP2
-    preset: str = Preset.SHORT_READ
-    threads: int = 4
-    sort_memory_mb: int = 1024
-    mark_duplicates: bool = False
-
-    def as_dict(self) -> dict:
-        return {
-            "aligner": self.aligner.value,
-            "preset": self.preset,
-            "threads": self.threads,
-            "sort_memory_mb": self.sort_memory_mb,
-            "mark_duplicates": self.mark_duplicates,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict | None) -> "AlignParams":
-        data = dict(data or {})
-        aligner = Aligner(data.get("aligner", Aligner.MINIMAP2))
-        preset = data.get("preset") or default_preset(aligner)
-
-        if aligner is Aligner.MINIMAP2 and preset not in Preset.ALL:
-            raise ValidationError(
-                f"Unknown minimap2 preset {preset!r}",
-                details={"valid": list(Preset.ALL)},
-            )
-
-        threads = int(data.get("threads", 4))
-        if threads < 1:
-            raise ValidationError("threads must be at least 1")
-
-        sort_memory_mb = int(data.get("sort_memory_mb", 1024))
-        if sort_memory_mb < 64:
-            # samtools spills to disk below this, which is slower than the
-            # memory saved is worth.
-            raise ValidationError("sort_memory_mb must be at least 64")
-
-        return cls(
-            aligner=aligner,
-            preset=preset,
-            threads=threads,
-            sort_memory_mb=sort_memory_mb,
-            mark_duplicates=bool(data.get("mark_duplicates", False)),
         )
 
 
