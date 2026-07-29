@@ -42,9 +42,12 @@ class JobContext:
     _progress_cb: Callable[[dict], None] | None = None
     _extend_cb: Callable[[int], None] | None = None
     # The longest lease any handler phase has asked for. Read by the worker's
-    # heartbeat loop, written from handler threads -- a plain int assignment is
-    # atomic under the GIL, and a stale read costs one heartbeat tick, so this
-    # deliberately has no lock.
+    # heartbeat loop, written from handler threads. Individual reads/writes of
+    # this int cannot tear under the GIL, but the compare-and-set in
+    # extend_lease is not atomic as a whole -- two threads racing could still
+    # lose an update. No lock anyway: the failure mode is bounded (one
+    # shorter-than-ideal lease, corrected on the next call or heartbeat tick),
+    # not worth the cost here.
     lease_override_seconds: int | None = None
 
     def is_cancelled(self) -> bool:
