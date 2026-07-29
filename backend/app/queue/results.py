@@ -276,7 +276,7 @@ async def _link_mate(obj: DataObject) -> None:
         object_id=str(obj.id),
         mate_id=str(mate.id),
         name=obj.name,
-        read_number=obj_read_number,
+        read_number=this_read,
     )
 
 

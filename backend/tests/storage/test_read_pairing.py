@@ -13,10 +13,18 @@ from app.queue.results import _link_mate
 from app.services import object_service
 
 
-@pytest.fixture(scope="module", autouse=True)
+@pytest.fixture(autouse=True)
 async def _init_beanie_models():
-    """Beanie requires init_beanie before any Document is instantiated. Connects
-    to the same Mongo the app uses but against a throwaway database."""
+    """Beanie requires init_beanie before any Document is instantiated, and the
+    client must be created inside the test's own event loop -- pytest-asyncio
+    gives each test function a fresh loop, so a module-scoped client (bound to
+    whichever loop happened to be running when the fixture first executed)
+    raises "attached to a different loop" on every DB call. Function-scoped,
+    same pattern as tests/queue/test_mate_link.py's `_db` fixture. Connects to
+    the same Mongo the app uses but against a throwaway database, cleaned
+    between tests rather than dropped, so index setup only has to run once
+    per module import.
+    """
     from app.db.index_reconcile import reconcile_indexes
 
     client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
@@ -28,7 +36,9 @@ async def _init_beanie_models():
         if indexes:
             await reconcile_indexes(db[coll_name], indexes)
     await init_beanie(database=db, document_models=ALL_MODELS)
+    await DataObject.delete_all()
     yield
+    await DataObject.delete_all()
     client.close()
 
 
