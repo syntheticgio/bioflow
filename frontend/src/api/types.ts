@@ -345,6 +345,7 @@ export interface PipelineTool {
   /** Plural: fastp is both a trimmer and a QC tool. Mirrors TOOL_META. */
   pipelines: PipelineType[];
   summary: string;
+  one_liner: string;
   strengths: string[];
   /**
    * Whether a job handler actually branches on this tool, independent of
@@ -472,18 +473,73 @@ export interface RunDetail extends RunSummary {
   jobs: RunMemberJob[];
 }
 
-export type AlignerName = "bwa-mem2" | "minimap2";
+export type AlignerName = "bwa-mem2" | "minimap2" | "bowtie2" | "hisat2";
 
 /** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */
 export type AlignPreset = "map-ont" | "map-pb" | "map-hifi" | "lr:hq" | "sr";
 
-/** Mirrors align_runner.AlignParams. */
+/**
+ * Mirrors align_params.BaseAlignParams plus whichever subclass is in play.
+ * Tool-specific keys are optional because they only exist for one aligner --
+ * the backend rejects a key belonging to a different tool rather than
+ * ignoring it, so sending the wrong one fails loudly at launch.
+ */
 export interface AlignParams {
   aligner: AlignerName;
-  preset: AlignPreset | "";
   threads: number;
   sort_memory_mb: number;
   mark_duplicates: boolean;
+  preset?: AlignPreset | "";
+  sensitivity?: string;
+  local?: boolean;
+  maxins?: number;
+  no_mixed?: boolean;
+  no_discordant?: boolean;
+  report_k?: number;
+  rna_strandness?: string;
+  max_intronlen?: number;
+  no_spliced_alignment?: boolean;
+  dta?: boolean;
+}
+
+/** One input in the generated parameter form. Mirrors registry ParamField. */
+export interface ParamFieldMeta {
+  key: string;
+  label: string;
+  kind: "int" | "bool" | "select" | "text";
+  default: unknown;
+  help: string;
+  group: "biology" | "performance";
+  min: number | null;
+  max: number | null;
+  choices: { value: string; label: string }[];
+}
+
+export interface AlignerSchema {
+  aligner: AlignerName;
+  fields: ParamFieldMeta[];
+}
+
+/** Mirrors resource_estimator.MemoryModel. */
+export interface MemoryModel {
+  index_bytes_per_ref_base: number;
+  fixed_overhead_mb: number;
+  bytes_per_thread_mb: number;
+  index_build_multiplier: number;
+}
+
+/**
+ * Fetched once per dialog open. The client evaluates the same arithmetic the
+ * backend does against these coefficients, so sliders give instant feedback
+ * without a request per keystroke -- and the backend re-checks at launch.
+ */
+export interface AlignEnvelope {
+  cpu_budget: number | null;
+  mem_budget_mb: number | null;
+  reference_bases: number;
+  input_bytes: number;
+  index_status: Record<string, boolean>;
+  models: Record<string, MemoryModel>;
 }
 
 /** Mirrors align_runner.ReadGroup: the @RG fields a variant caller requires. */
