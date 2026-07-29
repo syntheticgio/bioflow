@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
+import { readQuality } from "../lib/readQuality";
+import { QualityBadge } from "./QualityBadge";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
@@ -378,7 +380,9 @@ function ProjectView({ projectId }: { projectId: string }) {
                 </button>
 
                 {isExpanded &&
-                  categoryFiles.map((o: DataObject) => (
+                  categoryFiles.map((o: DataObject) => {
+                    const quality = readQuality(o);
+                    return (
                     <div
                       key={o.id}
                       className={`row ${sel === `object:${o.id}` ? "selected" : ""}`}
@@ -390,6 +394,7 @@ function ProjectView({ projectId }: { projectId: string }) {
                           : o.role === "reference"
                             ? "📗"
                             : "📄"}
+                        {quality && <QualityBadge quality={quality} />}
                       </span>
                       <div className="row-main">
                         <div className="row-name">{o.name}</div>
@@ -397,6 +402,11 @@ function ProjectView({ projectId }: { projectId: string }) {
                           <span>{formatBytes(o.size)}</span>
                           {o.format.kind !== "unknown" && (
                             <span>{formatKindLabel(o.format.kind)}</span>
+                          )}
+                          {/* After size and format, matching the detail
+                              panel's ordering. */}
+                          {quality && (
+                            <span title={quality.tooltip}>{quality.word}</span>
                           )}
                           {o.status !== "ready" && <span>{o.status}</span>}
                         </div>
@@ -414,7 +424,8 @@ function ProjectView({ projectId }: { projectId: string }) {
                         ×
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
               </div>
             );
           })}
