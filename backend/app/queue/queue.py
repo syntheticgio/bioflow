@@ -348,32 +348,63 @@ async def mark_running(job_id: str, worker_id: str, epoch: int) -> Job | None:
     return await Job.get(PydanticObjectId(job_id))
 
 
-async def heartbeat(job_ids: list[str], epochs: dict[str, int]) -> None:
+async def _heartbeat_mongo(
+    job_ids: list[str], epochs: dict[str, int], ttls: dict[str, int], now: datetime
+) -> None:
+    """Write the renewed lease to Mongo, one conditional update per job.
+
+    Split out from `heartbeat` so the Redis half -- the part the reaper actually
+    compares against -- is testable without a database.
+    """
+    from app.db.client import get_db
+
+    for jid in job_ids:
+        ttl = ttls.get(jid, settings.lease_ttl_seconds)
+        await get_db().jobs.update_one(
+            {"_id": PydanticObjectId(jid), "lease.epoch": epochs.get(jid, 0)},
+            {
+                "$set": {
+                    "lease.heartbeat_at": now,
+                    "lease.expires_at": now + timedelta(seconds=ttl),
+                }
+            },
+        )
+
+
+async def heartbeat(
+    job_ids: list[str],
+    epochs: dict[str, int],
+    ttls: dict[str, int] | None = None,
+) -> None:
     """Extend leases for in-flight jobs.
+
+    `ttls` carries per-job lease lengths for handlers that called
+    `ctx.extend_lease` -- anything absent renews to the global default. The
+    distinction only bites when heartbeating *stops*: a paused VM leaves the
+    recorded expiry as the sole thing standing between a live job and the
+    reaper, and a job that said it needed an hour must not be holding a 30s
+    lease at that moment.
 
     The Mongo update is conditional on the epoch, so a worker that lost its
     lease while paused cannot resurrect it.
     """
     if not job_ids:
         return
+    ttls = ttls or {}
     now = datetime.now(UTC)
-    expires_ms = int((now.timestamp() + settings.lease_ttl_seconds) * 1000)
 
     r = get_redis()
-    await r.zadd(keys.RUNNING, {jid: expires_ms for jid in job_ids})
+    await r.zadd(
+        keys.RUNNING,
+        {
+            jid: int(
+                (now.timestamp() + ttls.get(jid, settings.lease_ttl_seconds)) * 1000
+            )
+            for jid in job_ids
+        },
+    )
 
-    from app.db.client import get_db
-
-    for jid in job_ids:
-        await get_db().jobs.update_one(
-            {"_id": PydanticObjectId(jid), "lease.epoch": epochs.get(jid, 0)},
-            {
-                "$set": {
-                    "lease.heartbeat_at": now,
-                    "lease.expires_at": now + timedelta(seconds=settings.lease_ttl_seconds),
-                }
-            },
-        )
+    await _heartbeat_mongo(job_ids, epochs, ttls, now)
 
 
 async def release(job_id: str, *, requeue: bool = False, score: float | None = None) -> bool:
