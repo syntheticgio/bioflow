@@ -6,8 +6,37 @@ the flag on its drop path; these are the routes that bypass it.
 """
 
 import pytest
+from beanie import init_beanie
+from motor.motor_asyncio import AsyncIOMotorClient
 
+from app.config import settings
+from app.models import ALL_MODELS, JobState
+from app.models.job import Job, JobError
 from tests.queue.test_lifecycle import LEASE_MS, NOW_MS, claim
+
+
+@pytest.fixture(autouse=True)
+async def _init_beanie_models(monkeypatch):
+    """`_fail_blocked_job` writes through `Job` (a Beanie Document) via a raw
+    Mongo update plus a `Job.find(...)` in `_release_dependents`, so the
+    integration test below needs Beanie initialized against a real database --
+    same pattern as `tests/storage/test_object_role.py`. Function-scoped
+    (unlike that file) because this suite's tests actually perform I/O:
+    pytest-asyncio hands each async test its own event loop by default, and a
+    wider-scoped Motor client ends up bound to the wrong loop the moment a
+    later test tries to use it.
+
+    `_fail_blocked_job` also reaches for `app.db.client.get_db()` directly
+    (a second, separately-initialized Mongo handle used for the conditional
+    `update_one`), so that is patched to the same throwaway database rather
+    than standing up the app's real connection singleton in a test.
+    """
+    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    db = client["biopipe_test"]
+    await init_beanie(database=db, document_models=ALL_MODELS)
+    monkeypatch.setattr("app.db.client.get_db", lambda: db)
+    yield
+    client.close()
 
 
 class TestReaperClearsCancel:
@@ -58,3 +87,30 @@ class TestFailBlockedJobClearsCancel:
 
         monkeypatch.setattr(queue, "get_redis", lambda: Boom())
         await queue._clear_cancel_flag("job1")  # must not raise
+
+    async def test_fail_blocked_job_itself_clears_the_flag(self, redis, monkeypatch):
+        """The other tests in this class call `_clear_cancel_flag` directly,
+        which proves the helper works but not that `_fail_blocked_job` still
+        calls it -- a regression that deleted or reordered that one added
+        line would pass every other test here. This drives the real function
+        end to end against a real Job document."""
+        from app.queue import queue
+
+        culprit = Job(
+            type="build_index",
+            state=JobState.FAILED,
+            error=JobError(code="boom", message="disk full", retryable=False),
+        )
+        await culprit.insert()
+
+        blocked = Job(
+            type="align", state=JobState.BLOCKED, depends_on=[culprit.id]
+        )
+        await blocked.insert()
+
+        await redis.sadd("bp:cancel", str(blocked.id))
+        monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+        await queue._fail_blocked_job(blocked, [culprit])
+
+        assert await redis.sismember("bp:cancel", str(blocked.id)) == 0
