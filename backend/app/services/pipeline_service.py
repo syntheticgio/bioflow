@@ -1050,7 +1050,7 @@ def _variant_dedup_key(*, bam_id, params: dict) -> str:
     return f"call_variants:{bam_id}:{_params_fingerprint(params)}"
 
 
-async def _reference_for_bam(bam: DataObject) -> DataObject | None:
+async def reference_for_bam(bam: DataObject) -> DataObject | None:
     """The reference this BAM was aligned against, from its provenance.
 
     An alignment records the reference in `derived_from`, so this is a lookup
@@ -1230,7 +1230,7 @@ async def _resolve_variant_reference(
             raise ValidationError("BAM and reference must be in the same project")
         return reference
 
-    reference = await _reference_for_bam(bam)
+    reference = await reference_for_bam(bam)
     if reference is None:
         raise ValidationError(
             f"Cannot determine which reference {bam.name!r} was aligned "
