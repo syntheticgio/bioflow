@@ -33,6 +33,8 @@ log = get_logger(__name__)
 class Aligner(StrEnum):
     BWA_MEM2 = "bwa-mem2"
     MINIMAP2 = "minimap2"
+    BOWTIE2 = "bowtie2"
+    HISAT2 = "hisat2"
 
 
 # bwa-mem2's index is a five-file set, all named by appending to the reference
@@ -50,10 +52,28 @@ MINIMAP2_SUFFIX = ".mmi"
 FAI_SUFFIX = ".fai"
 BAI_SUFFIX = ".bai"
 
+# bowtie2 and HISAT2 both name their index files by appending a numbered
+# suffix to a basename, and both are handed that basename via -x rather than
+# a path to the reference. The counts differ: bowtie2 writes six files,
+# HISAT2 eight.
+#
+# These lists are the tool's contract, and `build_index` fails loudly when a
+# builder exits 0 without producing one of them -- see the verification step
+# in Task 5, which builds a real index and compares.
+BOWTIE2_SUFFIXES: tuple[str, ...] = (
+    ".1.bt2", ".2.bt2", ".3.bt2", ".4.bt2", ".rev.1.bt2", ".rev.2.bt2",
+)
+HISAT2_SUFFIXES: tuple[str, ...] = (
+    ".1.ht2", ".2.ht2", ".3.ht2", ".4.ht2",
+    ".5.ht2", ".6.ht2", ".7.ht2", ".8.ht2",
+)
+
 
 INDEX_ROLE: dict[Aligner, SidecarRole] = {
     Aligner.BWA_MEM2: SidecarRole.BWA_MEM2_INDEX,
     Aligner.MINIMAP2: SidecarRole.MINIMAP2_INDEX,
+    Aligner.BOWTIE2: SidecarRole.BOWTIE2_INDEX,
+    Aligner.HISAT2: SidecarRole.HISAT2_INDEX,
 }
 
 
@@ -61,6 +81,10 @@ def index_suffixes(aligner: Aligner) -> tuple[str, ...]:
     """Every suffix an aligner's index is made of, relative to the reference."""
     if aligner is Aligner.BWA_MEM2:
         return BWA_MEM2_SUFFIXES
+    if aligner is Aligner.BOWTIE2:
+        return BOWTIE2_SUFFIXES
+    if aligner is Aligner.HISAT2:
+        return HISAT2_SUFFIXES
     return (MINIMAP2_SUFFIX,)
 
 

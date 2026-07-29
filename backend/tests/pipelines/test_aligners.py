@@ -200,3 +200,22 @@ class TestMaterialize:
         )
         assert result.reference.parent == tmp_path / "ref"
         assert not (tmp_path / "escaped.fna").exists()
+
+
+class TestNewAligners:
+    def test_bowtie2_and_hisat2_are_aligners(self):
+        assert Aligner.BOWTIE2.value == "bowtie2"
+        assert Aligner.HISAT2.value == "hisat2"
+
+    def test_every_aligner_has_an_index_role(self):
+        """INDEX_ROLE is indexed by every member in reference_index_status,
+        so a missing entry is a KeyError on an unrelated code path."""
+        for aligner in Aligner:
+            assert aligner in aligners.INDEX_ROLE
+
+    def test_index_roles_are_distinct(self):
+        """Two aligners sharing a role would make one reference's index
+        satisfy the other's check, and the alignment would fail on a
+        malformed index rather than a missing one."""
+        roles = [aligners.INDEX_ROLE[a] for a in Aligner]
+        assert len(set(roles)) == len(roles)

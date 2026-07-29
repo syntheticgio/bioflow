@@ -894,6 +894,8 @@ _SIDECAR_ROLES = {
     "tbi": SidecarRole.TBI,
     SidecarRole.BWA_MEM2_INDEX.value: SidecarRole.BWA_MEM2_INDEX,
     SidecarRole.MINIMAP2_INDEX.value: SidecarRole.MINIMAP2_INDEX,
+    "bowtie2-index": SidecarRole.BOWTIE2_INDEX,
+    "hisat2-index": SidecarRole.HISAT2_INDEX,
 }
 
 
