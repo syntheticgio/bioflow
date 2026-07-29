@@ -29,6 +29,7 @@ import { AlignDialog } from "./AlignDialog";
 import { BamResults } from "./BamResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
+import { ProjectDangerZone } from "./ProjectDangerZone";
 import { TrimDialog } from "./TrimDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
@@ -216,6 +217,8 @@ function ProjectDetail({ id }: { id: string }) {
           <div className="section-title">Recent jobs</div>
           <JobList projectId={project.id} />
         </div>
+
+        <ProjectDangerZone projectId={project.id} projectName={project.name} />
       </div>
     </div>
   );
