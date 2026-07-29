@@ -311,6 +311,8 @@ textarea:focus {
 }
 
 .row-icon {
+  /* Positioning context so the quality badge dot can sit on its corner. */
+  position: relative;
   flex-shrink: 0;
   width: 20px;
   text-align: center;
@@ -1934,4 +1936,47 @@ textarea:focus {
 
 .dialog-tool-back:hover {
   text-decoration: underline;
+}
+
+/* Read quality badge -------------------------------------------------- */
+
+.q-badge {
+  position: absolute;
+  right: -1px;
+  bottom: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  /* Against the row background, so the dot reads as separate from the glyph
+     rather than merging with it on hover. */
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+}
+
+.row.selected .q-badge,
+.row:hover .q-badge {
+  box-shadow: 0 0 0 1.5px var(--bg-hover);
+}
+
+/* Green -> amber -> red. Existing theme vars, so light mode tracks. */
+.q-badge-5 {
+  background: var(--success);
+}
+
+/* Tier 4 is still good; dimmed rather than a different hue. */
+.q-badge-4 {
+  background: var(--success);
+  opacity: 0.65;
+}
+
+.q-badge-3 {
+  background: var(--warn);
+}
+
+/* Deepened rather than a new hue: still "caution", further along. */
+.q-badge-2 {
+  background: color-mix(in srgb, var(--warn) 75%, var(--error));
+}
+
+.q-badge-1 {
+  background: var(--error);
 }
