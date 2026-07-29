@@ -231,6 +231,13 @@ async def delete_project_tree(project_id: PydanticObjectId) -> dict:
             await RunJob.find(RunJob.run_id == run.id).delete()
             await run.delete()
 
+        # Unlike discard_run, this does not spare shared jobs: a build_index
+        # job is deduped by blob digest and owned by whichever project queued
+        # it first (see _enqueue_build_index in pipeline_service.py), so
+        # deleting that owner here also deletes a job a wholly separate
+        # project's RunJob still points at (linked with shared=True). That's
+        # a silent cross-project side effect, not corruption -- run_detail
+        # already renders a missing job as "expired" rather than erroring.
         await Job.find(Job.project_id == pid).delete()
 
         project = await Project.get(pid)
