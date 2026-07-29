@@ -369,3 +369,57 @@ class TestContigTruncation:
         assert f["reference_count"] == 200  # true count preserved
         assert len(f["reference_names"]) == parsers.MAX_STORED_CONTIGS
         assert f["reference_names_truncated"] is True
+
+
+class TestFastaSequenceLengths:
+    """Per-sequence lengths, and the longest/shortest across an assembly."""
+
+    def test_lengths_and_extremes(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\nACGT\n>c2\nACGTACGTAC\n>c3\nAC\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_lengths"] == {"c1": 4, "c2": 10, "c3": 2}
+        assert facts["sequence_longest"] == {"name": "c2", "length": 10}
+        assert facts["sequence_shortest"] == {"name": "c3", "length": 2}
+
+    def test_wrapped_records_sum_across_lines(self, tmp_path):
+        p = tmp_path / "wrapped.fasta"
+        # 3 lines x 60 bases: a real FASTA wraps, and a per-line count would
+        # report 60 instead of 180.
+        p.write_text(">chr1\n" + ("A" * 60 + "\n") * 3 + ">chr2\nAC\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_lengths"]["chr1"] == 180
+        assert facts["sequence_longest"] == {"name": "chr1", "length": 180}
+
+    def test_extremes_come_from_beyond_the_stored_window(self, tmp_path):
+        """The stored dict is capped, but longest/shortest are not.
+
+        Bounding the extremes to the first MAX_STORED_CONTIGS would report the
+        wrong longest contig for any assembly with more sequences than that --
+        which is most of them.
+        """
+        n = parsers.MAX_STORED_CONTIGS + 10
+        with open(tmp_path / "many.fasta", "w") as f:
+            for i in range(n):
+                # Records grow, so both extremes sit outside the first 50:
+                # the shortest is record 0... so make record n-1 longest and
+                # deliberately place the shortest late as well.
+                f.write(f">c{i}\n" + "A" * (100 + i) + "\n")
+            f.write(">tiny\nA\n")
+        facts = parsers.parse(tmp_path / "many.fasta", FormatKind.FASTA, Compression.NONE)
+        assert len(facts["sequence_lengths"]) == parsers.MAX_STORED_CONTIGS
+        assert facts["sequence_longest"] == {"name": f"c{n - 1}", "length": 100 + n - 1}
+        assert facts["sequence_shortest"] == {"name": "tiny", "length": 1}
+
+    def test_single_sequence_is_both_extremes(self, tmp_path):
+        p = tmp_path / "one.fasta"
+        p.write_text(">only\nACGTACGT\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_longest"] == {"name": "only", "length": 8}
+        assert facts["sequence_shortest"] == {"name": "only", "length": 8}
+
+    def test_complete_parse_is_not_flagged_partial(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\nACGT\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert "sequence_lengths_partial" not in facts
