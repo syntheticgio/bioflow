@@ -13,7 +13,7 @@ job that dies thirty seconds after the user walks away.
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import StrEnum
 from functools import lru_cache
 
@@ -526,19 +526,35 @@ def tool_with_meta(tool: Tool) -> dict:
     Enriched here at the boundary rather than by widening `Tool` itself: the
     probe result is what the pipeline code needs, and threading a summary
     string through `require()` would serve nothing but the one endpoint.
+
+    Built via `asdict` on `ToolMeta` rather than naming each field, the same
+    pattern `aligner_registry.schema_for` already uses: a field added to
+    `ToolMeta` reaches the API without a second edit here. `pipelines` is the
+    one exception, since it needs its enum members converted to their string
+    values for JSON. `strengths` is wrapped in `list(...)` explicitly because
+    `asdict` preserves tuples as tuples rather than converting them to lists.
     """
     meta = TOOL_META.get(tool.name)
+    meta_dict = (
+        asdict(meta)
+        if meta
+        else {
+            "pipelines": (),
+            "summary": "",
+            "strengths": (),
+            "one_liner": "",
+            # Absent metadata defaults runnable to False too: a tool this
+            # application does not describe is not one it has a code path for
+            # either, and offering it as selectable would be worse than
+            # omitting the summary text.
+            "runnable": False,
+        }
+    )
     return {
         **tool.as_dict(),
-        "pipelines": [p.value for p in meta.pipelines] if meta else [],
-        "summary": meta.summary if meta else "",
-        "one_liner": meta.one_liner if meta else "",
-        "strengths": list(meta.strengths) if meta else [],
-        # Absent metadata defaults runnable to False too: a tool this
-        # application does not describe is not one it has a code path for
-        # either, and offering it as selectable would be worse than omitting
-        # the summary text.
-        "runnable": meta.runnable if meta else False,
+        **meta_dict,
+        "pipelines": [p.value for p in meta_dict["pipelines"]],
+        "strengths": list(meta_dict["strengths"]),
     }
 
 

@@ -1,5 +1,6 @@
 """External tool discovery and version parsing."""
 
+import dataclasses
 import os
 import re
 import sys
@@ -368,3 +369,12 @@ class TestNewAlignerProbes:
         string, not a missing key or a 500."""
         enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
         assert enriched["one_liner"] == ""
+
+    def test_every_tool_meta_field_reaches_the_serialized_output(self):
+        """Generic on purpose: this is what should have caught the one_liner
+        bug, and would catch the same class of bug for any future field added
+        to ToolMeta and forgotten in tool_with_meta."""
+        tool = tools.Tool(name="bowtie2", path="/usr/bin/bowtie2", version="2.5.0")
+        enriched = tools.tool_with_meta(tool)
+        for field in dataclasses.fields(tools.ToolMeta):
+            assert field.name in enriched, f"{field.name} missing from serialized output"
