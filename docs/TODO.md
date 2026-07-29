@@ -2,20 +2,49 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
-## Variant calling and assembly: designed, not built
+## Assembly: designed, not built
+
+> **Variant calling was built on 2026-07-29** and is no longer deferred. The
+> section below is kept for the assembly half, which is still unbuilt, and
+> because the variant-calling notes explain design choices the code still
+> follows. What actually shipped, and where it departed from this design:
+>
+> - **`ReadChemistry` earned its keep as predicted** -- but the fact did not
+>   reach the BAM. `_apply_align_reads` copied `reads.metadata` and *not*
+>   `reads.facts`, so `qc_read_chemistry` was unreachable from an alignment and
+>   every caller would have silently resolved to bcftools, including for ONT
+>   and HiFi. Fixed by `align_provenance` (`app/queue/results.py`), which
+>   copies the fact forward, plus a fallback in
+>   `pipeline_service.read_chemistry_for_alignment` that reads it off the
+>   parent reads for BAMs aligned before the fix.
+> - **`depends_on` was not used.** This entry proposed gating `call_variants`
+>   behind a completed `index_bam`. The implementation instead requires the
+>   `.bai` and the reference `.fai` to exist at launch and refuses with an
+>   actionable message. Simpler, and the user gets "index it first" instead of
+>   a job that sits blocked.
+> - **Short reads use bcftools only.** GATK was listed as an option; it is
+>   ~400MB of JARs and bcftools is sufficient for single-sample calling.
+> - **DeepVariant is recognized but not installed** -- no arm64 build. The
+>   handler and the launch path both refuse it with an explanation.
+> - **CLR is refused outright**, as this entry suggested was worth deciding
+>   explicitly. `caller_for_chemistry` raises, and the dialog renders the
+>   refusal rather than offering a caller.
+> - `SidecarRole.TBI` was the only new storage concept needed, as predicted.
+>
+> Verified end to end against a real ONT run (DRR1078403 vs. *T. brucei*):
+> both Clair3 and bcftools produce a VCF with a `.tbi` sidecar, and the
+> chemistry fallback resolves `ont_simplex` on a BAM that predates the fix.
 
 Raised: 2026-07-28, during long-read QC and alignment-correctness work
 (`ReadChemistry`, `preset_for_chemistry`, `qc_stats.infer_chemistry`,
 `is_long_read`).
 
-Nothing here is built. This is recorded so the model added for HiFi/CLR
+Assembly is not built. This is recorded so the model added for HiFi/CLR
 correctness -- `ReadChemistry` on `align_runner`, inferred by
 `qc_stats.infer_chemistry` and stamped onto QC facts as `qc_read_chemistry`
--- does not have to be reshaped later to fit either pipeline. Both are real
-consumers of that same fact, which is the reason it is worth having designed
-now rather than after the fact.
+-- does not have to be reshaped later to fit it.
 
-### Variant calling
+### Variant calling (BUILT -- see the note above)
 
 Wants a new `RunKind.VARIANT_CALLING` (alongside the existing `ALIGNMENT`,
 `TRIM`, `SRA_DOWNLOAD` in `backend/app/models/run.py`), a `variants` object
