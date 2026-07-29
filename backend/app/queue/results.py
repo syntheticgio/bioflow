@@ -480,6 +480,120 @@ async def _apply_sra_download(result: dict) -> None:
             await run_service.link_job(run_id, qc_job.id, RunJobRole.QC)
 
 
+def _role_for_component(entry: dict) -> str | None:
+    """The ObjectRole value a staged component becomes.
+
+    Re-derived from `assembly_components.COMPONENTS` rather than trusting the
+    `role` the handler already attached to `entry`: the handler runs in a
+    worker thread and returns a plain dict across a process boundary, and
+    re-deriving from the one authoritative table costs nothing while removing
+    a class of "what if the dict disagrees with the table" bug.
+
+    Returns None for anything unrecognized: an unroled file is merely
+    uncategorized in the explorer, while a wrongly-roled one is actively
+    misleading -- a CDS FASTA offered as a reference genome.
+    """
+    from app.metadata import assembly_components
+
+    spec = assembly_components.COMPONENTS.get(entry.get("component") or "")
+    return spec.role if spec else None
+
+
+def _component_metadata(base: dict, accession: str, component: str) -> dict:
+    """Metadata for one component, from the assembly's shared record.
+
+    `assembly_accession` goes on every component: it is what makes the four
+    files recognize each other in search and in the explorer, and what
+    "do I already have this genome?" matches on.
+
+    Genome-specific keys are withheld from the others. `reference_build` on a
+    protein FASTA would assert that the file is an assembly, which is exactly
+    the confusion the PROTEIN role exists to prevent.
+    """
+    genome_only = {"reference_build", "assembly_level", "is_primary_assembly"}
+
+    out = {
+        k: v
+        for k, v in (base or {}).items()
+        if component == "genome" or k not in genome_only
+    }
+    out["assembly_accession"] = accession
+    return out
+
+
+async def _apply_assembly_download(result: dict) -> None:
+    """Take a finished assembly download into the project.
+
+    Mirrors `_apply_sra_download`: the handler ran in a worker thread and
+    could not touch the database, so the ingest happens here. One failed
+    component does not lose the rest -- the transfer is the expensive part and
+    it already succeeded.
+
+    No QC and no mate linking: a reference genome has no reads to QC and no
+    pair.
+    """
+    from app.services import object_service, run_service
+
+    staged = result.get("staged") or []
+    project_id = result.get("project_id")
+    if not staged or not project_id:
+        return
+
+    project_id = PydanticObjectId(project_id)
+    accession = result.get("accession") or ""
+    job_id = result.get("job_id")
+    base_metadata = dict(result.get("metadata") or {})
+    base_facts = dict(result.get("facts") or {})
+
+    created = []
+    for entry in staged:
+        component = entry.get("component") or ""
+        # Provenance, distinct from the biology: where these bytes came from,
+        # which is not a searchable property of the organism.
+        facts = dict(base_facts)
+        facts.update(
+            {
+                "assembly_downloaded_from": accession,
+                "assembly_download_source": "ncbi_datasets",
+                "assembly_component": component,
+            }
+        )
+        try:
+            obj = await object_service.ingest_local_file(
+                project_id=project_id,
+                path=Path(entry["path"]),
+                name=entry["name"],
+                role=_role_for_component(entry),
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts=facts,
+                metadata=_component_metadata(base_metadata, accession, component),
+            )
+        except Exception as e:  # noqa: BLE001 - one bad file must not lose the rest
+            log.error(
+                "assembly_ingest_failed",
+                accession=accession,
+                name=entry.get("name"),
+                error=str(e),
+            )
+            continue
+        created.append(obj)
+
+    if not created:
+        log.error("assembly_download_ingested_nothing", accession=accession)
+        return
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [o.id for o in created])
+
+    log.info(
+        "assembly_download_applied",
+        accession=accession,
+        objects=[str(o.id) for o in created],
+        components=[s.get("component") for s in staged],
+    )
+
+
 async def _apply_run_qc(result: dict) -> None:
     """Record a QC run's numbers on the object it described.
 
@@ -931,6 +1045,7 @@ _APPLIERS = {
     "trim_reads": _apply_trim_reads,
     "run_qc": _apply_run_qc,
     "download_sra_run": _apply_sra_download,
+    "download_assembly": _apply_assembly_download,
     "build_index": _apply_build_index,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
