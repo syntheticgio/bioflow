@@ -4,13 +4,20 @@ import { api } from "../api/client";
 import type { JobSummary } from "../api/types";
 
 /** Job types this indicator reports on: the ones a user launches from here. */
-const PIPELINE_TYPES = new Set(["trim_reads", "align_reads", "build_index", "index_bam"]);
+const PIPELINE_TYPES = new Set([
+  "trim_reads",
+  "align_reads",
+  "build_index",
+  "index_bam",
+  "run_bam_stats",
+]);
 
 const LABELS: Record<string, string> = {
   trim_reads: "Trimming",
   align_reads: "Aligning",
   build_index: "Building index",
   index_bam: "Indexing BAM",
+  run_bam_stats: "Computing results",
 };
 
 /**

@@ -26,7 +26,7 @@ import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { DerivedFiles } from "./DerivedFiles";
 import { ActivePipelineJobs } from "./ActivePipelineJobs";
 import { AlignDialog } from "./AlignDialog";
-import { AlignmentReport } from "./AlignmentReport";
+import { BamResults } from "./BamResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { TrimDialog } from "./TrimDialog";
@@ -221,12 +221,17 @@ function ProjectDetail({ id }: { id: string }) {
   );
 }
 
-/** Ordered so the panel opens on the question people ask most: is this file good? */
-const TABS: TabDef[] = [
-  { id: "qc", label: "QC" },
-  { id: "metadata", label: "Metadata" },
-  { id: "actions", label: "Actions" },
-];
+/** Ordered so the panel opens on the question people ask most: is this file
+ * good? Results sits next to QC -- they answer adjacent questions -- and only
+ * appears for BAMs, which is the only format it currently describes. */
+function tabsFor(formatKind: string): TabDef[] {
+  const tabs: TabDef[] = [{ id: "qc", label: "QC" }];
+  if (formatKind === "bam") {
+    tabs.push({ id: "results", label: "Results" });
+  }
+  tabs.push({ id: "metadata", label: "Metadata" }, { id: "actions", label: "Actions" });
+  return tabs;
+}
 
 /**
  * Where a Trim or Align click currently is: choosing a tool, or running the
@@ -272,9 +277,9 @@ function ObjectDetail({ id }: { id: string }) {
 
   // In the URL alongside ?sel=, so the tab survives selecting another file and
   // a link can point at a particular view. An unrecognised value falls back
-  // rather than rendering an empty panel.
-  const raw = params.get("tab");
-  const tab = TABS.some((t) => t.id === raw) ? raw! : "qc";
+  // rather than rendering an empty panel. The valid set depends on the
+  // object's format (see tabsFor), so which tab is "valid" is resolved below,
+  // once obj is available -- setTab itself needs no such check.
   const setTab = (id: string) => {
     const next = new URLSearchParams(params);
     next.set("tab", id);
@@ -351,6 +356,10 @@ function ObjectDetail({ id }: { id: string }) {
       </div>
     );
   }
+
+  const tabs = tabsFor(obj.format.kind);
+  const raw = params.get("tab");
+  const tab = tabs.some((t) => t.id === raw) ? raw! : "qc";
 
   const compression = compressionLabel(obj.format.compression);
   // A .bam that isn't a BAM is worth telling the user about rather than
@@ -496,11 +505,17 @@ function ObjectDetail({ id }: { id: string }) {
           </div>
         )}
 
-        <Tabs tabs={TABS} active={tab} onChange={setTab} idPrefix="obj" />
+        <Tabs tabs={tabs} active={tab} onChange={setTab} idPrefix="obj" />
 
         {tab === "qc" && (
           <TabPanel id="qc" idPrefix="obj">
             <QcTab obj={obj} isReference={isReference} reingest={reingest} />
+          </TabPanel>
+        )}
+
+        {tab === "results" && (
+          <TabPanel id="results" idPrefix="obj">
+            <BamResults obj={obj} />
           </TabPanel>
         )}
 
@@ -681,10 +696,6 @@ function QcTab({
       {/* Before/after comparison, on the source file rather than the output:
           "what did trimming do to my reads" is a question about the input. */}
       <TrimReport facts={obj.facts} />
-
-      {/* On the BAM itself: whether an alignment is worth keeping is a
-          question about the output, not about the reads that went in. */}
-      <AlignmentReport facts={obj.facts} />
     </>
   );
 }
