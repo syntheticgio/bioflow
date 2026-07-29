@@ -334,29 +334,6 @@ because it is a schema change that this feature does not otherwise need.
 Touches: `backend/app/models/object.py`, `backend/app/queue/results.py`,
 `backend/app/services/object_service.py`.
 
-## Sample GC content across the file instead of a prefix
-
-Raised: 2026-07-26, during the object-role design.
-
-`sequence_stats.fasta_stats` caps at `max_bases=50_000_000` and reads from the
-start of the file. On a multi-GB reference that means the reported
-`gc_content_percent` describes chr1, not the assembly — and GC content varies
-enough between chromosomes that the number is misleading when compared across
-references.
-
-The cap itself is a deliberate performance guard and should stay. The fix is to
-make the sample representative rather than larger: read strided blocks across
-the file (seek to N offsets, take a chunk at each, skip partial lines) and
-aggregate. Same cost, far better estimate.
-
-Blocked on nothing. Until it lands, the reference detail panel labels the row
-"GC content (sampled)" and shows `stats_sampled_bases`, so the figure is not
-presented as genome-wide.
-
-Touches: `backend/app/storage/sequence_stats.py`,
-`backend/tests/storage/test_sequence_stats.py`. Once fixed, revisit the
-"(sampled)" label in the Assembly section of `DetailPanel.tsx`.
-
 ## Extract per-sequence lengths for FASTA
 
 Raised: 2026-07-26, during the object-role design.

@@ -22,6 +22,7 @@ export function AssemblyFacts({ facts }: Props) {
   const totalBases = facts.total_bases as number | undefined;
   const gc = facts.gc_content_percent as number | undefined;
   const sampledBases = facts.stats_sampled_bases as number | undefined;
+  const sampling = facts.stats_sampling as string | undefined;
   const names = Array.isArray(facts.sequence_names)
     ? (facts.sequence_names as string[])
     : [];
@@ -85,13 +86,22 @@ export function AssemblyFacts({ facts }: Props) {
         )}
         {gc !== undefined && (
           <>
-            {/* Labelled as sampled because fasta_stats caps at 50M bases read
-                from the start of the file -- on a large genome that is chr1,
-                not a representative sample. See docs/TODO.md. */}
-            <dt>GC content (sampled)</dt>
+            {/* What this number means depends on how it was measured: a small
+                file is counted exactly, a large uncompressed one is sampled
+                across the whole file, and a compressed one is still a prefix
+                read because gzip cannot seek cheaply. Objects ingested before
+                strided sampling have no stats_sampling key and keep the
+                original conservative label. */}
+            <dt>
+              {sampling === "complete"
+                ? "GC content"
+                : sampling === "strided"
+                  ? "GC content (sampled across file)"
+                  : "GC content (sampled)"}
+            </dt>
             <dd>
               {gc}%
-              {sampledBases !== undefined && (
+              {sampling !== "complete" && sampledBases !== undefined && (
                 <span style={{ color: "var(--text-faint)" }}>
                   {" "}
                   from {formatBases(sampledBases)} sampled
