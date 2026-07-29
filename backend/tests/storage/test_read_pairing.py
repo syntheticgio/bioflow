@@ -9,6 +9,7 @@ from app.config import settings
 from app.errors import NotFoundError, ValidationError
 from app.models import ALL_MODELS, ObjectRole, SidecarRole
 from app.models.object import DataObject
+from app.queue.results import _link_mate
 from app.services import object_service
 
 
@@ -346,3 +347,82 @@ class TestClearPair:
         assert (await DataObject.get(a.id)).mate_object_id == right.id
         assert (await DataObject.get(right.id)).read_number == 2
         assert (await DataObject.get(wrong.id)).mate_object_id is None
+
+
+class TestInferenceRespectsManualPairing:
+    """Filename inference must never overrule a person -- the same promise
+    user_touched already keeps for role."""
+
+    async def test_a_manual_pairing_survives_reingest(self):
+        """The motivating case: names say one thing, the user said another."""
+        pid = PydanticObjectId()
+        # Names that inference *would* pair with each other.
+        r1 = await _saved(pid, "s_R1.fastq.gz")
+        r2 = await _saved(pid, "s_R2.fastq.gz")
+        # But the user pairs R1 with an unconventionally named file instead.
+        odd = await _saved(pid, "sampleA_forward.fastq.gz")
+        await object_service.set_pair(r1.id, odd.id, 1)
+
+        await _link_mate(await DataObject.get(r1.id))
+
+        assert (await DataObject.get(r1.id)).mate_object_id == odd.id
+        assert (await DataObject.get(r2.id)).mate_object_id is None
+
+    async def test_a_cleared_pairing_is_not_re_inferred(self):
+        """The hole in the old guard: cleared looks identical to never-set."""
+        pid = PydanticObjectId()
+        r1 = await _saved(pid, "s_R1.fastq.gz")
+        r2 = await _saved(pid, "s_R2.fastq.gz")
+        await object_service.set_pair(r1.id, r2.id, 1)
+        await object_service.clear_pair(r1.id)
+
+        await _link_mate(await DataObject.get(r1.id))
+
+        assert (await DataObject.get(r1.id)).mate_object_id is None
+        assert (await DataObject.get(r2.id)).mate_object_id is None
+
+    async def test_inference_does_not_pair_into_a_cleared_file(self):
+        """Reached from the *other* side: r2 was never touched, so it is a
+        candidate -- but r1 was, and must not be pulled back in."""
+        pid = PydanticObjectId()
+        r1 = await _saved(pid, "s_R1.fastq.gz", user_touched=["mate"])
+        r2 = await _saved(pid, "s_R2.fastq.gz")
+
+        await _link_mate(await DataObject.get(r2.id))
+
+        assert (await DataObject.get(r2.id)).mate_object_id is None
+        assert (await DataObject.get(r1.id)).mate_object_id is None
+
+    async def test_untouched_files_still_pair_automatically(self):
+        """The guard must not break ordinary inference."""
+        pid = PydanticObjectId()
+        r1 = await _saved(pid, "auto_R1.fastq.gz")
+        r2 = await _saved(pid, "auto_R2.fastq.gz")
+
+        await _link_mate(await DataObject.get(r2.id))
+
+        assert (await DataObject.get(r1.id)).mate_object_id == r2.id
+        assert (await DataObject.get(r2.id)).mate_object_id == r1.id
+
+    async def test_inference_records_read_numbers(self):
+        """split_mate already computes R1/R2 and throws it away; keeping it
+        gives inferred pairs their badges for free."""
+        pid = PydanticObjectId()
+        r1 = await _saved(pid, "auto_R1.fastq.gz")
+        r2 = await _saved(pid, "auto_R2.fastq.gz")
+
+        await _link_mate(await DataObject.get(r2.id))
+
+        assert (await DataObject.get(r1.id)).read_number == 1
+        assert (await DataObject.get(r2.id)).read_number == 2
+
+    async def test_inferred_pairing_is_not_marked_user_touched(self):
+        """Only a person's choice earns the override; inference does not."""
+        pid = PydanticObjectId()
+        r1 = await _saved(pid, "auto_R1.fastq.gz")
+        r2 = await _saved(pid, "auto_R2.fastq.gz")
+
+        await _link_mate(await DataObject.get(r2.id))
+
+        assert (await DataObject.get(r1.id)).user_touched == []
+        assert (await DataObject.get(r2.id)).user_touched == []
