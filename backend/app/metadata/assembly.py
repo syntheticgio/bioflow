@@ -107,6 +107,11 @@ class AssemblyMetadata:
             out["ncbi_scaffold_n50"] = self.scaffold_n50
         if self.assembly_name:
             out["ncbi_assembly_name"] = self.assembly_name
+        # Also duplicated into facts (beyond to_metadata) so the QC tab's
+        # divergence warning can link to the published assembly without
+        # threading obj.metadata through AssemblyFacts.
+        if self.accession:
+            out["ncbi_assembly_accession"] = self.accession
         if out:
             out["ncbi_fetched_at"] = datetime.now(UTC).isoformat()
         return out

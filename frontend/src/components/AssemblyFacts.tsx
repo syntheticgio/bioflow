@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { accessionUrl } from "../lib/format";
 
 interface Props {
   facts: Record<string, unknown>;
@@ -44,6 +45,10 @@ export function AssemblyFacts({ facts }: Props) {
   const ncbiSequences = facts.ncbi_sequence_count as number | undefined;
   const ncbiGc = facts.ncbi_gc_percent as number | undefined;
   const ncbiName = facts.ncbi_assembly_name as string | undefined;
+  const ncbiAccession = facts.ncbi_assembly_accession as string | undefined;
+  const ncbiUrl = ncbiAccession
+    ? accessionUrl("assembly_accession", ncbiAccession)
+    : null;
   const assemblyError = facts.assembly_error as string | undefined;
   const hasNcbi =
     ncbiTotal !== undefined || ncbiSequences !== undefined || ncbiGc !== undefined;
@@ -224,7 +229,15 @@ export function AssemblyFacts({ facts }: Props) {
               {count !== undefined && <>has {count.toLocaleString()} sequences</>}
               {count !== undefined && totalBases !== undefined && " "}
               {totalBases !== undefined && <>totalling {formatBases(totalBases)}</>};
-              the published assembly has{" "}
+              {" "}
+              {ncbiUrl ? (
+                <a href={ncbiUrl} target="_blank" rel="noreferrer">
+                  the published assembly
+                </a>
+              ) : (
+                "the published assembly"
+              )}{" "}
+              has{" "}
               {ncbiSequences !== undefined && (
                 <>{ncbiSequences.toLocaleString()} sequences</>
               )}
