@@ -7,6 +7,7 @@ import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { SraDownloadDialog } from "./SraDownloadDialog";
+import { orderWithPairs } from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
 /**
@@ -378,10 +379,12 @@ function ProjectView({ projectId }: { projectId: string }) {
                 </button>
 
                 {isExpanded &&
-                  categoryFiles.map((o: DataObject) => (
+                  orderWithPairs(categoryFiles).map(({ object: o, pair }) => (
                     <div
                       key={o.id}
-                      className={`row ${sel === `object:${o.id}` ? "selected" : ""}`}
+                      className={`row ${sel === `object:${o.id}` ? "selected" : ""}${
+                        pair ? ` paired paired-${pair}` : ""
+                      }`}
                       onClick={() => select(`object:${o.id}`)}
                     >
                       <span className="row-icon">
@@ -399,6 +402,9 @@ function ProjectView({ projectId }: { projectId: string }) {
                             <span>{formatKindLabel(o.format.kind)}</span>
                           )}
                           {o.status !== "ready" && <span>{o.status}</span>}
+                          {o.read_number != null && (
+                            <span className="read-badge">R{o.read_number}</span>
+                          )}
                         </div>
                       </div>
                       <button

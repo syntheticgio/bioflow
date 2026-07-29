@@ -336,6 +336,62 @@ textarea:focus {
   margin-top: 1px;
 }
 
+/* ---------- Paired-end reads ---------- */
+
+/* The spine lives in the row's left gutter, which is otherwise unused. Drawn
+   in --border so it reads as structure rather than status: it says "one run",
+   not "something happened". */
+.row.paired {
+  position: relative;
+  padding-left: 22px;
+}
+
+.row.paired::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  width: 2px;
+  background: var(--border);
+}
+
+/* Each half covers from its own vertical centre to the shared edge, so the two
+   pseudo-elements meet as one continuous line across the pair. */
+.row.paired-first::before {
+  top: 50%;
+  bottom: 0;
+}
+
+.row.paired-second::before {
+  top: 0;
+  bottom: 50%;
+}
+
+/* The tick into each row, turning the spine into a bracket. */
+.row.paired::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 6px;
+  height: 2px;
+  background: var(--border);
+}
+
+/* Selection draws its own inset left edge (see .row.selected). Nudging the
+   spine clear keeps the two from reading as one thick smear. */
+.row.paired.selected::before,
+.row.paired.selected::after {
+  left: 12px;
+}
+
+.read-badge {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .row-action {
   opacity: 0;
   color: var(--text-faint);
