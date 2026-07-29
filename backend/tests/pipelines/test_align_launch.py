@@ -305,6 +305,33 @@ class TestDefaultReadGroup:
         assert all(rg.get(k) for k in ("sample", "library", "platform"))
 
 
+class TestLaunchAlignmentRejectsUnwiredAligners:
+    """`launch_alignment` builds params via the `AlignParams` alias
+    (`Minimap2Params.from_dict`), which does not dispatch on the `aligner`
+    key -- it always builds minimap2 params. Without an explicit guard, a
+    request naming bowtie2/HISAT2 would silently launch a minimap2
+    alignment instead. The guard must fire before any database access, so
+    this is reachable without mocking a DB: it raises on the merged-params
+    check, ahead of the first `DataObject.get`.
+    """
+
+    async def test_bowtie2_is_rejected_before_touching_the_database(self):
+        with pytest.raises(ValidationError, match="not wired"):
+            await pipeline_service.launch_alignment(
+                object_id=PydanticObjectId(),
+                reference_id=PydanticObjectId(),
+                params={"aligner": "bowtie2"},
+            )
+
+    async def test_hisat2_is_rejected_before_touching_the_database(self):
+        with pytest.raises(ValidationError, match="not wired"):
+            await pipeline_service.launch_alignment(
+                object_id=PydanticObjectId(),
+                reference_id=PydanticObjectId(),
+                params={"aligner": "hisat2"},
+            )
+
+
 class TestActiveIndexJobQuery:
     """The lookup that finds an in-flight index build to wait on.
 

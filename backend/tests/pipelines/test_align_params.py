@@ -43,6 +43,50 @@ class TestSharedValidation:
             align_params.from_dict({"aligner": "bowtie2", "sort_memory_mb": 32})
 
 
+class TestEnsureWired:
+    """`ensure_wired` is the stopgap for `AlignParams.from_dict` (the
+    Minimap2Params alias) not dispatching on the `aligner` key. Until Task 7
+    rewires the two call sites onto `align_params.from_dict`, this is what
+    stops a bowtie2/HISAT2 request from being silently aligned with
+    minimap2 instead.
+    """
+
+    def test_bwa_mem2_is_wired(self):
+        align_params.ensure_wired(Aligner.BWA_MEM2.value)  # does not raise
+
+    def test_minimap2_is_wired(self):
+        align_params.ensure_wired(Aligner.MINIMAP2.value)  # does not raise
+
+    def test_bowtie2_is_rejected(self):
+        with pytest.raises(ValidationError, match="not wired"):
+            align_params.ensure_wired(Aligner.BOWTIE2.value)
+
+    def test_hisat2_is_rejected(self):
+        with pytest.raises(ValidationError, match="not wired"):
+            align_params.ensure_wired(Aligner.HISAT2.value)
+
+    def test_missing_aligner_is_not_this_guards_job(self):
+        """No `aligner` key means `AlignParams.from_dict` will default to
+        minimap2, which is correct behavior -- not this guard's concern."""
+        align_params.ensure_wired(None)  # does not raise
+
+    def test_an_unknown_aligner_name_is_not_this_guards_job(self):
+        """A name that is not a real `Aligner` member at all is
+        `from_dict`'s error to raise (a clear ValueError), not this guard's
+        -- it only rejects names that are valid but unwired."""
+        align_params.ensure_wired("not-a-real-aligner")  # does not raise
+
+    def test_a_future_fifth_aligner_is_unwired_by_default(self):
+        """UNWIRED_ALIGNERS is derived as everything minus the two known-
+        wired aligners, not a hardcoded pair -- so an aligner added to the
+        enum before Task 7 lands stays rejected without editing this
+        guard."""
+        assert align_params.UNWIRED_ALIGNERS == frozenset(Aligner) - {
+            Aligner.BWA_MEM2,
+            Aligner.MINIMAP2,
+        }
+
+
 class TestBowtie2:
     def test_sensitivity_defaults_to_sensitive(self):
         p = align_params.from_dict({"aligner": "bowtie2"})

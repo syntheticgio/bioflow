@@ -26,7 +26,6 @@ from app.pipelines.align_params import (
     Hisat2Params,
     Minimap2Params,
 )
-from app.pipelines.align_params import from_dict as _params_from_dict
 
 log = get_logger(__name__)
 

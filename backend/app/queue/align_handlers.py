@@ -12,10 +12,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
-from app.errors import PermanentError, RetryableError
+from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import align_runner, aligners, bam_stats_runner, tools
+from app.pipelines.align_params import ensure_wired
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _prepare_workdir
@@ -177,6 +178,19 @@ def align_reads(ctx: JobContext) -> dict:
     job: it is fast, independently useful, and separable.
     """
     aligner = Aligner(ctx.payload.get("aligner", Aligner.MINIMAP2))
+
+    # TODO(Task 7): AlignParams is still the Minimap2Params alias, whose
+    # from_dict always builds minimap2 params regardless of what `aligner`
+    # names -- it does not dispatch, and `_aligner_tool` below falls back to
+    # minimap2's tool status for any aligner that is not bwa-mem2. Until
+    # Task 7 switches this call site to align_params.from_dict (the
+    # aligner-aware dispatcher), a job payload naming bowtie2/HISAT2 must
+    # fail loudly here rather than silently align with minimap2 instead.
+    try:
+        ensure_wired(aligner.value)
+    except ValidationError as exc:
+        raise PermanentError(str(exc)) from exc
+
     tool = tools.require(_aligner_tool(aligner))
     samtools = tools.require(tools.samtools())
 

@@ -40,6 +40,7 @@ from app.pipelines import (
     trimmomatic_runner,
     variant_runner,
 )
+from app.pipelines.align_params import ensure_wired
 from app.pipelines.aligners import Aligner
 from app.services import blob_service, run_service
 from app.storage.paths import blob_path
@@ -805,9 +806,15 @@ async def launch_alignment(
     """
     from app.queue import queue
 
-    align_params = align_runner.AlignParams.from_dict(
-        {**default_align_params(), **(params or {})}
-    )
+    merged_params = {**default_align_params(), **(params or {})}
+    # TODO(Task 7): AlignParams is still the Minimap2Params alias, whose
+    # from_dict always builds minimap2 params regardless of the `aligner`
+    # key -- it does not dispatch. Until Task 7 switches this call site to
+    # align_params.from_dict (the aligner-aware dispatcher), a request for
+    # bowtie2/HISAT2 must fail loudly here rather than silently align with
+    # minimap2 instead.
+    ensure_wired(merged_params.get("aligner"))
+    align_params = align_runner.AlignParams.from_dict(merged_params)
     aligner = align_params.aligner
     tools.require(_aligner_tool(aligner))
     tools.require(tools.samtools())

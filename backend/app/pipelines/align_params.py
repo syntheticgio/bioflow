@@ -233,3 +233,44 @@ def from_dict(data: dict | None) -> BaseAlignParams:
     data = dict(data or {})
     aligner = Aligner(data.get("aligner", Aligner.MINIMAP2))
     return PARAMS_CLASSES[aligner].from_dict(data)
+
+
+# Aligners whose command construction and handler wiring actually exist.
+# bowtie2 and HISAT2 are valid `Aligner` members (Task 1) with their own
+# params classes (this task), but nothing builds their commands or routes
+# their handlers yet -- that lands in Task 7. Until then this is the
+# authoritative "is this aligner actually runnable" set, kept as everything
+# minus what Task 7 has yet to wire rather than an allowlist of two, so a
+# fifth aligner added before Task 7 lands is unwired by default instead of
+# silently falling through.
+UNWIRED_ALIGNERS: frozenset[Aligner] = frozenset(Aligner) - {
+    Aligner.BWA_MEM2,
+    Aligner.MINIMAP2,
+}
+
+
+def ensure_wired(requested_aligner: str | None) -> None:
+    """Reject a payload naming an aligner with no command builder yet.
+
+    Call sites that still use the `AlignParams` alias (`Minimap2Params`
+    under the hood) get no dispatch on the `aligner` key from
+    `Minimap2Params.from_dict` -- it always builds minimap2 params
+    regardless of what the payload asked for. Without this guard, a request
+    naming bowtie2 or HISAT2 would silently align with minimap2 instead:
+    wrong tool, wrong index, discarded params, and a job record that claims
+    "minimap2" ran. This is temporary scaffolding for Task 7, which will
+    replace these call sites with the aligner-aware `from_dict` dispatcher
+    above.
+    """
+    if not requested_aligner:
+        return
+    try:
+        aligner = Aligner(requested_aligner)
+    except ValueError:
+        # Not a real aligner at all -- from_dict will raise its own clear
+        # error momentarily; nothing to add here.
+        return
+    if aligner in UNWIRED_ALIGNERS:
+        raise ValidationError(
+            f"{requested_aligner} is not wired into alignment launch yet"
+        )
