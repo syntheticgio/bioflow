@@ -256,9 +256,10 @@ def _extract(package: Path, work: Path, accession: str) -> None:
     """
     try:
         with zipfile.ZipFile(package) as zf:
+            resolved_work = work.resolve()
             for member in zf.namelist():
                 target = (work / member).resolve()
-                if not str(target).startswith(str(work.resolve())):
+                if not target.is_relative_to(resolved_work):
                     raise PermanentError(
                         f"{accession}'s package contains an unsafe path: {member}"
                     )

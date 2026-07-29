@@ -11,6 +11,7 @@ silently wrong alignments rather than an error.
 """
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -137,3 +138,36 @@ class TestDiskPreflight:
         """A missing figure is not evidence of a problem, and refusing on it
         would block downloads NCBI has no size for."""
         assembly_handlers._check_disk_space(tmp_path, None, "GCF_000002445.2")
+
+
+class TestExtractPathTraversal:
+    def test_a_member_that_escapes_the_work_dir_is_rejected(self, tmp_path: Path):
+        """A zip whose member path climbs out of the work directory (e.g.
+        `../../etc/evil`) must be refused before extraction, not silently
+        written outside the target. A naive `str(target).startswith(...)`
+        check would wrongly treat a sibling directory that shares a string
+        prefix as 'contained'; `is_relative_to` is the correct guard."""
+        work = tmp_path / "work"
+        work.mkdir()
+        package = tmp_path / "package.zip"
+        with zipfile.ZipFile(package, "w") as zf:
+            zf.writestr("ncbi_dataset/data/genomic.fna", ">chr1\nACGT\n")
+            zf.writestr("../../etc/evil", "pwned")
+
+        with pytest.raises(PermanentError, match="unsafe path"):
+            assembly_handlers._extract(package, work, "GCF_000002445.2")
+
+        # Nothing should have been written outside the work directory.
+        assert not (tmp_path.parent / "etc" / "evil").exists()
+
+    def test_a_well_behaved_zip_still_extracts_normally(self, tmp_path: Path):
+        work = tmp_path / "work"
+        work.mkdir()
+        package = tmp_path / "package.zip"
+        with zipfile.ZipFile(package, "w") as zf:
+            zf.writestr("ncbi_dataset/data/genomic.fna", ">chr1\nACGT\n")
+
+        assembly_handlers._extract(package, work, "GCF_000002445.2")
+
+        extracted = work / "ncbi_dataset" / "data" / "genomic.fna"
+        assert extracted.read_text() == ">chr1\nACGT\n"
