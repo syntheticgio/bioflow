@@ -660,4 +660,9 @@ async def reap_uploads(ctx: JobContext) -> dict:
 # Pipeline handlers live in their own modules -- they shell out to external
 # tools and carry a different failure model -- but must be imported here, since
 # registry.load_handlers() imports only this one.
-from app.queue import align_handlers, pipeline_handlers, sra_handlers  # noqa: E402, F401
+from app.queue import (  # noqa: E402, F401
+    align_handlers,
+    pipeline_handlers,
+    sra_handlers,
+    variant_handlers,
+)
