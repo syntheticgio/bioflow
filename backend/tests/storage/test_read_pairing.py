@@ -4,7 +4,7 @@ import pytest
 from beanie import PydanticObjectId, init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from app.api.v1.schemas import ObjectOut
+from app.api.v1.schemas import ObjectOut, PairRequest
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.object import DataObject
@@ -56,3 +56,24 @@ class TestReadNumberSerialization:
 
     def test_object_out_read_number_is_none_when_unset(self):
         assert ObjectOut.of(_obj()).read_number is None
+
+
+class TestPairRequest:
+    """read_number is validated at the edge, so the service can trust it."""
+
+    def test_accepts_one_and_two(self):
+        mate = PydanticObjectId()
+        assert PairRequest(mate_object_id=mate, read_number=1).read_number == 1
+        assert PairRequest(mate_object_id=mate, read_number=2).read_number == 2
+
+    def test_rejects_zero(self):
+        with pytest.raises(ValueError):
+            PairRequest(mate_object_id=PydanticObjectId(), read_number=0)
+
+    def test_rejects_three(self):
+        with pytest.raises(ValueError):
+            PairRequest(mate_object_id=PydanticObjectId(), read_number=3)
+
+    def test_requires_a_mate(self):
+        with pytest.raises(ValueError):
+            PairRequest(read_number=1)
