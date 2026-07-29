@@ -231,10 +231,12 @@ async def _link_mate(obj: DataObject) -> None:
     mate = matches[0]
 
     # Read numbers come from the same split that matched the pair, so the label
-    # and the link cannot disagree. `is_mate_of` already established that the
-    # two tokens are opposites, so deriving one from the other is sound.
-    this_read = 1 if split[1] == "R1" else 2
-    mate_read = 2 if this_read == 1 else 1
+    # and the link cannot disagree. `pairing.OPPOSITE` is the same mapping
+    # `is_mate_of` used to establish that these two tokens are opposites, kept
+    # to one definition rather than re-encoded here.
+    read_number = {"R1": 1, "R2": 2}
+    this_read = read_number[split[1]]
+    mate_read = read_number[pairing.OPPOSITE[split[1]]]
 
     # Conditional on both sides still being unpaired, so two ingests finishing
     # at once cannot produce a half-formed link. Whichever write lands first
