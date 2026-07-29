@@ -119,7 +119,10 @@ export function ProjectDangerZone({
           // read false for a tick before data arrives). Guarding on the data
           // itself, not the loading flag, is what actually prevents the
           // child_project_count crash below.
-          <div>Checking what this would delete…</div>
+          <>
+            <div style={{ marginBottom: 8 }}>Checking what this would delete…</div>
+            <div style={{ display: "flex", gap: 8 }}>{cancel}</div>
+          </>
         ) : preview.data?.blocked ? (
           <>
             <div style={{ marginBottom: 8 }}>
