@@ -377,3 +377,19 @@ class TestFastaSampling:
         # labelled as such rather than claiming to span the file.
         assert r["stats_sampling"] == "prefix"
         assert "gc_content_percent" in r
+
+    def test_tiny_file_does_not_overcount_via_degenerate_stride(self, tmp_path):
+        """A file smaller than FASTA_SAMPLE_BLOCKS must not stride.
+
+        `stride = file_size // FASTA_SAMPLE_BLOCKS` truncates to 0 for any
+        file under 100 bytes, which would collapse every seek onto offset 0
+        and re-read the same handful of bytes ~100 times over. `max_bases` is
+        set below the file's own base count so the file still exceeds the
+        sampling budget -- the condition that used to force the strided path.
+        """
+        p = tmp_path / "tiny.fasta"
+        p.write_text(">c1\nGCAT\n")  # 4 bases, well under FASTA_SAMPLE_BLOCKS
+        r = ss.fasta_stats(p, Compression.NONE, max_bases=2)
+        # No ~100x overcounting: sampled bases can't exceed what's in the file.
+        assert r["stats_sampled_bases"] <= 4
+        assert r["stats_sampling"] in ("prefix", "complete")
