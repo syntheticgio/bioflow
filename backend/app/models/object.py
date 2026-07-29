@@ -74,6 +74,18 @@ class ObjectRole(StrEnum):
     # VCF and a called one are the same format, and only the called one can say
     # which BAM, which reference, and which caller produced it.
     VARIANTS = "variants"
+    # An assembly's authoritative annotation. Format says "intervals" and
+    # cannot distinguish NCBI's published GFF3 from a user's peak calls or
+    # blacklist, which are the same format used for a different purpose.
+    ANNOTATION = "annotation"
+    # Amino acid sequences. The role that matters most: a protein FASTA and a
+    # reference genome are both FormatKind.FASTA, and only this keeps one out
+    # of the aligner's reference picker.
+    PROTEIN = "protein"
+    # CDS / transcript nucleotide sequences. The same hazard as PROTEIN and
+    # slightly worse: `cds_from_genomic.fna` is nucleotide FASTA that would
+    # pass any "does this look like a genome" sniff test.
+    TRANSCRIPT = "transcript"
 
 
 class SidecarRole(StrEnum):
