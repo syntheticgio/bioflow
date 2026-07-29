@@ -47,3 +47,67 @@ class TestCollectSubtree:
         found = await project_service.collect_subtree(target.id)
 
         assert other.id not in found
+
+
+class TestDeletionPreview:
+    async def test_counts_objects_across_the_whole_subtree(self):
+        """The denormalized project counters only cover one project, which is
+        exactly why the preview exists -- nested contents must be counted."""
+        from tests.services.helpers import make_object
+
+        root = await make_project("preview-root")
+        child = await make_project("preview-child", root)
+        await make_object(root, "a.fastq.gz", size=100)
+        await make_object(child, "b.fastq.gz", size=250)
+
+        preview = await project_service.deletion_preview(root.id)
+
+        assert preview["object_count"] == 2
+        assert preview["total_bytes"] == 350
+        assert preview["child_project_count"] == 1
+
+    async def test_is_not_blocked_when_nothing_is_active(self):
+        root = await make_project("preview-idle")
+        preview = await project_service.deletion_preview(root.id)
+        assert preview["blocked"] is False
+        assert preview["active_jobs"] == []
+
+    async def test_is_blocked_by_a_running_job(self):
+        from tests.services.helpers import make_job
+
+        root = await make_project("preview-running")
+        await make_job(root, "align_bwa", "running")
+
+        preview = await project_service.deletion_preview(root.id)
+
+        assert preview["blocked"] is True
+        assert preview["active_jobs"][0]["job_type"] == "align_bwa"
+        assert preview["active_jobs"][0]["state"] == "running"
+
+    async def test_is_blocked_by_a_delayed_job(self):
+        """A DELAYED job awaiting backoff has not started but will. Deleting
+        out from under it causes the exact mid-write race the block exists to
+        prevent, so ACTIVE_STATES is the right predicate, not "running"."""
+        from tests.services.helpers import make_job
+
+        root = await make_project("preview-delayed")
+        await make_job(root, "index_bam", "delayed")
+
+        assert (await project_service.deletion_preview(root.id))["blocked"] is True
+
+    async def test_is_not_blocked_by_a_finished_job(self):
+        from tests.services.helpers import make_job
+
+        root = await make_project("preview-finished")
+        await make_job(root, "align_bwa", "succeeded")
+
+        assert (await project_service.deletion_preview(root.id))["blocked"] is False
+
+    async def test_is_blocked_by_a_job_in_a_descendant(self):
+        from tests.services.helpers import make_job
+
+        root = await make_project("preview-desc-root")
+        child = await make_project("preview-desc-child", root)
+        await make_job(child, "align_bwa", "queued")
+
+        assert (await project_service.deletion_preview(root.id))["blocked"] is True

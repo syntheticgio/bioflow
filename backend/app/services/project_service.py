@@ -149,6 +149,42 @@ async def collect_subtree(project_id: PydanticObjectId) -> list[PydanticObjectId
     return found
 
 
+async def deletion_preview(project_id: PydanticObjectId) -> dict:
+    """What deleting this project would destroy, and whether it may proceed.
+
+    Computed from collect_subtree so the numbers shown in the confirmation
+    match what the delete actually removes.
+    """
+    from app.models import Job, PipelineRun, UploadSession
+    from app.models.job import ACTIVE_STATES
+
+    await get_project(project_id)
+    ids = await collect_subtree(project_id)
+
+    objects = await DataObject.find({"project_id": {"$in": ids}}).to_list()
+    active = await Job.find(
+        {"project_id": {"$in": ids}, "state": {"$in": [s.value for s in ACTIVE_STATES]}}
+    ).to_list()
+
+    return {
+        "project_ids": [str(i) for i in ids],
+        "child_project_count": len(ids) - 1,
+        "object_count": len(objects),
+        # Bytes *referenced*, not bytes that will be freed: a blob shared with
+        # an object outside this subtree stays on disk.
+        "total_bytes": sum(o.size for o in objects),
+        "run_count": await PipelineRun.find({"project_id": {"$in": ids}}).count(),
+        "job_count": await Job.find({"project_id": {"$in": ids}}).count(),
+        "upload_session_count": await UploadSession.find(
+            {"project_id": {"$in": ids}}
+        ).count(),
+        "active_jobs": [
+            {"id": str(j.id), "job_type": j.type, "state": j.state.value} for j in active
+        ],
+        "blocked": bool(active),
+    }
+
+
 async def bump_counters(project_id: PydanticObjectId, *, objects: int, total_bytes: int) -> None:
     """Adjust denormalized rollups. Used outside the transactional paths."""
     await get_db().projects.update_one(
