@@ -611,6 +611,32 @@ async def _supply_sidecars_to_blocked_alignments(
         )
 
 
+def align_provenance(*, result: dict, reads_facts: dict | None) -> dict:
+    """The facts an alignment stamps onto the BAM it produced.
+
+    Chemistry is copied from the reads rather than recorded fresh: aligning
+    does not change how accurate the reads are, and QC already answered that
+    question on the FASTQ. Without the copy the fact is unreachable from a BAM
+    -- `metadata` is carried across but `facts` are not -- and anything
+    downstream that picks a tool by chemistry silently gets the short-read
+    default instead. Variant calling is the first such consumer.
+
+    Absent stays absent: writing `None` would round-trip as the string "None"
+    and parse back as an unrecognized chemistry rather than as "unknown".
+    """
+    provenance = {
+        "aligned_by": result.get("aligner"),
+        "aligner_version": result.get("tool_version"),
+        "samtools_version": result.get("samtools_version"),
+        "align_params": result.get("params") or {},
+        "read_group": result.get("read_group") or {},
+    }
+    chemistry = (reads_facts or {}).get("qc_read_chemistry")
+    if chemistry:
+        provenance["qc_read_chemistry"] = chemistry
+    return provenance
+
+
 async def _apply_align_reads(result: dict) -> None:
     """Turn a finished alignment into a BAM object, and chain its indexing.
 
@@ -638,13 +664,7 @@ async def _apply_align_reads(result: dict) -> None:
             parents.append(PydanticObjectId(value))
 
     job_id = result.get("job_id")
-    provenance = {
-        "aligned_by": result.get("aligner"),
-        "aligner_version": result.get("tool_version"),
-        "samtools_version": result.get("samtools_version"),
-        "align_params": result.get("params") or {},
-        "read_group": result.get("read_group") or {},
-    }
+    provenance = align_provenance(result=result, reads_facts=reads.facts)
 
     try:
         bam = await object_service.ingest_local_file(
@@ -739,9 +759,94 @@ async def _apply_index_bam(result: dict) -> None:
     log.info("index_bam_applied", object_id=bam_id, mapped_pct=facts.get("mapped_pct"))
 
 
+def variant_provenance(result: dict) -> dict:
+    """The facts a variant calling run stamps onto the VCF it produced.
+
+    Which caller ran is not a detail: Clair3 and bcftools disagree about
+    marginal sites, and a VCF whose caller is unrecorded cannot be compared
+    against another or written up in a methods section.
+    """
+    return {
+        "variants_called_by": result.get("caller"),
+        "variant_caller_version": result.get("tool_version"),
+        "variant_params": result.get("params") or {},
+    }
+
+
+async def _apply_call_variants(result: dict) -> None:
+    """Turn a finished variant calling run into a VCF object and its index.
+
+    The VCF descends from both the BAM and the reference: a variant call is a
+    claim about a position in a particular reference, and the call means
+    nothing without knowing which one. The `.tbi` is a sidecar of the VCF,
+    exactly as `.bai` is of a BAM.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    bam_id = result.get("bam_object_id")
+    if not output or not bam_id:
+        return
+
+    bam = await DataObject.get(PydanticObjectId(bam_id))
+    if bam is None:
+        log.warning("call_variants_parent_missing", object_id=bam_id)
+        return
+
+    parents = [bam.id]
+    reference_id = result.get("reference_object_id")
+    if reference_id:
+        parents.append(PydanticObjectId(reference_id))
+
+    job_id = result.get("job_id")
+    try:
+        vcf = await object_service.ingest_local_file(
+            project_id=bam.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.VARIANTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=variant_provenance(result),
+            # Sample-level metadata describes the biology, which calling does
+            # not change -- so the VCF stays findable by the sample it came
+            # from, the same reasoning as the BAM's copy.
+            metadata=dict(bam.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("variant_vcf_ingest_failed", object_id=bam_id, error=str(e))
+        return
+
+    log.info("call_variants_applied", bam_id=bam_id, vcf_id=str(vcf.id))
+
+    # The index is attached after the VCF exists, and its failure is logged
+    # rather than raised: the VCF is the deliverable, and an index can be
+    # rebuilt from it at any time.
+    index = result.get("index")
+    if index:
+        try:
+            await object_service.ingest_local_file(
+                project_id=bam.project_id,
+                path=Path(index["tmp_path"]),
+                name=index["name"],
+                derived_from=[vcf.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                sidecar_of=vcf.id,
+                sidecar_role=SidecarRole.TBI,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error("variant_tbi_ingest_failed", vcf_id=str(vcf.id), error=str(e))
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [vcf.id])
+
+
 _SIDECAR_ROLES = {
     "fai": SidecarRole.FAI,
     "bai": SidecarRole.BAI,
+    "tbi": SidecarRole.TBI,
     SidecarRole.BWA_MEM2_INDEX.value: SidecarRole.BWA_MEM2_INDEX,
     SidecarRole.MINIMAP2_INDEX.value: SidecarRole.MINIMAP2_INDEX,
 }
@@ -755,4 +860,5 @@ _APPLIERS = {
     "build_index": _apply_build_index,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
+    "call_variants": _apply_call_variants,
 }

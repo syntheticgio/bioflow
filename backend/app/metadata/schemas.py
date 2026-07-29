@@ -325,10 +325,14 @@ ROLE_FIELDS: dict[ObjectRole, tuple[FieldDef, ...]] = {
 # the role records that the provenance is known, which is a fact about where
 # the file came from rather than a reason to ask about it differently.
 #
+# VARIANTS follows ALIGNMENT exactly: a called VCF and an uploaded VCF describe
+# the same biology, and which caller produced it is already recorded in facts
+# by the applier rather than being something to ask the user.
+#
 # Listed explicitly rather than left implicit so that a role added without
 # thought still fails the "every role is accounted for" test.
 FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
-    {ObjectRole.TRIMMED_READS, ObjectRole.ALIGNMENT}
+    {ObjectRole.TRIMMED_READS, ObjectRole.ALIGNMENT, ObjectRole.VARIANTS}
 )
 
 

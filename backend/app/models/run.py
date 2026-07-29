@@ -25,6 +25,7 @@ class RunKind(StrEnum):
     ALIGNMENT = "alignment"
     TRIM = "trim"
     SRA_DOWNLOAD = "sra_download"
+    VARIANT_CALLING = "variant_calling"
 
 
 class RunStatus(StrEnum):
@@ -98,6 +99,7 @@ class RunJobRole(StrEnum):
     INGEST = "ingest"
     DOWNLOAD = "download"
     QC = "qc"
+    CALL_VARIANTS = "call_variants"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     fasterq_dump_path: str = "fasterq-dump"
     prefetch_path: str = "prefetch"
     nanoplot_path: str = "NanoPlot"
+    # bcftools does the short-read calling and all VCF indexing
+    # (`bcftools index -t`), so it is the only new binary the code invokes for
+    # variant calling besides Clair3 itself.
+    bcftools_path: str = "bcftools"
+    clair3_path: str = "run_clair3.sh"
+    # Model directories, one per Clair3 --platform. The install script
+    # normalizes each to hold the checkpoint files directly.
+    clair3_models_dir: str = "/opt/clair3/models"
 
 
     # Threads a single trim run may use. Deliberately well below the core count:

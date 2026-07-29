@@ -40,13 +40,23 @@ export interface FormatInfo {
 }
 
 /** How a file is used, when its format cannot say. Null = derive from format. */
-export type ObjectRole = "reference" | "trimmed_reads" | "alignment";
+export type ObjectRole =
+  | "reference"
+  | "trimmed_reads"
+  | "alignment"
+  | "variants";
 
 /**
  * What kind of scaffolding a sidecar is. Distinct from ObjectRole: a role says
  * how a file is *used*, and a sidecar is not used by a person at all.
  */
-export type SidecarRole = "bwa-mem2-index" | "minimap2-index" | "fai" | "bai";
+export type SidecarRole =
+  | "bwa-mem2-index"
+  | "minimap2-index"
+  | "fai"
+  | "bai"
+  /** The tabix index beside a bgzipped VCF -- to a VCF what bai is to a BAM. */
+  | "tbi";
 
 export interface DataObject {
   id: string;
@@ -318,7 +328,13 @@ export interface ApiError {
 
 // --- Pipelines ---
 
-export type PipelineType = "trim" | "align" | "qc" | "utility" | "download";
+export type PipelineType =
+  | "trim"
+  | "align"
+  | "qc"
+  | "utility"
+  | "download"
+  | "variant";
 
 export interface PipelineTool {
   name: string;
@@ -395,7 +411,7 @@ export interface MateSuggestion {
 }
 
 /** What a user asked for, and the jobs that served it. */
-export type RunKind = "alignment" | "trim";
+export type RunKind = "alignment" | "trim" | "sra_download" | "variant_calling";
 
 /** Derived from member job states on the server, never stored. */
 export type RunStatus =
@@ -408,7 +424,15 @@ export type RunStatus =
 
 export type RunInputRole = "reads" | "mate" | "reference";
 
-export type RunJobRole = "index" | "align" | "trim" | "index_bam" | "ingest";
+export type RunJobRole =
+  | "index"
+  | "align"
+  | "trim"
+  | "index_bam"
+  | "ingest"
+  | "download"
+  | "qc"
+  | "call_variants";
 
 export interface RunInput {
   object_id: string;
@@ -494,6 +518,41 @@ export interface AlignRequest {
   paired: boolean;
   read_group: ReadGroup;
   params: Partial<AlignParams>;
+}
+
+/**
+ * Variant callers. DeepVariant is recognized but not installed -- there is no
+ * arm64 build -- and the server refuses it with an explanation rather than
+ * failing obscurely, so the dialog can show it as unavailable.
+ */
+export type VariantCallerName = "clair3" | "bcftools" | "deepvariant";
+
+/** Mirrors variant_runner.VariantParams. */
+export interface VariantParams {
+  caller: VariantCallerName;
+  threads: number;
+}
+
+export interface VariantDefaults {
+  params: VariantParams;
+  /** Null when the chemistry is CLR: no caller is offered for it. */
+  caller: VariantCallerName | null;
+  /** The chemistry QC inferred, which is what picked the caller. */
+  chemistry: string | null;
+  /** Resolved from the BAM's provenance; null for an uploaded BAM. */
+  reference_id: string | null;
+  reference_name: string | null;
+  /** True when the dialog must ask the user to choose a reference. */
+  needs_reference: boolean;
+  callers: { name: VariantCallerName; available: boolean }[];
+  max_threads: number;
+}
+
+export interface VariantRequest {
+  bam_id: string;
+  reference_id?: string | null;
+  caller?: VariantCallerName | null;
+  params?: Partial<VariantParams>;
 }
 
 /** Alignment statistics read from `samtools flagstat` during index_bam. */

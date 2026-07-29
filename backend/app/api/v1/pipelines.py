@@ -180,6 +180,15 @@ class BuildIndexRequest(BaseModel):
     aligner: str = "minimap2"
 
 
+class VariantRequest(BaseModel):
+    bam_id: PydanticObjectId
+    # Normally resolved from the BAM's provenance. Supplied only for an
+    # uploaded BAM, which carries no record of what it was aligned against.
+    reference_id: PydanticObjectId | None = None
+    caller: str | None = None
+    params: dict = Field(default_factory=dict)
+
+
 @router.get("/align/defaults/{object_id}")
 async def align_defaults(object_id: PydanticObjectId) -> dict:
     """Defaults for the alignment dialog, including the read group.
@@ -262,5 +271,53 @@ async def launch_alignment(body: AlignRequest) -> JobOut:
         read_group=body.read_group,
         params=body.params,
         paired=body.paired,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/variants/defaults/{bam_id}")
+async def variant_defaults(bam_id: PydanticObjectId) -> dict:
+    """Defaults for the variant calling dialog.
+
+    Reports the inferred chemistry and the caller it implies, plus whether the
+    reference could be resolved -- so the dialog knows to ask for one rather
+    than discovering at submit time that it has to.
+    """
+    obj = await DataObject.get(bam_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {bam_id}")
+
+    # Resolved once each: the chemistry lookup may read the BAM's parent, and
+    # calling it twice to fill two response fields would double that.
+    params = await pipeline_service.default_variant_params(obj)
+    chemistry = await pipeline_service.read_chemistry_for_alignment(obj)
+    reference = await pipeline_service.reference_for_bam(obj)
+
+    return {
+        "params": params,
+        "caller": params.get("caller"),
+        "chemistry": chemistry.value if chemistry else None,
+        "reference_id": str(reference.id) if reference else None,
+        "reference_name": reference.name if reference else None,
+        "needs_reference": reference is None,
+        "callers": [
+            {
+                "name": name,
+                "available": probe().available,
+            }
+            for name, probe in (("clair3", tools.clair3), ("bcftools", tools.bcftools))
+        ],
+        "max_threads": settings.pipeline_default_threads,
+    }
+
+
+@router.post("/variants", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_variant_calling(body: VariantRequest) -> JobOut:
+    """Queue a variant calling run over an aligned, indexed BAM."""
+    job = await pipeline_service.launch_variant_calling(
+        bam_id=body.bam_id,
+        reference_id=body.reference_id,
+        caller=body.caller,
+        params=body.params,
     )
     return JobOut.of(job)

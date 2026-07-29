@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { AlignerName, ObjectDetail as ObjectDetailData } from "../api/types";
+import type {
+  AlignerName,
+  ObjectDetail as ObjectDetailData,
+  VariantCallerName,
+} from "../api/types";
 import {
   compressionLabel,
   formatBytes,
@@ -26,6 +30,7 @@ import { AlignmentReport } from "./AlignmentReport";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { TrimDialog } from "./TrimDialog";
+import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
@@ -230,7 +235,10 @@ const TABS: TabDef[] = [
  * a boolean per selector plus a separately-tracked tool name would admit
  * states the flow does not have, like both dialogs open at once.
  */
-type PipelineFlow = { pipeline: "trim" | "align"; tool: string | null } | null;
+type PipelineFlow = {
+  pipeline: "trim" | "align" | "variant";
+  tool: string | null;
+} | null;
 
 function ObjectDetail({ id }: { id: string }) {
   const qc = useQueryClient();
@@ -251,7 +259,7 @@ function ObjectDetail({ id }: { id: string }) {
   // partial state leaking into what actually launches a dialog.
   const [pendingTool, setPendingTool] = useState<string | null>(null);
 
-  const startFlow = (pipeline: "trim" | "align") => {
+  const startFlow = (pipeline: "trim" | "align" | "variant") => {
     setPendingTool(null);
     setFlow({ pipeline, tool: null });
   };
@@ -379,6 +387,11 @@ function ObjectDetail({ id }: { id: string }) {
   // as part of the first alignment against it.
   const canIndex = obj.status === "ready" && obj.format.kind === "fasta";
 
+  // Variant calling reads an alignment. The .bai and the reference are checked
+  // server-side at launch, which reports what is missing and how to fix it --
+  // better than hiding the button and leaving the user to guess why.
+  const canCallVariants = obj.status === "ready" && obj.format.kind === "bam";
+
   return (
     <div className="panel">
       <div className="panel-header">
@@ -403,6 +416,17 @@ function ObjectDetail({ id }: { id: string }) {
             title="Align these reads against a reference"
           >
             Align
+          </button>
+        )}
+        {canCallVariants && (
+          <button
+            type="button"
+            className="btn"
+            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
+            onClick={() => startFlow("variant")}
+            title="Call variants from this alignment"
+          >
+            Call variants
           </button>
         )}
         {/* Same eligibility as trimming, and in the header rather than the QC
@@ -537,6 +561,17 @@ function ObjectDetail({ id }: { id: string }) {
           onBack={() => {
             setPendingTool(flow.tool);
             setFlow({ pipeline: "align", tool: null });
+          }}
+          onClose={() => setFlow(null)}
+        />
+      )}
+      {flow?.pipeline === "variant" && flow.tool != null && (
+        <VariantDialog
+          object={obj}
+          selectedTool={flow.tool as VariantCallerName}
+          onBack={() => {
+            setPendingTool(flow.tool);
+            setFlow({ pipeline: "variant", tool: null });
           }}
           onClose={() => setFlow(null)}
         />

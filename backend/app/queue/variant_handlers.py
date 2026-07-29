@@ -1,0 +1,329 @@
+"""Variant calling job handler: call_variants.
+
+Split from `align_handlers.py` for the same reason that file was split from
+`pipeline_handlers.py`: these share a problem the others do not. A variant
+caller needs *both* an indexed BAM and an indexed reference laid out as
+siblings on disk, because Clair3 and bcftools each infer their index paths from
+the filename they were given.
+
+Imported by `handlers.py` for the `@handler` registration side effects.
+"""
+
+from pathlib import Path
+
+from app.config import settings
+from app.errors import PermanentError, RetryableError, ValidationError
+from app.logging import get_logger
+from app.models import IoClass, JobClass, JobResources
+from app.pipelines import aligners, tools, variant_runner
+from app.pipelines.align_runner import ReadChemistry
+from app.pipelines.variant_runner import VariantCaller
+from app.queue.align_handlers import _resolve_blob
+from app.queue.executor import run_subprocess
+from app.queue.pipeline_handlers import _failure, _prepare_workdir
+from app.queue.registry import HandlerMode, JobContext, handler
+
+log = get_logger(__name__)
+
+
+def _validate_payload(payload: dict) -> None:
+    if not payload.get("bam_object_id"):
+        raise PermanentError("call_variants requires a 'bam_object_id'")
+    if not payload.get("reference_object_id"):
+        raise PermanentError("call_variants requires a 'reference_object_id'")
+
+
+def _resolve_caller(payload: dict) -> VariantCaller:
+    """The caller this job should run, from the payload.
+
+    PermanentError throughout: every failure here is a payload that will not
+    improve on retry.
+    """
+    raw = payload.get("caller") or VariantCaller.CLAIR3.value
+    try:
+        caller = VariantCaller(raw)
+    except ValueError:
+        raise PermanentError(
+            f"Unknown variant caller {raw!r}",
+            details={"valid": [c.value for c in VariantCaller]},
+        ) from None
+
+    if caller is VariantCaller.DEEPVARIANT:
+        raise PermanentError(
+            "DeepVariant is not available in this installation: it has no "
+            "arm64 Linux build. Use Clair3 for long reads, or bcftools for "
+            "short reads."
+        )
+    return caller
+
+
+def _check_chemistry(
+    *, chemistry: ReadChemistry | None, caller: VariantCaller
+) -> None:
+    """Re-check the chemistry the launch path already validated.
+
+    Not redundant: a payload outlives the check that built it. A job queued
+    before a file was reclassified, or replayed by hand, arrives here without
+    having passed through `launch_variant_calling` in its current state.
+
+    A caller that merely disagrees with the chemistry is logged and allowed --
+    overriding the suggestion is the user's call. CLR is the exception, because
+    there is no caller that produces trustworthy results from it.
+    """
+    if chemistry is None:
+        return
+
+    try:
+        expected = variant_runner.caller_for_chemistry(chemistry)
+    except ValidationError as e:
+        # CLR. Permanent: the file's chemistry is not going to change.
+        raise PermanentError(str(e)) from e
+
+    if caller is not expected:
+        log.warning(
+            "caller_chemistry_mismatch",
+            caller=caller.value,
+            suggested=expected.value,
+            chemistry=chemistry.value,
+        )
+
+
+def _model_path(platform: str, *, root: Path | None = None) -> Path:
+    """The Clair3 model directory for a platform.
+
+    Checked before the run rather than trusted, so a model missing from the
+    image fails in the first second with a message naming the path, instead of
+    surfacing as a Clair3 traceback once the job is already underway.
+    """
+    base = root if root is not None else Path(settings.clair3_models_dir)
+    path = base / platform
+    if not path.is_dir():
+        raise PermanentError(
+            f"Clair3 model not found at {path}. The image should carry it; "
+            f"rebuild, or point CLAIR3_MODELS_DIR at a directory that has it.",
+            details={"platform": platform, "path": str(path)},
+        )
+    return path
+
+
+def _chemistry_from_payload(payload: dict) -> ReadChemistry | None:
+    raw = payload.get("chemistry")
+    if not raw:
+        return None
+    try:
+        return ReadChemistry(raw)
+    except ValueError:
+        # Facts are tool-written strings, not a validated enum. An unrecognized
+        # value means "we do not know", which is not a reason to fail the job.
+        log.warning("unrecognized_chemistry", chemistry=raw)
+        return None
+
+
+@handler(
+    "call_variants",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # The enqueue-time resources from launch_variant_calling override these;
+    # the governor reads job.resources, not this default. Kept in step with
+    # that call site so the /jobs display is not misleading.
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+    # As for alignment: a caller failure is almost always deterministic, and
+    # retrying a multi-hour run delays the error without making it less likely.
+    max_attempts=2,
+)
+def call_variants(ctx: JobContext) -> dict:
+    """Call variants from an aligned, indexed BAM.
+
+    The BAM's `.bai` and the reference's `.fai` are both required and both
+    checked at launch. They are materialized here as siblings of the files they
+    index, because that is where the callers look for them -- neither takes an
+    explicit index path.
+    """
+    _validate_payload(ctx.payload)
+
+    caller = _resolve_caller(ctx.payload)
+    chemistry = _chemistry_from_payload(ctx.payload)
+    _check_chemistry(chemistry=chemistry, caller=caller)
+
+    work = _prepare_workdir(ctx, "variants")
+
+    # The BAM and its .bai, laid out as siblings. samtools' own convention:
+    # `<name>.bam` alongside `<name>.bam.bai`.
+    bam_name = Path(ctx.payload.get("bam_name") or "aligned.bam").name
+    bam = work / bam_name
+    bam.unlink(missing_ok=True)
+    bam.symlink_to(_resolve_blob(ctx.payload, "bam"))
+
+    bai = work / f"{bam_name}{aligners.BAI_SUFFIX}"
+    bai.unlink(missing_ok=True)
+    bai.symlink_to(_resolve_blob(ctx.payload, "bai"))
+
+    # The reference and its .fai, through the same helper alignment uses.
+    ref_name = Path(ctx.payload.get("reference_name") or "reference.fa").name
+    materialized = aligners.materialize(
+        workdir=work / "ref",
+        reference_name=ref_name,
+        reference_blob=_resolve_blob(ctx.payload, "reference"),
+        sidecars={f"{ref_name}{aligners.FAI_SUFFIX}": str(_resolve_blob(ctx.payload, "fai"))},
+    )
+    if materialized.missing_index:
+        raise PermanentError(
+            f"The reference index for {ref_name!r} could not be laid out. Its "
+            f".fai may be recorded against a different reference."
+        )
+
+    out_dir = work / "out"
+    out_dir.mkdir(exist_ok=True)
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if caller is VariantCaller.CLAIR3:
+        vcf = _run_clair3(ctx, bam, materialized.reference, out_dir, log_path)
+    else:
+        vcf = _run_bcftools(ctx, bam, materialized.reference, out_dir, log_path)
+
+    tbi = _index_vcf(ctx, vcf, log_path)
+
+    ctx.progress(phase="done", pct=1.0, message="variant calling complete")
+    log.info(
+        "call_variants_finished",
+        job_id=ctx.job_id,
+        caller=caller.value,
+        output=vcf.name,
+    )
+
+    return {
+        "bam_object_id": ctx.payload.get("bam_object_id"),
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "output": {"tmp_path": str(vcf), "name": vcf.name},
+        "index": {"tmp_path": str(tbi), "name": tbi.name, "role": "tbi"},
+        "caller": caller.value,
+        "tool_version": _caller_version(caller),
+        "params": ctx.payload.get("params") or {},
+        "workdir": str(work),
+    }
+
+
+def _caller_version(caller: VariantCaller) -> str | None:
+    tool = tools.clair3() if caller is VariantCaller.CLAIR3 else tools.bcftools()
+    return tool.version
+
+
+def _progress_reporter(ctx: JobContext) -> "callable":
+    """A line callback that publishes phase changes.
+
+    `VariantProgress.feed` returns False for a repeat of the current phase, so
+    a banner printed on every line does not mean a database write on every
+    line.
+    """
+    progress = variant_runner.VariantProgress()
+
+    def on_line(line: str) -> None:
+        if progress.feed(line):
+            ctx.progress(
+                pct=progress.pct, phase=progress.phase, message=progress.message()
+            )
+
+    return on_line
+
+
+def _run_clair3(
+    ctx: JobContext, bam: Path, reference: Path, out_dir: Path, log_path: Path
+) -> Path:
+    tool = tools.require(tools.clair3())
+
+    params = variant_runner.Clair3Params.from_dict(ctx.payload.get("clair3_params"))
+    model_path = _model_path(params.platform)
+
+    ctx.progress(phase="starting", pct=None, message="starting Clair3")
+    cmd = variant_runner.build_clair3_command(
+        clair3_path=tool.path,
+        bam=bam,
+        reference=reference,
+        output_dir=out_dir,
+        model_path=model_path,
+        params=params,
+    )
+    log.info("clair3_started", job_id=ctx.job_id, platform=params.platform)
+
+    code = run_subprocess(
+        ctx, cmd, log_path=str(log_path), on_line=_progress_reporter(ctx)
+    )
+    if code != 0:
+        raise _failure(code, log_path, "clair3")
+
+    # Clair3 writes merge_output.vcf.gz: the pileup and full-alignment calls
+    # reconciled. Anything else in this directory is an intermediate.
+    produced = out_dir / "merge_output.vcf.gz"
+    if not produced.exists():
+        raise RetryableError("Clair3 exited 0 but produced no merged VCF")
+
+    return _rename_output(ctx, produced, bam, "clair3")
+
+
+def _run_bcftools(
+    ctx: JobContext, bam: Path, reference: Path, out_dir: Path, log_path: Path
+) -> Path:
+    tool = tools.require(tools.bcftools())
+
+    params = variant_runner.BcftoolsParams.from_dict(ctx.payload.get("bcftools_params"))
+    vcf = out_dir / variant_runner.output_name(bam.name, "bcftools")
+
+    ctx.progress(phase="starting", pct=None, message="starting bcftools")
+    cmd = variant_runner.build_bcftools_command(
+        bcftools_path=tool.path,
+        reference=reference,
+        bam=bam,
+        output=vcf,
+        params=params,
+    )
+    log.info("bcftools_started", job_id=ctx.job_id)
+
+    code = run_subprocess(
+        ctx, cmd, log_path=str(log_path), on_line=_progress_reporter(ctx)
+    )
+    if code != 0:
+        raise _failure(code, log_path, "bcftools")
+
+    if not vcf.exists() or vcf.stat().st_size == 0:
+        raise RetryableError("bcftools exited 0 but produced no VCF")
+    return vcf
+
+
+def _rename_output(ctx: JobContext, produced: Path, bam: Path, caller: str) -> Path:
+    """Give the caller's fixed output filename a name derived from the input.
+
+    Clair3 always writes `merge_output.vcf.gz`; two runs would be
+    indistinguishable in the object store.
+    """
+    name = ctx.payload.get("output_name") or variant_runner.output_name(bam.name, caller)
+    final = produced.parent / name
+    if final != produced:
+        produced.rename(final)
+    return final
+
+
+def _index_vcf(ctx: JobContext, vcf: Path, log_path: Path) -> Path:
+    """Index the VCF, returning the .tbi path.
+
+    Always bcftools, whichever caller produced the file: it is installed
+    unconditionally and knows the compression of what it reads.
+    """
+    tool = tools.require(tools.bcftools())
+
+    ctx.progress(phase="indexing", pct=None, message="indexing variants")
+    code = run_subprocess(
+        ctx,
+        variant_runner.build_index_command(bcftools_path=tool.path, vcf=vcf),
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "bcftools index")
+
+    tbi = Path(f"{vcf}.tbi")
+    if not tbi.exists():
+        raise RetryableError("bcftools index exited 0 but produced no .tbi")
+    return tbi
