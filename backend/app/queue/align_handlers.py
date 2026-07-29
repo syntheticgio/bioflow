@@ -376,6 +376,10 @@ def index_bam(ctx: JobContext) -> dict:
         "facts": facts,
         "tool_version": samtools.version,
         "workdir": str(work),
+        # Carried through so `_apply_index_bam` knows to chain the Results
+        # computation that requested this index -- see
+        # pipeline_service.launch_bam_stats.
+        "then_bam_stats": ctx.payload.get("then_bam_stats", False),
     }
 
 

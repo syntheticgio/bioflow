@@ -51,8 +51,8 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             </div>
           ) : !hasIndex ? (
             <div className="warn-box">
-              This BAM has no index (.bai). Index it first, from the Align
-              button or the Metadata tab, then compute results.
+              This BAM has no index (.bai). Compute results will index it
+              first, then compute.
             </div>
           ) : (
             <div style={{ color: "var(--text-faint)", fontSize: 12, marginBottom: 8 }}>
@@ -65,7 +65,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             type="button"
             className="btn"
             onClick={() => compute.mutate()}
-            disabled={compute.isPending || !sortedCoordinate || !hasIndex}
+            disabled={compute.isPending || !sortedCoordinate}
           >
             {compute.isPending ? "Computing…" : "Compute results"}
           </button>

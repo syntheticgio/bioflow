@@ -1077,10 +1077,13 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
     per-contig counts, and binned depth across the reference.
 
     Read-only, like QC: no derived objects, just facts merged onto the object
-    plus one TSV report on disk. Requires a coordinate-sorted, indexed BAM --
-    checked here rather than left for samtools to fail confusingly on, and
-    refused with an actionable message rather than auto-chaining index_bam,
-    matching launch_variant_calling's documented precedent.
+    plus one TSV report on disk. Requires a coordinate-sorted BAM, checked
+    here rather than left for samtools to fail confusingly on. Unlike
+    launch_variant_calling, a missing `.bai` is *not* refused here: the
+    Results tab has no Align button and the Metadata tab has no standalone
+    index action, so there is nowhere else for the user to ask for one. This
+    queues `index_bam` first and chains straight into `run_bam_stats` when it
+    finishes -- see `_apply_index_bam` in queue/results.py.
     """
     from app.queue import queue
 
@@ -1093,10 +1096,33 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
 
     bai = await _sidecar_of_role(bam, SidecarRole.BAI)
     if bai is None:
-        raise ValidationError(
-            f"{bam.name!r} has no BAM index (.bai). Index it first.",
-            details={"object_id": str(bam.id), "needs": "index_bam"},
+        if not bam.blob_sha256:
+            raise ValidationError(
+                f"{bam.name!r} has no stored content yet (status={bam.status.value})"
+            )
+        index_job = await queue.enqueue(
+            "index_bam",
+            payload={
+                "bam_object_id": str(bam.id),
+                "bam_sha256": bam.blob_sha256,
+                "bam_name": bam.name,
+                "project_id": str(bam.project_id),
+                "then_bam_stats": True,
+            },
+            job_class=JobClass.COMPUTE,
+            resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.LIGHT),
+            max_attempts=2,
+            dedup_key=f"index_bam:{bam.blob_sha256}",
+            project_id=bam.project_id,
+            object_id=bam.id,
         )
+        if index_job is None:
+            raise ConflictError(
+                "This BAM is already being indexed. Wait for it to finish, "
+                "then compute results.",
+                details={"object_id": str(bam.id)},
+            )
+        return index_job
 
     digest, path = await _resolve_readable(bam)
     bai_digest, bai_path = await _resolve_readable(bai)

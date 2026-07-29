@@ -85,7 +85,16 @@ async def _apply_ingest_headers(result: dict) -> None:
     if facts:
         # Merged, not replaced: a re-ingest should not discard facts an earlier
         # pass established (or that a future parser added).
-        update[DataObject.facts] = {**obj.facts, **facts}
+        merged_facts = {**obj.facts, **facts}
+        # `has_index` from this parse is a sibling-file check that is only
+        # meaningful for register-in-place files -- for a managed blob (stored
+        # by hash, not next to a `.bai`) it is unconditionally False, and
+        # `ingest_headers` can finish after `index_bam` (see
+        # `_apply_index_bam`) on a small/fast file, clobbering a real index
+        # back to "missing". An index, once true, does not become untrue.
+        if obj.facts.get("has_index") and not merged_facts.get("has_index"):
+            merged_facts["has_index"] = True
+        update[DataObject.facts] = merged_facts
 
     enrichment = result.get("enrichment") or {}
     if enrichment.get("values"):
@@ -748,6 +757,7 @@ async def _apply_index_bam(result: dict) -> None:
         return
 
     job_id = result.get("job_id")
+    bai_ingested = False
     try:
         await object_service.ingest_local_file(
             project_id=bam.project_id,
@@ -758,10 +768,17 @@ async def _apply_index_bam(result: dict) -> None:
             sidecar_of=bam.id,
             sidecar_role=SidecarRole.BAI,
         )
+        bai_ingested = True
     except Exception as e:  # noqa: BLE001
         log.error("bai_ingest_failed", object_id=bam_id, error=str(e))
 
     facts = result.get("facts") or {}
+    if bai_ingested:
+        # `has_index` is normally set once at ingest-time parsing (see
+        # storage/parsers.py) and never revisited, so a BAM indexed after the
+        # fact -- like this one -- needs it stamped here or the Results tab
+        # and Provenance panel both keep reporting a missing index forever.
+        facts = {**facts, "has_index": True}
     if facts:
         # On the BAM itself: this is where a user looks to decide whether the
         # alignment is worth keeping.
@@ -773,6 +790,18 @@ async def _apply_index_bam(result: dict) -> None:
         )
 
     log.info("index_bam_applied", object_id=bam_id, mapped_pct=facts.get("mapped_pct"))
+
+    # This index was built on the Results tab's behalf (see
+    # pipeline_service.launch_bam_stats), so finish what the user actually
+    # asked for now that the .bai exists.
+    if result.get("then_bam_stats"):
+        from app.errors import AppError
+        from app.services import pipeline_service
+
+        try:
+            await pipeline_service.launch_bam_stats(object_id=bam.id)
+        except AppError as e:
+            log.warning("bam_stats_chain_failed", object_id=bam_id, error=str(e))
 
 
 async def _apply_run_bam_stats(result: dict) -> None:
