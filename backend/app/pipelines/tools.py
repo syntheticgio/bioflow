@@ -180,6 +180,16 @@ def minimap2() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def bowtie2() -> Tool:
+    return _probe("bowtie2", settings.bowtie2_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def hisat2() -> Tool:
+    return _probe("hisat2", settings.hisat2_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def samtools() -> Tool:
     return _probe("samtools", settings.samtools_path, ["--version"])
 
@@ -222,6 +232,8 @@ def all_tools() -> list[Tool]:
         nanoplot(),
         bwa_mem2(),
         minimap2(),
+        bowtie2(),
+        hisat2(),
         samtools(),
         bcftools(),
         clair3(),
@@ -258,6 +270,10 @@ class ToolMeta:
     pipelines: tuple[PipelineType, ...]
     summary: str
     strengths: tuple[str, ...]
+    # The rail in the tool selector shows this; `summary` is a paragraph and
+    # too long for a row. Kept beside it rather than derived by truncation,
+    # since a sentence cut at 60 characters reads as a bug.
+    one_liner: str = ""
     # Whether a job handler actually branches on this tool, independent of
     # whether the binary is installed. cutadapt and Trimmomatic probe cleanly
     # -- they are real, working binaries -- but trim_reads only knows fastp;
@@ -273,6 +289,7 @@ class ToolMeta:
 TOOL_META: dict[str, ToolMeta] = {
     "fastp": ToolMeta(
         pipelines=(PipelineType.TRIM, PipelineType.QC),
+        one_liner="All-in-one Illumina QC and adapter trimming",
         summary=(
             "All-in-one Illumina read QC and adapter trimming. Single-pass: "
             "quality filtering, adapter removal, poly-G tail trimming, length "
@@ -289,6 +306,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "cutadapt": ToolMeta(
         pipelines=(PipelineType.TRIM,),
+        one_liner="Flexible adapter, primer, and barcode trimming",
         summary=(
             "Flexible adapter, primer, and barcode trimmer for all sequencing "
             "platforms. Supports anchored adapters, linked adapters, "
@@ -305,6 +323,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "trimmomatic": ToolMeta(
         pipelines=(PipelineType.TRIM,),
+        one_liner="Classic sliding-window quality trimmer",
         summary=(
             "Classic sliding-window quality trimmer for Illumina paired-end "
             "and single-end reads. The longest-established tool in the field "
@@ -319,6 +338,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "fastqc": ToolMeta(
         pipelines=(PipelineType.QC,),
+        one_liner="The canonical per-file HTML QC report",
         summary=(
             "The canonical per-file HTML QC report. Per-base quality, GC "
             "content, overrepresented sequences, adapter content, sequence "
@@ -334,6 +354,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "nanoplot": ToolMeta(
         pipelines=(PipelineType.QC,),
+        one_liner="QC plots for Nanopore and PacBio long reads",
         summary=(
             "QC for long reads. Plots read-length and quality distributions "
             "for Nanopore and PacBio data, where the per-base model FastQC "
@@ -349,6 +370,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "fasterq-dump": ToolMeta(
         pipelines=(PipelineType.DOWNLOAD,),
+        one_liner="Converts an SRA run into FASTQ",
         summary=(
             "Converts an SRA run into FASTQ. The multi-threaded successor to "
             "fastq-dump, and how sequencing data is pulled out of NCBI once a "
@@ -362,6 +384,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "prefetch": ToolMeta(
         pipelines=(PipelineType.DOWNLOAD,),
+        one_liner="Fetches an SRA run into the local cache",
         summary=(
             "Fetches an SRA run into the local cache ahead of conversion. "
             "Some NCBI configurations require it before fasterq-dump, and it "
@@ -375,6 +398,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "bwa-mem2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
+        one_liner="Standard short-read aligner for DNA-seq",
         summary=(
             "The standard short-read aligner for human and model organism "
             "genomes. Optimized for Illumina paired-end reads up to ~500 bp."
@@ -388,6 +412,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "minimap2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
+        one_liner="Long-read and splice-aware aligner",
         summary=(
             "Versatile aligner for long reads (PacBio, Nanopore) and "
             "any-vs-any comparisons. Splice-aware for RNA-seq. Works on short "
@@ -400,8 +425,43 @@ TOOL_META: dict[str, ToolMeta] = {
             "Runs on all architectures including arm64",
         ),
     ),
+    "bowtie2": ToolMeta(
+        pipelines=(PipelineType.ALIGN,),
+        one_liner="Short-read aligner for ChIP-seq, ATAC-seq, and resequencing",
+        summary=(
+            "Fast, memory-efficient short-read aligner. The standard choice "
+            "for ChIP-seq and ATAC-seq, where its local alignment mode and "
+            "explicit insert-size control matter more than the indel "
+            "sensitivity a variant-calling pipeline wants."
+        ),
+        strengths=(
+            "The conventional aligner for ChIP-seq and ATAC-seq",
+            "Compact index: about 3.5 GB for a human genome",
+            "Local mode soft-clips read ends rather than discarding the read",
+            "Explicit insert-size ceiling for fragment-length-sensitive work",
+            "Four sensitivity presets trading speed against divergent regions",
+        ),
+    ),
+    "hisat2": ToolMeta(
+        pipelines=(PipelineType.ALIGN,),
+        one_liner="Splice-aware RNA-seq aligner with a compact graph index",
+        summary=(
+            "Splice-aware aligner built for RNA-seq. Its graph FM index is "
+            "far smaller than STAR's for the same genome, which makes it the "
+            "practical choice for transcriptome alignment on a machine that "
+            "cannot spare 32 GB."
+        ),
+        strengths=(
+            "Splice-aware: designed for RNA-seq junction discovery",
+            "Compact index -- roughly 4 GB for human, against STAR's ~30 GB",
+            "Strandness handling for dUTP and other stranded protocols",
+            "Can be told to skip spliced alignment for DNA input",
+            "Output mode tailored for downstream transcript assembly",
+        ),
+    ),
     "samtools": ToolMeta(
         pipelines=(PipelineType.UTILITY, PipelineType.QC),
+        one_liner="Universal BAM/CRAM/SAM toolkit",
         summary=(
             "Universal BAM/CRAM/SAM toolkit. Sorting, indexing, flagstat, "
             "depth calculation. The common denominator of every alignment "
@@ -415,6 +475,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "bcftools": ToolMeta(
         pipelines=(PipelineType.VARIANT, PipelineType.UTILITY),
+        one_liner="Pileup variant caller and VCF toolkit",
         summary=(
             "Pileup-based variant caller and VCF/BCF toolkit. The long-"
             "established standard for short-read germline calling, and the "
@@ -429,6 +490,7 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "clair3": ToolMeta(
         pipelines=(PipelineType.VARIANT,),
+        one_liner="Deep-learning variant caller for long reads",
         summary=(
             "Deep-learning small-variant caller for long reads (ONT and "
             "PacBio HiFi). Combines a fast pileup model with a slower "
@@ -493,6 +555,8 @@ def reset_cache() -> None:
     nanoplot.cache_clear()
     bwa_mem2.cache_clear()
     minimap2.cache_clear()
+    bowtie2.cache_clear()
+    hisat2.cache_clear()
     samtools.cache_clear()
     bcftools.cache_clear()
     clair3.cache_clear()

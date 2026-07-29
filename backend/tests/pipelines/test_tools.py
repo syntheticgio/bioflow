@@ -205,6 +205,8 @@ class TestSerialization:
             "nanoplot",
             "bwa-mem2",
             "minimap2",
+            "bowtie2",
+            "hisat2",
             "samtools",
             "bcftools",
             "clair3",
@@ -313,3 +315,38 @@ class TestVariantToolProbes:
         default for a tool with no handler, not the default for one with one."""
         enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
         assert enriched["runnable"] is False
+
+
+class TestNewAlignerProbes:
+    def test_bowtie2_probes(self):
+        """Runs against the real binary in the image. An installed-but-broken
+        tool is exactly what `available` exists to report, so this asserts the
+        probe returns a Tool rather than asserting availability."""
+        t = tools.bowtie2()
+        assert t.name == "bowtie2"
+
+    def test_hisat2_probes(self):
+        t = tools.hisat2()
+        assert t.name == "hisat2"
+
+    def test_both_are_in_all_tools(self):
+        names = {t.name for t in tools.all_tools()}
+        assert "bowtie2" in names
+        assert "hisat2" in names
+
+    def test_both_have_metadata(self):
+        """A tool with no TOOL_META entry defaults to runnable=False and would
+        render as a permanently greyed-out card."""
+        assert tools.TOOL_META["bowtie2"].runnable is True
+        assert tools.TOOL_META["hisat2"].runnable is True
+
+    def test_both_are_align_pipeline_tools(self):
+        from app.pipelines.tools import PipelineType
+
+        assert PipelineType.ALIGN in tools.TOOL_META["bowtie2"].pipelines
+        assert PipelineType.ALIGN in tools.TOOL_META["hisat2"].pipelines
+
+    def test_every_tool_meta_has_a_one_liner(self):
+        """The selector rail shows this instead of the full summary."""
+        for name, meta in tools.TOOL_META.items():
+            assert meta.one_liner.strip(), f"{name} has no one_liner"
