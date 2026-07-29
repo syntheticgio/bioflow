@@ -7,7 +7,7 @@ correctly.
 
 import pytest
 
-from app.models import Project
+from app.models import DataObject, Project, SidecarRole
 from app.services import project_service
 
 pytestmark = [
@@ -111,3 +111,139 @@ class TestDeletionPreview:
         await make_job(child, "align_bwa", "queued")
 
         assert (await project_service.deletion_preview(root.id))["blocked"] is True
+
+
+class TestDeleteProjectTree:
+    async def test_releases_a_sidecars_blob(self):
+        """The regression that motivated this feature.
+
+        The old cascade called detach_blob_from_object directly, skipping the
+        sidecar cascade in delete_object. A BAM's .bai survived its parent with
+        refcount 1 -- unreachable, and permanently un-GC-able because
+        gc_candidates selects on ref_count <= 0.
+        """
+        from app.models import Blob
+        from tests.services.helpers import make_object
+
+        root = await make_project("sidecar-leak")
+        bam = await make_object(root, "sample.bam", digest="a" * 64)
+        await make_object(
+            root,
+            "sample.bam.bai",
+            digest="b" * 64,
+            sidecar_of=bam.id,
+            sidecar_role=SidecarRole.BAI,
+        )
+
+        await project_service.delete_project_tree(root.id)
+
+        assert (await Blob.get("b" * 64)).ref_count == 0
+        assert await DataObject.find({"project_id": root.id}).count() == 0
+
+    async def test_removes_every_project_in_the_subtree(self):
+        root = await make_project("tree-root")
+        child = await make_project("tree-child", root)
+        grandchild = await make_project("tree-grandchild", child)
+
+        await project_service.delete_project_tree(root.id)
+
+        for pid in (root.id, child.id, grandchild.id):
+            assert await Project.get(pid) is None
+
+    async def test_removes_objects_in_descendants(self):
+        from tests.services.helpers import make_object
+
+        root = await make_project("tree-obj-root")
+        child = await make_project("tree-obj-child", root)
+        await make_object(child, "nested.fastq.gz")
+
+        await project_service.delete_project_tree(root.id)
+
+        assert await DataObject.find({"project_id": child.id}).count() == 0
+
+    async def test_removes_runs_and_jobs(self):
+        from app.models import Job, PipelineRun
+        from tests.services.helpers import make_job
+
+        root = await make_project("tree-jobs")
+        await make_job(root, "align_bwa", "succeeded")
+
+        await project_service.delete_project_tree(root.id)
+
+        assert await Job.find({"project_id": root.id}).count() == 0
+        assert await PipelineRun.find({"project_id": root.id}).count() == 0
+
+    async def test_removes_upload_sessions_and_their_staging_dirs(self):
+        """Staging directories are not refcounted and not shared, so unlike
+        blobs they are removed synchronously rather than left to GC."""
+        from pathlib import Path
+
+        from app.models import UploadSession
+        from app.services import upload_service
+        from app.storage.home import check_home
+
+        if not check_home().ok:
+            pytest.skip("needs a configured storage home")
+
+        root = await make_project("tree-uploads")
+        # Returns (session, None) for a normal upload, or (None, object) when
+        # the content was already held. No client digest is passed, so the
+        # dedup short-circuit cannot fire and `session` is always set.
+        session, _ = await upload_service.create_session(
+            project_id=root.id, filename="pending.fastq.gz", total_size=1000
+        )
+        staging = Path(session.staging_dir)
+        assert staging.exists()
+
+        await project_service.delete_project_tree(root.id)
+
+        assert not staging.exists()
+        assert await UploadSession.find({"project_id": root.id}).count() == 0
+
+    async def test_refuses_while_a_job_is_active(self):
+        from app.errors import ConflictError
+        from tests.services.helpers import make_job
+
+        root = await make_project("tree-blocked")
+        await make_job(root, "align_bwa", "running")
+
+        with pytest.raises(ConflictError) as exc:
+            await project_service.delete_project_tree(root.id)
+
+        assert exc.value.details["active_jobs"][0]["job_type"] == "align_bwa"
+
+    async def test_deletes_nothing_when_blocked(self):
+        """A refusal must be total. A partial delete that then raises would
+        leave the project half-destroyed with no way to tell."""
+        from app.errors import ConflictError
+        from tests.services.helpers import make_job, make_object
+
+        root = await make_project("tree-blocked-intact")
+        await make_object(root, "keep.fastq.gz")
+        await make_job(root, "align_bwa", "running")
+
+        with pytest.raises(ConflictError):
+            await project_service.delete_project_tree(root.id)
+
+        assert await Project.get(root.id) is not None
+        assert await DataObject.find({"project_id": root.id}).count() == 1
+
+    async def test_leaves_a_shared_blob_referenced(self):
+        """Two objects, one blob. Deleting one project must decrement to 1,
+        not to 0 -- the surviving file still needs those bytes."""
+        from app.db.client import get_db
+        from app.models import Blob
+        from tests.services.helpers import make_object
+
+        keep = await make_project("shared-keep")
+        drop = await make_project("shared-drop")
+        shared = "c" * 64
+        await make_object(keep, "one.fastq.gz", digest=shared)
+        await make_object(drop, "two.fastq.gz", digest=shared)
+        # make_object only creates the blob once, so the second object needs
+        # the increment the real attach path would have applied.
+        await get_db().blobs.update_one({"_id": shared}, {"$inc": {"ref_count": 1}})
+
+        await project_service.delete_project_tree(drop.id)
+
+        assert (await Blob.get(shared)).ref_count == 1
