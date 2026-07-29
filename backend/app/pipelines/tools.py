@@ -532,6 +532,7 @@ def tool_with_meta(tool: Tool) -> dict:
         **tool.as_dict(),
         "pipelines": [p.value for p in meta.pipelines] if meta else [],
         "summary": meta.summary if meta else "",
+        "one_liner": meta.one_liner if meta else "",
         "strengths": list(meta.strengths) if meta else [],
         # Absent metadata defaults runnable to False too: a tool this
         # application does not describe is not one it has a code path for

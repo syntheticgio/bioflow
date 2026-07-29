@@ -350,3 +350,21 @@ class TestNewAlignerProbes:
         """The selector rail shows this instead of the full summary."""
         for name, meta in tools.TOOL_META.items():
             assert meta.one_liner.strip(), f"{name} has no one_liner"
+
+    def test_one_liner_survives_serialization(self):
+        """Regression: `TOOL_META` carrying a one_liner is not enough --
+        `tool_with_meta` builds the dict the API actually returns, and it
+        silently dropped `one_liner` while forwarding `summary`/`strengths`/
+        `runnable` right next to it. The dict-level test above would not have
+        caught that; this goes through the same serialization boundary the
+        endpoint uses."""
+        tool = tools.Tool(name="bowtie2", path="/usr/bin/bowtie2", version="2.5.4")
+        enriched = tools.tool_with_meta(tool)
+        assert enriched["one_liner"] == tools.TOOL_META["bowtie2"].one_liner
+        assert enriched["one_liner"].strip()
+
+    def test_an_undescribed_tool_serializes_with_an_empty_one_liner(self):
+        """Same fallback as `summary`: no TOOL_META entry means an empty
+        string, not a missing key or a 500."""
+        enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
+        assert enriched["one_liner"] == ""
