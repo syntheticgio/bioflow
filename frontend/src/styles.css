@@ -1980,3 +1980,73 @@ textarea:focus {
 .q-badge-1 {
   background: var(--error);
 }
+
+/* Help pages ---------------------------------------------------------- */
+
+.help-page {
+  padding: 24px 32px;
+  max-width: 760px;
+  overflow-y: auto;
+  color: var(--text);
+}
+
+.help-page h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.help-intro {
+  color: var(--text-dim);
+  margin: 0 0 24px;
+}
+
+.help-section {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+
+.help-section h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
+.help-section h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 24px 0 8px;
+}
+
+.help-section p,
+.help-section li {
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-section ul {
+  padding-left: 20px;
+}
+
+.help-section li {
+  margin-bottom: 6px;
+}
+
+.help-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.help-table th,
+.help-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-table th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
