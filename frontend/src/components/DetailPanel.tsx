@@ -244,6 +244,7 @@ function ObjectDetail({ id }: { id: string }) {
   const qc = useQueryClient();
   const [params, setParams] = useSearchParams();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [metadataDirty, setMetadataDirty] = useState(false);
 
   // Trim and Align both go through a tool selection step before their
   // parameter dialog. One piece of state for the whole two-step flow, rather
@@ -512,6 +513,7 @@ function ObjectDetail({ id }: { id: string }) {
               canIndex={canIndex}
               onSave={(m) => save.mutate(m)}
               saving={save.isPending}
+              onDirtyChange={setMetadataDirty}
             />
           </TabPanel>
         )}
@@ -696,12 +698,14 @@ function MetadataTab({
   canIndex,
   onSave,
   saving,
+  onDirtyChange,
 }: {
   obj: ObjectDetailData;
   isReference: boolean;
   canIndex: boolean;
   onSave: (metadata: Record<string, unknown>) => void;
   saving: boolean;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const compression = compressionLabel(obj.format.compression);
 
@@ -780,6 +784,7 @@ function MetadataTab({
           role={obj.role}
           onSave={onSave}
           saving={saving}
+          onDirtyChange={onDirtyChange}
         />
       </div>
 
