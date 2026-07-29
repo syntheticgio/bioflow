@@ -26,6 +26,10 @@ class RunKind(StrEnum):
     TRIM = "trim"
     SRA_DOWNLOAD = "sra_download"
     VARIANT_CALLING = "variant_calling"
+    # Separate from SRA_DOWNLOAD because RunKind is a display and grouping
+    # vocabulary, and "downloaded a genome" reads differently from "downloaded
+    # sequencing runs" in the activity view.
+    ASSEMBLY_DOWNLOAD = "assembly_download"
 
 
 class RunStatus(StrEnum):
