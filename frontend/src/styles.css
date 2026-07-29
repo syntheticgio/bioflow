@@ -1935,3 +1935,45 @@ textarea:focus {
 .dialog-tool-back:hover {
   text-decoration: underline;
 }
+
+/* --- Header menu (File/View/Help dropdowns) --- */
+
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.menu-item.active:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.menu-item:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.menu-empty {
+  padding: 6px 10px;
+  color: var(--text-faint);
+  font-size: 11px;
+}

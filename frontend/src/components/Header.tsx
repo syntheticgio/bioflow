@@ -1,11 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
+import { notify } from "../stores/messageStore";
 import { LoadIndicator } from "./LoadIndicator";
-
-/** Placeholders still awaiting real actions. */
-const MENUS = ["File", "View", "Help"];
+import { Menu } from "./Menu";
 
 /** Destinations that exist. Without these, /search and /activity are
  *  reachable only by typing the URL. */
@@ -21,6 +20,16 @@ export function Header() {
     refetchInterval: 15000,
   });
 
+  const cleanUp = useMutation({
+    mutationFn: () => api.runScheduleNow("gc_blobs"),
+    onSuccess: () => {
+      // The job is queued, not finished -- gc_blobs runs on the worker, so its
+      // reclaim counts are not available here. Point at Activity instead of
+      // inventing a number.
+      notify.success("Storage cleanup started. Progress is in Activity.");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
 
   return (
     <header className="header">
@@ -42,11 +51,18 @@ export function Header() {
             {l.label}
           </NavLink>
         ))}
-        {MENUS.map((m) => (
-          <button key={m} type="button" title={`${m} menu (not yet implemented)`}>
-            {m}
-          </button>
-        ))}
+        <Menu
+          label="File"
+          items={[
+            {
+              label: "Clean up storage now",
+              onSelect: () => cleanUp.mutate(),
+              disabled: cleanUp.isPending,
+            },
+          ]}
+        />
+        <Menu label="View" items={[]} />
+        <Menu label="Help" items={[]} />
       </nav>
 
       <div className="header-right">
