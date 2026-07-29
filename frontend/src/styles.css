@@ -2050,3 +2050,36 @@ textarea:focus {
   color: var(--text-dim);
   font-weight: 600;
 }
+
+/* Header dropdown ----------------------------------------------------- */
+
+.header-dropdown {
+  position: relative;
+}
+
+.header-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.header-dropdown-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text);
+  border-radius: 4px;
+}
+
+.header-dropdown-menu button:hover {
+  background: var(--bg-hover);
+}
