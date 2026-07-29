@@ -554,6 +554,40 @@ async def set_pair(
     return await get_object(object_id)
 
 
+async def clear_pair(object_id: PydanticObjectId) -> DataObject:
+    """Undo a pairing, from either side.
+
+    Clears the pointer *and* the read number on both files, but leaves "mate"
+    in user_touched: the cleared state is itself the user's decision, and that
+    entry is what stops filename inference from re-asserting the pairing on the
+    next re-ingest.
+
+    A no-op on an unpaired object, so the button is idempotent.
+    """
+    obj = await get_object(object_id)
+
+    if obj.mate_object_id is None:
+        return obj
+
+    cleared = {
+        "$set": {
+            DataObject.mate_object_id: None,
+            DataObject.read_number: None,
+            DataObject.updated_at: datetime.now(UTC),
+        },
+        "$addToSet": {"user_touched": "mate"},
+    }
+
+    # The mate is cleared by id rather than by fetching it first: the row may
+    # be gone (deleted out from under a stale tab), and that must not block
+    # unpairing the file the user is actually looking at.
+    await DataObject.find_one(DataObject.id == obj.mate_object_id).update(cleared)
+    await DataObject.find_one(DataObject.id == obj.id).update(cleared)
+
+    log.info("pair_cleared_manually", object_id=str(obj.id), mate_id=str(obj.mate_object_id))
+    return await get_object(object_id)
+
+
 async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObject:
     obj = await get_object(object_id)
 

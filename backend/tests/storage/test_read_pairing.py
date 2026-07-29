@@ -260,3 +260,89 @@ class TestSetPairWrites:
 
         assert (await DataObject.get(a.id)).mate_object_id is None
         assert (await DataObject.get(a.id)).read_number is None
+
+
+class TestClearPair:
+    async def test_clears_both_pointers(self):
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+        await object_service.set_pair(a.id, b.id, 1)
+
+        await object_service.clear_pair(a.id)
+
+        assert (await DataObject.get(a.id)).mate_object_id is None
+        assert (await DataObject.get(b.id)).mate_object_id is None
+
+    async def test_clears_both_read_numbers(self):
+        """A read number outliving its pair would collide against a value the
+        user believed they had cleared."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+        await object_service.set_pair(a.id, b.id, 1)
+
+        await object_service.clear_pair(a.id)
+
+        assert (await DataObject.get(a.id)).read_number is None
+        assert (await DataObject.get(b.id)).read_number is None
+
+    async def test_keeps_user_touched_on_both_sides(self):
+        """The cleared state is itself the user's decision -- this entry is
+        what stops re-ingest from undoing it."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+        await object_service.set_pair(a.id, b.id, 1)
+
+        await object_service.clear_pair(a.id)
+
+        assert "mate" in (await DataObject.get(a.id)).user_touched
+        assert "mate" in (await DataObject.get(b.id)).user_touched
+
+    async def test_clearing_from_the_other_side_works_too(self):
+        """Pairing is symmetric, so unpair must be reachable from either file."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        b = await _saved(pid, "rev.fastq.gz")
+        await object_service.set_pair(a.id, b.id, 1)
+
+        await object_service.clear_pair(b.id)
+
+        assert (await DataObject.get(a.id)).mate_object_id is None
+        assert (await DataObject.get(b.id)).mate_object_id is None
+
+    async def test_is_a_no_op_on_an_unpaired_object(self):
+        """Idempotent, so a double click is harmless."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "lonely.fastq.gz")
+
+        result = await object_service.clear_pair(a.id)
+
+        assert result.mate_object_id is None
+        assert result.user_touched == []
+
+    async def test_a_dangling_mate_pointer_still_clears(self):
+        """The mate row being gone must not block unpairing the survivor."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz", mate_object_id=PydanticObjectId(), read_number=1)
+
+        result = await object_service.clear_pair(a.id)
+
+        assert result.mate_object_id is None
+        assert result.read_number is None
+
+    async def test_can_re_pair_after_clearing(self):
+        """The correction path: unpair, then pair with the right file."""
+        pid = PydanticObjectId()
+        a = await _saved(pid, "fwd.fastq.gz")
+        wrong = await _saved(pid, "wrong.fastq.gz")
+        right = await _saved(pid, "right.fastq.gz")
+        await object_service.set_pair(a.id, wrong.id, 1)
+
+        await object_service.clear_pair(a.id)
+        await object_service.set_pair(a.id, right.id, 1)
+
+        assert (await DataObject.get(a.id)).mate_object_id == right.id
+        assert (await DataObject.get(right.id)).read_number == 2
+        assert (await DataObject.get(wrong.id)).mate_object_id is None
