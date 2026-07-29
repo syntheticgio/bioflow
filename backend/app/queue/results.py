@@ -775,6 +775,35 @@ async def _apply_index_bam(result: dict) -> None:
     log.info("index_bam_applied", object_id=bam_id, mapped_pct=facts.get("mapped_pct"))
 
 
+async def _apply_run_bam_stats(result: dict) -> None:
+    """Record a Results computation's numbers on the BAM it described.
+
+    Read-only like QC: no files to ingest, just facts merged onto the object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("bam_stats_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "bam_stats_applied",
+        object_id=object_id,
+        mean_depth=facts.get("bam_stats_summary", {}).get("mean_depth"),
+    )
+
+
 def variant_provenance(result: dict) -> dict:
     """The facts a variant calling run stamps onto the VCF it produced.
 
@@ -877,4 +906,5 @@ _APPLIERS = {
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
+    "run_bam_stats": _apply_run_bam_stats,
 }
