@@ -70,6 +70,10 @@ class ObjectRole(StrEnum):
     # from an alignment run and a BAM someone uploaded are the same format and
     # differ only in whether their provenance is known.
     ALIGNMENT = "alignment"
+    # A VCF/BCF this pipeline called. Same reasoning as ALIGNMENT: an uploaded
+    # VCF and a called one are the same format, and only the called one can say
+    # which BAM, which reference, and which caller produced it.
+    VARIANTS = "variants"
 
 
 class SidecarRole(StrEnum):
@@ -84,6 +88,8 @@ class SidecarRole(StrEnum):
     MINIMAP2_INDEX = "minimap2-index"
     FAI = "fai"
     BAI = "bai"
+    # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.
+    TBI = "tbi"
 
 
 class FormatConfidence(StrEnum):
