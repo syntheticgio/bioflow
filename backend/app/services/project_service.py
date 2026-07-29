@@ -133,6 +133,22 @@ async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False)
     await project.delete()
 
 
+async def collect_subtree(project_id: PydanticObjectId) -> list[PydanticObjectId]:
+    """Every project in this subtree, root first, then breadth-first.
+
+    Both the deletion preview and the delete itself build on this, so the two
+    cannot disagree about what "this project" covers -- a warning that
+    undercounts what is about to be destroyed is worse than no warning.
+    """
+    found = [project_id]
+    frontier = [project_id]
+    while frontier:
+        children = await Project.find({"parent_id": {"$in": frontier}}).to_list()
+        frontier = [c.id for c in children]
+        found.extend(frontier)
+    return found
+
+
 async def bump_counters(project_id: PydanticObjectId, *, objects: int, total_bytes: int) -> None:
     """Adjust denormalized rollups. Used outside the transactional paths."""
     await get_db().projects.update_one(

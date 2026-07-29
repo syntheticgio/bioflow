@@ -5,7 +5,7 @@ three files now need it. It targets a throwaway `biopipe_test` database, so it
 never touches real data.
 """
 
-import pytest
+import pytest_asyncio
 from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -13,7 +13,7 @@ from app.config import settings
 from app.models import ALL_MODELS
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def beanie_models():
     """Initialize Beanie against a throwaway database.
 
