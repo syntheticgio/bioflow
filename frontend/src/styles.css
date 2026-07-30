@@ -314,7 +314,7 @@ textarea:focus {
   /* Positioning context so the quality badge dot can sit on its corner. */
   position: relative;
   flex-shrink: 0;
-  width: 20px;
+  width: 40px;
   text-align: center;
   color: var(--text-dim);
 }

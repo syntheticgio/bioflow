@@ -10,6 +10,7 @@ import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { orderWithPairs, type OrderedFile } from "../lib/pairing";
+import { FileIcon } from "../icons/FileIcon";
 import type { DataObject } from "../api/types";
 
 /**
@@ -411,9 +412,7 @@ function ProjectView({ projectId }: { projectId: string }) {
                         <span className="row-icon">
                           {o.status !== "ready"
                             ? "⏳"
-                            : o.role === "reference"
-                              ? "📗"
-                              : "📄"}
+                            : <FileIcon formatKind={o.format.kind} role={o.role} />}
                           {quality && <QualityBadge quality={quality} />}
                         </span>
                         <div className="row-main">
