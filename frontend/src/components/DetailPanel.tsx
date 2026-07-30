@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { useUploads } from "../hooks/useUploads";
 import type {
   AlignerName,
   ObjectDetail as ObjectDetailData,
@@ -70,10 +71,15 @@ function EmptyDetail() {
 
 function ProjectDetail({ id }: { id: string }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { data: project, isLoading } = useQuery({
     queryKey: ["project", id],
     queryFn: () => api.getProject(id),
   });
+
+  // Same upload path the project view's + button uses, so "Add data" is a
+  // real action rather than a placeholder.
+  const { uploadFiles } = useUploads(id);
 
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -172,47 +178,73 @@ function ProjectDetail({ id }: { id: string }) {
             </button>
           </div>
         ) : (
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}
-          >
-            <div className="detail-title" style={{ marginBottom: 0 }}>
-              {project.name}
-            </div>
-            <button
-              type="button"
-              className="icon-btn"
-              title="Rename project"
-              onClick={startEditingName}
-            >
-              ✎
-            </button>
-          </div>
+          <div className="detail-title">{project.name}</div>
         )}
         <div className="detail-subtitle">{project.description || "No description"}</div>
 
-        <div className="section">
-          <div className="section-title">Overview</div>
-          <dl className="kv">
-            <dt>Files</dt>
-            <dd>{project.object_count}</dd>
-            <dt>Total size</dt>
-            <dd>{formatBytes(project.total_bytes)}</dd>
-            <dt>Created</dt>
-            <dd>{formatDate(project.created_at)}</dd>
-            <dt>Updated</dt>
-            <dd>{formatDate(project.updated_at)}</dd>
-            <dt>ID</dt>
-            <dd className="mono">{project.id}</dd>
-          </dl>
-        </div>
+        {/* Named actions rather than an icon beside the title: rename is not
+            the primary thing you come here to do, and burying it in a glyph
+            made the two commoner actions -- open, add data -- unreachable
+            from this panel at all. */}
+        {!editingName && (
+          <div className="detail-actions">
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => navigate(`/p/${project.id}`)}
+            >
+              Open project
+            </button>
+            <label className="btn" style={{ cursor: "pointer" }}>
+              Add data
+              <input
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) void uploadFiles(files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+            <button type="button" className="btn-text" onClick={startEditingName}>
+              Rename
+            </button>
+          </div>
+        )}
 
-        <div className="section">
-          <div className="section-title">Metadata</div>
-          <MetadataEditor
-            value={project.metadata}
-            onSave={(m) => save.mutate(m)}
-            saving={save.isPending}
-          />
+        {/* Paired because they are both "what this project is" -- the theme
+            sets them side by side where there is width for it, and they stack
+            on their own when there is not. */}
+        <div className="detail-columns">
+          <div className="section">
+            <div className="section-title">Overview</div>
+            <dl className="kv">
+              <dt>Files</dt>
+              <dd>{project.object_count}</dd>
+              <dt>Total size</dt>
+              <dd>{formatBytes(project.total_bytes)}</dd>
+              <dt>Created</dt>
+              <dd>{formatDate(project.created_at)}</dd>
+              <dt>Updated</dt>
+              <dd>{formatDate(project.updated_at)}</dd>
+              <dt>ID</dt>
+              <dd className="mono">{project.id}</dd>
+            </dl>
+          </div>
+
+          <div className="section">
+            <div className="section-title">Project metadata</div>
+            <div className="section-note">
+              Inherited by every file ingested into this project.
+            </div>
+            <MetadataEditor
+              value={project.metadata}
+              onSave={(m) => save.mutate(m)}
+              saving={save.isPending}
+            />
+          </div>
         </div>
 
         <div className="section">

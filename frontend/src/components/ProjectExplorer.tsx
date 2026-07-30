@@ -40,11 +40,23 @@ function RootView() {
   const qc = useQueryClient();
   const { sel, select } = useSelection();
   const [showModal, setShowModal] = useState(false);
+  const [filter, setFilter] = useState("");
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects", null],
     queryFn: () => api.listProjects(),
   });
+
+  // Client-side: the whole project list is already loaded here, and it is a
+  // handful of rows -- a round trip per keystroke would be slower and worse.
+  const needle = filter.trim().toLowerCase();
+  const visible = needle
+    ? projects?.filter(
+        (p) =>
+          p.name.toLowerCase().includes(needle) ||
+          (p.description ?? "").toLowerCase().includes(needle),
+      )
+    : projects;
 
   const del = useMutation({
     mutationFn: (id: string) => api.deleteProject(id),
@@ -59,24 +71,29 @@ function RootView() {
     <div className="panel panel-left">
       <div className="panel-header">
         <span className="panel-title">Projects</span>
+        {/* No search affordance here: /search indexes files, not projects, so
+            from the root it would lead somewhere that cannot answer the
+            question being asked. The filter below is what searches projects. */}
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <button
             type="button"
-            className="icon-btn"
-            title="Search all files"
-            onClick={() => navigate("/search")}
-          >
-            ⌕
-          </button>
-          <button
-            type="button"
-            className="icon-btn primary"
+            className="btn-text"
             title="New project"
             onClick={() => setShowModal(true)}
           >
-            +
+            New project
           </button>
         </div>
+      </div>
+
+      <div className="panel-filter">
+        <input
+          type="search"
+          placeholder="Filter projects…"
+          aria-label="Filter projects"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
       </div>
 
       <div className="panel-body">
@@ -89,11 +106,20 @@ function RootView() {
         {projects?.length === 0 && (
           <div className="empty">
             <div className="empty-title">No projects yet</div>
-            <div>Click + to create one.</div>
+            <div>Click New project to create one.</div>
           </div>
         )}
 
-        {projects?.map((p) => (
+        {/* Distinct from the empty state above: projects exist, this filter
+            just does not match any of them. */}
+        {projects?.length !== 0 && visible?.length === 0 && (
+          <div className="empty">
+            <div className="empty-title">No matching projects</div>
+            <div>No project matches “{filter.trim()}”.</div>
+          </div>
+        )}
+
+        {visible?.map((p) => (
           <div
             key={p.id}
             className={`row ${sel === `project:${p.id}` ? "selected" : ""}`}

@@ -2238,3 +2238,48 @@ a.btn {
   color: var(--text-faint);
   font-size: 11px;
 }
+
+/* A button that reads as a link: used where an action sits in a header or
+   beside heavier buttons and should not compete with them. */
+.btn-text {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-text:hover {
+  text-decoration: underline;
+}
+
+/* Filter row between a panel header and its list. */
+.panel-filter {
+  padding: 0 12px 8px;
+}
+
+.panel-filter input {
+  width: 100%;
+}
+
+/* Named actions under a detail title. */
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+/* Two related sections that may sit side by side. Stacked by default; the
+   Broadsheet theme puts them in columns where the width allows. */
+.detail-columns {
+  display: block;
+}
+
+.section-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}

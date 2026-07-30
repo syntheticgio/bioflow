@@ -398,13 +398,53 @@
   color: var(--color-text);
 }
 
+/* The panel header's action reads as a link in the masthead's register. */
+.theme-broadsheet .btn-text {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .btn-text:hover {
+  color: var(--color-accent-2);
+  text-decoration: none;
+}
+
+/* ── Filter ─────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .panel-filter {
+  padding: 0 0 var(--space-3);
+}
+
+.theme-broadsheet .panel-filter input {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  caret-color: var(--color-accent);
+}
+
+.theme-broadsheet .panel-filter input::placeholder {
+  color: var(--ink-62);
+  opacity: 1;
+}
+
+.theme-broadsheet .panel-filter input:focus {
+  border-color: var(--color-accent);
+}
+
 /* ── Rows ───────────────────────────────────────────────────────────────── */
 
 /* The mockup marks the selected row with a 3px accent bar in the left gutter
    over a tinted ground, rather than Classic's inset shadow. */
+/* The left padding is what separates the 3px selection bar from the icon --
+   without it the two collide and the bar reads as part of the glyph. */
 .theme-broadsheet .row {
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) var(--space-2) 0;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-1);
   border-bottom: 0;
   border-left: 3px solid transparent;
 }
@@ -434,6 +474,31 @@
 .theme-broadsheet .row-icon {
   width: 28px;
   color: var(--ink-62);
+}
+
+/* ── Key/value lists ────────────────────────────────────────────────────── */
+
+/* The Overview list is a table in the design: ruled rows, label in muted ink
+   at the same size as its value, not a smaller caption. */
+.theme-broadsheet .kv {
+  font-size: 14px;
+  gap: 0;
+  align-items: baseline;
+}
+
+.theme-broadsheet .kv dt,
+.theme-broadsheet .kv dd {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.theme-broadsheet .kv dt {
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .kv dd.mono {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
 }
 
 /* ── Tables ─────────────────────────────────────────────────────────────── */
@@ -527,16 +592,31 @@
 
 /* ── Sections ───────────────────────────────────────────────────────────── */
 
-/* Stays a small label rather than becoming a display heading: these mark
-   subsections inside the detail pane, and the mockup keeps that tier quiet
-   and letterspaced. Only the panel/pane titles get the serif treatment. */
+/* Section headings are serif subheads, matching "Overview" and "Project
+   metadata" in the design -- one clear step below the display title and one
+   above body text, with no rule under them. The uppercase letterspaced
+   treatment stays only where a label really is a label (.group-title). */
 .theme-broadsheet .section-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--color-text);
+  padding-bottom: 0;
+  margin-bottom: var(--space-3);
+  border-bottom: 0;
+}
+
+/* The file explorer's collapsible group headings are labels, not subheads --
+   they keep the quiet uppercase register so the filenames stay the content. */
+.theme-broadsheet .group-title {
   font-family: var(--font-body);
   font-size: 11px;
   font-weight: 400;
   letter-spacing: 0.08em;
   color: var(--ink-62);
-  border-bottom-color: var(--color-divider);
 }
 
 /* ── Detail pane ────────────────────────────────────────────────────────── */
@@ -560,10 +640,31 @@
 .theme-broadsheet .detail-subtitle {
   font-size: 17px;
   line-height: 1.5;
-  max-width: 60ch;
+  max-width: 46ch;
   text-wrap: pretty;
-  color: var(--ink-70);
-  margin-bottom: var(--space-6);
+  color: var(--ink-78);
+  margin-bottom: var(--space-4);
+}
+
+.theme-broadsheet .detail-actions {
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+}
+
+/* Overview and Project metadata sit as a spread. auto-fit collapses them back
+   to one column when the pane is narrow, so the detail panel stays usable at
+   any splitter width without a media query. */
+.theme-broadsheet .detail-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-8);
+  align-items: start;
+}
+
+.theme-broadsheet .section-note {
+  font-size: 13.5px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-3);
 }
 
 /* ── Detail tabs ────────────────────────────────────────────────────────── */
