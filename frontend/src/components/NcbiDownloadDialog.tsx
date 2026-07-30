@@ -70,6 +70,9 @@ export function NcbiDownloadDialog({
       }),
     onSuccess: (data) => {
       setPage(0);
+      // A fresh resolution starts with every group expanded, not whatever
+      // was collapsed from the previous lookup.
+      setCollapsed(new Set());
       // Only one branch is ever populated, and `kind` says which. Clearing
       // the other matters: leaving a stale run table beside a new assembly
       // card would show two answers for one lookup.
