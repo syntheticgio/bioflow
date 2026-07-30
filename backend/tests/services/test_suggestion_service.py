@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models import FormatKind
+from app.models import FormatKind, ObjectStatus
 from app.pipelines import align_runner, aligner_registry
 from app.services.suggestion_service import (
     CardStatus,
@@ -22,6 +22,7 @@ from app.services.suggestion_service import (
     build_variants_card,
     is_eukaryotic,
     resolve_reference,
+    suggestions_for,
 )
 
 
@@ -90,13 +91,23 @@ class _FakeTool:
         self.name = name
 
 
-def _fake_obj(kind=FormatKind.FASTQ, facts=None, metadata=None, obj_id="abc123"):
+def _fake_obj(
+    kind=FormatKind.FASTQ,
+    facts=None,
+    metadata=None,
+    obj_id="abc123",
+    status=ObjectStatus.READY,
+    project_id="proj1",
+):
     """A stand-in for DataObject carrying only what the rules read.
 
     A real Beanie document would need a database; the rules are pure
     functions of these attributes, so a namespace is enough. `id` is here
     because the launch body carries it -- the card assembles the complete
     request body server-side.
+
+    `status` and `project_id` are read only by `suggestions_for`, the one
+    non-pure function here; the individual builders never look at them.
     """
     from types import SimpleNamespace
     return SimpleNamespace(
@@ -104,6 +115,8 @@ def _fake_obj(kind=FormatKind.FASTQ, facts=None, metadata=None, obj_id="abc123")
         format=SimpleNamespace(kind=kind),
         facts=facts or {},
         metadata=metadata or {},
+        status=status,
+        project_id=project_id,
     )
 
 
@@ -611,3 +624,190 @@ class TestAssembleCard:
                 _fake_obj(facts={"qc_read_chemistry": chem} if chem else {})
             )
             assert card.status is CardStatus.UNAVAILABLE
+
+
+@contextmanager
+def stub_db(references=(), chemistry=None):
+    """Cut the two database seams `suggestions_for` reaches through.
+
+    `suggestions_for` is the one function in this module that is not pure: it
+    lists a project's references (for the align card) and walks a BAM's
+    provenance for chemistry (for the variants card). Both are patched here
+    rather than backed by the Beanie fixture because everything being asserted
+    -- which cards appear, in what order -- is decided above those calls, and
+    a real database would only add setup that pins none of it.
+
+    `list_objects` is patched to return exactly what the filter should keep,
+    so the assertions below stay about card assembly. Whether the filter is
+    correctly pushed into the query is a `list_objects` contract, covered
+    where that function lives.
+
+    `patch` autospecs an `async def` target to an AsyncMock, so `return_value`
+    is what the awaited call yields -- handing it a coroutine function via
+    `side_effect` would return a coroutine object the caller then treats as
+    the list.
+    """
+    with (
+        patch("app.services.object_service.list_objects",
+              return_value=[_as_reference(r) for r in references]),
+        patch("app.services.pipeline_service.read_chemistry_for_alignment",
+              return_value=chemistry),
+    ):
+        yield
+
+
+def _as_reference(ref):
+    """Give a `_ref` the FASTA format kind `suggestions_for` filters on.
+
+    `_ref` deliberately carries only what `resolve_reference` reads; the
+    listing filter above it reads `format.kind` as well.
+    """
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id=ref.id,
+        name=ref.name,
+        format=SimpleNamespace(kind=FormatKind.FASTA),
+    )
+
+
+CARD_KEYS = {
+    "kind", "category", "title", "description",
+    "why", "status", "reason", "launch",
+}
+
+
+@pytest.mark.usefixtures("all_aligners_installed", "all_callers_installed")
+class TestSuggestionsFor:
+    async def test_a_file_that_is_not_ready_gets_no_cards(self):
+        """Nothing to suggest for a file still ingesting or errored -- the
+        launch endpoints would refuse every one of them anyway."""
+        for status in (
+            ObjectStatus.UPLOADING,
+            ObjectStatus.INGESTING,
+            ObjectStatus.ERROR,
+            ObjectStatus.MISSING,
+        ):
+            with stub_db():
+                assert await suggestions_for(_fake_obj(status=status)) == []
+
+    async def test_a_fastq_gets_preprocess_align_and_assemble(self):
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db(
+                       references=[_ref("aaa", "ref.fna")]):
+            cards = await suggestions_for(_fake_obj())
+        assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+
+    async def test_a_fastq_never_gets_a_variants_card(self):
+        """Variants are called on an alignment, not on reads."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db():
+            cards = await suggestions_for(_fake_obj())
+        assert "variants" not in [c["kind"] for c in cards]
+
+    async def test_a_bam_gets_only_the_variants_card(self):
+        with stub_db(chemistry=align_runner.ReadChemistry.SHORT):
+            cards = await suggestions_for(_bam())
+        assert [c["kind"] for c in cards] == ["variants"]
+
+    async def test_the_order_does_not_move_with_availability(self):
+        """Fixed order, not sorted by availability: a card that changes
+        position between files makes the grid something to re-read rather
+        than scan."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db(references=[]):
+            # No reference, so align is unavailable and assemble always is.
+            cards = await suggestions_for(_fake_obj())
+        assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+        assert cards[1]["status"] == "unavailable"
+
+    async def test_every_card_is_a_plain_dict_with_the_full_key_set(self):
+        """This goes out as JSON -- a SuggestionCard would not serialise, and
+        a missing key would read as `undefined` in the grid."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db(
+                       references=[_ref("aaa", "ref.fna")]):
+            cards = await suggestions_for(_fake_obj())
+        assert cards
+        for card in cards:
+            assert type(card) is dict
+            assert set(card) == CARD_KEYS
+
+    async def test_references_are_not_fetched_for_a_bam(self):
+        """The align card is the only consumer, and it is FASTQ-only. Listing
+        a project's objects to build a card that will not be built is a query
+        per BAM click for nothing."""
+        with patch("app.services.object_service.list_objects") as listing:
+            with patch(
+                "app.services.pipeline_service.read_chemistry_for_alignment",
+                return_value=align_runner.ReadChemistry.SHORT,
+            ):
+                await suggestions_for(_bam())
+        listing.assert_not_called()
+
+    async def test_chemistry_is_not_resolved_for_a_fastq(self):
+        """`read_chemistry_for_alignment` walks a BAM's provenance to find the
+        FASTQ behind it. On a FASTQ that walk is a database round trip to
+        rediscover the object already in hand -- the synchronous
+        `read_chemistry` the builders call is enough."""
+        with patch(
+            "app.services.pipeline_service.read_chemistry_for_alignment"
+        ) as resolve:
+            with patch("app.services.suggestion_service.tools.fastp",
+                       return_value=_FakeTool(True)):
+                with patch("app.services.object_service.list_objects",
+                           return_value=[]):
+                    await suggestions_for(_fake_obj())
+        resolve.assert_not_called()
+
+    async def test_the_ready_filter_is_pushed_into_the_listing_query(self):
+        """Filtering after the fact would let a project's non-ready objects
+        eat the result limit and drop references silently."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)):
+            with patch("app.services.object_service.list_objects",
+                       return_value=[]) as listing:
+                await suggestions_for(_fake_obj())
+        assert listing.call_args.kwargs["status"] is ObjectStatus.READY
+
+
+class TestSuggestionsEndpoint:
+    """The HTTP surface only. Which cards come back is settled above, at the
+    service level; what is left here is the id-to-object lookup in front of
+    it, which is the endpoint's own code."""
+
+    @pytest.fixture
+    def client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from app.api.v1.pipelines import router
+        from app.errors import register_exception_handlers
+
+        app = FastAPI()
+        register_exception_handlers(app)
+        app.include_router(router)
+        return TestClient(app)
+
+    def test_unknown_object_id_is_a_404_not_an_empty_grid(self, client):
+        """An empty `suggestions` list would render as "nothing to do here",
+        which is a different and wrong answer to "that file does not exist"."""
+        with patch("app.api.v1.pipelines.DataObject.get", return_value=None):
+            resp = client.get(
+                "/pipelines/suggestions/000000000000000000000001"
+            )
+        assert resp.status_code == 404
+
+    def test_a_malformed_object_id_is_rejected_before_the_lookup(self, client):
+        resp = client.get("/pipelines/suggestions/not-an-object-id")
+        assert resp.status_code == 422
+
+    def test_a_found_object_is_answered_with_its_cards(self, client):
+        with patch("app.api.v1.pipelines.DataObject.get",
+                   return_value=_bam()), stub_db(
+                       chemistry=align_runner.ReadChemistry.SHORT), \
+                installed_callers():
+            resp = client.get(
+                "/pipelines/suggestions/000000000000000000000001"
+            )
+        assert resp.status_code == 200
+        assert [c["kind"] for c in resp.json()["suggestions"]] == ["variants"]

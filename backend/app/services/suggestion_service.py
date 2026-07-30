@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from app.errors import ValidationError
-from app.models import DataObject, FormatKind
+from app.models import DataObject, FormatKind, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, tools, variant_runner
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
@@ -515,3 +515,52 @@ def build_assemble_card(obj) -> SuggestionCard | None:
         # about the image rather than about this particular host.
         reason="No assembler is installed.",
     )
+
+
+async def suggestions_for(obj) -> list[dict]:
+    """Every card for one file, in fixed order.
+
+    Fixed order rather than sorted by availability: a card's position should
+    not move between files, or the grid becomes something to re-read rather
+    than scan. Builders return None for kinds that do not apply to the
+    format, so the list is dense.
+    """
+    # Locally imported: `object_service` imports `blob_service` and
+    # `project_service`, and pulling that chain in at module scope from a
+    # module `pipeline_service` already reaches would close an import cycle.
+    # `pipelines.py` does the same for the same reason.
+    from app.services import object_service
+
+    if obj.status is not ObjectStatus.READY:
+        return []
+
+    references: list[DataObject] = []
+    if obj.format.kind is FormatKind.FASTQ:
+        # FASTQ only. The align card is the sole consumer, so listing a
+        # project's objects on a BAM click would be a query whose result is
+        # discarded. READY is pushed into the query rather than filtered
+        # after: a project whose non-ready objects fill the limit would
+        # otherwise come back with references silently missing.
+        candidates = await object_service.list_objects(
+            obj.project_id, limit=500, status=ObjectStatus.READY
+        )
+        references = [
+            o for o in candidates if o.format.kind in pipeline_service.REFERENCE_KINDS
+        ]
+
+    chemistry = None
+    if obj.format.kind is FormatKind.BAM:
+        # BAM only, and awaited here rather than inside the builder: it is a
+        # provenance walk to the FASTQ behind the alignment, which keeps the
+        # builders uniformly synchronous and pure. On a FASTQ the synchronous
+        # `read_chemistry` the builders call themselves is the same answer
+        # without the round trip.
+        chemistry = await pipeline_service.read_chemistry_for_alignment(obj)
+
+    cards = [
+        build_preprocess_card(obj),
+        build_align_card(obj, references),
+        build_variants_card(obj, chemistry),
+        build_assemble_card(obj),
+    ]
+    return [c.as_dict() for c in cards if c is not None]

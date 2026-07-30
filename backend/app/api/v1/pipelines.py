@@ -57,6 +57,24 @@ async def list_tools() -> dict:
     }
 
 
+@router.get("/suggestions/{object_id}")
+async def list_suggestions(object_id: PydanticObjectId) -> dict:
+    """Pipelines worth offering for this file, with the reason for each.
+
+    Advisory: a card is a pre-answered instance of an operation the
+    Computations section also offers with a picker in front of it. Nothing
+    here launches anything -- the cards carry the same payloads the dialogs
+    post.
+    """
+    from app.services import suggestion_service
+
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    return {"suggestions": await suggestion_service.suggestions_for(obj)}
+
+
 @router.get("/defaults")
 async def trim_defaults(tool: str = "fastp") -> dict:
     """Default trim parameters for the given tool, owned by the server so the
