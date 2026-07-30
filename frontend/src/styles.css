@@ -1813,6 +1813,25 @@ textarea:focus {
   cursor: default;
 }
 
+/* Experiment group header inside the run table. */
+.sra-group-row {
+  background: var(--bg-hover);
+}
+
+.sra-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 /* Assembly component checkboxes: one row each, reason text beneath. */
 .assembly-components {
   display: flex;

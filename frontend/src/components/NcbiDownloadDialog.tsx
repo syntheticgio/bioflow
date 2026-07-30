@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
@@ -169,8 +169,29 @@ export function NcbiDownloadDialog({
     return copy;
   }, [runs, sort]);
 
-  const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const visible = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  // Grouping earns its complexity only for a multi-experiment container. A
+  // single run, or a sample with one experiment, would get a collapse control
+  // around every row for no benefit.
+  const groups = useMemo(() => groupByExperiment(sorted), [sorted]);
+  const grouped =
+    (resolved?.kind === "bioproject" || resolved?.kind === "study") &&
+    groups.length > 1;
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  // Whole experiments per page when grouped: a group split across a page
+  // boundary is the confusing case, and the experiment is the unit the user
+  // is now reasoning in.
+  const GROUPS_PER_PAGE = 5;
+  const pageCount = grouped
+    ? Math.max(1, Math.ceil(groups.length / GROUPS_PER_PAGE))
+    : Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const visibleGroups = grouped
+    ? groups.slice(page * GROUPS_PER_PAGE, (page + 1) * GROUPS_PER_PAGE)
+    : [];
+  const visible = grouped
+    ? []
+    : sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const selectable = runs.filter((r) => !r.already_downloaded);
   const allSelected =
@@ -194,6 +215,27 @@ export function NcbiDownloadDialog({
     setSelected(
       allSelected ? new Set() : new Set(selectable.map((r) => r.accession)),
     );
+
+  const toggleGroup = (group: RunGroup) => {
+    const groupSelectable = group.runs.filter((r) => !r.already_downloaded);
+    const allOn = groupSelectable.every((r) => selected.has(r.accession));
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const run of groupSelectable) {
+        if (allOn) next.delete(run.accession);
+        else next.add(run.accession);
+      }
+      return next;
+    });
+  };
+
+  const groupState = (group: RunGroup): "all" | "none" | "some" => {
+    const groupSelectable = group.runs.filter((r) => !r.already_downloaded);
+    if (groupSelectable.length === 0) return "none";
+    const on = groupSelectable.filter((r) => selected.has(r.accession)).length;
+    if (on === 0) return "none";
+    return on === groupSelectable.length ? "all" : "some";
+  };
 
   const sortBy = (key: SortKey) =>
     setSort((s) => ({ key, desc: s.key === key ? !s.desc : false }));
@@ -340,14 +382,75 @@ export function NcbiDownloadDialog({
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((run) => (
-                    <RunRow
-                      key={run.accession}
-                      run={run}
-                      checked={selected.has(run.accession)}
-                      onToggle={() => toggle(run.accession)}
-                    />
-                  ))}
+                  {!grouped &&
+                    visible.map((run) => (
+                      <RunRow
+                        key={run.accession}
+                        run={run}
+                        checked={selected.has(run.accession)}
+                        onToggle={() => toggle(run.accession)}
+                      />
+                    ))}
+
+                  {grouped &&
+                    visibleGroups.map((group) => {
+                      const state = groupState(group);
+                      const isCollapsed = collapsed.has(group.experiment);
+                      return (
+                        <Fragment key={group.experiment}>
+                          <tr className="sra-group-row">
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={state === "all"}
+                                ref={(el) => {
+                                  // Tri-state has no HTML attribute; it is a
+                                  // DOM property, so it must be set here.
+                                  if (el) el.indeterminate = state === "some";
+                                }}
+                                onChange={() => toggleGroup(group)}
+                                title="Select every run in this experiment"
+                              />
+                            </td>
+                            <td colSpan={7}>
+                              <button
+                                type="button"
+                                className="sra-group-toggle"
+                                onClick={() =>
+                                  setCollapsed((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(group.experiment))
+                                      next.delete(group.experiment);
+                                    else next.add(group.experiment);
+                                    return next;
+                                  })
+                                }
+                              >
+                                {isCollapsed ? "▸" : "▾"}
+                                <span className="mono">{group.experiment}</span>
+                                <span className="sra-dim">
+                                  {group.runs.length}{" "}
+                                  {group.runs.length === 1 ? "run" : "runs"}
+                                  {group.bytes > 0 && ` · ${formatBytes(group.bytes)}`}
+                                </span>
+                                {group.title && (
+                                  <span className="sra-dim">{group.title}</span>
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+                          {!isCollapsed &&
+                            group.runs.map((run) => (
+                              <RunRow
+                                key={run.accession}
+                                run={run}
+                                checked={selected.has(run.accession)}
+                                onToggle={() => toggle(run.accession)}
+                              />
+                            ))}
+                        </Fragment>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>
@@ -617,5 +720,39 @@ function Th({
       {label}
       <span className="sra-sort-caret">{active ? (sort.desc ? "▾" : "▴") : ""}</span>
     </th>
+  );
+}
+
+/** Runs grouped by the experiment they belong to. */
+type RunGroup = {
+  experiment: string;
+  title: string | null;
+  runs: SraRunInfo[];
+  bytes: number;
+};
+
+/**
+ * Group runs by experiment, preserving the incoming sort within each group.
+ *
+ * Derived here rather than from the resolver's `hierarchy`, which groups by
+ * *sample*: every run already names its experiment, so this needs no extra
+ * request and no cache invalidation.
+ */
+function groupByExperiment(runs: SraRunInfo[]): RunGroup[] {
+  const groups = new Map<string, RunGroup>();
+  for (const run of runs) {
+    // A run with no recorded experiment still has to appear somewhere;
+    // its own accession is the least surprising bucket.
+    const key = run.experiment ?? run.accession;
+    let group = groups.get(key);
+    if (!group) {
+      group = { experiment: key, title: run.title, runs: [], bytes: 0 };
+      groups.set(key, group);
+    }
+    group.runs.push(run);
+    group.bytes += run.bytes ?? 0;
+  }
+  return [...groups.values()].sort((a, b) =>
+    a.experiment.localeCompare(b.experiment),
   );
 }
