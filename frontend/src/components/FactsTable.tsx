@@ -103,9 +103,15 @@ function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
+// How many more entries each click of "+N more" reveals. Some facts (BAM
+// coverage bins) run to a thousand entries, so revealing everything at once
+// buries the rest of the table.
+const PAGE = 20;
+
 function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number }) {
-  const [open, setOpen] = useState(false);
-  const shown = open ? items : items.slice(0, max);
+  const [visible, setVisible] = useState(max);
+  const shown = items.slice(0, visible);
+  const remaining = items.length - shown.length;
   return (
     <span>
       {shown.map((v, i) => (
@@ -113,10 +119,10 @@ function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number })
           {String(v)}
         </span>
       ))}
-      {items.length > max && (
+      {remaining > 0 && (
         <button
           type="button"
-          onClick={() => setOpen(!open)}
+          onClick={() => setVisible(visible + PAGE)}
           style={{
             color: "var(--accent)",
             fontSize: 11,
@@ -124,7 +130,21 @@ function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number })
             verticalAlign: "middle",
           }}
         >
-          {open ? "show less" : `+${items.length - max} more`}
+          +{remaining} more
+        </button>
+      )}
+      {remaining <= 0 && items.length > max && (
+        <button
+          type="button"
+          onClick={() => setVisible(max)}
+          style={{
+            color: "var(--accent)",
+            fontSize: 11,
+            marginLeft: 4,
+            verticalAlign: "middle",
+          }}
+        >
+          show less
         </button>
       )}
     </span>
