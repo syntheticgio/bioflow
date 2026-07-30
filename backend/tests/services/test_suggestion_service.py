@@ -11,13 +11,15 @@ from unittest.mock import patch
 import pytest
 
 from app.models import FormatKind
-from app.pipelines import aligner_registry
+from app.pipelines import align_runner, aligner_registry
 from app.services.suggestion_service import (
     CardStatus,
     ReferenceChoice,
     SuggestionCard,
     build_align_card,
+    build_assemble_card,
     build_preprocess_card,
+    build_variants_card,
     is_eukaryotic,
     resolve_reference,
 )
@@ -421,3 +423,168 @@ class TestAlignCard:
         ):
             with pytest.raises(ValueError):
                 build_align_card(obj, [_ref("aaa", "ref.fna")])
+
+
+@contextmanager
+def installed_callers(clair3=True, bcftools=True):
+    """Pin the two variant-caller probes.
+
+    Safe to patch this way -- unlike the aligners, which reach their probes
+    through `aligner_registry`'s frozen specs, the variants card calls
+    `tools.clair3()` and `tools.bcftools()` as plain module-attribute lookups
+    on the name `suggestion_service` imported. Patching that name therefore
+    does reach the call; `test_the_caller_patch_actually_takes_effect` pins
+    that rather than trusting it, because a patch that misses would leave
+    every test below silently reading whatever this host has installed.
+    """
+    with (
+        patch("app.services.suggestion_service.tools.clair3",
+              return_value=_FakeTool(clair3, name="clair3")),
+        patch("app.services.suggestion_service.tools.bcftools",
+              return_value=_FakeTool(bcftools, name="bcftools")),
+    ):
+        yield
+
+
+@pytest.fixture
+def all_callers_installed():
+    with installed_callers():
+        yield
+
+
+def _bam(chemistry_facts=None, obj_id="bam456"):
+    return _fake_obj(kind=FormatKind.BAM, facts=chemistry_facts, obj_id=obj_id)
+
+
+@pytest.mark.usefixtures("all_callers_installed")
+class TestVariantsCard:
+    def test_the_caller_patch_actually_takes_effect(self):
+        """Guards every other test in this class. If the seam were wrong the
+        probes would read the host, and "clair3 is installed" would depend on
+        the machine rather than on what the test asked for."""
+        from app.services import suggestion_service
+
+        with installed_callers(clair3=False, bcftools=False):
+            assert suggestion_service.tools.clair3().available is False
+            assert suggestion_service.tools.bcftools().available is False
+            assert isinstance(suggestion_service.tools.clair3(), _FakeTool)
+
+    def test_not_offered_for_a_fastq(self):
+        assert build_variants_card(
+            _fake_obj(), align_runner.ReadChemistry.SHORT
+        ) is None
+
+    def test_long_reads_pick_clair3(self):
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.ONT_SIMPLEX)
+        assert card.status is CardStatus.AVAILABLE
+        assert "Clair3" in card.title
+        assert card.launch["body"]["params"]["caller"] == "clair3"
+
+    def test_short_reads_pick_bcftools(self):
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.SHORT)
+        assert card.status is CardStatus.AVAILABLE
+        assert "bcftools" in card.title
+        assert card.launch["body"]["params"]["caller"] == "bcftools"
+
+    def test_hifi_picks_clair3(self):
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.HIFI)
+        assert card.launch["body"]["params"]["caller"] == "clair3"
+
+    def test_the_launch_body_keys_on_bam_id_not_object_id(self):
+        """`/pipelines/variants` is the one endpoint of the three that keys on
+        `bam_id`. Sending `object_id` 422s at runtime."""
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.SHORT)
+        body = card.launch["body"]
+        assert card.launch["endpoint"] == "/pipelines/variants"
+        assert body["bam_id"] == "bam456"
+        assert "object_id" not in body
+
+    def test_the_reference_is_left_for_the_server_to_resolve(self):
+        """`reference_for_bam` reads it out of the BAM's provenance, which is
+        a database lookup this card has no business doing."""
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.SHORT)
+        assert "reference_id" not in card.launch["body"]
+
+    def test_unknown_chemistry_gates_the_card(self):
+        card = build_variants_card(_bam(), None)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert card.reason == "Unknown sequencing platform for this BAM."
+
+    def test_clr_is_refused_outright(self):
+        """Clair3 is trained on high-accuracy reads; at CLR's error rate it
+        produces calls that look ordinary and are wrong. Refusing beats
+        emitting a VCF nothing downstream flags."""
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.CLR)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "CLR" in card.reason
+        assert "HiFi" in card.reason
+
+    def test_the_clr_refusal_matches_the_launch_paths_wording(self):
+        """`caller_for_chemistry` raises on CLR. The card is the same refusal
+        rendered rather than raised, so the two must not drift apart."""
+        from app.errors import ValidationError
+        from app.pipelines import variant_runner
+
+        with pytest.raises(ValidationError) as excinfo:
+            variant_runner.caller_for_chemistry(align_runner.ReadChemistry.CLR)
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.CLR)
+        assert card.reason == str(excinfo.value)
+
+    def test_a_missing_clair3_gates_a_long_read_card(self):
+        with installed_callers(clair3=False):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "clair3" in card.reason
+
+    def test_a_missing_bcftools_gates_a_short_read_card(self):
+        with installed_callers(bcftools=False):
+            card = build_variants_card(_bam(), align_runner.ReadChemistry.SHORT)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "bcftools" in card.reason
+
+    def test_the_other_callers_absence_does_not_gate_the_chosen_one(self):
+        """Only the caller this chemistry would actually run is probed."""
+        with installed_callers(bcftools=False):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.status is CardStatus.AVAILABLE
+
+    def test_the_gated_card_still_describes_what_it_would_do(self):
+        card = build_variants_card(_bam(), None)
+        assert card.title
+        assert card.description
+
+
+class TestAssembleCard:
+    def test_not_offered_for_a_bam(self):
+        assert build_assemble_card(_fake_obj(kind=FormatKind.BAM)) is None
+
+    def test_offered_for_a_fastq_but_never_runnable(self):
+        """Shown rather than hidden so the card count stays stable across
+        files and the capability stays discoverable."""
+        card = build_assemble_card(_fake_obj())
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+
+    def test_the_reason_names_the_missing_assembler_not_the_dag(self):
+        """Both "no assembler" and "no pipeline system" are true, but the
+        absent binary is the blocking constraint and the honest one."""
+        card = build_assemble_card(_fake_obj())
+        assert card.reason == "No assembler is installed."
+        assert "pipeline" not in card.reason.lower()
+        assert "DAG" not in card.reason
+
+    def test_it_stays_unavailable_whatever_the_chemistry(self):
+        for chem in ("short", "ont_simplex", "hifi", "clr", None):
+            card = build_assemble_card(
+                _fake_obj(facts={"qc_read_chemistry": chem} if chem else {})
+            )
+            assert card.status is CardStatus.UNAVAILABLE

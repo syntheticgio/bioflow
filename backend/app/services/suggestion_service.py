@@ -15,8 +15,9 @@ replace it rather than inherit it.
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.errors import ValidationError
 from app.models import DataObject, FormatKind
-from app.pipelines import align_runner, aligner_registry, tools
+from app.pipelines import align_runner, aligner_registry, tools, variant_runner
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 
@@ -367,4 +368,146 @@ def build_align_card(obj, references: list[DataObject]) -> SuggestionCard | None
                 "params": params,
             },
         },
+    )
+
+
+def build_variants_card(obj, chemistry) -> SuggestionCard | None:
+    """Call variants against the reference this BAM was aligned to.
+
+    Chemistry is a parameter rather than something read here. On a BAM it may
+    live on the parent FASTQ, and reaching it is
+    `pipeline_service.read_chemistry_for_alignment`'s async database walk --
+    which the endpoint has already done by the time it calls this. Taking the
+    resolved value keeps this module's builders uniformly synchronous and pure.
+
+    Caller choice comes from `variant_runner.caller_for_chemistry` rather than
+    `pipeline_service.default_variant_params`. The delegate encodes the same
+    mapping, but it is async purely to re-resolve the chemistry the caller just
+    handed us, and it flattens the CLR refusal to `{"caller": None}` -- so this
+    card would have to special-case CLR anyway and would pay a second
+    provenance walk for the privilege. Going to the shared source of the
+    mapping directly gets the same answer with neither cost, and the CLR
+    branch below re-raises through that same function so the card's wording
+    cannot drift from the launch endpoint's refusal.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    long_read = _is_long_read(chemistry)
+    title = (
+        "Clair3 long-read calls" if long_read else "bcftools short-read calls"
+    )
+    description = "Call variants against this alignment's reference."
+
+    if chemistry is align_runner.ReadChemistry.CLR:
+        # Rendered, not raised. The launch path raises this exact message; the
+        # card is that refusal shown before the click rather than after it, so
+        # the text comes from the same function instead of being re-typed.
+        try:
+            variant_runner.caller_for_chemistry(chemistry)
+        except ValidationError as exc:
+            reason = str(exc)
+        else:  # pragma: no cover - caller_for_chemistry always raises on CLR
+            reason = (
+                "PacBio CLR reads are too error-prone for reliable variant "
+                "calls. Use HiFi/CCS reads instead."
+            )
+        return SuggestionCard(
+            kind="variants",
+            category="VARIANTS",
+            # CLR is long-read, so the title above names Clair3 -- the caller
+            # this would have used, and the one being refused.
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    if chemistry is None:
+        # Deliberately not defaulted to bcftools the way the *launch* path
+        # does. Guessing short-read is a safe fallback for someone who has
+        # chosen to run; it is a poor thing to advertise on a card, where the
+        # user has no signal that the caller shown is a guess.
+        return SuggestionCard(
+            kind="variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="Unknown sequencing platform for this BAM.",
+        )
+
+    caller = variant_runner.caller_for_chemistry(chemistry)
+
+    # Only the caller this chemistry would actually run. Probing both would
+    # gate a perfectly runnable Clair3 card on an unrelated missing bcftools.
+    tool = tools.clair3() if long_read else tools.bcftools()
+    if not tool.available:
+        return SuggestionCard(
+            kind="variants",
+            category="VARIANTS",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    why = (
+        "Long, high-accuracy reads: Clair3's model is trained on them."
+        if long_read
+        else "Short reads: bcftools mpileup is the standard pileup caller."
+    )
+
+    return SuggestionCard(
+        kind="variants",
+        category="VARIANTS",
+        title=title,
+        description=description,
+        why=why,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/variants",
+            # The complete VariantRequest body. Note the key is `bam_id` --
+            # this is the one launch endpoint of the three that does not key on
+            # `object_id`, and sending the wrong one 422s.
+            #
+            # `reference_id` is omitted rather than resolved: the server reads
+            # it out of the BAM's provenance via `reference_for_bam`, which is
+            # a database walk, and a card that guessed wrong would align calls
+            # against a reference the BAM was never aligned to.
+            "body": {
+                "bam_id": str(obj.id),
+                "params": {"caller": caller.value},
+            },
+        },
+    )
+
+
+def build_assemble_card(obj) -> SuggestionCard | None:
+    """De novo assembly. Always unavailable.
+
+    Shown rather than hidden on purpose: the card count then stays stable
+    across files, so the Actions tab does not appear to lose steps as you click
+    between them, and the capability stays discoverable as something this tool
+    knows about but cannot yet do.
+
+    The reason names the missing binary rather than the absent pipeline system.
+    Both are true -- there is no assembler installed and no DAG to run it under
+    -- but the binary is the blocking constraint and the one the user could
+    actually act on. "The pipeline system isn't built yet" reads as a promise
+    about our roadmap; "No assembler is installed" is a fact about their host.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+
+    return SuggestionCard(
+        kind="assemble",
+        category="ASSEMBLE",
+        title="De novo assembly",
+        description="Assemble these reads into contigs without a reference.",
+        status=CardStatus.UNAVAILABLE,
+        # Not probed, because there is nothing to probe: `tools.py` declares no
+        # assembler at all -- no Flye, no SPAdes, no Canu -- so this is a fact
+        # about the image rather than about this particular host.
+        reason="No assembler is installed.",
     )
