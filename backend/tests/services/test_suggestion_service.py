@@ -720,6 +720,24 @@ class TestSuggestionsFor:
         assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
         assert cards[1]["status"] == "unavailable"
 
+    async def test_one_failing_builder_does_not_take_the_grid_with_it(self):
+        """The grid is advisory -- every operation on it is also reachable
+        through Computations -- so a contract drift in one card must not cost
+        the user the other three. Several builders raise deliberately when an
+        upstream assumption moves; that loudness belongs to the card, not to
+        the tab."""
+        with patch(
+            "app.services.suggestion_service.build_align_card",
+            side_effect=ValueError("'snap' is not a valid Aligner"),
+        ), patch(
+            "app.services.suggestion_service.tools.fastp",
+            return_value=_FakeTool(True),
+        ), stub_db(references=[_ref("aaa", "ref.fna")]):
+            cards = await suggestions_for(_fake_obj())
+
+        # Align is gone; the other two survive in their usual order.
+        assert [c["kind"] for c in cards] == ["preprocess", "assemble"]
+
     async def test_every_card_is_a_plain_dict_with_the_full_key_set(self):
         """This goes out as JSON -- a SuggestionCard would not serialise, and
         a missing key would read as `undefined` in the grid."""

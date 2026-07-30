@@ -16,10 +16,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from app.errors import ValidationError
+from app.logging import get_logger
 from app.models import DataObject, FormatKind, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, tools, variant_runner
 from app.pipelines.aligners import Aligner
-from app.services import pipeline_service
+from app.services import object_service, pipeline_service
+
+log = get_logger(__name__)
 
 
 class CardStatus(StrEnum):
@@ -525,12 +528,6 @@ async def suggestions_for(obj) -> list[dict]:
     than scan. Builders return None for kinds that do not apply to the
     format, so the list is dense.
     """
-    # Locally imported: `object_service` imports `blob_service` and
-    # `project_service`, and pulling that chain in at module scope from a
-    # module `pipeline_service` already reaches would close an import cycle.
-    # `pipelines.py` does the same for the same reason.
-    from app.services import object_service
-
     if obj.status is not ObjectStatus.READY:
         return []
 
@@ -557,10 +554,30 @@ async def suggestions_for(obj) -> list[dict]:
         # without the round trip.
         chemistry = await pipeline_service.read_chemistry_for_alignment(obj)
 
-    cards = [
-        build_preprocess_card(obj),
-        build_align_card(obj, references),
-        build_variants_card(obj, chemistry),
-        build_assemble_card(obj),
-    ]
-    return [c.as_dict() for c in cards if c is not None]
+    builders = (
+        ("preprocess", lambda: build_preprocess_card(obj)),
+        ("align", lambda: build_align_card(obj, references)),
+        ("variants", lambda: build_variants_card(obj, chemistry)),
+        ("assemble", lambda: build_assemble_card(obj)),
+    )
+
+    cards: list[dict] = []
+    for kind, build in builders:
+        # One card's contract drifting must not cost the other three. Several
+        # builders raise deliberately when an upstream assumption moves --
+        # `Aligner(...)` on an unregistered aligner, the CLR assertion in the
+        # variants card -- and that loudness is right for the card that broke.
+        # Letting it reach the endpoint would be wrong: the whole grid 500s,
+        # and the user loses three working shortcuts to operations they can
+        # still reach through Computations anyway. Logged at error so the
+        # signal survives; the grid renders without the offender.
+        try:
+            card = build()
+        except Exception:
+            log.exception(
+                "suggestion_builder_failed", kind=kind, object_id=str(obj.id)
+            )
+            continue
+        if card is not None:
+            cards.append(card.as_dict())
+    return cards
