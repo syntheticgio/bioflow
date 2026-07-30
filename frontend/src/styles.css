@@ -2373,7 +2373,10 @@ a.btn {
    control instead of centring against it. */
 .manage-grid {
   display: grid;
-  grid-template-columns: minmax(80px, 110px) 1fr;
+  /* minmax(0, 1fr), not a bare 1fr: a grid item's min-width defaults to auto,
+     so the control column refuses to shrink below its widest child and pushes
+     the whole grid past the panel in a narrow window. */
+  grid-template-columns: minmax(80px, 110px) minmax(0, 1fr);
   gap: 16px 14px;
   align-items: start;
 }
@@ -2382,8 +2385,24 @@ a.btn {
    falls back to one pair per row rather than squeezing controls. */
 @media (min-width: 900px) {
   .manage-grid {
-    grid-template-columns: minmax(80px, 110px) 1fr minmax(80px, 110px) 1fr;
+    grid-template-columns:
+      minmax(80px, 110px) minmax(0, 1fr)
+      minmax(80px, 110px) minmax(0, 1fr);
   }
+}
+
+/* Cells and the flex rows inside them. A grid item and a flex item both default
+   to min-width:auto, so without this an <input size=20> keeps its ~159px
+   intrinsic width and pushes the whole grid past a narrow panel -- the track
+   shrinks while its contents refuse to. Reaching the input itself is what
+   matters; the cell rule alone stops one level short. */
+.manage-grid > *,
+.manage-grid > * > div {
+  min-width: 0;
+}
+
+.manage-grid input {
+  min-width: 0;
 }
 
 .manage-label {
