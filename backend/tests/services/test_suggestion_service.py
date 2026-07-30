@@ -461,13 +461,36 @@ class TestVariantsCard:
     def test_the_caller_patch_actually_takes_effect(self):
         """Guards every other test in this class. If the seam were wrong the
         probes would read the host, and "clair3 is installed" would depend on
-        the machine rather than on what the test asked for."""
+        the machine rather than on what the test asked for.
+
+        This matters more than it looks: the CI image ships both binaries, so
+        the available-card tests below assert exactly the value an escaped
+        patch would also produce. They cannot themselves tell a working seam
+        from a broken one -- this test is what does, by driving the probes to
+        False and checking the *card* changes, not merely the probe."""
         from app.services import suggestion_service
 
         with installed_callers(clair3=False, bcftools=False):
             assert suggestion_service.tools.clair3().available is False
             assert suggestion_service.tools.bcftools().available is False
             assert isinstance(suggestion_service.tools.clair3(), _FakeTool)
+            # The card, not just the probe: this is the assertion that would
+            # fail if the patch stopped reaching the call site.
+            card = build_variants_card(_bam(), align_runner.ReadChemistry.SHORT)
+            assert card.status is CardStatus.UNAVAILABLE
+
+    def test_unknown_chemistry_enum_is_not_the_same_as_no_chemistry(self):
+        """`ReadChemistry.UNKNOWN` is a value QC can write, distinct from the
+        None that means nothing was resolved. It falls through to bcftools --
+        `caller_for_chemistry`'s documented behaviour -- rather than hitting
+        the "Unknown sequencing platform" gate, which is about absence."""
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.UNKNOWN)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["params"]["caller"] == "bcftools"
+
+    def test_ont_duplex_picks_clair3(self):
+        card = build_variants_card(_bam(), align_runner.ReadChemistry.ONT_DUPLEX)
+        assert card.launch["body"]["params"]["caller"] == "clair3"
 
     def test_not_offered_for_a_fastq(self):
         assert build_variants_card(
