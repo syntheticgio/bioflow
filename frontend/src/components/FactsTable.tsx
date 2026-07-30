@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { formatDate, isIsoTimestamp } from "../lib/format";
 
 /**
  * Renders parser output with human labels and honest units.
@@ -45,6 +46,30 @@ const LABELS: Record<string, string> = {
   header_lines: "Header lines",
   sequence_longest: "Longest sequence",
   sequence_shortest: "Shortest sequence",
+  // Within a group the heading already says which tool wrote these, so the
+  // labels drop the redundant prefix: "BAM statistics / Tool", not
+  // "BAM statistics / BAM stats tool version".
+  bam_stats_computed_at: "Computed",
+  bam_stats_tool_version: "Tool",
+  bam_stats_status: "Status",
+  qc_tool: "Tool",
+  qc_tool_version: "Version",
+  trimmed_by: "Tool",
+  trim_tool_version: "Version",
+  aligned_by: "Tool",
+  aligner: "Aligner",
+  aligner_version: "Version",
+  index_built_by: "Tool",
+  index_tool_version: "Version",
+  index_status: "Status",
+  quality_encoding: "Quality encoding",
+  gc_content_percent: "GC content",
+  gc_per_read_mean: "GC per read (mean)",
+  mean_quality: "Mean quality",
+  min_position_quality: "Lowest position quality",
+  mean_mapping_quality: "Mean MAPQ",
+  mapped_percent: "Mapped",
+  duplicate_percent: "Duplicates",
 };
 
 // Rendered as annotations on other rows, or in their own panel — not as rows
@@ -95,16 +120,118 @@ const SUPPRESSED = new Set([
   "mapq_histogram",
 ]);
 
-const ORDER = [
-  "sort_order", "paired", "paired_hint", "read_length", "read_length_min",
-  "read_length_max", "read_count_estimate", "record_count", "sequence_count",
-  "sequence_count_estimate", "total_bases", "sample_names", "sample_count",
-  "platforms", "read_group_count", "reference_count", "reference_total_length",
-  "reference_names", "reference_lengths", "vcf_version", "sam_version",
-  "info_fields", "format_fields", "filters", "variant_types_sampled",
-  "has_index", "program_chain", "first_contig", "first_read_ids",
-  "sampled_records", "column_counts", "header_lines",
+/**
+ * Facts, grouped by where they came from.
+ *
+ * A single flat list mixes three unrelated provenances -- what the file's own
+ * header claims, what we measured by scanning records, and what a pipeline
+ * tool wrote afterwards -- and alphabetical order scatters each tool's output
+ * across the whole table. Grouping keeps "what did samtools say" answerable in
+ * one glance, and makes the provenance of a number visible, which matters when
+ * a header claim and a measurement disagree.
+ *
+ * `keys` fixes the order within a group. A group's `match` catches keys not
+ * listed by name -- how each tool's own facts stay together as the pipelines
+ * grow, without this list needing an edit per new fact.
+ */
+type FactGroup = {
+  title: string;
+  /** Explains what the group's numbers are, when the source isn't obvious. */
+  note?: string;
+  keys: string[];
+  match?: (key: string) => boolean;
+};
+
+const GROUPS: FactGroup[] = [
+  {
+    title: "File contents",
+    keys: [
+      "sort_order", "paired", "paired_hint", "read_length", "read_length_min",
+      "read_length_max", "read_count_estimate", "record_count", "sequence_count",
+      "sequence_count_estimate", "total_bases", "sequence_longest",
+      "sequence_shortest", "sequence_names", "first_contig", "first_read_ids",
+      "sampled_records", "column_counts", "header_lines",
+    ],
+  },
+  {
+    title: "Measured quality",
+    note: "Computed by sampling records in this file.",
+    keys: [
+      "quality_encoding", "mean_quality", "min_position_quality",
+      "gc_content_percent", "gc_per_read_mean", "mapped_percent",
+      "duplicate_percent", "mean_mapping_quality",
+    ],
+  },
+  {
+    title: "Header",
+    note: "Declared by the file itself, not measured.",
+    keys: [
+      "sam_version", "vcf_version", "sample_names", "sample_count", "platforms",
+      "read_group_count", "reference_count", "reference_total_length",
+      "reference_names", "reference_lengths", "info_fields", "info_field_count",
+      "format_fields", "filters", "variant_types_sampled", "program_chain",
+      "has_index",
+    ],
+  },
+  {
+    title: "Quality control",
+    note: "Written by the QC step.",
+    keys: ["qc_tool", "qc_tool_version"],
+    match: (k) => k.startsWith("qc_"),
+  },
+  {
+    title: "Trimming",
+    note: "Written by the trim step.",
+    keys: ["trimmed_by", "trim_tool_version"],
+    match: (k) => k.startsWith("trim_"),
+  },
+  {
+    title: "Alignment",
+    note: "Written by the align step.",
+    keys: ["aligned_by", "aligner", "aligner_version", "align_params"],
+    match: (k) => k.startsWith("align") || k === "aligned_by",
+  },
+  {
+    title: "BAM statistics",
+    note: "Written by samtools; see the charts below.",
+    keys: ["bam_stats_status", "bam_stats_tool_version", "bam_stats_computed_at"],
+    match: (k) => k.startsWith("bam_stats_"),
+  },
+  {
+    title: "Indexing",
+    note: "Written by the index step.",
+    keys: ["index_status", "index_built_by", "index_tool_version"],
+    match: (k) => k.startsWith("index_"),
+  },
 ];
+
+/**
+ * Split keys into their groups, preserving each group's declared order.
+ *
+ * Anything unclaimed lands in a trailing "Other" group rather than being
+ * dropped -- a new fact from a parser must still be visible before anyone
+ * remembers to classify it here.
+ */
+function groupKeys(keys: string[]): { title: string; note?: string; keys: string[] }[] {
+  const remaining = new Set(keys);
+  const out: { title: string; note?: string; keys: string[] }[] = [];
+
+  for (const group of GROUPS) {
+    const named = group.keys.filter((k) => remaining.has(k));
+    const matched = group.match
+      ? [...remaining].filter((k) => !group.keys.includes(k) && group.match!(k)).sort()
+      : [];
+    const members = [...named, ...matched];
+    if (members.length === 0) continue;
+    members.forEach((k) => remaining.delete(k));
+    out.push({ title: group.title, note: group.note, keys: members });
+  }
+
+  if (remaining.size > 0) {
+    out.push({ title: "Other", keys: [...remaining].sort() });
+  }
+  return out;
+}
 
 function label(key: string): string {
   return LABELS[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
@@ -145,6 +272,7 @@ function scalarText(v: unknown): string {
   if (v == null) return "—";
   if (typeof v === "number") return formatNumber(v);
   if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (isIsoTimestamp(v)) return formatDate(v);
   if (typeof v !== "object") return String(v);
   if (Array.isArray(v)) return v.map(scalarText).join(", ");
   return Object.entries(v as Record<string, unknown>)
@@ -198,6 +326,11 @@ function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number })
 function renderValue(key: string, value: unknown, facts: Record<string, unknown>) {
   if (typeof value === "boolean") return value ? "Yes" : "No";
 
+  // Facts arrive as whatever a parser or pipeline stored, so timestamps land
+  // here as raw ISO strings ("2026-07-29T19:03:23.276489+00:00") unless they
+  // are recognised by shape rather than by key name.
+  if (isIsoTimestamp(value)) return formatDate(value);
+
   if (key === "sequence_longest" || key === "sequence_shortest") {
     const v = value as { name: string; length: number };
     return (
@@ -230,6 +363,11 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
         )}
       </span>
     );
+  }
+
+  // The label no longer carries "percent", so the value has to.
+  if (key.endsWith("_percent") && typeof value === "number") {
+    return `${formatNumber(value)}%`;
   }
 
   if (typeof value === "number") return formatNumber(value);
@@ -279,10 +417,9 @@ export function FactsTable({ facts }: { facts: Record<string, unknown> }) {
   const keys = Object.keys(facts).filter((k) => !SUPPRESSED.has(k));
   if (keys.length === 0 && !facts.parse_error && !facts.parse_warning) return null;
 
-  const ordered = [
-    ...ORDER.filter((k) => keys.includes(k)),
-    ...keys.filter((k) => !ORDER.includes(k)).sort(),
-  ];
+  const groups = groupKeys(keys);
+  // One group is just a list; a heading over the whole table would be noise.
+  const showTitles = groups.length > 1;
 
   return (
     <div>
@@ -295,16 +432,37 @@ export function FactsTable({ facts }: { facts: Record<string, unknown> }) {
         <div className="warn-box">{facts.parse_warning}</div>
       )}
 
-      {ordered.length > 0 && (
-        <dl className="kv">
-          {ordered.map((k) => (
-            <span key={k} style={{ display: "contents" }}>
-              <dt>{label(k)}</dt>
-              <dd>{renderValue(k, facts[k], facts)}</dd>
-            </span>
-          ))}
-        </dl>
-      )}
+      {groups.map((group, i) => (
+        <div key={group.title} style={{ marginTop: i === 0 ? 0 : 14 }}>
+          {showTitles && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-faint)",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 6,
+              }}
+            >
+              {group.title}
+              {group.note && (
+                <span style={{ textTransform: "none", letterSpacing: 0 }}>
+                  {" · "}
+                  {group.note}
+                </span>
+              )}
+            </div>
+          )}
+          <dl className="kv">
+            {group.keys.map((k) => (
+              <span key={k} style={{ display: "contents" }}>
+                <dt>{label(k)}</dt>
+                <dd>{renderValue(k, facts[k], facts)}</dd>
+              </span>
+            ))}
+          </dl>
+        </div>
+      ))}
 
       {typeof facts.estimate_note === "string" && (
         <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 8 }}>

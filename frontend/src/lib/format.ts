@@ -8,6 +8,12 @@ export function formatBytes(bytes: number, decimals = 1): string {
   return `${value.toFixed(i === 0 ? 0 : decimals)} ${units[i]}`;
 }
 
+/**
+ * A timestamp as a person reads it, in their own timezone.
+ *
+ * Seconds are kept: pipeline steps within one run land in the same minute, and
+ * "which finished first" is a question people actually ask of these rows.
+ */
 export function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -18,7 +24,18 @@ export function formatDate(iso: string | null | undefined): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   });
+}
+
+// Matches an ISO-8601 instant: date, T, time, and a zone offset or Z. Anchored
+// and zone-required on purpose -- a bare "2026-07-29" or an accession that
+// happens to contain digits must not be silently reinterpreted as a date.
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
+
+/** True when a string is an ISO instant safe to hand to formatDate. */
+export function isIsoTimestamp(v: unknown): v is string {
+  return typeof v === "string" && ISO_TIMESTAMP.test(v);
 }
 
 export function shortHash(hash: string | null | undefined, chars = 12): string {
