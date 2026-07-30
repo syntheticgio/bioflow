@@ -237,6 +237,11 @@ def prefetch() -> Tool:
     return _probe("prefetch", settings.prefetch_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def datasets() -> Tool:
+    return _probe("datasets", settings.datasets_path, ["--version"])
+
+
 def all_tools() -> list[Tool]:
     return [
         fastp(),
@@ -253,6 +258,7 @@ def all_tools() -> list[Tool]:
         clair3(),
         fasterq_dump(),
         prefetch(),
+        datasets(),
     ]
 
 
@@ -408,6 +414,20 @@ TOOL_META: dict[str, ToolMeta] = {
             "Resumable: an interrupted fetch continues rather than restarting",
             "Validates the downloaded archive against its checksum",
             "A no-op on an already-cached run, so it is safe to always run",
+        ),
+    ),
+    "datasets": ToolMeta(
+        pipelines=(PipelineType.DOWNLOAD,),
+        summary=(
+            "NCBI's Datasets CLI. Downloads a published assembly -- genome "
+            "FASTA, annotation, protein and CDS sequences -- from a GenBank "
+            "(GCA) or RefSeq (GCF) accession, which is how reference genomes "
+            "arrive without a manual trip to the NCBI website."
+        ),
+        strengths=(
+            "One accession fetches genome, annotation, protein and CDS together",
+            "Ships an md5 manifest, so a truncated transfer is detectable",
+            "Reports package contents and size before downloading anything",
         ),
     ),
     "bwa-mem2": ToolMeta(
@@ -595,3 +615,4 @@ def reset_cache() -> None:
     clair3.cache_clear()
     fasterq_dump.cache_clear()
     prefetch.cache_clear()
+    datasets.cache_clear()

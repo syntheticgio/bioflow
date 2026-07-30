@@ -17,8 +17,9 @@ from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import tools
+from app.queue import download_failures
 from app.queue.executor import run_subprocess
-from app.queue.pipeline_handlers import _log_tail, _prepare_workdir
+from app.queue.pipeline_handlers import _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
@@ -34,21 +35,6 @@ _PROGRESS_RE = re.compile(r"^\s*(\w+)\s*:\|[^|]*?([\d.]+)%")
 # FASTQ, so the extracted size is several times the archive's -- and prefetch
 # holds the archive at the same time.
 EXTRACTION_FACTOR = 4.0
-
-# Errors that mean "ask again later" rather than "this will never work". SRA
-# is rate-limited and intermittently unavailable, and burning the attempt
-# budget on a transient 503 would fail a download that a retry would complete.
-_RETRYABLE_PATTERNS = (
-    "connection",
-    "timeout",
-    "timed out",
-    "network",
-    "temporarily",
-    "503",
-    "502",
-    "429",
-    "try again",
-)
 
 
 @handler(
@@ -291,31 +277,9 @@ def _describe(fastq_files: list[Path]) -> list[dict]:
 def _download_failure(code: int, log_path: Path, accession: str) -> Exception:
     """Classify a non-zero exit from the SRA toolkit.
 
-    Retryable by default here, which is the opposite of the pipeline handlers'
-    default and deliberate: a fastp failure is almost always the input, while a
-    download failure is almost always the network.
+    Kept as a named wrapper so the call site reads the same; the logic is
+    shared with the assembly handler in `download_failures`.
     """
-    tail = _log_tail(log_path)
-    detail = f"fasterq-dump exited {code} for {accession}"
-    if tail:
-        detail = f"{detail}: {tail}"
-
-    lowered = tail.lower()
-
-    # A retracted or mistyped accession will fail identically forever, so it
-    # must not consume three attempts.
-    if "not found" in lowered or "does not exist" in lowered or "invalid" in lowered:
-        return PermanentError(detail, details={"accession": accession})
-
-    if "disk" in lowered and ("full" in lowered or "space" in lowered):
-        return PermanentError(detail, details={"accession": accession})
-
-    if code == 137:
-        return RetryableError(f"{detail} (killed, most likely out of memory)")
-
-    if any(pattern in lowered for pattern in _RETRYABLE_PATTERNS):
-        return RetryableError(detail)
-
-    # Unrecognized. Retryable because the common case for this handler is
-    # transient, and a genuinely permanent failure still stops after three.
-    return RetryableError(detail)
+    return download_failures.classify_failure(
+        code, log_path, accession, tool="fasterq-dump"
+    )

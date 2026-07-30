@@ -57,7 +57,7 @@ class TestClassify:
     def test_is_case_insensitive(self):
         assert sra_resolver.classify("prjna631678") == "bioproject"
 
-    @pytest.mark.parametrize("junk", ["", "NOTREAL", "12345", "GCF_000002445.2"])
+    @pytest.mark.parametrize("junk", ["", "NOTREAL", "12345"])
     def test_rejects_what_it_does_not_know(self, junk):
         assert sra_resolver.classify(junk) is None
 
@@ -343,3 +343,37 @@ class TestSerialization:
         assert [h.accession for h in restored.hierarchy] == [
             h.accession for h in original.hierarchy
         ]
+
+
+class TestAssemblyClassification:
+    def test_refseq_accession_classifies_as_assembly(self):
+        assert sra_resolver.classify("GCF_000002445.2") == "assembly"
+
+    def test_genbank_accession_classifies_as_assembly(self):
+        assert sra_resolver.classify("GCA_000001405.29") == "assembly"
+
+    def test_lowercase_is_accepted(self):
+        """Users paste from papers and spreadsheets; case is not signal."""
+        assert sra_resolver.classify("gcf_000002445.2") == "assembly"
+
+    def test_an_assembly_accession_is_resolvable(self):
+        assert sra_resolver.is_resolvable("GCF_000002445.2") is True
+
+    def test_an_unversioned_assembly_is_not_resolvable(self):
+        """NCBI assembly accessions always carry a version. Rejecting it here
+        gives an immediate answer instead of a round trip that finds nothing."""
+        assert sra_resolver.is_resolvable("GCF_000002445") is False
+
+    def test_resolve_does_not_send_an_assembly_to_esearch(self, monkeypatch):
+        """db=sra&term=GCF_... finds nothing, so the user would be told "no
+        sequencing runs found" -- true, and actively misleading."""
+        called = []
+        monkeypatch.setattr(
+            sra_resolver, "search_uids",
+            lambda *a, **k: called.append(a) or ([], 0),
+        )
+        result = sra_resolver.resolve("GCF_000002445.2")
+        assert called == []
+        assert result.kind == "assembly"
+        assert result.error is not None
+        assert "assembly" in result.error.lower()

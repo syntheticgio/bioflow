@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     events,
     jobs,
+    ncbi,
     objects,
     pipelines,
     projects,
@@ -27,6 +28,7 @@ api_router.include_router(jobs.router)
 api_router.include_router(pipelines.router)
 api_router.include_router(runs.router)
 api_router.include_router(sra.router)
+api_router.include_router(ncbi.router)
 api_router.include_router(schedules.router)
 api_router.include_router(system.router)
 api_router.include_router(events.router)

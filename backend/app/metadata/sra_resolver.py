@@ -27,7 +27,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 
 from app.logging import get_logger
-from app.metadata import sra
+from app.metadata import assembly, sra
 
 log = get_logger(__name__)
 
@@ -152,6 +152,10 @@ def classify(accession: str) -> str | None:
     if not accession:
         return None
     upper = accession.strip().upper()
+    # Checked before the INSDC prefixes: an assembly lives in a different NCBI
+    # service (Datasets, not E-utilities) and resolves down a different path.
+    if assembly.is_valid_accession(upper):
+        return "assembly"
     if upper.startswith(_BIOPROJECT_PREFIXES):
         return "bioproject"
     if upper.startswith(_BIOSAMPLE_PREFIXES):
@@ -169,6 +173,10 @@ def is_resolvable(accession: str) -> bool:
         return False
     upper = accession.strip().upper()
     kind = classify(upper)
+    if kind == "assembly":
+        # is_valid_accession already required the version suffix, which is what
+        # separates a resolvable accession from a bare GCF_000002445.
+        return True
     if kind in ("bioproject", "biosample"):
         return bool(_DIGITS_AFTER_PREFIX.fullmatch(upper))
     return sra.is_valid_accession(upper)
@@ -374,6 +382,21 @@ def resolve(accession: str, *, platform_filter: str | None = None) -> SraResolut
     """
     accession = (accession or "").strip().upper()
     kind = classify(accession) or "unknown"
+
+    if kind == "assembly":
+        # This resolver answers "which runs can I download". An assembly has
+        # none: it is a published genome, resolved through
+        # assembly_components and downloaded by a different handler. Returning
+        # an explanatory error beats an esearch that truthfully reports no
+        # sequencing runs and reads as "this accession is broken".
+        return SraResolution(
+            accession=accession,
+            kind=kind,
+            error=(
+                f"{accession} is a genome assembly, not sequencing data. "
+                "Resolve it through the assembly endpoint."
+            ),
+        )
 
     if not is_resolvable(accession):
         return SraResolution(

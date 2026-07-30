@@ -44,7 +44,14 @@ export type ObjectRole =
   | "reference"
   | "trimmed_reads"
   | "alignment"
-  | "variants";
+  | "variants"
+  /** An assembly's published annotation (GFF3). */
+  | "annotation"
+  /** Amino acid FASTA. Distinct from "reference" so it never reaches an
+   * aligner's reference picker -- both are FASTA. */
+  | "protein"
+  /** CDS / transcript nucleotide FASTA. Same hazard as "protein". */
+  | "transcript";
 
 /**
  * What kind of scaffolding a sidecar is. Distinct from ObjectRole: a role says

@@ -243,3 +243,50 @@ def lookup(accession: str) -> AssemblyMetadata | None:
                 )
             return meta
     return None
+
+
+def component_availability(accession: str) -> list | None:
+    """What this assembly offers, preferring the CLI's own preview.
+
+    Best-effort in the same way `lookup` is: a failure here costs accurate
+    checkboxes, not the ability to download a genome.
+    """
+    import subprocess
+
+    from app.config import settings
+    from app.metadata import assembly_components
+
+    if not is_valid_accession(accession):
+        return None
+    accession = accession.strip().upper()
+
+    try:
+        completed = subprocess.run(
+            [
+                settings.datasets_path,
+                "download",
+                "genome",
+                "accession",
+                accession,
+                "--include",
+                "genome,gff3,protein,cds",
+                "--preview",
+                # Without this the CLI writes an ANSI progress bar that buries
+                # the JSON.
+                "--no-progressbar",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("assembly_preview_failed", accession=accession, error=str(e))
+        return None
+
+    if completed.returncode == 0:
+        parsed = assembly_components.parse_preview(completed.stdout)
+        if parsed is not None:
+            return parsed
+
+    log.info("assembly_preview_unusable", accession=accession, code=completed.returncode)
+    return None
