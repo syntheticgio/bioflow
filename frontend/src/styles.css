@@ -2316,3 +2316,53 @@ a.btn {
   color: var(--text-dim);
   margin-bottom: 8px;
 }
+/* Pipeline suggestion cards -- what a file can be run through next.
+   Sized off var(--radius) rather than a literal so the broadsheet theme's
+   2px corners apply without a second rule here. */
+.suggestion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.suggestion-category {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.suggestion-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.suggestion-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* margin-top:auto pushes the rationale -- and with it the button below --
+   to the bottom, so buttons line up across cards of differing text length. */
+.suggestion-why {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: auto;
+}
+
+.suggestion-none {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin: 0;
+}

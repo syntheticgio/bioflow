@@ -19,6 +19,7 @@ import type {
   ObjectDetail,
   ObjectRole,
   OverdueSchedule,
+  PipelineSuggestion,
   PipelineTools,
   Project,
   ProjectDetail,
@@ -407,6 +408,22 @@ export const api = {
   /** Candidate references in a project, each with its index status. */
   references: (projectId: string) =>
     request<{ references: ReferenceOption[] }>(`/pipelines/references/${projectId}`),
+
+  /** Which pipelines to offer for one file, each with the reason it can or
+   * cannot run. Advisory: a failure here costs the Actions tab its cards, not
+   * its manual controls. */
+  suggestions: (objectId: string) =>
+    request<{ suggestions: PipelineSuggestion[] }>(
+      `/pipelines/suggestions/${objectId}`,
+    ),
+
+  /** Post a suggestion's launch payload verbatim. The endpoint and body both
+   * come from the card, so this adds nothing -- see `PipelineSuggestion`. */
+  launchSuggestion: (endpoint: string, body: Record<string, unknown>) =>
+    request<JobSummary>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   buildIndex: (body: { reference_id: string; aligner: string }) =>
     request<JobSummary>("/pipelines/index", {

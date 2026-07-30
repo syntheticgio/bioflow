@@ -921,3 +921,29 @@ export interface DeletionPreview {
   active_jobs: ActiveJob[];
   blocked: boolean;
 }
+
+/**
+ * One pipeline offer for a data file, as rendered in the Actions tab.
+ *
+ * Every card is either `available` with a `launch` payload or `unavailable`
+ * with a `reason` -- the two always agree, since an available card without a
+ * payload would render as a button that does nothing. `why` is populated only
+ * on available cards, `reason` only on unavailable ones.
+ *
+ * `body` is deliberately opaque. It is the *complete* JSON body for
+ * `endpoint`, assembled server-side where the object id and its defaults are
+ * known, and the client posts it verbatim rather than merging anything in:
+ * the three launch endpoints do not share a request shape (`/variants` keys
+ * on `bam_id`, the others on `object_id`), so anything the client had to add
+ * would be a shape it had to know about.
+ */
+export interface PipelineSuggestion {
+  kind: string;
+  category: string;
+  title: string;
+  description: string;
+  why: string | null;
+  status: "available" | "unavailable";
+  reason: string | null;
+  launch: { endpoint: string; body: Record<string, unknown> } | null;
+}
