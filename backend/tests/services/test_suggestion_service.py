@@ -4,11 +4,15 @@ Table-driven because the rules are a mapping, not an algorithm: the value is
 in pinning each branch, especially the ones whose ordering is load-bearing.
 """
 
+from unittest.mock import patch
+
 import pytest
 
+from app.models import FormatKind
 from app.services.suggestion_service import (
     CardStatus,
     SuggestionCard,
+    build_preprocess_card,
     is_eukaryotic,
 )
 
@@ -67,3 +71,74 @@ class TestCardDefaults:
         data = card.as_dict()
         assert data["launch"] is None
         assert data["reason"] == "No assembler is installed."
+
+
+class _FakeTool:
+    def __init__(self, available: bool, version: str = "0.23.4"):
+        self.available = available
+        self.version = version
+
+
+def _fake_obj(kind=FormatKind.FASTQ, facts=None, metadata=None, obj_id="abc123"):
+    """A stand-in for DataObject carrying only what the rules read.
+
+    A real Beanie document would need a database; the rules are pure
+    functions of these attributes, so a namespace is enough. `id` is here
+    because the launch body carries it -- the card assembles the complete
+    request body server-side.
+    """
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        id=obj_id,
+        format=SimpleNamespace(kind=kind),
+        facts=facts or {},
+        metadata=metadata or {},
+    )
+
+
+class TestPreprocessCard:
+    def test_not_offered_for_a_bam(self):
+        assert build_preprocess_card(_fake_obj(kind=FormatKind.BAM)) is None
+
+    def test_available_for_a_fastq_with_no_qc_yet(self):
+        """Not gated on chemistry: fastp's defaults are safe either way, and
+        gating it would leave a fresh FASTQ with nothing runnable at all."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)):
+            card = build_preprocess_card(_fake_obj())
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/trim"
+        assert card.launch["body"]["tool"] == "fastp"
+        assert card.launch["body"]["object_id"] == "abc123"
+        # Tool settings nest under params -- TrimRequest's shape, not flat.
+        assert "params" in card.launch["body"]
+
+    def test_unavailable_when_fastp_is_not_installed(self):
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(False)):
+            card = build_preprocess_card(_fake_obj())
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "fastp" in card.reason
+
+    def test_long_read_and_short_read_cards_have_different_copy(self):
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)):
+            long_read_card = build_preprocess_card(
+                _fake_obj(facts={"qc_read_chemistry": "ont_simplex"})
+            )
+            short_read_card = build_preprocess_card(_fake_obj())
+        assert long_read_card.description != short_read_card.description
+        assert long_read_card.why != short_read_card.why
+
+    def test_unrecognised_chemistry_degrades_to_a_card_rather_than_raising(self):
+        """qc_read_chemistry is tool-written data, not a validated enum -- a
+        stale or unrecognised value falls back to the short-read copy rather
+        than blowing up the card grid."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)):
+            card = build_preprocess_card(
+                _fake_obj(facts={"qc_read_chemistry": "martian_reads"})
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.description == "Adapter trim and length filter."

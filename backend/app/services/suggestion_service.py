@@ -15,6 +15,10 @@ replace it rather than inherit it.
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.models import FormatKind
+from app.pipelines import align_runner, tools
+from app.services import pipeline_service
+
 
 class CardStatus(StrEnum):
     AVAILABLE = "available"
@@ -85,3 +89,67 @@ class SuggestionCard:
             "reason": self.reason,
             "launch": self.launch,
         }
+
+
+def _is_long_read(chemistry: align_runner.ReadChemistry | None) -> bool:
+    return chemistry in (
+        align_runner.ReadChemistry.ONT_SIMPLEX,
+        align_runner.ReadChemistry.ONT_DUPLEX,
+        align_runner.ReadChemistry.HIFI,
+        align_runner.ReadChemistry.CLR,
+    )
+
+
+def build_preprocess_card(obj) -> SuggestionCard | None:
+    """Adapter trimming and quality filtering.
+
+    Never gated on chemistry. fastp's defaults are safe on both read types,
+    and gating it would leave a freshly ingested FASTQ -- the common case,
+    since QC has run on very few files -- with no runnable card at all.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+
+    fastp = tools.fastp()
+    chemistry = pipeline_service.read_chemistry(obj)
+    long_read = _is_long_read(chemistry)
+
+    description = (
+        "Length and quality filtering for long reads."
+        if long_read
+        else "Adapter trim and length filter."
+    )
+    why = (
+        "Long reads carry no short-read adapters to trim."
+        if long_read
+        else "Short-read defaults: adapter detection plus a length floor."
+    )
+
+    if not fastp.available:
+        return SuggestionCard(
+            kind="preprocess",
+            category="PREPROCESS",
+            title="Trim & filter -- fastp",
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason="fastp is not installed.",
+        )
+
+    return SuggestionCard(
+        kind="preprocess",
+        category="PREPROCESS",
+        title="Trim & filter -- fastp",
+        description=description,
+        why=why,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/trim",
+            # The complete TrimRequest body: tool settings nest under
+            # `params`, and the mate is left out so the server detects it.
+            "body": {
+                "object_id": str(obj.id),
+                "tool": "fastp",
+                "params": pipeline_service.default_params("fastp"),
+            },
+        },
+    )

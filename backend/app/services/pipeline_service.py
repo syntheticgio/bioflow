@@ -360,7 +360,7 @@ def is_long_read(obj: DataObject) -> bool:
     falls back to platform, the same way `suggested_preset` does, since most
     files reach the trim dialog before anyone has run QC on them.
     """
-    chemistry = _read_chemistry(obj)
+    chemistry = read_chemistry(obj)
     if chemistry is not None and chemistry is not align_runner.ReadChemistry.UNKNOWN:
         return chemistry in (
             align_runner.ReadChemistry.HIFI,
@@ -572,7 +572,7 @@ def default_library(metadata: dict, *, sample: str) -> str:
     return sample
 
 
-def _read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None:
+def read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None:
     """The chemistry QC already inferred, read from facts rather than
     recomputed -- QC runs before alignment, so the fact is known by the time
     the align dialog opens. Facts are tool-written data, not a validated
@@ -606,7 +606,7 @@ async def read_chemistry_for_alignment(
     if obj is None:
         return None
 
-    chemistry = _read_chemistry(obj)
+    chemistry = read_chemistry(obj)
     if chemistry is not None:
         return chemistry
 
@@ -614,7 +614,7 @@ async def read_chemistry_for_alignment(
         parent = await DataObject.get(parent_id)
         if parent is None or parent.format.kind is not FormatKind.FASTQ:
             continue
-        chemistry = _read_chemistry(parent)
+        chemistry = read_chemistry(parent)
         if chemistry is not None:
             return chemistry
     return None
@@ -632,7 +632,7 @@ def default_align_params(obj: DataObject | None = None) -> dict:
     aligner = Aligner.BWA_MEM2 if bwa.available else Aligner.MINIMAP2
 
     platform = sam_platform((obj.metadata or {}).get("platform")) if obj else "ILLUMINA"
-    preset = suggested_preset(platform, chemistry=_read_chemistry(obj))
+    preset = suggested_preset(platform, chemistry=read_chemistry(obj))
 
     # Long reads are minimap2's domain regardless of what else is installed:
     # bwa-mem2 is a short-read aligner and would produce poor alignments.
