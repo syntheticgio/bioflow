@@ -307,7 +307,7 @@ textarea:focus {
 
 .row.selected {
   background: var(--bg-elevated);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
 }
 
 .row-icon {
@@ -351,7 +351,7 @@ textarea:focus {
 .row.paired::before {
   content: "";
   position: absolute;
-  left: 10px;
+  left: 12px;
   width: 2px;
   background: var(--border);
 }
@@ -372,19 +372,17 @@ textarea:focus {
 .row.paired::after {
   content: "";
   position: absolute;
-  left: 10px;
+  left: 12px;
   top: 50%;
   width: 6px;
   height: 2px;
   background: var(--border);
 }
 
-/* Selection draws its own inset left edge (see .row.selected). Nudging the
-   spine clear keeps the two from reading as one thick smear. */
-.row.paired.selected::before,
-.row.paired.selected::after {
-  left: 12px;
-}
+/* The spine sits at a constant left offset whether or not the row is selected:
+   the two halves of a pair must line up, and shifting only the selected half
+   visibly breaks the bracket. The 12px offset already clears the 4px selection
+   edge (see .row.selected), so no nudge is needed. */
 
 .read-badge {
   padding: 0 4px;
