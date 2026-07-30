@@ -188,9 +188,6 @@ async def sra_resolve(body: SraResolveRequest) -> SraResolveResponse:
     )
 
 
-@router.post(
-    "/download", response_model=SraAccepted, status_code=status.HTTP_202_ACCEPTED
-)
 async def sra_download(body: SraDownloadRequest) -> SraAccepted:
     """Download selected runs from SRA.
 
