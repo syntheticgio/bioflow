@@ -134,7 +134,9 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               {Array.isArray(obj.facts.program_chain) && obj.facts.program_chain.length > 0 && (
                 <>
                   <dt>Program chain</dt>
-                  <dd>{(obj.facts.program_chain as string[]).join(" → ")}</dd>
+                  {/* One PG line per invocation, so repeated tools repeat;
+                      the distinct tools are what's worth reading. */}
+                  <dd>{[...new Set(obj.facts.program_chain as string[])].join(" → ")}</dd>
                 </>
               )}
               {Array.isArray(obj.facts.sample_names) && obj.facts.sample_names.length > 0 && (
