@@ -4,7 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import type { SraResolveResponse, SraRunInfo } from "../api/types";
+import type {
+  AssemblyResolveResponse,
+  SraResolveResponse,
+  SraRunInfo,
+} from "../api/types";
 
 const PAGE_SIZE = 20;
 
@@ -21,7 +25,11 @@ const PLATFORM_FILTERS = [
 type SortKey = "accession" | "platform" | "library_strategy" | "spots" | "bytes";
 
 /**
- * Find sequencing runs at NCBI and download them into a project.
+ * Find sequencing runs -- or a GenBank/RefSeq assembly -- at NCBI and
+ * download into a project. One accession field, one lookup: the server
+ * decides whether the accession names an SRA run/study or an assembly, and
+ * this dialog switches its body between the run-picker table and an
+ * assembly summary card accordingly.
  *
  * Two steps rather than the four an earlier sketch had. The hierarchy view and
  * the run checklist collapsed into one screen: the hierarchy is derived from
@@ -30,7 +38,7 @@ type SortKey = "accession" | "platform" | "library_strategy" | "spots" | "bytes"
  * there is no progress screen -- downloads become jobs in a `PipelineRun`, and
  * the activity view already renders those better than a modal could.
  */
-export function SraDownloadDialog({
+export function NcbiDownloadDialog({
   projectId,
   onClose,
 }: {
@@ -50,24 +58,46 @@ export function SraDownloadDialog({
     key: "accession",
     desc: false,
   });
+  const [assembly, setAssembly] = useState<AssemblyResolveResponse | null>(null);
+  const [components, setComponents] = useState<Set<string>>(new Set(["genome"]));
 
   const resolve = useMutation({
     mutationFn: () =>
-      api.sraResolve({
+      api.ncbiResolve({
         accession: accession.trim(),
         platform_filter: platform || null,
         project_id: projectId,
       }),
     onSuccess: (data) => {
-      setResolved(data);
       setPage(0);
+      // Only one branch is ever populated, and `kind` says which. Clearing
+      // the other matters: leaving a stale run table beside a new assembly
+      // card would show two answers for one lookup.
+      if (data.assembly) {
+        setAssembly(data.assembly);
+        setResolved(null);
+        setSelected(new Set());
+        // Genome plus everything available: the common case is "give me this
+        // genome and its annotation", and unchecking is cheaper than hunting
+        // for the boxes to check.
+        setComponents(
+          new Set(
+            data.assembly.components.filter((c) => c.available).map((c) => c.key),
+          ),
+        );
+        return;
+      }
+      setAssembly(null);
+      setResolved(data.sra);
       // Everything not already present, pre-selected. The common case is
       // "give me this run" or "give me this sample", and re-selecting by hand
       // would be busywork; a large study is the case where the user wants to
       // choose, and there the count in the button makes the scale obvious.
       setSelected(
         new Set(
-          data.runs.filter((r) => !r.already_downloaded).map((r) => r.accession),
+          (data.sra?.runs ?? [])
+            .filter((r) => !r.already_downloaded)
+            .map((r) => r.accession),
         ),
       );
     },
@@ -95,6 +125,23 @@ export function SraDownloadDialog({
             .join(", ")}`,
         );
       }
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const downloadAssembly = useMutation({
+    mutationFn: () =>
+      api.ncbiDownloadAssembly({
+        project_id: projectId,
+        accession: assembly!.accession,
+        components: [...components],
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      notify.success(`Downloading ${assembly!.accession} from NCBI`);
       onClose();
       navigate("/activity");
     },
@@ -158,7 +205,7 @@ export function SraDownloadDialog({
         onClick={(e) => e.stopPropagation()}
         style={{ maxWidth: 900, width: "90vw" }}
       >
-        <h2>Download from NCBI SRA</h2>
+        <h2>Download from NCBI</h2>
 
         <form
           className="sra-search"
@@ -172,21 +219,23 @@ export function SraDownloadDialog({
             <input
               autoFocus
               value={accession}
-              placeholder="SRR11768093, PRJNA631678, SAMN14886310…"
+              placeholder="SRR11768093, PRJNA1495534, GCF_000002445.2…"
               onChange={(e) => setAccession(e.target.value)}
             />
           </label>
 
-          <label className="sra-search-platform">
-            <span>Platform</span>
-            <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
-              {PLATFORM_FILTERS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {!assembly && (
+            <label className="sra-search-platform">
+              <span>Platform</span>
+              <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                {PLATFORM_FILTERS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <button
             type="submit"
@@ -198,7 +247,8 @@ export function SraDownloadDialog({
         </form>
 
         <small className="sra-search-hint">
-          A run, experiment, sample, study, BioProject, or BioSample.
+          A run, experiment, sample, study, BioProject, BioSample, or a
+          GenBank/RefSeq assembly (GCA/GCF).
         </small>
 
         {resolve.isPending && (
@@ -211,6 +261,30 @@ export function SraDownloadDialog({
           <div className="warn-box" style={{ fontSize: 12 }}>
             {resolved.error}
           </div>
+        )}
+
+        {assembly?.error && (
+          <div className="warn-box" style={{ fontSize: 12 }}>
+            {assembly.error}
+          </div>
+        )}
+
+        {assembly && !assembly.error && (
+          <AssemblyCard
+            assembly={assembly}
+            selected={components}
+            onToggle={(key) =>
+              setComponents((prev) => {
+                const next = new Set(prev);
+                // Genome is mandatory: everything else describes coordinates
+                // or products of it and is close to uninterpretable alone.
+                if (key === "genome") return next;
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+          />
         )}
 
         {resolved && runs.length > 0 && (
@@ -326,7 +400,7 @@ export function SraDownloadDialog({
 
         <div className="modal-actions">
           <div style={{ marginRight: "auto", fontSize: 12, color: "var(--text-faint)" }}>
-            {selected.size > 0 && (
+            {!assembly && selected.size > 0 && (
               <>
                 {selected.size} selected
                 {selectedBytes > 0 && <> · {formatBytes(selectedBytes)}</>}
@@ -336,19 +410,130 @@ export function SraDownloadDialog({
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button
-            type="button"
-            className="btn primary"
-            disabled={selected.size === 0 || overLimit || download.isPending}
-            onClick={() => download.mutate()}
-          >
-            {download.isPending
-              ? "Queueing…"
-              : `Download ${selected.size || ""}`.trim()}
-          </button>
+          {assembly && !assembly.error ? (
+            <button
+              type="button"
+              className="btn primary"
+              disabled={downloadAssembly.isPending}
+              onClick={() => downloadAssembly.mutate()}
+            >
+              {downloadAssembly.isPending
+                ? "Queueing…"
+                : `Download ${components.size} ${
+                    components.size === 1 ? "file" : "files"
+                  }`}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn primary"
+              disabled={selected.size === 0 || overLimit || download.isPending}
+              onClick={() => download.mutate()}
+            >
+              {download.isPending
+                ? "Queueing…"
+                : `Download ${selected.size || ""}`.trim()}
+            </button>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** A resolved assembly: what it is, and which parts to fetch. */
+function AssemblyCard({
+  assembly,
+  selected,
+  onToggle,
+}: {
+  assembly: AssemblyResolveResponse;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+}) {
+  const totalBytes = assembly.components
+    .filter((c) => selected.has(c.key))
+    .reduce((sum, c) => sum + (c.size_bytes ?? 0), 0);
+
+  return (
+    <>
+      <div className="sra-summary">
+        <div>
+          <strong className="mono">{assembly.accession}</strong>
+          {assembly.organism && (
+            <>
+              {" · "}
+              <span style={{ fontStyle: "italic" }}>{assembly.organism}</span>
+            </>
+          )}
+          {assembly.strain && <> · {assembly.strain}</>}
+          {assembly.already_downloaded && (
+            <span className="sra-have-tag" title="Already in this project">
+              have
+            </span>
+          )}
+        </div>
+        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+          {[
+            assembly.assembly_name,
+            assembly.assembly_level,
+            assembly.submitter,
+            assembly.release_date,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+          {[
+            assembly.total_length != null &&
+              `${formatBytes(assembly.total_length)} of sequence`,
+            assembly.scaffold_count != null &&
+              `${assembly.scaffold_count.toLocaleString()} scaffolds`,
+            assembly.scaffold_n50 != null &&
+              `N50 ${formatBytes(assembly.scaffold_n50)}`,
+            assembly.gc_percent != null && `${assembly.gc_percent}% GC`,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+      </div>
+
+      <div className="assembly-components">
+        {assembly.components.map((c) => (
+          <label
+            key={c.key}
+            className={`assembly-component${c.available ? "" : " disabled"}`}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(c.key)}
+              disabled={!c.available || c.key === "genome"}
+              onChange={() => onToggle(c.key)}
+            />
+            <span>
+              {c.label}
+              {c.key === "genome" && (
+                <small className="assembly-component-note">always included</small>
+              )}
+              {c.size_bytes != null && c.available && (
+                <small className="assembly-component-note">
+                  {formatBytes(c.size_bytes)}
+                </small>
+              )}
+              {!c.available && c.reason && (
+                <small className="assembly-component-note">{c.reason}</small>
+              )}
+            </span>
+          </label>
+        ))}
+      </div>
+
+      {totalBytes > 0 && (
+        <small className="sra-search-hint">
+          About {formatBytes(totalBytes)} to download.
+        </small>
+      )}
+    </>
   );
 }
 

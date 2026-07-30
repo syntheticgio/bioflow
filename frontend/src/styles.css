@@ -1813,6 +1813,31 @@ textarea:focus {
   cursor: default;
 }
 
+/* Assembly component checkboxes: one row each, reason text beneath. */
+.assembly-components {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.assembly-component {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.assembly-component.disabled {
+  color: var(--text-faint);
+}
+
+.assembly-component-note {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
 /* --- Split button (Upload / Download from SRA) --- */
 
 .split-btn {
