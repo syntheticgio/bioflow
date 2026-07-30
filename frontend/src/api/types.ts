@@ -839,6 +839,55 @@ export interface SraAccepted {
   skipped: string[];
 }
 
+// --- NCBI unified resolve (assembly branch) ---
+
+/** One downloadable part of an assembly. */
+export interface AssemblyComponent {
+  key: "genome" | "gff3" | "protein" | "cds";
+  label: string;
+  role: ObjectRole;
+  available: boolean;
+  size_bytes: number | null;
+  /** Why it is unavailable. Present only when `available` is false. */
+  reason: string | null;
+}
+
+export interface AssemblyResolveResponse {
+  accession: string;
+  organism: string | null;
+  tax_id: number | null;
+  strain: string | null;
+  assembly_name: string | null;
+  assembly_level: string | null;
+  submitter: string | null;
+  release_date: string | null;
+  bioproject: string | null;
+  paired_accession: string | null;
+  total_length: number | null;
+  scaffold_count: number | null;
+  contig_count: number | null;
+  gc_percent: number | null;
+  scaffold_n50: number | null;
+  components: AssemblyComponent[];
+  already_downloaded: boolean;
+  error: string | null;
+}
+
+/**
+ * One accession, two possible answers. `kind` says which branch is populated
+ * so the dialog never has to infer it from the shape.
+ */
+export interface NcbiResolveResponse {
+  kind: string;
+  sra: SraResolveResponse | null;
+  assembly: AssemblyResolveResponse | null;
+}
+
+export interface AssemblyAccepted {
+  run_id: string;
+  download_job_ids: string[];
+}
+
 export interface TrimRequest {
   object_id: string;
   mate_object_id?: string | null;

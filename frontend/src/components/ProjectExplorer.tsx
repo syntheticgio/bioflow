@@ -8,7 +8,7 @@ import { QualityBadge } from "./QualityBadge";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
-import { SraDownloadDialog } from "./SraDownloadDialog";
+import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { orderWithPairs, type OrderedFile } from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
@@ -206,7 +206,7 @@ function ProjectView({ projectId }: { projectId: string }) {
   const { sel, select } = useSelection();
   const [dragging, setDragging] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [sraOpen, setSraOpen] = useState(false);
+  const [ncbiOpen, setNcbiOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<FileCategory>>(
     new Set(["reads", "references", "alignments"])
   );
@@ -327,10 +327,10 @@ function ProjectView({ projectId }: { projectId: string }) {
                     role="menuitem"
                     onClick={() => {
                       setAddMenuOpen(false);
-                      setSraOpen(true);
+                      setNcbiOpen(true);
                     }}
                   >
-                    Download from NCBI SRA…
+                    Download from NCBI…
                   </button>
                 </div>
               </>
@@ -339,8 +339,8 @@ function ProjectView({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      {sraOpen && (
-        <SraDownloadDialog projectId={projectId} onClose={() => setSraOpen(false)} />
+      {ncbiOpen && (
+        <NcbiDownloadDialog projectId={projectId} onClose={() => setNcbiOpen(false)} />
       )}
 
       <div

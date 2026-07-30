@@ -3,6 +3,7 @@ import type {
   AlignEnvelope,
   AlignerSchema,
   AlignRequest,
+  AssemblyAccepted,
   BulkResult,
   CompleteAccepted,
   ContigsPage,
@@ -14,6 +15,7 @@ import type {
   JobSummary,
   MateSuggestion,
   MetadataSchema,
+  NcbiResolveResponse,
   ObjectDetail,
   ObjectRole,
   OverdueSchedule,
@@ -348,6 +350,33 @@ export const api = {
 
   sraDownload: (body: SraDownloadRequest) =>
     request<SraAccepted>("/sra/download", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // --- NCBI unified resolve ---
+
+  /**
+   * Resolve an accession without knowing in advance whether it names an SRA
+   * run/study or a GenBank/RefSeq assembly. `kind` on the response says which
+   * branch (`sra` or `assembly`) is populated.
+   */
+  ncbiResolve: (body: {
+    accession: string;
+    platform_filter?: string | null;
+    project_id?: string | null;
+  }) =>
+    request<NcbiResolveResponse>("/ncbi/resolve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  ncbiDownloadAssembly: (body: {
+    project_id: string;
+    accession: string;
+    components: string[];
+  }) =>
+    request<AssemblyAccepted>("/ncbi/download-assembly", {
       method: "POST",
       body: JSON.stringify(body),
     }),
