@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models import FormatKind, ObjectStatus
+from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import align_runner, aligner_registry
 from app.services.suggestion_service import (
     CardStatus,
@@ -186,6 +186,41 @@ class TestReferenceResolution:
         worse behaviour on a better-configured project."""
         refs = [_ref("aaa", "local.fna")]
         choice = resolve_reference(refs, organism="Saccharomyces cerevisiae")
+        assert choice.usable is True
+        assert choice.reference_id == "aaa"
+
+    def test_the_same_assembly_stored_twice_is_still_one_reference(self):
+        """Found on live data: a project holding two copies of
+        GCF_000002445.2_ASM244v1_genomic.fna counted as two references, so it
+        skipped the single-reference branch and refused to align against a
+        genome plainly sitting in the project. The align *button* above the
+        card already collapses these by assembly name; the card has to agree
+        with it."""
+        refs = [
+            _ref("aaa", "GCF_000002445.2_ASM244v1_genomic.fna"),
+            _ref("bbb", "GCF_000002445.2_ASM244v1_genomic.fna"),
+        ]
+        choice = resolve_reference(refs, organism="Trypanosoma brucei brucei")
+        assert choice.usable is True
+        # The oldest copy, deterministically.
+        assert choice.reference_id == "aaa"
+
+    def test_two_genuinely_different_assemblies_are_two_references(self):
+        """The dedup must not collapse distinct genomes -- that would pick one
+        arbitrarily where the organism branch is the honest answer."""
+        refs = [
+            _ref("aaa", "GCF_000002445.2_ASM244v1_genomic.fna"),
+            _ref("bbb", "GCF_000001405.40_GRCh38.p14_genomic.fna"),
+        ]
+        choice = resolve_reference(refs, organism="Homo sapiens")
+        assert choice.usable is False
+        assert "Homo sapiens" in choice.reason
+
+    def test_unparseable_names_are_never_treated_as_duplicates(self):
+        """Two files whose names carry no assembly cannot be shown to be the
+        same genome, so each stays its own candidate."""
+        refs = [_ref("aaa", "my_reference.fasta"), _ref("bbb", "other.fasta")]
+        choice = resolve_reference(refs, organism=None)
         assert choice.usable is True
         assert choice.reference_id == "aaa"
 
@@ -656,17 +691,19 @@ def stub_db(references=(), chemistry=None):
         yield
 
 
-def _as_reference(ref):
-    """Give a `_ref` the FASTA format kind `suggestions_for` filters on.
+def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
+    """Give a `_ref` the fields `suggestions_for`'s listing filter reads.
 
     `_ref` deliberately carries only what `resolve_reference` reads; the
-    listing filter above it reads `format.kind` as well.
+    filter above it reads `format.kind` and `role`. Both are overridable so a
+    test can hand the filter something it must reject.
     """
     from types import SimpleNamespace
     return SimpleNamespace(
         id=ref.id,
         name=ref.name,
-        format=SimpleNamespace(kind=FormatKind.FASTA),
+        format=SimpleNamespace(kind=kind),
+        role=role,
     )
 
 
@@ -719,6 +756,45 @@ class TestSuggestionsFor:
             cards = await suggestions_for(_fake_obj())
         assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
         assert cards[1]["status"] == "unavailable"
+
+    async def test_protein_and_transcript_fasta_are_not_counted_as_references(self):
+        """Caught on live data, not by these tests.
+
+        A project that downloaded an assembly from NCBI also holds
+        `protein.faa` and `cds_from_genomic.fna` -- FASTA files that are not
+        genomes to align against. Counting them made a project with ONE real
+        reference look like it had three, which pushed `resolve_reference`
+        past its single-reference branch into "fetching a genome for
+        <organism> is not wired up yet" while a usable reference sat right
+        there in the project.
+        """
+        listed = [
+            _as_reference(_ref("aaa", "GCF_000002445.2_genomic.fna")),
+            _as_reference(_ref("bbb", "protein.faa"), role=ObjectRole.PROTEIN),
+            _as_reference(
+                _ref("ccc", "cds_from_genomic.fna"), role=ObjectRole.TRANSCRIPT
+            ),
+        ]
+        with patch(
+            "app.services.object_service.list_objects", return_value=listed
+        ), patch(
+            "app.services.pipeline_service.read_chemistry_for_alignment",
+            return_value=None,
+        ), patch(
+            "app.services.suggestion_service.tools.fastp",
+            return_value=_FakeTool(True),
+        ):
+            cards = await suggestions_for(
+                _fake_obj(
+                    facts={"qc_read_chemistry": "short"},
+                    metadata={"organism": "Trypanosoma brucei brucei"},
+                )
+            )
+
+        align = next(c for c in cards if c["kind"] == "align")
+        # The one real reference wins outright; the organism branch never runs.
+        assert align["status"] == "available"
+        assert align["launch"]["body"]["reference_id"] == "aaa"
 
     async def test_one_failing_builder_does_not_take_the_grid_with_it(self):
         """The grid is advisory -- every operation on it is also reachable

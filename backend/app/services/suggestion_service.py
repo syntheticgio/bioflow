@@ -12,12 +12,13 @@ prerequisite -- that is DAG behaviour, and a real pipeline system will
 replace it rather than inherit it.
 """
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
 from app.errors import ValidationError
 from app.logging import get_logger
-from app.models import DataObject, FormatKind, ObjectStatus
+from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, tools, variant_runner
 from app.pipelines.aligners import Aligner
 from app.services import object_service, pipeline_service
@@ -170,6 +171,42 @@ class ReferenceChoice:
     reason: str | None = None
 
 
+# `GCF_000002445.2_ASM244v1_genomic.fna` -> `ASM244v1`. Mirrors
+# `parseAssemblyName` in FileHeadline.tsx, which the align *button* already
+# uses to decide it can name one assembly; the card has to agree with the
+# button sitting directly above it.
+_NCBI_ASSEMBLY = re.compile(
+    r"^GC[AF]_\d+\.\d+_(.+?)(?:_genomic)?$", re.IGNORECASE
+)
+
+
+def _assembly_name(filename: str) -> str | None:
+    """The assembly a reference filename names, or None if it does not."""
+    stem = re.sub(r"\.(fa|fna|fasta)(\.gz)?$", "", filename, flags=re.IGNORECASE)
+    match = _NCBI_ASSEMBLY.match(stem)
+    return match.group(1) if match else None
+
+
+def _distinct_assemblies(references: list[DataObject]) -> list[DataObject]:
+    """One entry per assembly, keeping the oldest file of each.
+
+    Two copies of `GCF_000002445.2_ASM244v1_genomic.fna` are one reference to
+    a user, however many rows they occupy. A filename that names no assembly
+    cannot be shown to duplicate anything, so it stays a candidate of its own.
+    """
+    seen: dict[str, DataObject] = {}
+    out: list[DataObject] = []
+    for ref in sorted(references, key=lambda r: str(r.id)):
+        name = _assembly_name(ref.name)
+        if name is None:
+            out.append(ref)
+            continue
+        if name not in seen:
+            seen[name] = ref
+            out.append(ref)
+    return out
+
+
 def resolve_reference(
     references: list[DataObject], organism: str | None
 ) -> ReferenceChoice:
@@ -188,8 +225,15 @@ def resolve_reference(
     regardless. The card names the species; naming the assembly is work for
     whenever fetching is built, behind the launch rather than the render.
     """
-    if len(references) == 1:
-        only = references[0]
+    # By distinct *assembly*, not by file. A project that downloaded a genome
+    # twice, or holds the same assembly under two filenames, has one reference
+    # as far as a user is concerned -- counting files would send it to the
+    # organism branch below and refuse to align against a genome it plainly
+    # has. Files whose names carry no parseable assembly are each their own
+    # candidate, which is the conservative reading.
+    distinct = _distinct_assemblies(references)
+    if len(distinct) == 1:
+        only = distinct[0]
         return ReferenceChoice(
             reference_id=str(only.id), reference_name=only.name, usable=True
         )
@@ -207,16 +251,16 @@ def resolve_reference(
             ),
         )
 
-    # Only ever reached with two or more, so the sort is not redundant with the
-    # branch above.
-    if references:
+    # Only ever reached with two or more distinct assemblies, so the sort is
+    # not redundant with the branch above.
+    if distinct:
         # Oldest first: an ObjectId's hex sorts by the timestamp prefix it
         # starts with, so this names the same reference on every render rather
         # than merely a stable-but-arbitrary one. Switching the key to `name`
         # for alphabetical tidiness would quietly change which one is chosen.
         # `str()` because ids are PydanticObjectId in production and plain str
         # in the tests, which are not mutually comparable.
-        chosen = sorted(references, key=lambda r: str(r.id))[0]
+        chosen = sorted(distinct, key=lambda r: str(r.id))[0]
         return ReferenceChoice(
             reference_id=str(chosen.id), reference_name=chosen.name, usable=True
         )
@@ -541,8 +585,23 @@ async def suggestions_for(obj) -> list[dict]:
         candidates = await object_service.list_objects(
             obj.project_id, limit=500, status=ObjectStatus.READY
         )
+        # Role, not just format. `REFERENCE_KINDS` is FASTA, and a project that
+        # downloaded an assembly from NCBI also holds `protein.faa` and
+        # `cds_from_genomic.fna` -- FASTA files that are emphatically not
+        # genomes to align against. Counting those made a project with one
+        # real reference look like it had four, which sent `resolve_reference`
+        # past its single-reference branch and into "fetching a genome for
+        # <organism> is not wired up yet" beside a reference sitting right
+        # there.
+        #
+        # The align *dialog* can afford the looser filter because a human
+        # picks from the list it shows. A card picks on its own, so it has to
+        # be right rather than merely close.
         references = [
-            o for o in candidates if o.format.kind in pipeline_service.REFERENCE_KINDS
+            o
+            for o in candidates
+            if o.format.kind in pipeline_service.REFERENCE_KINDS
+            and o.role is ObjectRole.REFERENCE
         ]
 
     chemistry = None
