@@ -92,3 +92,46 @@ expected. Backend changes are covered by `pytest`; run it inside the `api`
 container (`docker compose exec api python -m pytest tests/ -q`) rather than
 a bare host `.venv`, since the host venv hits Mongo replica-set connection
 errors that the container's network doesn't have.
+
+**Check a rule against the real database, not only its unit tests.** The
+Actions tab's suggestion rules passed a full green suite while getting two
+things wrong that one look at a real project exposed: `protein.faa` and
+`cds_from_genomic.fna` were counted as alignable references because they are
+FASTA, and the same assembly stored twice counted as two. Both made a project
+with one usable reference refuse to align. The tests were green because they
+fed the rules hand-built objects that already looked the way the rules
+expected. A quick
+
+```bash
+docker compose exec api python -c "..."
+```
+
+against real objects is worth more than another fixture here.
+
+## Adding a pipeline tool
+
+Registering a tool in `backend/app/pipelines/tools.py` is only half the
+change. `backend/app/services/suggestion_service.py` decides which tool each
+Actions-tab card recommends, and it is a hand-maintained mapping -- a new tool
+that no rule can pick will never be suggested, however cleanly it installs.
+
+The failure mode is silent, which is why this is worth writing down:
+installing Flye does not make the Assemble card light up. It leaves a card
+reading "No assembler is installed" sitting next to an installed assembler.
+
+So when adding a tool, check `suggestion_service.py` for either a rule that
+should now pick it, or a card whose `unavailable` reason has just stopped
+being true. The rules have tests in
+`backend/tests/services/test_suggestion_service.py`; add the case there.
+
+Two traps when testing tool availability, both of which produced tests that
+silently read the host machine while appearing to control it:
+
+- `aligner_registry`'s specs are frozen dataclasses that captured
+  `tools.minimap2` as a *function object* at import time, so patching
+  `app.pipelines.tools.minimap2` never reaches `spec.tool`. Patch `spec_for`
+  instead.
+- The image ships most tools as installed, so a test asserting a card is
+  *available* passes whether or not its patch worked. Assert the card flips
+  to unavailable when the probe is patched off -- that is the direction that
+  fails when the seam breaks.
