@@ -288,3 +288,63 @@ class TestAlignCard:
         )
         card = build_align_card(obj, [_ref("aaa", "ref.fna")])
         assert card.launch["body"]["params"]["aligner"] == "minimap2"
+
+    def test_a_missing_aligner_gates_an_otherwise_runnable_card(self):
+        """The third gate, on its own: chemistry and reference are both fine."""
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        # The delegated choice is bwa-mem2 whenever it is installed, so
+        # marking it absent in `pipeline_service` too moves that choice to
+        # minimap2 -- which the gate then finds missing. Patching only the
+        # gate would leave the card naming an aligner nothing selected.
+        with (
+            patch("app.services.pipeline_service.tools.bwa_mem2",
+                  return_value=_FakeTool(False)),
+            patch("app.services.suggestion_service.tools.minimap2",
+                  return_value=_FakeTool(False)),
+        ):
+            card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "minimap2" in card.reason
+
+    def test_a_missing_tool_suppresses_the_other_two_reasons(self):
+        """Tool wins outright rather than joining the list. Neither uploading
+        a reference nor running QC makes the card runnable while the binary is
+        absent, so naming them would send the user off to do useless work."""
+        with (
+            patch("app.services.pipeline_service.tools.bwa_mem2",
+                  return_value=_FakeTool(False)),
+            patch("app.services.suggestion_service.tools.minimap2",
+                  return_value=_FakeTool(False)),
+        ):
+            card = build_align_card(_fake_obj(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "minimap2" in card.reason
+        assert "Upload a reference" not in card.reason
+        assert "Run QC" not in card.reason
+
+    def test_the_gated_card_still_describes_what_it_would_do(self):
+        """An unavailable card is still the user's explanation of the step, so
+        it keeps its title and description -- only `why` and `launch` are the
+        available card's alone."""
+        card = build_align_card(_fake_obj(), [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "BAM" in card.title
+        assert card.description == "Align to ref.fna, sort and index."
+        assert card.launch is None
+
+    def test_the_qc_written_chemistry_reason_becomes_the_why(self):
+        """QC already justified the chemistry in prose; the card surfaces that
+        rather than inventing a second, vaguer account of the same call."""
+        obj = _fake_obj(facts={
+            "qc_read_chemistry": "hifi",
+            "qc_read_chemistry_reason": "Median read length 15.2 kb at Q31.",
+        })
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.why == "Median read length 15.2 kb at Q31."
+
+    def test_a_gated_card_without_a_reference_still_names_the_step(self):
+        card = build_align_card(_fake_obj(), [])
+        assert card.description == (
+            "Align these reads against a reference, sort and index."
+        )
