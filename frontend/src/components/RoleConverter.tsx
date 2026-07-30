@@ -70,6 +70,10 @@ export function RoleConverter({
       // The left panel re-sections off this value.
       qc.invalidateQueries({ queryKey: ["objects", obj.project_id] });
       qc.invalidateQueries({ queryKey: ["search"] });
+      // Deliberately the broad key, not this object's: making a file a
+      // reference gives every set of reads in the project something to align
+      // against, so it changes the align card of files other than this one.
+      qc.invalidateQueries({ queryKey: ["suggestions"] });
       notify.success(
         role === "reference"
           ? `${obj.name} is now a reference`
