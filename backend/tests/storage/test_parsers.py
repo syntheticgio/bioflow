@@ -30,7 +30,14 @@ def bam(tmp_path):
             {"SN": "chr2", "LN": 242193529},
         ],
         "RG": [{"ID": "rg1", "SM": "PatientA", "PL": "ILLUMINA"}],
-        "PG": [{"ID": "bwa", "PN": "bwa", "VN": "0.7.17"}],
+        # Repeated PG entries are normal: each samtools invocation appends its
+        # own line, so a real BAM lists the same tool many times.
+        "PG": [
+            {"ID": "bwa", "PN": "bwa", "VN": "0.7.17"},
+            {"ID": "samtools", "PN": "samtools", "VN": "1.19"},
+            {"ID": "samtools.1", "PN": "samtools", "VN": "1.19"},
+            {"ID": "samtools.2", "PN": "samtools", "VN": "1.19"},
+        ],
     }
     with pysam.AlignmentFile(str(path), "wb", header=header) as out:
         for i in range(10):
@@ -119,6 +126,11 @@ class TestBam:
     def test_records_program_chain(self, bam):
         f = parsers.parse(bam, FormatKind.BAM, Compression.BGZF)
         assert "bwa" in f["program_chain"]
+
+    def test_program_chain_lists_each_tool_once(self, bam):
+        """Three samtools invocations are still one entry, in first-use order."""
+        f = parsers.parse(bam, FormatKind.BAM, Compression.BGZF)
+        assert f["program_chain"] == ["bwa", "samtools"]
 
     def test_samples_read_length_and_pairing(self, bam):
         f = parsers.parse(bam, FormatKind.BAM, Compression.BGZF)

@@ -120,9 +120,13 @@ def _parse_alignment(path: Path, kind: FormatKind, cancel) -> dict:
 
         pgs = header.get("PG", [])
         if pgs:
-            facts["program_chain"] = [
-                p.get("PN") or p.get("ID") for p in pgs[:10] if p.get("PN") or p.get("ID")
-            ]
+            # A program invoked several times gets one PG line per invocation;
+            # the chain is more readable as the distinct set of tools used, in
+            # first-use order.
+            names = dict.fromkeys(
+                name for p in pgs if (name := p.get("PN") or p.get("ID"))
+            )
+            facts["program_chain"] = list(names)[:10]
 
         # An index means random access is possible, which decides whether many
         # downstream tools can run at all.

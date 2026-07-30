@@ -236,6 +236,14 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
 
   if (Array.isArray(value)) {
     if (value.length === 0) return "—";
+    // The program chain lists one entry per invocation, so a tool run several
+    // times shows up several times. Which tools touched the file is the useful
+    // part, not how many times each ran. Deduping here (not only in the parser)
+    // also cleans up results stored before the parser started deduping.
+    if (key === "program_chain") {
+      const distinct = [...new Set(value.map(scalarText))];
+      return <CollapsibleList items={distinct} />;
+    }
     const truncated =
       facts[`${key}_truncated`] === true ||
       (key === "reference_names" &&
