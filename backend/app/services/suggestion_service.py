@@ -217,3 +217,142 @@ def resolve_reference(
         )
 
     return ReferenceChoice(usable=False, reason="Upload a reference to align.")
+
+
+# Assays whose reads cross exon junctions. Both spellings of single-cell RNA
+# appear in `assay`'s option list, and a scRNA library is still spliced cDNA.
+_SPLICED_ASSAYS: frozenset[str] = frozenset({"rna-seq", "scrna-seq"})
+
+# Probes keyed by the aligner name `default_align_params` can return, plus the
+# one this module layers on. A dict rather than an if/else so an aligner added
+# to the delegated choice fails loudly on a KeyError here instead of silently
+# reporting "installed" for a binary nobody checked.
+_ALIGNER_TOOLS = {
+    "bwa-mem2": lambda: tools.bwa_mem2(),
+    "minimap2": lambda: tools.minimap2(),
+    "hisat2": lambda: tools.hisat2(),
+}
+
+
+def _align_tool_and_why(obj, chemistry) -> tuple[dict, str]:
+    """The alignment params to launch with, and the sentence justifying them.
+
+    Tool choice is `pipeline_service.default_align_params`' job, not this
+    module's: it already encodes that bwa-mem2 is x86-64 only and that long
+    reads belong to minimap2 whatever else is installed. Re-deriving any of
+    that here would make the card advertise an aligner the launch endpoint
+    would then refuse.
+
+    Splice-awareness is the one thing layered on top, because it is a
+    property of the *library* rather than of the reads or the host, and
+    nothing below this line knows the assay. It is withheld from prokaryotes
+    deliberately -- an intron-free genome has no junctions to find, so hisat2
+    would buy nothing and cost a second index.
+    """
+    params = pipeline_service.default_align_params(obj)
+
+    metadata = obj.metadata or {}
+    assay = str(metadata.get("assay") or "").strip().lower()
+    organism = metadata.get("organism")
+
+    # Short reads only: hisat2 is a short-read aligner, so an ONT RNA-seq run
+    # would align far worse under it than under the long-read choice above.
+    if (
+        assay in _SPLICED_ASSAYS
+        and not _is_long_read(chemistry)
+        and is_eukaryotic(organism)
+    ):
+        # Blanked rather than left alone: `preset` is a minimap2 concept, and
+        # carrying "sr" onto a hisat2 request describes a flag it has no way
+        # to accept.
+        params = {**params, "aligner": "hisat2", "preset": ""}
+        return params, "RNA-seq on a eukaryote: splice-aware alignment."
+
+    # QC already wrote a human-readable justification for the chemistry it
+    # inferred. Preferring it keeps the card agreeing with the QC report
+    # rather than inventing a second, vaguer account of the same decision.
+    reason = (obj.facts or {}).get("qc_read_chemistry_reason")
+    if reason:
+        return params, str(reason)
+
+    return params, "Chosen from the reads' chemistry and this host's tools."
+
+
+def build_align_card(obj, references: list[DataObject]) -> SuggestionCard | None:
+    """Align reads to a reference.
+
+    Three gates fail independently, so the reason has to be able to name more
+    than one. Order is load-bearing where both apply: the reference is what
+    the user can fix right now, while chemistry means waiting on a QC job, so
+    leading with QC would hide the actionable half behind the slow one.
+
+    A missing tool suppresses both. Neither uploading a reference nor running
+    QC makes the card runnable while the binary is absent, so listing them
+    alongside would send the user off to do work that changes nothing.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return None
+
+    chemistry = pipeline_service.read_chemistry(obj)
+    choice = resolve_reference(references, (obj.metadata or {}).get("organism"))
+    params, why = _align_tool_and_why(obj, chemistry)
+
+    aligner = params["aligner"]
+    preset = params.get("preset") or ""
+    title = f"{aligner} {preset} -> BAM" if preset else f"{aligner} -> BAM"
+    description = (
+        f"Align to {choice.reference_name}, sort and index."
+        if choice.usable and choice.reference_name
+        else "Align these reads against a reference, sort and index."
+    )
+
+    tool = _ALIGNER_TOOLS[aligner]()
+    if not tool.available:
+        return SuggestionCard(
+            kind="align",
+            category="ALIGN",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{aligner} is not installed.",
+        )
+
+    # Reference before chemistry; see the docstring. Built as a list so the
+    # order is one obvious edit rather than nested string formatting.
+    blockers: list[str] = []
+    if not choice.usable:
+        blockers.append(choice.reason or "No reference is available.")
+    if chemistry is None:
+        blockers.append("Run QC to determine read chemistry.")
+
+    if blockers:
+        return SuggestionCard(
+            kind="align",
+            category="ALIGN",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=" ".join(blockers),
+        )
+
+    return SuggestionCard(
+        kind="align",
+        category="ALIGN",
+        title=title,
+        description=description,
+        why=why,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/align",
+            # The complete AlignRequest body. `read_group` is omitted rather
+            # than filled: `launch_alignment` merges what it is sent over
+            # `default_read_group(obj)`, so sending nothing yields the server's
+            # own defaults, while sending a card-invented @RG line would
+            # override them with a worse guess.
+            "body": {
+                "object_id": str(obj.id),
+                "reference_id": choice.reference_id,
+                "params": params,
+            },
+        },
+    )

@@ -13,6 +13,7 @@ from app.services.suggestion_service import (
     CardStatus,
     ReferenceChoice,
     SuggestionCard,
+    build_align_card,
     build_preprocess_card,
     is_eukaryotic,
     resolve_reference,
@@ -200,3 +201,90 @@ class TestReferenceResolution:
         choice = resolve_reference(refs, organism="   ")
         assert choice.usable is True
         assert choice.reference_id == "aaa"
+
+
+@pytest.fixture
+def all_aligners_installed():
+    """Pin every tool probe the align card can reach.
+
+    Without this the rules are read through whatever happens to be on the
+    host: `default_align_params` picks bwa-mem2 only when it is installed,
+    and this repo runs on both arm64 (where it never is) and x86-64. A test
+    whose expected aligner depends on the machine pins nothing.
+
+    Patched at two seams because two modules probe: `pipeline_service` for
+    the delegated choice, `suggestion_service` for the availability gate.
+    """
+    with (
+        patch("app.services.pipeline_service.tools.bwa_mem2",
+              return_value=_FakeTool(True)),
+        patch("app.services.suggestion_service.tools.bwa_mem2",
+              return_value=_FakeTool(True)),
+        patch("app.services.suggestion_service.tools.minimap2",
+              return_value=_FakeTool(True)),
+        patch("app.services.suggestion_service.tools.hisat2",
+              return_value=_FakeTool(True)),
+    ):
+        yield
+
+
+@pytest.mark.usefixtures("all_aligners_installed")
+class TestAlignCard:
+    def test_not_offered_for_a_bam(self):
+        assert build_align_card(_fake_obj(kind=FormatKind.BAM), []) is None
+
+    def test_unknown_chemistry_gates_the_card(self):
+        card = build_align_card(_fake_obj(), [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "Run QC" in card.reason
+
+    def test_long_reads_pick_minimap2_with_the_matching_preset(self):
+        obj = _fake_obj(facts={"qc_read_chemistry": "ont_simplex"})
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.AVAILABLE
+        assert "minimap2" in card.title
+        assert card.launch["body"]["params"]["preset"] == "map-ont"
+
+    def test_rna_seq_on_a_eukaryote_picks_hisat2(self):
+        obj = _fake_obj(
+            facts={"qc_read_chemistry": "short"},
+            metadata={"assay": "RNA-seq", "organism": "Saccharomyces cerevisiae"},
+        )
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.launch["body"]["params"]["aligner"] == "hisat2"
+        assert "splice" in card.why.lower()
+
+    def test_rna_seq_on_a_bacterium_does_not_pick_hisat2(self):
+        """Bacteria have no introns, so splice-awareness is wrong there."""
+        obj = _fake_obj(
+            facts={"qc_read_chemistry": "short"},
+            metadata={"assay": "RNA-seq", "organism": "Escherichia coli"},
+        )
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.launch["body"]["params"]["aligner"] != "hisat2"
+
+    def test_both_gates_failing_names_the_reference_first(self):
+        """Reference first because it is actionable without waiting on a job."""
+        card = build_align_card(_fake_obj(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.reason.index("Upload a reference") < card.reason.index("Run QC")
+
+    def test_available_card_carries_a_complete_align_request_body(self):
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        body = card.launch["body"]
+        assert card.launch["endpoint"] == "/pipelines/align"
+        assert body["reference_id"] == "aaa"
+        assert body["object_id"] == "abc123"
+        assert "aligner" in body["params"]
+        # read_group is the server's to fill from default_read_group.
+        assert "read_group" not in body
+
+    def test_long_read_rna_seq_does_not_become_hisat2(self):
+        """hisat2 is a short-read aligner; ONT RNA-seq must stay on minimap2."""
+        obj = _fake_obj(
+            facts={"qc_read_chemistry": "ont_simplex"},
+            metadata={"assay": "RNA-seq", "organism": "Homo sapiens"},
+        )
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.launch["body"]["params"]["aligner"] == "minimap2"
