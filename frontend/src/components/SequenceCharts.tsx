@@ -22,13 +22,16 @@ interface QualityPoint {
 
 // Colours follow the convention used by IGV and most genome browsers, so the
 // chart reads correctly to anyone who has looked at sequence data before.
+// Held as CSS variables with the IGV value as the fallback: a theme can
+// retune them to its own inks without touching this file, and any theme that
+// says nothing still gets the conventional colours.
 const BASE_COLORS: Record<string, string> = {
-  A: "#3fb950",
-  C: "#4a9eff",
-  G: "#d29922",
-  T: "#f85149",
-  N: "#8b949e",
-  Other: "#a371f7",
+  A: "var(--base-a, #3fb950)",
+  C: "var(--base-c, #4a9eff)",
+  G: "var(--base-g, #d29922)",
+  T: "var(--base-t, #f85149)",
+  N: "var(--base-n, #8b949e)",
+  Other: "var(--base-other, #a371f7)",
 };
 
 export function BaseCompositionChart({
