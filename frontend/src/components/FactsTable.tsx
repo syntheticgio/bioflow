@@ -111,7 +111,19 @@ function label(key: string): string {
 }
 
 function formatNumber(n: number): string {
-  return n.toLocaleString();
+  if (n === 0 || !Number.isFinite(n)) return n.toString();
+  const abs = Math.abs(n);
+  if (abs >= 1) return n.toLocaleString();
+  // Leading zeros don't count as precision, so scale the budget by magnitude:
+  // 0.87 keeps 3 digits, 0.00042 keeps 3 digits rather than rounding to 0.
+  const sigFigs = Math.max(3, -Math.floor(Math.log10(abs)) + 2);
+  const text = n.toLocaleString(undefined, { maximumSignificantDigits: sigFigs });
+  // Rounding a fraction up to a bare "1" would claim a whole number the value
+  // never reached; keep enough digits to stay visibly below it.
+  if (Math.abs(Number(text.replace(/,/g, ""))) >= 1) {
+    return n.toLocaleString(undefined, { maximumSignificantDigits: sigFigs + 3 });
+  }
+  return text;
 }
 
 // How many more entries each click of "+N more" reveals. Some facts (BAM
