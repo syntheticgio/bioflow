@@ -2,7 +2,7 @@ import { api } from "../api/client";
 import { compressionLabel, formatBytes } from "../lib/format";
 import type { ObjectDetail as ObjectDetailData } from "../api/types";
 import { canPair, PairEditor } from "./PairEditor";
-import { RoleConverter } from "./RoleConverter";
+import { canConvertRole, RoleConverter } from "./RoleConverter";
 import { TagEditor } from "./TagEditor";
 
 interface Props {
@@ -41,6 +41,7 @@ export function ManageFile({
   // apply to. In a stack that is invisible; in a static grid it would strand
   // the label, so the pairing row asks the component's own question first.
   const showPairing = canPair(obj);
+  const showRole = canConvertRole(obj);
 
   return (
     <div className="section">
@@ -147,13 +148,17 @@ export function ManageFile({
           )}
         </div>
 
-        {/* Last: RoleConverter returns null on a BAM or VCF, and a trailing
-            gap in the flow costs nothing, where a stranded label mid-grid
-            would. */}
-        <div className="manage-label">Role</div>
-        <div>
-          <RoleConverter obj={obj} metadataDirty={metadataDirty} bare />
-        </div>
+        {/* Guarded like the pairing row above rather than merely placed last:
+            RoleConverter renders null on a BAM or VCF, and position alone
+            still leaves the label sitting over nothing. */}
+        {showRole && (
+          <>
+            <div className="manage-label">Role</div>
+            <div>
+              <RoleConverter obj={obj} metadataDirty={metadataDirty} bare />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

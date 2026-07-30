@@ -21,6 +21,21 @@ interface Props {
 const CONVERTIBLE_FORMATS = ["fasta", "fastq"];
 
 /**
+ * Whether this file has a role worth offering to change.
+ *
+ * Exported so a caller laying out a label beside this component can drop the
+ * whole row rather than leaving the label stranded over nothing -- the
+ * component itself renders null here, which a static grid cannot see.
+ * Mirrors `canPair` in PairEditor, which exists for the same reason.
+ */
+export function canConvertRole(obj: { role?: string | null; format: { kind: string } }): boolean {
+  return (
+    obj.role === "reference" ||
+    CONVERTIBLE_FORMATS.includes(obj.format.kind.toLowerCase())
+  );
+}
+
+/**
  * Converts a file between reads and reference.
  *
  * Both directions are the same PATCH with a different value, and the change is
@@ -65,11 +80,9 @@ export function RoleConverter({
   });
 
   // A BAM or VCF has an unambiguous role already; offering to convert it
-  // invites confusion rather than solving a problem.
-  if (
-    !isReference &&
-    !CONVERTIBLE_FORMATS.includes(obj.format.kind.toLowerCase())
-  ) {
+  // invites confusion rather than solving a problem. Shares its condition with
+  // `canConvertRole` so a caller's guard cannot disagree with what renders.
+  if (!canConvertRole(obj)) {
     return null;
   }
 
