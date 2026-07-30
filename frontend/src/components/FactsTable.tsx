@@ -82,6 +82,17 @@ const SUPPRESSED = new Set([
   "trim_params",
   "trimmed_by",
   "trim_tool_version",
+  // BAM results have their own charts, summary row and per-contig table; see
+  // BamResults. These are arrays of objects that the generic renderer can only
+  // print as a wall of key: value chips, duplicating what's drawn below.
+  "bam_stats_summary",
+  "bam_stats_coverage_bins",
+  "bam_stats_coverage_boundaries",
+  "bam_stats_cumulative",
+  "bam_stats_contigs_top",
+  "bam_stats_report",
+  "insert_size_histogram",
+  "mapq_histogram",
 ]);
 
 const ORDER = [
@@ -108,6 +119,27 @@ function formatNumber(n: number): string {
 // buries the rest of the table.
 const PAGE = 20;
 
+/**
+ * Last-resort text for one value in a list or nested object.
+ *
+ * The generic table gets whatever a parser or pipeline decided to put in
+ * `facts`, so it has to stay honest about values it has no dedicated renderer
+ * for: a nested object printed via template literal or String() becomes
+ * "[object Object]", which tells the reader nothing and hides real data. A
+ * fact worth a good layout belongs in its own panel (see SUPPRESSED); until
+ * then, showing its contents beats showing its type.
+ */
+function scalarText(v: unknown): string {
+  if (v == null) return "—";
+  if (typeof v === "number") return formatNumber(v);
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (typeof v !== "object") return String(v);
+  if (Array.isArray(v)) return v.map(scalarText).join(", ");
+  return Object.entries(v as Record<string, unknown>)
+    .map(([k, inner]) => `${k}: ${scalarText(inner)}`)
+    .join(", ");
+}
+
 function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number }) {
   const [visible, setVisible] = useState(max);
   const shown = items.slice(0, visible);
@@ -116,7 +148,7 @@ function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number })
     <span>
       {shown.map((v, i) => (
         <span key={i} className="chip">
-          {String(v)}
+          {scalarText(v)}
         </span>
       ))}
       {remaining > 0 && (
@@ -214,9 +246,7 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
     const entries = Object.entries(value as Record<string, unknown>);
     return (
       <CollapsibleList
-        items={entries.map(([k, v]) =>
-          typeof v === "number" ? `${k}: ${formatNumber(v)}` : `${k}: ${v}`,
-        )}
+        items={entries.map(([k, v]) => `${k}: ${scalarText(v)}`)}
         max={5}
       />
     );
