@@ -395,13 +395,29 @@ textarea:focus {
 .row-action {
   opacity: 0;
   color: var(--text-faint);
+  /* Download is an <a>, delete a <button>. Anchors get neither of these from
+     the reset, and without them the two controls sit at different heights. */
+  text-decoration: none;
+  flex-shrink: 0;
 }
 
 .row:hover .row-action {
   opacity: 1;
 }
 
+/* Keyboard users never trigger the row's :hover, so a focused action would
+   otherwise stay invisible while holding the focus ring. */
+.row-action:focus-visible {
+  opacity: 1;
+}
+
 .row-action:hover {
+  color: var(--text);
+}
+
+/* Red is reserved for the destructive one. It used to apply to every
+   .row-action, which was fine when delete was the only one. */
+.row-action-danger:hover {
   color: var(--error);
 }
 

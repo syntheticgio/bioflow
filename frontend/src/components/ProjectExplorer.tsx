@@ -121,7 +121,7 @@ function RootView() {
             </button>
             <button
               type="button"
-              className="icon-btn row-action"
+              className="icon-btn row-action row-action-danger"
               title="Delete project"
               onClick={(e) => {
                 e.stopPropagation();
@@ -433,9 +433,25 @@ function ProjectView({ projectId }: { projectId: string }) {
                             )}
                           </div>
                         </div>
+                        {/* An <a> rather than a button so the browser streams
+                            the file to disk itself; these run to gigabytes.
+                            stopPropagation keeps the click from also selecting
+                            the row behind it. Hidden until there are bytes to
+                            serve, which is the same gate the Actions tab uses. */}
+                        {o.blob_sha256 && (
+                          <a
+                            className="icon-btn row-action"
+                            href={api.objectDownloadUrl(o.id)}
+                            download={o.name}
+                            title={`Download ${o.name}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            ↓
+                          </a>
+                        )}
                         <button
                           type="button"
-                          className="icon-btn row-action"
+                          className="icon-btn row-action row-action-danger"
                           title="Delete file"
                           onClick={(e) => {
                             e.stopPropagation();
