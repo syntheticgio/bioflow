@@ -407,10 +407,14 @@ def build_variants_card(obj, chemistry) -> SuggestionCard | None:
             variant_runner.caller_for_chemistry(chemistry)
         except ValidationError as exc:
             reason = str(exc)
-        else:  # pragma: no cover - caller_for_chemistry always raises on CLR
-            reason = (
-                "PacBio CLR reads are too error-prone for reliable variant "
-                "calls. Use HiFi/CCS reads instead."
+        else:
+            # Unreachable while CLR is refused. Deliberately not a fallback
+            # string: a paraphrase here would be the re-typed wording this
+            # branch exists to avoid, and it would go stale silently the day
+            # CLR became callable. Failing loudly says which contract moved.
+            raise AssertionError(
+                "caller_for_chemistry no longer refuses CLR; this card's "
+                "refusal branch needs revisiting."
             )
         return SuggestionCard(
             kind="variants",
