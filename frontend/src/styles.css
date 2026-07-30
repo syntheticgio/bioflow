@@ -743,6 +743,15 @@ textarea:focus {
   font-size: 13px;
 }
 
+/* A download is a plain <a> so the browser streams it to disk, but it should
+   read as a button. `button` already gets color: inherit from the reset;
+   anchors do not, so they need the link styling undone explicitly. */
+a.btn {
+  display: inline-block;
+  color: inherit;
+  text-decoration: none;
+}
+
 .btn:hover {
   background: var(--bg-hover);
 }

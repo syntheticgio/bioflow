@@ -133,6 +133,15 @@ export const api = {
       method: "POST",
     }),
 
+  /**
+   * URL for downloading the object's raw stored bytes.
+   *
+   * A plain URL rather than a `request` call: these files run to gigabytes, so
+   * the browser should stream it to disk itself instead of us buffering the
+   * whole thing into memory as a Blob to hand back.
+   */
+  objectDownloadUrl: (id: string) => `${BASE}/objects/${id}/download`,
+
   // --- Chunked uploads ---
   createUpload: (body: {
     project_id: string;

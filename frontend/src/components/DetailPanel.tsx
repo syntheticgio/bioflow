@@ -850,8 +850,48 @@ function ActionsTab({
   onTagsChanged: () => void;
   metadataDirty: boolean;
 }) {
+  // Nothing to serve until the bytes have actually landed, and a blob the
+  // verifier has marked missing (an unmounted drive, most often) would only
+  // produce a failed download -- so the button says why instead of lying.
+  const hasContent = Boolean(obj.blob && obj.blob_sha256);
+  const contentMissing = obj.blob?.state === "missing";
+  const downloadable = hasContent && !contentMissing;
+
   return (
     <>
+      <div className="section">
+        <div className="section-title">Download</div>
+        {downloadable ? (
+          <div>
+            <a
+              className="btn"
+              href={api.objectDownloadUrl(obj.id)}
+              // Named for the user's filename, not the digest. The attribute
+              // only applies same-origin, which this is; the server sets
+              // Content-Disposition regardless, so the name survives either way.
+              download={obj.name}
+            >
+              Download file
+            </a>
+            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}>
+              The original file as stored
+              {obj.blob?.size != null && <> · {formatBytes(obj.blob.size)}</>}
+              {/* compressionLabel returns null for "none", so an uncompressed
+                  file simply says nothing here. */}
+              {compressionLabel(obj.format.compression) && (
+                <> · still {compressionLabel(obj.format.compression)}-compressed</>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+            {contentMissing
+              ? "The stored file is not currently available. If it lives on an external drive, check that the drive is mounted."
+              : "No stored content to download yet."}
+          </div>
+        )}
+      </div>
+
       <div className="section">
         <div className="section-title">Tags</div>
         <TagEditor
