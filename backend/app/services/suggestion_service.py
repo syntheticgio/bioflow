@@ -15,7 +15,7 @@ replace it rather than inherit it.
 from dataclasses import dataclass
 from enum import StrEnum
 
-from app.models import FormatKind
+from app.models import DataObject, FormatKind
 from app.pipelines import align_runner, tools
 from app.services import pipeline_service
 
@@ -165,7 +165,9 @@ class ReferenceChoice:
     reason: str | None = None
 
 
-def resolve_reference(references: list, organism: str | None) -> ReferenceChoice:
+def resolve_reference(
+    references: list[DataObject], organism: str | None
+) -> ReferenceChoice:
     """Pick the reference to align against.
 
     Order is load-bearing. A single uploaded reference wins outright, before
@@ -187,6 +189,10 @@ def resolve_reference(references: list, organism: str | None) -> ReferenceChoice
             reference_id=str(only.id), reference_name=only.name, usable=True
         )
 
+    # Must stay below the single-reference branch. Hoisted to the top -- which
+    # it invites, being the only branch that does not touch `references` -- a
+    # project with one reference and a known organism would refuse to align
+    # against the file it actually has.
     if organism and organism.strip():
         return ReferenceChoice(
             usable=False,
@@ -196,8 +202,15 @@ def resolve_reference(references: list, organism: str | None) -> ReferenceChoice
             ),
         )
 
+    # Only ever reached with two or more, so the sort is not redundant with the
+    # branch above.
     if references:
-        # Deterministic: the same card on every render and reload.
+        # Oldest first: an ObjectId's hex sorts by the timestamp prefix it
+        # starts with, so this names the same reference on every render rather
+        # than merely a stable-but-arbitrary one. Switching the key to `name`
+        # for alphabetical tidiness would quietly change which one is chosen.
+        # `str()` because ids are PydanticObjectId in production and plain str
+        # in the tests, which are not mutually comparable.
         chosen = sorted(references, key=lambda r: str(r.id))[0]
         return ReferenceChoice(
             reference_id=str(chosen.id), reference_name=chosen.name, usable=True
