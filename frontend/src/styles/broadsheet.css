@@ -321,10 +321,50 @@
   color: var(--ink-62);
 }
 
-.theme-broadsheet .load-indicator {
+.theme-broadsheet .load-indicator,
+.theme-broadsheet .header-stats {
   font-size: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
+  color: inherit;
+  gap: var(--space-2);
+}
+
+/* The strip reads as running text in the design, its parts divided by middots
+   rather than whitespace. Generated between siblings so the components stay
+   plain lists of spans and Classic keeps its own spacing. */
+.theme-broadsheet .header-stats > span + span::before,
+.theme-broadsheet .load-indicator > span + span::before {
+  content: "·";
+  margin-right: var(--space-2);
+  color: var(--ink-55);
+}
+
+/* The status dot is the one child that is a mark, not a word -- it takes no
+   separator and sits tight against the state it belongs to. */
+.theme-broadsheet .load-indicator > .dot + span::before {
+  content: none;
+}
+
+.theme-broadsheet .load-indicator .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+/* The idle dot takes the cyan accent here, as the design has it. Only this one
+   state: busy and loaded keep their amber and red, which are warnings and must
+   stay legible as such. --success itself cannot move -- the quality chart's
+   "good" band reads it. */
+.theme-broadsheet .load-indicator .dot.state-open {
+  --dot-color: var(--color-accent);
+}
+
+/* The strip is one uniform ink in the design. LoadIndicator dims its trailing
+   items for Classic's denser header; here that reads as two tones in a line of
+   running text, so pull them back level. The dot keeps its own colour -- that
+   one is load state, not decoration. */
+.theme-broadsheet .load-indicator .load-metric {
   color: inherit;
 }
 
@@ -536,6 +576,10 @@
   font-weight: 600;
 }
 
+.theme-broadsheet .btn:not(.primary) {
+  background: #fff;
+}
+
 .theme-broadsheet .btn.primary,
 .theme-broadsheet .icon-btn.primary {
   background: var(--color-accent);
@@ -567,13 +611,16 @@
    tint of the ink goes chalky, while the ramp's own 100/800 steps are
    measured against each other. */
 .theme-broadsheet .badge.ready,
-.theme-broadsheet .badge.present {
+.theme-broadsheet .badge.present,
+.theme-broadsheet .badge.succeeded {
   background: var(--color-accent-100);
   color: var(--color-accent-800);
 }
 
 .theme-broadsheet .badge.error,
-.theme-broadsheet .badge.missing {
+.theme-broadsheet .badge.missing,
+.theme-broadsheet .badge.failed,
+.theme-broadsheet .badge.dead {
   background: var(--color-accent-2-100);
   color: var(--color-accent-2-800);
 }

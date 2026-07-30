@@ -237,6 +237,7 @@ function ProjectView({ projectId }: { projectId: string }) {
   const [expandedCategories, setExpandedCategories] = useState<Set<FileCategory>>(
     new Set(["reads", "references", "alignments"])
   );
+  const [filter, setFilter] = useState("");
   const { uploadFiles } = useUploads(projectId);
 
   const delObject = useMutation({
@@ -266,6 +267,14 @@ function ProjectView({ projectId }: { projectId: string }) {
         ? 1500
         : false;
     },
+  });
+
+  const filteredObjects = objects?.filter((o) => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      o.name.toLowerCase().includes(q) || o.tags.some((t) => t.toLowerCase().includes(q))
+    );
   });
 
   const toggleCategory = (category: FileCategory) => {
@@ -307,14 +316,6 @@ function ProjectView({ projectId }: { projectId: string }) {
         </nav>
 
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          <button
-            type="button"
-            className="icon-btn"
-            title="Search within this project"
-            onClick={() => navigate(`/search?project_id=${projectId}`)}
-          >
-            ⌕
-          </button>
           {/* A split button: uploading is much the commoner action and keeps
               the one-click path, while the chevron reaches the alternative
               without turning every upload into a menu choice. */}
@@ -370,6 +371,16 @@ function ProjectView({ projectId }: { projectId: string }) {
         <NcbiDownloadDialog projectId={projectId} onClose={() => setNcbiOpen(false)} />
       )}
 
+      <div className="panel-filter">
+        <input
+          type="search"
+          placeholder="Filter files, tags, runs…"
+          aria-label="Filter files"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
+      </div>
+
       <div
         className={`dropzone ${dragging ? "dragging" : ""}`}
         onDragOver={(e) => {
@@ -395,9 +406,13 @@ function ProjectView({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        {objects && objects.length > 0 &&
+        {objects && objects.length > 0 && filteredObjects?.length === 0 && (
+          <div className="empty">No files match “{filter}”.</div>
+        )}
+
+        {filteredObjects && filteredObjects.length > 0 &&
           CATEGORIES.map((category) => {
-            const categoryFiles = categorizeObjects(objects)[category.key];
+            const categoryFiles = categorizeObjects(filteredObjects)[category.key];
             if (categoryFiles.length === 0) return null;
 
             const isExpanded = expandedCategories.has(category.key);

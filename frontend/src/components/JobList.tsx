@@ -63,7 +63,11 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span className="mono">{job.type}</span>
               <span className={`badge ${job.state}`}>{job.state}</span>
-              <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+                {job.job_class}
+                {job.progress.phase && ` · ${job.progress.phase}`}
+              </span>
+              <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
                 {active && (
                   <button
                     type="button"
@@ -85,6 +89,9 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
                     Retry
                   </button>
                 )}
+                <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+                  {formatDate(job.created_at)}
+                </span>
               </span>
             </div>
 
@@ -94,24 +101,11 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
               </div>
             )}
 
-            <div
-              style={{
-                color: "var(--text-faint)",
-                fontSize: 11,
-                marginTop: 3,
-                display: "flex",
-                gap: 8,
-              }}
-            >
-              <span>{job.job_class}</span>
-              {job.attempts > 1 && (
-                <span>
-                  attempt {job.attempts}/{job.max_attempts}
-                </span>
-              )}
-              {job.progress.phase && <span>{job.progress.phase}</span>}
-              <span style={{ marginLeft: "auto" }}>{formatDate(job.created_at)}</span>
-            </div>
+            {job.attempts > 1 && (
+              <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
+                attempt {job.attempts}/{job.max_attempts}
+              </div>
+            )}
 
             {job.error && (
               <div style={{ color: "var(--error)", fontSize: 11, marginTop: 3 }}>

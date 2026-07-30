@@ -175,6 +175,23 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* Measurements behind the load state's label: quieter than the word they
+   qualify, so "Idle" leads and the numbers follow. */
+.load-metric {
+  color: var(--text-faint);
+}
+
+/* What the library holds, at the same quiet weight as the load state it sits
+   beside. */
+.header-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Main split ---------- */
 .main {
   display: grid;
@@ -831,7 +848,9 @@ a.btn {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--text-faint);
+  /* --dot-color lets a caller set the fill without an inline background, so
+     themes can still override a single state in CSS. */
+  background: var(--dot-color, var(--text-faint));
   flex-shrink: 0;
 }
 
@@ -841,6 +860,20 @@ a.btn {
 
 .dot.bad {
   background: var(--error);
+}
+
+/* Admission-control states, from LoadIndicator. Absent when the governor is
+   not reporting, which leaves the neutral default. */
+.dot.state-open {
+  --dot-color: var(--success);
+}
+
+.dot.state-throttled {
+  --dot-color: var(--warn);
+}
+
+.dot.state-closed {
+  --dot-color: var(--error);
 }
 
 /* ---------- Upload tray ---------- */

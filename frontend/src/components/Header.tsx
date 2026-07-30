@@ -96,19 +96,21 @@ export function Header() {
       </nav>
 
       <div className="header-right">
-        <LoadIndicator />
-        {/* Library size rather than free space: under Docker Desktop the
-            container cannot see the external drive's real capacity, and a
-            confidently wrong "192 GB free" is worse than not saying. This we
-            can count exactly. */}
+        {/* What the library holds, then what it is doing. Library size rather
+            than free space: under Docker Desktop the container cannot see the
+            external drive's real capacity, and a confidently wrong "192 GB
+            free" is worse than not saying. These we can count exactly. */}
         {data && (
           <div
-            className="load-indicator"
+            className="header-stats"
             title={`${data.counts.objects} files at ${data.storage.path}`}
           >
+            <span>{data.counts.objects} files</span>
+            <span>{data.counts.projects} projects</span>
             <span>{formatBytes(data.storage.library_bytes)} stored</span>
           </div>
         )}
+        <LoadIndicator />
       </div>
     </header>
   );
