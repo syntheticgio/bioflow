@@ -16,7 +16,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from app.models import DataObject, FormatKind
-from app.pipelines import align_runner, tools
+from app.pipelines import align_runner, aligner_registry, tools
+from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 
 
@@ -223,16 +224,6 @@ def resolve_reference(
 # appear in `assay`'s option list, and a scRNA library is still spliced cDNA.
 _SPLICED_ASSAYS: frozenset[str] = frozenset({"rna-seq", "scrna-seq"})
 
-# Probes keyed by the aligner name `default_align_params` can return, plus the
-# one this module layers on. A dict rather than an if/else so an aligner added
-# to the delegated choice fails loudly on a KeyError here instead of silently
-# reporting "installed" for a binary nobody checked.
-_ALIGNER_TOOLS = {
-    "bwa-mem2": lambda: tools.bwa_mem2(),
-    "minimap2": lambda: tools.minimap2(),
-    "hisat2": lambda: tools.hisat2(),
-}
-
 
 def _align_tool_and_why(obj, chemistry) -> tuple[dict, str]:
     """The alignment params to launch with, and the sentence justifying them.
@@ -262,10 +253,10 @@ def _align_tool_and_why(obj, chemistry) -> tuple[dict, str]:
         and not _is_long_read(chemistry)
         and is_eukaryotic(organism)
     ):
-        # Blanked rather than left alone: `preset` is a minimap2 concept, and
-        # carrying "sr" onto a hisat2 request describes a flag it has no way
-        # to accept.
-        params = {**params, "aligner": "hisat2", "preset": ""}
+        # `preset` is left as the delegate wrote it. It is a minimap2 concept,
+        # but `Hisat2Params.from_dict` reads only the keys it knows and
+        # ignores the rest, so a stray preset is inert rather than a bad flag.
+        params = {**params, "aligner": "hisat2"}
         return params, "RNA-seq on a eukaryote: splice-aware alignment."
 
     # QC already wrote a human-readable justification for the chemistry it
@@ -298,7 +289,17 @@ def build_align_card(obj, references: list[DataObject]) -> SuggestionCard | None
     params, why = _align_tool_and_why(obj, chemistry)
 
     aligner = params["aligner"]
-    preset = params.get("preset") or ""
+    # Through the registry -- the single place an aligner is declared -- rather
+    # than a local table that would drift from it. `Aligner(...)` raises on a
+    # name the registry has never heard of, so an unknown aligner fails here
+    # instead of rendering a card whose launch the endpoint would refuse.
+    kind = Aligner(aligner)
+    spec = aligner_registry.spec_for(kind)
+
+    # Only minimap2 takes a preset, so only its title names one. The delegate
+    # leaves the key populated on the hisat2 override, where showing it would
+    # describe a flag that aligner never receives.
+    preset = (params.get("preset") or "") if kind is Aligner.MINIMAP2 else ""
     title = f"{aligner} {preset} -> BAM" if preset else f"{aligner} -> BAM"
     description = (
         f"Align to {choice.reference_name}, sort and index."
@@ -306,15 +307,26 @@ def build_align_card(obj, references: list[DataObject]) -> SuggestionCard | None
         else "Align these reads against a reference, sort and index."
     )
 
-    tool = _ALIGNER_TOOLS[aligner]()
-    if not tool.available:
+    # bowtie2 and hisat2 index through a separate binary, each configured by
+    # its own setting. Gating on the aligner alone would render an available
+    # card whose launch then *succeeds* -- `launch_alignment` requires only the
+    # aligner -- and fails later inside the async index job, far from the click
+    # that caused it.
+    tool = spec.tool()
+    builder = spec.builder_tool() if spec.builder_tool else None
+    missing = next(
+        (t for t in (tool, builder) if t is not None and not t.available), None
+    )
+    if missing is not None:
         return SuggestionCard(
             kind="align",
             category="ALIGN",
             title=title,
             description=description,
             status=CardStatus.UNAVAILABLE,
-            reason=f"{aligner} is not installed.",
+            # Names the binary that is actually absent: sending someone to
+            # install hisat2 when hisat2-build is the gap wastes the trip.
+            reason=f"{missing.name} is not installed.",
         )
 
     # Reference before chemistry; see the docstring. Built as a list so the

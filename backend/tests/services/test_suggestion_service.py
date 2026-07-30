@@ -4,11 +4,14 @@ Table-driven because the rules are a mapping, not an algorithm: the value is
 in pinning each branch, especially the ones whose ordering is load-bearing.
 """
 
+import dataclasses
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
 
 from app.models import FormatKind
+from app.pipelines import aligner_registry
 from app.services.suggestion_service import (
     CardStatus,
     ReferenceChoice,
@@ -77,9 +80,12 @@ class TestCardDefaults:
 
 
 class _FakeTool:
-    def __init__(self, available: bool, version: str = "0.23.4"):
+    def __init__(self, available: bool, version: str = "0.23.4", name: str = "tool"):
         self.available = available
         self.version = version
+        # The align card puts this in the reason, so it has to be the real
+        # binary name rather than a placeholder.
+        self.name = name
 
 
 def _fake_obj(kind=FormatKind.FASTQ, facts=None, metadata=None, obj_id="abc123"):
@@ -203,28 +209,57 @@ class TestReferenceResolution:
         assert choice.reference_id == "aaa"
 
 
-@pytest.fixture
-def all_aligners_installed():
-    """Pin every tool probe the align card can reach.
+@contextmanager
+def installed_tools(**overrides):
+    """Pin the tool probes the align card reads. Everything installed by
+    default; pass e.g. `hisat2_build=False` to take one away.
 
-    Without this the rules are read through whatever happens to be on the
-    host: `default_align_params` picks bwa-mem2 only when it is installed,
-    and this repo runs on both arm64 (where it never is) and x86-64. A test
-    whose expected aligner depends on the machine pins nothing.
+    Two seams, because the card reads probes two different ways.
 
-    Patched at two seams because two modules probe: `pipeline_service` for
-    the delegated choice, `suggestion_service` for the availability gate.
+    `pipeline_service.tools.bwa_mem2` drives the *delegated choice* and is a
+    plain module-attribute lookup, so it patches normally.
+
+    The *gate* resolves through `aligner_registry`, whose frozen specs
+    captured `tools.minimap2` and friends as function objects at import time.
+    Patching `app.pipelines.tools.minimap2` therefore does NOT reach
+    `spec.tool`, which still holds the original -- so `spec_for` is patched to
+    hand back specs rebuilt with the probes the test asked for.
+
+    Without this the rules are read through whatever the host happens to have:
+    `default_align_params` picks bwa-mem2 only where it is installed, and this
+    repo runs on both arm64 (where it never is) and x86-64. A test whose
+    expected aligner depends on the machine pins nothing.
     """
+    available = {
+        "bwa_mem2": True, "minimap2": True, "hisat2": True,
+        "hisat2_build": True, "bowtie2": True, "bowtie2_build": True,
+    }
+    unknown = set(overrides) - set(available)
+    assert not unknown, f"unknown tool(s): {sorted(unknown)}"
+    available.update(overrides)
+
+    def probe(binary: str) -> _FakeTool:
+        return _FakeTool(available[binary.replace("-", "_")], name=binary)
+
+    def fake_spec_for(aligner):
+        real = aligner_registry.REGISTRY[aligner]
+        changes = {"tool": lambda: probe(real.aligner.value)}
+        if real.builder_tool is not None:
+            changes["builder_tool"] = lambda: probe(real.index.builder)
+        return dataclasses.replace(real, **changes)
+
     with (
         patch("app.services.pipeline_service.tools.bwa_mem2",
-              return_value=_FakeTool(True)),
-        patch("app.services.suggestion_service.tools.bwa_mem2",
-              return_value=_FakeTool(True)),
-        patch("app.services.suggestion_service.tools.minimap2",
-              return_value=_FakeTool(True)),
-        patch("app.services.suggestion_service.tools.hisat2",
-              return_value=_FakeTool(True)),
+              return_value=probe("bwa-mem2")),
+        patch("app.services.suggestion_service.aligner_registry.spec_for",
+              side_effect=fake_spec_for),
     ):
+        yield
+
+
+@pytest.fixture
+def all_aligners_installed():
+    with installed_tools():
         yield
 
 
@@ -292,16 +327,10 @@ class TestAlignCard:
     def test_a_missing_aligner_gates_an_otherwise_runnable_card(self):
         """The third gate, on its own: chemistry and reference are both fine."""
         obj = _fake_obj(facts={"qc_read_chemistry": "short"})
-        # The delegated choice is bwa-mem2 whenever it is installed, so
-        # marking it absent in `pipeline_service` too moves that choice to
-        # minimap2 -- which the gate then finds missing. Patching only the
-        # gate would leave the card naming an aligner nothing selected.
-        with (
-            patch("app.services.pipeline_service.tools.bwa_mem2",
-                  return_value=_FakeTool(False)),
-            patch("app.services.suggestion_service.tools.minimap2",
-                  return_value=_FakeTool(False)),
-        ):
+        # bwa-mem2 absent moves the delegated choice to minimap2, which the
+        # gate then finds missing too -- so this pins the gate rather than
+        # the fallback.
+        with installed_tools(bwa_mem2=False, minimap2=False):
             card = build_align_card(obj, [_ref("aaa", "ref.fna")])
         assert card.status is CardStatus.UNAVAILABLE
         assert card.launch is None
@@ -311,12 +340,7 @@ class TestAlignCard:
         """Tool wins outright rather than joining the list. Neither uploading
         a reference nor running QC makes the card runnable while the binary is
         absent, so naming them would send the user off to do useless work."""
-        with (
-            patch("app.services.pipeline_service.tools.bwa_mem2",
-                  return_value=_FakeTool(False)),
-            patch("app.services.suggestion_service.tools.minimap2",
-                  return_value=_FakeTool(False)),
-        ):
+        with installed_tools(bwa_mem2=False, minimap2=False):
             card = build_align_card(_fake_obj(), [])
         assert card.status is CardStatus.UNAVAILABLE
         assert "minimap2" in card.reason
@@ -348,3 +372,52 @@ class TestAlignCard:
         assert card.description == (
             "Align these reads against a reference, sort and index."
         )
+
+    def _rna_euk_obj(self):
+        return _fake_obj(
+            facts={"qc_read_chemistry": "short"},
+            metadata={"assay": "RNA-seq", "organism": "Homo sapiens"},
+        )
+
+    def test_a_missing_index_builder_gates_the_card(self):
+        """hisat2 indexes through a separate binary, configured by its own
+        setting. Gating only on the aligner would render an available card
+        whose launch succeeds and then fails inside the async index job."""
+        with installed_tools(hisat2_build=False):
+            card = build_align_card(self._rna_euk_obj(), [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+
+    def test_the_gate_names_the_binary_that_is_actually_missing(self):
+        """"hisat2 is not installed" would send the user to check the wrong
+        thing when hisat2-build is the one that is absent."""
+        with installed_tools(hisat2_build=False):
+            card = build_align_card(self._rna_euk_obj(), [_ref("aaa", "ref.fna")])
+        assert "hisat2-build" in card.reason
+
+    def test_an_aligner_with_no_separate_builder_is_not_gated_on_one(self):
+        """bwa-mem2 and minimap2 index through the aligner itself, so a
+        builder gate must not invent a second binary for them."""
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        with installed_tools(hisat2_build=False, bowtie2_build=False):
+            card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["params"]["aligner"] == "bwa-mem2"
+
+    def test_hisat2_is_available_when_both_its_binaries_are(self):
+        with installed_tools():
+            card = build_align_card(self._rna_euk_obj(), [_ref("aaa", "ref.fna")])
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["params"]["aligner"] == "hisat2"
+
+    def test_an_aligner_outside_the_registry_fails_loudly(self):
+        """A card must never quietly report "installed" for a binary nobody
+        probed. A silent `.get()` here would render a launchable card the
+        align endpoint then refuses, so the miss has to raise."""
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        with patch(
+            "app.services.suggestion_service.pipeline_service.default_align_params",
+            return_value={"aligner": "snap", "threads": 4},
+        ):
+            with pytest.raises(ValueError):
+                build_align_card(obj, [_ref("aaa", "ref.fna")])
