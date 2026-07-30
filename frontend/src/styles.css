@@ -2366,3 +2366,39 @@ a.btn {
   color: var(--text-faint);
   margin: 0;
 }
+
+/* The Manage section: a label/control grid rather than a stack of bordered
+   sections, so five small unrelated controls stop reading as five weighty
+   steps. align-items:start keeps a short label level with the top of a tall
+   control instead of centring against it. */
+.manage-grid {
+  display: grid;
+  grid-template-columns: minmax(80px, 110px) 1fr;
+  gap: 16px 14px;
+  align-items: start;
+}
+
+/* Wide enough for two label/control pairs side by side. Below this the grid
+   falls back to one pair per row rather than squeezing controls. */
+@media (min-width: 900px) {
+  .manage-grid {
+    grid-template-columns: minmax(80px, 110px) 1fr minmax(80px, 110px) 1fr;
+  }
+}
+
+.manage-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  /* Sits the label level with the text inside its control rather than the
+     control's border. */
+  padding-top: 7px;
+}
+
+.manage-note {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-top: 6px;
+}

@@ -8,6 +8,13 @@ interface Props {
   obj: DataObject;
   /** True when the metadata editor holds unsaved edits. */
   metadataDirty?: boolean;
+  /**
+   * Omit the `.section` wrapper and its title, returning only the control.
+   *
+   * For callers that supply their own heading -- the Manage grid labels each
+   * row itself, so the built-in title would render twice.
+   */
+  bare?: boolean;
 }
 
 /** Formats where reference-vs-reads is genuinely ambiguous. */
@@ -25,7 +32,11 @@ const CONVERTIBLE_FORMATS = ["fasta", "fastq"];
  * That is correct but not something to do silently, so a dirty editor gets a
  * confirm step.
  */
-export function RoleConverter({ obj, metadataDirty = false }: Props) {
+export function RoleConverter({
+  obj,
+  metadataDirty = false,
+  bare = false,
+}: Props) {
   const qc = useQueryClient();
   const isReference = obj.role === "reference";
   const [confirming, setConfirming] = useState(false);
@@ -72,9 +83,8 @@ export function RoleConverter({ obj, metadataDirty = false }: Props) {
     doConvert();
   };
 
-  return (
-    <div className="section">
-      <div className="section-title">Role</div>
+  const body = (
+    <>
       {confirming && (
         <div className="warn-box" style={{ marginBottom: 8 }}>
           You have unsaved metadata edits. Converting will discard them.
@@ -110,6 +120,15 @@ export function RoleConverter({ obj, metadataDirty = false }: Props) {
           ? "Moves this back to the Reads section and restores the sequencing metadata fields. Nothing is lost either way."
           : "Marks this as a reference genome. It will move to the References section and show assembly metadata."}
       </div>
+    </>
+  );
+
+  if (bare) return body;
+
+  return (
+    <div className="section">
+      <div className="section-title">Role</div>
+      {body}
     </div>
   );
 }

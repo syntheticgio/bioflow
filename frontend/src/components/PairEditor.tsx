@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
@@ -6,6 +6,13 @@ import type { DataObject } from "../api/types";
 
 interface Props {
   obj: DataObject;
+  /**
+   * Omit the `.section` wrapper and its title, returning only the control.
+   *
+   * For callers that supply their own heading -- the Manage grid labels each
+   * row itself, so the built-in title would render twice.
+   */
+  bare?: boolean;
 }
 
 /** Whether a file can take a paired-end mate.
@@ -14,8 +21,19 @@ interface Props {
  * format check -- the point of manual pairing is files whose conventional
  * signals are missing, and trimmed reads pair like any others.
  */
-function isReads(o: DataObject): boolean {
+export function isReads(o: DataObject): boolean {
   return o.role !== "reference" && o.sidecar_of === null;
+}
+
+/**
+ * Whether this component renders anything at all.
+ *
+ * Exported so a caller laying out a static label/control grid can drop the
+ * whole row rather than leave a "Paired end" label with nothing beside it.
+ * The component applies the same test internally, so the two cannot diverge.
+ */
+export function canPair(o: DataObject): boolean {
+  return isReads(o) && o.status === "ready";
 }
 
 /**
@@ -29,7 +47,7 @@ function isReads(o: DataObject): boolean {
  * filtered to the same predicate the server enforces. The server validates
  * again -- this filter is for usability, not for correctness.
  */
-export function PairEditor({ obj }: Props) {
+export function PairEditor({ obj, bare = false }: Props) {
   const qc = useQueryClient();
   const [mateId, setMateId] = useState("");
   const [readNumber, setReadNumber] = useState(1);
@@ -68,14 +86,25 @@ export function PairEditor({ obj }: Props) {
 
   // A reference or a sidecar has no mate to have; offering the control would
   // only invite a rejection.
-  if (!isReads(obj) || obj.status !== "ready") return null;
+  if (!canPair(obj)) return null;
+
+  // Both branches below end in a section, so the wrapper is applied in one
+  // place rather than repeated as a ternary around each return.
+  const wrap = (body: ReactNode) =>
+    bare ? (
+      <>{body}</>
+    ) : (
+      <div className="section">
+        <div className="section-title">Paired end</div>
+        {body}
+      </div>
+    );
 
   const mate = siblings.find((o) => o.id === obj.mate_object_id);
 
   if (obj.mate_object_id) {
-    return (
-      <div className="section">
-        <div className="section-title">Paired end</div>
+    return wrap(
+      <>
         <div style={{ fontSize: 12, marginBottom: 6 }}>
           {obj.read_number ? `R${obj.read_number}` : "Paired"}
           {" · mate: "}
@@ -94,7 +123,7 @@ export function PairEditor({ obj }: Props) {
         <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}>
           Clears the pairing on both files. Neither file is deleted or changed.
         </div>
-      </div>
+      </>,
     );
   }
 
@@ -102,10 +131,8 @@ export function PairEditor({ obj }: Props) {
     (o) => o.id !== obj.id && o.mate_object_id === null && isReads(o),
   );
 
-  return (
-    <div className="section">
-      <div className="section-title">Paired end</div>
-
+  return wrap(
+    <>
       {candidates.length === 0 ? (
         <div style={{ color: "var(--text-faint)", fontSize: 11 }}>
           No unpaired reads files in this project to pair with.
@@ -150,6 +177,6 @@ export function PairEditor({ obj }: Props) {
           </div>
         </>
       )}
-    </div>
+    </>,
   );
 }
