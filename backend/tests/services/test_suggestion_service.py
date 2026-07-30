@@ -11,9 +11,11 @@ import pytest
 from app.models import FormatKind
 from app.services.suggestion_service import (
     CardStatus,
+    ReferenceChoice,
     SuggestionCard,
     build_preprocess_card,
     is_eukaryotic,
+    resolve_reference,
 )
 
 
@@ -142,3 +144,59 @@ class TestPreprocessCard:
             )
         assert card.status is CardStatus.AVAILABLE
         assert card.description == "Adapter trim and length filter."
+
+
+def _ref(object_id: str, name: str):
+    from types import SimpleNamespace
+    return SimpleNamespace(id=object_id, name=name)
+
+
+class TestReferenceResolution:
+    def test_exactly_one_uploaded_reference_is_used(self):
+        refs = [_ref("aaa", "GCF_000005845.2.fna")]
+        choice = resolve_reference(refs, organism="Escherichia coli")
+        assert choice.reference_id == "aaa"
+        assert choice.usable is True
+
+    def test_one_uploaded_reference_beats_a_known_organism(self):
+        """Load-bearing ordering. Reversing it makes the card refuse a
+        perfectly good local reference in favour of an unfetchable one --
+        worse behaviour on a better-configured project."""
+        refs = [_ref("aaa", "local.fna")]
+        choice = resolve_reference(refs, organism="Saccharomyces cerevisiae")
+        assert choice.usable is True
+        assert choice.reference_id == "aaa"
+
+    def test_no_references_but_known_organism_names_the_species(self):
+        choice = resolve_reference([], organism="Saccharomyces cerevisiae")
+        assert choice.usable is False
+        assert "Saccharomyces cerevisiae" in choice.reason
+        assert "not wired up" in choice.reason
+
+    def test_many_references_with_known_organism_names_the_species(self):
+        refs = [_ref("bbb", "b.fna"), _ref("aaa", "a.fna")]
+        choice = resolve_reference(refs, organism="Escherichia coli")
+        assert choice.usable is False
+        assert "Escherichia coli" in choice.reason
+
+    def test_many_references_without_organism_picks_deterministically(self):
+        """Sorted by id, first. A random pick would name a different
+        reference on each render, which reads as a bug."""
+        refs = [_ref("ccc", "c.fna"), _ref("aaa", "a.fna"), _ref("bbb", "b.fna")]
+        first = resolve_reference(refs, organism=None)
+        second = resolve_reference(list(reversed(refs)), organism=None)
+        assert first.reference_id == "aaa"
+        assert second.reference_id == "aaa"
+        assert first.usable is True
+
+    def test_nothing_at_all_asks_for_an_upload(self):
+        choice = resolve_reference([], organism=None)
+        assert choice.usable is False
+        assert "Upload a reference" in choice.reason
+
+    def test_blank_organism_is_treated_as_absent(self):
+        """Metadata carries empty strings and whitespace, not just None."""
+        refs = [_ref("ccc", "c.fna"), _ref("aaa", "a.fna")]
+        choice = resolve_reference(refs, organism="   ")
+        assert choice.usable is True
+        assert choice.reference_id == "aaa"

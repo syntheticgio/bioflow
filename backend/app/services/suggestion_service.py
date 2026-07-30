@@ -153,3 +153,54 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
             },
         },
     )
+
+
+@dataclass(frozen=True)
+class ReferenceChoice:
+    """Which reference the align card would use, or why it cannot."""
+
+    reference_id: str | None = None
+    reference_name: str | None = None
+    usable: bool = False
+    reason: str | None = None
+
+
+def resolve_reference(references: list, organism: str | None) -> ReferenceChoice:
+    """Pick the reference to align against.
+
+    Order is load-bearing. A single uploaded reference wins outright, before
+    metadata is consulted: a project with one reference and a known organism
+    should align against the file the user actually has, not refuse in favour
+    of an accession nothing can fetch yet.
+
+    Note what this deliberately does *not* do: turn an organism into an
+    assembly accession. `assembly_accession` is a field on reference files,
+    not on the reads this card renders against, and going from a species name
+    to an accession means an NCBI call -- which would put a network round trip
+    behind every Actions tab render, to fill in a card that is disabled
+    regardless. The card names the species; naming the assembly is work for
+    whenever fetching is built, behind the launch rather than the render.
+    """
+    if len(references) == 1:
+        only = references[0]
+        return ReferenceChoice(
+            reference_id=str(only.id), reference_name=only.name, usable=True
+        )
+
+    if organism and organism.strip():
+        return ReferenceChoice(
+            usable=False,
+            reason=(
+                f"Fetching a reference genome for {organism.strip()} is not "
+                "wired up yet."
+            ),
+        )
+
+    if references:
+        # Deterministic: the same card on every render and reload.
+        chosen = sorted(references, key=lambda r: str(r.id))[0]
+        return ReferenceChoice(
+            reference_id=str(chosen.id), reference_name=chosen.name, usable=True
+        )
+
+    return ReferenceChoice(usable=False, reason="Upload a reference to align.")
