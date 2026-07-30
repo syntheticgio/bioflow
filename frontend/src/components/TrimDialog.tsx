@@ -112,8 +112,12 @@ export function TrimDialog({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
+        {/* "Preprocess", not "Trim": this dialog also filters by length and
+            quality, which the narrower name undersells. The route, job kind
+            and trim_* facts keep their names -- renaming those is a data
+            migration for a cosmetic gain. */}
         <h2>
-          Trim reads
+          Preprocess reads
           {onBack && (
             <button type="button" className="dialog-tool-back" onClick={onBack}>
               change tool
@@ -351,7 +355,11 @@ export function TrimDialog({
             onClick={() => launch.mutate()}
             disabled={!ready || launch.isPending}
           >
-            {launch.isPending ? "Starting…" : usePair ? "Trim pair" : "Trim"}
+            {launch.isPending
+              ? "Starting…"
+              : usePair
+                ? "Preprocess pair"
+                : "Preprocess"}
           </button>
         </div>
       </div>
