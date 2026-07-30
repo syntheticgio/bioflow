@@ -429,6 +429,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "Ships an md5 manifest, so a truncated transfer is detectable",
             "Reports package contents and size before downloading anything",
         ),
+        one_liner="Downloads a published genome assembly from NCBI",
     ),
     "bwa-mem2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
