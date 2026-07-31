@@ -9,7 +9,8 @@ from datetime import datetime
 from beanie import PydanticObjectId
 from pydantic import BaseModel, Field
 
-from app.models import Blob, DataObject, ObjectRole, Project
+from app.models import Blob, DataObject, ObjectRole, Profile, Project
+from app.models.profile import ProfileDisplay
 
 
 # --- Projects ---
@@ -197,3 +198,55 @@ class DeletionPreviewOut(BaseModel):
     upload_session_count: int
     active_jobs: list[ActiveJobOut]
     blocked: bool
+
+
+# --- Profiles ---
+class ProfileCreate(BaseModel):
+    username: str
+    password: str | None = None
+    email: str | None = None
+    # A claim the caller makes, not a fact -- `create_profile` checks it,
+    # because the setup screen is reachable again from a stale tab and a second
+    # adopter would hand an existing library to whoever asked last.
+    is_first_boot: bool = False
+
+
+class ProfileSelect(BaseModel):
+    password: str | None = None
+
+
+class ProfileOut(BaseModel):
+    """A profile as the picker sees it.
+
+    `has_password` rather than the hash: the picker needs to know whether to
+    show the password prompt, and nothing on the client has any use for the
+    stored value. Hand-enumerated like every other response model here, which
+    is what keeps `password_hash` from arriving the day someone reaches for a
+    generic serializer -- returning the document directly would publish it.
+    """
+
+    id: str
+    username: str
+    email: str | None
+    display: ProfileDisplay
+    details: dict
+    has_password: bool
+    adopted_legacy_owner: bool
+    last_used_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, p: Profile) -> "ProfileOut":
+        return cls(
+            id=str(p.id),
+            username=p.username,
+            email=p.email,
+            display=p.display,
+            details=p.details,
+            has_password=p.password_hash is not None,
+            adopted_legacy_owner=p.adopted_legacy_owner,
+            last_used_at=p.last_used_at,
+            created_at=p.created_at,
+            updated_at=p.updated_at,
+        )

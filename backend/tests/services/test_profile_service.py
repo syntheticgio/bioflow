@@ -243,6 +243,7 @@ class TestDeleteProfile:
         with pytest.raises(ConflictError) as exc_info:
             await profile_service.delete_profile(doomed.id)
 
+        assert exc_info.value.code == "profile_not_empty"
         assert exc_info.value.details["projects"] == 1
         assert "doomed" in exc_info.value.message
         assert await Profile.get(doomed.id) is not None
@@ -267,7 +268,7 @@ class TestDeleteProfile:
         adopted-owner guard refuses that too, so an adopted `only` would still
         raise ConflictError with this guard gone. Hence a spare profile
         created and deleted to leave a *non-adopted* last profile behind.
-        And the assertion names this guard's message rather than accepting any
+        And the assertion names this guard's `code` rather than accepting any
         ConflictError, since three separate branches raise that type.
         """
         only = await profile_service.create_profile(username="only")
@@ -280,7 +281,7 @@ class TestDeleteProfile:
         with pytest.raises(ConflictError) as exc_info:
             await profile_service.delete_profile(only.id)
 
-        assert "the only profile" in exc_info.value.message
+        assert exc_info.value.code == "last_profile"
         assert await Profile.get(only.id) is not None
 
     async def test_refuses_the_adopted_profile_even_when_it_owns_nothing(self):
@@ -312,7 +313,7 @@ class TestDeleteProfile:
         with pytest.raises(ConflictError) as exc_info:
             await profile_service.delete_profile(adopter.id)
 
-        assert "adopter" in exc_info.value.message
+        assert exc_info.value.code == "adopted_legacy_owner"
         assert await Profile.get(adopter.id) is not None
         assert await Profile.find_one({"adopted_legacy_owner": True}) is not None
 

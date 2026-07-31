@@ -6,6 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query, Request, status
 from pydantic import BaseModel
 
+from app.api.deps import OwnerDep
 from app.api.v1.schemas import (
     DeletionPreviewOut,
     ObjectOut,
@@ -23,15 +24,14 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(
+    owner: OwnerDep,
     parent_id: str | None = None,
     include_archived: bool = False,
     limit: int = Query(200, le=1000),
 ) -> list[ProjectOut]:
     parent = PydanticObjectId(parent_id) if parent_id else None
     projects = await project_service.list_projects(
-        # TODO(profiles): thread owner from the route once its API layer resolves
-        # get_current_owner
-        owner="local",
+        owner=owner,
         parent_id=parent,
         include_archived=include_archived,
         limit=limit,
@@ -40,12 +40,10 @@ async def list_projects(
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-async def create_project(body: ProjectCreate) -> ProjectOut:
+async def create_project(body: ProjectCreate, owner: OwnerDep) -> ProjectOut:
     project = await project_service.create_project(
         name=body.name,
-        # TODO(profiles): thread owner from the route once its API layer resolves
-        # get_current_owner
-        owner="local",
+        owner=owner,
         description=body.description,
         parent_id=PydanticObjectId(body.parent_id) if body.parent_id else None,
         metadata=body.metadata,

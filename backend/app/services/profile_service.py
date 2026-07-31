@@ -155,6 +155,20 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
     the only thing that answers for `owner: "local"`, and `create_profile`
     will not let another profile adopt once any profile exists. See the guard
     below.
+
+    All three refusals are conflicts, but they carry *different* codes --
+    `last_profile`, `profile_not_empty`, `adopted_legacy_owner` -- because the
+    picker recovers from them differently. Only `profile_not_empty` is
+    actionable ("delete its projects first", and the counts to say how many);
+    the other two are permanent and the UI can only explain them. A shared
+    `conflict` code would make the three indistinguishable to the frontend,
+    which reads `body.code` and cannot parse prose.
+
+    The codes also give tests something stable to assert on. Asserting the
+    exception type alone is not enough here and has already failed once: a
+    test for the last-profile refusal kept passing after its guard was
+    deleted, because the adopted-owner branch below raised the same
+    `ConflictError` and the test could not tell which one it had caught.
     """
     try:
         profile = await Profile.get(profile_id)
@@ -171,6 +185,7 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
         raise ConflictError(
             f"Cannot delete {profile.username!r}: it is the only profile",
             details={"username": profile.username},
+            code="last_profile",
         )
 
     # owner_id(), never str(profile.id) -- the adopted profile's documents are
@@ -183,6 +198,7 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
             f"Cannot delete {profile.username!r}: it still owns "
             f"{counts['projects']} project(s) and {counts['objects']} object(s)",
             details={**counts, "username": profile.username},
+            code="profile_not_empty",
         )
 
     # Deliberately *after* the count, not before. Both refuse the adopted
@@ -200,6 +216,7 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
             "runs when no profile exists. Deleting it would strand that data "
             "with no way to reach it again.",
             details={"username": profile.username, "adopted_legacy_owner": True},
+            code="adopted_legacy_owner",
         )
 
     await profile.delete()

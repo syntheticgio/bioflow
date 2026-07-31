@@ -8,6 +8,7 @@ from app.api.v1 import (
     ncbi,
     objects,
     pipelines,
+    profiles,
     projects,
     runs,
     schedules,
@@ -21,6 +22,7 @@ api_router = APIRouter(prefix="/api/v1")
 # search first: its /objects/bulk-* routes must not be shadowed by the
 # /objects/{object_id} path parameter in the objects router.
 api_router.include_router(search.router)
+api_router.include_router(profiles.router)
 api_router.include_router(projects.router)
 api_router.include_router(objects.router)
 api_router.include_router(uploads.router)
