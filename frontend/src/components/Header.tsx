@@ -13,9 +13,13 @@ const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
 ];
 
-/** Help menu contents. One entry today; the shape is the point. */
+/** Help menu contents. Reference pages, in the order a user needs them:
+ *  what the numbers mean, then what produced them, then where the inputs
+ *  came from. */
 const HELP_ITEMS: { to: string; label: string }[] = [
   { to: "/help/calculations", label: "BioFlow Calculations" },
+  { to: "/help/software", label: "Software" },
+  { to: "/help/sources", label: "Data Sources" },
 ];
 
 export function Header() {
