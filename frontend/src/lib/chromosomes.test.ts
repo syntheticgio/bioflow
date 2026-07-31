@@ -303,4 +303,11 @@ describe("markerLabel", () => {
   it("falls back when sanitising empties both alleles", () => {
     expect(markerLabel("|", "*")).toBe("variant");
   });
+
+  // %ALT emits a comma-separated list at a multi-allelic site. Collapsing the
+  // comma would turn a biallelic SNV into a two-base insertion -- a different
+  // variant, not a shorter label.
+  it("keeps alternate alleles distinct", () => {
+    expect(markerLabel("G", "A,T")).toBe("G-to-A/T");
+  });
 });

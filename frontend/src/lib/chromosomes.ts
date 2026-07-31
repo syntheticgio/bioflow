@@ -103,10 +103,23 @@ const LABEL_ALLELE_MAX = 12;
  * `mk` -- so an allele carrying one would corrupt the spec rather than just
  * look wrong. VCF also permits symbolic alleles such as `<DEL>` and `*`.
  * Rather than escape a moving target, reduce the label to plain ASCII.
+ *
+ * Commas are the one character kept meaningful rather than stripped: `%ALT`
+ * from `bcftools query` (backend/app/pipelines/vcf_stats_runner.py) emits a
+ * comma-separated list at a multi-allelic site, e.g. `A,T`. Collapsing that
+ * comma would turn a biallelic choice between A and T into what reads as a
+ * two-base insertion -- naming a different variant, not just a shorter
+ * label. Commas are preserved as `/`, which is not the `mk` field separator
+ * and survives `encodeURIComponent` at the call site.
  */
 export function markerLabel(ref: string, alt: string): string {
   const clean = (allele: string) =>
-    allele.replace(/[^A-Za-z0-9]/g, "").slice(0, LABEL_ALLELE_MAX);
+    allele
+      .split(",")
+      .map((a) => a.replace(/[^A-Za-z0-9]/g, ""))
+      .filter(Boolean)
+      .join("/")
+      .slice(0, LABEL_ALLELE_MAX);
   const r = clean(ref);
   const a = clean(alt);
   if (!r && !a) return "variant";
