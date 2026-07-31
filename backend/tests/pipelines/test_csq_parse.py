@@ -1,9 +1,15 @@
 """BCSQ parsing.
 
-Every fixture here is a real string from `bcftools csq -p a` run against
+Most fixtures here are real strings from `bcftools csq -p a` run against
 DRR1066343.bcftools.vcf.gz with the GCF_000146045.2 GFF3. The format is not
 one fixed shape -- records carry 7, 5, 4 or 1 fields -- and the parser exists
 because a `split("|")[5]` would be wrong on three of those four.
+
+The severity-ranking and malformed-input tests (`GENE1`/`rna-1` style, the
+"??>??" case, and the unknown-consequence-type cases) are hand-built instead:
+the measured run had no frameshift-beside-synonymous record, no malformed aa
+field, and no consequence type outside its own vocabulary, so those shapes
+are constructed to exercise behaviour the real data never happened to hit.
 """
 
 from app.pipelines import csq_parse
@@ -93,6 +99,25 @@ class TestPointersAndLists:
         )
         assert c.consequence == "frameshift"
         assert c.gene == "GENE2"
+
+    # An unrecognised consequence type must not be ranked below everything
+    # known -- that is how a new bcftools vocabulary entry would silently lose
+    # to a synonymous call on an overlapping transcript.
+    def test_an_unknown_consequence_outranks_the_benign_tail(self):
+        c = csq_parse.parse_bcsq(
+            "synonymous|GENE1|rna-1|protein_coding|+|10A|100A>G,"
+            "brand_new_type|GENE2|rna-2|protein_coding|+|20B|100A>G"
+        )
+        assert c.consequence == "brand_new_type"
+        assert c.gene == "GENE2"
+
+    # But a genuinely severe known type still beats an unknown one.
+    def test_a_known_severe_type_still_beats_an_unknown(self):
+        c = csq_parse.parse_bcsq(
+            "brand_new_type|GENE1|rna-1|protein_coding|+|10A|100A>G,"
+            "frameshift|GENE2|rna-2|protein_coding|+|20B|100A>G"
+        )
+        assert c.consequence == "frameshift"
 
 
 class TestAbsentAndMalformed:

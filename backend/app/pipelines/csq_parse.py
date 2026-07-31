@@ -29,10 +29,13 @@ _SEVERITY = (
     "splice_donor",
     "inframe_deletion",
     "inframe_insertion",
+    "inframe_altering",
     "missense",
     "splice_region",
+    "coding_sequence",
     "synonymous",
     "stop_retained",
+    "start_retained",
     "5_prime_utr",
     "3_prime_utr",
     "non_coding",
@@ -40,6 +43,15 @@ _SEVERITY = (
     "intergenic",
 )
 _RANK = {name: i for i, name in enumerate(_SEVERITY)}
+
+# Where a consequence type we do not know about sorts. Deliberately above the
+# benign tail rather than below everything: an unrecognised type is more
+# likely to be a new bcftools vocabulary entry than something harmless, and a
+# consequence nobody has seen before winning the column is visible and
+# investigable. Ranking it last -- the obvious default -- meant it silently
+# lost to `synonymous`, which is the failure this whole ranking exists to
+# prevent.
+_UNKNOWN_RANK = _RANK["synonymous"] - 0.5
 
 # Fewer fields than this is not a consequence -- the shortest real form
 # (intron) carries four.
@@ -122,7 +134,7 @@ def parse_bcsq(value: str | None) -> Consequence | None:
     if not parsed:
         return None
 
-    best = min(parsed, key=lambda c: _RANK.get(c.consequence, len(_SEVERITY)))
+    best = min(parsed, key=lambda c: _RANK.get(c.consequence, _UNKNOWN_RANK))
     if len(parsed) == 1:
         return best
     return Consequence(
