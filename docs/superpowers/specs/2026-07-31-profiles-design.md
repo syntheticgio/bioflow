@@ -220,6 +220,18 @@ decrements refcounts correctly, instead of adding a second destructive path that
 would have to rediscover the same rules. A cascading profile delete is a large
 irreversible action behind one button, and refusing is both safer and less code.
 
+Two consequences worth stating, since "refuse unless empty" interacts with the
+adopted `"local"` profile:
+
+- The profile holding the pre-existing library is effectively undeletable until
+  that library is deleted. That is the correct outcome — it is the user's whole
+  data set — but the refusal message should name the profile rather than reading
+  as a generic error.
+- Deleting the **last** profile is refused outright, empty or not. A BioFlow with
+  no profiles would drop into the first-boot setup screen, and a first-boot
+  screen that appears on an installation with existing blobs is a confusing
+  state to design around.
+
 ## Testing
 
 Backend tests run with `pytest` inside the `api` container, per `CLAUDE.md`:
