@@ -505,6 +505,7 @@ async def _apply_sra_download(result: dict) -> None:
     for obj in created.values():
         qc_job = await queue.enqueue(
             "run_qc",
+            owner=obj.owner,
             payload={
                 "object_id": str(obj.id),
                 "project_id": str(project_id),
@@ -970,6 +971,7 @@ async def _apply_align_reads(result: dict) -> None:
     if bam.blob_sha256:
         index_job = await queue.enqueue(
             "index_bam",
+            owner=bam.owner,
             payload={
                 "bam_object_id": str(bam.id),
                 "bam_sha256": bam.blob_sha256,

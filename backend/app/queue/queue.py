@@ -53,6 +53,7 @@ class ClaimedJob:
 async def enqueue(
     job_type: str,
     *,
+    owner: str,
     payload: dict | None = None,
     job_class: JobClass = JobClass.USER_BACKGROUND,
     dedup_key: str | None = None,
@@ -70,6 +71,25 @@ async def enqueue(
     non-terminal states means a concurrent duplicate raises DuplicateKeyError
     rather than producing two jobs.
 
+    `owner` is folded into the stored dedup key rather than being left to each
+    caller to remember. Deduplication reports itself as a `None` return, not an
+    error, so a key that collides across profiles loses a job in total silence:
+    two of the keys this codebase builds -- `build_index:{digest}:{aligner}`
+    and `index_bam:{sha256}` -- are derived from blob content alone, and blobs
+    are global and shared by design, so the second profile to align against a
+    shared reference genome would have got `None` back and no index. Folding it
+    in here means a call site someone adds later, that builds a purely
+    content-scoped key and never reads this warning, is safe by construction --
+    which is the whole reason this lives in `enqueue` rather than in the two
+    call sites that happen to need it today.
+
+    The honest cost: identical work is no longer shared between profiles. A
+    reference genome that two profiles both align against is now indexed twice,
+    once per profile, where before it was indexed once. That is the correct
+    trade -- a profile's job must not vanish because another profile happened
+    to ask for the same thing first -- but it does mean a shared `build_index`
+    is no longer actually shared.
+
     `depends_on` holds the job back until every listed job has *succeeded*.
     Such a job is never pushed to Redis; `_release_dependents` puts it there
     when its last dependency finishes. If any dependency fails, the dependent
@@ -82,12 +102,18 @@ async def enqueue(
     available_at = now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else None
     depends_on = list(depends_on or [])
 
+    # Left None when the caller passed None: the unique index's $type clause
+    # exempts missing keys, and turning "no deduplication" into the bare owner
+    # string would collide every opted-out job in a profile with every other.
+    stored_dedup_key = f"{owner}:{dedup_key}" if dedup_key is not None else None
+
     job = Job(
         type=job_type,
+        owner=owner,
         job_class=job_class,
         state=JobState.PENDING,
         payload=payload or {},
-        dedup_key=dedup_key,
+        dedup_key=stored_dedup_key,
         project_id=project_id,
         object_id=object_id,
         resources=resources,
@@ -101,7 +127,7 @@ async def enqueue(
     try:
         await job.insert()
     except DuplicateKeyError:
-        log.debug("job_deduplicated", type=job_type, dedup_key=dedup_key)
+        log.debug("job_deduplicated", type=job_type, dedup_key=stored_dedup_key)
         return None
 
     if depends_on:

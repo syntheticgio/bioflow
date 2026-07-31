@@ -144,6 +144,7 @@ async def launch_download(
 
     job = await queue.enqueue(
         "download_assembly",
+        owner=project.owner,
         payload=payload,
         job_class=JobClass.USER_INTERACTIVE,
         resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),

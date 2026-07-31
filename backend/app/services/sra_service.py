@@ -134,6 +134,7 @@ async def launch_download(
 
         job = await queue.enqueue(
             "download_sra_run",
+            owner=project.owner,
             payload=payload,
             # USER_INTERACTIVE: someone clicked a button and is watching for
             # the file to appear. The work is IO-bound waiting on NCBI rather

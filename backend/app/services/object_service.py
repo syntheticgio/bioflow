@@ -321,12 +321,9 @@ async def enqueue_ingest(
     heavily-scaffolded BAM is slow enough to hurt a response, and a malformed
     file must not take the upload down with it.
 
-    `owner` is accepted but not yet forwarded to `queue.enqueue`, which has no
-    owner parameter until Task 8 gives it one. Threading it from the callers
-    now means that task finds a real value waiting here rather than a
-    placeholder it has to chase back up the stack -- and until then Job rows
-    keep inheriting the "local" default, which is why delete_project_tree's
-    Job filter is still inert.
+    `owner` is forwarded to `queue.enqueue`, so the queued job is attributed to
+    the profile whose file it is -- not to whichever profile happened to boot
+    first, which is what the inherited "local" default gave before.
     """
     from app.queue import queue
 
@@ -348,6 +345,7 @@ async def enqueue_ingest(
 
     job = await queue.enqueue(
         "ingest_headers",
+        owner=owner,
         payload=payload,
         job_class=job_class,
         resources=JobResources(cpu=1, mem_mb=256, io=IoClass.LIGHT),
@@ -462,6 +460,7 @@ async def register_in_place(
     # Hashing a 100 GB file cannot happen in a request, so it goes to the queue.
     job = await queue.enqueue(
         "register_hash",
+        owner=owner,
         payload={
             "object_id": str(obj.id),
             "path": str(resolved),

@@ -268,6 +268,7 @@ async def launch_trim(
 
     job = await queue.enqueue(
         "trim_reads",
+        owner=obj.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(
@@ -424,6 +425,7 @@ async def launch_qc(*, object_id: PydanticObjectId):
     # path uses, so a manual click and an automatic run collapse into one job.
     job = await queue.enqueue(
         "run_qc",
+        owner=obj.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         # Matches the handler's declaration -- see run_qc for why 2048.
@@ -528,6 +530,7 @@ async def launch_summary(
 
     job = await queue.enqueue(
         "summarize_object",
+        owner=obj.owner,
         payload=payload,
         job_class=job_class,
         resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
@@ -903,11 +906,18 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner):
         payload["reference_path"] = path
 
     # Keyed on the blob rather than the object: the same genome registered in
-    # two projects is one index, with no cross-project bookkeeping.
+    # two of one profile's projects is one index, with no cross-project
+    # bookkeeping. Deliberately left content-only -- `queue.enqueue` prefixes
+    # the owner onto whatever key it is handed, so the profile scoping is
+    # applied in exactly one place instead of being re-derived by every caller
+    # that happens to remember. Sharing therefore stops at the profile
+    # boundary: two profiles aligning against the same genome build one index
+    # each, which is the price of neither of them silently getting none.
     dedup_key = f"build_index:{digest or path}:{aligner.value}"
 
     return await queue.enqueue(
         "build_index",
+        owner=reference.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
@@ -1136,6 +1146,7 @@ async def launch_alignment(
 
     job = await queue.enqueue(
         "align_reads",
+        owner=obj.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         # The user's thread count, exactly as trim_reads declares it.
@@ -1304,6 +1315,7 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
             )
         index_job = await queue.enqueue(
             "index_bam",
+            owner=bam.owner,
             payload={
                 "bam_object_id": str(bam.id),
                 "bam_sha256": bam.blob_sha256,
@@ -1347,6 +1359,7 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
     # result, so the object id alone is the dedup key.
     job = await queue.enqueue(
         "run_bam_stats",
+        owner=bam.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.HEAVY),
@@ -1421,6 +1434,7 @@ async def launch_vcf_stats(*, object_id: PydanticObjectId):
 
     return await queue.enqueue(
         "run_vcf_stats",
+        owner=vcf.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
@@ -1580,6 +1594,7 @@ async def launch_variant_calling(
 
     job = await queue.enqueue(
         "call_variants",
+        owner=bam.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=merged.threads, mem_mb=8192, io=IoClass.HEAVY),
@@ -1851,6 +1866,7 @@ async def launch_annotation(*, object_id: PydanticObjectId):
 
     return await queue.enqueue(
         "annotate_variants",
+        owner=vcf.owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),

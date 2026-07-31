@@ -304,6 +304,10 @@ async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession,
 
     job = await queue.enqueue(
         "assemble_upload",
+        # The object's own owner, same reasoning as the enqueue_ingest call
+        # above: upload_service does not set one yet, so this is "local" in
+        # practice today and becomes correct on its own when that writer lands.
+        owner=obj.owner,
         payload={"session_id": str(session_id), "object_id": str(obj.id)},
         # The user just clicked "upload" and is watching a progress bar.
         job_class=JobClass.USER_INTERACTIVE,

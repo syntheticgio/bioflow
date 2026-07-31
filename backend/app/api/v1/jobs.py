@@ -146,6 +146,10 @@ async def create_job(body: JobCreate) -> JobOut:
 
     job = await queue.enqueue(
         body.type,
+        # TODO(profiles): route wiring is Task 10 -- once this endpoint takes
+        # the OwnerDep, pass the caller's owner instead of the literal. It is a
+        # dev/smoke-test endpoint, so nothing user-facing depends on the gap.
+        owner="local",
         payload=body.payload,
         job_class=body.job_class or spec.default_class,
         resources=spec.default_resources,

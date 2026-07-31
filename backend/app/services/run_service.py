@@ -252,24 +252,21 @@ async def status_for_many(
     # The Job lookup stays unscoped, and that is the considered choice rather
     # than an oversight.
     #
-    # Today it would be actively wrong: queue/queue.py builds every Job without
-    # an owner, so they all carry the "local" default, and adding
-    # `"owner": owner` here would match nothing for a real profile. That is not
-    # a missing row -- `derive_status` maps an empty member list to SUCCEEDED,
-    # so the activity view would claim a running alignment had already
-    # finished. An affirmative lie is a worse failure than the gap it closes.
-    #
-    # It stays right once jobs do carry an owner, for a different reason: these
-    # job ids come from RunJob rows whose run this function has already
-    # confirmed belongs to `owner`. The run is the authorization boundary and
-    # the job id is downstream of it, so a job filter is redundant -- and a
-    # redundant filter here buys nothing while keeping the empty-member failure
-    # above permanently reachable.
+    # Jobs do carry an owner now -- queue/queue.py's `enqueue` stamps one as of
+    # Task 8 -- so the filter would no longer match nothing. It is still the
+    # wrong thing to add: these job ids come from RunJob rows whose run this
+    # function has already confirmed belongs to `owner`. The run is the
+    # authorization boundary and the job id is downstream of it, so a job
+    # filter is redundant, and a redundant filter buys nothing while keeping a
+    # bad failure mode reachable. `derive_status` maps an empty member list to
+    # SUCCEEDED, so any filter that drops a member turns a running alignment
+    # into a finished one in the activity view. An affirmative lie is worse
+    # than the gap it would close.
     #
     # Do not reach for the "a shared build_index serves several profiles"
-    # argument: that stops being true when owner is folded into the dedup key,
-    # at which point each profile gets its own copy of otherwise-identical
-    # work. The reason above survives that change; that one does not.
+    # argument: that stopped being true when Task 8 folded owner into the dedup
+    # key, and each profile now gets its own copy of otherwise-identical work.
+    # The reason above survived that change; that one did not.
     jobs = await Job.find({"_id": {"$in": [link.job_id for link in links]}}).to_list()
     states = {job.id: job.state for job in jobs}
 
