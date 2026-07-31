@@ -45,6 +45,7 @@ import type {
   VariantQuery,
   VariantRequest,
   VariantsPage,
+  VariantStructure,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -532,6 +533,21 @@ export const api = {
       `/pipelines/vcfstats/variants/${objectId}?${p.toString()}`,
     );
   },
+
+  /** The protein structure for one gene's variants, if there is one.
+   *
+   *  Requested on click rather than per row: most genes resolve to nothing,
+   *  and asking for a whole page would spend dozens of round trips to decide
+   *  the appearance of buttons that mostly never get pressed.
+   *
+   *  The residue is deliberately not a parameter. The server reads it from
+   *  the variant database, because it is what picks between two proteins
+   *  sharing a gene symbol -- a caller-supplied one could select a protein
+   *  too short for a residue the callset actually contains. */
+  variantStructure: (objectId: string, gene: string) =>
+    request<VariantStructure>(
+      `/pipelines/vcfstats/structure/${objectId}?gene=${encodeURIComponent(gene)}`,
+    ),
 
   /** URL for downloading the complete variants TSV. */
   vcfStatsDownloadUrl: (objectId: string, reportPath: string) =>

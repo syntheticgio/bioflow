@@ -3,7 +3,9 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { VariantContigRow, VariantRow } from "../api/types";
 import { isNcbiNucleotideAccession, markerLabel } from "../lib/chromosomes";
+import { canShowStructure } from "../lib/variants";
 import { SequenceViewerModal } from "./SequenceViewerModal";
+import { StructureViewerModal } from "./StructureViewerModal";
 
 const PAGE_SIZE = 50;
 
@@ -47,6 +49,7 @@ export function VariantTable({
   const [lastTotal, setLastTotal] = useState<number | null>(null);
   // The variant whose genomic context is open, or null for none.
   const [contextRow, setContextRow] = useState<VariantRow | null>(null);
+  const [structureRow, setStructureRow] = useState<VariantRow | null>(null);
 
   // Contig -> length, for scaling the viewer's window to the sequence.
   // Memoised so the lookup is not rebuilt on every keystroke in the filters.
@@ -306,6 +309,26 @@ export function VariantTable({
                         Context
                       </button>
                     )}
+                    {/* Optimistic: this says the row *could* have a
+                        structure, not that one exists. Two thirds of genes
+                        have none, and resolving every row to decide would
+                        cost a page of requests to render buttons that
+                        mostly never get pressed -- so the miss is reported
+                        in the modal instead. */}
+                    {canShowStructure(row) && (
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{
+                          padding: "1px 8px",
+                          fontSize: 11,
+                          marginLeft: 4,
+                        }}
+                        onClick={() => setStructureRow(row)}
+                      >
+                        3D
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -367,6 +390,17 @@ export function VariantTable({
             sequenceLength: contigLengths.get(contextRow.chrom),
           }}
           onClose={() => setContextRow(null)}
+        />
+      )}
+
+      {/* `gene` is non-null here: canShowStructure gated the button on it. */}
+      {structureRow?.gene && (
+        <StructureViewerModal
+          objectId={objectId}
+          gene={structureRow.gene}
+          aaChange={structureRow.aa_change}
+          aaPos={structureRow.aa_pos}
+          onClose={() => setStructureRow(null)}
         />
       )}
     </div>
