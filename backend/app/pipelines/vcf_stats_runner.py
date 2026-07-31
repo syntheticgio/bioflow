@@ -149,3 +149,39 @@ def rebin_distribution(
         for i, c in enumerate(sums)
         if c > 0
     ]
+
+
+def variant_summary(stats: dict, *, filter_counts: dict[str, int]) -> dict:
+    """The headline numbers, from the parsed stats and the FILTER tally.
+
+    `pass_pct` is deliberately conditional. bcftools call does not stamp PASS
+    -- every record in the reference test file carries '.' -- so a file whose
+    only FILTER value is '.' has never been filtered at all. Reporting either
+    0% or 100% for it would assert something untrue about the call set, so the
+    rate is omitted and the UI simply does not show that statistic. A file
+    that uses FILTER at all, even partially, gets a real rate.
+    """
+    sn = stats.get("sn", {})
+    tstv = stats.get("tstv", {})
+
+    total = sn.get("records", 0)
+    no_filter = filter_counts.get(".", 0)
+    uses_filter = any(k != "." for k in filter_counts)
+
+    summary = {
+        "variants": total,
+        "snps": sn.get("snps", 0),
+        "indels": sn.get("indels", 0),
+        "multiallelic": sn.get("multiallelic_sites", 0),
+        "samples": sn.get("samples", 0),
+        "ts": tstv.get("ts", 0),
+        "tv": tstv.get("tv", 0),
+        "ti_tv": tstv.get("ti_tv", 0.0),
+        "pass_count": filter_counts.get("PASS", 0),
+        "no_filter_count": no_filter,
+    }
+
+    if uses_filter and total:
+        summary["pass_pct"] = round(100 * summary["pass_count"] / total, 2)
+
+    return summary
