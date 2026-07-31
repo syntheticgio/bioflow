@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { PipelineTool, PipelineType } from "../api/types";
@@ -33,6 +34,129 @@ const GROUPS: { type: PipelineType; title: string }[] = [
 const GROUP_TITLES: Record<PipelineType, string> = Object.fromEntries(
   GROUPS.map((g) => [g.type, g.title]),
 ) as Record<PipelineType, string>;
+
+/**
+ * Every tool against every pipeline, as a grid.
+ *
+ * The entries below answer "what is this tool"; this answers the question they
+ * cannot, which is "what have I got for job X" -- a reader who wants a variant
+ * caller should not have to scroll six sections to learn there are two. It is
+ * built from the same `tool.pipelines` the sections are built from, so a tool
+ * added to TOOL_META appears here with no second edit and no mapping to rot.
+ *
+ * Primary and secondary roles are drawn differently rather than as one mark.
+ * `pipelines[0]` is not incidental ordering -- it decides which section a tool
+ * is filed under, and marking both cells identically would say samtools is a
+ * QC tool as much as a utility, which is the exact reading the grouping code
+ * below goes out of its way to avoid.
+ *
+ * Names link to the entries, so the matrix works as the page's index.
+ * Unavailable tools are dimmed and marked, because a filled cell promising a
+ * variant caller that isn't installed is worse than no cell at all.
+ *
+ * Collapsible, because fifteen rows is a lot of page to scroll past once you
+ * have used it -- but it opens *expanded*, since a summary that must be
+ * clicked open is not one you can take in at a glance. Folding it is for the
+ * reader who has finished with it, not a default state to be discovered.
+ * The toggle reuses .group-title from the explorer's category headers rather
+ * than inventing a second disclosure idiom for one page.
+ */
+function ToolMatrix({ tools }: { tools: PipelineTool[] }) {
+  const [expanded, setExpanded] = useState(true);
+
+  if (tools.length === 0) return null;
+
+  return (
+    <section className="software-matrix-wrap" aria-labelledby="matrix-title">
+      <button
+        type="button"
+        id="matrix-title"
+        className="group-title software-matrix-toggle"
+        aria-expanded={expanded}
+        aria-controls="matrix-body"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span className="group-chevron">▶</span>
+        <span>At a glance</span>
+        <span className="group-count">{tools.length} tools</span>
+      </button>
+
+      {/* `hidden` rather than unmounting: it keeps the element `aria-controls`
+          names present in the DOM, preserves the table's horizontal scroll
+          across a fold/unfold, and is excluded from find-on-page, so ctrl-F
+          cannot match a row the reader cannot see. */}
+      <div id="matrix-body" hidden={!expanded}>
+      {/* Its own scroll container: six columns plus names outruns a narrow
+          panel, and the page body must not scroll sideways with it. */}
+      <div className="software-matrix-scroll">
+        <table className="software-matrix">
+          <thead>
+            <tr>
+              <th scope="col" className="software-matrix-corner">
+                Tool
+              </th>
+              {GROUPS.map(({ type, title }) => (
+                <th key={type} scope="col">
+                  {title}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {tools.map((tool) => (
+              <tr
+                key={tool.name}
+                className={tool.available ? undefined : "is-missing"}
+              >
+                <th scope="row">
+                  <a href={`#tool-${tool.name}`}>{tool.name}</a>
+                  {!tool.available && (
+                    <span className="software-matrix-flag" aria-hidden="true">
+                      !
+                    </span>
+                  )}
+                </th>
+                {GROUPS.map(({ type, title }) => {
+                  const rank = tool.pipelines.indexOf(type);
+                  const role =
+                    rank === 0 ? "primary" : rank > 0 ? "secondary" : null;
+                  return (
+                    <td key={type} className={role ? `is-${role}` : undefined}>
+                      {role ? (
+                        <>
+                          <span aria-hidden="true" className="software-dot" />
+                          <span className="visually-hidden">
+                            {`${tool.name}: ${role} ${title.toLowerCase()} tool`}
+                          </span>
+                        </>
+                      ) : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Each swatch and its label are one item, so the flex gap falls between
+          pairs rather than between a swatch and the word it labels. */}
+      <p className="software-matrix-key">
+        <span className="software-matrix-key-item">
+          <span className="software-dot is-key" /> primary role
+        </span>
+        <span className="software-matrix-key-item">
+          <span className="software-dot is-key is-secondary-key" /> also used
+          for
+        </span>
+        <span className="software-matrix-key-item">
+          <span className="software-matrix-flag is-key">!</span> not installed
+        </span>
+      </p>
+      </div>
+    </section>
+  );
+}
 
 /**
  * The version chip, or the reason there isn't one.
@@ -194,6 +318,13 @@ export function HelpSoftware() {
     entries: tools.filter((t) => t.pipelines[0] === type),
   }));
 
+  // The matrix reads top-to-bottom in the same order the sections read, so
+  // scanning a column and then scrolling to the entry moves in one direction.
+  // Flattening `grouped` rather than re-sorting `tools` keeps that guarantee
+  // automatic: a tool the sections would drop cannot appear as a matrix row
+  // linking to an anchor that was never rendered.
+  const matrixRows = grouped.flatMap((g) => g.entries);
+
   return (
     <div className="help-page software-page">
       <h1>Software</h1>
@@ -212,6 +343,8 @@ export function HelpSoftware() {
           Could not reach the server to list installed tools.
         </p>
       )}
+
+      <ToolMatrix tools={matrixRows} />
 
       {grouped.map(({ type, title, entries }) =>
         entries.length === 0 ? null : (
