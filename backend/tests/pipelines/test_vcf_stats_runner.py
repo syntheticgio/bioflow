@@ -12,6 +12,7 @@ from app.pipelines.vcf_stats_runner import (
     build_query_command,
     build_stats_command,
     parse_stats,
+    rebin_distribution,
 )
 
 STATS = """# This file was produced by bcftools stats
@@ -152,3 +153,40 @@ class TestParseStats:
         not break parsing."""
         out = parse_stats(STATS + "HWE\t0\t1\t2\t3\n")
         assert out["sn"]["records"] == 6641
+
+
+class TestRebinDistribution:
+    def test_collapses_to_at_most_bucket_count(self):
+        """805 QUAL rows on the real test file; facts stores a histogram."""
+        rows = [{"qual": float(i), "count": 1} for i in range(805)]
+        out = rebin_distribution(rows, value_key="qual", bucket_count=20)
+        assert len(out) <= 20
+
+    def test_preserves_the_total_count(self):
+        """Re-binning redistributes; it must not lose or invent observations."""
+        rows = [{"qual": float(i), "count": i} for i in range(100)]
+        out = rebin_distribution(rows, value_key="qual", bucket_count=10)
+        assert sum(b["count"] for b in out) == sum(r["count"] for r in rows)
+
+    def test_buckets_span_the_observed_range(self):
+        rows = [{"qual": 10.0, "count": 1}, {"qual": 90.0, "count": 1}]
+        out = rebin_distribution(rows, value_key="qual", bucket_count=8)
+        assert out[0]["value"] == 10.0
+        assert out[-1]["value"] <= 90.0
+        assert sum(b["count"] for b in out) == 2
+
+    def test_single_distinct_value_yields_one_bucket(self):
+        """A file where every record has the same QUAL must not divide by a
+        zero-width range."""
+        rows = [{"qual": 50.0, "count": 7}]
+        out = rebin_distribution(rows, value_key="qual", bucket_count=20)
+        assert out == [{"value": 50.0, "count": 7}]
+
+    def test_empty_input_returns_empty(self):
+        assert rebin_distribution([], value_key="qual", bucket_count=20) == []
+
+    def test_fewer_rows_than_buckets_passes_through(self):
+        rows = [{"depth": 1, "count": 5}, {"depth": 2, "count": 3}]
+        out = rebin_distribution(rows, value_key="depth", bucket_count=20)
+        assert sum(b["count"] for b in out) == 8
+        assert len(out) == 2
