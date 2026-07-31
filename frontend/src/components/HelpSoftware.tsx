@@ -37,21 +37,31 @@ const GROUP_TITLES: Record<PipelineType, string> = Object.fromEntries(
 /**
  * The version chip, or the reason there isn't one.
  *
- * Three states, and they are not the same question. `available` is whether the
- * binary is on this machine -- nanoplot is not, today. `runnable` is whether
- * any handler in this application calls it. A tool can be installed and still
- * unwired, so the two get separate chips rather than one merged "status":
- * collapsing them would report a missing binary and an unimplemented code path
- * as the same problem, and only one of those is fixed by installing something.
+ * `available` is whether the binary is usable on this machine; `runnable` is
+ * whether any handler in this application calls it. A tool can be installed
+ * and still unwired, so the two get separate chips rather than one merged
+ * "status": collapsing them would report a missing binary and an
+ * unimplemented code path as the same problem, and only one of those is fixed
+ * by installing something.
+ *
+ * Unavailable splits again, because "not installed" is a claim this page
+ * cannot always support. `_probe` reports a binary it could not *run* the
+ * same way it reports one it could not *find*, and the difference is visible
+ * only in the error text. NanoPlot is the live example: it is installed and
+ * works, but it is a Python entry point that takes ~13s to answer
+ * `--version`, past the 10s probe timeout. Calling that "not installed"
+ * would send a user to reinstall a package they already have.
  */
 function VersionChips({ tool }: { tool: PipelineTool }) {
   if (!tool.available) {
+    // A timeout means the probe gave up, not that the binary is absent.
+    const timedOut = tool.error?.includes("timed out");
     return (
       <span
         className="software-version missing"
         title={tool.error || `${tool.name} is not installed`}
       >
-        not installed
+        {timedOut ? "version check timed out" : "not installed"}
       </span>
     );
   }
