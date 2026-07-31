@@ -70,6 +70,7 @@ def build_variant_db(*, rows, db_path: Path) -> int:
 
     Returns the number of rows inserted.
     """
+    rows = list(rows)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path.unlink(missing_ok=True)
 
