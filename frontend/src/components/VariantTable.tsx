@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { VariantContigRow } from "../api/types";
+import type { VariantContigRow, VariantRow } from "../api/types";
+import { isNcbiNucleotideAccession, markerLabel } from "../lib/chromosomes";
+import { SequenceViewerModal } from "./SequenceViewerModal";
 
 const PAGE_SIZE = 50;
 
@@ -42,6 +44,15 @@ export function VariantTable({
   // Holds the last known total across a skip_count page turn, so the row
   // count does not flash to nothing while only the page changed.
   const [lastTotal, setLastTotal] = useState<number | null>(null);
+  // The variant whose genomic context is open, or null for none.
+  const [contextRow, setContextRow] = useState<VariantRow | null>(null);
+
+  // Contig -> length, for scaling the viewer's window to the sequence.
+  // Memoised so the lookup is not rebuilt on every keystroke in the filters.
+  const contigLengths = useMemo(
+    () => new Map(contigs.map((c) => [c.contig, c.length])),
+    [contigs],
+  );
 
   const minQual = useDebounced(minQualInput, 300);
 
@@ -195,6 +206,7 @@ export function VariantTable({
                 <th>Filter</th>
                 <th style={{ textAlign: "right" }}>Depth</th>
                 <th>Genotype</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -222,6 +234,22 @@ export function VariantTable({
                   </td>
                   <td style={{ textAlign: "right" }}>{row.dp == null ? "—" : row.dp}</td>
                   <td className="mono">{genotypeFor(row.gt, sampleIdx)}</td>
+                  <td>
+                    {/* Variants are called against whatever reference was
+                        aligned to, often a local assembly whose contigs have
+                        no page at NCBI. No button beats a button that opens a
+                        viewer which then fails. */}
+                    {isNcbiNucleotideAccession(row.chrom) && (
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: "1px 8px", fontSize: 11 }}
+                        onClick={() => setContextRow(row)}
+                      >
+                        Context
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -265,6 +293,18 @@ export function VariantTable({
             </div>
           </div>
         </>
+      )}
+
+      {contextRow && (
+        <SequenceViewerModal
+          accession={contextRow.chrom}
+          focus={{
+            position: contextRow.pos,
+            label: markerLabel(contextRow.ref, contextRow.alt),
+            sequenceLength: contigLengths.get(contextRow.chrom),
+          }}
+          onClose={() => setContextRow(null)}
+        />
       )}
     </div>
   );
