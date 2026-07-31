@@ -34,6 +34,23 @@ const MIN_CHROMOSOME_SCALE = 5;
  *  assembly shows its 24 primary chromosomes and yeast shows all 17. */
 const MAX_BARS = 24;
 
+/**
+ * Whether a sequence name is an accession NCBI's Sequence Viewer can resolve
+ * as a nucleotide record.
+ *
+ * Anchored deliberately: `lcl|NC_008409.1_cds_XP_846376.1_2` contains a real
+ * accession but is a local identifier NCBI cannot resolve, and an unanchored
+ * match would hand the viewer an id it rejects. `XP_`/`NP_` are excluded on
+ * purpose -- they resolve, but as proteins, which is not what a chromosome
+ * bar claims to be.
+ */
+const NUCLEOTIDE_ACCESSION =
+  /^(?:(?:NC|NZ|NT|NW|AC)_\d+\.\d+|[A-Z]{2}\d{6}\.\d+|[A-Z]{4}\d{8,}\.\d+)$/;
+
+export function isNcbiNucleotideAccession(name: string): boolean {
+  return NUCLEOTIDE_ACCESSION.test(name.trim());
+}
+
 export function classifyChromosomes(
   facts: Record<string, unknown>,
 ): ChromosomeView {
@@ -68,7 +85,10 @@ export function classifyChromosomes(
     kind: "drawable",
     bars: ranked.slice(0, MAX_BARS),
     overflow: ranked.slice(MAX_BARS),
-    linkable: false,
+    // One resolvable name is enough: a genome can carry an unplaced scaffold
+    // with a local name without that making the chromosomes unlinkable. Each
+    // bar is re-checked individually at render time.
+    linkable: ranked.some((b) => isNcbiNucleotideAccession(b.name)),
   };
 }
 

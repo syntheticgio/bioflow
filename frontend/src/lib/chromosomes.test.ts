@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyChromosomes } from "./chromosomes";
+import { classifyChromosomes, isNcbiNucleotideAccession } from "./chromosomes";
 
 describe("classifyChromosomes", () => {
   // genomic.gff: parsed, but carries no sequence names at all.
@@ -140,5 +140,42 @@ describe("classifyChromosomes", () => {
     expect(view.bars).toHaveLength(24);
     expect(view.overflow).toHaveLength(200);
     expect(view.bars.every((b) => b.name.startsWith("NC_"))).toBe(true);
+  });
+
+  it("marks NCBI RefSeq accessions as linkable", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.linkable).toBe(true);
+  });
+
+  // The local-assembly path. Nothing in the live database exercises this, so
+  // it is the branch most likely to break unnoticed.
+  it("draws a local assembly but marks it unlinkable", () => {
+    const local: Record<string, number> = {};
+    for (let i = 1; i <= 8; i++) local[`contig_${i}`] = 900_000 - i * 1000;
+
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(local),
+      sequence_lengths: local,
+    });
+    expect(view.kind).toBe("drawable");
+    if (view.kind !== "drawable") return;
+    expect(view.linkable).toBe(false);
+    expect(view.bars).toHaveLength(8);
+  });
+
+  // `lcl|NC_008409.1_cds_...` embeds a real accession. An unanchored test
+  // would call it linkable and feed NCBI an id it cannot resolve.
+  it("does not treat an embedded accession as linkable", () => {
+    expect(isNcbiNucleotideAccession("lcl|NC_008409.1_cds_XP_846376.1_2")).toBe(
+      false,
+    );
+    expect(isNcbiNucleotideAccession("NC_001133.9")).toBe(true);
+    expect(isNcbiNucleotideAccession("BK006935.2")).toBe(true);
+    // A protein accession is resolvable at NCBI but is not a chromosome.
+    expect(isNcbiNucleotideAccession("XP_001218755.1")).toBe(false);
   });
 });
