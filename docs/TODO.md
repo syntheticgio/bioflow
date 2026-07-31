@@ -64,25 +64,36 @@ separate shared area, and what happens to a share when the owner deletes their
 copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
 refcount reaching zero and the bytes being unlinked).
 
-## Non-local / remote NCBI data
+## Non-local / remote NCBI data — SPECCED
+
+Design: `docs/superpowers/specs/2026-07-31-remote-data-design.md` (2026-07-31).
 
 Keep an NCBI download remote rather than ingesting it: store a pointer, fetch
-just-in-time when used. `BlobStorage` already distinguishes `MANAGED` from
-`EXTERNAL` (`models/blob.py`); this wants a third mode for content that is not
-on this machine at all.
+just-in-time when used. The file explorer badges files `Local`, `NCBI`, or both,
+and an Actions entry drops the bytes of anything re-fetchable while keeping its
+metadata, QC reports and provenance.
 
-The file explorer badges files `Local`, `NCBI`, or both — a file uploaded by the
-user whose name matches the NCBI accession regex gets the `NCBI` badge too. For
-anything re-downloadable, an Actions entry deletes the bytes but keeps the
-metadata, so the file stays listed and usable on demand while freeing the space.
-Remote files skip QC and ingestion parsing; triggering either downloads the file
-first.
+What the design settled:
 
-Undecided, and worth settling before building: whether the just-in-time fetch
-happens *inside* the job that needs the file or as a *prerequisite* job. The
-existing `depends_on` gate (`models/job.py`) already supports the second shape,
-and it is the one that keeps a stalled multi-gigabyte download visible in the
-queue rather than hidden inside a pipeline step that looks hung.
+- **The fetch is a real job**, gated by `depends_on` and reusing the
+  `build_index` → `align_reads` pattern — so a multi-gigabyte download is
+  visible in the queue with its own progress instead of making a pipeline job
+  look hung, and a failed fetch names itself as the reason.
+- **`locality`, not a new `ObjectStatus`.** This was the trap. `ObjectStatus`
+  `.READY` is guarded in ~14 places, and two of them — the reference picker
+  (`api/v1/pipelines.py:529`) and the Actions rules
+  (`suggestion_service.py:654`) — *filter collections* on it. A remote file
+  carrying a new status would silently disappear from both. So `status` keeps
+  meaning "is this file understood" and a new `locality` field says "are its
+  bytes here", leaving every existing guard working unchanged.
+- **No blob row until first fetch**, since `Blob.id` *is* the SHA-256 and the
+  digest of an un-downloaded file is unknown.
+
+Two things came out free: `_resolve_readable`
+(`services/pipeline_service.py:129`) is a single chokepoint that already
+branches on storage mode, so no handler or runner is touched; and
+`qc_reports/`, `bam_stats/` and `vcf_stats/` are keyed by object id outside
+`objects/`, so dropping a blob cannot disturb them.
 
 ## Helper install program
 
@@ -121,13 +132,17 @@ its own repo and build/signing story.
 On `/help/software`, clicking a column header (Alignment, Quality Control, ...)
 filters the page to the tools matching that column — primary *or* secondary, and
 including uninstalled ones. All columns stay visible, since a tool can occupy
-several. Separately, make the tool names in the matrix clickable so they jump to
-that tool's description further down the page.
+several.
 
-The matrix already exists and already distinguishes primary from secondary rank
-(`ToolMatrix` in `frontend/src/components/HelpSoftware.tsx`), and its rows are
-built from the same list the sections render, so an anchor per tool is
-straightforward. Contained frontend work, no backend change.
+**The clickable tool names asked for alongside this already work.** Matrix rows
+render `<a href={`#tool-${tool.name}`}>` (`HelpSoftware.tsx:112`) against
+`id={`tool-${tool.name}`}` on each entry heading (line 219), and `ToolMatrix`'s
+docstring states the intent: "Names link to the entries, so the matrix works as
+the page's index." Only the column filtering is outstanding.
+
+Small enough to build directly rather than spec: contained frontend work in one
+component, no backend change, and the matrix already distinguishes primary from
+secondary rank.
 
 ---
 
