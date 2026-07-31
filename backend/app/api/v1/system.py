@@ -8,6 +8,7 @@ from app.config import settings
 from app.db.client import get_db
 from app.logging import get_logger
 from app.models import Blob, DataObject, Project
+from app.pipelines import sources
 from app.storage.home import check_home
 
 log = get_logger(__name__)
@@ -93,3 +94,15 @@ async def system_load() -> dict:
     from app.queue.governor import current_load
 
     return await current_load()
+
+
+@router.get("/sources")
+async def data_sources() -> dict:
+    """The external data sources behind the Sources help page.
+
+    On `system` rather than `pipelines` because these are not pipeline
+    tools -- nothing here is dispatched to by a job. Static data, so no
+    probe and no I/O: unlike /pipelines/tools this cannot be slow and
+    cannot fail.
+    """
+    return {"sources": sources.all_sources()}
