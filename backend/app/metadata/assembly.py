@@ -27,6 +27,11 @@ log = get_logger(__name__)
 
 DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha"
 
+# Bounded like the parser's MAX_STORED_CONTIGS: the strip draws at most 24 bars
+# and lists the remainder from the stored lengths, so labels past this window
+# would have nothing to label.
+MAX_STORED_LABELS = 50
+
 # GCA (GenBank) or GCF (RefSeq), nine digits, dot, version. Anchored at a word
 # boundary so `MYGCA_000000001.1` does not match but a path separator or an
 # underscore-joined filename does.
@@ -206,6 +211,52 @@ def parse_report(payload: dict) -> AssemblyMetadata | None:
         gc_percent=_float(stats.get("gc_percent")),
         scaffold_n50=_int(stats.get("scaffold_n50")),
     )
+
+
+def parse_sequence_reports(payload: dict) -> dict[str, str]:
+    """Map every sequence accession in a report to a human-readable label.
+
+    Both namespaces are keyed to the same label: a record carries
+    `refseq_accession` *and* `genbank_accession`, so one lookup labels a GCF
+    file (`NC_001133.9`) and the GCA file beside it (`BK006935.2`).
+
+    The label depends on the record's role, and this is not cosmetic.
+    Unplaced and unlocalized scaffolds inherit their parent chromosome's
+    `chr_name`: the real Aspergillus assembly has two records both reporting
+    `chr_name: "11"`, and the larger of them is the longest sequence in the
+    file. Labelling those by `chr_name` would draw two bars reading "11".
+    Only an assembled molecule may use `chr_name`; everything else uses its own
+    `sequence_name`.
+
+    Never raises. A schema change or a wrong-typed field yields a smaller map,
+    or an empty one -- never a failed ingest.
+    """
+    reports = _obj(payload).get("reports")
+    if not isinstance(reports, list):
+        return {}
+
+    labels: dict[str, str] = {}
+    # sort_order is the assembly's own ordering, so a truncated map keeps the
+    # leading sequences rather than an arbitrary slice.
+    records = [r for r in reports if isinstance(r, dict)]
+    records.sort(key=lambda r: _int(r.get("sort_order")) or 0)
+
+    for record in records:
+        if len(labels) >= MAX_STORED_LABELS:
+            break
+        role = _text(record.get("role"))
+        if role == "assembled-molecule":
+            label = _text(record.get("chr_name")) or _text(record.get("sequence_name"))
+        else:
+            label = _text(record.get("sequence_name")) or _text(record.get("chr_name"))
+        if not label:
+            continue
+        for key in ("refseq_accession", "genbank_accession"):
+            accession = _text(record.get(key))
+            if accession:
+                labels[accession] = label
+
+    return labels
 
 
 def lookup(accession: str) -> AssemblyMetadata | None:
