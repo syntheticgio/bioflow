@@ -175,21 +175,45 @@ Choosing one opens the modal for it.
 
 **Script loading.** `sviewer.js` is injected on first open, never at page load:
 a `loadSviewer()` helper appends the `<script>` tag once, caches the promise, and
-resolves when NCBI's global appears. Later opens reuse it. Nothing else in the
+resolves from a `SeqViewOnReady` callback -- the point at which `SeqView` is
+actually usable, which is later than the script tag's `onload`. Later opens
+reuse it; a failure nulls the cache so a reconnect can retry. Nothing else in the
 app depends on NCBI being reachable -- which matters, because this is otherwise
 a local-only tool and this script is its one runtime outbound dependency.
 
-**Mounting.** The declarative form -- render
+**Mounting.** The **dynamic/programmatic** form, which NCBI's docs require here:
 
-```html
-<div class="SeqViewerApp" data-id="NC_001133.9" data-width="..."
-     data-tracks="[key:gene_model_track]"></div>
+```js
+SeqViewOnReady(function () {
+  const app = new SeqView.App(divId);
+  app.load("embedded=true&id=" + accession + "&tracks=[key:gene_model_track]");
+});
 ```
 
-and let the script claim it -- rather than the programmatic
-`SeqView.App.AppNode` API. We are not driving the viewer from elsewhere in the
-app, so the programmatic control buys nothing. Each open mounts a fresh div with
-a unique React key so the script is never handed a node React has since reused.
+The declarative `<div class="SeqViewerApp">` form is **not usable for a modal**.
+NCBI's embedding API states it plainly: "You do not use this method if the
+Sequence Viewer div is initially hidden. Use the method from point 3 to
+instantiate Sequence Viewer dynamically." The declarative form also requires an
+inner `<a href='?embedded=true&id=...'>` carrying the parameters -- they are not
+`data-*` attributes on the div -- and its `SeqView.loadApp()` only claims
+`div.SeqViewerApp` nodes that already exist when it runs, and only when the
+script tag carries `id="autoload"` or the div carries `data-autoload`.
+
+`SeqViewOnReady` exists precisely to avoid using SV before the class is
+initialized: the script's `onload` fires when `sviewer.js` is parsed, but it
+then loads its own dependencies, so the global is not ready at `onload`.
+
+Each open creates an app against a uniquely-id'd div, unique per open because
+NCBI keys its registry on the div id.
+
+Cleanup is partial, and the code says so rather than implying otherwise:
+`SeqView.App` exposes **no** teardown API -- no `destroy()`, `remove()`, or
+`dispose()`. Its constructor pushes the instance into the global
+`SeqView.m_Apps` array and nothing removes it. On unmount we splice our own
+instance out of that array (safe: `findAppByIndex()` matches the app's own
+`m_Idx` field, not the array position) and detach the DOM. Timers, in-flight
+ajax callbacks, and any document-level listeners the viewer registered are not
+reachable from outside and do leak.
 
 **States**, all three of which must be handled because of the outbound
 dependency:
@@ -218,7 +242,6 @@ rather than inventing a pattern; Escape and backdrop click close it.
 - **Coordinate deep-linking** (`data-v` to a region). Nothing in the app
   currently produces a locus to point at.
 - **Configurable track sets.** Configuration for its own sake in a QC tool.
-- **Programmatic `SeqView.App.AppNode` initialization.** No caller needs it.
 - **Inline tracks under the strip.** The viewer needs width the Quality column
   does not have.
 
