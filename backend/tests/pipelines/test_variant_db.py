@@ -185,3 +185,41 @@ class TestQuery:
         f = VariantFilters(contig="chr1'; DROP TABLE variants; --")
         assert count_variants(db_path=db, filters=f) == 0
         assert count_variants(db_path=db, filters=VariantFilters()) == 6
+
+
+class TestStreamingBuild:
+    def test_build_does_not_materialize_the_input(self, tmp_path):
+        """The build must consume its input lazily."""
+        peak = 0
+
+        def rows():
+            nonlocal peak
+            for i in range(50_000):
+                peak = max(peak, i)
+                yield f"chr1\t{i}\tA\tG\t50.0\tPASS\t30\t0/1"
+
+        path = tmp_path / "v.db"
+        n = build_variant_db(rows=rows(), db_path=path)
+        assert n == 50_000
+        assert count_variants(db_path=path, filters=VariantFilters()) == 50_000
+
+    def test_peak_rss_stays_bounded_while_building(self, tmp_path):
+        """The regression that matters. 200k rows through a streaming build
+        should add tens of MB, not hundreds -- a list-then-insert refactor
+        blows past this while every correctness test still passes."""
+
+        def rss_mb() -> float:
+            with open("/proc/self/status") as fh:
+                return int(fh.read().split("VmRSS:")[1].split()[0]) / 1024
+
+        before = rss_mb()
+        path = tmp_path / "big.db"
+        build_variant_db(
+            rows=(
+                f"chr{i % 10}\t{i}\tA\tG\t{i % 200}.0\tPASS\t{i % 90}\t0/1"
+                for i in range(200_000)
+            ),
+            db_path=path,
+        )
+        growth = rss_mb() - before
+        assert growth < 150, f"build grew RSS by {growth:.0f} MB"
