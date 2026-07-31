@@ -3,6 +3,7 @@
 import dataclasses
 import os
 import re
+import subprocess
 import sys
 
 import pytest
@@ -167,6 +168,45 @@ class TestProbe:
         tool = tools._probe("hangs", str(script), ["--version"])
         assert not tool.available
         assert tool.error
+
+    def test_a_slow_starting_tool_gets_the_longer_timeout(self, monkeypatch):
+        """NanoPlot must probe with the slow-import timeout, not the default.
+
+        Asserts the timeout actually reaching `subprocess.run`, because the
+        bug it guards was silent and load-dependent: NanoPlot needs ~16s cold
+        and ~2s warm, so a probe left on the 10s default still passes on a
+        warm machine and fails only at startup on a cold one. A test that
+        merely checked `nanoplot().available` was green throughout the bug --
+        and would also pass here without the patch working at all, since the
+        image ships NanoPlot installed.
+        """
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["timeout"] = kwargs["timeout"]
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        monkeypatch.setattr(tools.subprocess, "run", fake_run)
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/NanoPlot")
+
+        tools.nanoplot()
+        assert seen["timeout"] == tools.SLOW_IMPORT_TIMEOUT_SECONDS
+        assert seen["timeout"] > tools.VERSION_TIMEOUT_SECONDS
+
+    def test_an_ordinary_tool_keeps_the_default_timeout(self, monkeypatch):
+        """The longer timeout is per-tool, not a global relaxation -- a hung
+        binary must still fail its probe in VERSION_TIMEOUT_SECONDS."""
+        seen = {}
+
+        def fake_run(args, **kwargs):
+            seen["timeout"] = kwargs["timeout"]
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        monkeypatch.setattr(tools.subprocess, "run", fake_run)
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/fastp")
+
+        tools.fastp()
+        assert seen["timeout"] == tools.VERSION_TIMEOUT_SECONDS
 
 
 class TestRequire:

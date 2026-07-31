@@ -27,6 +27,19 @@ log = get_logger(__name__)
 # binary fails the probe rather than the request.
 VERSION_TIMEOUT_SECONDS = 10
 
+# For a tool whose `--version` has to import a scientific Python stack before
+# it can answer. NanoPlot pulls in pandas, scipy and plotly on the way to
+# printing one line: measured at 16.3s in a cold container against 2-4s once
+# the imports are in page cache, so the 10s default failed it exactly when the
+# app was starting up and probing for the first time. The failure was silent
+# and load-dependent -- `available` went False, the long-read QC path vanished,
+# and a warm re-probe then showed the tool working fine.
+#
+# Note this is not "Python entry points are slow": cutadapt is one too and
+# answers in 0.2s. What costs the time is the import graph behind the entry
+# point, so this belongs on the individual tool rather than on a class of them.
+SLOW_IMPORT_TIMEOUT_SECONDS = 60
+
 
 @dataclass(frozen=True)
 class Tool:
@@ -49,7 +62,16 @@ class Tool:
         }
 
 
-def _probe(name: str, configured: str, version_args: list[str]) -> Tool:
+def _probe(
+    name: str,
+    configured: str,
+    version_args: list[str],
+    # Resolved at call time, not bound as a default: the hang test patches
+    # VERSION_TIMEOUT_SECONDS on the module, and a default evaluated at import
+    # would capture 10 and quietly ignore the patch -- a test that takes the
+    # full timeout while appearing to control it.
+    timeout: float | None = None,
+) -> Tool:
     resolved = shutil.which(configured)
     if resolved is None:
         return Tool(
@@ -72,7 +94,7 @@ def _probe(name: str, configured: str, version_args: list[str]) -> Tool:
             # "failed to open elf" message is not. Decoding with `text=True`
             # raised UnicodeDecodeError straight out of the probe, which turned
             # one broken tool into a failure of the whole tool panel.
-            timeout=VERSION_TIMEOUT_SECONDS,
+            timeout=VERSION_TIMEOUT_SECONDS if timeout is None else timeout,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as e:
@@ -224,7 +246,14 @@ def clair3() -> Tool:
 
 @lru_cache(maxsize=1)
 def nanoplot() -> Tool:
-    return _probe("nanoplot", settings.nanoplot_path, ["--version"])
+    # Slow timeout: see SLOW_IMPORT_TIMEOUT_SECONDS. NanoPlot spends its
+    # startup importing pandas/scipy/plotly before it will print a version.
+    return _probe(
+        "nanoplot",
+        settings.nanoplot_path,
+        ["--version"],
+        timeout=SLOW_IMPORT_TIMEOUT_SECONDS,
+    )
 
 
 @lru_cache(maxsize=1)
