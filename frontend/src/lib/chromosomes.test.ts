@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { classifyChromosomes, isNcbiNucleotideAccession } from "./chromosomes";
+import {
+  classifyChromosomes,
+  focusWindow,
+  isNcbiNucleotideAccession,
+} from "./chromosomes";
 
 describe("classifyChromosomes", () => {
   // genomic.gff: parsed, but carries no sequence names at all.
@@ -241,5 +245,40 @@ describe("classifyChromosomes", () => {
       sequence_labels: "not an object",
     });
     expect(view.kind).toBe("drawable");
+  });
+});
+
+describe("focusWindow", () => {
+  // A 10 kb virus: 1% is 100 bases, so the 2 kb floor takes over -- a 4 kb
+  // span rather than a 200 b one that would show nothing around the variant.
+  it("applies the floor on a small viral genome", () => {
+    expect(focusWindow(5_000, 10_000)).toEqual([3_000, 7_000]);
+  });
+
+  // Smaller than one full window: clamping at both ends yields the whole
+  // sequence, which is the right answer for a tiny genome.
+  it("shows the whole sequence when it is shorter than the window", () => {
+    expect(focusWindow(1_500, 3_000)).toEqual([1, 3_000]);
+  });
+
+  // A 250 Mb plant chromosome: 1% is 2.5 Mb, so the 200 kb ceiling applies
+  // and the view stays readable instead of becoming a smear.
+  it("applies the ceiling on a large chromosome", () => {
+    expect(focusWindow(100_000_000, 250_000_000)).toEqual([
+      99_800_000, 100_200_000,
+    ]);
+  });
+
+  // A 5 Mb bacterial genome: 1% is 50 kb, between floor and ceiling.
+  it("uses one percent of length between the bounds", () => {
+    expect(focusWindow(2_500_000, 5_000_000)).toEqual([2_450_000, 2_550_000]);
+  });
+
+  it("clamps to the start of the sequence", () => {
+    expect(focusWindow(100, 5_000_000)).toEqual([1, 50_100]);
+  });
+
+  it("clamps to the end of the sequence", () => {
+    expect(focusWindow(4_999_900, 5_000_000)).toEqual([4_949_900, 5_000_000]);
   });
 });

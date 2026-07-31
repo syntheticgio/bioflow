@@ -55,6 +55,42 @@ export function isNcbiNucleotideAccession(name: string): boolean {
   return NUCLEOTIDE_ACCESSION.test(name.trim());
 }
 
+/** Fraction of a sequence's length shown to each side of a focused position. */
+const FOCUS_FRACTION = 0.01;
+/** Smallest half-window, so a short viral genome does not zoom to a near-empty
+ *  view. */
+const FOCUS_MIN_HALF = 2_000;
+/** Largest half-window, so a plant chromosome does not become an unreadable
+ *  smear. */
+const FOCUS_MAX_HALF = 200_000;
+
+/**
+ * The visible range to show around a focused position, as [start, end], 1-based
+ * and inclusive.
+ *
+ * Scaled rather than fixed because references here run from viruses to plants
+ * -- four orders of magnitude. A constant flank that frames a gene in a plant
+ * genome is the entire genome of a virus, and one that suits a virus crops a
+ * plant gene to a fragment.
+ *
+ * The fraction and both bounds are judgment, not measurement: they are starting
+ * points chosen to degrade sensibly at both ends of that range. Tune them if
+ * they read wrong in practice.
+ */
+export function focusWindow(
+  position: number,
+  sequenceLength: number,
+): [number, number] {
+  const half = Math.min(
+    FOCUS_MAX_HALF,
+    Math.max(FOCUS_MIN_HALF, Math.round(sequenceLength * FOCUS_FRACTION)),
+  );
+  return [
+    Math.max(1, position - half),
+    Math.min(sequenceLength, position + half),
+  ];
+}
+
 export function classifyChromosomes(
   facts: Record<string, unknown>,
 ): ChromosomeView {
