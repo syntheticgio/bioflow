@@ -176,25 +176,20 @@ def _fingerprint(path: str | None) -> str | None:
     the installed binary is the half of a run's provenance a methods section
     reports.
 
-    Combines path, mtime/size, and a content hash rather than relying on any
-    one of them, because each catches a change the others miss: mtime/size
-    alone missed an in-place same-size replacement landing in the same
-    filesystem timestamp tick (measured happening in this repo's test
-    container); a content hash alone drops path, so two tools resolving to
-    identical bytes -- or one tool moving to a new PATH entry with its bytes
-    unchanged -- would fingerprint the same; mtime/size alone (without the
-    hash) missed nothing extra, but a package upgrade normally rewrites mtime
-    even when bytes are unchanged, so combining catches more real cases than
-    either alone.
+    Combines path, mtime/size and a content hash, because each catches a change
+    the others miss. Content alone drops path, so two tools resolving to
+    identical bytes -- or one tool moving to a new PATH entry unchanged --
+    would look the same. mtime/size alone missed an in-place same-size
+    replacement landing in one filesystem timestamp tick, measured happening in
+    this repo's test container. And mtime moves on a package upgrade even when
+    the bytes do not.
 
-    Residual limitation, left undocumented nowhere else but here: several
-    probed tools (fastqc, bowtie2, hisat2, cutadapt) are interpreter wrapper
-    scripts that dispatch to a separate payload (JARs, installed packages).
-    This fingerprints the wrapper, not the payload it calls into -- an
-    upgrade that replaces only the payload, leaving the wrapper
-    byte-identical and its mtime untouched, goes undetected here. That is an
-    accepted gap, not a silent one: the probe cache's TTL is the backstop for
-    it.
+    Known gap: fastqc, bowtie2, hisat2 and cutadapt are interpreter wrappers
+    that dispatch to a separate payload (JARs, installed packages). This
+    fingerprints the wrapper, not the payload -- so an upgrade replacing only
+    the payload, leaving the wrapper byte- and mtime-identical, goes
+    undetected. Accepted rather than silent; the probe cache's TTL is the
+    backstop.
     """
     if path is None:
         return None
