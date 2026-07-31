@@ -2875,3 +2875,11 @@ a.btn {
   font-size: 12px;
   font-weight: 400;
 }
+
+/* De-emphasised beside the accession in the viewer heading: the accession
+   names the sequence, the position only says where in it we opened. */
+.sviewer-position {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-faint);
+}

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { accessionUrl } from "../lib/format";
+import { focusWindow } from "../lib/chromosomes";
 
 const SVIEWER_SRC = "https://www.ncbi.nlm.nih.gov/projects/sviewer/js/sviewer.js";
 
@@ -118,6 +119,17 @@ function loadSviewer(): Promise<void> {
  *  instance that is still registered. */
 let mountSeq = 0;
 
+/** A specific position to open on, rather than the whole sequence.
+ *
+ *  `sequenceLength` is optional because a contig length is not always known;
+ *  without it the view range is omitted and NCBI shows the whole sequence,
+ *  which is the correct fallback rather than a special case. */
+export interface ViewerFocus {
+  position: number;
+  label: string;
+  sequenceLength?: number;
+}
+
 /**
  * NCBI's embedded genome browser for one chromosome.
  *
@@ -130,9 +142,11 @@ let mountSeq = 0;
  */
 export function SequenceViewerModal({
   accession,
+  focus,
   onClose,
 }: {
   accession: string;
+  focus?: ViewerFocus;
   onClose: () => void;
 }) {
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
@@ -178,9 +192,21 @@ export function SequenceViewerModal({
     // tracks on every single open. NCBI asks for a unique, namespaced value --
     // it keys the cookie holding the user's viewer settings -- and warns off
     // generic words like "viewer".
+    // Appended only when focused, so the unfocused string stays byte-identical
+    // to what ChromosomeStrip has always sent.
+    let focusParams = "";
+    if (focus) {
+      if (focus.sequenceLength != null) {
+        const [start, end] = focusWindow(focus.position, focus.sequenceLength);
+        focusParams += `&v=${start}:${end}`;
+      }
+      focusParams += `&mk=${focus.position}|${encodeURIComponent(focus.label)}|ff5555`;
+    }
+
     app.load(
       `embedded=true&appname=${VIEWER_APPNAME}` +
-        `&id=${encodeURIComponent(accession)}&tracks=[key:gene_model_track]`,
+        `&id=${encodeURIComponent(accession)}&tracks=[key:gene_model_track]` +
+        focusParams,
     );
 
     return () => {
@@ -206,7 +232,17 @@ export function SequenceViewerModal({
       // and are not cleaned up.
       host.remove();
     };
-  }, [state, accession, divId]);
+    // Primitives, not `focus`: the parent rebuilds that object literal every
+    // render, so depending on its identity would re-load the viewer on every
+    // keystroke in the table's filters.
+  }, [
+    state,
+    accession,
+    divId,
+    focus?.position,
+    focus?.label,
+    focus?.sequenceLength,
+  ]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -216,6 +252,12 @@ export function SequenceViewerModal({
       >
         <h2>
           {accession}
+          {focus && (
+            <span className="sviewer-position">
+              {" "}
+              @ {focus.position.toLocaleString()}
+            </span>
+          )}
           {ncbiUrl && (
             <a
               className="sviewer-external"
