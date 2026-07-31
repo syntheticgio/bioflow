@@ -691,6 +691,16 @@ class TestAnnotateCard:
     ships bcftools 1.21, so an availability assertion passes whether or not
     the seam it depends on actually works."""
 
+    def test_the_csq_patch_actually_takes_effect(self):
+        """Guards every other test in this class. bcftools 1.21 ships in the
+        image and `bcftools_csq` is lru_cached, so the available-card tests
+        assert exactly the value an escaped patch would also produce -- they
+        cannot themselves tell a working seam from a broken one."""
+        from app.services import suggestion_service
+
+        with installed_csq(False, error="nope"):
+            assert not suggestion_service.tools.bcftools_csq().available
+
     def test_no_card_on_a_non_vcf(self):
         with installed_csq(True):
             assert build_annotate_card(_bam(), None) is None
@@ -746,12 +756,13 @@ class TestAnnotateCard:
 
 
 @contextmanager
-def stub_db(references=(), chemistry=None):
-    """Cut the two database seams `suggestions_for` reaches through.
+def stub_db(references=(), chemistry=None, annotation_inputs=None):
+    """Cut the three database seams `suggestions_for` reaches through.
 
     `suggestions_for` is the one function in this module that is not pure: it
-    lists a project's references (for the align card) and walks a BAM's
-    provenance for chemistry (for the variants card). Both are patched here
+    lists a project's references (for the align card), walks a BAM's
+    provenance for chemistry (for the variants card), and resolves a VCF's
+    reference/GFF3 pair (for the annotate card). All three are patched here
     rather than backed by the Beanie fixture because everything being asserted
     -- which cards appear, in what order -- is decided above those calls, and
     a real database would only add setup that pins none of it.
@@ -771,6 +782,8 @@ def stub_db(references=(), chemistry=None):
               return_value=[_as_reference(r) for r in references]),
         patch("app.services.pipeline_service.read_chemistry_for_alignment",
               return_value=chemistry),
+        patch("app.services.pipeline_service.resolve_annotation_inputs",
+              return_value=annotation_inputs),
     ):
         yield
 
@@ -829,6 +842,16 @@ class TestSuggestionsFor:
         with stub_db(chemistry=align_runner.ReadChemistry.SHORT):
             cards = await suggestions_for(_bam())
         assert [c["kind"] for c in cards] == ["variants"]
+
+    async def test_a_vcf_gets_only_the_annotate_card(self):
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True,
+            reference=_ref("aaa", "ref.fna"),
+            annotation=_ref("bbb", "annotation.gff3"),
+        )
+        with installed_csq(True), stub_db(annotation_inputs=inputs):
+            cards = await suggestions_for(_vcf())
+        assert [c["kind"] for c in cards] == ["annotate"]
 
     async def test_the_order_does_not_move_with_availability(self):
         """Fixed order, not sorted by availability: a card that changes
@@ -935,6 +958,21 @@ class TestSuggestionsFor:
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
                     await suggestions_for(_fake_obj())
+        resolve.assert_not_called()
+
+    async def test_annotation_inputs_are_not_resolved_for_a_bam(self):
+        """The symmetric cost guard the other two formats each have:
+        `resolve_annotation_inputs` walks provenance to a reference and lists
+        the project for a GFF3, and hoisting that out of its VCF/BCF `if`
+        would pay it on every BAM click for nothing."""
+        with patch(
+            "app.services.pipeline_service.resolve_annotation_inputs"
+        ) as resolve:
+            with patch(
+                "app.services.pipeline_service.read_chemistry_for_alignment",
+                return_value=align_runner.ReadChemistry.SHORT,
+            ):
+                await suggestions_for(_bam())
         resolve.assert_not_called()
 
     async def test_the_ready_filter_is_pushed_into_the_listing_query(self):

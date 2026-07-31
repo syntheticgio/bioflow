@@ -575,14 +575,22 @@ def build_annotate_card(obj, inputs) -> SuggestionCard | None:
             reason=(inputs.reason if inputs else "Inputs could not be resolved."),
         )
 
+    # `ok=True` guarantees both reference and annotation are set -- see the
+    # single ok return in resolve_annotation_inputs, which is reached only
+    # after both are found.
     return SuggestionCard(
         kind="annotate",
         category="ANNOTATE",
         title=title,
-        description=(
-            f"Read genes from {inputs.annotation.name} and record what each "
-            "variant does to a protein."
-        ),
+        description=description,
+        # `resolve_annotation_inputs` matches on `ncbi_assembly_accession`, so
+        # there is exactly one candidate annotation by construction -- naming
+        # it in `description` cannot disambiguate anything, and every real
+        # file here is literally `genomic.gff`, which tells the user nothing.
+        # `why` is where the other available cards (preprocess, align,
+        # variants) put this kind of detail, and the frontend falls back to
+        # `reason` when `why` is absent -- which an available card never has.
+        why=f"Consequences called against {inputs.annotation.name}.",
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/annotate",
