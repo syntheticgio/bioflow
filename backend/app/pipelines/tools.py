@@ -346,6 +346,19 @@ TOOL_META: dict[str, ToolMeta] = {
             "Built-in per-base quality JSON for downstream visualization",
             "Fast C++ implementation, low memory footprint",
         ),
+        homepage="https://github.com/OpenGene/fastp",
+        repository="https://github.com/OpenGene/fastp",
+        # fastp's README asks for the 2025 iMeta paper, which supersedes the
+        # 2018 Bioinformatics one most pipelines still cite.
+        citation="Chen, iMeta 2025",
+        citation_url="https://doi.org/10.1002/imt2.70078",
+        license="MIT",
+        usage=(
+            "The default trimmer, and the only one the Actions tab suggests. "
+            "Adapter-trims and quality-filters a FASTQ file or an R1/R2 pair, "
+            "and its JSON report supplies the per-base quality and duplication "
+            "numbers the QC screen charts."
+        ),
     ),
     "cutadapt": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -363,6 +376,17 @@ TOOL_META: dict[str, ToolMeta] = {
             "Poly-A tail trimming for RNA-seq",
             "Works on any platform (Illumina, PacBio, ONT)",
         ),
+        homepage="https://cutadapt.readthedocs.io/",
+        repository="https://github.com/marcelm/cutadapt",
+        citation="Martin, EMBnet.journal 2011",
+        citation_url="https://doi.org/10.14806/ej.17.1.200",
+        license="MIT",
+        usage=(
+            "One of the three trimmers a trim job can select. Trims the "
+            "selected reads and parses its own JSON report for the read counts "
+            "the trim summary shows; it reports no progress while running, "
+            "since it emits no progress stream to follow."
+        ),
     ),
     "trimmomatic": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -377,6 +401,28 @@ TOOL_META: dict[str, ToolMeta] = {
             "Gold standard for legacy Illumina pipeline comparisons",
             "Simple paired-end model: keeps R1/R2 in sync",
             "Plays well with Nextera/TruSeq adapter FASTA files",
+        ),
+        # The project's own site (usadellab.org/cms/?page=trimmomatic) is
+        # HTTP-only, and a plain-http homepage renders as a browser warning
+        # next to a tool we are vouching for. The repo is the same project
+        # over TLS.
+        homepage="https://github.com/usadellab/Trimmomatic",
+        repository="https://github.com/usadellab/Trimmomatic",
+        citation="Bolger, Lohse & Usadel, Bioinformatics 2014",
+        citation_url="https://doi.org/10.1093/bioinformatics/btu170",
+        # GPL-3.0 per the repo's LICENSE, with a stated carve-out: the bundled
+        # Illumina adapter sequences remain Illumina's and are included by
+        # permission rather than under the GPL.
+        # GPL-3.0-only, not -or-later: the LICENSE grants version 3 and the
+        # sources carry no per-file "or (at your option) any later version"
+        # header, unlike FastQC, bowtie2, and hisat2.
+        license="GPL-3.0-only",
+        usage=(
+            "One of the three trimmers a trim job can select. Runs sliding- "
+            "window trimming against one of the adapter FASTA files this image "
+            "ships, and its summary line supplies the surviving-read counts "
+            "the trim report shows. The adapter file is checked against that "
+            "shipped set before use, since it reaches an unescaped argument."
         ),
     ),
     "fastqc": ToolMeta(
@@ -394,6 +440,18 @@ TOOL_META: dict[str, ToolMeta] = {
             "Overrepresented sequence detection",
             "Zero configuration: runs on any FASTQ",
         ),
+        homepage="https://www.bioinformatics.babraham.ac.uk/projects/fastqc/",
+        repository="https://github.com/s-andrews/FastQC",
+        # No paper: FastQC has always been cited as a web reference, and the
+        # project has never published one. Hence the empty citation_url.
+        citation="Andrews, FastQC (Babraham Bioinformatics)",
+        license="GPL-3.0-or-later",
+        usage=(
+            "Runs alongside fastp on every short-read QC job, producing the "
+            "standalone HTML report the QC screen links. Treated as optional: "
+            "if the binary is missing the QC job still finishes on fastp's "
+            "numbers rather than failing."
+        ),
     ),
     "nanoplot": ToolMeta(
         pipelines=(PipelineType.QC,),
@@ -410,6 +468,17 @@ TOOL_META: dict[str, ToolMeta] = {
             "Handles Nanopore and PacBio HiFi alike",
             "Reads FASTQ, BAM, or a sequencing summary file",
         ),
+        homepage="https://github.com/wdecoster/NanoPlot",
+        repository="https://github.com/wdecoster/NanoPlot",
+        citation="De Coster & Rademakers, Bioinformatics 2023",
+        citation_url="https://doi.org/10.1093/bioinformatics/btad311",
+        license="MIT",
+        usage=(
+            "The QC path for long reads: a QC job on Nanopore or PacBio input "
+            "runs NanoPlot instead of fastp and FastQC. Its plot directory "
+            "becomes the QC report, and its summary statistics supply the read "
+            "counts and length figures the QC screen shows."
+        ),
     ),
     "fasterq-dump": ToolMeta(
         pipelines=(PipelineType.DOWNLOAD,),
@@ -424,6 +493,21 @@ TOOL_META: dict[str, ToolMeta] = {
             "Splits paired-end runs into R1/R2 automatically",
             "Handles Illumina, PacBio, and Nanopore submissions alike",
         ),
+        homepage="https://github.com/ncbi/sra-tools",
+        repository="https://github.com/ncbi/sra-tools",
+        # No paper for the toolkit itself; the archive it reads is what gets
+        # cited, and that is the reference NCBI points submitters to.
+        citation="Leinonen et al., Nucleic Acids Research 2011 (Sequence Read Archive)",
+        citation_url="https://doi.org/10.1093/nar/gkq1019",
+        # A US Government Work, dedicated to the public domain rather than
+        # licensed -- SPDX has an identifier for exactly this notice.
+        license="NCBI-PD",
+        usage=(
+            "The second half of an SRA download job: converts the fetched run "
+            "into FASTQ, splitting a paired run into R1/R2, and the resulting "
+            "files are registered as project objects. Unlike prefetch its "
+            "failure fails the job, since nothing downstream exists without it."
+        ),
     ),
     "prefetch": ToolMeta(
         pipelines=(PipelineType.DOWNLOAD,),
@@ -437,6 +521,20 @@ TOOL_META: dict[str, ToolMeta] = {
             "Resumable: an interrupted fetch continues rather than restarting",
             "Validates the downloaded archive against its checksum",
             "A no-op on an already-cached run, so it is safe to always run",
+        ),
+        # Same repository, licence, and reference as fasterq-dump: both are
+        # binaries of the one SRA Toolkit, listed separately because a user
+        # picks them separately.
+        homepage="https://github.com/ncbi/sra-tools",
+        repository="https://github.com/ncbi/sra-tools",
+        citation="Leinonen et al., Nucleic Acids Research 2011 (Sequence Read Archive)",
+        citation_url="https://doi.org/10.1093/nar/gkq1019",
+        license="NCBI-PD",
+        usage=(
+            "Runs first on every SRA download job, caching the run before "
+            "conversion. Its failure is logged rather than fatal -- "
+            "fasterq-dump can fetch on its own -- so a prefetch that cannot "
+            "run only costs resumability, not the download."
         ),
     ),
     "datasets": ToolMeta(
@@ -453,6 +551,17 @@ TOOL_META: dict[str, ToolMeta] = {
             "Reports package contents and size before downloading anything",
         ),
         one_liner="Downloads a published genome assembly from NCBI",
+        homepage="https://www.ncbi.nlm.nih.gov/datasets/",
+        repository="https://github.com/ncbi/datasets",
+        citation="O'Leary et al., Scientific Data 2024",
+        citation_url="https://doi.org/10.1038/s41597-024-03571-y",
+        license="NCBI-PD",
+        usage=(
+            "Backs the 'download a reference assembly' job: given a GCA or GCF "
+            "accession it fetches the assembly package, and the genome FASTA "
+            "and annotation it unpacks are registered as project objects "
+            "available to align against."
+        ),
     ),
     "bwa-mem2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
@@ -466,6 +575,17 @@ TOOL_META: dict[str, ToolMeta] = {
             "Handles mated reads with proper insert-size modeling",
             "2x faster than original bwa-mem with the same accuracy",
             "x86-64 (prebuilt) and arm64 (sse2neon build) supported",
+        ),
+        homepage="https://github.com/bwa-mem2/bwa-mem2",
+        repository="https://github.com/bwa-mem2/bwa-mem2",
+        citation="Vasimuddin et al., IEEE IPDPS 2019",
+        citation_url="https://doi.org/10.1109/IPDPS.2019.00041",
+        license="MIT",
+        usage=(
+            "One of the four aligners an alignment job can select, and the "
+            "default suggested for short reads. Builds its own index for a "
+            "reference the first time one is needed, then aligns straight into "
+            "a sorted BAM."
         ),
     ),
     "minimap2": ToolMeta(
@@ -481,6 +601,16 @@ TOOL_META: dict[str, ToolMeta] = {
             "Splice-aware for RNA-seq (junctions in BAM tags)",
             "Short-read alignment with the -x sr preset",
             "Runs on all architectures including arm64",
+        ),
+        homepage="https://github.com/lh3/minimap2",
+        repository="https://github.com/lh3/minimap2",
+        citation="Li, Bioinformatics 2018",
+        citation_url="https://doi.org/10.1093/bioinformatics/bty191",
+        license="MIT",
+        usage=(
+            "The aligner for long reads, and the one suggested for Nanopore or "
+            "PacBio input. Aligns straight into a sorted BAM, with the preset "
+            "matching the read type offered as a choice in the align dialog."
         ),
     ),
     "bowtie2": ToolMeta(
@@ -499,6 +629,17 @@ TOOL_META: dict[str, ToolMeta] = {
             "Explicit insert-size ceiling for fragment-length-sensitive work",
             "Four sensitivity presets trading speed against divergent regions",
         ),
+        homepage="https://bowtie-bio.sourceforge.net/bowtie2/index.shtml",
+        repository="https://github.com/BenLangmead/bowtie2",
+        citation="Langmead & Salzberg, Nature Methods 2012",
+        citation_url="https://doi.org/10.1038/nmeth.1923",
+        license="GPL-3.0-or-later",
+        usage=(
+            "One of the four aligners an alignment job can select. Its index is "
+            "built by a separate bowtie2-build binary, which this application "
+            "runs on demand rather than asking the user to prepare a reference "
+            "beforehand."
+        ),
     ),
     "hisat2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
@@ -516,6 +657,16 @@ TOOL_META: dict[str, ToolMeta] = {
             "Can be told to skip spliced alignment for DNA input",
             "Output mode tailored for downstream transcript assembly",
         ),
+        homepage="https://daehwankimlab.github.io/hisat2/",
+        repository="https://github.com/DaehwanKimLab/hisat2",
+        citation="Kim et al., Nature Biotechnology 2019",
+        citation_url="https://doi.org/10.1038/s41587-019-0201-4",
+        license="GPL-3.0-or-later",
+        usage=(
+            "One of the four aligners an alignment job can select, and the "
+            "RNA-seq choice. Like bowtie2 its index comes from a separate "
+            "hisat2-build binary this application runs on demand."
+        ),
     ),
     "samtools": ToolMeta(
         pipelines=(PipelineType.UTILITY, PipelineType.QC),
@@ -529,6 +680,20 @@ TOOL_META: dict[str, ToolMeta] = {
             "Universal BAM/CRAM manipulation",
             "Fast coordinate sorting and indexing",
             "Flagstat: comprehensive alignment statistics",
+        ),
+        homepage="https://www.htslib.org/",
+        repository="https://github.com/samtools/samtools",
+        # The project's README asks for the 2021 GigaScience paper rather than
+        # the 2009 SAM-format one, which is the citation most pipelines still
+        # reach for.
+        citation="Danecek et al., GigaScience 2021",
+        citation_url="https://doi.org/10.1093/gigascience/giab008",
+        license="MIT",
+        usage=(
+            "The most-used tool here: every alignment job pipes into it to "
+            "sort and index the BAM, it indexes the reference beforehand, and "
+            "its flagstat, idxstats, and coverage output are the numbers "
+            "behind the alignment report."
         ),
     ),
     "bcftools": ToolMeta(
@@ -545,6 +710,22 @@ TOOL_META: dict[str, ToolMeta] = {
             "Part of the htslib/samtools ecosystem",
             "Also does the VCF indexing (bcftools index -t)",
         ),
+        homepage="https://www.htslib.org/",
+        repository="https://github.com/samtools/bcftools",
+        # The same GigaScience paper samtools cites: bcftools' own README asks
+        # for it by name rather than for a separate bcftools paper. The
+        # calling model itself is Li 2011, doi.org/10.1093/bioinformatics/btr509.
+        citation="Danecek et al., GigaScience 2021",
+        citation_url="https://doi.org/10.1093/gigascience/giab008",
+        # Dual-licensed, unlike samtools' plain MIT: the LICENSE offers a
+        # choice of MIT/Expat or GPL, and a build linked against the GNU
+        # Scientific Library (off by default) is GPL-only.
+        license="MIT OR GPL-3.0-or-later",
+        usage=(
+            "The short-read variant caller, and the indexer for every VCF this "
+            "application produces -- including the ones Clair3 wrote, since it "
+            "is installed whichever caller ran."
+        ),
     ),
     "clair3": ToolMeta(
         pipelines=(PipelineType.VARIANT,),
@@ -559,6 +740,17 @@ TOOL_META: dict[str, ToolMeta] = {
             "Calls SNVs and small indels together",
             "Chemistry-matched models, selected automatically from QC",
             "CPU-only build: no GPU required",
+        ),
+        homepage="https://github.com/HKU-BAL/Clair3",
+        repository="https://github.com/HKU-BAL/Clair3",
+        citation="Zheng et al., Nature Computational Science 2022",
+        citation_url="https://doi.org/10.1038/s43588-022-00387-x",
+        license="BSD-3-Clause",
+        usage=(
+            "The long-read variant caller: a variant job on ONT or PacBio HiFi "
+            "input runs Clair3 rather than bcftools, against a chemistry-"
+            "matched model picked from the reads' recorded platform. bcftools "
+            "still indexes the VCF it writes."
         ),
     ),
 }
