@@ -30,6 +30,10 @@ const CHROMOSOME_SCALE_BP = 100_000;
  *  -- coding sequences, proteins, a lone plasmid. */
 const MIN_CHROMOSOME_SCALE = 5;
 
+/** Bars drawn before the rest move to the overflow picker. Chosen so a human
+ *  assembly shows its 24 primary chromosomes and yeast shows all 17. */
+const MAX_BARS = 24;
+
 export function classifyChromosomes(
   facts: Record<string, unknown>,
 ): ChromosomeView {
@@ -55,7 +59,17 @@ export function classifyChromosomes(
     return { kind: "not-chromosomal", reason: describeNonChromosomal(entries) };
   }
 
-  return { kind: "nothing" };
+  // Ranked by length, not file order: chromosome numbers cannot be recovered
+  // from an accession like NC_001133.9 without an NCBI lookup this design
+  // does without, and ranking is what makes the top-24 cut meaningful.
+  const ranked = [...entries].sort((a, b) => b.length - a.length);
+
+  return {
+    kind: "drawable",
+    bars: ranked.slice(0, MAX_BARS),
+    overflow: ranked.slice(MAX_BARS),
+    linkable: false,
+  };
 }
 
 /**

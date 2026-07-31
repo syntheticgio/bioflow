@@ -76,4 +76,69 @@ describe("classifyChromosomes", () => {
     });
     expect(view.kind).toBe("not-chromosomal");
   });
+
+  /** The real GCF_000146045.2_R64 yeast genome: 17 sequences, 16 nuclear
+   *  chromosomes plus the 85 kb mitochondrion. */
+  const YEAST_LENGTHS: Record<string, number> = {
+    "NC_001133.9": 230218,
+    "NC_001134.8": 813184,
+    "NC_001135.5": 316620,
+    "NC_001136.10": 1531933,
+    "NC_001137.3": 576874,
+    "NC_001138.5": 270161,
+    "NC_001139.9": 1090940,
+    "NC_001140.6": 562643,
+    "NC_001141.2": 439888,
+    "NC_001142.9": 745751,
+    "NC_001143.9": 666816,
+    "NC_001144.5": 1078177,
+    "NC_001145.3": 924431,
+    "NC_001146.8": 784333,
+    "NC_001147.6": 1091291,
+    "NC_001148.4": 948066,
+    "NC_001224.1": 85779,
+  };
+
+  it("ranks bars longest first", () => {
+    const view = classifyChromosomes({
+      sequence_count: 17,
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+    });
+    expect(view.kind).toBe("drawable");
+    if (view.kind !== "drawable") return;
+    expect(view.bars[0]).toEqual({ name: "NC_001136.10", length: 1531933 });
+    expect(view.bars).toHaveLength(17);
+    expect(view.overflow).toHaveLength(0);
+  });
+
+  // The 100 kb rule decides whether to draw at all; it must never drop a
+  // sequence from a file that passed. Yeast's mitochondrion is 85 kb and
+  // still belongs on the strip.
+  it("keeps sub-100kb sequences as bars once the file qualifies", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars.map((b) => b.name)).toContain("NC_001224.1");
+  });
+
+  // A human-like assembly: 24 primary chromosomes plus 200 unplaced
+  // scaffolds. The bars must be the 24 biggest, with the rest reachable
+  // rather than discarded.
+  it("caps bars at 24 and puts the rest in overflow", () => {
+    const many: Record<string, number> = {};
+    for (let i = 0; i < 24; i++) many[`NC_0000${i}.1`] = 50_000_000 - i * 1000;
+    for (let i = 0; i < 200; i++) many[`NW_0001${i}.1`] = 120_000;
+
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(many),
+      sequence_lengths: many,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars).toHaveLength(24);
+    expect(view.overflow).toHaveLength(200);
+    expect(view.bars.every((b) => b.name.startsWith("NC_"))).toBe(true);
+  });
 });
