@@ -103,10 +103,18 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
 
           {f.vcf_stats_density_bins && f.vcf_stats_density_bounds && (
             <div className="section">
+              <div className="section-title">Variant density</div>
               <VariantDensityChart
                 bins={f.vcf_stats_density_bins}
                 boundaries={f.vcf_stats_density_bounds}
               />
+              <div className="section-note">
+                Bar heights use a square-root scale, not a straight count, so
+                that regions with just a few variants still show up next to
+                the densest spots — read this as "where are the variants,"
+                not as an exact ratio between bars. Hover a bar for its
+                actual count.
+              </div>
             </div>
           )}
 

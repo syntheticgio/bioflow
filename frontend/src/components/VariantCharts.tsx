@@ -23,7 +23,23 @@ export function VariantDensityChart({
   const maxVal = Math.max(...bins, 1);
   const barW = plotW / bins.length;
   const x = (i: number) => pad.left + i * barW;
-  const y = (v: number) => pad.top + plotH - (v / maxVal) * plotH;
+
+  // Variant density is severely long-tailed (verified on real data: a
+  // handful of bins near the max, hundreds in single digits), so scaling
+  // bar height linearly against the max renders almost the whole genome as
+  // a flat line -- a bin of 2 next to a bin of 205 is under a pixel tall.
+  // Square-root the height instead: it compresses the tail enough that
+  // sparse bins stay visible while the peak still reads as the peak. Log
+  // would flatten real structure too far and needs special-casing for
+  // zero-count bins, which sqrt doesn't.
+  const scale = (v: number) => Math.sqrt(v) / Math.sqrt(maxVal);
+  const barHeight = (v: number) => {
+    if (v <= 0) return 0;
+    // Any variant present must be visibly different from none -- round up
+    // to a 1px floor rather than let a scaled sliver disappear entirely.
+    return Math.max(scale(v) * plotH, 1);
+  };
+  const y = (v: number) => pad.top + plotH - barHeight(v);
 
   // More than ~40 separators is noise rather than signal at this width, and
   // the first boundary sits at x=0 -- that line is the axis, not a division
@@ -45,7 +61,7 @@ export function VariantDensityChart({
           x={x(i)}
           y={y(count)}
           width={Math.max(barW, 1)}
-          height={pad.top + plotH - y(count)}
+          height={barHeight(count)}
           fill="var(--accent)"
           opacity={0.8}
         >
