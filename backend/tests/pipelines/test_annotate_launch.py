@@ -8,7 +8,7 @@ missing one otherwise fails thirty seconds into a job rather than at launch.
 import pytest
 
 from app.errors import PermanentError
-from app.queue import results, variant_handlers
+from app.queue import registry, results, variant_handlers
 from app.queue.registry import JobContext
 
 
@@ -23,6 +23,18 @@ class TestAnnotateVariantsRegistered:
     # reaper deletes it -- nothing is ever ingested or shown in the UI.
     def test_has_a_result_applier(self):
         assert "annotate_variants" in results._APPLIERS
+
+    # The name being registered is not enough -- it has to be registered to
+    # the *handler*. A helper defined between the decorator and its function
+    # silently captures the decorator instead, and everything still imports,
+    # every payload test still passes, and the worker still logs the name in
+    # handlers_loaded. The job then runs the helper, which returns a closure,
+    # and the applier dies on `'function' object has no attribute 'get'`.
+    # That is exactly what happened here; this pins it.
+    def test_the_name_is_registered_to_the_handler_itself(self):
+        spec = registry.get_handler("annotate_variants")
+        assert spec is not None
+        assert spec.fn is variant_handlers.annotate_variants
 
 
 class TestAnnotateVariantsPayload:

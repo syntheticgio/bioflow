@@ -454,12 +454,6 @@ def run_vcf_stats(ctx: JobContext) -> dict:
     return {"object_id": object_id, "facts": facts}
 
 
-@handler(
-    "annotate_variants",
-    mode=HandlerMode.SUBPROCESS,
-    job_class=JobClass.COMPUTE,
-    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
-)
 def _csq_line_logger(ctx: JobContext) -> "callable":
     """A line callback that classifies `csq`'s stderr as it streams.
 
@@ -480,6 +474,12 @@ def _csq_line_logger(ctx: JobContext) -> "callable":
     return on_line
 
 
+@handler(
+    "annotate_variants",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+)
 def annotate_variants(ctx: JobContext) -> dict:
     """Add consequence annotations to a VCF with `bcftools csq`.
 
