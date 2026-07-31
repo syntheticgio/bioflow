@@ -140,6 +140,57 @@ def contigs_from_coverage(*, idxstats_rows: list[dict], coverage_rows: list[dict
     return merged
 
 
+def allocate_bins(
+    *,
+    contig_lengths: list[tuple[str, int]],
+    bin_count: int,
+) -> tuple[dict[str, tuple[int, float]], list[dict], dict[str, int]]:
+    """Lay contigs end to end across a fixed number of bins.
+
+    Bins are allocated proportionally to each contig's length, with one floor:
+    every contig gets at least one bin regardless of its share, so a short
+    scaffold is never averaged away into a neighbour's bin or omitted
+    entirely. Rounding discrepancies are absorbed by the last contig, so the
+    allocation always sums to exactly `bin_count`.
+
+    Extracted from `bin_depth` so variant density (which counts per bin) and
+    read depth (which averages per bin) share one definition of where a
+    contig sits on the axis. Returns `(geometry, boundaries, counts)`:
+    `geometry` maps contig -> (start_bin, positions_per_bin), `boundaries`
+    marks which bin index starts each contig for drawing separators, and
+    `counts` maps contig -> how many bins it was given.
+    """
+    total_length = sum(length for _, length in contig_lengths)
+    if total_length <= 0 or bin_count <= 0:
+        return {}, [], {}
+
+    n = len(contig_lengths)
+    floor_bins = min(bin_count, n)
+    remaining_bins = bin_count - floor_bins
+
+    contig_bin_counts: dict[str, int] = {}
+    for name, length in contig_lengths:
+        share = round(remaining_bins * length / total_length) if total_length else 0
+        contig_bin_counts[name] = 1 + share
+
+    allocated = sum(contig_bin_counts.values())
+    if allocated != bin_count and contig_lengths:
+        last_name = contig_lengths[-1][0]
+        contig_bin_counts[last_name] += bin_count - allocated
+
+    geometry: dict[str, tuple[int, float]] = {}
+    boundaries = []
+    offset = 0
+    for name, length in contig_lengths:
+        bins_for_contig = contig_bin_counts[name]
+        positions_per_bin = max(length / bins_for_contig, 1)
+        geometry[name] = (offset, positions_per_bin)
+        boundaries.append({"contig": name, "bin_start": offset})
+        offset += bins_for_contig
+
+    return geometry, boundaries, contig_bin_counts
+
+
 def bin_depth(
     *,
     contig_lengths: list[tuple[str, int]],
@@ -161,36 +212,11 @@ def bin_depth(
     `boundaries` marks which bin index starts each contig, for drawing
     separators and axis labels.
     """
-    total_length = sum(length for _, length in contig_lengths)
-    if total_length <= 0 or bin_count <= 0:
+    geometry, boundaries, contig_bin_counts = allocate_bins(
+        contig_lengths=contig_lengths, bin_count=bin_count
+    )
+    if not geometry:
         return [], []
-
-    n = len(contig_lengths)
-    floor_bins = min(bin_count, n)
-    remaining_bins = bin_count - floor_bins
-
-    contig_bin_counts: dict[str, int] = {}
-    for name, length in contig_lengths:
-        share = round(remaining_bins * length / total_length) if total_length else 0
-        contig_bin_counts[name] = 1 + share
-
-    # Rounding can miss the exact total by a few bins either way; any
-    # discrepancy is absorbed by the last contig so the sum is always exactly
-    # bin_count.
-    allocated = sum(contig_bin_counts.values())
-    if allocated != bin_count and contig_lengths:
-        last_name = contig_lengths[-1][0]
-        contig_bin_counts[last_name] += bin_count - allocated
-
-    geometry: dict[str, tuple[int, float]] = {}
-    boundaries = []
-    offset = 0
-    for name, length in contig_lengths:
-        bins_for_contig = contig_bin_counts[name]
-        positions_per_bin = max(length / bins_for_contig, 1)
-        geometry[name] = (offset, positions_per_bin)
-        boundaries.append({"contig": name, "bin_start": offset})
-        offset += bins_for_contig
 
     bin_sum = [0.0] * bin_count
     bin_n = [0] * bin_count
