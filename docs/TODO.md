@@ -2,6 +2,72 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+## The first `/pipelines/tools` request stalls 6-15s on NanoPlot
+
+Raised: 2026-07-31, while fixing NanoPlot being reported unavailable
+(`SLOW_IMPORT_TIMEOUT_SECONDS` in `backend/app/pipelines/tools.py`).
+
+Probing is lazy and serial, and nothing warms it. `all_tools()` calls fifteen
+`lru_cache`d probe functions in sequence, each shelling out to `<tool>
+--version`. No cache is populated at startup -- `lifespan` in
+`backend/app/main.py` connects Mongo/Redis and loads handlers but never touches
+`tools` -- so **the entire probe cost is paid inside whichever user request
+reaches `/api/v1/pipelines/tools` first**, which is the tool selector and the
+`/help/software` page.
+
+Measured on this machine, cold container:
+
+| | |
+|---|---|
+| NanoPlot alone | **12.0s** |
+| All other 14 tools combined | ~2.7s (fastqc 0.7s, bwa-mem2 1.0s, rest <0.3s) |
+| Full serial probe | **14.7s** |
+| Endpoint, warm host page cache | **6.1s** |
+
+The important shape: **this is one slow tool, not fifteen.** NanoPlot is ~80% of
+the total because it imports pandas/scipy/plotly before printing one line.
+cutadapt is also a Python entry point and answers in 0.2s.
+
+That makes parallelism the *wrong* fix, which is worth stating plainly because
+it is the obvious one to reach for. Running all fifteen probes concurrently
+caps the total at the slowest single probe -- NanoPlot's 12s -- so it buys
+about 3s of the 15 and adds a thread pool. Options actually worth considering:
+
+1. **Warm the cache in `lifespan`, in the background.** A `create_task` that
+   calls `all_tools()` after `yield`-time setup moves the cost off the request
+   path entirely; by the time a user opens the tool selector it is usually
+   done. Keep the laziness as the fallback for a request that arrives first --
+   the point is to stop *guaranteeing* a user pays it, not to add a startup
+   gate. Note this would make container start do 15 subprocess spawns, so it
+   should not block `/readyz`.
+2. **Don't ask NanoPlot for its version at all.** The probe exists to prove the
+   binary runs and to capture a version string for provenance. `shutil.which`
+   plus the version parsed from a cheaper source would collapse 12s to ~0.
+   Cost: loses the "does it actually execute" check that catches an x86-64
+   binary on arm64 -- the exact case `_probe`'s returncode branch was written
+   for. Probably only acceptable if paired with a check that runs once and is
+   persisted rather than per-process.
+3. **Persist probe results across restarts.** Keyed by binary path + mtime, in
+   Redis or under `.biopipe/`. Survives `uvicorn --reload`, which currently
+   discards the whole cache on every backend edit -- so during active
+   development this cost is paid repeatedly, not once.
+
+Option 1 is the smallest change that fixes the user-visible symptom and is
+probably where to start; 3 is the one that also helps the edit-reload loop.
+
+Not urgent: it is a one-time-per-process stall on a page that is not on the
+critical path of any pipeline, and the 60s timeout means it now *completes*
+rather than silently failing. Before this was fixed the same probe hit the 10s
+default and NanoPlot simply reported unavailable, which is why the latency was
+not visible as latency.
+
+Worth doing before anything else with a heavy import graph is registered --
+another tool of NanoPlot's shape doubles the stall, and `all_tools()` has no
+per-tool budget.
+
+Touches: `backend/app/pipelines/tools.py`, `backend/app/main.py` (lifespan),
+`backend/app/api/v1/pipelines.py`.
+
 ## Assembly: designed, not built
 
 > **Variant calling was built on 2026-07-29** and is no longer deferred. The
