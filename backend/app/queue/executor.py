@@ -154,7 +154,10 @@ class JobExecutor:
         try:
             from app.queue import results
 
-            await results.apply(job.type, result)
+            # The job document has carried its owner since `enqueue` started
+            # setting it; the appliers that create objects from nothing but a
+            # project_id have no other source for one.
+            await results.apply(job.type, result, owner=job.owner)
         except Exception as e:  # noqa: BLE001
             # The work succeeded; only the write-back failed. Log loudly rather
             # than failing the job and re-running expensive work.

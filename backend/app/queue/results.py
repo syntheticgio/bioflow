@@ -29,10 +29,37 @@ from app.pipelines.aligners import Aligner
 log = get_logger(__name__)
 
 
-async def apply(job_type: str, result: dict) -> None:
+async def apply(job_type: str, result: dict, *, owner: str) -> None:
+    """Run the applier for a finished job, telling it who launched the job.
+
+    `owner` is the *launching profile*, not necessarily the owner of every
+    object an applier writes. Most appliers resolve a parent object first and
+    take that parent's owner instead, because a sidecar's owner has to match
+    the object it hangs off -- `list_sidecars` and `delete_object`'s cascade
+    both key on that relationship, so an inherited owner is the more specific
+    fact and the one those appliers must use.
+
+    The two download appliers have no parent to inherit from: they create the
+    first object in a chain from nothing but a project_id, so the launching
+    profile is the only owner that exists. That is the whole reason this
+    parameter is here. It is passed to every applier uniformly rather than only
+    to those two, so that dispatch stays one line and a new applier that *does*
+    need it is not silently handed nothing. Those appliers name it
+    `launching_owner` and do not read it, which is the intended reading: the
+    value arrived, and inheriting from the parent was a decision rather than an
+    oversight.
+
+    The two should never actually disagree. Every `queue.enqueue` call in the
+    services derives its owner from the very object or project the job acts on
+    (`owner=bam.owner`, `owner=project.owner`, ...), so the launching profile is
+    already the parent's owner by construction. A disagreement would mean one
+    profile's job producing another profile's object, which nothing can reach
+    today -- but the parent-derived owner is still the one to trust if it ever
+    happened, because it is what `list_sidecars` will later query with.
+    """
     handler = _APPLIERS.get(job_type)
     if handler is not None:
-        await handler(result)
+        await handler(result, owner=owner)
 
 
 def should_assign_reference_role(
@@ -57,7 +84,7 @@ def should_assign_reference_role(
     return bool((enrichment or {}).get("accession"))
 
 
-async def _apply_ingest_headers(result: dict) -> None:
+async def _apply_ingest_headers(result: dict, *, launching_owner: str) -> None:
     object_id = result.get("object_id")
     if not object_id:
         return
@@ -280,7 +307,7 @@ async def _link_mate(obj: DataObject) -> None:
     )
 
 
-async def _apply_trim_reads(result: dict) -> None:
+async def _apply_trim_reads(result: dict, *, launching_owner: str) -> None:
     """Turn a finished trim run into objects.
 
     The handler ran in a worker thread and could not touch the database, so
@@ -405,7 +432,7 @@ async def _apply_trim_reads(result: dict) -> None:
     )
 
 
-async def _apply_sra_download(result: dict) -> None:
+async def _apply_sra_download(result: dict, *, owner: str) -> None:
     """Take a finished SRA download into the project, and chain its QC.
 
     The handler ran in a worker thread and could not touch the database, so
@@ -442,14 +469,13 @@ async def _apply_sra_download(result: dict) -> None:
     for entry in staged:
         try:
             obj = await object_service.ingest_local_file(
-                # TODO(profiles): Task 9 threads the job's owner through
-                # `results.apply`. Unlike the appliers that resolve a parent
-                # object, an SRA download has only the payload's project_id --
-                # there is nothing here to read an owner off. Until then this
-                # fails closed: on a project owned by anything but "local",
-                # ingest_local_file raises NotFoundError, the except below logs
-                # it, and the downloaded FASTQ is silently never registered.
-                owner="local",
+                # The launching job's owner, threaded through `apply`. Unlike
+                # the appliers that resolve a parent object, a download has only
+                # the payload's project_id -- a freshly downloaded FASTQ is
+                # derived from nothing, so there is no parent here to read an
+                # owner off, and the profile that asked for the download is the
+                # only answer.
+                owner=owner,
                 project_id=project_id,
                 path=Path(entry["path"]),
                 name=entry["name"],
@@ -590,7 +616,7 @@ def _component_metadata(base: dict, accession: str, component: str) -> dict:
     return out
 
 
-async def _apply_assembly_download(result: dict) -> None:
+async def _apply_assembly_download(result: dict, *, owner: str) -> None:
     """Take a finished assembly download into the project.
 
     Mirrors `_apply_sra_download`: the handler ran in a worker thread and
@@ -629,14 +655,10 @@ async def _apply_assembly_download(result: dict) -> None:
         )
         try:
             obj = await object_service.ingest_local_file(
-                # TODO(profiles): Task 9 threads the job's owner through
-                # `results.apply`. As in `_apply_sra_download`, a download has
-                # only the payload's project_id and no parent object to read an
-                # owner off. Until then this fails closed: on a project owned by
-                # anything but "local", ingest_local_file raises NotFoundError,
-                # the except below logs it, and the component is silently never
-                # registered.
-                owner="local",
+                # As in `_apply_sra_download`: a download has only the payload's
+                # project_id and no parent object to inherit from, so the owner
+                # of the job that asked for it is the one that reaches here.
+                owner=owner,
                 project_id=project_id,
                 path=Path(entry["path"]),
                 name=entry["name"],
@@ -673,7 +695,7 @@ async def _apply_assembly_download(result: dict) -> None:
     )
 
 
-async def _apply_run_qc(result: dict) -> None:
+async def _apply_run_qc(result: dict, *, launching_owner: str) -> None:
     """Record a QC run's numbers on the object it described.
 
     QC derives no files, so unlike trim or align there is nothing to ingest --
@@ -717,7 +739,7 @@ async def _apply_run_qc(result: dict) -> None:
         log.warning("summary_launch_failed", object_id=object_id, error=str(e))
 
 
-async def _apply_summarize_object(result: dict) -> None:
+async def _apply_summarize_object(result: dict, *, launching_owner: str) -> None:
     """Record a generated narrative summary on the object it describes.
 
     A no-op when the model server was down or the file had too little to say --
@@ -759,7 +781,7 @@ async def _apply_summarize_object(result: dict) -> None:
     log.info("summary_applied", object_id=object_id, model=result.get("model"))
 
 
-async def _apply_build_index(result: dict) -> None:
+async def _apply_build_index(result: dict, *, launching_owner: str) -> None:
     """Turn a finished index build into sidecar objects on the reference.
 
     Every produced file becomes an object in its own right -- verified,
@@ -911,7 +933,7 @@ def align_provenance(*, result: dict, reads_facts: dict | None) -> dict:
     return provenance
 
 
-async def _apply_align_reads(result: dict) -> None:
+async def _apply_align_reads(result: dict, *, launching_owner: str) -> None:
     """Turn a finished alignment into a BAM object, and chain its indexing.
 
     The BAM descends from both the reads and the reference: all three are
@@ -993,7 +1015,7 @@ async def _apply_align_reads(result: dict) -> None:
             await run_service.link_job(run_id, index_job.id, RunJobRole.INDEX_BAM)
 
 
-async def _apply_index_bam(result: dict) -> None:
+async def _apply_index_bam(result: dict, *, launching_owner: str) -> None:
     """Attach a `.bai` to its BAM and record the flagstat numbers."""
     from app.services import object_service
 
@@ -1056,7 +1078,7 @@ async def _apply_index_bam(result: dict) -> None:
             log.warning("bam_stats_chain_failed", object_id=bam_id, error=str(e))
 
 
-async def _apply_run_bam_stats(result: dict) -> None:
+async def _apply_run_bam_stats(result: dict, *, launching_owner: str) -> None:
     """Record a Results computation's numbers on the BAM it described.
 
     Read-only like QC: no files to ingest, just facts merged onto the object.
@@ -1085,7 +1107,7 @@ async def _apply_run_bam_stats(result: dict) -> None:
     )
 
 
-async def _apply_run_vcf_stats(result: dict) -> None:
+async def _apply_run_vcf_stats(result: dict, *, launching_owner: str) -> None:
     """Record a Variant Results computation on the VCF it described.
 
     Read-only like QC and BAM stats: no files to ingest, just facts merged
@@ -1129,7 +1151,7 @@ def variant_provenance(result: dict) -> dict:
     }
 
 
-async def _apply_call_variants(result: dict) -> None:
+async def _apply_call_variants(result: dict, *, launching_owner: str) -> None:
     """Turn a finished variant calling run into a VCF object and its index.
 
     The VCF descends from both the BAM and the reference: a variant call is a
@@ -1209,7 +1231,7 @@ def annotation_provenance(result: dict) -> dict:
     }
 
 
-async def _apply_annotate_variants(result: dict) -> None:
+async def _apply_annotate_variants(result: dict, *, launching_owner: str) -> None:
     """Turn a finished annotation run into a new VCF object and its index.
 
     Mirrors `_apply_call_variants`: the annotated VCF descends from the

@@ -10,6 +10,7 @@ passes any assertion made against a "local" project, which is exactly how the
 placeholder these tests replace survived a green suite.
 """
 
+import inspect
 import uuid
 from pathlib import Path
 
@@ -74,6 +75,14 @@ async def _parent(owner: str, name: str, *, role: ObjectRole | None = None) -> D
 
 
 class TestSidecarsInheritTheirParentsOwner:
+    """`launching_owner` is deliberately a *different* string here.
+
+    These appliers take their owner from the parent object they resolved, not
+    from the job, and a matching value would make either source pass the
+    assertion. Setting it to "someone-else" is what makes these tests say which
+    of the two actually reached the ingest.
+    """
+
     async def test_index_bam_attaches_the_bai_to_a_non_local_bam(self):
         """The bug this replaces, end to end.
 
@@ -92,7 +101,8 @@ class TestSidecarsInheritTheirParentsOwner:
                 "bam_object_id": str(bam.id),
                 "output": {"tmp_path": str(output), "name": "sample.bam.bai"},
                 "facts": {},
-            }
+            },
+            launching_owner="someone-else",
         )
 
         sidecars = await object_service.list_sidecars(bam.id, owner=owner)
@@ -112,7 +122,8 @@ class TestSidecarsInheritTheirParentsOwner:
                 "bam_object_id": str(bam.id),
                 "output": {"tmp_path": str(output), "name": "flagged.bam.bai"},
                 "facts": {},
-            }
+            },
+            launching_owner="someone-else",
         )
 
         refreshed = await DataObject.get(bam.id)
@@ -131,7 +142,8 @@ class TestSidecarsInheritTheirParentsOwner:
                 "reference_object_id": str(reference.id),
                 "aligner": "minimap2",
                 "outputs": [{"tmp_path": str(output), "name": "genome.fna.fai", "role": "fai"}],
-            }
+            },
+            launching_owner="someone-else",
         )
 
         sidecars = await object_service.list_sidecars(reference.id, owner=owner)
@@ -155,7 +167,8 @@ class TestDerivedOutputsInheritTheirParentsOwner:
                 "caller": "bcftools",
                 "output": {"tmp_path": str(output), "name": "calls.vcf.gz"},
                 "index": {"tmp_path": str(index), "name": "calls.vcf.gz.tbi"},
-            }
+            },
+            launching_owner="someone-else",
         )
 
         produced = await DataObject.find(
@@ -183,9 +196,78 @@ class TestDerivedOutputsInheritTheirParentsOwner:
                 "tool": "fastp",
                 "outputs": [{"tmp_path": str(output), "name": "reads.trimmed.fastq.gz"}],
                 "report": {},
-            }
+            },
+            launching_owner="someone-else",
         )
 
         produced = await DataObject.find(DataObject.derived_from == reads.id).to_list()
         assert [p.name for p in produced] == ["reads.trimmed.fastq.gz"]
         assert produced[0].owner == owner
+
+
+class TestDownloadsTakeTheOwnerFromTheJob:
+    """The two appliers with no parent object to read an owner off.
+
+    A download produces the *first* object in its chain: nothing it ingests is
+    derived from anything, so there is no `<parent>.owner` to inherit and the
+    only owner available is the one on the job that launched it. That is why
+    `apply` has to be told, and why these two are the sites Task 9 exists for.
+    """
+
+    async def test_apply_requires_an_owner(self):
+        """A keyword-only, non-defaulted `owner` is the point of the change.
+
+        A default would make every caller that forgets it silently write
+        someone else's data to "local", which is the failure these tests were
+        written to make impossible to reintroduce.
+        """
+        sig = inspect.signature(results.apply)
+        owner_param = sig.parameters["owner"]
+        assert owner_param.kind is inspect.Parameter.KEYWORD_ONLY
+        assert owner_param.default is inspect.Parameter.empty
+
+    async def test_an_sra_download_lands_under_the_jobs_owner(self):
+        """Driven through `apply` rather than the applier directly, so the
+        dispatch that has to forward the keyword is part of what is asserted."""
+        owner = "results-sra-a"
+        project = await project_service.create_project(name=f"{owner}-sra", owner=owner)
+        staged = _scratch_file()
+
+        await results.apply(
+            "download_sra_run",
+            {
+                "project_id": str(project.id),
+                "accession": "SRR000001",
+                "platform": "ILLUMINA",
+                "staged": [{"path": str(staged), "name": "SRR000001.fastq", "mate": "single"}],
+            },
+            owner=owner,
+        )
+
+        produced = await DataObject.find(DataObject.project_id == project.id).to_list()
+        assert [p.name for p in produced] == ["SRR000001.fastq"]
+        assert produced[0].owner == owner
+
+    async def test_an_assembly_download_lands_under_the_jobs_owner(self):
+        owner = "results-assembly-a"
+        project = await project_service.create_project(name=f"{owner}-asm", owner=owner)
+        staged = _scratch_file()
+
+        await results.apply(
+            "download_assembly",
+            {
+                "project_id": str(project.id),
+                "accession": "GCF_000002445.2",
+                "staged": [
+                    {"path": str(staged), "name": "genome.fna", "component": "genome"}
+                ],
+            },
+            owner=owner,
+        )
+
+        produced = await DataObject.find(DataObject.project_id == project.id).to_list()
+        assert [p.name for p in produced] == ["genome.fna"]
+        assert produced[0].owner == owner
+        # The role still comes from the component map -- threading the owner
+        # must not disturb what the applier already decided about the file.
+        assert produced[0].role == ObjectRole.REFERENCE
