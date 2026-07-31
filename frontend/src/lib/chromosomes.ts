@@ -58,7 +58,9 @@ export function classifyChromosomes(
     ? (facts.sequence_names as string[])
     : [];
   const lengths =
-    facts.sequence_lengths && typeof facts.sequence_lengths === "object"
+    facts.sequence_lengths &&
+    typeof facts.sequence_lengths === "object" &&
+    !Array.isArray(facts.sequence_lengths)
       ? (facts.sequence_lengths as Record<string, number>)
       : {};
   const lengthCount = Object.keys(lengths).length;
@@ -66,14 +68,29 @@ export function classifyChromosomes(
   if (!names.length && !lengthCount) return { kind: "nothing" };
   if (!lengthCount) return { kind: "needs-qc" };
 
+  // The parser (backend/app/storage/parsers.py) caps stored entries at
+  // MAX_STORED_CONTIGS = 50, so `entries` may be a truncated window over the
+  // file rather than the whole thing -- true count lives in
+  // facts.sequence_count. The >=5-chromosome-scale check below and the
+  // overflow list further down both operate on this possibly-truncated
+  // window: for a real file with >50 records, "too few chromosome-scale
+  // sequences" or a short overflow list may reflect what got stored, not
+  // what the file actually contains.
   const entries: Bar[] = Object.entries(lengths).map(([name, length]) => ({
     name,
     length: Number(length) || 0,
   }));
+  const trueCount =
+    typeof facts.sequence_count === "number"
+      ? facts.sequence_count
+      : entries.length;
   const bigEnough = entries.filter((e) => e.length >= CHROMOSOME_SCALE_BP);
 
   if (bigEnough.length < MIN_CHROMOSOME_SCALE) {
-    return { kind: "not-chromosomal", reason: describeNonChromosomal(entries) };
+    return {
+      kind: "not-chromosomal",
+      reason: describeNonChromosomal(entries, trueCount),
+    };
   }
 
   // Ranked by length, not file order: chromosome numbers cannot be recovered
@@ -99,8 +116,8 @@ export function classifyChromosomes(
  * file is short records, without claiming to know whether they are CDS,
  * proteins or something else.
  */
-function describeNonChromosomal(entries: Bar[]): string {
-  const count = entries.length.toLocaleString();
+function describeNonChromosomal(entries: Bar[], trueCount: number): string {
+  const count = trueCount.toLocaleString();
   const longest = entries.reduce((m, e) => Math.max(m, e.length), 0);
   if (longest < CHROMOSOME_SCALE_BP) {
     return `${count} sequences, none over 100 kb — this looks like coding sequences or proteins, not chromosomes.`;

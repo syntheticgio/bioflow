@@ -34,14 +34,17 @@ describe("classifyChromosomes", () => {
     return out;
   }
 
-  // cds_from_genomic.fna, as it really is: 8,769 coding records whose names
-  // are `lcl|` local identifiers NCBI cannot resolve.
+  // cds_from_genomic.fna, as it really is: the backend parser
+  // (backend/app/storage/parsers.py, MAX_STORED_CONTIGS = 50) stores only the
+  // first 50 of the file's 8,769 coding records in sequence_lengths. The true
+  // count survives separately in sequence_count -- the fixture must match
+  // that truncated shape, or it never exercises the real parser output.
   it("rejects a CDS file as not chromosomal", () => {
     const view = classifyChromosomes({
       sequence_count: 8769,
       sequence_names: ["lcl|NC_008409.1_cds_XP_001218755.1_1"],
       sequence_lengths: lengths(
-        8769,
+        50,
         1400,
         (i) => `lcl|NC_008409.1_cds_XP_${i}_1`,
       ),
@@ -52,12 +55,13 @@ describe("classifyChromosomes", () => {
     }
   });
 
-  // protein.faa: 8,758 XP_ protein accessions. Real accessions, wrong molecule.
+  // protein.faa: 8,758 XP_ protein accessions, but only the first 50 are
+  // ever stored in sequence_lengths (see MAX_STORED_CONTIGS above).
   it("rejects a protein file as not chromosomal", () => {
     const view = classifyChromosomes({
       sequence_count: 8758,
       sequence_names: ["XP_001218755.1"],
-      sequence_lengths: lengths(8758, 450, (i) => `XP_00121${i}.1`),
+      sequence_lengths: lengths(50, 450, (i) => `XP_00121${i}.1`),
     });
     expect(view.kind).toBe("not-chromosomal");
   });
@@ -146,6 +150,24 @@ describe("classifyChromosomes", () => {
     const view = classifyChromosomes({
       sequence_names: Object.keys(YEAST_LENGTHS),
       sequence_lengths: YEAST_LENGTHS,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.linkable).toBe(true);
+  });
+
+  // "One resolvable name is enough" (see the `linkable` comment): a genome
+  // can carry an unplaced local-named scaffold alongside real accessions
+  // without losing linkability. Without this, mutating the regex to also
+  // accept protein accessions would leave the protein-file test passing
+  // (it only checks not-chromosomal) while this behavior went untested.
+  it("stays linkable when only some bars are NCBI accessions", () => {
+    const mixed: Record<string, number> = {
+      ...YEAST_LENGTHS,
+      local_scaffold_1: 150_000,
+    };
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(mixed),
+      sequence_lengths: mixed,
     });
     if (view.kind !== "drawable") throw new Error("expected drawable");
     expect(view.linkable).toBe(true);
