@@ -244,6 +244,37 @@ def query_variants(
         con.close()
 
 
+def max_residue_for_gene(*, db_path: Path, gene: str) -> int | None:
+    """The highest residue position this gene's variants change.
+
+    Feeds the structure resolver's length guard, which needs to know how long
+    a candidate protein has to be to hold the callset's residues. Read here
+    rather than accepted from the client: it is a correctness input, and a
+    hand-edited request could otherwise select a protein too short for a
+    residue actually present.
+
+    Synonymous variants are excluded. They carry an `aa_pos` but change no
+    residue, so counting them would demand length the variant does not need
+    and could reject the right protein.
+
+    None when the gene has no residue-changing variant here -- including the
+    common case of a gene that is not in this callset at all.
+
+    Unindexed, deliberately: `gene` has no index and this scans, which
+    measures at 0.8ms on the real 6,641-row yeast database against a ~1s
+    UniProt round trip that follows it. It also runs on click, not per row.
+    """
+    con = _connect(db_path)
+    try:
+        return con.execute(
+            "SELECT MAX(aa_pos) FROM variants "
+            "WHERE gene = ? AND aa_pos IS NOT NULL AND consequence != 'synonymous'",
+            (gene,),
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+
 def count_variants(*, db_path: Path, filters: VariantFilters) -> int:
     """How many rows match. See the route: this is not recomputed on every
     page turn, because a combined predicate costs ~400ms at 5M rows."""
