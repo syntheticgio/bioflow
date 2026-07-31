@@ -229,6 +229,16 @@ def _fixture_metadata() -> assembly.AssemblyMetadata:
 class TestEnrichFromAssembly:
     """Enrichment fills gaps and never overwrites a person's entry."""
 
+    @pytest.fixture(autouse=True)
+    def _no_sequence_names(self):
+        """The label lookup is a second request these tests never meant to make.
+
+        Without this they all hit NCBI live once enrichment started fetching
+        names.
+        """
+        with patch.object(assembly, "lookup_sequence_names", return_value=None):
+            yield
+
     def test_fills_empty_fields_from_the_filename(self):
         with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
             result = enrich.enrich_from_assembly(

@@ -27,6 +27,11 @@ log = get_logger(__name__)
 
 DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha"
 
+# Bounded like the parser's MAX_STORED_CONTIGS: the strip draws at most 24 bars
+# and lists the remainder from the stored lengths, so labels past this window
+# would have nothing to label.
+MAX_STORED_LABELS = 50
+
 # GCA (GenBank) or GCF (RefSeq), nine digits, dot, version. Anchored at a word
 # boundary so `MYGCA_000000001.1` does not match but a path separator or an
 # underscore-joined filename does.
@@ -208,6 +213,52 @@ def parse_report(payload: dict) -> AssemblyMetadata | None:
     )
 
 
+def parse_sequence_reports(payload: dict) -> dict[str, str]:
+    """Map every sequence accession in a report to a human-readable label.
+
+    Both namespaces are keyed to the same label: a record carries
+    `refseq_accession` *and* `genbank_accession`, so one lookup labels a GCF
+    file (`NC_001133.9`) and the GCA file beside it (`BK006935.2`).
+
+    The label depends on the record's role, and this is not cosmetic.
+    Unplaced and unlocalized scaffolds inherit their parent chromosome's
+    `chr_name`: the real Aspergillus assembly has two records both reporting
+    `chr_name: "11"`, and the larger of them is the longest sequence in the
+    file. Labelling those by `chr_name` would draw two bars reading "11".
+    Only an assembled molecule may use `chr_name`; everything else uses its own
+    `sequence_name`.
+
+    Never raises. A schema change or a wrong-typed field yields a smaller map,
+    or an empty one -- never a failed ingest.
+    """
+    reports = _obj(payload).get("reports")
+    if not isinstance(reports, list):
+        return {}
+
+    labels: dict[str, str] = {}
+    # sort_order is the assembly's own ordering, so a truncated map keeps the
+    # leading sequences rather than an arbitrary slice.
+    records = [r for r in reports if isinstance(r, dict)]
+    records.sort(key=lambda r: _int(r.get("sort_order")) or 0)
+
+    for record in records:
+        if len(labels) >= MAX_STORED_LABELS:
+            break
+        role = _text(record.get("role"))
+        if role == "assembled-molecule":
+            label = _text(record.get("chr_name")) or _text(record.get("sequence_name"))
+        else:
+            label = _text(record.get("sequence_name")) or _text(record.get("chr_name"))
+        if not label:
+            continue
+        for key in ("refseq_accession", "genbank_accession"):
+            accession = _text(record.get(key))
+            if accession:
+                labels[accession] = label
+
+    return labels
+
+
 def lookup(accession: str) -> AssemblyMetadata | None:
     """Fetch and normalize an assembly record, or None.
 
@@ -243,6 +294,35 @@ def lookup(accession: str) -> AssemblyMetadata | None:
                 )
             return meta
     return None
+
+
+def lookup_sequence_names(accession: str) -> dict[str, str] | None:
+    """Fetch per-sequence chromosome names for an assembly, or None.
+
+    A second Datasets call: the `dataset_report` the rest of this module uses
+    carries only `total_number_of_chromosomes`, not per-sequence names.
+
+    Best-effort in every direction, exactly like `lookup`. Returns None rather
+    than an empty map so a failed lookup and a report with nothing usable in it
+    look the same to the caller, and neither writes an empty fact.
+    """
+    if not is_valid_accession(accession):
+        return None
+    accession = accession.strip().upper()
+
+    try:
+        body = _get(f"{DATASETS}/genome/accession/{accession}/sequence_reports")
+        if body is None:
+            return None
+        labels = parse_sequence_reports(json.loads(body))
+    except (ValueError, TypeError) as e:
+        log.warning("sequence_reports_parse_failed", accession=accession, error=str(e))
+        return None
+    except Exception as e:  # noqa: BLE001 - a lookup must never fail an ingest
+        log.warning("sequence_reports_error", accession=accession, error=str(e))
+        return None
+
+    return labels or None
 
 
 def component_availability(accession: str) -> list | None:

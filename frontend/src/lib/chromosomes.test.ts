@@ -200,4 +200,46 @@ describe("classifyChromosomes", () => {
     // A protein accession is resolvable at NCBI but is not a chromosome.
     expect(isNcbiNucleotideAccession("XP_001218755.1")).toBe(false);
   });
+
+  it("labels bars from sequence_labels", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+      sequence_labels: { "NC_001136.10": "IV", "NC_001224.1": "MT" },
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars[0].label).toBe("IV");
+    expect(view.bars.find((b) => b.name === "NC_001224.1")?.label).toBe("MT");
+  });
+
+  it("leaves bars unlabelled when a name has no entry", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+      sequence_labels: { "NC_001136.10": "IV" },
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars.find((b) => b.name === "NC_001133.9")?.label).toBeUndefined();
+  });
+
+  // Existing references have no labels at all and must be untouched.
+  it("is unchanged when sequence_labels is absent", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+    });
+    if (view.kind !== "drawable") throw new Error("expected drawable");
+    expect(view.bars).toHaveLength(17);
+    expect(view.bars.every((b) => b.label === undefined)).toBe(true);
+  });
+
+  // Labels are cosmetic: a garbage value must not change classification.
+  it("ignores a wrong-typed sequence_labels", () => {
+    const view = classifyChromosomes({
+      sequence_names: Object.keys(YEAST_LENGTHS),
+      sequence_lengths: YEAST_LENGTHS,
+      sequence_labels: "not an object",
+    });
+    expect(view.kind).toBe("drawable");
+  });
 });

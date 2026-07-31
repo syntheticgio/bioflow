@@ -204,6 +204,17 @@ def enrich_from_assembly(
 
     result.facts = meta.to_facts()
 
+    # Per-sequence chromosome names, so the strip can label a bar "IV" rather
+    # than deriving "1136" from its accession. A second request, and a strictly
+    # optional one: it must never cost the stats the lookup above already got.
+    try:
+        labels = assembly.lookup_sequence_names(meta.accession or accession)
+    except Exception as e:  # noqa: BLE001 - enrichment must never break ingest
+        log.warning("sequence_names_failed", accession=accession, error=str(e))
+        labels = None
+    if labels:
+        result.facts["sequence_labels"] = labels
+
     for key, value in meta.to_metadata().items():
         if value in (None, ""):
             continue
