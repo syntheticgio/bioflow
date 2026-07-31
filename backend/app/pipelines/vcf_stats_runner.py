@@ -33,7 +33,12 @@ VARIANT_COLUMNS = (
 # second, breaking the feature for half the callers this app offers. Inside
 # square brackets bcftools resolves %DP from whichever section declares it,
 # so the same format string works for both.
-QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\n"
+#
+# BCSQ last, after the repeating per-sample genotypes, so the consequence is
+# always the final field however many samples the file has. `-u` in
+# build_query_command already makes an undefined tag emit "." rather than
+# failing the job, which is what every un-annotated VCF does here.
+QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\t%INFO/BCSQ\n"
 
 # `number of X:` keys in the SN section, mapped to the names used in facts.
 _SN_KEYS = {

@@ -93,7 +93,7 @@ class TestBuild:
         it needs pinning."""
         path = tmp_path / "multi.db"
         build_variant_db(
-            rows=iter(["chr1\t100\tA\tG\t50.0\tPASS\t30\t0/1\t1/1\t0/0"]),
+            rows=iter(["chr1\t100\tA\tG\t50.0\tPASS\t30\t0/1\t1/1\t0/0\t."]),
             db_path=path,
         )
         row = query_variants(
@@ -138,6 +138,10 @@ class TestQuery:
             "filter": "PASS",
             "dp": 30,
             "gt": "0/1",
+            "gene": None,
+            "consequence": None,
+            "aa_change": None,
+            "aa_pos": None,
         }
 
     def test_filter_by_contig(self, db):
@@ -252,3 +256,102 @@ class TestStreamingBuild:
         )
         growth = peak_rss_mb() - before
         assert growth < 60, f"build's peak RSS grew by {growth:.0f} MB"
+
+
+class TestConsequenceColumns:
+    """The annotated columns, which arrive as a 9th TSV field holding the raw
+    BCSQ value. An un-annotated VCF sends "." there, which must round-trip as
+    empty rather than as the string "."."""
+
+    def test_stores_gene_consequence_and_aa_change(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(
+            rows=iter(
+                [
+                    "NC_001133.9\t22639\tA\tT\t10.8\t.\t1\t1/1\t"
+                    "missense|YAL063C-A|rna-NM_001184642.1|protein_coding|-|16F>16Y|22639A>T"
+                ]
+            ),
+            db_path=path,
+        )
+        row = query_variants(
+            db_path=path, filters=VariantFilters(), offset=0, limit=10
+        )[0]
+        assert row["gene"] == "YAL063C-A"
+        assert row["consequence"] == "missense"
+        assert row["aa_change"] == "16F>16Y"
+        assert row["aa_pos"] == 16
+
+    def test_an_unannotated_row_has_empty_consequence_columns(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(
+            rows=iter(["NC_001133.9\t12690\tA\tT\t30.0\t.\t5\t0/1\t."]),
+            db_path=path,
+        )
+        row = query_variants(
+            db_path=path, filters=VariantFilters(), offset=0, limit=10
+        )[0]
+        assert row["gene"] is None
+        assert row["consequence"] is None
+
+    # A VCF indexed before this change has only 8 fields per line.
+    def test_a_row_with_no_consequence_field_still_loads(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(
+            rows=iter(["NC_001133.9\t12690\tA\tT\t30.0\t.\t5\t0/1"]),
+            db_path=path,
+        )
+        rows = query_variants(
+            db_path=path, filters=VariantFilters(), offset=0, limit=10
+        )
+        assert len(rows) == 1
+        assert rows[0]["consequence"] is None
+
+    # Two samples plus BCSQ: the genotypes must not absorb the consequence,
+    # and the consequence must not absorb a genotype.
+    def test_multi_sample_genotypes_survive_the_appended_consequence(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(
+            rows=iter(
+                [
+                    "c1\t1\tA\tT\t10\t.\t5\t0/1\t1/1\t"
+                    "missense|G1|r1|protein_coding|+|1A>1B|x"
+                ]
+            ),
+            db_path=path,
+        )
+        row = query_variants(
+            db_path=path, filters=VariantFilters(), offset=0, limit=10
+        )[0]
+        assert row["gt"] == "0/1\t1/1"
+        assert row["consequence"] == "missense"
+
+    def _two_rows(self):
+        return iter(
+            [
+                "c1\t1\tA\tT\t10\t.\t1\t1/1\tmissense|G1|r1|protein_coding|+|1A>1B|x",
+                "c1\t2\tA\tT\t10\t.\t1\t1/1\tsynonymous|G2|r2|protein_coding|+|2C|x",
+            ]
+        )
+
+    def test_filters_by_consequence(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(rows=self._two_rows(), db_path=path)
+        rows = query_variants(
+            db_path=path,
+            filters=VariantFilters(consequence="missense"),
+            offset=0,
+            limit=10,
+        )
+        assert len(rows) == 1
+        assert rows[0]["gene"] == "G1"
+
+    def test_counts_respect_the_consequence_filter(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(rows=self._two_rows(), db_path=path)
+        assert (
+            count_variants(
+                db_path=path, filters=VariantFilters(consequence="missense")
+            )
+            == 1
+        )

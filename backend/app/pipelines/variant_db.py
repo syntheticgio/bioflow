@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.logging import get_logger
+from app.pipelines import csq_parse
 
 log = get_logger(__name__)
 
@@ -40,6 +41,7 @@ class VariantFilters:
     filter_value: str | None = None
     variant_type: str | None = None  # "snp" | "indel"
     min_qual: float | None = None
+    consequence: str | None = None
 
 
 def _num(value: str) -> float | None:
@@ -87,7 +89,11 @@ def build_variant_db(*, rows, db_path: Path) -> int:
               qual   REAL,
               filter TEXT,
               dp     INTEGER,
-              gt     TEXT
+              gt     TEXT,
+              gene        TEXT,
+              consequence TEXT,
+              aa_change   TEXT,
+              aa_pos      INTEGER
             )
             """
         )
@@ -116,6 +122,18 @@ def build_variant_db(*, rows, db_path: Path) -> int:
             # and leave the table showing sample 1's genotype whichever
             # sample the picker selects. The frontend splits this back apart
             # by index.
+            #
+            # BCSQ is appended after the repeating per-sample genotypes, so it
+            # is the last field and the genotypes are everything between.
+            # Older indexes were built with no 9th field at all; those keep
+            # working and simply carry no consequence.
+            if len(parts) >= 9:
+                gt_text = "\t".join(parts[7:-1])
+                csq = csq_parse.parse_bcsq(parts[-1])
+            else:
+                gt_text = "\t".join(parts[7:])
+                csq = None
+
             batch.append(
                 (
                     parts[0],
@@ -125,22 +143,29 @@ def build_variant_db(*, rows, db_path: Path) -> int:
                     qual,
                     parts[5],
                     int(dp) if dp is not None else None,
-                    "\t".join(parts[7:]),
+                    gt_text,
+                    csq.gene if csq else None,
+                    csq.consequence if csq else None,
+                    csq.aa_change if csq else None,
+                    csq.aa_pos if csq else None,
                 )
             )
             if len(batch) >= _INSERT_BATCH:
                 con.executemany(
-                    "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?)", batch
+                    "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
                 )
                 inserted += len(batch)
                 batch = []
 
         if batch:
-            con.executemany("INSERT INTO variants VALUES (?,?,?,?,?,?,?,?)", batch)
+            con.executemany(
+                "INSERT INTO variants VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
+            )
             inserted += len(batch)
 
         con.execute("CREATE INDEX ix_variants_locus ON variants(chrom, pos)")
         con.execute("CREATE INDEX ix_variants_filter ON variants(filter)")
+        con.execute("CREATE INDEX ix_variants_consequence ON variants(consequence)")
         con.commit()
     finally:
         con.close()
@@ -178,6 +203,9 @@ def _where(filters: VariantFilters) -> tuple[str, list]:
         clauses.append("length(ref) = 1 AND length(alt) = 1")
     elif filters.variant_type == "indel":
         clauses.append("length(ref) <> length(alt)")
+    if filters.consequence:
+        clauses.append("consequence = ?")
+        args.append(filters.consequence)
 
     if not clauses:
         return "", []
@@ -204,7 +232,8 @@ def query_variants(
     try:
         con.row_factory = sqlite3.Row
         cur = con.execute(
-            f"SELECT chrom,pos,ref,alt,qual,filter,dp,gt FROM variants{where} "
+            f"SELECT chrom,pos,ref,alt,qual,filter,dp,gt,"
+            f"gene,consequence,aa_change,aa_pos FROM variants{where} "
             f"LIMIT ? OFFSET ?",
             [*args, limit, offset],
         )
