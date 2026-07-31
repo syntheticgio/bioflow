@@ -8,6 +8,7 @@ largest bar there is.
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from app.metadata import assembly
 
@@ -86,3 +87,35 @@ class TestParseSequenceReports:
             )
             == {}
         )
+
+
+class TestLookupSequenceNames:
+    def test_returns_labels_from_a_real_payload(self):
+        body = (FIXTURES / YEAST).read_bytes()
+        with patch("app.metadata.assembly._get", return_value=body) as get:
+            labels = assembly.lookup_sequence_names("GCF_000146045.2")
+        assert labels["NC_001133.9"] == "I"
+        assert "sequence_reports" in get.call_args[0][0]
+
+    def test_rejects_a_malformed_accession_without_calling_out(self):
+        with patch("app.metadata.assembly._get") as get:
+            assert assembly.lookup_sequence_names("not-an-accession") is None
+        get.assert_not_called()
+
+    def test_returns_none_when_the_request_fails(self):
+        with patch("app.metadata.assembly._get", return_value=None):
+            assert assembly.lookup_sequence_names("GCF_000146045.2") is None
+
+    def test_returns_none_on_unparseable_json(self):
+        with patch("app.metadata.assembly._get", return_value=b"<html>nope"):
+            assert assembly.lookup_sequence_names("GCF_000146045.2") is None
+
+    def test_returns_none_rather_than_an_empty_map(self):
+        """An empty map and a failed lookup are the same to the caller, and
+        None keeps a meaningless `sequence_labels: {}` out of facts."""
+        with patch("app.metadata.assembly._get", return_value=b'{"reports": []}'):
+            assert assembly.lookup_sequence_names("GCF_000146045.2") is None
+
+    def test_never_raises_when_the_helper_explodes(self):
+        with patch("app.metadata.assembly._get", side_effect=RuntimeError("boom")):
+            assert assembly.lookup_sequence_names("GCF_000146045.2") is None

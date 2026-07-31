@@ -296,6 +296,35 @@ def lookup(accession: str) -> AssemblyMetadata | None:
     return None
 
 
+def lookup_sequence_names(accession: str) -> dict[str, str] | None:
+    """Fetch per-sequence chromosome names for an assembly, or None.
+
+    A second Datasets call: the `dataset_report` the rest of this module uses
+    carries only `total_number_of_chromosomes`, not per-sequence names.
+
+    Best-effort in every direction, exactly like `lookup`. Returns None rather
+    than an empty map so a failed lookup and a report with nothing usable in it
+    look the same to the caller, and neither writes an empty fact.
+    """
+    if not is_valid_accession(accession):
+        return None
+    accession = accession.strip().upper()
+
+    try:
+        body = _get(f"{DATASETS}/genome/accession/{accession}/sequence_reports")
+        if body is None:
+            return None
+        labels = parse_sequence_reports(json.loads(body))
+    except (ValueError, TypeError) as e:
+        log.warning("sequence_reports_parse_failed", accession=accession, error=str(e))
+        return None
+    except Exception as e:  # noqa: BLE001 - a lookup must never fail an ingest
+        log.warning("sequence_reports_error", accession=accession, error=str(e))
+        return None
+
+    return labels or None
+
+
 def component_availability(accession: str) -> list | None:
     """What this assembly offers, preferring the CLI's own preview.
 
