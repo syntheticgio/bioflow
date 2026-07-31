@@ -2801,3 +2801,50 @@ a.btn {
   font-size: 11px;
   margin-top: 6px;
 }
+
+/* Chromosome strip: bars are proportional to sequence length, drawn from
+   facts the ingest already stored. Sits in the second column of .qc-charts,
+   which on a reference is otherwise empty -- the quality curve is suppressed
+   for a FASTA. */
+.chrom-strip {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.chrom-bar rect {
+  fill: var(--text-faint);
+  transition: fill 0.12s ease;
+}
+
+.chrom-bar.is-clickable {
+  cursor: pointer;
+}
+
+.chrom-bar.is-clickable:hover rect {
+  fill: var(--accent);
+}
+
+.chrom-note {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
+.chrom-overflow {
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+/* The reason this is a modal at all: the viewer is unusable in a column. */
+.sviewer-modal {
+  width: min(1100px, 92vw);
+  max-width: 92vw;
+}
+
+.sviewer-external {
+  float: right;
+  font-size: 12px;
+  font-weight: 400;
+}

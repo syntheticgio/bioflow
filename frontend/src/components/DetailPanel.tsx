@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { classifyChromosomes } from "../lib/chromosomes";
 import { useUploads } from "../hooks/useUploads";
 import type {
   AlignerName,
@@ -19,6 +20,7 @@ import { readQuality } from "../lib/readQuality";
 import { notify } from "../stores/messageStore";
 import { AiSummary } from "./AiSummary";
 import { AssemblyFacts } from "./AssemblyFacts";
+import { ChromosomeStrip } from "./ChromosomeStrip";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
@@ -744,6 +746,12 @@ function QcTab({
     !isReference && Array.isArray(obj.facts.quality_per_position)
       ? obj.facts.quality_per_position
       : null;
+  // ChromosomeStrip renders nothing for `kind: "nothing"` (no sequence facts
+  // at all, e.g. a GFF sidecar). Without this check, a reference with no
+  // composition/curve either would still open an empty .qc-charts grid --
+  // a visible gap with nothing in it.
+  const showChromStrip =
+    isReference && classifyChromosomes(obj.facts).kind !== "nothing";
 
   // Which tool produced these numbers. Sits under the tab as one line rather
   // than being repeated as a note on every group below it.
@@ -779,7 +787,7 @@ function QcTab({
       {/* Charts lead: the shape of the data answers "is this any good?" faster
           than any table of it can, and the numbers below are what you check
           once the shape has raised a question. */}
-      {(composition || curve) && (
+      {(composition || curve || showChromStrip) && (
         <div className="qc-charts">
           {composition && (
             <div className="qc-chart">
@@ -798,6 +806,10 @@ function QcTab({
               <QualityChart curve={curve as never} />
             </div>
           )}
+          {/* Second column on a reference, where the quality curve would be
+              for reads. Renders nothing when the file has no sequence facts,
+              so a GFF sidecar keeps the single-column layout. */}
+          {showChromStrip && <ChromosomeStrip facts={obj.facts} />}
         </div>
       )}
 
