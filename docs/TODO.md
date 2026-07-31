@@ -2,7 +2,46 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
-## The first `/pipelines/tools` request stalls 6-15s on NanoPlot
+## The first `/pipelines/tools` request stalls 6-15s on NanoPlot — FIXED
+
+Fixed 2026-07-31. `lifespan` now starts a fire-and-forget task (`_warm_tools`
+in `backend/app/main.py`) that probes every tool in a thread before a user asks
+for one, and `backend/app/pipelines/tool_cache.py` persists the results in
+Redis so a restart re-seeds the `lru_cache`s instead of re-probing -- which is
+what makes `uvicorn --reload`, the only way this app runs, stop re-paying the
+cost on every backend edit.
+
+Measured on the running stack after the change:
+
+| | |
+|---|---|
+| Endpoint, cold container | **0.025s** (was 6-15s) |
+| Warm task completes after startup | 33ms, not gating `/readyz` |
+| Second start, reading Redis | `seeded=15 tools=15` |
+| First start, empty cache | `seeded=0 tools=15` |
+
+Options 2 (skip NanoPlot's `--version`) and 3's file-based variant were not
+taken. The measurement table and the "parallelism is the wrong fix" reasoning
+below still describe the shape of the problem, and are kept for whenever
+another heavy-import tool is registered.
+
+Two things the design got wrong, both found during implementation and worth
+knowing if this code is touched again:
+
+- **The planned `path:mtime_ns:size` fingerprint was not viable.** Two writes
+  to one path can land in a single `mtime_ns` tick, so an upgraded binary
+  fingerprinted identically. It now also hashes contents.
+- **Four tools are wrapper scripts, not binaries** -- `fastqc`, `bowtie2`,
+  `hisat2` and `cutadapt` are Perl or Python entry points that dispatch to a
+  separate payload. The fingerprint covers the wrapper, so a payload-only
+  upgrade leaving the wrapper byte- and mtime-identical goes undetected. That
+  gap is documented on `_fingerprint`; the 24h TTL is the backstop.
+
+Verified against the real stack, not only the suite: a deliberately poisoned
+cache entry claiming version `0.0.0-WRONG` for fastp was rejected on
+fingerprint mismatch and re-probed to the true `0.24.0`. That is the property
+that matters here -- a cached version string is half of what a methods section
+reports.
 
 Raised: 2026-07-31, while fixing NanoPlot being reported unavailable
 (`SLOW_IMPORT_TIMEOUT_SECONDS` in `backend/app/pipelines/tools.py`).
