@@ -12,6 +12,28 @@ const MIN_BAR_H = 8;
 const BAR_W = 11;
 const BAR_GAP = 7;
 
+/** Room under the bars for the accession-tail labels. */
+const LABEL_BAND_H = 18;
+
+/**
+ * The part of an accession worth printing under an 11px-wide bar.
+ *
+ * A full `NC_000001.11` needs roughly 70px against an 18px pitch, so the
+ * shared prefix and the version suffix are dropped and the significant digits
+ * kept: `NC_000001.11` renders as `1`, `NC_001133.9` as `1133`. The `<title>`
+ * and the bar's accessible name still carry the accession in full, so nothing
+ * is only available in the abbreviation.
+ */
+function accessionTail(name: string): string {
+  const bare = name.trim().replace(/\.\d+$/, "");
+  const m = /^[A-Z]{2}_?0*(\d+)$/.exec(bare);
+  if (m) return m[1];
+  // Not an accession we can shorten safely -- show the tail rather than a
+  // misleading fragment of the front, since names that collide usually do so
+  // at the front (scaffold_1, scaffold_2).
+  return bare.length > 6 ? `…${bare.slice(-5)}` : bare;
+}
+
 /**
  * A reference's sequences as proportional bars, in the empty second column of
  * the Quality tab's chart grid.
@@ -52,30 +74,54 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
       <svg
         className="chrom-strip"
         width={view.bars.length * (BAR_W + BAR_GAP)}
-        height={MAX_BAR_H + 18}
-        role="list"
+        height={MAX_BAR_H + LABEL_BAND_H}
+        role="group"
         aria-label="Chromosomes in this reference"
       >
         {view.bars.map((bar, i) => {
           const h = Math.max(MIN_BAR_H, (bar.length / longest) * MAX_BAR_H);
           const clickable = view.linkable && isNcbiNucleotideAccession(bar.name);
+          const label = `${bar.name} · ${formatBases(bar.length)}`;
+          const x = i * (BAR_W + BAR_GAP);
           return (
             <g
               key={bar.name}
-              role="listitem"
+              // Only the clickable bars are controls. A bar with no viewer
+              // behind it stays plain graphics: unfocusable, and not
+              // announced as a button it would do nothing to activate.
+              role={clickable ? "button" : undefined}
+              tabIndex={clickable ? 0 : undefined}
+              aria-label={clickable ? label : undefined}
               className={clickable ? "chrom-bar is-clickable" : "chrom-bar"}
               onClick={clickable ? () => setSelected(bar.name) : undefined}
+              onKeyDown={
+                clickable
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        // Space would otherwise scroll the panel.
+                        e.preventDefault();
+                        setSelected(bar.name);
+                      }
+                    }
+                  : undefined
+              }
             >
-              <title>
-                {bar.name} · {formatBases(bar.length)}
-              </title>
+              <title>{label}</title>
               <rect
-                x={i * (BAR_W + BAR_GAP)}
+                x={x}
                 y={MAX_BAR_H - h}
                 width={BAR_W}
                 height={h}
                 rx={BAR_W / 2}
               />
+              <text
+                className="chrom-bar-label"
+                x={x + BAR_W / 2}
+                y={MAX_BAR_H + 12}
+                textAnchor="middle"
+              >
+                {accessionTail(bar.name)}
+              </text>
             </g>
           );
         })}
