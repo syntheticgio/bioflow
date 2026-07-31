@@ -204,9 +204,23 @@ class TestStreamingBuild:
         assert count_variants(db_path=path, filters=VariantFilters()) == 50_000
 
     def test_peak_rss_stays_bounded_while_building(self, tmp_path):
-        """The regression that matters. 200k rows through a streaming build
-        should add tens of MB, not hundreds -- a list-then-insert refactor
-        blows past this while every correctness test still passes."""
+        """The regression that matters. A streaming build should add a few
+        MB; a list-then-insert refactor should add tens of MB, and every
+        other test in this file still passes when that regression happens.
+
+        The row count and threshold are sized off measurements, not guesses.
+        Real `bcftools query` rows run ~54 chars (e.g.
+        "NC_001133.9\\t1234567\\tACGTACGTAC\\tA\\t247.3910\\tPASS\\t142\\t0/1"), and
+        at that length materializing the input as a list costs about 100
+        bytes/row in this container: 200k short synthetic rows (the previous
+        fixture, ~25 chars each) only cost ~16 MB materialized -- nowhere
+        near a 150 MB threshold -- so a `rows = list(rows)` regression was
+        silently passing. At realistic row length, 1,000,000 rows costs
+        ~101 MB materialized versus a few MB streamed, so 60 MB sits clearly
+        between the two: ~6x the streaming cost and comfortably under the
+        materialized cost. Do not shrink the row count or row length to make
+        this faster -- that is exactly what made the guard decorative
+        before, and it will quietly stop catching the regression again."""
 
         def rss_mb() -> float:
             with open("/proc/self/status") as fh:
@@ -216,10 +230,10 @@ class TestStreamingBuild:
         path = tmp_path / "big.db"
         build_variant_db(
             rows=(
-                f"chr{i % 10}\t{i}\tA\tG\t{i % 200}.0\tPASS\t{i % 90}\t0/1"
-                for i in range(200_000)
+                f"NC_00113{i % 9}.9\t{i}\tACGTACGTAC\tA\t{i % 400}.391\tPASS\t{i % 200}\t0/1"
+                for i in range(1_000_000)
             ),
             db_path=path,
         )
         growth = rss_mb() - before
-        assert growth < 150, f"build grew RSS by {growth:.0f} MB"
+        assert growth < 60, f"build grew RSS by {growth:.0f} MB"
