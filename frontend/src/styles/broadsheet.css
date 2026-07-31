@@ -1151,3 +1151,145 @@
   text-transform: uppercase;
   color: var(--ink-62);
 }
+
+/* ── Software and Sources help pages ────────────────────────────────────── */
+
+/* These two pages are indexes rather than articles: a run of entries, each
+   with a subject, a status, prose, and a column of bibliographic facts. The
+   editorial treatment does the structural work that boxes would otherwise --
+   hairline rules between entries, uppercase letterspaced labels, and the
+   subject in italic serif. Nothing here is a card: a rounded surface would be
+   the only one on the page and would read as a different component. */
+
+.theme-broadsheet .software-note {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-6);
+}
+
+.theme-broadsheet .software-group {
+  border-top: 1px solid var(--color-divider);
+  margin-top: var(--space-8);
+  padding-top: var(--space-3);
+}
+
+/* The section rule of a newspaper page: small, spaced capitals over the
+   hairline, not a heading competing with the tool names below it. */
+.theme-broadsheet .software-group-title {
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+  margin-bottom: var(--space-2);
+}
+
+.theme-broadsheet .software-entry {
+  border-bottom: 1px solid var(--color-divider);
+  padding: var(--space-4) 0;
+}
+
+/* The subject of the entry, in the same italic serif the app gives every other
+   named thing (see .detail-title). Not italic-as-emphasis -- italic is this
+   theme's mark for "this is a name". */
+.theme-broadsheet .software-name {
+  font-family: var(--font-heading);
+  font-size: 23px;
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+/* Monospace, because a version is a literal string to be copied into a
+   methods section, and because it is the one thing on the page that is not
+   prose. */
+.theme-broadsheet .software-version {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-radius: var(--radius-sm);
+  border-color: var(--color-divider);
+  background: var(--color-neutral-200);
+  color: var(--ink-70);
+}
+
+.theme-broadsheet .software-version.missing {
+  background: var(--color-accent-2-200);
+  border-color: transparent;
+  color: var(--color-accent-2-800);
+}
+
+.theme-broadsheet .software-version.pending {
+  background: var(--color-accent-200);
+  border-color: transparent;
+  color: var(--color-accent-800);
+}
+
+.theme-broadsheet .software-also {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-style: italic;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .software-entry-body {
+  gap: var(--space-3) var(--space-8);
+  margin-top: var(--space-3);
+}
+
+.theme-broadsheet .software-prose p {
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-78);
+  text-wrap: pretty;
+}
+
+.theme-broadsheet .software-label,
+.theme-broadsheet .software-fact-label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .software-strengths li {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-70);
+}
+
+/* Separated by a rule rather than boxed. On a page with no other enclosed
+   surface, a panel here would look like a widget dropped into an article. The
+   rule sits to the left on a wide page and flips to a top rule once auto-fit
+   has stacked the rail under the prose, where a left border would point at
+   nothing. */
+.theme-broadsheet .software-facts {
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+  padding-top: var(--space-3);
+}
+
+/* Sized off the entry, not the viewport. The grid is `auto-fit` with a 280px
+   minimum, so whether the rail gets its own column depends on the entry's
+   width -- which the left panel changes without the window moving at all. A
+   viewport query got this wrong in exactly that case, drawing the beside-the-
+   prose left border on a rail that had already stacked underneath it.
+   612px = the 280px rail + 280px prose + the 32px column gap: the width at
+   which auto-fit can actually seat two columns. */
+@container (min-width: 612px) {
+  .theme-broadsheet .software-facts {
+    border-top: none;
+    padding-top: 0;
+    border-left: 1px solid var(--color-divider);
+    padding-left: var(--space-4);
+  }
+}
+
+.theme-broadsheet .software-fact-value {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink-78);
+}

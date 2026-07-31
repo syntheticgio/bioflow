@@ -6,6 +6,8 @@ import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
 import { HelpCalculations } from "./components/HelpCalculations";
+import { HelpSoftware } from "./components/HelpSoftware";
+import { HelpSources } from "./components/HelpSources";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
 import { UploadTray } from "./components/UploadTray";
@@ -65,6 +67,8 @@ function Shell() {
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
+          <Route path="/help/software" element={<HelpSoftware />} />
+          <Route path="/help/sources" element={<HelpSources />} />
         </Routes>
         {!singleColumn && <DetailPanel />}
       </div>

@@ -2270,6 +2270,157 @@ a.btn {
   font-weight: 600;
 }
 
+/* --- Software and Sources help pages --- */
+
+/* Wider than .help-page's 760px measure because these entries are two
+   columns, not one: prose plus a facts rail. At 760 the rail squeezes the
+   prose below a readable measure. */
+.software-page {
+  max-width: 1020px;
+}
+
+.software-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 20px;
+}
+
+.software-group {
+  border-top: 1px solid var(--border);
+  margin-top: 28px;
+  padding-top: 16px;
+}
+
+.software-group-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+
+.software-entry {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.software-entry:last-child {
+  border-bottom: none;
+}
+
+.software-entry-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.software-name {
+  font-size: 16px;
+  margin: 0;
+  /* Anchor targets land under the sticky header without this. */
+  scroll-margin-top: 70px;
+}
+
+.software-version {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.software-version.missing {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.software-version.pending {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.software-also {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+}
+
+/* auto-fit rather than a media query, following .detail-columns: the rail
+   drops under the prose on its own once the page cannot carry both. */
+/* container-type on the entry, not just the grid: the facts rail's rule flips
+   from a top border (stacked) to a left border (beside the prose), and that
+   has to follow whether auto-fit actually gave it its own column. A viewport
+   media query cannot know -- the same window width stacks or does not
+   depending on whether the left panel is open -- so it drew a left border on
+   a rail sitting under the prose. See the @container rule in broadsheet.css. */
+.software-entry {
+  container-type: inline-size;
+}
+
+.software-entry-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px 32px;
+  align-items: start;
+  margin-top: 10px;
+}
+
+.software-prose p {
+  line-height: 1.6;
+  margin: 0 0 10px;
+}
+
+.software-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  font-weight: 600;
+  margin: 14px 0 4px;
+}
+
+.software-strengths {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.software-strengths li {
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+.software-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.software-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.software-fact-label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+
+.software-fact-value {
+  line-height: 1.45;
+}
+
+.software-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 /* --- Header menu (File/View/Help dropdowns) --- */
 
 .menu-dropdown {

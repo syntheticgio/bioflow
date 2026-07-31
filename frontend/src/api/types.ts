@@ -365,18 +365,55 @@ export interface PipelineTool {
   strengths: string[];
   /**
    * Whether a job handler actually branches on this tool, independent of
-   * `available` (whether the binary works). cutadapt and Trimmomatic probe
-   * as available -- real, working binaries -- but trim_reads has no code
-   * path for either yet. The selector must use this, not `available`, to
-   * decide whether a card is selectable: `available` alone would offer a
-   * choice that silently does nothing.
+   * `available` (whether the binary works). The selector must use this, not
+   * `available`, to decide whether a card is selectable: `available` alone
+   * would offer a choice that silently does nothing.
+   *
+   * This comment used to name cutadapt and Trimmomatic as the unrunnable
+   * examples. That has not been true since trim_reads grew its three-way
+   * dispatch, and no TOOL_META entry sets it false today -- the case that
+   * still reaches here is `tool_with_meta`'s fallback, which defaults it to
+   * false for a tool the backend has no metadata entry for at all.
    */
   runnable: boolean;
+
+  /**
+   * Reference data for the Software help page, from ToolMeta. Any of these
+   * may be empty: a tool with no public repository or no paper is a real
+   * case, and the page renders the absence rather than a dead link.
+   */
+  homepage: string;
+  repository: string;
+  citation: string;
+  citation_url: string;
+  license: string;
+  /** How BioFlow uses this tool -- the part no upstream page can tell you. */
+  usage: string;
 }
 
 export interface PipelineTools {
   tools: PipelineTool[];
   all_available: boolean;
+}
+
+/** An external data source. Mirrors sources.DataSource.
+ *
+ *  No version field, deliberately: a source has nothing to probe, and
+ *  NCBI Datasets is whatever the API returned today. */
+export interface DataSource {
+  name: string;
+  kind: "api" | "database" | "reference";
+  summary: string;
+  usage: string;
+  homepage: string;
+  docs: string;
+  citation: string;
+  citation_url: string;
+  terms: string;
+}
+
+export interface DataSources {
+  sources: DataSource[];
 }
 
 /** Mirrors fastp_runner.TrimParams. Nulls mean "let fastp decide". */
