@@ -228,12 +228,22 @@ class DensityAccumulator:
             return
 
         stats["variants"] += 1
-        # A SNP is a single base substituted for a single base; anything where
-        # the lengths differ is an indel. Multi-allelic ALTs (comma-separated)
-        # fall into neither and are counted only in the total.
-        if len(ref) == 1 and len(alt) == 1:
+        # Classified by allele, the same way `bcftools stats` classifies a
+        # site for its SN indel/SNP totals -- a multiallelic ALT is one site
+        # with several alleles, not several independent events, so every
+        # allele has to agree before the site earns a bucket. All alleles a
+        # single base against a single-base REF is a (possibly multiallelic)
+        # SNP site; any allele whose length differs from REF makes it an
+        # indel site, since one true indel allele is enough to shift the
+        # contig's indel density. A same-length multi-base substitution is an
+        # MNP in bcftools' vocabulary and lands in neither bucket, counted
+        # only in the total -- matching this to bcftools is what keeps the
+        # per-contig table's sums equal to the summary row above it instead
+        # of quietly drifting apart on any file with multiallelic sites.
+        alleles = alt.split(",")
+        if len(ref) == 1 and all(len(a) == 1 for a in alleles):
             stats["snps"] += 1
-        elif "," not in alt and len(ref) != len(alt):
+        elif any(len(a) != len(ref) for a in alleles):
             stats["indels"] += 1
 
         geom = self._geometry.get(contig)
