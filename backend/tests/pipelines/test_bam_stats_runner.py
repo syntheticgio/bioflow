@@ -7,6 +7,7 @@ worth testing in isolation, with no queue or filesystem involved.
 from pathlib import Path
 
 from app.pipelines.bam_stats_runner import (
+    allocate_bins,
     bin_depth,
     build_coverage_command,
     build_depth_command,
@@ -272,3 +273,34 @@ class TestCoerceTsvValue:
 
     def test_unknown_column_stays_a_string(self):
         assert coerce_tsv_value("mystery", "42") == "42"
+
+
+class TestAllocateBins:
+    def test_bins_sum_to_exactly_bin_count(self):
+        """Rounding must never leave the total short or over."""
+        geometry, boundaries, counts = allocate_bins(
+            contig_lengths=[("chr1", 1000), ("chr2", 3000), ("chr3", 17)],
+            bin_count=100,
+        )
+        assert sum(counts.values()) == 100
+
+    def test_short_contig_still_gets_a_bin(self):
+        """A 17bp contig beside a 3Mb one must not vanish from the plot."""
+        _, _, counts = allocate_bins(
+            contig_lengths=[("big", 3_000_000), ("tiny", 17)], bin_count=10
+        )
+        assert counts["tiny"] >= 1
+
+    def test_boundaries_mark_each_contig_start(self):
+        _, boundaries, _ = allocate_bins(
+            contig_lengths=[("chr1", 100), ("chr2", 100)], bin_count=10
+        )
+        assert boundaries[0] == {"contig": "chr1", "bin_start": 0}
+        assert boundaries[1]["contig"] == "chr2"
+        assert boundaries[1]["bin_start"] > 0
+
+    def test_empty_input_returns_empty(self):
+        geometry, boundaries, counts = allocate_bins(
+            contig_lengths=[], bin_count=100
+        )
+        assert geometry == {} and boundaries == [] and counts == {}
