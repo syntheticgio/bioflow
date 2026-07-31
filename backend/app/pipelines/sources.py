@@ -93,8 +93,10 @@ DATA_SOURCES: tuple[DataSource, ...] = (
             "skips the enrichment rather than failing the ingest -- the "
             "file is still a perfectly good file without it."
         ),
+        # docs is left empty rather than repeated: E-utilities has no consumer
+        # landing page separate from its documentation, and the same URL under
+        # two labels renders as two links to one place, which reads as a bug.
         homepage="https://www.ncbi.nlm.nih.gov/books/NBK25501/",
-        docs="https://www.ncbi.nlm.nih.gov/books/NBK25501/",
         terms="https://www.ncbi.nlm.nih.gov/home/about/policies/",
     ),
     DataSource(
@@ -104,7 +106,7 @@ DATA_SOURCES: tuple[DataSource, ...] = (
             "The public archive of raw sequencing data that SRA accessions "
             "(SRR, SRX, SRS, SRP, and their ENA/DDBJ equivalents) resolve "
             "to. This application does not query the SRA directly -- reads "
-            "arrive through E-utilities and download through sra-tools --  "
+            "arrive through E-utilities and download through sra-tools -- "
             "but a recognized accession links to its record here."
         ),
         usage=(
