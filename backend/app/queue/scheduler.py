@@ -43,6 +43,16 @@ DEFAULT_SCHEDULES = [
         "payload": {"max_age_hours": 24},
     },
     {
+        "_id": "reap_report_dirs",
+        # Hourly, matching its grace window. Deletion removes these inline, so
+        # a sweep that finds anything is either cleaning up pre-existing strays
+        # or covering a delete that failed partway -- neither is urgent.
+        "job_type": "reap_report_dirs",
+        "interval_seconds": 3600,
+        "job_class": JobClass.MAINTENANCE,
+        "payload": {"max_age_hours": 1},
+    },
+    {
         "_id": "reap_pipeline_scratch",
         "job_type": "reap_pipeline_scratch",
         # Hourly: the scratch it reclaims is whole FASTQ files, but a grace
@@ -57,6 +67,7 @@ RESOURCES = {
     "verify_files": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
     "gc_blobs": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
     "reap_uploads": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
+    "reap_report_dirs": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
     "reap_pipeline_scratch": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
 }
 

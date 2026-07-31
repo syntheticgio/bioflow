@@ -1,0 +1,178 @@
+"""Object deletion: the per-object report directories written outside objects/.
+
+Compute jobs write Results artifacts to qc_reports/, bam_stats/ and vcf_stats/
+keyed by object id. Those live outside the content-addressed store, so nothing
+refcounts them and blob GC never sees them -- deletion has to remove them by
+hand or they leak permanently.
+"""
+
+import pytest
+
+from app.config import settings
+from app.services import object_service, project_service
+
+pytestmark = [
+    pytest.mark.usefixtures("beanie_models"),
+    pytest.mark.asyncio(loop_scope="module"),
+]
+
+
+def report_dirs():
+    return (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir)
+
+
+class TestReportDirCleanup:
+    async def test_removes_every_report_dir_for_the_deleted_object(self):
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="reports-cleanup")
+        obj = await make_object(root, "sample.vcf.gz")
+
+        made = []
+        for parent in report_dirs():
+            d = parent / str(obj.id)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "artifact.txt").write_text("generated")
+            made.append(d)
+
+        await object_service.delete_object(obj.id)
+
+        for d in made:
+            assert not d.exists(), f"leaked {d}"
+
+    async def test_leaves_other_objects_reports_alone(self):
+        """The removal is keyed by object id, so a sibling's identically-shaped
+        directory next to it must survive."""
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="reports-sibling")
+        target = await make_object(root, "target.vcf.gz")
+        keeper = await make_object(root, "keeper.vcf.gz")
+
+        kept = settings.vcf_stats_dir / str(keeper.id)
+        kept.mkdir(parents=True, exist_ok=True)
+        (kept / "variants.tsv").write_text("keep me")
+        doomed = settings.vcf_stats_dir / str(target.id)
+        doomed.mkdir(parents=True, exist_ok=True)
+
+        await object_service.delete_object(target.id)
+
+        assert not doomed.exists()
+        assert (kept / "variants.tsv").read_text() == "keep me"
+
+    async def test_deletes_cleanly_when_no_reports_were_ever_computed(self):
+        """The normal case: most objects never have Results computed, so a
+        missing directory is expected and must not fail the delete."""
+        from app.models import DataObject
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="reports-absent")
+        obj = await make_object(root, "plain.fastq.gz")
+        for parent in report_dirs():
+            assert not (parent / str(obj.id)).exists()
+
+        await object_service.delete_object(obj.id)
+
+        assert await DataObject.get(obj.id) is None
+
+    async def test_removes_a_sidecars_reports_too(self):
+        """Sidecars are deleted by recursion, so their reports have to ride the
+        same path -- a .bai's own stats directory would otherwise outlive it."""
+        from app.models import SidecarRole
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="reports-sidecar")
+        bam = await make_object(root, "sample.bam")
+        bai = await make_object(
+            root,
+            "sample.bam.bai",
+            sidecar_of=bam.id,
+            sidecar_role=SidecarRole.BAI,
+        )
+        d = settings.bam_stats_dir / str(bai.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "contigs.tsv").write_text("x")
+
+        await object_service.delete_object(bam.id)
+
+        assert not d.exists()
+
+
+class TestReapReportDirs:
+    """The sweep for directories stranded before deletion cleaned up inline."""
+
+    @staticmethod
+    def ctx(**payload):
+        from app.queue.registry import JobContext
+
+        return JobContext(job_id="reap-1", payload=payload, epoch=1, attempts=1)
+
+    @staticmethod
+    def age(path, hours=48):
+        """Backdate mtime past the grace window."""
+        import os
+        import time
+
+        old = time.time() - hours * 3600
+        os.utime(path, (old, old))
+
+    async def test_removes_a_directory_whose_object_is_gone(self):
+        from bson import ObjectId
+
+        from app.queue.handlers import reap_report_dirs
+
+        gone = ObjectId()
+        d = settings.vcf_stats_dir / str(gone)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "variants.db").write_bytes(b"x" * 2048)
+        self.age(d)
+
+        result = await reap_report_dirs(self.ctx())
+
+        assert not d.exists()
+        assert result["removed"] >= 1
+        assert result["bytes_reclaimed"] >= 2048
+
+    async def test_keeps_a_directory_whose_object_still_exists(self):
+        """The check that matters: a live object's Results must survive a sweep
+        that is running specifically to delete directories like it."""
+        from app.queue.handlers import reap_report_dirs
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="reap-live")
+        obj = await make_object(root, "live.vcf.gz")
+        d = settings.vcf_stats_dir / str(obj.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "variants.tsv").write_text("live")
+        self.age(d)
+
+        await reap_report_dirs(self.ctx())
+
+        assert (d / "variants.tsv").read_text() == "live"
+
+    async def test_spares_a_recent_orphan(self):
+        """A directory is created before the compute job writes into it, so a
+        just-made one may have no object row yet. The grace window covers it."""
+        from bson import ObjectId
+
+        from app.queue.handlers import reap_report_dirs
+
+        fresh = settings.bam_stats_dir / str(ObjectId())
+        fresh.mkdir(parents=True, exist_ok=True)
+
+        await reap_report_dirs(self.ctx())
+
+        assert fresh.exists()
+        fresh.rmdir()
+
+    async def test_ignores_entries_that_are_not_object_ids(self):
+        from app.queue.handlers import reap_report_dirs
+
+        stray = settings.qc_reports_dir / "not-an-object-id"
+        stray.mkdir(parents=True, exist_ok=True)
+        self.age(stray)
+
+        await reap_report_dirs(self.ctx())
+
+        assert stray.exists()
+        stray.rmdir()
