@@ -16,6 +16,7 @@ from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import aligners, tools, variant_runner
+from app.pipelines import variant_db, vcf_stats_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller
 from app.queue.align_handlers import _resolve_blob
@@ -327,3 +328,127 @@ def _index_vcf(ctx: JobContext, vcf: Path, log_path: Path) -> Path:
     if not tbi.exists():
         raise RetryableError("bcftools index exited 0 but produced no .tbi")
     return tbi
+
+
+@handler(
+    "run_vcf_stats",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+)
+def run_vcf_stats(ctx: JobContext) -> dict:
+    """Summary statistics and the per-variant table for the Results tab.
+
+    Read-only, like run_bam_stats: derives no objects except the regenerable
+    TSV and SQLite database. The bounded summary returns as facts for
+    `_apply_run_vcf_stats` to merge; the per-variant detail goes to
+    settings.vcf_stats_dir and is referenced by filename.
+
+    The query output is consumed as a stream and fed to the database builder
+    and the density accumulator together, so a file with tens of millions of
+    variants is read once and never held in memory.
+    """
+    bcftools = tools.require(tools.bcftools())
+
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("run_vcf_stats requires an 'object_id'")
+
+    work = _prepare_workdir(ctx, "vcf_stats")
+
+    vcf_name = Path(ctx.payload.get("vcf_name") or "variants.vcf.gz").name
+    vcf = work / vcf_name
+    vcf.unlink(missing_ok=True)
+    vcf.symlink_to(_resolve_blob(ctx.payload, "vcf"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="stats", pct=0.1, message="summarising the call set")
+    stats_path = work / "stats.txt"
+    code = run_subprocess(
+        ctx,
+        vcf_stats_runner.build_stats_command(bcftools_path=bcftools.path, vcf=vcf),
+        log_path=str(stats_path),
+    )
+    if code != 0:
+        raise _failure(code, stats_path, "bcftools stats")
+    stats = vcf_stats_runner.parse_stats(stats_path.read_text(errors="replace"))
+
+    ctx.progress(phase="query", pct=0.4, message="extracting variants")
+    query_path = work / "variants.tsv"
+    code = run_subprocess(
+        ctx,
+        vcf_stats_runner.build_query_command(bcftools_path=bcftools.path, vcf=vcf),
+        log_path=str(query_path),
+    )
+    if code != 0:
+        raise _failure(code, query_path, "bcftools query")
+
+    # Contig lengths come from the payload -- the ingest parser already read
+    # them from the header, and the handler cannot query for them.
+    contig_lengths = [
+        (name, int(length))
+        for name, length in (ctx.payload.get("contig_lengths") or [])
+    ]
+    density = vcf_stats_runner.DensityAccumulator(contig_lengths=contig_lengths)
+    filter_counts: dict[str, int] = {}
+
+    def _rows():
+        """One pass: every line reaches the database, the density bins and
+        the FILTER tally without the file being read three times."""
+        with open(query_path, errors="replace") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 8:
+                    continue
+                try:
+                    pos = int(parts[1])
+                except ValueError:
+                    continue
+                filter_counts[parts[5]] = filter_counts.get(parts[5], 0) + 1
+                density.add(parts[0], pos, ref=parts[2], alt=parts[3])
+                yield line
+
+    ctx.progress(phase="index", pct=0.7, message="building the variant index")
+    report_dir = settings.vcf_stats_dir / str(object_id)
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    # Built at a temporary path and renamed into place, so a failed recompute
+    # leaves the previous working database rather than a half-built one the
+    # table would query.
+    tmp_db = report_dir / "variants.db.tmp"
+    total = variant_db.build_variant_db(rows=_rows(), db_path=tmp_db)
+    tmp_db.replace(report_dir / "variants.db")
+
+    # The downloadable export, beside the database. Moved rather than copied:
+    # bcftools already wrote it.
+    query_path.replace(report_dir / "variants.tsv")
+
+    summary = vcf_stats_runner.variant_summary(stats, filter_counts=filter_counts)
+
+    facts = {
+        "vcf_stats_status": "ok",
+        "vcf_stats_tool_version": bcftools.version,
+        "vcf_stats_summary": summary,
+        "vcf_stats_qual_histogram": vcf_stats_runner.rebin_distribution(
+            stats["qual"], value_key="qual"
+        ),
+        "vcf_stats_depth_histogram": vcf_stats_runner.rebin_distribution(
+            stats["dp"], value_key="depth"
+        ),
+        "vcf_stats_substitutions": stats["st"],
+        "vcf_stats_indel_lengths": stats["idd"],
+        "vcf_stats_filters": [
+            {"filter": k, "count": v}
+            for k, v in sorted(filter_counts.items(), key=lambda kv: -kv[1])
+        ],
+        "vcf_stats_density_bins": density.bins(),
+        "vcf_stats_density_bounds": density.boundaries(),
+        "vcf_stats_contigs": density.contigs(),
+        "vcf_stats_report": "variants.tsv",
+        "vcf_stats_db": "variants.db",
+    }
+
+    log.info("vcf_stats_done", object_id=object_id, variants=total)
+    return {"object_id": object_id, "facts": facts}
