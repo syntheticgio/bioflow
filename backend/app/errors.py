@@ -52,6 +52,21 @@ class StorageUnavailableError(AppError):
     code = "storage_unavailable"
 
 
+class ProfileUnresolvedError(AppError):
+    """The X-BioFlow-Profile header is missing, malformed, or names no profile.
+
+    Distinct from a generic validation error because the profile picker recovers
+    from it rather than reporting it: a profile id remembered in localStorage
+    goes stale the moment that profile is deleted, which makes this the expected
+    steady-state failure, not a bug. One code covers all three cases on purpose
+    -- the picker's branch is "this id is no good, ask again", and it should not
+    have to enumerate the ways an id can be no good to take it.
+    """
+
+    status_code = 400
+    code = "profile_unresolved"
+
+
 class PayloadTooLargeError(AppError):
     status_code = 413
     code = "payload_too_large"

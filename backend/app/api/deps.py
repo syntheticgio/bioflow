@@ -9,15 +9,18 @@ rather than stashing anything in request state.
 
 Rejecting an unknown header is *not* authentication. Profiles are an
 organizational boundary; the API stays unauthenticated, so any client can send
-any profile's id and get that profile's data. The 404 below exists to catch a
-stale or mistyped header before it silently partitions someone's library into a
-profile that does not exist, not to keep anyone out.
+any profile's id and get that profile's data. The rejection below exists to
+catch a stale or mistyped header before it silently partitions someone's
+library into a profile that does not exist, not to keep anyone out.
 """
+
+from typing import Annotated
 
 from beanie import PydanticObjectId
 from bson.errors import InvalidId
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header
 
+from app.errors import ProfileUnresolvedError
 from app.models import Profile
 
 
@@ -25,29 +28,24 @@ async def get_current_owner(
     x_bioflow_profile: str | None = Header(default=None),
 ) -> str:
     if not x_bioflow_profile:
-        raise HTTPException(status_code=400, detail="X-BioFlow-Profile header is required")
+        raise ProfileUnresolvedError("X-BioFlow-Profile header is required")
 
-    # "local" is the one owner id that is not a real ObjectId. An installation
-    # that predates this feature has documents already carrying the
-    # `owner: "local"` default from TimestampedDocument, and one profile adopts
-    # them by returning the literal "local" from `Profile.owner_id()` instead of
-    # its own id -- so nothing has to be migrated.
+    # "local" is the one owner id that is not a real ObjectId: documents from
+    # before this feature already carry the `owner: "local"` default from
+    # TimestampedDocument, and one profile adopts them by returning the literal
+    # "local" from `Profile.owner_id()` instead of its own id, so nothing has to
+    # be migrated.
     #
-    # We cannot yet tell *which* profile that is. Adoption is marked by an
-    # `adopted_legacy_owner` flag that a later task adds, and until it exists
-    # there is no honest way to identify the adopted profile: it is emphatically
-    # not "the one named local" -- a user's first profile might be called "ada"
-    # and still be the adopted one, so matching on username would resolve the
-    # header for the wrong profile, or fail for the right one.
-    #
-    # So this branch deliberately checks only that *some* profile exists, which
-    # is all that can be verified today and is exactly right in the single
-    # adopted profile case that is the only way a "local" header can be produced
-    # before that flag lands. The `any profile at all` check still catches the
-    # case worth catching here: a header arriving against an empty database.
+    # Which profile that is cannot be determined yet -- adoption is marked by an
+    # `adopted_legacy_owner` flag a later task adds, and it is emphatically not
+    # "the one named local" (a first profile called "ada" can be the adopted
+    # one). So this branch verifies only that *some* profile exists, which is
+    # correct in the single-adopted-profile case that is the only way a "local"
+    # header can be produced today, and still catches the case worth catching:
+    # a header arriving against an empty database.
     if x_bioflow_profile == "local":
         if await Profile.find_one() is None:
-            raise HTTPException(status_code=404, detail="No profile exists to own 'local'")
+            raise ProfileUnresolvedError("No profile exists to own 'local'")
         return "local"
 
     try:
@@ -55,10 +53,17 @@ async def get_current_owner(
     except InvalidId as e:
         # bson raises InvalidId, which is a BSONError -- *not* a ValueError.
         # Catching the wrong type turns a typo'd header into an unhandled 500.
-        raise HTTPException(status_code=400, detail="Malformed profile id") from e
+        raise ProfileUnresolvedError("Malformed profile id") from e
 
     profile = await Profile.get(profile_id)
     if profile is None:
-        raise HTTPException(status_code=404, detail=f"Unknown profile: {x_bioflow_profile}")
+        raise ProfileUnresolvedError(f"Unknown profile: {x_bioflow_profile}")
 
     return profile.owner_id()
+
+
+# Routes take `owner: OwnerDep` rather than repeating the full `Depends(...)`
+# annotation. Roughly a dozen route files follow this one, and the alias keeps
+# the dependency named in a single place -- swapping what resolution does is
+# then a change here, not in every signature that consumes an owner.
+OwnerDep = Annotated[str, Depends(get_current_owner)]
