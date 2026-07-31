@@ -14,7 +14,7 @@ from app.models import DataObject, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, bam_stats_runner, tools
 from app.pipelines import variant_db
 from app.pipelines.aligners import Aligner
-from app.services import pipeline_service
+from app.services import pipeline_service, structure_lookup
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
@@ -403,6 +403,63 @@ async def get_vcf_stats_variants(
         else variant_db.count_variants(db_path=db_path, filters=filters)
     )
     return {"total": total, "rows": rows}
+
+
+@router.get("/vcfstats/structure/{object_id}")
+async def get_variant_structure(object_id: PydanticObjectId, gene: str) -> dict:
+    """The protein structure for one gene's variants, if there is one.
+
+    Takes the object rather than a taxid so the VCF -> reference -> organism
+    walk stays on the server, where the provenance lives: the client knows the
+    gene, not the species it belongs to.
+
+    Never an error for a gene with no structure. Roughly two thirds of resolved
+    genes have none, an unknown symbol is indistinguishable to the user from a
+    UniProt outage, and all three reach the UI as the same sentence -- so every
+    one of them is a 200 with a null accession rather than a status code the
+    caller has to branch on.
+
+    Resolved on click rather than per row, which is why the response covers one
+    gene: most rows would resolve to nothing, and pre-resolving a page would
+    spend dozens of round trips to render buttons that mostly do not fire.
+    """
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    db_path = settings.vcf_stats_dir / str(object_id) / "variants.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    empty = {"gene": gene, "accession": None, "pdb_ids": [], "length": None}
+
+    # Both of these mean "there is nothing a structure view could show", and
+    # neither is worth a request: without a residue the resolver's length guard
+    # has nothing to check, and without an organism the query would not be
+    # species-scoped, which returns a confidently wrong protein rather than a
+    # broader set of right ones.
+    max_aa_pos = variant_db.max_residue_for_gene(db_path=db_path, gene=gene)
+    if max_aa_pos is None:
+        return empty
+
+    taxid = await pipeline_service.taxid_for_vcf(obj)
+    if taxid is None:
+        return empty
+
+    hit = await structure_lookup.resolve_structure(
+        gene=gene, taxid=taxid, max_aa_pos=max_aa_pos
+    )
+    if hit is None:
+        return empty
+
+    return {
+        "gene": gene,
+        "accession": hit.accession,
+        "pdb_ids": hit.pdb_ids,
+        "length": hit.length,
+    }
 
 
 @router.get("/vcfstats/report/{object_id}/{report_path:path}")

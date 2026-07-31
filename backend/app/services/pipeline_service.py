@@ -1679,6 +1679,45 @@ async def _variant_payload(
 ANNOTATION_KINDS = {FormatKind.GFF}
 
 
+async def taxid_for_vcf(vcf: DataObject) -> int | None:
+    """The NCBI taxonomy ID of the organism a VCF was called against.
+
+    Scopes the gene lookup behind the structure viewer. The taxid is not an
+    optimisation there: gene symbols collide across organisms far more often
+    than within one, so an unscoped query can return an unrelated protein
+    with a residue highlighted at a position that means nothing. None
+    therefore means "do not query", never "query without a species".
+
+    `tax_id` is read from the reference's `metadata`, where the NCBI download
+    path puts it -- not `facts`, which holds the assembly accession and the
+    published statistics. All seven reference objects on this machine carry it
+    in metadata and none in facts.
+
+    Returns None for a reference that was never enriched from NCBI. The
+    organism *name* is often still present, but resolving a name to a taxid is
+    another remote lookup with its own failure modes, and a bare species name
+    does not distinguish the strain a callset actually used.
+    """
+    for parent_id in vcf.derived_from or []:
+        parent = await DataObject.get(parent_id)
+        if parent is None or parent.role is not ObjectRole.REFERENCE:
+            continue
+        metadata = parent.metadata if isinstance(parent.metadata, dict) else {}
+        raw = metadata.get("tax_id")
+        if raw is None:
+            continue
+        # Metadata is hand-editable, so this field can hold anything. A bool
+        # is excluded deliberately -- `int(True)` is 1, a real taxid.
+        if isinstance(raw, bool):
+            continue
+        try:
+            taxid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        return taxid if taxid > 0 else None
+    return None
+
+
 @dataclass(frozen=True)
 class AnnotationInputs:
     """What a VCF needs to be annotated, or why it cannot be.
