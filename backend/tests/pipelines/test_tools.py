@@ -379,3 +379,55 @@ class TestNewAlignerProbes:
         enriched = tools.tool_with_meta(tool)
         for field in dataclasses.fields(tools.ToolMeta):
             assert field.name in enriched, f"{field.name} missing from serialized output"
+
+
+class TestBibliographicFields:
+    """The help page's reference data lives on ToolMeta, so it reaches the
+    API through tool_with_meta's asdict() with no serializer change."""
+
+    def test_tool_meta_carries_bibliographic_fields(self):
+        meta = tools.ToolMeta(
+            pipelines=(tools.PipelineType.ALIGN,),
+            summary="s",
+            strengths=(),
+            homepage="https://example.org",
+            repository="https://github.com/example/x",
+            citation="Author et al., Journal 2020",
+            citation_url="https://doi.org/10.0000/x",
+            license="MIT",
+            usage="Runs when you do the thing.",
+        )
+        assert meta.homepage == "https://example.org"
+        assert meta.repository == "https://github.com/example/x"
+        assert meta.citation == "Author et al., Journal 2020"
+        assert meta.citation_url == "https://doi.org/10.0000/x"
+        assert meta.license == "MIT"
+        assert meta.usage == "Runs when you do the thing."
+
+    def test_bibliographic_fields_default_to_empty(self):
+        """Constructible without them, so an entry can be filled in
+        incrementally rather than all at once."""
+        meta = tools.ToolMeta(
+            pipelines=(tools.PipelineType.ALIGN,), summary="s", strengths=()
+        )
+        assert meta.homepage == ""
+        assert meta.citation_url == ""
+        assert meta.license == ""
+
+    def test_fields_reach_the_api_payload(self):
+        """The whole point of putting them on ToolMeta: no serializer edit."""
+        tool = tools.Tool(name="fastp", path="/usr/bin/fastp", version="0.24.0")
+        payload = tools.tool_with_meta(tool)
+        assert payload["homepage"].startswith("http")
+        assert payload["license"]
+        assert payload["usage"]
+
+    def test_undescribed_tool_gets_empty_bibliographic_fields(self):
+        """A tool with no TOOL_META entry must still serialize, with blanks
+        rather than a KeyError -- the fallback dict enumerates keys by hand."""
+        tool = tools.Tool(name="not-a-real-tool", path="/x", version="1.0")
+        payload = tools.tool_with_meta(tool)
+        assert payload["homepage"] == ""
+        assert payload["citation"] == ""
+        assert payload["license"] == ""
+        assert payload["usage"] == ""

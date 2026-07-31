@@ -305,6 +305,29 @@ class ToolMeta:
     # ignored the choice.
     runnable: bool = True
 
+    # --- Reference data for the Software help page. ---
+    # These are bibliographic facts about the tool rather than anything the
+    # pipeline consults, but they live here because this dict is already the
+    # one registry of what a tool *is*. A second catalog keyed by tool name
+    # would go stale silently -- a new tool would simply be missing from the
+    # help page with nothing failing, which is the trap
+    # suggestion_service.py's hand-maintained mapping already set once.
+    #
+    # All default to "" so an entry stays constructible while it is being
+    # filled in. `test_every_tool_is_documented` is what actually requires
+    # them, and it deliberately exempts the two that are legitimately absent
+    # for some tools (repository, citation_url).
+    homepage: str = ""
+    repository: str = ""
+    citation: str = ""  # human-readable, for a methods section
+    citation_url: str = ""
+    license: str = ""  # SPDX identifier
+    # How *this application* uses the tool -- the one thing here that no
+    # upstream page can tell a user. Prose, so nothing can verify it
+    # mechanically: describe behaviour, not flags, so it survives a
+    # parameter change in the runner.
+    usage: str = ""
+
 
 TOOL_META: dict[str, ToolMeta] = {
     "fastp": ToolMeta(
@@ -569,6 +592,12 @@ def tool_with_meta(tool: Tool) -> dict:
             # either, and offering it as selectable would be worse than
             # omitting the summary text.
             "runnable": False,
+            "homepage": "",
+            "repository": "",
+            "citation": "",
+            "citation_url": "",
+            "license": "",
+            "usage": "",
         }
     )
     return {
