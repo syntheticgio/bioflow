@@ -103,3 +103,49 @@ def parse_stats(text: str) -> dict:
             idd.append({"length": int(parts[2]), "count": int(parts[3])})
 
     return {"sn": sn, "tstv": tstv, "st": st, "qual": qual, "dp": dp, "idd": idd}
+
+
+# How many buckets the stored QUAL and DP histograms hold. bcftools emits one
+# row per distinct value -- 805 and 211 respectively on a 6,641-variant test
+# file, and far more at plant scale -- which is a list to store, not a shape
+# to read. This is the BIN_COUNT of this module.
+HISTOGRAM_BUCKETS = 40
+
+
+def rebin_distribution(
+    rows: list[dict], *, value_key: str, bucket_count: int = HISTOGRAM_BUCKETS
+) -> list[dict]:
+    """Collapse a one-row-per-distinct-value distribution into a histogram.
+
+    Buckets span the observed range in equal widths, and every observation
+    lands in exactly one -- the total count is preserved, so the histogram
+    describes the same data at lower resolution rather than a sample of it.
+
+    Returns `[{"value", "count"}]` where `value` is the bucket's lower bound,
+    so a caller can label an axis without knowing the bucket width. A
+    distribution with a single distinct value returns one bucket rather than
+    dividing by a zero-width range.
+    """
+    if not rows:
+        return []
+
+    values = [float(r[value_key]) for r in rows]
+    lo, hi = min(values), max(values)
+
+    if hi == lo or len(rows) <= bucket_count:
+        return [
+            {"value": float(r[value_key]), "count": int(r["count"])} for r in rows
+        ]
+
+    width = (hi - lo) / bucket_count
+    sums = [0] * bucket_count
+    for r in rows:
+        # The maximum lands one past the last bucket without this clamp.
+        idx = min(int((float(r[value_key]) - lo) / width), bucket_count - 1)
+        sums[idx] += int(r["count"])
+
+    return [
+        {"value": round(lo + i * width, 4), "count": c}
+        for i, c in enumerate(sums)
+        if c > 0
+    ]
