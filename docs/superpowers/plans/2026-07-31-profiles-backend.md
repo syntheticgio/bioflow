@@ -1862,16 +1862,14 @@ api_router.include_router(profiles.router)
 Edit `backend/app/api/v1/projects.py`. Find the route that lists projects (the one calling `project_service.list_projects`) and add the dependency:
 
 ```python
-from fastapi import Depends
-
-from app.api.deps import get_current_owner
+from app.api.deps import OwnerDep
 
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects_route(
     parent_id: str | None = None,
     include_archived: bool = False,
-    owner: str = Depends(get_current_owner),
+    owner: OwnerDep,
 ) -> list[ProjectOut]:
     projects = await project_service.list_projects(
         owner=owner,
@@ -1881,14 +1879,14 @@ async def list_projects_route(
     return [ProjectOut.of(p) for p in projects]
 ```
 
-(Match this to the route's actual current name, parameter list, and response construction — the research did not capture this specific route's full body, only that `project_id` handling elsewhere in the file is inline path/body parsing. Read the file first, then apply the same edit shape: add `owner: str = Depends(get_current_owner)` as a parameter and pass `owner=owner` into the `project_service.list_projects` call.)
+(Match this to the route's actual current name, parameter list, and response construction — the research did not capture this specific route's full body, only that `project_id` handling elsewhere in the file is inline path/body parsing. Read the file first, then apply the same edit shape: add `owner: OwnerDep` as a parameter and pass `owner=owner` into the `project_service.list_projects` call.)
 
 Also wire `create_project` (`POST /api/v1/projects`, shown fully in the research) the same way:
 
 ```python
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 async def create_project(
-    body: ProjectCreate, owner: str = Depends(get_current_owner)
+    body: ProjectCreate, owner: OwnerDep
 ) -> ProjectOut:
     project = await project_service.create_project(
         name=body.name,
@@ -1960,7 +1958,7 @@ cd /Users/syntheticgio/Programming/local-bio-pipeliner && docker compose restart
 
 Deliberately out of scope, so the plan stays reviewable and each task independently testable:
 
-- **Wiring `get_current_owner` into every route.** Only `projects.py`'s list and create routes are wired (Task 10), to prove the pattern end-to-end. The remaining ~12 route files need the identical mechanical treatment — add `owner: str = Depends(get_current_owner)`, pass `owner=owner` into the service call — and are better done as a focused follow-up once this plan's foundation (model, dependency, service scoping, dedup-key fix, results propagation) is reviewed and merged.
+- **Wiring `get_current_owner` into every route.** Only `projects.py`'s list and create routes are wired (Task 10), to prove the pattern end-to-end. The remaining ~12 route files need the identical mechanical treatment — add `owner: OwnerDep`, pass `owner=owner` into the service call — and are better done as a focused follow-up once this plan's foundation (model, dependency, service scoping, dedup-key fix, results propagation) is reviewed and merged.
 - **Threading real `owner` through `pipeline_service.py`'s launch functions** (trim, QC, align, call_variants, annotate, build_index, assembly/SRA download launches). These currently pass `owner="local"` literally (Task 8) because their callers — the unwired API routes above — don't yet have a real owner to give them. This becomes real once those routes are wired.
 - **The frontend.** Its own plan (`docs/superpowers/plans/2026-07-31-profiles-frontend.md`, not yet written), covering the startup picker, add-profile modal, header profile menu, `X-BioFlow-Profile` header injection in `api/client.ts`, and the upload-dedup message.
 - **Sharing between profiles.** Named in the spec as its own future feature; this plan's global-blob design is what keeps it cheap later, but no share mechanism is built here.
