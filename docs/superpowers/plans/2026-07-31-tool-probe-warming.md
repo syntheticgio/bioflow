@@ -40,9 +40,23 @@ holding `(fingerprint, Tool)`. `_probe` consults it after `shutil.which`
 resolves the path and before it shells out. Because the check compares
 fingerprints, a seeded entry can never be served for a changed binary.
 
-**The fingerprint** is `f"{path}:{mtime_ns}:{size}"` of the resolved binary. An
-upgraded tool produces a different fingerprint and is re-probed. This is a
-correctness concern, not a performance one: versions end up in methods sections.
+**The fingerprint** is `f"{path}:{mtime_ns}:{size}:{sha256}"` of the resolved
+binary. An upgraded tool produces a different fingerprint and is re-probed. This
+is a correctness concern, not a performance one: versions end up in methods
+sections.
+
+Revised during Task 1, after the originally-planned `path:mtime_ns:size` proved
+both flaky and insufficient. Two writes to the same path can land in one
+`mtime_ns` tick, and four of the fifteen tools (`fastqc`, `bowtie2`, `hisat2`,
+`cutadapt`) are interpreter wrapper scripts rather than binaries -- so each
+component covers a failure the others miss: mtime catches a reinstall whose
+bytes are unchanged, the hash catches an in-place same-mtime replacement, and
+the path keeps two tools sharing a binary from colliding. Hashing costs a few ms
+(4.15 MB across all tools, against a 15s probe).
+
+Residual, documented limitation: for a wrapper script this fingerprints the
+wrapper, not the program it dispatches to. A payload-only upgrade leaving the
+wrapper byte- and mtime-identical goes undetected; the 24h TTL is the backstop.
 
 **Test conventions in this repo.** `backend/tests/pipelines/test_tools.py` tests
 probes by writing real `#!/bin/sh` scripts into `tmp_path` and prepending it to
@@ -133,29 +147,20 @@ Expected: FAIL with `AttributeError: module 'app.pipelines.tools' has no attribu
 
 - [ ] **Step 3: Write the implementation**
 
-In `backend/app/pipelines/tools.py`, add `import os` to the imports at the top
-(alongside the existing `import re`, `import shutil`, `import subprocess`), then
-add this function directly below `_clean_version`:
+> **Superseded during execution.** The implementation below was the original
+> plan; it proved flaky (two writes in one `mtime_ns` tick) and insufficient
+> (wrapper scripts). The shipped version combines stat metadata with a SHA-256
+> content hash -- see the fingerprint note in the background section above, and
+> `_fingerprint` in `backend/app/pipelines/tools.py` for what actually landed.
+> The test class below is unchanged and still passes, plus one case asserting
+> that identical content at different paths fingerprints differently.
 
-```python
-def _fingerprint(path: str | None) -> str | None:
-    """Identity of the binary at `path`, for deciding whether a cached probe
-    still describes it.
-
-    Returns None when there is nothing to fingerprint -- an unresolved tool, or
-    one that vanished between `which` and here. None means "always probe",
-    which is the safe direction: a cached version string that no longer matches
-    the installed binary is the half of a run's provenance a methods section
-    reports.
-    """
-    if path is None:
-        return None
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return f"{path}:{st.st_mtime_ns}:{st.st_size}"
-```
+In `backend/app/pipelines/tools.py`, add `import os` and `import hashlib` to the
+imports at the top (alongside the existing `import re`, `import shutil`,
+`import subprocess`), then add a `_fingerprint` function directly below
+`_clean_version` that returns `None` for a `None` or unstattable path, and
+otherwise `f"{path}:{st.st_mtime_ns}:{st.st_size}:{sha256_of_contents}"`,
+streaming the hash in 1MB chunks and catching `OSError`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
