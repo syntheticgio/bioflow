@@ -6,6 +6,8 @@ functions over strings, with no queue or filesystem involved. Mirrors
 bam_stats_runner.py's split for the same reason.
 """
 
+from app.pipelines.bam_stats_runner import allocate_bins
+
 # The columns of the variant table, in the order build_query_command emits
 # them. The format string below and this tuple are one definition split in
 # two: changing either alone shifts every value one column left or right.
@@ -185,3 +187,91 @@ def variant_summary(stats: dict, *, filter_counts: dict[str, int]) -> dict:
         summary["pass_pct"] = round(100 * summary["pass_count"] / total, 2)
 
     return summary
+
+
+# Fixed regardless of genome size, so the stored array is the same size for a
+# 135 Mb Arabidopsis genome as for a 16 Gb wheat one. Matches BIN_COUNT in
+# bam_stats_runner, so the density strip and the coverage strip are directly
+# comparable when both are on screen.
+DENSITY_BINS = 1000
+
+
+class DensityAccumulator:
+    """Variant counts per bin and per contig, accumulated in one pass.
+
+    Built as an accumulator rather than a function over a list because the
+    variant stream is consumed once and never materialized -- at plant scale
+    it is tens of millions of records. The handler feeds every record here
+    while also writing it to the database, so the file is read once.
+
+    Bin geometry comes from `allocate_bins`, shared with the BAM coverage
+    strip, so a short contig gets its own bin in both rather than vanishing.
+    """
+
+    def __init__(self, *, contig_lengths: list[tuple[str, int]], bin_count: int = DENSITY_BINS):
+        self._lengths = dict(contig_lengths)
+        self._order = [name for name, _ in contig_lengths]
+        self._geometry, self._boundaries, self._counts = allocate_bins(
+            contig_lengths=contig_lengths, bin_count=bin_count
+        )
+        self._bins = [0] * bin_count if self._geometry else []
+        self._per_contig: dict[str, dict] = {
+            name: {"variants": 0, "snps": 0, "indels": 0} for name in self._order
+        }
+
+    def add(self, contig: str, pos: int, *, ref: str, alt: str) -> None:
+        """Record one variant. Unknown contigs are ignored: a VCF can carry
+        records for a contig absent from its own header, and dropping them
+        from the plot is better than raising on an otherwise-usable file."""
+        stats = self._per_contig.get(contig)
+        if stats is None:
+            return
+
+        stats["variants"] += 1
+        # A SNP is a single base substituted for a single base; anything where
+        # the lengths differ is an indel. Multi-allelic ALTs (comma-separated)
+        # fall into neither and are counted only in the total.
+        if len(ref) == 1 and len(alt) == 1:
+            stats["snps"] += 1
+        elif "," not in alt and len(ref) != len(alt):
+            stats["indels"] += 1
+
+        geom = self._geometry.get(contig)
+        if geom is None:
+            return
+        start_bin, positions_per_bin = geom
+        offset = min(
+            int((pos - 1) / positions_per_bin), max(self._counts[contig], 1) - 1
+        )
+        self._bins[start_bin + offset] += 1
+
+    def bins(self) -> list[int]:
+        return self._bins
+
+    def boundaries(self) -> list[dict]:
+        return self._boundaries
+
+    def contigs(self) -> list[dict]:
+        """Per-contig counts, ordered as the VCF header declares them.
+
+        Header order rather than descending count: contigs have meaningful
+        names a person scans for (chr1, chr2, ...), unlike BAM's per-contig
+        table where the interesting ones are whichever got the most reads.
+        """
+        out = []
+        for name in self._order:
+            length = self._lengths.get(name, 0)
+            stats = self._per_contig[name]
+            out.append(
+                {
+                    "contig": name,
+                    "length": length,
+                    "variants": stats["variants"],
+                    "snps": stats["snps"],
+                    "indels": stats["indels"],
+                    "per_kb": (
+                        round(1000 * stats["variants"] / length, 3) if length else 0.0
+                    ),
+                }
+            )
+        return out
