@@ -12,11 +12,13 @@ import pytest
 
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import align_runner, aligner_registry
+from app.services import pipeline_service
 from app.services.suggestion_service import (
     CardStatus,
     ReferenceChoice,
     SuggestionCard,
     build_align_card,
+    build_annotate_card,
     build_assemble_card,
     build_preprocess_card,
     build_variants_card,
@@ -659,6 +661,88 @@ class TestAssembleCard:
                 _fake_obj(facts={"qc_read_chemistry": chem} if chem else {})
             )
             assert card.status is CardStatus.UNAVAILABLE
+
+
+def _vcf(obj_id="vcf789", kind=FormatKind.VCF):
+    return _fake_obj(kind=kind, obj_id=obj_id)
+
+
+@contextmanager
+def installed_csq(available=True, error=None):
+    """Pin the bcftools-csq probe the annotate card reads.
+
+    A plain module-attribute lookup, like the variants card's caller probes
+    above -- not a frozen-spec seam like the aligners', since `bcftools_csq`
+    is called directly rather than through a registry.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.bcftools_csq",
+        return_value=_FakeTool(available, name="bcftools csq"),
+    ) as probe:
+        # `_FakeTool` has no `error` attribute by default; the card reads
+        # `.error` only on the unavailable path, so it is added here rather
+        # than widening the shared fake for every other test.
+        probe.return_value.error = error
+        yield
+
+
+class TestAnnotateCard:
+    """Per CLAUDE.md, assert the *unavailable* direction hardest: the image
+    ships bcftools 1.21, so an availability assertion passes whether or not
+    the seam it depends on actually works."""
+
+    def test_no_card_on_a_non_vcf(self):
+        with installed_csq(True):
+            assert build_annotate_card(_bam(), None) is None
+
+    def test_available_when_inputs_resolve(self):
+        vcf = _vcf()
+        reference = _ref("ref1", "GCF_000002445.2_ASM244v1_genomic.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(True):
+            card = build_annotate_card(vcf, inputs)
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/annotate"
+        assert card.launch["body"] == {"object_id": "vcf789"}
+
+    def test_a_bcf_is_also_offered_the_card(self):
+        """`FormatKind.BCF` is the binary sibling of VCF; both are called
+        variants, so both should be able to reach the same card."""
+        vcf = _vcf(kind=FormatKind.BCF)
+        reference = _ref("ref1", "ref.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(True):
+            card = build_annotate_card(vcf, inputs)
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+
+    def test_unavailable_reason_comes_from_the_resolver(self):
+        inputs = pipeline_service.AnnotationInputs(
+            ok=False, reason="No annotation (GFF3) for this reference."
+        )
+        with installed_csq(True):
+            card = build_annotate_card(_vcf(), inputs)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.reason == "No annotation (GFF3) for this reference."
+        assert card.launch is None
+
+    def test_unavailable_when_csq_is_missing(self):
+        reference = _ref("ref1", "ref.fna")
+        annotation = _ref("gff1", "annotation.gff3")
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True, reference=reference, annotation=annotation
+        )
+        with installed_csq(False, error="bcftools csq requires bcftools >= 1.12."):
+            card = build_annotate_card(_vcf(), inputs)
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+        assert "csq" in card.reason.lower()
 
 
 @contextmanager

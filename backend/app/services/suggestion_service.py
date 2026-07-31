@@ -534,6 +534,66 @@ def build_variants_card(obj, chemistry) -> SuggestionCard | None:
     )
 
 
+def build_annotate_card(obj, inputs) -> SuggestionCard | None:
+    """Consequence annotation for a called VCF.
+
+    `inputs` is a parameter rather than something resolved here, mirroring
+    `build_variants_card`'s chemistry: `resolve_annotation_inputs` walks
+    provenance to the reference and lists the project for a GFF3, which is an
+    async database round trip the endpoint has already paid for by the time
+    this builder runs. Taking the resolved value keeps this module's builders
+    uniformly synchronous and pure.
+
+    The reason text is the resolver's, not this card's. Two places deciding
+    why something is unavailable drift, and the card is the one the user
+    reads -- so it must say exactly what the launcher would enforce.
+    """
+    if obj.format.kind not in (FormatKind.VCF, FormatKind.BCF):
+        return None
+
+    title = "Annotate variants"
+    description = "Add gene and protein consequences to these variants."
+
+    csq = tools.bcftools_csq()
+    if not csq.available:
+        return SuggestionCard(
+            kind="annotate",
+            category="ANNOTATE",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=csq.error or "bcftools csq is unavailable.",
+        )
+
+    if inputs is None or not inputs.ok:
+        return SuggestionCard(
+            kind="annotate",
+            category="ANNOTATE",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(inputs.reason if inputs else "Inputs could not be resolved."),
+        )
+
+    return SuggestionCard(
+        kind="annotate",
+        category="ANNOTATE",
+        title=title,
+        description=(
+            f"Read genes from {inputs.annotation.name} and record what each "
+            "variant does to a protein."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/annotate",
+            # The complete request body: `/pipelines/annotate` keys on
+            # `object_id` alone and resolves the reference/annotation itself,
+            # the same walk `inputs` above already came from.
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_assemble_card(obj) -> SuggestionCard | None:
     """De novo assembly. Always unavailable.
 
@@ -613,10 +673,18 @@ async def suggestions_for(obj) -> list[dict]:
         # without the round trip.
         chemistry = await pipeline_service.read_chemistry_for_alignment(obj)
 
+    annotation_inputs = None
+    if obj.format.kind in (FormatKind.VCF, FormatKind.BCF):
+        # VCF only, and awaited here rather than inside the builder: it walks
+        # provenance to the reference and lists the project for a GFF3, which
+        # keeps the builders uniformly synchronous.
+        annotation_inputs = await pipeline_service.resolve_annotation_inputs(obj)
+
     builders = (
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
         ("variants", lambda: build_variants_card(obj, chemistry)),
+        ("annotate", lambda: build_annotate_card(obj, annotation_inputs)),
         ("assemble", lambda: build_assemble_card(obj)),
     )
 
