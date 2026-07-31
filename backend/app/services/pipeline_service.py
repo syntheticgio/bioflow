@@ -1672,6 +1672,12 @@ async def _variant_payload(
 
 # --- Consequence annotation --------------------------------------------------
 
+# ObjectRole.ANNOTATION spans GFF3, GTF and BED -- the role records intent
+# and cannot say which interval format a file actually is. `bcftools csq`
+# reads GFF3 only, so a BED blacklist tagged ANNOTATION would launch a job
+# that dies in the worker on a parse error.
+ANNOTATION_KINDS = {FormatKind.GFF}
+
 
 @dataclass(frozen=True)
 class AnnotationInputs:
@@ -1700,16 +1706,21 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
     """
     from app.services import object_service
 
-    variants = 0
-    summary = vcf.facts.get("vcf_stats_summary") or {}
-    if isinstance(summary, dict):
-        variants = summary.get("variants") or 0
-    if not variants:
+    summary = vcf.facts.get("vcf_stats_summary")
+    if not isinstance(summary, dict) or "variants" not in summary:
         return AnnotationInputs(
             ok=False,
             reason=(
-                "This VCF has no called variants to annotate. Compute its "
-                "results first, or call variants against a reference."
+                "Variant results haven't been computed for this VCF yet, so "
+                "there is nothing to annotate. Compute its results first."
+            ),
+        )
+    if not summary.get("variants"):
+        return AnnotationInputs(
+            ok=False,
+            reason=(
+                "This VCF contains no called variants, so there is nothing "
+                "to annotate."
             ),
         )
 
@@ -1724,12 +1735,27 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
         return AnnotationInputs(
             ok=False,
             reason=(
-                "The reference this VCF was called against isn't in this "
-                "project, so there is nothing to read genes from."
+                f"Cannot determine which reference {vcf.name} was called "
+                "against -- an uploaded VCF carries no record of it, so there "
+                "is nothing to read genes from."
             ),
         )
 
+    # Without a confirmed accession there is nothing to match a GFF3 against:
+    # picking "any GFF3 in the project" would silently pair an unrelated
+    # genome's annotation with this reference (see the accession check below).
     accession = reference.facts.get("ncbi_assembly_accession")
+    if not accession:
+        return AnnotationInputs(
+            ok=False,
+            reference=reference,
+            reason=(
+                f"{reference.name} has no NCBI assembly accession recorded, so "
+                "no annotation can be confirmed to match it. Annotation needs "
+                "a GFF3 for this exact assembly."
+            ),
+        )
+
     candidates = await object_service.list_objects(
         vcf.project_id, limit=500, status=ObjectStatus.READY
     )
@@ -1737,11 +1763,13 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
     for obj in candidates:
         if obj.role is not ObjectRole.ANNOTATION:
             continue
+        if obj.format.kind not in ANNOTATION_KINDS:
+            continue
         # Match on assembly accession rather than taking any GFF3 in the
         # project. An annotation for a different assembly parses fine and
         # annotates nothing, which reads as a successful run producing an
         # empty column -- worse than refusing.
-        if accession and obj.facts.get("ncbi_assembly_accession") != accession:
+        if obj.facts.get("ncbi_assembly_accession") != accession:
             continue
         annotation = obj
         break
