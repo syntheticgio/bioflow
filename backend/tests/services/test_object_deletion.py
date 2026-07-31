@@ -10,6 +10,7 @@ import pytest
 
 from app.config import settings
 from app.services import object_service, project_service
+from tests.services.helpers import TEST_OWNER
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -25,7 +26,7 @@ class TestReportDirCleanup:
     async def test_removes_every_report_dir_for_the_deleted_object(self):
         from tests.services.helpers import make_object
 
-        root = await project_service.create_project(name="reports-cleanup")
+        root = await project_service.create_project(name="reports-cleanup", owner=TEST_OWNER)
         obj = await make_object(root, "sample.vcf.gz")
 
         made = []
@@ -45,7 +46,7 @@ class TestReportDirCleanup:
         directory next to it must survive."""
         from tests.services.helpers import make_object
 
-        root = await project_service.create_project(name="reports-sibling")
+        root = await project_service.create_project(name="reports-sibling", owner=TEST_OWNER)
         target = await make_object(root, "target.vcf.gz")
         keeper = await make_object(root, "keeper.vcf.gz")
 
@@ -66,7 +67,7 @@ class TestReportDirCleanup:
         from app.models import DataObject
         from tests.services.helpers import make_object
 
-        root = await project_service.create_project(name="reports-absent")
+        root = await project_service.create_project(name="reports-absent", owner=TEST_OWNER)
         obj = await make_object(root, "plain.fastq.gz")
         for parent in report_dirs():
             assert not (parent / str(obj.id)).exists()
@@ -81,7 +82,7 @@ class TestReportDirCleanup:
         from app.models import SidecarRole
         from tests.services.helpers import make_object
 
-        root = await project_service.create_project(name="reports-sidecar")
+        root = await project_service.create_project(name="reports-sidecar", owner=TEST_OWNER)
         bam = await make_object(root, "sample.bam")
         bai = await make_object(
             root,
@@ -139,7 +140,7 @@ class TestReapReportDirs:
         from app.queue.handlers import reap_report_dirs
         from tests.services.helpers import make_object
 
-        root = await project_service.create_project(name="reap-live")
+        root = await project_service.create_project(name="reap-live", owner=TEST_OWNER)
         obj = await make_object(root, "live.vcf.gz")
         d = settings.vcf_stats_dir / str(obj.id)
         d.mkdir(parents=True, exist_ok=True)

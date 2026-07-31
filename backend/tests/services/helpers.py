@@ -20,6 +20,21 @@ from app.models import (
     Project,
     SidecarRole,
 )
+from app.services import project_service
+
+# These factories exist for deletion-cascade tests, which care about the
+# document graph and refcounts rather than the owner boundary -- that boundary
+# has its own negative tests in test_project_service_owner.py. A default keeps
+# those call sites reading about what they actually assert.
+TEST_OWNER = "test-owner"
+
+
+async def make_project(
+    name: str, parent: Project | None = None, *, owner: str = TEST_OWNER
+) -> Project:
+    return await project_service.create_project(
+        name=name, owner=owner, parent_id=parent.id if parent else None
+    )
 
 
 async def make_blob(digest: str, *, ref_count: int = 1) -> Blob:
@@ -53,8 +68,12 @@ async def make_object(
     if await Blob.get(digest) is None:
         await make_blob(digest)
 
+    # Inherit the project's owner rather than the model default: the deletion
+    # queries are owner-scoped now, so an object left at "local" under a
+    # "test-owner" project is invisible to the cascade under test.
     obj = DataObject(
         project_id=project.id,
+        owner=project.owner,
         name=name,
         size=size,
         blob_sha256=digest,
@@ -71,6 +90,7 @@ async def make_job(project: Project, job_type: str, state: str) -> Job:
         type=job_type,
         state=JobState(state),
         project_id=project.id,
+        owner=project.owner,
     )
     await job.insert()
     return job

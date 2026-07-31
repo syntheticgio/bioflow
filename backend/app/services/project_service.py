@@ -17,6 +17,7 @@ log = get_logger(__name__)
 async def create_project(
     *,
     name: str,
+    owner: str,
     description: str = "",
     parent_id: PydanticObjectId | None = None,
     metadata: dict | None = None,
@@ -29,12 +30,17 @@ async def create_project(
     path: list[PydanticObjectId] = []
     if parent_id is not None:
         parent = await Project.get(parent_id)
-        if parent is None:
+        # Another profile's project is "not found" here, exactly as a missing
+        # one is -- otherwise a nested create would quietly build a tree that
+        # straddles the partition, and the child's `path` would name ancestors
+        # its owner can never see.
+        if parent is None or parent.owner != owner:
             raise NotFoundError(f"Parent project not found: {parent_id}")
         path = [*parent.path, parent.id]
 
     project = Project(
         name=name,
+        owner=owner,
         slug=slugify(name),
         description=description,
         parent_id=parent_id,
@@ -52,34 +58,46 @@ async def create_project(
     return project
 
 
-async def get_project(project_id: PydanticObjectId) -> Project:
+async def get_project(project_id: PydanticObjectId, *, owner: str) -> Project:
+    """Fetch a project, scoped to its owner.
+
+    A wrong-owner lookup raises the same NotFoundError as a missing one, on
+    purpose: it keeps every existing caller's error handling working unchanged,
+    and it does not confirm to one profile that another profile's id exists.
+    """
     project = await Project.get(project_id)
-    if project is None:
+    if project is None or project.owner != owner:
         raise NotFoundError(f"Project not found: {project_id}")
     return project
 
 
 async def list_projects(
     *,
+    owner: str,
     parent_id: PydanticObjectId | None = None,
     include_archived: bool = False,
     limit: int = 200,
 ) -> list[Project]:
-    query: dict = {"parent_id": parent_id}
+    query: dict = {"owner": owner, "parent_id": parent_id}
     if not include_archived:
         query["archived"] = False
     return await Project.find(query).sort("-updated_at").limit(limit).to_list()
 
 
-async def breadcrumbs(project: Project) -> list[dict]:
+async def breadcrumbs(project: Project, *, owner: str) -> list[dict]:
     """Resolve the materialized ancestor path into display entries.
 
     One query for the whole chain rather than a walk up the tree.
+
+    `project` arrives already fetched, so this cannot re-check that the caller
+    was entitled to it -- the owner filter here only governs which ancestor
+    *names* get resolved. Callers must have obtained `project` through
+    get_project.
     """
     if not project.path:
         return [{"id": str(project.id), "name": project.name}]
 
-    ancestors = await Project.find({"_id": {"$in": project.path}}).to_list()
+    ancestors = await Project.find({"owner": owner, "_id": {"$in": project.path}}).to_list()
     by_id = {a.id: a for a in ancestors}
     trail = [
         {"id": str(pid), "name": by_id[pid].name} for pid in project.path if pid in by_id
@@ -88,8 +106,10 @@ async def breadcrumbs(project: Project) -> list[dict]:
     return trail
 
 
-async def update_project(project_id: PydanticObjectId, updates: dict) -> Project:
-    project = await get_project(project_id)
+async def update_project(
+    project_id: PydanticObjectId, updates: dict, *, owner: str
+) -> Project:
+    project = await get_project(project_id, owner=owner)
 
     if "name" in updates and updates["name"] is not None:
         new_name = updates["name"].strip()
@@ -112,7 +132,9 @@ async def update_project(project_id: PydanticObjectId, updates: dict) -> Project
     return project
 
 
-async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False) -> None:
+async def delete_project(
+    project_id: PydanticObjectId, *, owner: str, cascade: bool = False
+) -> None:
     """Delete a project, optionally with everything inside it.
 
     `cascade=True` delegates to delete_project_tree rather than detaching blobs
@@ -120,10 +142,14 @@ async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False)
     cascade and stranded index blobs at refcount 1, where GC could never reach
     them.
     """
-    project = await get_project(project_id)
+    project = await get_project(project_id, owner=owner)
 
-    object_count = await DataObject.find(DataObject.project_id == project_id).count()
-    child_count = await Project.find(Project.parent_id == project_id).count()
+    object_count = await DataObject.find(
+        DataObject.project_id == project_id, DataObject.owner == owner
+    ).count()
+    child_count = await Project.find(
+        Project.parent_id == project_id, Project.owner == owner
+    ).count()
 
     if not cascade and (object_count or child_count):
         raise ConflictError(
@@ -132,29 +158,37 @@ async def delete_project(project_id: PydanticObjectId, *, cascade: bool = False)
         )
 
     if cascade:
-        await delete_project_tree(project_id)
+        await delete_project_tree(project_id, owner=owner)
         return
 
     await project.delete()
 
 
-async def collect_subtree(project_id: PydanticObjectId) -> list[PydanticObjectId]:
+async def collect_subtree(
+    project_id: PydanticObjectId, *, owner: str
+) -> list[PydanticObjectId]:
     """Every project in this subtree, root first, then breadth-first.
 
     Both the deletion preview and the delete itself build on this, so the two
     cannot disagree about what "this project" covers -- a warning that
     undercounts what is about to be destroyed is worse than no warning.
+
+    The owner filter is not merely a read scope here: what this returns is what
+    the delete destroys, so an unscoped descendant would be another profile's
+    project deleted without ever appearing in its owner's preview.
     """
     found = [project_id]
     frontier = [project_id]
     while frontier:
-        children = await Project.find({"parent_id": {"$in": frontier}}).to_list()
+        children = await Project.find(
+            {"owner": owner, "parent_id": {"$in": frontier}}
+        ).to_list()
         frontier = [c.id for c in children]
         found.extend(frontier)
     return found
 
 
-async def deletion_preview(project_id: PydanticObjectId) -> dict:
+async def deletion_preview(project_id: PydanticObjectId, *, owner: str) -> dict:
     """What deleting this project would destroy, and whether it may proceed.
 
     Computed from collect_subtree so the numbers shown in the confirmation
@@ -163,12 +197,16 @@ async def deletion_preview(project_id: PydanticObjectId) -> dict:
     from app.models import Job, PipelineRun, UploadSession
     from app.models.job import ACTIVE_STATES
 
-    await get_project(project_id)
-    ids = await collect_subtree(project_id)
+    await get_project(project_id, owner=owner)
+    ids = await collect_subtree(project_id, owner=owner)
 
-    objects = await DataObject.find({"project_id": {"$in": ids}}).to_list()
+    objects = await DataObject.find({"owner": owner, "project_id": {"$in": ids}}).to_list()
     active = await Job.find(
-        {"project_id": {"$in": ids}, "state": {"$in": [s.value for s in ACTIVE_STATES]}}
+        {
+            "owner": owner,
+            "project_id": {"$in": ids},
+            "state": {"$in": [s.value for s in ACTIVE_STATES]},
+        }
     ).to_list()
 
     return {
@@ -178,10 +216,12 @@ async def deletion_preview(project_id: PydanticObjectId) -> dict:
         # Bytes *referenced*, not bytes that will be freed: a blob shared with
         # an object outside this subtree stays on disk.
         "total_bytes": sum(o.size for o in objects),
-        "run_count": await PipelineRun.find({"project_id": {"$in": ids}}).count(),
-        "job_count": await Job.find({"project_id": {"$in": ids}}).count(),
+        "run_count": await PipelineRun.find(
+            {"owner": owner, "project_id": {"$in": ids}}
+        ).count(),
+        "job_count": await Job.find({"owner": owner, "project_id": {"$in": ids}}).count(),
         "upload_session_count": await UploadSession.find(
-            {"project_id": {"$in": ids}}
+            {"owner": owner, "project_id": {"$in": ids}}
         ).count(),
         "active_jobs": [
             {"id": str(j.id), "job_type": j.type, "state": j.state.value} for j in active
@@ -190,8 +230,13 @@ async def deletion_preview(project_id: PydanticObjectId) -> dict:
     }
 
 
-async def delete_project_tree(project_id: PydanticObjectId) -> dict:
+async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> dict:
     """Delete a project and everything belonging to it.
+
+    Ownership is settled before anything is destroyed: deletion_preview below
+    calls get_project first, so a wrong-owner call raises NotFoundError while
+    the tree is still intact rather than discovering its mistake partway
+    through the delete loop.
 
     Delegates each object to object_service.delete_object rather than
     detaching blobs here. That delegation is load-bearing: delete_object
@@ -205,7 +250,7 @@ async def delete_project_tree(project_id: PydanticObjectId) -> dict:
     from app.models import Job, PipelineRun, RunJob, UploadSession
     from app.services import object_service, upload_service
 
-    preview = await deletion_preview(project_id)
+    preview = await deletion_preview(project_id, owner=owner)
     if preview["blocked"]:
         raise ConflictError(
             "Project has jobs that are still active. Wait for them to finish, "
@@ -218,18 +263,27 @@ async def delete_project_tree(project_id: PydanticObjectId) -> dict:
     # Deepest first: if this fails partway, what remains is a valid tree rather
     # than orphans pointing at a parent that no longer exists.
     for pid in reversed(ids):
-        for obj in await DataObject.find(DataObject.project_id == pid).to_list():
+        for obj in await DataObject.find(
+            DataObject.project_id == pid, DataObject.owner == owner
+        ).to_list():
             # A sidecar may already be gone, cascaded with its parent above.
             if await DataObject.get(obj.id) is not None:
                 await object_service.delete_object(obj.id)
 
         for session in await UploadSession.find(
-            UploadSession.project_id == pid
+            UploadSession.project_id == pid, UploadSession.owner == owner
         ).to_list():
             await upload_service.abort_session(session.id)
             await session.delete()
 
-        for run in await PipelineRun.find(PipelineRun.project_id == pid).to_list():
+        for run in await PipelineRun.find(
+            PipelineRun.project_id == pid, PipelineRun.owner == owner
+        ).to_list():
+            # Deliberately not owner-filtered. RunJob is a link row belonging to
+            # `run`, which is already confirmed to be this owner's, and a row
+            # linking a shared build_index job can carry the owner of whichever
+            # profile enqueued that job first. Filtering here would strand
+            # exactly those rows pointing at a run that no longer exists.
             await RunJob.find(RunJob.run_id == run.id).delete()
             await run.delete()
 
@@ -240,10 +294,13 @@ async def delete_project_tree(project_id: PydanticObjectId) -> dict:
         # project's RunJob still points at (linked with shared=True). That's
         # a silent cross-project side effect, not corruption -- run_detail
         # already renders a missing job as "expired" rather than erroring.
-        await Job.find(Job.project_id == pid).delete()
+        await Job.find(Job.project_id == pid, Job.owner == owner).delete()
 
         project = await Project.get(pid)
-        if project is not None:
+        # The owner re-check is redundant -- collect_subtree only returned this
+        # owner's projects -- but it is the last statement that destroys a
+        # project document, and it costs one comparison.
+        if project is not None and project.owner == owner:
             await project.delete()
 
     log.info(

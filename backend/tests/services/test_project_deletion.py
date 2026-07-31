@@ -9,6 +9,7 @@ import pytest
 
 from app.models import DataObject, Project, SidecarRole
 from app.services import project_service
+from tests.services.helpers import TEST_OWNER, make_project
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -16,16 +17,10 @@ pytestmark = [
 ]
 
 
-async def make_project(name: str, parent: Project | None = None) -> Project:
-    return await project_service.create_project(
-        name=name, parent_id=parent.id if parent else None
-    )
-
-
 class TestCollectSubtree:
     async def test_returns_just_the_root_when_there_are_no_children(self):
         root = await make_project("solo-subtree-root")
-        assert await project_service.collect_subtree(root.id) == [root.id]
+        assert await project_service.collect_subtree(root.id, owner=TEST_OWNER) == [root.id]
 
     async def test_includes_descendants_at_every_depth(self):
         """Three levels, because a two-level test passes even against an
@@ -34,7 +29,7 @@ class TestCollectSubtree:
         child = await make_project("deep-child", root)
         grandchild = await make_project("deep-grandchild", child)
 
-        found = await project_service.collect_subtree(root.id)
+        found = await project_service.collect_subtree(root.id, owner=TEST_OWNER)
 
         assert found[0] == root.id
         assert set(found) == {root.id, child.id, grandchild.id}
@@ -44,7 +39,7 @@ class TestCollectSubtree:
         target = await make_project("sibling-target", parent)
         other = await make_project("sibling-other", parent)
 
-        found = await project_service.collect_subtree(target.id)
+        found = await project_service.collect_subtree(target.id, owner=TEST_OWNER)
 
         assert other.id not in found
 
@@ -60,7 +55,7 @@ class TestDeletionPreview:
         await make_object(root, "a.fastq.gz", size=100)
         await make_object(child, "b.fastq.gz", size=250)
 
-        preview = await project_service.deletion_preview(root.id)
+        preview = await project_service.deletion_preview(root.id, owner=TEST_OWNER)
 
         assert preview["object_count"] == 2
         assert preview["total_bytes"] == 350
@@ -68,7 +63,7 @@ class TestDeletionPreview:
 
     async def test_is_not_blocked_when_nothing_is_active(self):
         root = await make_project("preview-idle")
-        preview = await project_service.deletion_preview(root.id)
+        preview = await project_service.deletion_preview(root.id, owner=TEST_OWNER)
         assert preview["blocked"] is False
         assert preview["active_jobs"] == []
 
@@ -78,7 +73,7 @@ class TestDeletionPreview:
         root = await make_project("preview-running")
         await make_job(root, "align_bwa", "running")
 
-        preview = await project_service.deletion_preview(root.id)
+        preview = await project_service.deletion_preview(root.id, owner=TEST_OWNER)
 
         assert preview["blocked"] is True
         assert preview["active_jobs"][0]["job_type"] == "align_bwa"
@@ -93,7 +88,8 @@ class TestDeletionPreview:
         root = await make_project("preview-delayed")
         await make_job(root, "index_bam", "delayed")
 
-        assert (await project_service.deletion_preview(root.id))["blocked"] is True
+        preview = await project_service.deletion_preview(root.id, owner=TEST_OWNER)
+        assert preview["blocked"] is True
 
     async def test_is_not_blocked_by_a_finished_job(self):
         from tests.services.helpers import make_job
@@ -101,7 +97,8 @@ class TestDeletionPreview:
         root = await make_project("preview-finished")
         await make_job(root, "align_bwa", "succeeded")
 
-        assert (await project_service.deletion_preview(root.id))["blocked"] is False
+        preview = await project_service.deletion_preview(root.id, owner=TEST_OWNER)
+        assert preview["blocked"] is False
 
     async def test_is_blocked_by_a_job_in_a_descendant(self):
         from tests.services.helpers import make_job
@@ -110,7 +107,8 @@ class TestDeletionPreview:
         child = await make_project("preview-desc-child", root)
         await make_job(child, "align_bwa", "queued")
 
-        assert (await project_service.deletion_preview(root.id))["blocked"] is True
+        preview = await project_service.deletion_preview(root.id, owner=TEST_OWNER)
+        assert preview["blocked"] is True
 
 
 class TestDeleteProjectTree:
@@ -135,7 +133,7 @@ class TestDeleteProjectTree:
             sidecar_role=SidecarRole.BAI,
         )
 
-        await project_service.delete_project_tree(root.id)
+        await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         assert (await Blob.get("b" * 64)).ref_count == 0
         assert await DataObject.find({"project_id": root.id}).count() == 0
@@ -145,7 +143,7 @@ class TestDeleteProjectTree:
         child = await make_project("tree-child", root)
         grandchild = await make_project("tree-grandchild", child)
 
-        await project_service.delete_project_tree(root.id)
+        await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         for pid in (root.id, child.id, grandchild.id):
             assert await Project.get(pid) is None
@@ -157,7 +155,7 @@ class TestDeleteProjectTree:
         child = await make_project("tree-obj-child", root)
         await make_object(child, "nested.fastq.gz")
 
-        await project_service.delete_project_tree(root.id)
+        await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         assert await DataObject.find({"project_id": child.id}).count() == 0
 
@@ -168,7 +166,7 @@ class TestDeleteProjectTree:
         root = await make_project("tree-jobs")
         await make_job(root, "align_bwa", "succeeded")
 
-        await project_service.delete_project_tree(root.id)
+        await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         assert await Job.find({"project_id": root.id}).count() == 0
         assert await PipelineRun.find({"project_id": root.id}).count() == 0
@@ -185,7 +183,13 @@ class TestDeleteProjectTree:
         if not check_home().ok:
             pytest.skip("needs a configured storage home")
 
-        root = await make_project("tree-uploads")
+        # Owned by "local" rather than TEST_OWNER: upload_service does not take
+        # an owner yet, so the session it creates carries the TimestampedDocument
+        # default. Matching the project to it keeps this test about staging-dir
+        # cleanup. Threading owner through upload_service is its own task, and
+        # until then an upload into a non-"local" project leaves a session the
+        # cascade cannot see.
+        root = await make_project("tree-uploads", owner="local")
         # Returns (session, None) for a normal upload, or (None, object) when
         # the content was already held. No client digest is passed, so the
         # dedup short-circuit cannot fire and `session` is always set.
@@ -195,7 +199,7 @@ class TestDeleteProjectTree:
         staging = Path(session.staging_dir)
         assert staging.exists()
 
-        await project_service.delete_project_tree(root.id)
+        await project_service.delete_project_tree(root.id, owner="local")
 
         assert not staging.exists()
         assert await UploadSession.find({"project_id": root.id}).count() == 0
@@ -208,7 +212,7 @@ class TestDeleteProjectTree:
         await make_job(root, "align_bwa", "running")
 
         with pytest.raises(ConflictError) as exc:
-            await project_service.delete_project_tree(root.id)
+            await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         assert exc.value.details["active_jobs"][0]["job_type"] == "align_bwa"
 
@@ -223,7 +227,7 @@ class TestDeleteProjectTree:
         await make_job(root, "align_bwa", "running")
 
         with pytest.raises(ConflictError):
-            await project_service.delete_project_tree(root.id)
+            await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         assert await Project.get(root.id) is not None
         assert await DataObject.find({"project_id": root.id}).count() == 1
@@ -244,7 +248,7 @@ class TestDeleteProjectTree:
         # the increment the real attach path would have applied.
         await get_db().blobs.update_one({"_id": shared}, {"$inc": {"ref_count": 1}})
 
-        await project_service.delete_project_tree(drop.id)
+        await project_service.delete_project_tree(drop.id, owner=TEST_OWNER)
 
         assert (await Blob.get(shared)).ref_count == 1
 
@@ -266,7 +270,7 @@ class TestLegacyCascade:
             sidecar_role=SidecarRole.BAI,
         )
 
-        await project_service.delete_project(root.id, cascade=True)
+        await project_service.delete_project(root.id, owner=TEST_OWNER, cascade=True)
 
         assert (await Blob.get("e" * 64)).ref_count == 0
 
@@ -278,11 +282,11 @@ class TestLegacyCascade:
         await make_object(root, "blocker.fastq.gz")
 
         with pytest.raises(ConflictError):
-            await project_service.delete_project(root.id, cascade=False)
+            await project_service.delete_project(root.id, owner=TEST_OWNER, cascade=False)
 
         assert await Project.get(root.id) is not None
 
     async def test_cascade_false_still_deletes_an_empty_project(self):
         root = await make_project("legacy-empty")
-        await project_service.delete_project(root.id, cascade=False)
+        await project_service.delete_project(root.id, owner=TEST_OWNER, cascade=False)
         assert await Project.get(root.id) is None

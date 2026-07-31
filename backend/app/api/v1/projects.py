@@ -29,7 +29,12 @@ async def list_projects(
 ) -> list[ProjectOut]:
     parent = PydanticObjectId(parent_id) if parent_id else None
     projects = await project_service.list_projects(
-        parent_id=parent, include_archived=include_archived, limit=limit
+        # TODO(profiles): thread owner from the route once its API layer resolves
+        # get_current_owner
+        owner="local",
+        parent_id=parent,
+        include_archived=include_archived,
+        limit=limit,
     )
     return [ProjectOut.of(p) for p in projects]
 
@@ -38,6 +43,9 @@ async def list_projects(
 async def create_project(body: ProjectCreate) -> ProjectOut:
     project = await project_service.create_project(
         name=body.name,
+        # TODO(profiles): thread owner from the route once its API layer resolves
+        # get_current_owner
+        owner="local",
         description=body.description,
         parent_id=PydanticObjectId(body.parent_id) if body.parent_id else None,
         metadata=body.metadata,
@@ -48,28 +56,40 @@ async def create_project(body: ProjectCreate) -> ProjectOut:
 
 @router.get("/{project_id}", response_model=ProjectDetail)
 async def get_project(project_id: PydanticObjectId) -> ProjectDetail:
-    project = await project_service.get_project(project_id)
-    trail = await project_service.breadcrumbs(project)
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
+    project = await project_service.get_project(project_id, owner="local")
+    trail = await project_service.breadcrumbs(project, owner="local")
     return ProjectDetail(**ProjectOut.of(project).model_dump(), breadcrumbs=trail)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
 async def update_project(project_id: PydanticObjectId, body: ProjectUpdate) -> ProjectOut:
     project = await project_service.update_project(
-        project_id, body.model_dump(exclude_unset=True)
+        project_id,
+        body.model_dump(exclude_unset=True),
+        # TODO(profiles): thread owner from the route once its API layer resolves
+        # get_current_owner
+        owner="local",
     )
     return ProjectOut.of(project)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_project(project_id: PydanticObjectId, cascade: bool = False) -> None:
-    await project_service.delete_project(project_id, cascade=cascade)
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
+    await project_service.delete_project(project_id, owner="local", cascade=cascade)
 
 
 @router.get("/{project_id}/deletion-preview", response_model=DeletionPreviewOut)
 async def project_deletion_preview(project_id: PydanticObjectId) -> DeletionPreviewOut:
     """Counts and blockers for a delete, so the confirmation can be specific."""
-    return DeletionPreviewOut(**await project_service.deletion_preview(project_id))
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
+    return DeletionPreviewOut(
+        **await project_service.deletion_preview(project_id, owner="local")
+    )
 
 
 @router.get("/{project_id}/objects", response_model=list[ObjectOut])
@@ -78,7 +98,9 @@ async def list_project_objects(
     obj_status: ObjectStatus | None = Query(None, alias="status"),
     limit: int = Query(200, le=1000),
 ) -> list[ObjectOut]:
-    await project_service.get_project(project_id)  # 404 if the project is gone
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
+    await project_service.get_project(project_id, owner="local")  # 404 if it is gone
     objects = await object_service.list_objects(project_id, status=obj_status, limit=limit)
     return [ObjectOut.of(o) for o in objects]
 

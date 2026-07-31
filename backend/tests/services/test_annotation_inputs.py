@@ -10,7 +10,7 @@ import pytest_asyncio
 
 from app.models import FormatKind, ObjectRole
 from app.services import pipeline_service, project_service
-from tests.services.helpers import make_object
+from tests.services.helpers import TEST_OWNER, make_object
 
 # `beanie_models` is module-scoped and holds a Motor connection bound to that
 # scope's loop, so the tests (and the fixtures that touch the database) have
@@ -29,7 +29,7 @@ GCF_YEAST = "GCF_000146045.2"
 async def annotatable_vcf():
     """Reference and matching GFF3 both present, variants called: the
     everything-is-fine case."""
-    project = await project_service.create_project(name="annotatable")
+    project = await project_service.create_project(name="annotatable", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -57,7 +57,7 @@ async def annotatable_vcf():
 async def vcf_results_not_computed():
     """Results were never run: `vcf_stats_summary` is entirely absent, distinct
     from having been run and finding nothing (see `empty_vcf`)."""
-    project = await project_service.create_project(name="results-not-computed")
+    project = await project_service.create_project(name="results-not-computed", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -79,7 +79,7 @@ async def vcf_results_not_computed():
 async def empty_vcf():
     """The real T. brucei case: reference and GFF3 both present, results
     computed, and the caller found nothing to call."""
-    project = await project_service.create_project(name="empty-vcf")
+    project = await project_service.create_project(name="empty-vcf", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -107,7 +107,7 @@ async def empty_vcf():
 async def vcf_without_gff():
     """The real yeast case: a usable reference, no GFF3 anywhere in the
     project."""
-    project = await project_service.create_project(name="no-gff")
+    project = await project_service.create_project(name="no-gff", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -129,7 +129,7 @@ async def vcf_without_gff():
 async def vcf_without_reference():
     """The reference id in derived_from points nowhere in this project --
     e.g. it was deleted after the VCF was called."""
-    project = await project_service.create_project(name="no-reference")
+    project = await project_service.create_project(name="no-reference", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -148,7 +148,7 @@ async def vcf_without_reference():
 async def vcf_with_mismatched_gff():
     """A GFF3 exists in the project, but for a different assembly than the
     one this VCF was called against -- must not be paired with it."""
-    project = await project_service.create_project(name="mismatched-gff")
+    project = await project_service.create_project(name="mismatched-gff", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -178,7 +178,7 @@ async def vcf_with_bed_annotation():
     """ObjectRole.ANNOTATION spans BED and GTF too -- a BED blacklist tagged
     ANNOTATION for the right assembly must still be refused, since `bcftools
     csq` reads GFF3 only and would die parsing it."""
-    project = await project_service.create_project(name="bed-annotation")
+    project = await project_service.create_project(name="bed-annotation", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
@@ -207,7 +207,7 @@ async def vcf_with_unaccessioned_reference():
     """The reference carries no NCBI accession (e.g. locally assembled or
     hand-uploaded), even though a real GFF3 sits in the same project -- the
     absence of an accession must refuse rather than guess a match."""
-    project = await project_service.create_project(name="unaccessioned-reference")
+    project = await project_service.create_project(name="unaccessioned-reference", owner=TEST_OWNER)
 
     bam = await make_object(project, "sample.bam")
 
