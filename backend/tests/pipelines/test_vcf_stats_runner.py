@@ -9,6 +9,7 @@ DRR1066343.bcftools.vcf.gz (6,641 variants, 17 contigs, S. cerevisiae).
 from pathlib import Path
 
 from app.pipelines.vcf_stats_runner import (
+    DensityAccumulator,
     build_query_command,
     build_stats_command,
     parse_stats,
@@ -234,3 +235,67 @@ class TestVariantSummary:
         out = variant_summary(parse_stats(EMPTY_STATS), filter_counts={})
         assert out["variants"] == 0
         assert "pass_pct" not in out
+
+
+class TestDensityAccumulator:
+    def test_counts_variants_per_contig(self):
+        acc = DensityAccumulator(
+            contig_lengths=[("chr1", 1000), ("chr2", 1000)], bin_count=10
+        )
+        for pos in (10, 20, 30):
+            acc.add("chr1", pos, ref="A", alt="G")
+        acc.add("chr2", 10, ref="A", alt="AT")
+
+        contigs = acc.contigs()
+        by_name = {c["contig"]: c for c in contigs}
+        assert by_name["chr1"]["variants"] == 3
+        assert by_name["chr2"]["variants"] == 1
+
+    def test_splits_snps_from_indels(self):
+        acc = DensityAccumulator(contig_lengths=[("chr1", 1000)], bin_count=10)
+        acc.add("chr1", 10, ref="A", alt="G")
+        acc.add("chr1", 20, ref="A", alt="AT")
+        by_name = {c["contig"]: c for c in acc.contigs()}
+        assert by_name["chr1"]["snps"] == 1
+        assert by_name["chr1"]["indels"] == 1
+
+    def test_per_kb_density(self):
+        acc = DensityAccumulator(contig_lengths=[("chr1", 2000)], bin_count=10)
+        for pos in range(1, 11):
+            acc.add("chr1", pos, ref="A", alt="G")
+        assert acc.contigs()[0]["per_kb"] == 5.0
+
+    def test_bins_span_the_whole_reference(self):
+        acc = DensityAccumulator(
+            contig_lengths=[("chr1", 1000), ("chr2", 1000)], bin_count=10
+        )
+        acc.add("chr1", 1, ref="A", alt="G")
+        acc.add("chr2", 999, ref="A", alt="G")
+        bins = acc.bins()
+        assert len(bins) == 10
+        assert bins[0] == 1
+        assert bins[-1] == 1
+
+    def test_unknown_contig_is_ignored_not_fatal(self):
+        """A VCF can carry records for a contig absent from its own header."""
+        acc = DensityAccumulator(contig_lengths=[("chr1", 1000)], bin_count=10)
+        acc.add("chrUnplaced", 5, ref="A", alt="G")
+        assert sum(acc.bins()) == 0
+
+    def test_no_contig_lengths_yields_empty_rather_than_dividing(self):
+        acc = DensityAccumulator(contig_lengths=[], bin_count=10)
+        acc.add("chr1", 5, ref="A", alt="G")
+        assert acc.bins() == []
+        assert acc.contigs() == []
+
+    def test_more_contigs_than_bins_does_not_crash(self):
+        """A fragmented plant assembly can have thousands of scaffolds and
+        only 1000 bins. allocate_bins degrades by sharing bins; this must
+        follow it without an index error."""
+        contigs = [(f"scaffold{i}", 500) for i in range(50)]
+        acc = DensityAccumulator(contig_lengths=contigs, bin_count=10)
+        for i in range(50):
+            acc.add(f"scaffold{i}", 250, ref="A", alt="G")
+        assert len(acc.bins()) == 10
+        assert sum(acc.bins()) == 50
+        assert len(acc.contigs()) == 50
