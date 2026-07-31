@@ -292,6 +292,11 @@ async def launch_trim(
         label=_trim_label(obj, mate),
         inputs=_trim_inputs(obj, mate),
         params=payload["params"],
+        # The run inherits the owner of the file it operates on. launch_trim
+        # still resolves that file with an unscoped DataObject.get, so this is
+        # as good as the caller's own scope -- Task 10 tightens the lookup when
+        # the route learns to resolve get_current_owner.
+        owner=obj.owner,
         tool=tool,
     )
     await run_service.link_job(run.id, job.id, RunJobRole.TRIM)
@@ -1048,6 +1053,10 @@ async def launch_alignment(
         label=_alignment_label(obj, mate, reference),
         inputs=_alignment_inputs(obj, mate, reference),
         params={**align_params.as_dict(), "read_group": rg.as_dict()},
+        # The reads' owner, not the reference's: the two are already required
+        # to share a project above, so they agree, and the reads are what the
+        # user launched this on.
+        owner=obj.owner,
     )
 
     # Build the index first if it is missing, and hold the alignment behind it.
@@ -1143,7 +1152,7 @@ async def launch_alignment(
         # The run describes work that will not happen, so it must not linger in
         # the activity view claiming otherwise. The index build it may have
         # queued is left alone: that work is real and the earlier run owns it.
-        await run_service.discard_run(run.id)
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "An identical alignment is already queued or running",
             details={"object_id": str(obj.id)},
@@ -1565,6 +1574,7 @@ async def launch_variant_calling(
             ),
         ],
         params=merged.as_dict(),
+        owner=bam.owner,
         tool=merged.caller.value,
     )
 
@@ -1581,7 +1591,7 @@ async def launch_variant_calling(
         # nothing left to wait for.
     )
     if job is None:
-        await run_service.discard_run(run.id)
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "An identical variant calling run is already queued or running",
             details={"bam_id": str(bam.id), "caller": merged.caller.value},

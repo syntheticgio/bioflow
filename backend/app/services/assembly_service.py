@@ -128,6 +128,8 @@ async def launch_download(
             "components": selected,
             "source": "ncbi_datasets",
         },
+        # The project the download lands in owns the run that groups it.
+        owner=project.owner,
     )
 
     payload = {
@@ -155,7 +157,7 @@ async def launch_download(
     if job is None:
         # Already queued or running from an earlier click, so this run
         # describes no work and must not linger in the activity view.
-        await run_service.discard_run(run.id)
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             f"{accession} is already downloading",
             details={"accession": accession},

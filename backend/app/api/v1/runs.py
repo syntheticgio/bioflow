@@ -72,7 +72,22 @@ async def list_runs(
         query["project_id"] = PydanticObjectId(project_id)
 
     runs = await PipelineRun.find(query).sort("-created_at").limit(limit).to_list()
-    statuses = await run_service.status_for_many([r.id for r in runs])
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner (Task 10), at which point the listing query above gains
+    # the same filter and this collapses to a single call.
+    #
+    # Until then the listing itself is unscoped, so passing a fixed "local"
+    # here would report no status at all for any run belonging to another
+    # profile that the listing nonetheless returned. Grouping by the runs' own
+    # owner keeps the route's behaviour identical to before the partition, and
+    # keeps the batching this function exists for: one query per distinct
+    # owner, which is one query until profiles actually exist.
+    statuses: dict = {}
+    by_owner: dict[str, list[PydanticObjectId]] = {}
+    for r in runs:
+        by_owner.setdefault(r.owner, []).append(r.id)
+    for owner, ids in by_owner.items():
+        statuses.update(await run_service.status_for_many(ids, owner=owner))
     return [RunOut.of(r, statuses.get(r.id, "succeeded")) for r in runs]
 
 
@@ -89,7 +104,9 @@ async def run_for_job(job_id: PydanticObjectId) -> RunOut | None:
     run = await PipelineRun.get(link.run_id)
     if run is None:
         return None
-    status, _ = await run_service.status_for(run.id)
+    # TODO(profiles): use the request's owner once Task 10 wires
+    # get_current_owner into this router.
+    status, _ = await run_service.status_for(run.id, owner=run.owner)
     return RunOut.of(run, status.value)
 
 
@@ -100,7 +117,9 @@ async def get_run(run_id: PydanticObjectId) -> RunDetail:
     if run is None:
         raise NotFoundError(f"Run not found: {run_id}")
 
-    status, jobs = await run_service.status_for(run_id)
+    # TODO(profiles): use the request's owner once Task 10 wires
+    # get_current_owner into this router; `run` is unscoped above.
+    status, jobs = await run_service.status_for(run_id, owner=run.owner)
     return RunDetail(**RunOut.of(run, status.value).model_dump(), jobs=jobs)
 
 

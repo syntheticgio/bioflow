@@ -76,12 +76,14 @@ async def create_run(
     label: str,
     inputs: list[RunInput],
     params: dict,
+    owner: str,
     tool: str | None = None,
 ) -> PipelineRun:
     """Record what a user asked for, before any of it is enqueued."""
     run = PipelineRun(
         kind=kind,
         project_id=project_id,
+        owner=owner,
         label=label,
         inputs=inputs,
         params=params,
@@ -92,18 +94,25 @@ async def create_run(
     return run
 
 
-async def discard_run(run_id: PydanticObjectId) -> None:
+async def discard_run(run_id: PydanticObjectId, *, owner: str) -> None:
     """Delete a run whose work was deduplicated away before it started.
 
     Only for the launch path: a run that turns out to describe nothing must not
     linger in the activity view implying work is happening. Its membership rows
     go too, but the *jobs* they referenced are untouched -- a shared index build
     is real work owned by whichever run queued it first.
+
+    The ownership check comes first, before anything is deleted. This used to
+    delete the membership rows and only then fetch the run, which meant a
+    wrong-owner call destroyed another profile's link rows on its way to
+    discovering it should not have -- damage done before the guard it was
+    heading for could refuse.
     """
-    await RunJob.find(RunJob.run_id == run_id).delete()
     run = await PipelineRun.get(run_id)
-    if run is not None:
-        await run.delete()
+    if run is None or run.owner != owner:
+        return
+    await RunJob.find(RunJob.run_id == run_id).delete()
+    await run.delete()
     log.info("run_discarded", run_id=str(run_id))
 
 
@@ -115,6 +124,18 @@ async def link_job(
     shared: bool = False,
 ) -> None:
     """Record that a job serves a run.
+
+    Deliberately not owner-scoped, along with `run_for_job`, `members` and
+    `link_job_to_run_of` below. RunJob is a link row with no owner of its own:
+    nothing sets one (the constructor here does not), so every row carries
+    TimestampedDocument's "local" default, and a filter on it would strand link
+    rows rather than protect anything. Nor could it carry a meaningful one --
+    the docstring on RunJob explains that a deduplicated `build_index` belongs
+    to more than one run, so "whose is this row" has no single answer.
+
+    What actually scopes these is the caller: each is reached through a run or
+    a job the caller already holds, from a flow that resolved ownership before
+    it got here. `run_id` and `job_id` are the whole scope.
 
     Idempotent by way of the unique index: a retry that re-links the same job
     must not create a second member, which would double-count it in the
@@ -133,25 +154,38 @@ async def run_for_job(job_id: PydanticObjectId) -> PydanticObjectId | None:
     from the alignment's applier because it needs the BAM's digest, and an
     ingest is enqueued from `ingest_local_file`. Both resolve the run from the
     job that caused them.
+
+    Unscoped -- see link_job for why.
     """
     link = await RunJob.find_one(RunJob.job_id == job_id)
     return link.run_id if link else None
 
 
 async def members(run_id: PydanticObjectId) -> list[RunJob]:
+    """The link rows for a run. Unscoped -- see link_job for why."""
     return await RunJob.find(RunJob.run_id == run_id).to_list()
 
 
-async def status_for(run_id: PydanticObjectId) -> tuple[RunStatus, list[dict]]:
+async def status_for(run_id: PydanticObjectId, *, owner: str) -> tuple[RunStatus, list[dict]]:
     """A run's derived status and the state of each member job.
 
     Returns both because every caller that wants one wants the other, and
     fetching the jobs is the expensive half.
+
+    The run itself is the boundary: another owner's run resolves to no members
+    and so reports the empty-run answer, which is what a profile that cannot
+    see the run should get.
     """
+    run = await PipelineRun.get(run_id)
+    if run is None or run.owner != owner:
+        return RunStatus.SUCCEEDED, []
+
     links = await members(run_id)
     if not links:
         return RunStatus.SUCCEEDED, []
 
+    # The Job lookup is deliberately *not* owner-filtered. See the note in
+    # status_for_many.
     jobs = await Job.find({"_id": {"$in": [link.job_id for link in links]}}).to_list()
     by_id = {job.id: job for job in jobs}
 
@@ -180,14 +214,26 @@ async def status_for(run_id: PydanticObjectId) -> tuple[RunStatus, list[dict]]:
 
 
 async def status_for_many(
-    run_ids: list[PydanticObjectId],
+    run_ids: list[PydanticObjectId], *, owner: str
 ) -> dict[PydanticObjectId, RunStatus]:
     """Derived status for several runs, in two queries rather than 2N.
 
     The listing renders every run's status, and doing that one run at a time
     would put the cost of the activity view on the number of runs -- the exact
     shape that makes a page feel slow as history accumulates.
+
+    Runs are resolved by owner first, so an id belonging to another profile is
+    absent from the result rather than answered. Absent, not SUCCEEDED: a
+    caller that passes an id it should not have must not be handed a status for
+    it, and the empty-run default would look exactly like a real answer.
     """
+    if not run_ids:
+        return {}
+
+    owned = await PipelineRun.find(
+        {"owner": owner, "_id": {"$in": run_ids}}
+    ).to_list()
+    run_ids = [run.id for run in owned]
     if not run_ids:
         return {}
 
@@ -195,6 +241,18 @@ async def status_for_many(
     if not links:
         return {rid: RunStatus.SUCCEEDED for rid in run_ids}
 
+    # The Job lookup stays unscoped, and that is the considered choice rather
+    # than an oversight. queue/queue.py builds every Job without an owner, so
+    # they all carry the "local" default until Task 8; adding `"owner": owner`
+    # here today would match nothing for a real profile and quietly report each
+    # of its runs as having no jobs -- an activity view claiming a running
+    # alignment had already succeeded. Leaving it unscoped is also correct
+    # *after* Task 8 lands, because these job ids come from RunJob rows whose
+    # run this function has already confirmed belongs to `owner`; the run is
+    # the boundary and the job id is downstream of it. A shared build_index is
+    # the case that settles it either way: it legitimately serves runs
+    # belonging to different profiles, so its own owner field could never be
+    # the right thing to filter a member lookup by.
     jobs = await Job.find({"_id": {"$in": [link.job_id for link in links]}}).to_list()
     states = {job.id: job.state for job in jobs}
 
@@ -210,13 +268,18 @@ async def status_for_many(
 
 
 async def record_outputs(
-    run_id: PydanticObjectId, object_ids: list[PydanticObjectId]
+    run_id: PydanticObjectId, object_ids: list[PydanticObjectId], *, owner: str
 ) -> None:
-    """Attach produced objects to the run that made them."""
+    """Attach produced objects to the run that made them.
+
+    A wrong owner is silently a no-op, matching the missing-run branch it sits
+    beside: this runs on the applier path after the real work has succeeded,
+    and raising there would turn a grouping problem into a failed pipeline.
+    """
     if not object_ids:
         return
     run = await PipelineRun.get(run_id)
-    if run is None:
+    if run is None or run.owner != owner:
         return
     existing = set(run.outputs)
     merged = run.outputs + [oid for oid in object_ids if oid not in existing]

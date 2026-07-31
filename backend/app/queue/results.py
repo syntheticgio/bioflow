@@ -385,7 +385,16 @@ async def _apply_trim_reads(result: dict) -> None:
 
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [o.id for o in created])
+            # The owner comes from a file this apply just produced, which
+            # object_service stamped with the project's owner. An applier has
+            # no request and so no get_current_owner to ask; carrying the owner
+            # in the job payload is Task 9's work, and this is the same value
+            # that task will arrive at -- an output and the run that produced
+            # it always share a project. `created` is non-empty here: the
+            # produced-nothing case returned above.
+            await run_service.record_outputs(
+                run_id, [o.id for o in created], owner=created[0].owner
+            )
 
     log.info(
         "trim_applied",
@@ -477,7 +486,11 @@ async def _apply_sra_download(result: dict) -> None:
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [o.id for o in created.values()])
+        await run_service.record_outputs(
+            run_id,
+            [o.id for o in created.values()],
+            owner=next(iter(created.values())).owner,
+        )
 
     log.info(
         "sra_download_applied",
@@ -647,7 +660,9 @@ async def _apply_assembly_download(result: dict) -> None:
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [o.id for o in created])
+        await run_service.record_outputs(
+            run_id, [o.id for o in created], owner=created[0].owner
+        )
 
     log.info(
         "assembly_download_applied",
@@ -802,7 +817,9 @@ async def _apply_build_index(result: dict) -> None:
 
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [o.id for o in created])
+            await run_service.record_outputs(
+                run_id, [o.id for o in created], owner=created[0].owner
+            )
 
     log.info(
         "index_applied",
@@ -946,7 +963,7 @@ async def _apply_align_reads(result: dict) -> None:
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [bam.id])
+        await run_service.record_outputs(run_id, [bam.id], owner=bam.owner)
 
     # Chain the follow-on index. Enqueued here rather than at launch because it
     # needs the BAM's digest, which does not exist until the alignment has run.
@@ -1179,7 +1196,7 @@ async def _apply_call_variants(result: dict) -> None:
     if job_id:
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [vcf.id])
+            await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
 
 
 def annotation_provenance(result: dict) -> dict:
@@ -1264,7 +1281,7 @@ async def _apply_annotate_variants(result: dict) -> None:
     if job_id:
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [annotated.id])
+            await run_service.record_outputs(run_id, [annotated.id], owner=annotated.owner)
 
 
 _SIDECAR_ROLES = {

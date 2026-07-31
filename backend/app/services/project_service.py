@@ -265,19 +265,22 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
     # matched here and really are reclaimed. test_object_service_owner.py's
     # cascade test drives ingest_local_file end to end to hold that down.
     #
-    # The UploadSession, PipelineRun and Job filters are still written for the
-    # end state and inert: no production writer sets `owner` on those documents
-    # yet, so every such row carries the "local" default from
-    # TimestampedDocument. Threading owner through run_service and the queue is
-    # deliberately later work (Task 5; upload_service is tracked separately),
-    # which leaves a window where the ordering matters. If a real profile lands
-    # before those writers do, a non-"local" project's cascade matches none of
-    # them: the project document is deleted while its sessions, runs and jobs
-    # survive as orphans pointing at a dead project_id. That is a milder
-    # failure than the object leak this used to describe -- those rows hold no
-    # blob refcount -- but it is the same shape, and it is unreachable at the
-    # moment only because every route in api/v1/projects.py hardcodes
-    # owner="local" pending get_current_owner.
+    # The PipelineRun filter is live too, as of Task 5: run_service.create_run
+    # now stamps `owner` on every run it records, and each launch path passes
+    # the owner of the project or the file the run operates on. A non-"local"
+    # project's runs really are matched here and really are deleted.
+    #
+    # The UploadSession and Job filters are still written for the end state and
+    # inert: nothing sets `owner` on those documents, so every such row carries
+    # the "local" default from TimestampedDocument. queue/queue.py's Job
+    # constructor is Task 8; upload_service is tracked separately. Until both
+    # land there is a window where ordering matters -- if a real profile
+    # arrives first, a non-"local" project's cascade matches neither, and the
+    # project document is deleted while its sessions and jobs survive as
+    # orphans pointing at a dead project_id. Milder than the object leak this
+    # once described, since those rows hold no blob refcount, but the same
+    # shape; unreachable at the moment only because every route in
+    # api/v1/projects.py hardcodes owner="local" pending get_current_owner.
     # Do not read a green suite as evidence the remaining gap is closed -- the
     # deletion fixtures in tests/services/helpers.py set the owner on Job that
     # queue/queue.py does not.

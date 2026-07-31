@@ -114,6 +114,8 @@ async def launch_download(
             "run_qc": run_qc,
             "source": "ncbi_sra",
         },
+        # The project the download lands in owns the run that groups it.
+        owner=project.owner,
     )
 
     job_ids: list[str] = []
@@ -156,7 +158,7 @@ async def launch_download(
     if not job_ids:
         # Every selected run was already in flight, so this run describes no
         # work and must not linger in the activity view implying otherwise.
-        await run_service.discard_run(run.id)
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "Every selected run is already downloading",
             details={"accessions": skipped},
