@@ -304,3 +304,25 @@ class TestAllocateBins:
             contig_lengths=[], bin_count=100
         )
         assert geometry == {} and boundaries == [] and counts == {}
+
+    def test_more_contigs_than_bins_does_not_overflow(self):
+        """A fragmented assembly can have more scaffolds than bins. Every
+        contig cannot get its own bin then, and the floor must yield rather
+        than produce a negative allocation whose offsets run off the end of
+        the array."""
+        geometry, boundaries, counts = allocate_bins(
+            contig_lengths=[(f"c{i}", 1000) for i in range(37)], bin_count=10
+        )
+        assert sum(counts.values()) == 10
+        assert all(c >= 0 for c in counts.values())
+        # Every start_bin must address a real slot in a bin_count-long array.
+        assert all(start < 10 for start, _ in geometry.values())
+
+    def test_bin_depth_survives_more_contigs_than_bins(self):
+        """The IndexError this guards against was reachable from bin_depth."""
+        contigs = [(f"c{i}", 1000) for i in range(37)]
+        lines = iter([f"c{i}\t500\t30" for i in range(37)])
+        bins, boundaries = bin_depth(
+            contig_lengths=contigs, depth_lines=lines, bin_count=10
+        )
+        assert len(bins) == 10
