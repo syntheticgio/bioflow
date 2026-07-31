@@ -150,8 +150,13 @@ def allocate_bins(
     Bins are allocated proportionally to each contig's length, with one floor:
     every contig gets at least one bin regardless of its share, so a short
     scaffold is never averaged away into a neighbour's bin or omitted
-    entirely. Rounding discrepancies are absorbed by the last contig, so the
-    allocation always sums to exactly `bin_count`.
+    entirely. Independent per-contig rounding can land the total a few bins
+    over `bin_count` (each contig rounds to its nearest bin count, and those
+    errors can accumulate in the same direction); the excess is then taken
+    one bin at a time from the largest contigs that can spare one, so no
+    single contig -- least of all whichever happens to be last -- is ever
+    driven below the floor. The allocation always sums to exactly
+    `bin_count`.
 
     That floor is unsatisfiable when there are more contigs than bins (a
     fragmented draft assembly can have thousands of scaffolds against a
@@ -217,9 +222,41 @@ def allocate_bins(
         contig_bin_counts[name] = 1 + share
 
     allocated = sum(contig_bin_counts.values())
-    if allocated != bin_count and contig_lengths:
+    excess = allocated - bin_count
+    if excess > 0:
+        # Take the excess back one bin at a time from the largest contigs
+        # that can still spare one (more than the floor of 1) -- dumping it
+        # all on a single contig, especially whichever happens to be last,
+        # can drive that contig to 0 or negative bins and crash the geometry
+        # pass below with a ZeroDivisionError. Largest-first keeps the
+        # length-proportionality the allocation is meant to express: a big
+        # contig giving up one of its many bins barely moves its share,
+        # while a small one giving up its only bin would erase it.
+        by_size_desc = sorted(
+            contig_lengths, key=lambda item: item[1], reverse=True
+        )
+        while excess > 0:
+            took_one = False
+            for name, _ in by_size_desc:
+                if contig_bin_counts[name] > 1:
+                    contig_bin_counts[name] -= 1
+                    excess -= 1
+                    took_one = True
+                    if excess == 0:
+                        break
+            if not took_one:
+                # Every contig is already at the floor of 1 -- cannot happen
+                # on this path since n <= bin_count guarantees at least
+                # `bin_count` bins are available to give back, but breaking
+                # here rather than looping forever is the safe failure mode
+                # if that invariant is ever violated.
+                break
+    elif excess < 0 and contig_lengths:
+        # Under-allocated (roundings summed short): the last contig is a
+        # fine place to add the shortfall since adding bins never risks
+        # crossing the floor.
         last_name = contig_lengths[-1][0]
-        contig_bin_counts[last_name] += bin_count - allocated
+        contig_bin_counts[last_name] += -excess
 
     geometry: dict[str, tuple[int, float]] = {}
     boundaries = []
