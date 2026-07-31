@@ -1,6 +1,7 @@
 """Object lifecycle: ingest, metadata edits, deletion."""
 
 import asyncio
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -639,6 +640,10 @@ async def delete_object(object_id: PydanticObjectId) -> None:
     files (`derived_from`) deliberately do *not* cascade: a trimmed FASTQ
     outlives its source, and deleting reads must not silently destroy the
     alignments made from them.
+
+    Report directories are removed here too. They sit outside objects/ and so
+    are not content-addressed, which means blob GC never sees them: nothing but
+    this call will ever free them.
     """
     await get_object(object_id)
 
@@ -655,7 +660,43 @@ async def delete_object(object_id: PydanticObjectId) -> None:
             role=sidecar.sidecar_role.value if sidecar.sidecar_role else None,
         )
 
+    await asyncio.to_thread(remove_report_dirs, object_id)
     await blob_service.detach_blob_from_object(object_id)
+
+
+def remove_report_dirs(object_id: PydanticObjectId) -> None:
+    """Remove the per-object Results directories written outside objects/.
+
+    Best-effort by design. The overwhelmingly common case is that none of these
+    exist -- most objects never have Results computed -- so absence is normal
+    and must never fail the delete. A directory that cannot be removed is worth
+    a log line and nothing more: the object is going away regardless, and
+    refusing to delete it would trade a recoverable disk leak for a file the
+    user cannot get rid of.
+    """
+    for parent in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
+        path = parent / str(object_id)
+        # The id is a validated ObjectId, so it cannot traverse -- checked
+        # anyway because the cost is nothing and the blast radius of an rmtree
+        # that escapes its parent is the whole storage home.
+        try:
+            path.resolve().relative_to(parent.resolve())
+        except ValueError:
+            log.error("refusing_report_cleanup_outside_parent", path=str(path))
+            continue
+        if not path.exists():
+            continue
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            log.warning(
+                "report_dir_cleanup_failed",
+                object_id=str(object_id),
+                path=str(path),
+                error=str(exc),
+            )
+        else:
+            log.info("report_dir_removed", object_id=str(object_id), path=str(path))
 
 
 async def object_with_blob(object_id: PydanticObjectId) -> tuple[DataObject, Blob | None]:

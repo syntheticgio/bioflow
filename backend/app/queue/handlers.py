@@ -657,6 +657,72 @@ async def reap_uploads(ctx: JobContext) -> dict:
     return {"removed": removed}
 
 
+@handler(
+    "reap_report_dirs",
+    mode=HandlerMode.ASYNC,
+    job_class=JobClass.MAINTENANCE,
+    resources=JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
+)
+async def reap_report_dirs(ctx: JobContext) -> dict:
+    """Remove Results directories whose object no longer exists.
+
+    `object_service.delete_object` removes these as part of the delete, so this
+    exists for the ones already stranded before it did -- and as a backstop, in
+    the same spirit as reap_uploads scanning the tree rather than trusting the
+    collection. A single VCF's variants.db can run to hundreds of megabytes, so
+    a stranded directory is worth real disk.
+
+    Matches on the directory name being an object id absent from Mongo. Entries
+    that are not object ids are left alone: this sweeps its own leavings, and
+    something else's file under these roots is not its business to delete.
+    """
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from app.services import object_service
+    from app.storage.home import check_home
+
+    home = check_home()
+    if not home.ok:
+        return {"skipped": True, "reason": home.detail}
+
+    # A directory is created before the compute job finishes writing into it,
+    # and the object row can lag a moment behind at ingest. The grace window
+    # keeps the sweep from racing either one.
+    max_age_hours = float(ctx.payload.get("max_age_hours", 1))
+    cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
+
+    removed = 0
+    reclaimed = 0
+    for root in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
+        if not root.exists():
+            continue
+        for entry in await asyncio.to_thread(lambda r=root: list(r.iterdir())):
+            ctx.check_cancel()
+            if not entry.is_dir():
+                continue
+            try:
+                object_id = PydanticObjectId(entry.name)
+            except Exception:
+                continue
+            mtime = datetime.fromtimestamp(entry.stat().st_mtime, UTC)
+            if mtime > cutoff:
+                continue
+            if await DataObject.get(object_id) is not None:
+                continue
+            size = await asyncio.to_thread(
+                lambda e=entry: sum(f.stat().st_size for f in e.rglob("*") if f.is_file())
+            )
+            await asyncio.to_thread(object_service.remove_report_dirs, object_id)
+            if not entry.exists():
+                removed += 1
+                reclaimed += size
+
+    if removed:
+        log.info("report_dirs_reaped", removed=removed, bytes_reclaimed=reclaimed)
+    return {"removed": removed, "bytes_reclaimed": reclaimed}
+
+
 # Pipeline handlers live in their own modules -- they shell out to external
 # tools and carry a different failure model -- but must be imported here, since
 # registry.load_handlers() imports only this one.
