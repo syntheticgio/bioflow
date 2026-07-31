@@ -6,6 +6,7 @@ handler expects. Kept out of the router so the launch rules are testable
 without HTTP.
 """
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from beanie import PydanticObjectId
@@ -1667,3 +1668,92 @@ async def _variant_payload(
         ).as_dict()
 
     return payload
+
+
+# --- Consequence annotation --------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AnnotationInputs:
+    """What a VCF needs to be annotated, or why it cannot be.
+
+    One result type for both the Actions card and the launcher. They asked the
+    same question separately once before -- the align card and
+    `resolve_reference` -- and disagreed about which references counted, which
+    is how a project with one usable genome ended up refusing to align beside
+    a card saying it could.
+    """
+
+    ok: bool
+    reference: DataObject | None = None
+    annotation: DataObject | None = None
+    reason: str | None = None
+
+
+async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
+    """Find the reference and GFF3 for a VCF, or say what is missing.
+
+    The reason text names the missing input and, where there is one, the
+    action: "no annotation, download it from NCBI" is something a user can do,
+    "cannot annotate" is not. All three projects on this machine are blocked on
+    a different one of these, so every branch is reachable in practice.
+    """
+    from app.services import object_service
+
+    variants = 0
+    summary = vcf.facts.get("vcf_stats_summary") or {}
+    if isinstance(summary, dict):
+        variants = summary.get("variants") or 0
+    if not variants:
+        return AnnotationInputs(
+            ok=False,
+            reason=(
+                "This VCF has no called variants to annotate. Compute its "
+                "results first, or call variants against a reference."
+            ),
+        )
+
+    reference = None
+    for parent_id in vcf.derived_from or []:
+        parent = await DataObject.get(parent_id)
+        if parent is not None and parent.role is ObjectRole.REFERENCE:
+            reference = parent
+            break
+
+    if reference is None:
+        return AnnotationInputs(
+            ok=False,
+            reason=(
+                "The reference this VCF was called against isn't in this "
+                "project, so there is nothing to read genes from."
+            ),
+        )
+
+    accession = reference.facts.get("ncbi_assembly_accession")
+    candidates = await object_service.list_objects(
+        vcf.project_id, limit=500, status=ObjectStatus.READY
+    )
+    annotation = None
+    for obj in candidates:
+        if obj.role is not ObjectRole.ANNOTATION:
+            continue
+        # Match on assembly accession rather than taking any GFF3 in the
+        # project. An annotation for a different assembly parses fine and
+        # annotates nothing, which reads as a successful run producing an
+        # empty column -- worse than refusing.
+        if accession and obj.facts.get("ncbi_assembly_accession") != accession:
+            continue
+        annotation = obj
+        break
+
+    if annotation is None:
+        return AnnotationInputs(
+            ok=False,
+            reference=reference,
+            reason=(
+                "No annotation (GFF3) for this reference. Download it from "
+                "NCBI alongside the genome -- the assembly download offers it."
+            ),
+        )
+
+    return AnnotationInputs(ok=True, reference=reference, annotation=annotation)
