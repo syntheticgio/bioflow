@@ -10,6 +10,7 @@ missing binary shows up as "fastp not found" in the launch dialog instead of a
 job that dies thirty seconds after the user walks away.
 """
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -162,6 +163,34 @@ def _clean_version(raw: str) -> str:
         if match:
             return match.group(1)
     return raw.splitlines()[0].strip() if raw else ""
+
+
+def _fingerprint(path: str | None) -> str | None:
+    """Identity of the binary at `path`, for deciding whether a cached probe
+    still describes it.
+
+    Returns None when there is nothing to fingerprint -- an unresolved tool, or
+    one that vanished between `which` and here. None means "always probe",
+    which is the safe direction: a cached version string that no longer matches
+    the installed binary is the half of a run's provenance a methods section
+    reports.
+
+    Hashes content rather than keying off mtime/size: an in-place upgrade that
+    preserves both (a `cp -p` over the old binary, or two writes landing in the
+    same filesystem timestamp tick, which happens in practice on some
+    filesystems at sub-microsecond write speed) must still be detected as a
+    change.
+    """
+    if path is None:
+        return None
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
 
 
 @lru_cache(maxsize=1)

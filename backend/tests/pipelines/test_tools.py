@@ -553,3 +553,34 @@ class TestBcftoolsCsq:
             lambda: tools.Tool(name="bcftools", path="/usr/bin/bcftools", version=None),
         )
         assert tools.bcftools_csq().available
+
+
+class TestFingerprint:
+    def test_fingerprint_changes_when_the_binary_changes(self, tmp_path):
+        """The fingerprint is what keeps a stale version out of a methods
+        section: an upgraded tool must not be served from cache."""
+        binary = tmp_path / "sometool"
+        binary.write_text("#!/bin/sh\necho 'sometool 1.0.0'\n")
+        binary.chmod(0o755)
+
+        before = tools._fingerprint(str(binary))
+
+        binary.write_text("#!/bin/sh\necho 'sometool 2.0.0'\n")
+        binary.chmod(0o755)
+
+        assert tools._fingerprint(str(binary)) != before
+
+    def test_fingerprint_is_stable_for_an_unchanged_binary(self, tmp_path):
+        binary = tmp_path / "sometool"
+        binary.write_text("#!/bin/sh\necho 'sometool 1.0.0'\n")
+        binary.chmod(0o755)
+
+        assert tools._fingerprint(str(binary)) == tools._fingerprint(str(binary))
+
+    def test_fingerprint_of_a_missing_path_is_none(self):
+        """A tool `which` cannot resolve has nothing to fingerprint, and must
+        always be probed rather than served from a cache entry."""
+        assert tools._fingerprint("/definitely/not/here/xyz") is None
+
+    def test_fingerprint_of_none_is_none(self):
+        assert tools._fingerprint(None) is None
