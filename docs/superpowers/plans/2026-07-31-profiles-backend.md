@@ -563,6 +563,29 @@ git commit -m "feat: scope project_service queries by owner"
 
 Same treatment as Task 3, applied to `DataObject`. `DataObject` has no `owner`-leading index today (per the design spec, `by_status` leads with `owner` but nothing else does) — this task does not add an index, since none of the new queries are a new access pattern; they add a filter to an existing one.
 
+### This task closes a gap Task 3 opened — do not skip the writer half
+
+Task 3 made `delete_project_tree` filter `DataObject` by `owner`, but **no
+production writer sets `owner` on a `DataObject` yet**. Verified empirically:
+create a project under `owner-a`, insert an object the way `object_service`
+does today, run the cascade — the project is deleted, the object survives as an
+orphan pointing at a dead `project_id`, its blob refcount is never decremented,
+and the log reports `objects=0` while doing it. That is the stranded-at-
+refcount-1 leak `delete_project`'s docstring says the design prevents.
+
+It is unreachable today only because every route hardcodes `owner="local"`, so
+both sides of the filter match. **This task is what closes it**, by making all
+five `DataObject(...)` constructions carry a real owner.
+
+So the acceptance bar here is higher than "the new tests pass". Confirm the
+cascade actually reclaims a non-`"local"` project's objects — a test that
+creates a project under one owner, ingests an object through the *real*
+`ingest_local_file` path (not a hand-built fixture), deletes the tree, and
+asserts the object is gone and its blob refcount decremented. `CLAUDE.md`'s
+warning applies directly: `tests/services/helpers.py`'s factories already set
+`owner=project.owner`, which is the owner the writers do not, so a green suite
+proves nothing about this until a test drives the production path.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `backend/tests/services/test_object_service_owner.py`:
