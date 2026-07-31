@@ -600,3 +600,92 @@ class TestFingerprint:
         second.chmod(0o755)
 
         assert tools._fingerprint(str(first)) != tools._fingerprint(str(second))
+
+
+class TestSeeding:
+    def test_a_seeded_probe_does_not_shell_out(self, tmp_path, monkeypatch):
+        """The whole point: a seeded entry must skip the subprocess. Asserted
+        by seeding a version the script does not print -- if the probe ran, it
+        would return 1.0.0 instead."""
+        script = tmp_path / "seededtool"
+        script.write_text("#!/bin/sh\necho 'seededtool 1.0.0'\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        resolved = str(script)
+        tools.seed(
+            "seededtool",
+            tools._fingerprint(resolved),
+            tools.Tool(name="seededtool", path=resolved, version="9.9.9"),
+        )
+
+        tool = tools._probe("seededtool", "seededtool", ["--version"])
+        assert tool.version == "9.9.9"
+
+    def test_a_stale_fingerprint_forces_a_reprobe(self, tmp_path, monkeypatch):
+        """The correctness case. An upgraded binary must be re-probed, not
+        served from a seed describing the old one."""
+        script = tmp_path / "staletool"
+        script.write_text("#!/bin/sh\necho 'staletool 1.0.0'\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        tools.seed(
+            "staletool",
+            "a-fingerprint-that-does-not-match",
+            tools.Tool(name="staletool", path=str(script), version="9.9.9"),
+        )
+
+        tool = tools._probe("staletool", "staletool", ["--version"])
+        assert tool.version == "1.0.0"
+
+    def test_a_seed_for_a_missing_binary_is_ignored(self):
+        """`which` failing short-circuits before the seed is consulted: a tool
+        that is no longer installed must report unavailable, not report the
+        version it had when it was."""
+        tools.seed(
+            "gonetool",
+            "some-fingerprint",
+            tools.Tool(name="gonetool", path="/was/here", version="9.9.9"),
+        )
+
+        tool = tools._probe("gonetool", "definitely-not-a-real-binary-xyz", ["--version"])
+        assert not tool.available
+        assert "not found on PATH" in tool.error
+
+    def test_reset_cache_clears_seeds(self, tmp_path, monkeypatch):
+        """Otherwise a test or a runtime config change clears the lru_caches
+        and immediately repopulates them from the values it meant to discard."""
+        script = tmp_path / "clearedtool"
+        script.write_text("#!/bin/sh\necho 'clearedtool 1.0.0'\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        resolved = str(script)
+        tools.seed(
+            "clearedtool",
+            tools._fingerprint(resolved),
+            tools.Tool(name="clearedtool", path=resolved, version="9.9.9"),
+        )
+        tools.reset_cache()
+
+        tool = tools._probe("clearedtool", "clearedtool", ["--version"])
+        assert tool.version == "1.0.0"
+
+    def test_a_seed_with_no_fingerprint_is_not_stored(self, tmp_path, monkeypatch):
+        """A caller that could not fingerprint the binary has nothing to
+        validate against, so its offer must be dropped rather than trusted
+        unconditionally."""
+        script = tmp_path / "nofptool"
+        script.write_text("#!/bin/sh\necho 'nofptool 1.0.0'\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        tools.seed(
+            "nofptool",
+            None,
+            tools.Tool(name="nofptool", path=str(script), version="9.9.9"),
+        )
+
+        tool = tools._probe("nofptool", "nofptool", ["--version"])
+        assert tool.version == "1.0.0"

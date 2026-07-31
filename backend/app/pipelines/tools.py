@@ -64,6 +64,27 @@ class Tool:
         }
 
 
+# Probe results supplied from outside, keyed by tool name and holding the
+# fingerprint of the binary they describe. Populated at startup from Redis (see
+# `tool_cache.py`) so a restart does not re-pay the probe cost -- NanoPlot alone
+# is 12s of it.
+#
+# Keyed by fingerprint rather than trusted outright: an entry describing a
+# binary that has since been upgraded must be ignored, not served.
+_seeded: dict[str, tuple[str, Tool]] = {}
+
+
+def seed(name: str, fingerprint: str | None, tool: Tool) -> None:
+    """Offer a previously-probed result for `name`.
+
+    Ignored at use time unless the binary still fingerprints identically, so a
+    caller cannot force a stale version into the cache.
+    """
+    if fingerprint is None:
+        return
+    _seeded[name] = (fingerprint, tool)
+
+
 def _probe(
     name: str,
     configured: str,
@@ -86,6 +107,10 @@ def _probe(
                 f"or set {name.upper()}_PATH."
             ),
         )
+
+    seeded = _seeded.get(name)
+    if seeded is not None and seeded[0] == _fingerprint(resolved):
+        return seeded[1]
 
     try:
         proc = subprocess.run(
@@ -946,6 +971,7 @@ def require(tool: Tool) -> Tool:
 
 def reset_cache() -> None:
     """Forget probed versions. For tests, and for a config change at runtime."""
+    _seeded.clear()
     fastp.cache_clear()
     fastqc.cache_clear()
     cutadapt.cache_clear()
