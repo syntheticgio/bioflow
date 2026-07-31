@@ -13,10 +13,12 @@ Async because the Redis client is; `tools.py` stays sync and knows nothing about
 Redis. The seam between them is `tools.seed`, called from the startup warm task.
 """
 
+import asyncio
 import json
 from typing import Any
 
 from app.logging import get_logger
+from app.pipelines import tools
 from app.pipelines.tools import Tool
 
 log = get_logger(__name__)
@@ -82,3 +84,27 @@ async def invalidate(client: Any) -> None:
         await client.delete(CACHE_KEY)
     except Exception as e:  # noqa: BLE001
         log.warning("tool_cache_invalidate_failed", error=str(e))
+
+
+async def warm(client: Any) -> None:
+    """Populate the probe caches, using Redis to skip what has not changed.
+
+    Seeds first, then probes. Probing runs in a thread: `all_tools()` is sync
+    and spawns fifteen subprocesses, so calling it on the event loop would
+    block every request for the ~15s it takes -- turning a latency problem into
+    an outage.
+    """
+    stored = await read(client)
+    for name, (fingerprint, tool) in stored.items():
+        tools.seed(name, fingerprint, tool)
+
+    probed = await asyncio.to_thread(tools.all_tools)
+
+    entries: dict[str, tuple[str, Tool]] = {}
+    for tool in probed:
+        fingerprint = tools._fingerprint(tool.path)
+        if fingerprint is not None:
+            entries[tool.name] = (fingerprint, tool)
+
+    await write(client, entries)
+    log.info("tool_cache_warmed", tools=len(entries), seeded=len(stored))
