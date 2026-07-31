@@ -208,25 +208,40 @@ class TestStreamingBuild:
         MB; a list-then-insert refactor should add tens of MB, and every
         other test in this file still passes when that regression happens.
 
-        The row count and threshold are sized off measurements, not guesses.
-        Real `bcftools query` rows run ~54 chars (e.g.
-        "NC_001133.9\\t1234567\\tACGTACGTAC\\tA\\t247.3910\\tPASS\\t142\\t0/1"), and
-        at that length materializing the input as a list costs about 100
-        bytes/row in this container: 200k short synthetic rows (the previous
-        fixture, ~25 chars each) only cost ~16 MB materialized -- nowhere
-        near a 150 MB threshold -- so a `rows = list(rows)` regression was
-        silently passing. At realistic row length, 1,000,000 rows costs
-        ~101 MB materialized versus a few MB streamed, so 60 MB sits clearly
-        between the two: ~6x the streaming cost and comfortably under the
-        materialized cost. Do not shrink the row count or row length to make
-        this faster -- that is exactly what made the guard decorative
-        before, and it will quietly stop catching the regression again."""
+        Two things had to be fixed to make this guard real, not one:
 
-        def rss_mb() -> float:
-            with open("/proc/self/status") as fh:
-                return int(fh.read().split("VmRSS:")[1].split()[0]) / 1024
+        1. Row count and length. Real `bcftools query` rows run ~54 chars
+           (e.g. "NC_001133.9\\t1234567\\tACGTACGTAC\\tA\\t247.3910\\tPASS\\t142\\t0/1").
+           200k short synthetic rows (the previous fixture, ~25 chars each)
+           only cost ~16 MB materialized -- nowhere near the old 150 MB
+           threshold. At realistic row length, 1,000,000 rows costs ~100 MB
+           materialized versus a few MB streamed, so 60 MB sits clearly
+           between the two: ~6x the streaming cost and comfortably under the
+           materialized cost.
 
-        before = rss_mb()
+        2. What "stays bounded" measures. `VmRSS` from /proc/self/status is a
+           snapshot, not a peak: measured immediately before and after the
+           call, a `rows = list(rows)` regression that peaks at +100 MB and
+           is freed again before `build_variant_db` returns (glibc gives the
+           pages back once the list and its strings are garbage collected)
+           shows as only a few MB of *net* growth -- passing clean despite
+           genuinely materializing the whole input mid-call. Measured this
+           exact way against a real `list(rows)` regression in this
+           container, VmRSS before/after showed ~5 MB of growth while
+           `resource.getrusage(RUSAGE_SELF).ru_maxrss` -- the kernel's
+           monotonic high-water mark for the process, which cannot decrease
+           -- showed ~107 MB. So this test reads maxrss, not VmRSS.
+
+        Do not shrink the row count/length or switch back to a before/after
+        RSS snapshot to make this faster -- both are exactly what made the
+        guard decorative before, and either one alone is enough to quietly
+        stop it from catching the regression again."""
+        import resource
+
+        def peak_rss_mb() -> float:
+            return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+
+        before = peak_rss_mb()
         path = tmp_path / "big.db"
         build_variant_db(
             rows=(
@@ -235,5 +250,5 @@ class TestStreamingBuild:
             ),
             db_path=path,
         )
-        growth = rss_mb() - before
-        assert growth < 60, f"build grew RSS by {growth:.0f} MB"
+        growth = peak_rss_mb() - before
+        assert growth < 60, f"build's peak RSS grew by {growth:.0f} MB"
