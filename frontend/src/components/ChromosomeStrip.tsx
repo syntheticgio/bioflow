@@ -52,8 +52,8 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
     return (
       <Framed title="Sequences">
         <div className="chrom-note">
-          Sequence lengths weren’t measured for this file. Re-run QC to draw the
-          chromosome map.
+          Sequence lengths weren’t measured for this file. Re-ingest it to draw
+          the chromosome map — the Computations panel has the button.
         </div>
       </Framed>
     );
@@ -81,7 +81,10 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
         {view.bars.map((bar, i) => {
           const h = Math.max(MIN_BAR_H, (bar.length / longest) * MAX_BAR_H);
           const clickable = view.linkable && isNcbiNucleotideAccession(bar.name);
-          const label = `${bar.name} · ${formatBases(bar.length)}`;
+          const described = bar.label
+            ? `${bar.label} · ${bar.name} · ${formatBases(bar.length)}`
+            : `${bar.name} · ${formatBases(bar.length)}`;
+          const caption = bar.label ?? accessionTail(bar.name);
           const x = i * (BAR_W + BAR_GAP);
           return (
             <g
@@ -91,7 +94,7 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
               // announced as a button it would do nothing to activate.
               role={clickable ? "button" : undefined}
               tabIndex={clickable ? 0 : undefined}
-              aria-label={clickable ? label : undefined}
+              aria-label={clickable ? described : undefined}
               className={clickable ? "chrom-bar is-clickable" : "chrom-bar"}
               onClick={clickable ? () => setSelected(bar.name) : undefined}
               onKeyDown={
@@ -106,7 +109,7 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
                   : undefined
               }
             >
-              <title>{label}</title>
+              <title>{described}</title>
               <rect
                 x={x}
                 y={MAX_BAR_H - h}
@@ -120,7 +123,7 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
                 y={MAX_BAR_H + 12}
                 textAnchor="middle"
               >
-                {accessionTail(bar.name)}
+                {caption}
               </text>
             </g>
           );
