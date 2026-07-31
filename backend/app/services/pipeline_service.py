@@ -1785,3 +1785,52 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
         )
 
     return AnnotationInputs(ok=True, reference=reference, annotation=annotation)
+
+
+async def launch_annotation(*, object_id: PydanticObjectId):
+    """Queue a consequence-annotation run for a VCF.
+
+    Resolution goes through `resolve_annotation_inputs` rather than repeating
+    the rules, so a launch cannot succeed where the card said it could not, or
+    the reverse.
+    """
+    from app.queue import queue
+
+    tools.require(tools.bcftools_csq())
+
+    vcf = await DataObject.get(object_id)
+    if vcf is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    inputs = await resolve_annotation_inputs(vcf)
+    if not inputs.ok:
+        raise ValidationError(inputs.reason)
+
+    payload: dict = {
+        "object_id": str(vcf.id),
+        "project_id": str(vcf.project_id),
+        "vcf_name": vcf.name,
+        "reference_name": inputs.reference.name,
+        "annotation_name": inputs.annotation.name,
+    }
+    for key, obj in (
+        ("vcf", vcf),
+        ("reference", inputs.reference),
+        ("annotation", inputs.annotation),
+    ):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    return await queue.enqueue(
+        "annotate_variants",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"annotate:{vcf.id}",
+        project_id=vcf.project_id,
+        object_id=vcf.id,
+    )

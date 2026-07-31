@@ -1,0 +1,32 @@
+"""Wiring for the annotation run.
+
+The handler shells out and is verified manually against real data; what is
+worth testing here is that it refuses a payload missing an input, since a
+missing one otherwise fails thirty seconds into a job rather than at launch.
+"""
+
+import pytest
+
+from app.errors import PermanentError
+from app.queue import variant_handlers
+from app.queue.registry import JobContext
+
+
+def _ctx(payload: dict) -> JobContext:
+    return JobContext(job_id="job-1", payload=payload, epoch=1, attempts=1)
+
+
+class TestAnnotateVariantsPayload:
+    def test_requires_an_object_id(self):
+        with pytest.raises(PermanentError, match="object_id"):
+            variant_handlers.annotate_variants(_ctx({}))
+
+    def test_requires_a_reference(self):
+        with pytest.raises(PermanentError, match="reference"):
+            variant_handlers.annotate_variants(_ctx({"object_id": "abc"}))
+
+    def test_requires_an_annotation(self):
+        with pytest.raises(PermanentError, match="annotation"):
+            variant_handlers.annotate_variants(
+                _ctx({"object_id": "abc", "reference_sha256": "d" * 64})
+            )

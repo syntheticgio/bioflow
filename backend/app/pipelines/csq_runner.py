@@ -94,3 +94,21 @@ def is_benign_gff_warning(line: str) -> bool:
     if line.lstrip().startswith(_ERROR_PREFIX):
         return False
     return any(marker in line for marker in _BENIGN_GFF_MARKERS)
+
+
+# Suffixes a VCF may arrive with, longest first so `.vcf.gz` is stripped whole
+# rather than leaving a stray `.vcf`.
+_VCF_SUFFIXES = (".vcf.gz", ".vcf", ".bcf")
+
+
+def annotated_name(vcf_name: str) -> str:
+    """The output name for an annotated copy of `vcf_name`.
+
+    Not `variant_runner.output_name`, which takes `Path(name).stem` because
+    its input is a BAM. A `.vcf.gz` has a double extension, so the stem keeps
+    the inner `.vcf` and the result is `foo.bcftools.vcf.csq.vcf.gz`.
+    """
+    for suffix in _VCF_SUFFIXES:
+        if vcf_name.endswith(suffix):
+            return f"{vcf_name[: -len(suffix)]}.csq.vcf.gz"
+    return f"{vcf_name}.csq.vcf.gz"

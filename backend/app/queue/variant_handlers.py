@@ -15,13 +15,13 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import aligners, tools, variant_runner
+from app.pipelines import aligners, csq_runner, tools, variant_runner
 from app.pipelines import variant_db, vcf_stats_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller
 from app.queue.align_handlers import _resolve_blob
 from app.queue.executor import run_subprocess
-from app.queue.pipeline_handlers import _failure, _prepare_workdir
+from app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
@@ -452,3 +452,92 @@ def run_vcf_stats(ctx: JobContext) -> dict:
 
     log.info("vcf_stats_done", object_id=object_id, variants=total)
     return {"object_id": object_id, "facts": facts}
+
+
+@handler(
+    "annotate_variants",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+)
+def annotate_variants(ctx: JobContext) -> dict:
+    """Add consequence annotations to a VCF with `bcftools csq`.
+
+    Produces a new VCF object rather than mutating the input: the original is
+    what the caller actually emitted, and an annotation run is a derivation of
+    it like every other step here.
+
+    GFF3 parse warnings are expected on real NCBI annotations -- the T. brucei
+    file emits three kinds -- and are logged rather than failed on. See
+    `csq_runner.is_benign_gff_warning`.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("annotate_variants requires an 'object_id'")
+    if not (ctx.payload.get("reference_sha256") or ctx.payload.get("reference_path")):
+        raise PermanentError("annotate_variants requires a reference")
+    if not (
+        ctx.payload.get("annotation_sha256") or ctx.payload.get("annotation_path")
+    ):
+        raise PermanentError("annotate_variants requires an annotation (GFF3)")
+
+    bcftools = tools.require(tools.bcftools_csq())
+    work = _prepare_workdir(ctx, "annotate")
+
+    vcf = _named_link(
+        work, _resolve_blob(ctx.payload, "vcf"), ctx.payload.get("vcf_name")
+    )
+    reference = _named_link(
+        work, _resolve_blob(ctx.payload, "reference"), ctx.payload.get("reference_name")
+    )
+    annotation = _named_link(
+        work,
+        _resolve_blob(ctx.payload, "annotation"),
+        ctx.payload.get("annotation_name"),
+    )
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # csq needs a .fai beside the reference, exactly as the aligners do.
+    ctx.progress(phase="index", pct=0.1, message="indexing the reference")
+    code = run_subprocess(
+        ctx,
+        [tools.require(tools.samtools()).path, "faidx", str(reference)],
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "samtools faidx")
+
+    ctx.progress(phase="annotate", pct=0.3, message="calling consequences")
+    out = work / "annotated.vcf.gz"
+    code = run_subprocess(
+        ctx,
+        csq_runner.build_csq_command(
+            bcftools_path=bcftools.path,
+            vcf=vcf,
+            reference=reference,
+            annotation=annotation,
+            out=out,
+        ),
+        log_path=str(log_path),
+    )
+    if code != 0:
+        raise _failure(code, log_path, "bcftools csq")
+
+    # Not `_rename_output`: it calls `variant_runner.output_name`, which takes
+    # `Path(name).stem` on the assumption its input is a BAM. Handed a
+    # `.vcf.gz` that yields `foo.bcftools.vcf.csq.vcf.gz`.
+    produced = out.parent / csq_runner.annotated_name(
+        ctx.payload.get("vcf_name") or vcf.name
+    )
+    if produced != out:
+        out.rename(produced)
+    index = _index_vcf(ctx, produced, log_path)
+
+    return {
+        "produced": str(produced),
+        "index": str(index),
+        "tool": "bcftools csq",
+        "tool_version": bcftools.version,
+    }

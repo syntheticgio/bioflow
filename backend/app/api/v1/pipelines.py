@@ -342,6 +342,17 @@ async def launch_vcf_stats(body: VcfStatsRequest) -> JobOut:
     return JobOut.of(job)
 
 
+class AnnotateRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.post("/annotate", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_annotate(body: AnnotateRequest) -> JobOut:
+    """Queue consequence annotation for a called VCF."""
+    job = await pipeline_service.launch_annotation(object_id=body.object_id)
+    return JobOut.of(job)
+
+
 @router.get("/vcfstats/variants/{object_id}")
 async def get_vcf_stats_variants(
     object_id: PydanticObjectId,

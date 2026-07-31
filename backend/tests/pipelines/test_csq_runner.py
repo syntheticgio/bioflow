@@ -80,3 +80,22 @@ class TestGffWarnings:
         assert not csq_runner.is_benign_gff_warning(
             "Failed to build index: duplicate id at record 12"
         )
+
+
+class TestAnnotatedName:
+    # The trap: Path("x.bcftools.vcf.gz").stem is "x.bcftools.vcf", so the
+    # BAM-oriented helper would produce "x.bcftools.vcf.csq.vcf.gz".
+    def test_strips_a_double_extension_whole(self):
+        assert (
+            csq_runner.annotated_name("DRR1066343.bcftools.vcf.gz")
+            == "DRR1066343.bcftools.csq.vcf.gz"
+        )
+
+    def test_handles_a_plain_vcf(self):
+        assert csq_runner.annotated_name("sample.vcf") == "sample.csq.vcf.gz"
+
+    def test_handles_a_bcf(self):
+        assert csq_runner.annotated_name("x.bcf") == "x.csq.vcf.gz"
+
+    def test_falls_back_on_an_unrecognised_name(self):
+        assert csq_runner.annotated_name("weird") == "weird.csq.vcf.gz"
