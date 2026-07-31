@@ -126,6 +126,10 @@ let mountSeq = 0;
  *  which is the correct fallback rather than a special case. */
 export interface ViewerFocus {
   position: number;
+  /** Marker text. Build it with `markerLabel()` rather than by hand: allele
+   *  syntax that reads fine in a table (`A,T` at a multi-allelic site) names a
+   *  different variant once its punctuation is stripped for the `mk`
+   *  parameter. */
   label: string;
   sequenceLength?: number;
 }
@@ -187,11 +191,7 @@ export function SequenceViewerModal({
     mountRef.current.appendChild(host);
 
     const app = new SeqView.App(divId);
-    // `appname` is not optional in practice: without it the viewer opens a
-    // modal warning ("initialized with parameter appname=undefined") over the
-    // tracks on every single open. NCBI asks for a unique, namespaced value --
-    // it keys the cookie holding the user's viewer settings -- and warns off
-    // generic words like "viewer".
+
     // Appended only when focused, so the unfocused string stays byte-identical
     // to what ChromosomeStrip has always sent.
     let focusParams = "";
@@ -203,6 +203,11 @@ export function SequenceViewerModal({
       focusParams += `&mk=${focus.position}|${encodeURIComponent(focus.label)}|ff5555`;
     }
 
+    // `appname` is not optional in practice: without it the viewer opens a
+    // modal warning ("initialized with parameter appname=undefined") over the
+    // tracks on every single open. NCBI asks for a unique, namespaced value --
+    // it keys the cookie holding the user's viewer settings -- and warns off
+    // generic words like "viewer".
     app.load(
       `embedded=true&appname=${VIEWER_APPNAME}` +
         `&id=${encodeURIComponent(accession)}&tracks=[key:gene_model_track]` +
