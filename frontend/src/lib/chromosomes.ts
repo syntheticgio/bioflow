@@ -91,6 +91,28 @@ export function focusWindow(
   ];
 }
 
+/** Longest allele fragment kept in a marker label. */
+const LABEL_ALLELE_MAX = 12;
+
+/**
+ * A marker name for one variant, safe to interpolate into NCBI's `mk`
+ * parameter.
+ *
+ * NCBI warns that special characters in marker names "must be escaped
+ * properly", and `|` is the separator between position, name and colour within
+ * `mk` -- so an allele carrying one would corrupt the spec rather than just
+ * look wrong. VCF also permits symbolic alleles such as `<DEL>` and `*`.
+ * Rather than escape a moving target, reduce the label to plain ASCII.
+ */
+export function markerLabel(ref: string, alt: string): string {
+  const clean = (allele: string) =>
+    allele.replace(/[^A-Za-z0-9]/g, "").slice(0, LABEL_ALLELE_MAX);
+  const r = clean(ref);
+  const a = clean(alt);
+  if (!r && !a) return "variant";
+  return `${r || "?"}-to-${a || "?"}`;
+}
+
 export function classifyChromosomes(
   facts: Record<string, unknown>,
 ): ChromosomeView {

@@ -3,6 +3,7 @@ import {
   classifyChromosomes,
   focusWindow,
   isNcbiNucleotideAccession,
+  markerLabel,
 } from "./chromosomes";
 
 describe("classifyChromosomes", () => {
@@ -280,5 +281,26 @@ describe("focusWindow", () => {
 
   it("clamps to the end of the sequence", () => {
     expect(focusWindow(4_999_900, 5_000_000)).toEqual([4_949_900, 5_000_000]);
+  });
+});
+
+describe("markerLabel", () => {
+  it("formats a simple SNV", () => {
+    expect(markerLabel("G", "A")).toBe("G-to-A");
+  });
+
+  // `|` separates fields inside NCBI's mk parameter, so an allele containing
+  // one would silently corrupt the marker spec.
+  it("strips characters that would break the mk parameter", () => {
+    expect(markerLabel("<DEL>", "A|B")).toBe("DEL-to-AB");
+  });
+
+  // Indel alleles run to kilobases; the marker label is not where that belongs.
+  it("truncates long indel alleles", () => {
+    expect(markerLabel("A".repeat(40), "T")).toBe(`${"A".repeat(12)}-to-T`);
+  });
+
+  it("falls back when sanitising empties both alleles", () => {
+    expect(markerLabel("|", "*")).toBe("variant");
   });
 });
