@@ -1353,6 +1353,74 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
     return job
 
 
+VCF_STATS_CALLABLE_KINDS = {FormatKind.VCF, FormatKind.BCF}
+
+
+def _check_vcf_stats_callable(obj) -> None:
+    """Whether a Variant Results computation can run against this object.
+
+    Unlike the BAM path there is no index precondition: `bcftools stats` and
+    `bcftools query` both stream the whole file, so a `.tbi` is never
+    required and there is nothing to chain an index build onto.
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready for results (status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind not in VCF_STATS_CALLABLE_KINDS:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not a VCF or BCF",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+
+async def launch_vcf_stats(*, object_id: PydanticObjectId):
+    """Queue the Results computation for a VCF: call-set summary statistics
+    and the per-variant table.
+
+    Read-only, like launch_bam_stats: no derived objects, just facts merged
+    onto the object plus a TSV and a SQLite database on disk.
+    """
+    from app.queue import queue
+
+    tools.require(tools.bcftools())
+
+    vcf = await DataObject.get(object_id)
+    if vcf is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+    _check_vcf_stats_callable(vcf)
+
+    digest, path = await _resolve_readable(vcf)
+
+    # Contig names and lengths come from the facts the ingest parser already
+    # wrote: the handler runs in a worker thread and cannot query for them.
+    lengths = vcf.facts.get("reference_lengths") or {}
+    contig_lengths = [[name, length] for name, length in lengths.items()]
+
+    payload: dict = {
+        "object_id": str(vcf.id),
+        "project_id": str(vcf.project_id),
+        "vcf_name": vcf.name,
+        "contig_lengths": contig_lengths,
+    }
+    if digest:
+        payload["vcf_sha256"] = digest
+    if path:
+        payload["vcf_path"] = path
+
+    return await queue.enqueue(
+        "run_vcf_stats",
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"vcf_stats:{vcf.id}",
+        project_id=vcf.project_id,
+        object_id=vcf.id,
+    )
+
+
 def _variant_dedup_key(*, bam_id, params: dict) -> str:
     """Identity of a variant calling request.
 

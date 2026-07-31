@@ -1046,6 +1046,36 @@ async def _apply_run_bam_stats(result: dict) -> None:
     )
 
 
+async def _apply_run_vcf_stats(result: dict) -> None:
+    """Record a Variant Results computation on the VCF it described.
+
+    Read-only like QC and BAM stats: no files to ingest, just facts merged
+    onto the object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("vcf_stats_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "vcf_stats_applied",
+        object_id=object_id,
+        variants=facts.get("vcf_stats_summary", {}).get("variants"),
+    )
+
+
 def variant_provenance(result: dict) -> dict:
     """The facts a variant calling run stamps onto the VCF it produced.
 
@@ -1153,4 +1183,5 @@ _APPLIERS = {
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
     "run_bam_stats": _apply_run_bam_stats,
+    "run_vcf_stats": _apply_run_vcf_stats,
 }
