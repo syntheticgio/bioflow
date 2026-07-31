@@ -8,6 +8,7 @@ import type {
   CompleteAccepted,
   ContigsPage,
   DataObject,
+  DataSources,
   DeletionPreview,
   FacetValue,
   Facets,
@@ -239,6 +240,8 @@ export const api = {
   systemStats: () => request<SystemStats>("/system/stats"),
 
   systemLoad: () => request<SystemLoad>("/system/load"),
+
+  sources: () => request<DataSources>("/system/sources"),
 
   listSchedules: () => request<ScheduleInfo[]>("/schedules"),
 
