@@ -59,6 +59,22 @@ def _num(value: str) -> float | None:
         return None
 
 
+def _looks_like_bcsq(field: str) -> bool:
+    """Whether a trailing field is a consequence rather than a genotype.
+
+    `bcftools query` emits "." for an absent tag, and a real BCSQ value always
+    carries at least one "|" separator or an "@" pointer. A genotype is digits,
+    "/", "|" and "." only -- and `1|1` is a phased genotype, so the presence of
+    a pipe alone does not settle it. Requiring a letter alongside the separator
+    is what distinguishes `missense|GENE|...` from `1|1`.
+    """
+    if field == ".":
+        return True
+    if field.startswith("@"):
+        return True
+    return "|" in field and any(c.isalpha() for c in field)
+
+
 def build_variant_db(*, rows, db_path: Path) -> int:
     """Stream parsed `bcftools query` lines into an indexed SQLite database.
 
@@ -123,11 +139,13 @@ def build_variant_db(*, rows, db_path: Path) -> int:
             # sample the picker selects. The frontend splits this back apart
             # by index.
             #
-            # BCSQ is appended after the repeating per-sample genotypes, so it
-            # is the last field and the genotypes are everything between.
-            # Older indexes were built with no 9th field at all; those keep
-            # working and simply carry no consequence.
-            if len(parts) >= 9:
+            # BCSQ is appended after the repeating per-sample genotypes, so
+            # when present it is the last field. Detected by shape rather than
+            # by field count: `[\t%GT]` repeats per sample, so a three-sample
+            # row without BCSQ has exactly as many fields as a two-sample row
+            # with it, and counting would read that third genotype as a
+            # consequence.
+            if len(parts) >= 9 and _looks_like_bcsq(parts[-1]):
                 gt_text = "\t".join(parts[7:-1])
                 csq = csq_parse.parse_bcsq(parts[-1])
             else:

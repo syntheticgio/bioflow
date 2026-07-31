@@ -75,7 +75,7 @@ class TestCommandConstruction:
         # this assertion with actual escapes -- "\t" not "\\t" -- because a
         # literal backslash-t makes bcftools emit one unsplittable column and
         # every row lands in the database as a single field.
-        assert cmd[4] == "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\n"
+        assert cmd[4] == "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\t%INFO/BCSQ\n"
         assert cmd[5] == "/work/a.vcf.gz"
 
     def test_query_format_separator_is_a_real_tab(self):

@@ -93,7 +93,7 @@ class TestBuild:
         it needs pinning."""
         path = tmp_path / "multi.db"
         build_variant_db(
-            rows=iter(["chr1\t100\tA\tG\t50.0\tPASS\t30\t0/1\t1/1\t0/0\t."]),
+            rows=iter(["chr1\t100\tA\tG\t50.0\tPASS\t30\t0/1\t1/1\t0/0"]),
             db_path=path,
         )
         row = query_variants(
@@ -355,3 +355,31 @@ class TestConsequenceColumns:
             )
             == 1
         )
+
+    # A three-sample row with no BCSQ has the same field count as a two-sample
+    # row with one. Counting fields would read that third genotype as a
+    # consequence, so the last field is judged by shape.
+    def test_a_third_genotype_is_not_mistaken_for_a_consequence(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(
+            rows=iter(["c1\t1\tA\tT\t10\t.\t5\t0/1\t1/1\t0/0"]),
+            db_path=path,
+        )
+        row = query_variants(
+            db_path=path, filters=VariantFilters(), offset=0, limit=10
+        )[0]
+        assert row["gt"] == "0/1\t1/1\t0/0"
+        assert row["consequence"] is None
+
+    # Phased genotypes contain "|", which is also BCSQ's field separator.
+    def test_a_phased_genotype_is_not_mistaken_for_a_consequence(self, tmp_path):
+        path = tmp_path / "v.db"
+        build_variant_db(
+            rows=iter(["c1\t1\tA\tT\t10\t.\t5\t0|1\t1|1"]),
+            db_path=path,
+        )
+        row = query_variants(
+            db_path=path, filters=VariantFilters(), offset=0, limit=10
+        )[0]
+        assert row["gt"] == "0|1\t1|1"
+        assert row["consequence"] is None
