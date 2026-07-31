@@ -13,5 +13,4 @@ Licensed under the SIL Open Font License 1.1 (upstream:
 https://github.com/adobe-fonts/source-serif). The OFL permits redistribution
 and bundling; the license text travels with the upstream project.
 
-Only the Broadsheet theme references these. The Classic theme keeps using the
-system sans stack and loads none of them.
+Broadsheet is the app's only theme, so these faces load on every page.
