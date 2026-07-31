@@ -183,6 +183,18 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "bam_stats"
 
     @property
+    def vcf_stats_dir(self) -> Path:
+        """Generated Variant Results artifacts (the variants TSV and the
+        SQLite database the table queries), keyed by object id.
+
+        Outside objects/ deliberately, same rationale as bam_stats_dir: both
+        are derivative and regenerable from the VCF itself, so content-
+        addressing them would buy deduplication of something never shared and
+        cost a blob record per run.
+        """
+        return self.bioinfo_home / "vcf_stats"
+
+    @property
     def meta_dir(self) -> Path:
         return self.bioinfo_home / ".biopipe"
 

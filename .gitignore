@@ -13,3 +13,6 @@ dist/
 .vscode/
 tsconfig.tsbuildinfo
 backend/.venv/
+
+# Superpowers brainstorming scratch (mockups, session state)
+.superpowers/
