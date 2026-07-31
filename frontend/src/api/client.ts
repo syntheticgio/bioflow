@@ -41,7 +41,9 @@ import type {
   UploadCreated,
   UploadSessionInfo,
   VariantDefaults,
+  VariantQuery,
   VariantRequest,
+  VariantsPage,
 } from "./types";
 
 const BASE = "/api/v1";
@@ -497,6 +499,39 @@ export const api = {
   /** URL for downloading the complete per-contig TSV. */
   bamStatsDownloadUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/bamstats/report/${objectId}/${reportPath}?download=1`,
+
+  /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
+   * and a variants TSV, no derived objects. */
+  launchVcfStats: (objectId: string) =>
+    request<JobSummary>("/pipelines/vcfstats", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
+  /** A page of the variant table. Filters are applied server-side against
+   *  the SQLite index rather than by slicing a TSV -- a plant VCF holds
+   *  millions of rows, where reading the whole file costs ~440 MB per
+   *  request. */
+  vcfStatsVariants: (objectId: string, q: VariantQuery) => {
+    const p = new URLSearchParams({
+      offset: String(q.offset),
+      limit: String(q.limit),
+    });
+    if (q.contig) p.set("contig", q.contig);
+    if (q.posMin != null) p.set("pos_min", String(q.posMin));
+    if (q.posMax != null) p.set("pos_max", String(q.posMax));
+    if (q.filterValue) p.set("filter_value", q.filterValue);
+    if (q.variantType) p.set("variant_type", q.variantType);
+    if (q.minQual != null) p.set("min_qual", String(q.minQual));
+    if (q.skipCount) p.set("skip_count", "true");
+    return request<VariantsPage>(
+      `/pipelines/vcfstats/variants/${objectId}?${p.toString()}`,
+    );
+  },
+
+  /** URL for downloading the complete variants TSV. */
+  vcfStatsDownloadUrl: (objectId: string, reportPath: string) =>
+    `${BASE}/pipelines/vcfstats/report/${objectId}/${reportPath}`,
 
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,

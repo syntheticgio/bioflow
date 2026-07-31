@@ -36,6 +36,7 @@ import { DerivedFiles } from "./DerivedFiles";
 import { ActivePipelineJobs } from "./ActivePipelineJobs";
 import { AlignDialog } from "./AlignDialog";
 import { BamResults } from "./BamResults";
+import { VariantResults } from "./VariantResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
@@ -265,8 +266,8 @@ function ProjectDetail({ id }: { id: string }) {
 }
 
 /** Ordered so the panel opens on the question people ask most: is this file
- * good? Results sits next to QC -- they answer adjacent questions -- and only
- * appears for BAMs, which is the only format it currently describes. */
+ * good? Results sits next to QC -- they answer adjacent questions -- and
+ * appears for BAMs and for called variants (VCF/BCF). */
 function tabsFor(obj: DataObject): TabDef[] {
   const factCount = countVisibleFacts(obj.facts);
 
@@ -281,7 +282,14 @@ function tabsFor(obj: DataObject): TabDef[] {
       hint: factCount > 0 ? `${factCount} facts` : undefined,
     },
   ];
-  if (obj.format.kind === "bam") {
+  // One tab id across all three formats rather than a push per format: `tab`
+  // is persisted in the URL alongside ?sel=, so a link stays on Results when
+  // the selection moves between a BAM and the VCF called from it.
+  const hasResults =
+    obj.format.kind === "bam" ||
+    obj.format.kind === "vcf" ||
+    obj.format.kind === "bcf";
+  if (hasResults) {
     tabs.push({ id: "results", label: "Results" });
   }
   tabs.push(
@@ -623,7 +631,11 @@ function ObjectDetail({ id }: { id: string }) {
 
         {tab === "results" && (
           <TabPanel id="results" idPrefix="obj">
-            <BamResults obj={obj} />
+            {obj.format.kind === "bam" ? (
+              <BamResults obj={obj} />
+            ) : (
+              <VariantResults obj={obj} />
+            )}
           </TabPanel>
         )}
 
