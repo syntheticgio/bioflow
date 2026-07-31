@@ -46,6 +46,29 @@ confirming the mount is live rather than reading the image's baked-in copy.
 `--network biopipe_default` gives the container the Mongo replica set, which
 is why this works where a host venv does not.
 
+## Its one real limitation: don't judge the *full* suite by it
+
+**Reliable for a targeted file. Not a substitute for the full suite.**
+`docker run` does not supply everything `docker compose` does, so
+`pytest tests/` under it reports **15 failures and 134 errors** that are pure
+artifact -- async fixtures that never get their plugin, and Mongo-backed
+tests that cannot reach what they need.
+
+Those numbers cost real time here: they looked like pre-existing breakage on
+main and were nearly filed as a bug against the image. The same suite run the
+documented way is clean:
+
+```bash
+cd /Users/syntheticgio/Programming/local-bio-pipeliner
+docker compose exec api python -m pytest tests/ -q
+```
+
+→ `1716 passed` (verified 2026-07-31 on main, after this feature merged).
+
+So: `docker run` for fast iteration on the files you are editing; the
+CLAUDE.md `docker compose exec` form -- on main, after merging -- before
+believing anything about overall health.
+
 ## Frontend and UI verification
 
 Not possible from the worktree, and not worth making possible. Per the
