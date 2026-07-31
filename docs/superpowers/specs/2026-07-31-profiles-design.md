@@ -113,9 +113,32 @@ sequential integer would need.
 ### First boot adopts `"local"`
 
 Every existing document has `owner: "local"`. On first boot with no profiles,
-the setup screen creates a profile whose id is the literal string `"local"`
-rather than a generated `ObjectId`. The existing library belongs to it
-immediately and **not one document is rewritten**.
+the setup screen creates a profile that **claims `"local"` as its owner value**
+— so the existing library belongs to it immediately and **not one document is
+rewritten**.
+
+Note what that does *not* mean. The profile's own `_id` is an ordinary
+`ObjectId`; Beanie rejects a `Profile(id="local", ...)` outright with
+`ValidationError: Id must be of type PydanticObjectId`, verified against the
+running stack. (`Blob` does override `id` to a `str` for its digest, so a
+string key is achievable — but conflating the two here would be wrong anyway.)
+
+A profile's identity and the owner value its documents carry are separate
+facts, and only the adopted profile has them differ. That difference has to be
+stored, because nothing else distinguishes the adopted profile once a second
+one exists:
+
+```python
+class Profile(TimestampedDocument):
+    adopted_legacy_owner: bool = False
+
+    def owner_id(self) -> str:
+        """The value this profile's documents carry in their `owner` field."""
+        return "local" if self.adopted_legacy_owner else str(self.id)
+```
+
+Every caller asks `profile.owner_id()` and never `str(profile.id)`. That is the
+whole reason the accessor exists rather than reading `.id` at each call site.
 
 This is worth a special case because the alternative is a data migration across
 `objects`, `projects`, `runs` and `jobs`, and `docs/TODO.md` records that this
