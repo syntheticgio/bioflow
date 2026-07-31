@@ -2340,6 +2340,65 @@ table.software-matrix thead th {
   white-space: nowrap;
 }
 
+/* The pipeline heads are filter buttons. Padding moves off the `th` and onto
+   the button so the whole cell is clickable rather than just the glyphs --
+   a 60px word in a 12px-padded cell otherwise leaves a dead border the user
+   aims at and misses. */
+table.software-matrix thead th:not(.software-matrix-corner) {
+  padding: 0;
+}
+
+.software-matrix-filter {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  width: 100%;
+  padding: 10px 12px;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.software-matrix-filter:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* The pressed column is the page's current state, so it gets the accent the
+   primary dot uses -- the same colour meaning "this pipeline" in both places. */
+table.software-matrix thead th.is-filtered .software-matrix-filter,
+.software-matrix-filter[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+table.software-matrix thead th.is-filtered {
+  border-bottom-color: var(--accent);
+}
+
+/* Says why the page is short and offers the way back. Sits between the matrix
+   and the entries, where a reader who has just clicked a column is looking. */
+.software-filter-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 14px 0 0;
+}
+
+.software-filter-clear {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* The name column stays put while the pipeline columns scroll under it --
    otherwise scrolling right leaves a grid of anonymous dots.
 
