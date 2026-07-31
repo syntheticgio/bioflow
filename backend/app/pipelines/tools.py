@@ -11,6 +11,7 @@ job that dies thirty seconds after the user walks away.
 """
 
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -175,22 +176,37 @@ def _fingerprint(path: str | None) -> str | None:
     the installed binary is the half of a run's provenance a methods section
     reports.
 
-    Hashes content rather than keying off mtime/size: an in-place upgrade that
-    preserves both (a `cp -p` over the old binary, or two writes landing in the
-    same filesystem timestamp tick, which happens in practice on some
-    filesystems at sub-microsecond write speed) must still be detected as a
-    change.
+    Combines path, mtime/size, and a content hash rather than relying on any
+    one of them, because each catches a change the others miss: mtime/size
+    alone missed an in-place same-size replacement landing in the same
+    filesystem timestamp tick (measured happening in this repo's test
+    container); a content hash alone drops path, so two tools resolving to
+    identical bytes -- or one tool moving to a new PATH entry with its bytes
+    unchanged -- would fingerprint the same; mtime/size alone (without the
+    hash) missed nothing extra, but a package upgrade normally rewrites mtime
+    even when bytes are unchanged, so combining catches more real cases than
+    either alone.
+
+    Residual limitation, left undocumented nowhere else but here: several
+    probed tools (fastqc, bowtie2, hisat2, cutadapt) are interpreter wrapper
+    scripts that dispatch to a separate payload (JARs, installed packages).
+    This fingerprints the wrapper, not the payload it calls into -- an
+    upgrade that replaces only the payload, leaving the wrapper
+    byte-identical and its mtime untouched, goes undetected here. That is an
+    accepted gap, not a silent one: the probe cache's TTL is the backstop for
+    it.
     """
     if path is None:
         return None
     try:
+        st = os.stat(path)
         digest = hashlib.sha256()
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 digest.update(chunk)
     except OSError:
         return None
-    return digest.hexdigest()
+    return f"{path}:{st.st_mtime_ns}:{st.st_size}:{digest.hexdigest()}"
 
 
 @lru_cache(maxsize=1)

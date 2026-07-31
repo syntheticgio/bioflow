@@ -584,3 +584,19 @@ class TestFingerprint:
 
     def test_fingerprint_of_none_is_none(self):
         assert tools._fingerprint(None) is None
+
+    def test_fingerprint_differs_for_identical_content_at_different_paths(self, tmp_path):
+        """A content hash alone would treat two tools resolving to identical
+        bytes -- or one tool moving to a new PATH entry -- as the same
+        fingerprint. Path must be part of the identity."""
+        content = "#!/bin/sh\necho 'sometool 1.0.0'\n"
+
+        first = tmp_path / "sometool"
+        first.write_text(content)
+        first.chmod(0o755)
+
+        second = tmp_path / "othertool"
+        second.write_text(content)
+        second.chmod(0o755)
+
+        assert tools._fingerprint(str(first)) != tools._fingerprint(str(second))
