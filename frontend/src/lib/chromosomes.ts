@@ -30,9 +30,20 @@ export interface Bar {
 /** Below this, a sequence is not a chromosome or a large scaffold. */
 const CHROMOSOME_SCALE_BP = 100_000;
 
-/** Fewer chromosome-scale sequences than this and the file is something else
- *  -- coding sequences, proteins, a lone plasmid. */
+/** Fewer chromosome-scale sequences than this and the file needs the
+ *  whole-file check below before it can be called a genome. */
 const MIN_CHROMOSOME_SCALE = 5;
+
+/** The parser stores at most this many entries (MAX_STORED_CONTIGS in
+ *  backend/app/storage/parsers.py). Equal counts therefore mean every record
+ *  in the file is present, and a smaller stored count means a truncated
+ *  window over something much larger. */
+const MAX_STORED_CONTIGS = 50;
+
+/** A file whose records are all shorter than this is not a genome, however few
+ *  of them there are. Sits above a long CDS (~7.7 kb in this data) and below
+ *  the smallest genome worth drawing -- HIV-1 at 9.7 kb. */
+const SMALL_GENOME_MIN_BP = 8_000;
 
 /** Bars drawn before the rest move to the overflow picker. Chosen so a human
  *  assembly shows its 24 primary chromosomes and yeast shows all 17. */
@@ -186,8 +197,27 @@ export function classifyChromosomes(
       ? facts.sequence_count
       : entries.length;
   const bigEnough = entries.filter((e) => e.length >= CHROMOSOME_SCALE_BP);
+  const longest = entries.reduce((m, e) => Math.max(m, e.length), 0);
 
-  if (bigEnough.length < MIN_CHROMOSOME_SCALE) {
+  // Three ways to be a genome, because counting chromosome-scale sequences
+  // only recognises the eukaryotes. References here run from viruses to
+  // plants, and the first rule alone hid the Sequence Viewer from everything
+  // prokaryotic or smaller -- a bacterium has one chromosome, so it could
+  // never reach five.
+  const isChromosomeSet = bigEnough.length >= MIN_CHROMOSOME_SCALE;
+  // A single chromosome-scale sequence that is megabases long: a bacterium.
+  const isLoneChromosome = longest >= CHROMOSOME_SCALE_BP;
+  // Nothing chromosome-scale, but the file is small, complete, and its
+  // records are far longer than coding sequences -- a viral or organellar
+  // genome. `trueCount === entries.length` is what makes this safe: a CDS or
+  // protein file is truncated at MAX_STORED_CONTIGS, so its true count always
+  // exceeds what is stored and it cannot take this branch.
+  const isSmallCompleteGenome =
+    trueCount === entries.length &&
+    entries.length <= MAX_STORED_CONTIGS &&
+    longest >= SMALL_GENOME_MIN_BP;
+
+  if (!isChromosomeSet && !isLoneChromosome && !isSmallCompleteGenome) {
     return {
       kind: "not-chromosomal",
       reason: describeNonChromosomal(entries, trueCount),

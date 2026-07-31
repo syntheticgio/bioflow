@@ -71,9 +71,10 @@ describe("classifyChromosomes", () => {
     expect(view.kind).toBe("not-chromosomal");
   });
 
-  // A plasmid-only or single-contig file: real DNA, too few chromosome-scale
-  // sequences to be a chromosome set.
-  it("rejects a file with too few chromosome-scale sequences", () => {
+  // Previously rejected for having only one chromosome-scale sequence. That
+  // rule could not tell this from a bacterium, which is exactly the shape it
+  // was excluding, so a lone 500 kb sequence now draws.
+  it("draws a genome with one chromosome-scale sequence plus small contigs", () => {
     const view = classifyChromosomes({
       sequence_count: 3,
       sequence_names: ["NC_000001.1", "NC_000002.1", "NC_000003.1"],
@@ -82,6 +83,58 @@ describe("classifyChromosomes", () => {
         "NC_000002.1": 4_000,
         "NC_000003.1": 3_000,
       },
+    });
+    expect(view.kind).toBe("drawable");
+  });
+
+  // The real GCF_002310435.1: S. aureus Newman, one 2.9 Mb chromosome. A
+  // bacterium can never reach five chromosome-scale sequences, so the old
+  // count rule hid the Sequence Viewer from every prokaryote.
+  it("draws a single-chromosome bacterial genome", () => {
+    const view = classifyChromosomes({
+      sequence_count: 1,
+      sequence_names: ["NZ_CP023390.1"],
+      sequence_lengths: { "NZ_CP023390.1": 2_878_897 },
+    });
+    expect(view.kind).toBe("drawable");
+    if (view.kind === "drawable") {
+      expect(view.bars.map((b) => b.name)).toEqual(["NZ_CP023390.1"]);
+      expect(view.linkable).toBe(true);
+    }
+  });
+
+  // Nothing chromosome-scale at all, but complete and far longer than coding
+  // records. References here run from viruses to plants.
+  it("draws a small complete viral genome", () => {
+    const view = classifyChromosomes({
+      sequence_count: 1,
+      sequence_names: ["NC_045512.2"],
+      sequence_lengths: { "NC_045512.2": 29_903 },
+    });
+    expect(view.kind).toBe("drawable");
+  });
+
+  // A segmented viral genome: eight records, all short, but all of them.
+  it("draws a segmented viral genome", () => {
+    const view = classifyChromosomes({
+      sequence_count: 8,
+      sequence_names: ["NC_002023.1"],
+      sequence_lengths: lengths(8, 2_300, (i) => `NC_00202${i}.1`),
+    });
+    // Every segment is under the 8 kb floor, so this stays rejected -- the
+    // floor is what keeps a handful of CDS records out, and influenza's
+    // segments are genuinely CDS-sized. Documented rather than fixed: the
+    // Sequence Viewer is still reachable per-sequence from a variant row.
+    expect(view.kind).toBe("not-chromosomal");
+  });
+
+  // The floor's real job: a small file of short records is not a genome even
+  // though nothing is truncated.
+  it("rejects a short complete file below the small-genome floor", () => {
+    const view = classifyChromosomes({
+      sequence_count: 6,
+      sequence_names: ["XP_001218755.1"],
+      sequence_lengths: lengths(6, 820, (i) => `XP_00121${i}.1`),
     });
     expect(view.kind).toBe("not-chromosomal");
   });
