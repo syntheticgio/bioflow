@@ -2,6 +2,291 @@
 
 Deferred work, with enough context to pick up cold. Newest first.
 
+See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
+lands. Short version: mark it `— FIXED` with a note, keep the body, and never
+trust a plan's checkboxes as evidence it shipped.
+
+## Results should be the first tab
+
+Raised: 2026-07-31, requested.
+
+`tabsFor` in `frontend/src/components/DetailPanel.tsx` (~line 271) builds the
+tab list Quality, Results, Metadata, Actions, and Results is only pushed when
+`obj.format.kind` is `bam`, `vcf` or `bcf`. Put Results first for the objects
+that have it.
+
+Two things not to break. The tab id is persisted in the URL alongside `?sel=`,
+deliberately: one `results` id across all three formats means a link stays on
+Results when the selection moves from a BAM to the VCF called from it. And the
+existing order is not accidental -- the docstring above `tabsFor` argues the
+panel should open on "is this file good?". Reordering is a decision to
+overrule that, so update the docstring to say what the new order is for rather
+than leaving the old rationale sitting above contradicting code.
+
+Objects with no Results tab keep opening on Quality, so this changes the
+first-open tab only where results exist.
+
+Touches: `frontend/src/components/DetailPanel.tsx`.
+
+## Help → Software: two columns, one section per page
+
+Raised: 2026-07-31, requested.
+
+`frontend/src/components/HelpSoftware.tsx` renders `TOOL_META` as a single
+column. Two columns for the descriptions, with each section starting on its own
+page break.
+
+"Page break" cuts two ways here and the answer changes the CSS: for *print*
+it is `break-before: page` inside an `@media print` block; for *screen* it is
+a section that starts at the top of the viewport rather than flowing on. This
+page is a reference people read on screen and occasionally print for a methods
+appendix, so most likely both -- `break-inside: avoid` on each tool entry so a
+tool is never split across a column or page boundary, which is the failure the
+two-column layout otherwise introduces.
+
+Note `TOOL_META` is rendered directly and `test_every_tool_is_documented`
+requires every entry to carry `homepage`, `citation`, `license` and `usage`, so
+the column layout must not depend on any of those being short.
+
+Touches: `frontend/src/components/HelpSoftware.tsx`, `frontend/src/styles.css`.
+
+## Aligners: STAR and DRAGMAP
+
+Raised: 2026-07-31, requested.
+
+Two additions to `Aligner` in `backend/app/pipelines/aligners.py`, which today
+holds `BWA_MEM2`, `MINIMAP2`, `BOWTIE2`, `HISAT2`.
+
+**STAR** is the splice-aware aligner RNA-seq wants, and is the dependency for
+the differential-expression pipeline below -- build that first or together.
+Its index is a *directory* of files with fixed names (`SA`, `SAindex`,
+`Genome`, ...), not a set of suffixes appended to the reference path. Every
+existing aligner follows the suffix pattern, and `aligners.py`'s module
+docstring is explicit that index naming is a first-class concern with its own
+tests. STAR breaks that assumption, so `build_index_command` and the index
+existence checks need a directory-shaped branch rather than another suffix
+tuple. STAR also needs a GTF/GFF3 at index time for splice junctions, and wants
+~30GB RAM for a human genome -- this is the case that should carry a real
+`JobResources` declaration.
+
+**DRAGMAP** is a short-read aligner whose draw is Illumina DRAGEN
+compatibility. Check the arm64 story before committing to it: it is the same
+class of problem as DeepVariant below, and bwa-mem2 already needed a
+from-source sse2neon build (`backend/scripts/build-bwa-mem2-arm64.sh`) to work
+on Apple Silicon at all.
+
+Per CLAUDE.md, registering either tool is only half the change --
+`suggestion_service.py` must gain a rule that can pick it, and `TOOL_META`
+needs `homepage`/`citation`/`license`/`usage` filled in or
+`test_every_tool_is_documented` fails.
+
+Touches: `backend/app/pipelines/aligners.py`,
+`backend/app/pipelines/aligner_registry.py`,
+`backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
+`backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
+
+## DeepVariant: recognized, refused, not installed
+
+Raised: 2026-07-31, requested. Blocked on architecture, not effort.
+
+`VariantCaller.DEEPVARIANT` already exists in
+`backend/app/pipelines/variant_runner.py`, and two paths refuse it with the
+same message -- `backend/app/queue/variant_handlers.py` (~line 52) and
+`backend/app/services/pipeline_service.py` (~line 1533). The reason is that
+upstream ships no arm64 Linux build.
+
+So this is not "write a handler". The handler shape is already decided; what
+is missing is a way to run the binary on this machine. Options, roughly in
+order of how much they cost:
+
+1. **Wait for / find an arm64 build.** Cheapest if one now exists -- check
+   before assuming, this refusal was written some time ago.
+2. **Run it under emulation.** `--platform linux/amd64` for one tool in a
+   separate container. Works, slowly, and a variant caller is not the place
+   you want a large constant factor.
+3. **Only enable it on x86-64 hosts.** Ties directly to the Linux-support entry
+   below: on an x86-64 Linux box this is a non-problem, and the refusal could
+   become conditional on `TARGETARCH` rather than absolute.
+
+Option 3 is probably the honest one, and it is worth doing *with* the Linux
+work rather than before it.
+
+Touches: `backend/app/queue/variant_handlers.py`,
+`backend/app/services/pipeline_service.py`, `backend/Dockerfile`.
+
+## Post-assembly QC: BUSCO and QUAST
+
+Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
+
+Once assembly produces a FASTA, the immediate question is whether it is any
+good, and neither existing QC path answers it -- `qc_stats` is about reads, and
+alignment QC needs something to align to.
+
+- **QUAST** is reference-free structural stats: N50, contig count, total
+  length, misassemblies when a reference is supplied.
+- **BUSCO** scores biological completeness against a lineage-specific ortholog
+  set, and reports the numbers a paper quotes (complete / duplicated /
+  fragmented / missing). It needs lineage datasets downloaded, which is a real
+  storage and provenance concern -- closer to the reference-download machinery
+  than to a tool probe.
+
+Both produce facts that belong on the assembly object, so they should land as
+facts in the same shape `qc_read_chemistry` and friends use, not as a separate
+report format.
+
+The contig-length gap recorded below (longest/shortest contig, never shipped
+from the 2026-07-29 todo-batch plan) is the small end of this same question and
+could fold into QUAST rather than being built separately.
+
+## Reference-guided assembly: Pilon, RagTag, iVar
+
+Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
+
+De-novo assembly first; these three all take an existing assembly plus
+something else and improve it.
+
+- **Pilon** polishes an assembly using aligned reads -- so it consumes a BAM
+  against the assembly, meaning it needs the *assembly* indexed and the reads
+  realigned to it. That makes it the first pipeline whose input is an alignment
+  to a previous pipeline's output, which the run-provenance model should be
+  checked against before building.
+- **RagTag** scaffolds contigs against a reference assembly, giving
+  chromosome-scale ordering.
+- **iVar** is the amplicon/viral path -- primer trimming and consensus calling
+  from an alignment, which is a different enough workflow from the other two
+  that it may deserve its own card rather than sharing theirs.
+
+All three are chemistry- and context-dependent enough that
+`suggestion_service.py` will need real rules, not just availability checks.
+
+## RNA-seq differential expression
+
+Raised: 2026-07-31, requested. **Wants STAR (above) first.**
+
+The full path is align (STAR, splice-aware) → count (featureCounts or HTSeq) →
+test (DESeq2 or edgeR), and the last step is the one that does not fit the
+current model.
+
+Everything the app runs today is one-object-in, one-object-out. Differential
+expression is inherently *multi-sample and grouped*: it needs a design -- which
+samples are treatment, which are control -- and that is user-supplied
+experimental metadata with nowhere to live right now. Neither `DataObject` nor
+`Run` carries a sample-grouping concept.
+
+So the interesting design work is not the tools, it is: where does a sample
+sheet live, how does a user express "these six BAMs are two conditions", and
+what object does a results table become. Worth brainstorming before planning.
+
+DESeq2 and edgeR are also R, which this image has no runtime for -- either add
+R, or use a Python reimplementation (`pydeseq2`) and say so plainly in
+`TOOL_META.usage`, since the choice affects whether results match what a
+reviewer expects.
+
+## Generic pipeline workflows (DAG)
+
+Raised: 2026-07-31, requested.
+
+Today each pipeline is a hand-written handler and `Job.depends_on` gates one
+job behind another. That gate is real and exercised (`align_reads` waiting on
+`build_index`), but it is a per-launch decision made in
+`pipeline_service.launch_*`, not a reusable graph.
+
+What this asks for is a user-definable DAG: run QC, then trim, then align, then
+call, as one declared unit that survives a restart and reports progress as a
+whole.
+
+Two things to settle early, because they shape everything after:
+
+- **Does a workflow instance become an object?** The activity view groups by
+  `Run`, and a DAG is naturally a run-of-runs. Extending `Run` beats inventing
+  a parallel concept if it can carry the nesting.
+- **Failure semantics.** If step three of five fails, does the DAG halt, retry,
+  or continue what does not depend on it? The current queue has retries and a
+  reaper but no notion of partial workflow failure.
+
+This is the largest item in this file and probably wants decomposing into its
+own spec before any plan.
+
+## More LLM usage: pipeline provenance narratives
+
+Raised: 2026-07-31, requested.
+
+The valuable version: given a VCF, generate a plain-language account of
+everything that produced it -- which reads, which QC, which trim parameters,
+which aligner and version, which caller -- walking the provenance chain back to
+the original reads. That is a methods paragraph, generated from facts the
+system already recorded rather than from the user's memory.
+
+The chain largely exists. `align_provenance` in `backend/app/queue/results.py`
+already copies facts forward so a BAM knows its reads' chemistry, and tool
+versions are captured at probe time precisely because "a trimming parameter set
+means nothing without the version of the tool that applied it" (the module
+docstring in `tools.py`). What is missing is a walker that assembles the chain
+and a prompt that renders it.
+
+`backend/app/services/summary_prompt.py` is the existing pattern to follow, and
+the summary model runs on the *host* -- containers reach it via
+`host.docker.internal`, not `localhost`.
+
+The hard constraint: this output will be pasted into papers. It must never
+invent a step or a version. Prefer a narrative assembled from facts with the
+model only doing the prose, over asking the model to infer what happened.
+
+Other candidates worth considering under the same heading: explaining *why* a
+QC run failed a threshold, and suggesting the next pipeline step in prose
+alongside the Actions cards.
+
+## UniProt download
+
+Raised: 2026-07-31, requested.
+
+`backend/app/services/structure_lookup.py` already resolves a gene to a protein
+structure via UniProt, so the client and the ID-mapping path exist. This asks
+for downloading UniProt data as a stored object -- proteomes or per-protein
+FASTA -- the way assemblies download from NCBI today.
+
+`assembly_handlers.py` is the model to copy: it exists as a sibling to
+`sra_handlers` rather than a branch inside it, because one accession yielding
+files with no QC chained is a different operational shape from a run yielding
+FASTQ pairs. A UniProt download is the same shape as the assembly one, so it
+likely belongs beside it -- and `RunKind` would gain a member for it, since
+that enum is a display and grouping vocabulary and "downloaded a proteome"
+reads differently from "downloaded a genome".
+
+Touches: `backend/app/queue/` (new handler module),
+`backend/app/models/run.py`, `backend/app/pipelines/sources.py` (which has its
+own completeness test).
+
+## Build and run on Linux
+
+Raised: 2026-07-31, requested.
+
+Nothing here is macOS-specific by design, but the setup has only ever run on
+Apple Silicon under Docker Desktop, and several accommodations exist *because*
+of that. Going to Linux means checking each one:
+
+- **arm64 workarounds may be unnecessary or wrong on x86-64.** `Dockerfile`
+  already branches on `TARGETARCH` and builds bwa-mem2 from source with
+  sse2neon for arm64 (`backend/scripts/build-bwa-mem2-arm64.sh`). On x86-64 the
+  upstream binaries work, so that branch should not fire -- verify it does not.
+- **DeepVariant becomes possible.** See its entry above; on x86-64 Linux the
+  refusal could be conditional rather than absolute.
+- **The governor's disk problem may disappear.** The entry below is a
+  Docker-Desktop-on-macOS VirtioFS artifact. On Linux, `shutil.disk_usage`
+  through a bind mount reports the real filesystem, so the host-side reporter
+  that entry sketches may be unnecessary there -- which argues for keeping the
+  plain `shutil.disk_usage` path and treating the reporter as the macOS
+  special case, not the general one.
+- **`host.docker.internal` is not automatic on Linux.** The summary model runs
+  on the host and containers reach it via that name; on Linux it needs
+  `extra_hosts: host-gateway` in Compose or it silently fails to connect.
+- **Bind-mount UID/GID.** Docker Desktop papers over ownership; on Linux a
+  container writing to a bind-mounted `BIOINFO_HOME` writes as the container's
+  user, and files can land root-owned on the host.
+
+Worth doing as an actual attempt on a Linux box rather than an audit -- the
+list above is what to expect, not what will happen.
+
 ## The first `/pipelines/tools` request stalls 6-15s on NanoPlot — FIXED
 
 Fixed 2026-07-31. `lifespan` now starts a fire-and-forget task (`_warm_tools`
@@ -106,6 +391,23 @@ per-tool budget.
 
 Touches: `backend/app/pipelines/tools.py`, `backend/app/main.py` (lifespan),
 `backend/app/api/v1/pipelines.py`.
+
+## Longest/shortest contig reporting never shipped
+
+Raised: 2026-07-31, by an audit of `docs/superpowers/plans/`.
+
+`docs/superpowers/plans/2026-07-29-todo-batch.md` set out to fix three things.
+Two landed. The third -- reporting longest and shortest contig for an assembly
+-- did not: nothing in `backend/app/` mentions `longest_contig`, `shortest_contig`
+or an equivalent, and the plan's checkboxes are all unticked (which proves
+nothing either way, since no plan in this repo has its boxes ticked).
+
+Small on its own. Worth folding into the QUAST work above rather than building
+separately, since N50 and contig extremes come out of the same pass and QUAST
+reports all of them.
+
+Touches: wherever assembly facts are computed, alongside the existing
+`ContigTable.tsx` on the frontend.
 
 ## Assembly: designed, not built
 
@@ -347,7 +649,24 @@ to genuinely fill the drive.
 Touches: `backend/app/queue/governor.py`, `backend/app/storage/home.py`,
 `backend/app/api/v1/system.py`, `Makefile`, `ops/`.
 
-## `JobContext.extend_lease` is inert
+## `JobContext.extend_lease` is inert — FIXED
+
+Fixed 2026-07-29 by
+`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`,
+found stale by an audit on 2026-07-31.
+
+**It was wired, not deleted -- and this entry's advice had gone dangerous.**
+`_extend_cb` is now assigned in both `executor.py` (~line 54) and
+`worker.py` (~line 304). Four handlers call `ctx.extend_lease` today:
+`summary_handlers`, `assembly_handlers`, `sra_handlers` and
+`pipeline_handlers`. Deleting the method, as suggested below, would now break
+working code.
+
+The docstring was also rewritten to draw the distinction the original muddled:
+the heartbeat covers a merely *slow* job, while `extend_lease` covers lease
+*length* -- a paused VM or stalled event loop stops the heartbeat entirely, and
+then only the recorded TTL stands between a live job and the reaper. Covered by
+`backend/tests/queue/test_lease_extension.py`.
 
 Raised: 2026-07-27, during read preparation.
 
@@ -373,7 +692,21 @@ did not otherwise touch.
 Touches: `backend/app/queue/registry.py`, `backend/app/queue/executor.py`,
 `backend/app/queue/worker.py`.
 
-## `bp:cancel` grows without bound
+## `bp:cancel` grows without bound — FIXED
+
+Fixed 2026-07-29 by
+`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`,
+found stale by an audit on 2026-07-31.
+
+**This entry's premise was wrong.** The main drop path already cleared the
+flag: `SREM bp:cancel` has been in `backend/app/queue/scripts/release.lua`
+(line ~42) since the initial commit. What actually leaked were the routes that
+bypass that script, fixed across three commits -- `0ce1d28` (the reaper marking
+a job dead), `f665812` (a blocked job failing on its dependency) and `5122c39`
+(covering `_fail_blocked_job`'s own clear rather than just the helper).
+
+`backend/tests/queue/test_cancel_cleanup.py` exists specifically for those
+bypassing routes, and its module docstring names the distinction.
 
 Raised: 2026-07-27, during read preparation.
 
@@ -417,7 +750,22 @@ silent.
 
 Touches: `backend/app/pipelines/pairing.py`, `backend/app/queue/results.py`.
 
-## Re-ingest re-asserts a reference role the user cleared
+## Re-ingest re-asserts a reference role the user cleared — FIXED
+
+Fixed 2026-07-29 by
+`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`,
+found stale by an audit on 2026-07-31.
+
+The `user_touched: list[str]` shape this entry preferred is what shipped
+(`backend/app/models/object.py`, ~line 172), and the comment there records why
+a list beat a per-field `role_set_by`.
+
+**The implementation went further than this entry asked.** Checking
+`user_touched` at the decision point still leaves a window: a conversion
+landing between the decision and the write would be overruled by it. So
+`backend/app/queue/results.py` (~line 170) re-checks `{"user_touched": {"$ne":
+"role"}}` inside the update filter itself, making the write conditional rather
+than the decision. That race is not mentioned below.
 
 Raised: 2026-07-26, during assembly-accession enrichment.
 
