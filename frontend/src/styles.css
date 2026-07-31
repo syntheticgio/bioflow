@@ -2275,8 +2275,11 @@ a.btn {
 /* Wider than .help-page's 760px measure because these entries are two
    columns, not one: prose plus a facts rail. At 760 the rail squeezes the
    prose below a readable measure. */
+/* Wider than the other help pages: this one lays tools out two abreast, and
+   1020px left each column too narrow to seat a tool's prose and its facts
+   rail without the rail stacking on every entry. */
 .software-page {
-  max-width: 1020px;
+  max-width: 1200px;
 }
 
 .software-note {
@@ -2482,13 +2485,51 @@ table.software-matrix thead th.software-matrix-corner {
   margin: 0 0 8px;
 }
 
-.software-entry {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--border);
+/* Two tools abreast. Each section is its own grid, so a new section always
+   begins in the left column rather than continuing beside the last tool of the
+   one before it -- the section break stays visible without any explicit break
+   rule. auto-fit rather than a fixed 2, so a narrow window (or an open left
+   panel) collapses to one column instead of squeezing two unreadable ones. */
+.software-group-entries {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 0 32px;
+  align-items: start;
 }
 
-.software-entry:last-child {
-  border-bottom: none;
+/* Separated by a top border rather than a bottom one. With entries stacked a
+   bottom border worked and `:last-child` suppressed the trailing rule, but in
+   a grid the closing row can be two cells and only one of them is
+   `:last-child` -- which drew a rule under one column and not its neighbour.
+   Any nth-child rule fixing that has to assume a column count, and `auto-fit`
+   means there isn't one. Hanging the border off the top and suppressing it for
+   the cells of the first row is column-count agnostic: `top` is what makes two
+   entries a row, and the first row is the only one that must not have a rule
+   above it. */
+.software-entry {
+  padding: 18px 0;
+  border-top: 1px solid var(--border);
+}
+
+.software-entry:first-child {
+  border-top: none;
+}
+
+/* The second entry is only a *first-row* cell when two columns are actually
+   seated; at one column it is row two and needs its rule. Keyed off the grid's
+   own width rather than the viewport, for the reason the @container rule in
+   broadsheet.css gives: the left panel changes an entry's width without the
+   window moving, so a viewport query gets this wrong in exactly that case.
+   872px = two 420px columns plus the 32px gap -- the width at which auto-fit
+   can seat a second column. */
+.software-group-entries {
+  container-type: inline-size;
+}
+
+@container (min-width: 872px) {
+  .software-entry:nth-child(2) {
+    border-top: none;
+  }
 }
 
 .software-entry-head {

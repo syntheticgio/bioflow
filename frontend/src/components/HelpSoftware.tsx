@@ -350,16 +350,24 @@ export function HelpSoftware() {
         entries.length === 0 ? null : (
           <section key={type} className="software-group">
             <h2 className="software-group-title">{title}</h2>
-            {entries.map((tool) => (
-              <ToolEntry
-                key={tool.name}
-                tool={tool}
-                alsoIn={tool.pipelines
-                  .slice(1)
-                  .map((p) => GROUP_TITLES[p]?.toLowerCase())
-                  .filter(Boolean)}
-              />
-            ))}
+            {/* Entries are wrapped rather than laid out by .software-group
+                itself: the grid must contain only entries, so the heading is
+                not pulled into a column beside the first tool. It also makes
+                each section its own grid, which is what keeps a new section
+                starting at the left column instead of continuing next to the
+                previous section's last tool. */}
+            <div className="software-group-entries">
+              {entries.map((tool) => (
+                <ToolEntry
+                  key={tool.name}
+                  tool={tool}
+                  alsoIn={tool.pipelines
+                    .slice(1)
+                    .map((p) => GROUP_TITLES[p]?.toLowerCase())
+                    .filter(Boolean)}
+                />
+              ))}
+            </div>
           </section>
         ),
       )}
