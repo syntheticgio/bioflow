@@ -12,6 +12,10 @@ const SVIEWER_SRC = "https://www.ncbi.nlm.nih.gov/projects/sviewer/js/sviewer.js
  *  hang here silently. */
 const LOAD_TIMEOUT_MS = 15_000;
 
+/** Identifies this app to NCBI, namespaced as they ask. Changing it orphans
+ *  whatever view settings a user has saved under the old name. */
+const VIEWER_APPNAME = "BioFlowLocalPipeliner";
+
 /**
  * The parts of NCBI's untyped globals this file actually touches.
  *
@@ -169,8 +173,14 @@ export function SequenceViewerModal({
     mountRef.current.appendChild(host);
 
     const app = new SeqView.App(divId);
+    // `appname` is not optional in practice: without it the viewer opens a
+    // modal warning ("initialized with parameter appname=undefined") over the
+    // tracks on every single open. NCBI asks for a unique, namespaced value --
+    // it keys the cookie holding the user's viewer settings -- and warns off
+    // generic words like "viewer".
     app.load(
-      `embedded=true&id=${encodeURIComponent(accession)}&tracks=[key:gene_model_track]`,
+      `embedded=true&appname=${VIEWER_APPNAME}` +
+        `&id=${encodeURIComponent(accession)}&tracks=[key:gene_model_track]`,
     );
 
     return () => {
