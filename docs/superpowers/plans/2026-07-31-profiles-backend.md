@@ -1695,6 +1695,33 @@ ran the job."
 
 This exposes `profile_service` over HTTP: list profiles (for the startup picker), create one, select one (checks the password speed bump if set), get the current one's details, edit details, delete. This task also proves `get_current_owner` (Task 2) works end-to-end against a real route, which is this plan's scope boundary — see "What this plan does not include" for why the rest of the API surface is not rewired here.
 
+### `delete_profile` raises `ConflictError` for three different reasons
+
+Found while reviewing Tasks 6-7: `delete_profile` refuses on three distinct
+grounds, all raising a bare `ConflictError`:
+
+1. the profile is the **last** one,
+2. the profile **adopted the legacy library** (`adopted_legacy_owner=True`) —
+   deleting it would strand every pre-profiles document under an owner nothing
+   claims, with no recovery path since `create_profile` refuses `is_first_boot`
+   once any profile exists,
+3. the profile still **owns projects or objects** (counts in `details`).
+
+This already caused one bug: a test asserting the last-profile refusal passed
+after its guard was deleted, because a different branch raised the same
+exception type. Tests here must assert on the message or `details`, not just
+the type.
+
+The API needs the same care. All three are 409s, but the picker's recovery
+differs — (1) and (2) are permanent refusals to surface as explanations, while
+(3) is actionable ("delete its projects first"). Either give them distinct
+`code` values via `AppError`'s `code` parameter, or ensure the message carries
+enough for the UI. Do not collapse them into one opaque conflict.
+
+Also note `profile_service` has **no `list_profiles`**, and nothing writes
+`Profile.last_used_at` despite the model's comment saying it is set on
+selection. Both are this task's to add.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `backend/tests/api/test_profiles.py`:
