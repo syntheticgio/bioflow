@@ -1514,6 +1514,37 @@ should thread the real value through instead."
 
 The research found the exact fix: `_apply_result(self, job: Job, result: dict | None)` in `executor.py` **already has the full `Job` document**, including `job.owner`. It calls `results.apply(job.type, result)` without ever passing that owner through. This task threads it.
 
+### Scope reduced by Task 4 — read this before starting
+
+Task 4 already fixed **8 of the 10** `ingest_local_file` call sites in
+`results.py`. Those handlers resolve a parent object immediately before
+ingesting (`bam`, `reads`, `reference`, `vcf`, `annotated`, `parent`), so the
+owner was already in scope and is now passed as `<parent>.owner`. Sidecars use
+the owner of the object they are a sidecar *of* — the two `.tbi` sites use the
+VCF's owner, not the BAM's, because `list_sidecars` and `delete_object`'s
+cascade key on the parent relationship.
+
+`backend/tests/queue/test_results_owner.py` covers those 8 and is
+mutation-verified: reverting any `<parent>.owner` to `"local"` fails with
+`Project not found`, because `ingest_local_file` now resolves the project
+through the owner-scoped `get_project`.
+
+**What is left for this task** is the two download appliers, which genuinely
+have no parent object — only a `project_id` from the job payload:
+
+- `_apply_sra_download` (`results.py:443`)
+- `_apply_assembly_download` (`results.py:625`)
+
+Both still pass `owner="local"` with a comment naming this task. They are the
+reason `results.apply` needs the owner threaded from `executor._apply_result`'s
+`job.owner` at all: there is nothing else to derive it from.
+
+So this task is now: thread `owner` through `results.apply` and the handler
+signatures, use it at those two sites, and leave the 8 already-correct sites
+reading `<parent>.owner` — do **not** convert them to the threaded value.
+The parent's owner is the more specific fact, and it is what the sidecar and
+cascade relationships actually key on.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `backend/tests/queue/test_results_owner.py`:
