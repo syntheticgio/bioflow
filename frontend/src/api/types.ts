@@ -978,3 +978,83 @@ export interface PipelineSuggestion {
   reason: string | null;
   launch: { endpoint: string; body: Record<string, unknown> } | null;
 }
+
+// --- Variant results (vcfstats) ---
+
+/** One bucket of a re-binned distribution. `value` is the bucket's lower
+ *  bound, so an axis can be labelled without knowing the bucket width. */
+export interface HistogramBucket {
+  value: number;
+  count: number;
+}
+
+export interface VariantSummary {
+  variants: number;
+  snps: number;
+  indels: number;
+  multiallelic: number;
+  samples: number;
+  ts: number;
+  tv: number;
+  ti_tv: number;
+  pass_count: number;
+  no_filter_count: number;
+  /** Absent when the file does not use FILTER at all -- bcftools call does
+   *  not stamp PASS, and reporting a rate for such a file would misstate it. */
+  pass_pct?: number;
+}
+
+export interface VariantContigRow {
+  contig: string;
+  length: number;
+  variants: number;
+  snps: number;
+  indels: number;
+  per_kb: number;
+}
+
+export interface VcfStatsFacts extends Record<string, unknown> {
+  vcf_stats_status?: string;
+  vcf_stats_tool_version?: string;
+  vcf_stats_summary?: VariantSummary;
+  vcf_stats_qual_histogram?: HistogramBucket[];
+  vcf_stats_depth_histogram?: HistogramBucket[];
+  vcf_stats_substitutions?: { type: string; count: number }[];
+  vcf_stats_indel_lengths?: { length: number; count: number }[];
+  vcf_stats_filters?: { filter: string; count: number }[];
+  vcf_stats_density_bins?: number[];
+  vcf_stats_density_bounds?: { contig: string; bin_start: number }[];
+  vcf_stats_contigs?: VariantContigRow[];
+  vcf_stats_report?: string;
+  vcf_stats_db?: string;
+}
+
+export interface VariantRow {
+  chrom: string;
+  pos: number;
+  ref: string;
+  alt: string;
+  qual: number | null;
+  filter: string;
+  dp: number | null;
+  gt: string;
+}
+
+export interface VariantsPage {
+  /** Null when the request set skip_count -- the caller keeps its previous
+   *  total, because only the page number changed. */
+  total: number | null;
+  rows: VariantRow[];
+}
+
+export interface VariantQuery {
+  offset: number;
+  limit: number;
+  contig?: string;
+  posMin?: number;
+  posMax?: number;
+  filterValue?: string;
+  variantType?: string;
+  minQual?: number;
+  skipCount?: boolean;
+}
