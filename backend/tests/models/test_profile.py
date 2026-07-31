@@ -24,9 +24,21 @@ class TestProfile:
 
         assert profile.password_hash is None
 
-    async def test_owner_id_is_its_own_stringified_object_id(self):
+    async def test_owner_id_returns_a_plain_non_empty_string(self):
         profile = await Profile(
             username="hopper", display={"emoji": "⚓", "colour": "#4a9eff"}
         ).insert()
 
-        assert str(profile.id) == profile.owner_id()
+        owner = profile.owner_id()
+
+        # `owner` is typed `str` on TimestampedDocument, and PydanticObjectId
+        # subclasses ObjectId, not str -- one leaking through here would not
+        # fail at the boundary, it would fail much later as a query that
+        # silently matches nothing. This is the assertion that must survive
+        # first-boot adoption, when the returned value stops tracking the id.
+        assert type(owner) is str
+        assert owner
+
+        # Correct for a profile that did not adopt the legacy owner, which is
+        # every profile today.
+        assert owner == str(profile.id)
