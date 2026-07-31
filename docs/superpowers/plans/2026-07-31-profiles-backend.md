@@ -14,17 +14,50 @@
 
 ## Before you start
 
-Run the existing suite once so you have a clean baseline to compare against after each task:
+### Running tests from a worktree
+
+**`docker compose exec api python -m pytest` does not work here.** The `api`
+container bind-mounts the *main* checkout (`/Users/.../local-bio-pipeliner/backend`),
+not this worktree, so it runs main's code and cannot see your changes at all.
+`CLAUDE.md` forbids repointing the shared stack at a worktree — doing so
+silently hijacks port 5173 for everyone.
+
+Use the script instead, from the worktree root:
 
 ```bash
+./backend/run-worktree-tests.sh                          # whole suite
+./backend/run-worktree-tests.sh tests/models -v          # one directory
+```
+
+It runs a throwaway container with this worktree's source mounted, against the
+running stack's Mongo and Redis, and mounts `/data` exactly as the real `api`
+container does (reading the source from `biopipe-api-1` so the two cannot
+drift). That `/data` mount is not optional: tests touching `reap_report_dirs`
+fail for entirely the wrong reason without it.
+
+Run it once before starting so you have a baseline:
+
+**Worktree baseline: 1781 passed.** (Main is higher — it has since merged
+`icn3d-integration-prep`, adding `test_variant_structure.py`,
+`test_structure_lookup.py` and `test_variant_taxid.py`, which do not exist on
+this branch. A different number from main is expected and not a regression.)
+
+If the baseline is red, stop and report — do not start this plan against it.
+
+### After merge
+
+The final verification for this plan happens **after merging to main**, since
+the running stack serves main. Once merged:
+
+```bash
+cd /Users/syntheticgio/Programming/local-bio-pipeliner
+docker compose up -d --build api web worker
 docker compose exec api python -m pytest tests/ -q
 ```
 
-Expected: all tests pass (no failures). If they don't, stop and report — do not start this plan against a red baseline.
-
-All backend commands in this plan run inside the `api` container, per `CLAUDE.md`: `docker compose exec api python -m pytest tests/ -q`, never a bare host `.venv`. After any change to `backend/app/queue/pipeline_handlers.py` or files it imports, `docker compose restart worker` is required before that change is live — but this plan does not touch that file, so it applies only if you deviate.
-
-Run `docker compose up -d --build api web worker` **from the main repo root**, never from this worktree — see `CLAUDE.md`'s warning about bind-mount project-name collisions.
+Per `CLAUDE.md`, run `docker compose` only from the main repo root, and note
+that `worker` does not hot-reload: `docker compose restart worker` is required
+after changing anything the queue handlers import, which Task 8 and Task 9 do.
 
 ---
 
@@ -40,7 +73,7 @@ Run `docker compose up -d --build api web worker` **from the main repo root**, n
 Create `backend/tests/models/__init__.py` if it does not already exist (empty file, makes the directory a package):
 
 ```bash
-docker compose exec api test -f tests/models/__init__.py && echo exists || echo missing
+test -f tests/models/__init__.py && echo exists || echo missing
 ```
 
 If missing, create it as an empty file.
@@ -81,7 +114,7 @@ class TestProfile:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/models/test_profile.py -v
+./backend/run-worktree-tests.sh tests/models/test_profile.py -v
 ```
 
 Expected: FAIL with `ImportError: cannot import name 'Profile'` (the model doesn't exist yet).
@@ -168,7 +201,7 @@ Add `Profile` to `ALL_MODELS` (find the list in the same file — it is what `in
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/models/test_profile.py -v
+./backend/run-worktree-tests.sh tests/models/test_profile.py -v
 ```
 
 Expected: PASS (3 tests).
@@ -229,7 +262,7 @@ class TestGetCurrentOwner:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/api/test_deps.py -v
+./backend/run-worktree-tests.sh tests/api/test_deps.py -v
 ```
 
 Expected: FAIL with `ModuleNotFoundError: No module named 'app.api.deps'`.
@@ -284,7 +317,7 @@ async def get_current_owner(
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/api/test_deps.py -v
+./backend/run-worktree-tests.sh tests/api/test_deps.py -v
 ```
 
 Expected: PASS (3 tests). Note `test_resolves_a_known_profile_header_to_its_owner_id` will pass because the profile id is a real ObjectId, not literally `"local"` — the `"local"` branch is exercised separately in Task 6's tests once the adoption flow exists.
@@ -368,20 +401,16 @@ class TestProjectServiceOwnerScoping:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_project_service_owner.py -v
+./backend/run-worktree-tests.sh tests/services/test_project_service_owner.py -v
 ```
 
 Expected: FAIL — `create_project() got an unexpected keyword argument 'owner'`.
 
 - [ ] **Step 3: Thread `owner` through the service**
 
-Read the current file first:
+Read `backend/app/services/project_service.py` in full before editing — the edits below name specific functions, and several have bodies this plan does not reproduce.
 
-```bash
-docker compose exec api python -c "import app.services.project_service as m; print(m.__file__)"
-```
-
-Edit `backend/app/services/project_service.py`. Change `create_project`:
+Change `create_project`:
 
 ```python
 async def create_project(
@@ -481,7 +510,7 @@ Apply the same shape to `delete_project(project_id, *, cascade: bool = False, ow
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_project_service_owner.py -v
+./backend/run-worktree-tests.sh tests/services/test_project_service_owner.py -v
 ```
 
 Expected: PASS (4 tests).
@@ -493,7 +522,7 @@ Expected: PASS (4 tests).
 Run the full suite to see every break:
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: multiple failures, all `TypeError: create_project() missing 1 required keyword-only argument: 'owner'` or similar for `get_project`/`list_projects`/`breadcrumbs`/`collect_subtree`/`deletion_preview`/`delete_project_tree`.
@@ -512,7 +541,7 @@ Using a default (`owner: str = "test-owner"`) rather than making it required kee
 - [ ] **Step 6: Run the full suite to confirm nothing else broke**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green.
@@ -603,7 +632,7 @@ class TestObjectServiceOwnerScoping:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_object_service_owner.py -v
+./backend/run-worktree-tests.sh tests/services/test_object_service_owner.py -v
 ```
 
 Expected: FAIL — `ingest_local_file() got an unexpected keyword argument 'owner'`.
@@ -716,7 +745,7 @@ async def update_object(object_id: PydanticObjectId, updates: dict, *, owner: st
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_object_service_owner.py -v
+./backend/run-worktree-tests.sh tests/services/test_object_service_owner.py -v
 ```
 
 Expected: PASS (3 tests).
@@ -724,7 +753,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Fix every existing call site**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: failures anywhere `object_service.ingest_local_file`, `ingest_stream`, `register_in_place`, `get_object`, `list_objects`, `list_sidecars`, `set_pair`, or `clear_pair` are called without `owner`. This includes:
@@ -737,7 +766,7 @@ Fix each with `owner="test-owner"` (or the project's own `.owner` where already 
 - [ ] **Step 6: Run the full suite to confirm nothing else broke**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green.
@@ -824,7 +853,7 @@ class TestRunServiceOwnerScoping:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_run_service_owner.py -v
+./backend/run-worktree-tests.sh tests/services/test_run_service_owner.py -v
 ```
 
 Expected: FAIL — `create_run() got an unexpected keyword argument 'owner'`.
@@ -912,7 +941,7 @@ async def status_for_many(
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_run_service_owner.py -v
+./backend/run-worktree-tests.sh tests/services/test_run_service_owner.py -v
 ```
 
 Expected: PASS (2 tests).
@@ -920,13 +949,13 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Fix every existing call site, then confirm the full suite**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: failures at every `create_run(`, `discard_run(`, `status_for(`, `status_for_many(`, `record_outputs(` call missing `owner`. Find them all:
 
 ```bash
-docker compose exec api grep -rn "create_run(\|discard_run(\|status_for(\|status_for_many(\|record_outputs(" app/ tests/
+grep -rn "create_run(\|discard_run(\|status_for(\|status_for_many(\|record_outputs(" app/ tests/
 ```
 
 Most are in `services/pipeline_service.py`, `services/sra_service.py`, `services/assembly_service.py` (all launch paths), and `api/v1/runs.py`. Per this plan's scope boundary, pass `owner="local"` at each of those call sites with a `# TODO(profiles): thread owner from the route once its API layer resolves get_current_owner` comment — the same interim treatment Task 8 uses for `enqueue`. Test call sites get `owner="test-owner"`.
@@ -934,7 +963,7 @@ Most are in `services/pipeline_service.py`, `services/sra_service.py`, `services
 - [ ] **Step 6: Run the full suite to confirm nothing else broke**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green.
@@ -1048,7 +1077,7 @@ class TestFirstBootAdoption:
 - [ ] **Step 3: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_profile_service.py -v
+./backend/run-worktree-tests.sh tests/services/test_profile_service.py -v
 ```
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.profile_service'`.
@@ -1134,7 +1163,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 - [ ] **Step 5: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_profile_service.py -v
+./backend/run-worktree-tests.sh tests/services/test_profile_service.py -v
 ```
 
 Expected: PASS (5 tests).
@@ -1189,7 +1218,7 @@ class TestProfileDeletion:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_profile_service.py::TestProfileDeletion -v
+./backend/run-worktree-tests.sh tests/services/test_profile_service.py::TestProfileDeletion -v
 ```
 
 Expected: FAIL — `AttributeError: module 'app.services.profile_service' has no attribute 'delete_profile'`.
@@ -1236,7 +1265,7 @@ Update the import line at the top of `backend/app/services/profile_service.py` t
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_profile_service.py::TestProfileDeletion -v
+./backend/run-worktree-tests.sh tests/services/test_profile_service.py::TestProfileDeletion -v
 ```
 
 Expected: PASS (3 tests).
@@ -1244,7 +1273,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Run the full suite**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green.
@@ -1316,7 +1345,7 @@ class TestEnqueueOwner:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/queue/test_queue_owner.py -v
+./backend/run-worktree-tests.sh tests/queue/test_queue_owner.py -v
 ```
 
 Expected: FAIL — `enqueue() got an unexpected keyword argument 'owner'`.
@@ -1400,7 +1429,7 @@ Folding `owner` into `enqueue` itself (rather than only fixing call sites) is th
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/queue/test_queue_owner.py -v
+./backend/run-worktree-tests.sh tests/queue/test_queue_owner.py -v
 ```
 
 Expected: PASS (3 tests).
@@ -1408,7 +1437,7 @@ Expected: PASS (3 tests).
 - [ ] **Step 5: Fix every existing `enqueue(` call site to pass `owner`**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: many failures — `enqueue() missing 1 required keyword-only argument: 'owner'` — at every call site listed in the research (19 total, across `results.py`, `scheduler.py`, `api/v1/jobs.py`, `pipeline_service.py` x9, `assembly_service.py`, `sra_service.py`, `upload_service.py`, `object_service.py` x2).
@@ -1427,7 +1456,7 @@ Also fix the two named dedup-key traps directly, since fixing them is this task'
 - [ ] **Step 6: Run the full suite to confirm nothing else broke**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green. (All jobs in the current test suite and current running system are attributed to `"local"` at this point in the plan — that is correct and matches the fact that no API route resolves a real profile yet.)
@@ -1507,7 +1536,7 @@ Add a second test against the simplest handler that calls `ingest_local_file` �
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/queue/test_results_owner.py -v
+./backend/run-worktree-tests.sh tests/queue/test_results_owner.py -v
 ```
 
 Expected: FAIL — `apply() got an unexpected keyword argument 'owner'`.
@@ -1566,7 +1595,7 @@ This is the entire fix for this half of the trap: `job` was already in scope her
 - [ ] **Step 5: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/queue/test_results_owner.py -v
+./backend/run-worktree-tests.sh tests/queue/test_results_owner.py -v
 ```
 
 Expected: PASS (2 tests).
@@ -1574,7 +1603,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 6: Fix `_apply_index_bam`'s sidecar ingest and every other in-file call site, then run the full suite**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: failures at any remaining `ingest_local_file(...)` call inside `results.py` still missing `owner=owner` (the research found two such calls inside `_apply_call_variants` and two inside `_apply_annotate_variants` — confirm every one, not just the first, got the edit). Fix each the same way.
@@ -1582,7 +1611,7 @@ Expected: failures at any remaining `ingest_local_file(...)` call inside `result
 - [ ] **Step 7: Run the full suite to confirm nothing else broke**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green.
@@ -1705,7 +1734,7 @@ class TestProfilesApi:
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/api/test_profiles.py -v
+./backend/run-worktree-tests.sh tests/api/test_profiles.py -v
 ```
 
 Expected: FAIL — `404 Not Found` for `/api/v1/profiles` (route doesn't exist), and the last two tests fail too since `GET /api/v1/projects` does not yet require the header.
@@ -1877,7 +1906,7 @@ This plan deliberately wires **only** `projects.py`'s list and create routes —
 - [ ] **Step 6: Run test to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/api/test_profiles.py -v
+./backend/run-worktree-tests.sh tests/api/test_profiles.py -v
 ```
 
 Expected: PASS (7 tests).
@@ -1885,7 +1914,7 @@ Expected: PASS (7 tests).
 - [ ] **Step 7: Run the full suite**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green. If any other test hits `GET /api/v1/projects` or `POST /api/v1/projects` directly (via `httpx`/`TestClient` rather than calling `project_service` functions directly), it will now need an `X-BioFlow-Profile` header — fix those call sites by creating a profile first and passing its id, following the pattern in this task's own test file.
@@ -1904,7 +1933,7 @@ git commit -m "feat: add the profiles API and wire get_current_owner into projec
 - [ ] Run the complete suite one more time from a clean state:
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./backend/run-worktree-tests.sh
 ```
 
 Expected: PASS, all tests green, no skips introduced.
@@ -1912,7 +1941,7 @@ Expected: PASS, all tests green, no skips introduced.
 - [ ] Confirm no stray `owner="local"` literal was left where a real value was available. Search for the TODO markers Task 8 introduced and confirm each still has a reason to exist (i.e. its route genuinely isn't wired yet) rather than having been silently forgotten:
 
 ```bash
-docker compose exec api grep -rn "TODO(profiles)" app/
+grep -rn "TODO(profiles)" app/
 ```
 
 Expected: matches only at the call sites this plan explicitly deferred (pipeline_service.py's ~9 sites, assembly_service.py, sra_service.py, upload_service.py, api/v1/jobs.py's dev endpoint, queue/scheduler.py's two global-schedule sites are permanent and should have no TODO). Confirm none remain in `results.py` — Task 9 should have removed that one.
