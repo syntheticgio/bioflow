@@ -2350,6 +2350,16 @@ a.btn {
 
 /* auto-fit rather than a media query, following .detail-columns: the rail
    drops under the prose on its own once the page cannot carry both. */
+/* container-type on the entry, not just the grid: the facts rail's rule flips
+   from a top border (stacked) to a left border (beside the prose), and that
+   has to follow whether auto-fit actually gave it its own column. A viewport
+   media query cannot know -- the same window width stacks or does not
+   depending on whether the left panel is open -- so it drew a left border on
+   a rail sitting under the prose. See the @container rule in broadsheet.css. */
+.software-entry {
+  container-type: inline-size;
+}
+
 .software-entry-body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

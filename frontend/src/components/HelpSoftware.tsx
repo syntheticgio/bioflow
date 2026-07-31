@@ -166,18 +166,18 @@ export function HelpSoftware() {
 
   const tools = data?.tools ?? [];
 
-  // A tool in two pipelines is placed in the first group it matches and
-  // cross-referenced from there, never repeated. fastp is trim+qc and samtools
-  // is utility+qc; rendering both twice would duplicate two of the longest
-  // entries on the page and make the index look half again as large as the
-  // toolchain actually is.
-  // A tool's home is its *first* listed pipeline, which is the primary role
-  // TOOL_META's author picked, not whichever heading happens to come first on
-  // this page. Those differ: samtools is (utility, qc), so filing it under the
-  // earlier heading put it in Quality control and left Utilities empty --
-  // reading it as a QC tool that flagstat is incidental to, when it is a
-  // utility whose flagstat output happens to serve QC. The remaining
-  // pipelines become the cross-reference line.
+  // A tool in two pipelines is placed once and cross-referenced, never
+  // repeated: fastp is trim+qc and samtools is utility+qc, and rendering
+  // either twice would duplicate one of the longest entries on the page and
+  // make the index look half again as large as the toolchain really is.
+  //
+  // Its home is its *first listed* pipeline -- the primary role TOOL_META's
+  // author picked -- not whichever heading comes first on this page. Those
+  // differ, and the difference is not cosmetic: samtools is (utility, qc), so
+  // keying off page order filed it under Quality control and left Utilities
+  // with no entries at all. That reads samtools as a QC tool whose flagstat
+  // is incidental, when it is a utility whose flagstat happens to serve QC.
+  // The remaining pipelines become the cross-reference line.
   const grouped = GROUPS.map(({ type, title }) => ({
     type,
     title,

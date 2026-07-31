@@ -1272,7 +1272,14 @@
   padding-top: var(--space-3);
 }
 
-@media (min-width: 900px) {
+/* Sized off the entry, not the viewport. The grid is `auto-fit` with a 280px
+   minimum, so whether the rail gets its own column depends on the entry's
+   width -- which the left panel changes without the window moving at all. A
+   viewport query got this wrong in exactly that case, drawing the beside-the-
+   prose left border on a rail that had already stacked underneath it.
+   612px = the 280px rail + 280px prose + the 32px column gap: the width at
+   which auto-fit can actually seat two columns. */
+@container (min-width: 612px) {
   .theme-broadsheet .software-facts {
     border-top: none;
     padding-top: 0;
