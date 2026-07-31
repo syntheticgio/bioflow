@@ -206,6 +206,29 @@ describe("classifyChromosomes", () => {
     expect(isNcbiNucleotideAccession("XP_001218755.1")).toBe(false);
   });
 
+  // `NZ_` wraps an underlying INSDC or WGS accession and keeps its letters,
+  // unlike `NC_`, which numbers its own records. Assuming digits everywhere
+  // excluded every bacterial RefSeq assembly. All four verified resolvable
+  // through NCBI's esummary.
+  it("accepts NZ_ accessions, whose bodies carry letters", () => {
+    // Complete bacterial genomes: two letters plus six digits.
+    expect(isNcbiNucleotideAccession("NZ_CP012345.1")).toBe(true);
+    expect(isNcbiNucleotideAccession("NZ_LR134386.1")).toBe(true);
+    // A WGS contig: four letters plus eight or more digits.
+    expect(isNcbiNucleotideAccession("NZ_AAAB01000001.1")).toBe(true);
+    // The all-digit form stays valid -- this widened the rule, not moved it.
+    expect(isNcbiNucleotideAccession("NZ_123456.1")).toBe(true);
+  });
+
+  // Widening NZ_ must not widen the prefixes that really are all digits, or
+  // the viewer gets handed ids NCBI rejects.
+  it("still rejects lettered bodies under digit-only prefixes", () => {
+    expect(isNcbiNucleotideAccession("NC_CP012345.1")).toBe(false);
+    expect(isNcbiNucleotideAccession("NW_AAAB01000001.1")).toBe(false);
+    // A version suffix is still required.
+    expect(isNcbiNucleotideAccession("NZ_CP012345")).toBe(false);
+  });
+
   it("labels bars from sequence_labels", () => {
     const view = classifyChromosomes({
       sequence_names: Object.keys(YEAST_LENGTHS),

@@ -38,6 +38,11 @@ const MIN_CHROMOSOME_SCALE = 5;
  *  assembly shows its 24 primary chromosomes and yeast shows all 17. */
 const MAX_BARS = 24;
 
+/** An accession body without a RefSeq prefix: either INSDC's two-letters-plus-
+ *  six-digits (`CP012345`, `BK006935`) or a WGS contig's four letters plus at
+ *  least eight digits (`AAAB01000001`). */
+const ACCESSION_BODY = String.raw`(?:[A-Z]{2}\d{6}|[A-Z]{4}\d{8,})`;
+
 /**
  * Whether a sequence name is an accession NCBI's Sequence Viewer can resolve
  * as a nucleotide record.
@@ -47,9 +52,20 @@ const MAX_BARS = 24;
  * match would hand the viewer an id it rejects. `XP_`/`NP_` are excluded on
  * purpose -- they resolve, but as proteins, which is not what a chromosome
  * bar claims to be.
+ *
+ * The genomic RefSeq prefixes take two different bodies, and assuming they all
+ * took digits is what previously excluded every bacterial assembly: `NC_` and
+ * friends number their own records (`NC_001133.9`), but `NZ_` wraps an
+ * underlying INSDC or WGS accession and keeps its letters
+ * (`NZ_CP012345.1`, `NZ_AAAB01000001.1` -- both verified against esummary).
+ * Since a wrapped body is exactly what the bare forms below already describe,
+ * `NZ_` accepts either shape rather than getting a pattern of its own.
  */
-const NUCLEOTIDE_ACCESSION =
-  /^(?:(?:NC|NZ|NT|NW|AC)_\d+\.\d+|[A-Z]{2}\d{6}\.\d+|[A-Z]{4}\d{8,}\.\d+)$/;
+const NUCLEOTIDE_ACCESSION = new RegExp(
+  String.raw`^(?:(?:NC|NT|NW|AC)_\d+\.\d+` +
+    String.raw`|NZ_(?:\d+|${ACCESSION_BODY})\.\d+` +
+    String.raw`|${ACCESSION_BODY}\.\d+)$`,
+);
 
 export function isNcbiNucleotideAccession(name: string): boolean {
   return NUCLEOTIDE_ACCESSION.test(name.trim());
