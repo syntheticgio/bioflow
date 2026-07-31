@@ -235,6 +235,49 @@ def bcftools() -> Tool:
     return _probe("bcftools", settings.bcftools_path, ["--version"])
 
 
+# `bcftools csq` landed in 1.7. Older builds have the binary and not the
+# subcommand, which fails at run time rather than at probe time.
+CSQ_MIN_VERSION = (1, 7)
+
+
+@lru_cache(maxsize=1)
+def bcftools_csq() -> Tool:
+    """The consequence caller, as a capability of an already-probed binary.
+
+    Not a `_probe` call: `csq` is a subcommand, so there is no separate
+    executable to find and no `--version` of its own. What can go wrong is a
+    bcftools too old to have it, and the Actions card needs to say that rather
+    than "bcftools is missing" -- which would be false and would send the user
+    looking for an install that is already there.
+    """
+    base = bcftools()
+    if not base.available:
+        return Tool(
+            name="bcftools csq",
+            path=None,
+            version=None,
+            error=f"bcftools is unavailable, so csq cannot run: {base.error}",
+        )
+
+    # An unparseable version is not evidence of being too old. Treating it as
+    # such would disable a working tool over a cosmetic parse failure, so the
+    # check only fires when a real version was read and it is below the floor.
+    if _looks_like_version(base.version):
+        parts = tuple(int(p) for p in base.version.split(".")[:2])
+        if parts < CSQ_MIN_VERSION:
+            return Tool(
+                name="bcftools csq",
+                path=base.path,
+                version=base.version,
+                error=(
+                    f"bcftools {base.version} has no `csq` subcommand; "
+                    f"{CSQ_MIN_VERSION[0]}.{CSQ_MIN_VERSION[1]} or newer is required."
+                ),
+            )
+
+    return Tool(name="bcftools csq", path=base.path, version=base.version)
+
+
 @lru_cache(maxsize=1)
 def clair3() -> Tool:
     # `--version` prints "Clair3 v2.0.2". `--help` also exits 0 but dumps a
@@ -868,6 +911,7 @@ def reset_cache() -> None:
     hisat2_build.cache_clear()
     samtools.cache_clear()
     bcftools.cache_clear()
+    bcftools_csq.cache_clear()
     clair3.cache_clear()
     fasterq_dump.cache_clear()
     prefetch.cache_clear()

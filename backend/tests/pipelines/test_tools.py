@@ -498,3 +498,58 @@ class TestBibliographicFields:
                     assert value.startswith("https://"), (
                         f"{name}.{field} is not a URL: {value!r}"
                     )
+
+
+class TestBcftoolsCsq:
+    """`csq` ships inside bcftools rather than as its own binary, so the
+    question is the version, not the path. Asserting the unavailable direction
+    matters most: the image ships bcftools 1.21, so an "available" assertion
+    would pass whether or not the patch worked."""
+
+    def setup_method(self):
+        tools.reset_cache()
+
+    def teardown_method(self):
+        tools.reset_cache()
+
+    def test_unavailable_when_bcftools_is_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            tools,
+            "bcftools",
+            lambda: tools.Tool(
+                name="bcftools", path=None, version=None, error="not found"
+            ),
+        )
+        t = tools.bcftools_csq()
+        assert not t.available
+        assert "bcftools" in (t.error or "")
+
+    def test_unavailable_when_bcftools_is_too_old(self, monkeypatch):
+        monkeypatch.setattr(
+            tools,
+            "bcftools",
+            lambda: tools.Tool(name="bcftools", path="/usr/bin/bcftools", version="1.6"),
+        )
+        t = tools.bcftools_csq()
+        assert not t.available
+        assert "1.7" in (t.error or "")
+
+    def test_available_on_a_new_enough_bcftools(self, monkeypatch):
+        monkeypatch.setattr(
+            tools,
+            "bcftools",
+            lambda: tools.Tool(name="bcftools", path="/usr/bin/bcftools", version="1.21"),
+        )
+        t = tools.bcftools_csq()
+        assert t.available
+        assert t.version == "1.21"
+
+    # An unparseable version must not be read as "too old" -- that would
+    # disable a working tool over a cosmetic parse failure.
+    def test_unknown_version_is_allowed(self, monkeypatch):
+        monkeypatch.setattr(
+            tools,
+            "bcftools",
+            lambda: tools.Tool(name="bcftools", path="/usr/bin/bcftools", version=None),
+        )
+        assert tools.bcftools_csq().available
