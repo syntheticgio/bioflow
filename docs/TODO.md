@@ -127,22 +127,20 @@ Also note this is a different *kind* of artifact from everything else here: a
 native desktop app, outside this repo's Python/React/Docker toolchain, needing
 its own repo and build/signing story.
 
-## Software help page: filter by column
+## Software help page: filter by column — DONE
 
-On `/help/software`, clicking a column header (Alignment, Quality Control, ...)
-filters the page to the tools matching that column — primary *or* secondary, and
-including uninstalled ones. All columns stay visible, since a tool can occupy
-several.
+Built 2026-07-31 in `43cf771`. Clicking a column head narrows the whole page —
+grid *and* entries — to that pipeline; clicking again or "Show all" restores it.
 
-**The clickable tool names asked for alongside this already work.** Matrix rows
-render `<a href={`#tool-${tool.name}`}>` (`HelpSoftware.tsx:112`) against
-`id={`tool-${tool.name}`}` on each entry heading (line 219), and `ToolMatrix`'s
-docstring states the intent: "Names link to the entries, so the matrix works as
-the page's index." Only the column filtering is outstanding.
+The clickable tool names asked for alongside this already worked: matrix rows
+have linked to `#tool-<name>` against ids on the entry headings since the matrix
+was written, which `ToolMatrix`'s docstring describes as the point of it.
 
-Small enough to build directly rather than spec: contained frontend work in one
-component, no backend change, and the matrix already distinguishes primary from
-secondary rank.
+Two decisions worth keeping: membership is `pipelines.includes`, not
+`pipelines[0] === type`, so fastp, samtools and bcftools each appear under both
+their roles — a QC filter that hid samtools would be lying about the toolchain.
+And availability is deliberately absent from the predicate, so an uninstalled
+tool is still listed for the job it would do.
 
 ---
 
