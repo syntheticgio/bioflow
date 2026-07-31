@@ -22,7 +22,7 @@ two things this feature needs:
   caching per process. The probe is honest about failure: a missing binary
   yields `available: false` with an error string, and an unrunnable one (an
   x86-64 build on arm64) is reported as unavailable rather than versioned.
-- **Describes each tool statically** in `TOOL_META` (line 307) -- 17 entries
+- **Describes each tool statically** in `TOOL_META` (line 307) -- 15 entries
   carrying `pipelines`, `summary`, `strengths`, `one_liner`, and `runnable`.
 
 `tool_with_meta()` (line 517) merges probe and description, and
@@ -241,7 +241,7 @@ letterspaced category kickers (`--ink-62`, `0.16em`), ruled dividers at
 
 ## Research required during implementation
 
-License, homepage, repository, and citation for all 17 tools are external
+License, homepage, repository, and citation for all 15 tools are external
 facts. Verify each against the project's own repository or documentation
 rather than asserting from memory; licenses especially, where a wrong claim is
 worse than a blank field.
@@ -250,7 +250,7 @@ Any field that cannot be confirmed stays empty. The rendering must therefore
 treat every link and fact as optional -- an entry with no repository shows no
 repository line rather than a dead link.
 
-The four fields under the completeness test must be filled for all 17 before
+The four fields under the completeness test must be filled for all 15 before
 that test passes, which is the intended forcing function.
 
 ## Verification
