@@ -328,9 +328,7 @@ async def _apply_trim_reads(result: dict) -> None:
         tmp_path = Path(output["tmp_path"])
         try:
             obj = await object_service.ingest_local_file(
-                # TODO(profiles): thread owner from the route once its API layer
-                # resolves get_current_owner
-                owner="local",
+                owner=parent.owner,
                 project_id=parent.project_id,
                 path=tmp_path,
                 name=output["name"],
@@ -435,8 +433,13 @@ async def _apply_sra_download(result: dict) -> None:
     for entry in staged:
         try:
             obj = await object_service.ingest_local_file(
-                # TODO(profiles): thread owner from the route once its API layer
-                # resolves get_current_owner
+                # TODO(profiles): Task 9 threads the job's owner through
+                # `results.apply`. Unlike the appliers that resolve a parent
+                # object, an SRA download has only the payload's project_id --
+                # there is nothing here to read an owner off. Until then this
+                # fails closed: on a project owned by anything but "local",
+                # ingest_local_file raises NotFoundError, the except below logs
+                # it, and the downloaded FASTQ is silently never registered.
                 owner="local",
                 project_id=project_id,
                 path=Path(entry["path"]),
@@ -612,8 +615,13 @@ async def _apply_assembly_download(result: dict) -> None:
         )
         try:
             obj = await object_service.ingest_local_file(
-                # TODO(profiles): thread owner from the route once its API layer
-                # resolves get_current_owner
+                # TODO(profiles): Task 9 threads the job's owner through
+                # `results.apply`. As in `_apply_sra_download`, a download has
+                # only the payload's project_id and no parent object to read an
+                # owner off. Until then this fails closed: on a project owned by
+                # anything but "local", ingest_local_file raises NotFoundError,
+                # the except below logs it, and the component is silently never
+                # registered.
                 owner="local",
                 project_id=project_id,
                 path=Path(entry["path"]),
@@ -769,9 +777,7 @@ async def _apply_build_index(result: dict) -> None:
             continue
         try:
             obj = await object_service.ingest_local_file(
-                # TODO(profiles): thread owner from the route once its API layer
-                # resolves get_current_owner
-                owner="local",
+                owner=reference.owner,
                 project_id=reference.project_id,
                 path=Path(output["tmp_path"]),
                 name=output["name"],
@@ -918,9 +924,7 @@ async def _apply_align_reads(result: dict) -> None:
 
     try:
         bam = await object_service.ingest_local_file(
-            # TODO(profiles): thread owner from the route once its API layer
-            # resolves get_current_owner
-            owner="local",
+            owner=reads.owner,
             project_id=reads.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -988,9 +992,7 @@ async def _apply_index_bam(result: dict) -> None:
     bai_ingested = False
     try:
         await object_service.ingest_local_file(
-            # TODO(profiles): thread owner from the route once its API layer
-            # resolves get_current_owner
-            owner="local",
+            owner=bam.owner,
             project_id=bam.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1136,9 +1138,7 @@ async def _apply_call_variants(result: dict) -> None:
     job_id = result.get("job_id")
     try:
         vcf = await object_service.ingest_local_file(
-            # TODO(profiles): thread owner from the route once its API layer
-            # resolves get_current_owner
-            owner="local",
+            owner=bam.owner,
             project_id=bam.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1164,9 +1164,7 @@ async def _apply_call_variants(result: dict) -> None:
     if index:
         try:
             await object_service.ingest_local_file(
-                # TODO(profiles): thread owner from the route once its API layer
-                # resolves get_current_owner
-                owner="local",
+                owner=vcf.owner,
                 project_id=bam.project_id,
                 path=Path(index["tmp_path"]),
                 name=index["name"],
@@ -1222,9 +1220,7 @@ async def _apply_annotate_variants(result: dict) -> None:
     job_id = result.get("job_id")
     try:
         annotated = await object_service.ingest_local_file(
-            # TODO(profiles): thread owner from the route once its API layer
-            # resolves get_current_owner
-            owner="local",
+            owner=vcf.owner,
             project_id=vcf.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1249,9 +1245,7 @@ async def _apply_annotate_variants(result: dict) -> None:
     if index:
         try:
             await object_service.ingest_local_file(
-                # TODO(profiles): thread owner from the route once its API layer
-                # resolves get_current_owner
-                owner="local",
+                owner=annotated.owner,
                 project_id=vcf.project_id,
                 path=Path(index["tmp_path"]),
                 name=index["name"],

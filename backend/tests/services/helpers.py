@@ -68,14 +68,12 @@ async def make_object(
     if await Blob.get(digest) is None:
         await make_blob(digest)
 
-    # Setting `owner` here is not something production does. No writer in
-    # object_service sets it yet -- real objects inherit the "local" default
-    # from TimestampedDocument -- so these fixtures describe the end state the
-    # owner-scoped deletion cascade is written for, not today's behaviour.
-    # That gap is closed by Task 4 (object_service) and Task 5 (run_service).
-    # Until then, these tests cannot see the cascade miss a real object whose
-    # owner was never set, so treat them as coverage of the intended design
-    # rather than proof the partition holds end to end.
+    # Setting `owner` here now matches production: Task 4 made
+    # object_service's writers stamp it, so a real object carries its
+    # project's owner rather than the "local" default from
+    # TimestampedDocument. Runs are still the gap -- run_service does not set
+    # it yet (Task 5) -- so a cascade over runs remains coverage of the
+    # intended design rather than proof the partition holds end to end.
     obj = DataObject(
         project_id=project.id,
         owner=project.owner,
@@ -91,8 +89,9 @@ async def make_object(
 
 
 async def make_job(project: Project, job_type: str, state: str) -> Job:
-    # `owner` is set here for the same forward-looking reason as in
-    # make_object above: queue/queue.py does not set it on real jobs yet.
+    # Unlike make_object above, this one is still forward-looking:
+    # queue/queue.py does not set `owner` on real jobs yet (Task 8), so a real
+    # job takes the "local" default whatever its project's owner is.
     job = Job(
         type=job_type,
         state=JobState(state),
