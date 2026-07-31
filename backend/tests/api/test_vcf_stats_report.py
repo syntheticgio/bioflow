@@ -20,12 +20,13 @@ from app.pipelines.variant_db import build_variant_db
 OBJECT_ID = "507f1f77bcf86cd799439011"
 OTHER_ID = "507f191e810c19729de860ea"
 
-# chrom pos id ref alt qual filter info [GT]
+# CHROM POS REF ALT QUAL FILTER DP [GT] -- matches vcf_stats_runner.QUERY_FORMAT,
+# what build_variant_db actually parses.
 VARIANT_LINES = [
-    "chr1\t100\t.\tA\tG\t50.0\tPASS\t.\t0/1",
-    "chr1\t200\t.\tC\tT\t10.0\tq10\t.\t1/1",
-    "chr1\t300\t.\tG\tGA\t80.0\tPASS\t.\t0/1",
-    "chr2\t150\t.\tT\tC\t99.0\tPASS\t.\t1/1",
+    "chr1\t100\tA\tG\t50.0\tPASS\t30\t0/1",
+    "chr1\t200\tC\tT\t10.0\tq10\t25\t1/1",
+    "chr1\t300\tG\tGA\t80.0\tPASS\t40\t0/1",
+    "chr2\t150\tT\tC\t99.0\tPASS\t35\t1/1",
 ]
 
 
