@@ -298,6 +298,12 @@ export function VariantTable({
       {contextRow && (
         <SequenceViewerModal
           accession={contextRow.chrom}
+          // A fresh object every render, which the modal tolerates by
+          // depending on these three fields rather than on the object. That
+          // only holds while each stays stable across a re-render:
+          // `markerLabel` is pure, and `contigLengths` is memoised above. Make
+          // either one churn and the NCBI viewer reloads on every keystroke in
+          // the filters.
           focus={{
             position: contextRow.pos,
             label: markerLabel(contextRow.ref, contextRow.alt),
