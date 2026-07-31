@@ -12,6 +12,7 @@ from app.config import settings
 from app.errors import ConflictError, NotFoundError
 from app.models import DataObject, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, bam_stats_runner, tools
+from app.pipelines import variant_db
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 
@@ -327,6 +328,95 @@ async def get_bam_stats_report(
         rows.append(row)
 
     return {"total": total, "rows": rows}
+
+
+class VcfStatsRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.post("/vcfstats", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_vcf_stats(body: VcfStatsRequest) -> JobOut:
+    """Queue the Results computation for a VCF: call-set summary statistics
+    and the per-variant table. Read-only."""
+    job = await pipeline_service.launch_vcf_stats(object_id=body.object_id)
+    return JobOut.of(job)
+
+
+@router.get("/vcfstats/variants/{object_id}")
+async def get_vcf_stats_variants(
+    object_id: PydanticObjectId,
+    offset: int = 0,
+    limit: int = 100,
+    contig: str | None = None,
+    pos_min: int | None = None,
+    pos_max: int | None = None,
+    filter_value: str | None = None,
+    variant_type: str | None = None,
+    min_qual: float | None = None,
+    skip_count: bool = False,
+) -> dict:
+    """A page of the variant table, filtered.
+
+    `total` is the count *after* filtering, so pagination stays correct. It is
+    omitted when `skip_count` is set: a combined qual+filter predicate costs
+    ~400ms at 5M rows and cannot use a single index, so the client sends this
+    when only the page number changed and the previous total still holds.
+
+    Unlike the BAM per-contig route this reads a database rather than slicing
+    a TSV -- a plant VCF holds millions of rows, where read-the-whole-file
+    costs ~440 MB of RSS per request.
+    """
+    db_path = settings.vcf_stats_dir / str(object_id) / "variants.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    filters = variant_db.VariantFilters(
+        contig=contig,
+        pos_min=pos_min,
+        pos_max=pos_max,
+        filter_value=filter_value,
+        variant_type=variant_type,
+        min_qual=min_qual,
+    )
+
+    rows = variant_db.query_variants(
+        db_path=db_path, filters=filters, offset=offset, limit=limit
+    )
+    total = (
+        None
+        if skip_count
+        else variant_db.count_variants(db_path=db_path, filters=filters)
+    )
+    return {"total": total, "rows": rows}
+
+
+@router.get("/vcfstats/report/{object_id}/{report_path:path}")
+async def get_vcf_stats_report(
+    object_id: PydanticObjectId, report_path: str
+) -> FileResponse:
+    """Serve the downloadable variants TSV.
+
+    Same containment rules as get_bam_stats_report -- `..` and absolute paths
+    are rejected outright, then the resolved path is re-checked against the
+    report root.
+    """
+    parts = PurePosixPath(report_path).parts
+    if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
+        raise NotFoundError(f"No such report: {report_path}")
+
+    root = (settings.vcf_stats_dir / str(object_id)).resolve()
+    target = (root / report_path).resolve()
+    if not target.is_file() or root not in target.parents:
+        raise NotFoundError(f"No such report: {report_path}")
+
+    return FileResponse(
+        target,
+        media_type="text/tab-separated-values",
+        filename=Path(report_path).name,
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 class AlignRequest(BaseModel):
