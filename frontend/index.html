@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Served from public/, which Vite exposes at the root in dev and copies
+         into dist/ on build. Note that docker-compose.override.yml does not
+         bind-mount public/, so changing this file needs a `--build` to show
+         up in the running stack. -->
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
     <title>BioFlow</title>
   </head>
   <body>
