@@ -95,12 +95,22 @@ offers a Run button. Thereafter it is a launcher and a status check, with Run an
 Shutdown buttons. Upgrading (bumping container image tags) is explicitly a
 later generation.
 
-**This collides with profiles and the two cannot be specced independently.** The
-setup flow above says it should ask the user to create an initial profile — but
-at install time the stack is not running, so there is no API to create one
-against. Either the installer writes a seed file the backend consumes on first
-boot, or it does not ask and profile creation stays in the web UI's first-run
-screen. Worth deciding when profiles land.
+**The installer does not create the initial profile.** The original note had it
+collecting one during setup, but at install time the stack is not running and
+there is no API to create a profile against. The installer would have to know
+the `Profile` schema, hash a password, and write a seed file the backend parses
+on boot — duplicating logic that already exists behind the API, and adding a
+second way to create a profile that could drift from the first.
+
+Instead the installer's job ends at "the stack is up and a browser is pointing
+at it", and profile creation belongs to the web UI's first-run screen — which
+the profiles design already requires for the empty-database case, and which is
+also where a *second* profile gets added later. One code path, in the place that
+already owns it.
+
+So the installer collects only what the compose file needs: storage location,
+install directory, and port. That leaves it with no dependency on the profiles
+feature at all, and the two can be built in either order.
 
 Also note this is a different *kind* of artifact from everything else here: a
 native desktop app, outside this repo's Python/React/Docker toolchain, needing
