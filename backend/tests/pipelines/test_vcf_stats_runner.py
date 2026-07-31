@@ -70,13 +70,13 @@ class TestCommandConstruction:
         cmd = build_query_command(
             bcftools_path="/usr/bin/bcftools", vcf=Path("/work/a.vcf.gz")
         )
-        assert cmd[:3] == ["/usr/bin/bcftools", "query", "-f"]
+        assert cmd[:3] == ["/usr/bin/bcftools", "query", "-u"]
         # Real tabs and a real newline, not the two-character sequences. Write
         # this assertion with actual escapes -- "\t" not "\\t" -- because a
         # literal backslash-t makes bcftools emit one unsplittable column and
         # every row lands in the database as a single field.
-        assert cmd[3] == "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/DP[\t%GT]\n"
-        assert cmd[4] == "/work/a.vcf.gz"
+        assert cmd[4] == "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\n"
+        assert cmd[5] == "/work/a.vcf.gz"
 
     def test_query_format_separator_is_a_real_tab(self):
         """Guards the escaping directly: verified against bcftools 1.21, this
@@ -86,6 +86,25 @@ class TestCommandConstruction:
         assert "\t" in QUERY_FORMAT
         assert "\\t" not in QUERY_FORMAT
         assert QUERY_FORMAT.endswith("\n")
+
+    def test_query_resolves_dp_from_either_format_or_info(self):
+        """Clair3 declares DP in FORMAT and bcftools call declares it in
+        INFO. A hardcoded %INFO/DP fails outright on Clair3 output with
+        'no such tag defined in the VCF header' -- half the callers this app
+        offers. Inside square brackets bcftools resolves it from whichever
+        section declares it."""
+        from app.pipelines.vcf_stats_runner import QUERY_FORMAT
+
+        assert "%INFO/DP" not in QUERY_FORMAT
+        assert "[\t%DP]" in QUERY_FORMAT
+
+    def test_query_allows_undefined_tags(self):
+        """A VCF with no DP at all must yield '.' rather than failing the
+        whole job -- -u is what makes the missing-tag case survivable."""
+        cmd = build_query_command(
+            bcftools_path="/usr/bin/bcftools", vcf=Path("/work/a.vcf.gz")
+        )
+        assert "-u" in cmd
 
 
 class TestParseStats:
