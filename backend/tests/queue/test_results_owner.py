@@ -271,3 +271,57 @@ class TestDownloadsTakeTheOwnerFromTheJob:
         # The role still comes from the component map -- threading the owner
         # must not disturb what the applier already decided about the file.
         assert produced[0].role == ObjectRole.REFERENCE
+
+
+class TestTheExecutorSuppliesTheOwner:
+    """The one production caller of `apply` is `Executor._apply_result`.
+
+    Every other test in this file calls `results.apply` directly, which means
+    none of them touch the line that decides *what* owner production passes.
+    That line could be changed to a literal and the whole file would stay
+    green -- verified, which is why this class exists. `_apply_result` takes
+    the `Job` as a plain argument, so it can be driven without a worker, a
+    Redis connection, or a real dispatch.
+    """
+
+    async def test_apply_result_forwards_the_jobs_owner(self):
+        from app.models import Job
+        from app.queue import results as results_mod
+        from app.queue.executor import JobExecutor
+
+        seen: dict[str, str] = {}
+
+        async def _capture(job_type: str, result: dict, *, owner: str) -> None:
+            seen["owner"] = owner
+
+        original = results_mod.apply
+        results_mod.apply = _capture
+        try:
+            job = Job(type="download_sra_run", owner="executor-owner-a")
+            await JobExecutor.__new__(JobExecutor)._apply_result(job, {"anything": True})
+        finally:
+            results_mod.apply = original
+
+        assert seen["owner"] == "executor-owner-a"
+
+    async def test_apply_result_does_not_hardcode_local(self):
+        """The specific regression: a literal here writes every profile's
+        pipeline output into the adopted profile's library."""
+        from app.models import Job
+        from app.queue import results as results_mod
+        from app.queue.executor import JobExecutor
+
+        seen: dict[str, str] = {}
+
+        async def _capture(job_type: str, result: dict, *, owner: str) -> None:
+            seen["owner"] = owner
+
+        original = results_mod.apply
+        results_mod.apply = _capture
+        try:
+            job = Job(type="download_assembly", owner="executor-owner-b")
+            await JobExecutor.__new__(JobExecutor)._apply_result(job, {"anything": True})
+        finally:
+            results_mod.apply = original
+
+        assert seen["owner"] != "local"
