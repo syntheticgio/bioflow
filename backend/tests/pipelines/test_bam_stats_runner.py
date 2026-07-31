@@ -326,3 +326,42 @@ class TestAllocateBins:
             contig_lengths=contigs, depth_lines=lines, bin_count=10
         )
         assert len(bins) == 10
+
+    def test_rounding_excess_never_zeroes_a_contig(self):
+        """Per-contig roundings can sum past bin_count. Subtracting the whole
+        excess from the last contig can drive it to zero bins, which is a
+        division by zero -- and silently drops that contig from the plot.
+        These 27 lengths round to 51 bins when 50 are asked for."""
+        lengths = [
+            42225, 616354, 895801, 1612293, 870751, 1830345, 249407, 92693,
+            1268772, 1288788, 1597283, 94266, 792334, 1506698, 1229737,
+            694081, 1155239, 1847412, 1933347, 585279, 1059963, 494846,
+            75544, 649445, 15188, 161439, 226762,
+        ]
+        contigs = [(f"c{i}", L) for i, L in enumerate(lengths)]
+        geometry, boundaries, counts = allocate_bins(
+            contig_lengths=contigs, bin_count=50
+        )
+        assert sum(counts.values()) == 50
+        assert all(c >= 1 for c in counts.values()), "every contig keeps a bin"
+        assert all(start < 50 for start, _ in geometry.values())
+        assert len(geometry) == len(contigs)
+
+    def test_no_contig_is_dropped_when_rounding_overshoots(self):
+        """Randomized: across many shapes, every contig keeps at least one
+        bin and offsets stay in range."""
+        import random
+
+        rng = random.Random(3)
+        for _ in range(200):
+            n = rng.randint(1, 40)
+            bin_count = rng.choice([10, 50, 100, 1000])
+            if n > bin_count:
+                continue
+            contigs = [(f"c{i}", rng.randint(20, 2_000_000)) for i in range(n)]
+            geometry, _, counts = allocate_bins(
+                contig_lengths=contigs, bin_count=bin_count
+            )
+            assert sum(counts.values()) == bin_count
+            assert all(c >= 1 for c in counts.values())
+            assert all(start < bin_count for start, _ in geometry.values())
