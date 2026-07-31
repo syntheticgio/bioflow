@@ -21,6 +21,10 @@ export type ChromosomeView =
 export interface Bar {
   name: string;
   length: number;
+  /** NCBI's name for this sequence ("IV", "MT", "chr11-scaffold01"), when the
+   *  assembly lookup found one. Absent on references ingested before labels
+   *  were fetched, and on any locally-assembled file. */
+  label?: string;
 }
 
 /** Below this, a sequence is not a chromosome or a large scaffold. */
@@ -64,6 +68,12 @@ export function classifyChromosomes(
       ? (facts.sequence_lengths as Record<string, number>)
       : {};
   const lengthCount = Object.keys(lengths).length;
+  const labels =
+    facts.sequence_labels &&
+    typeof facts.sequence_labels === "object" &&
+    !Array.isArray(facts.sequence_labels)
+      ? (facts.sequence_labels as Record<string, string>)
+      : {};
 
   if (!names.length && !lengthCount) return { kind: "nothing" };
   if (!lengthCount) return { kind: "needs-qc" };
@@ -76,10 +86,14 @@ export function classifyChromosomes(
   // window: for a real file with >50 records, "too few chromosome-scale
   // sequences" or a short overflow list may reflect what got stored, not
   // what the file actually contains.
-  const entries: Bar[] = Object.entries(lengths).map(([name, length]) => ({
-    name,
-    length: Number(length) || 0,
-  }));
+  const entries: Bar[] = Object.entries(lengths).map(([name, length]) => {
+    const label = labels[name];
+    return {
+      name,
+      length: Number(length) || 0,
+      ...(typeof label === "string" && label ? { label } : {}),
+    };
+  });
   const trueCount =
     typeof facts.sequence_count === "number"
       ? facts.sequence_count
