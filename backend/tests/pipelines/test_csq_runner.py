@@ -64,3 +64,19 @@ class TestGffWarnings:
             "Unphased heterozygous genotype at NC_001133.9:88609"
         )
         assert not csq_runner.is_benign_gff_warning("[E::faidx] Failed to open ref.fa")
+
+    # An "[E::" line is a failure whatever else it says. Checked ahead of the
+    # substrings so the safe direction is explicit rather than a consequence of
+    # which phrases happen to be listed.
+    def test_an_error_line_is_never_benign_even_if_it_matches_a_marker(self):
+        assert not csq_runner.is_benign_gff_warning(
+            "[E::idx] Duplicate id in the index, unknown phase"
+        )
+
+    # "duplicate id" alone is generic enough to appear in a fatal message about
+    # the VCF or its index; the marker is the fuller observed phrase so that a
+    # swallowed failure cannot leave a job looking successful with no output.
+    def test_a_bare_duplicate_id_message_is_not_treated_as_gff_noise(self):
+        assert not csq_runner.is_benign_gff_warning(
+            "Failed to build index: duplicate id at record 12"
+        )

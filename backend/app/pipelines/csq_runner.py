@@ -28,12 +28,23 @@ PHASE_MODE = "a"
 
 # Substrings of the lines real NCBI GFF3 files produce on a normal run. The
 # T. brucei annotation emits all of these and still annotates correctly.
+#
+# Taken from the fuller observed phrase rather than the shortest distinctive
+# fragment: "duplicate id" alone is generic enough to appear in a fatal message
+# about the VCF or its index, and swallowing one of those would leave a job
+# reading as successful while producing no annotations. The three others are
+# specific enough that a real failure is unlikely to contain them.
 _BENIGN_GFF_MARKERS = (
     "unknown phase",
-    "duplicate id",
+    "features with duplicate id",
     "unknown biotype",
     "incomplete CDS",
 )
+
+# bcftools prefixes genuine errors this way. Checked first so the classifier's
+# safe direction is explicit rather than a consequence of which substrings
+# happen to be listed above.
+_ERROR_PREFIX = "[E::"
 
 
 def build_csq_command(
@@ -71,7 +82,15 @@ def is_benign_gff_warning(line: str) -> bool:
 
     Real NCBI annotations are not clean by bcftools' standards -- partial
     features, duplicate ids, tRNA biotypes it does not model. Every one of
-    those is a warning about a record it skipped, not about the run. Logged at
-    debug rather than surfaced, or a successful annotation would look alarming.
+    those is a warning about a record it skipped, not about the run. Callers
+    should log these at debug rather than surface them, or a successful
+    annotation looks alarming.
+
+    Substring matching against another tool's stderr is version-fragile, and
+    deliberately fragile in the safe direction: if bcftools rephrases a
+    message the match simply stops, the line is treated as noteworthy, and the
+    user sees extra noise. Noise is recoverable; a swallowed error is not.
     """
+    if line.lstrip().startswith(_ERROR_PREFIX):
+        return False
     return any(marker in line for marker in _BENIGN_GFF_MARKERS)

@@ -275,6 +275,14 @@ def bcftools_csq() -> Tool:
                 ),
             )
 
+    # `path` is bcftools' own, because csq is invoked *through* it -- so this
+    # is still the binary a caller execs, and `name` is the capability rather
+    # than an executable. That is also why this is absent from `all_tools()`:
+    # that list drives the tool panel, which enumerates installed binaries and
+    # pairs each with a TOOL_META entry. A capability has no separate install
+    # to report and no meta row, so listing it would render a blank card for
+    # something the user cannot act on. Reached through `require()` at job
+    # time instead, and surfaced by the Actions card's own reason text.
     return Tool(name="bcftools csq", path=base.path, version=base.version)
 
 
