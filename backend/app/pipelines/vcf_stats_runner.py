@@ -34,11 +34,14 @@ VARIANT_COLUMNS = (
 # square brackets bcftools resolves %DP from whichever section declares it,
 # so the same format string works for both.
 #
-# BCSQ last, after the repeating per-sample genotypes, so the consequence is
-# always the final field however many samples the file has. `-u` in
-# build_query_command already makes an undefined tag emit "." rather than
-# failing the job, which is what every un-annotated VCF does here.
-QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\t%INFO/BCSQ\n"
+# BCSQ sits before the sample block, not after it. `[\t%GT]` repeats once
+# per sample, so a trailing consequence field cannot be told apart from an
+# extra genotype by position -- a three-sample row without BCSQ has exactly
+# as many fields as a two-sample row with it. Placed ahead of the repeating
+# block it is always field 6, whatever the sample count. `-u` in
+# build_query_command makes an undefined tag emit "." rather than failing
+# the job, which is what every un-annotated VCF does here.
+QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/BCSQ[\t%DP][\t%GT]\n"
 
 # `number of X:` keys in the SN section, mapped to the names used in facts.
 _SN_KEYS = {

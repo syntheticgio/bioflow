@@ -93,7 +93,7 @@ class TestBuild:
         it needs pinning."""
         path = tmp_path / "multi.db"
         build_variant_db(
-            rows=iter(["chr1\t100\tA\tG\t50.0\tPASS\t30\t0/1\t1/1\t0/0"]),
+            rows=iter(["chr1\t100\tA\tG\t50.0\tPASS\t.\t30\t0/1\t1/1\t0/0"]),
             db_path=path,
         )
         row = query_variants(
@@ -259,17 +259,19 @@ class TestStreamingBuild:
 
 
 class TestConsequenceColumns:
-    """The annotated columns, which arrive as a 9th TSV field holding the raw
-    BCSQ value. An un-annotated VCF sends "." there, which must round-trip as
-    empty rather than as the string "."."""
+    """The annotated columns, which arrive as a 7th TSV field (index 6) holding
+    the raw BCSQ value, ahead of the repeating DP/GT sample block so its
+    position never depends on sample count. An un-annotated VCF sends "."
+    there, which must round-trip as empty rather than as the string "."."""
 
     def test_stores_gene_consequence_and_aa_change(self, tmp_path):
         path = tmp_path / "v.db"
         build_variant_db(
             rows=iter(
                 [
-                    "NC_001133.9\t22639\tA\tT\t10.8\t.\t1\t1/1\t"
+                    "NC_001133.9\t22639\tA\tT\t10.8\t.\t"
                     "missense|YAL063C-A|rna-NM_001184642.1|protein_coding|-|16F>16Y|22639A>T"
+                    "\t1\t1/1"
                 ]
             ),
             db_path=path,
@@ -285,7 +287,7 @@ class TestConsequenceColumns:
     def test_an_unannotated_row_has_empty_consequence_columns(self, tmp_path):
         path = tmp_path / "v.db"
         build_variant_db(
-            rows=iter(["NC_001133.9\t12690\tA\tT\t30.0\t.\t5\t0/1\t."]),
+            rows=iter(["NC_001133.9\t12690\tA\tT\t30.0\t.\t.\t5\t0/1"]),
             db_path=path,
         )
         row = query_variants(
@@ -294,7 +296,8 @@ class TestConsequenceColumns:
         assert row["gene"] is None
         assert row["consequence"] is None
 
-    # A VCF indexed before this change has only 8 fields per line.
+    # A VCF indexed before this change has only 8 fields per line and no BCSQ
+    # field at all.
     def test_a_row_with_no_consequence_field_still_loads(self, tmp_path):
         path = tmp_path / "v.db"
         build_variant_db(
@@ -309,13 +312,14 @@ class TestConsequenceColumns:
 
     # Two samples plus BCSQ: the genotypes must not absorb the consequence,
     # and the consequence must not absorb a genotype.
-    def test_multi_sample_genotypes_survive_the_appended_consequence(self, tmp_path):
+    def test_multi_sample_genotypes_survive_the_leading_consequence(self, tmp_path):
         path = tmp_path / "v.db"
         build_variant_db(
             rows=iter(
                 [
-                    "c1\t1\tA\tT\t10\t.\t5\t0/1\t1/1\t"
+                    "c1\t1\tA\tT\t10\t.\t"
                     "missense|G1|r1|protein_coding|+|1A>1B|x"
+                    "\t5\t0/1\t1/1"
                 ]
             ),
             db_path=path,
@@ -329,8 +333,8 @@ class TestConsequenceColumns:
     def _two_rows(self):
         return iter(
             [
-                "c1\t1\tA\tT\t10\t.\t1\t1/1\tmissense|G1|r1|protein_coding|+|1A>1B|x",
-                "c1\t2\tA\tT\t10\t.\t1\t1/1\tsynonymous|G2|r2|protein_coding|+|2C|x",
+                "c1\t1\tA\tT\t10\t.\tmissense|G1|r1|protein_coding|+|1A>1B|x\t1\t1/1",
+                "c1\t2\tA\tT\t10\t.\tsynonymous|G2|r2|protein_coding|+|2C|x\t1\t1/1",
             ]
         )
 
@@ -356,13 +360,12 @@ class TestConsequenceColumns:
             == 1
         )
 
-    # A three-sample row with no BCSQ has the same field count as a two-sample
-    # row with one. Counting fields would read that third genotype as a
-    # consequence, so the last field is judged by shape.
-    def test_a_third_genotype_is_not_mistaken_for_a_consequence(self, tmp_path):
+    # A three-sample row survives with the consequence fixed at index 6,
+    # regardless of how many genotype columns follow it.
+    def test_a_third_genotype_survives_the_fixed_consequence_position(self, tmp_path):
         path = tmp_path / "v.db"
         build_variant_db(
-            rows=iter(["c1\t1\tA\tT\t10\t.\t5\t0/1\t1/1\t0/0"]),
+            rows=iter(["c1\t1\tA\tT\t10\t.\t.\t5\t0/1\t1/1\t0/0"]),
             db_path=path,
         )
         row = query_variants(
@@ -371,11 +374,12 @@ class TestConsequenceColumns:
         assert row["gt"] == "0/1\t1/1\t0/0"
         assert row["consequence"] is None
 
-    # Phased genotypes contain "|", which is also BCSQ's field separator.
-    def test_a_phased_genotype_is_not_mistaken_for_a_consequence(self, tmp_path):
+    # Phased genotypes contain "|", which is also BCSQ's field separator --
+    # the fixed position means that no longer matters.
+    def test_a_phased_genotype_survives_the_fixed_consequence_position(self, tmp_path):
         path = tmp_path / "v.db"
         build_variant_db(
-            rows=iter(["c1\t1\tA\tT\t10\t.\t5\t0|1\t1|1"]),
+            rows=iter(["c1\t1\tA\tT\t10\t.\t.\t5\t0|1\t1|1"]),
             db_path=path,
         )
         row = query_variants(
