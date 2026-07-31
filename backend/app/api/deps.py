@@ -34,17 +34,10 @@ async def get_current_owner(
     # before this feature already carry the `owner: "local"` default from
     # TimestampedDocument, and one profile adopts them by returning the literal
     # "local" from `Profile.owner_id()` instead of its own id, so nothing has to
-    # be migrated.
-    #
-    # Which profile that is cannot be determined yet -- adoption is marked by an
-    # `adopted_legacy_owner` flag a later task adds, and it is emphatically not
-    # "the one named local" (a first profile called "ada" can be the adopted
-    # one). So this branch verifies only that *some* profile exists, which is
-    # correct in the single-adopted-profile case that is the only way a "local"
-    # header can be produced today, and still catches the case worth catching:
-    # a header arriving against an empty database.
+    # be migrated. That profile is identified by its `adopted_legacy_owner`
+    # flag and not by its name -- the adopted profile can be called anything.
     if x_bioflow_profile == "local":
-        if await Profile.find_one() is None:
+        if await Profile.find_one({"adopted_legacy_owner": True}) is None:
             raise ProfileUnresolvedError("No profile exists to own 'local'")
         return "local"
 

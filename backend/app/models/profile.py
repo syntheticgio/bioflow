@@ -43,27 +43,48 @@ class Profile(TimestampedDocument):
     # Written on successful profile selection, not on every request that uses
     # the profile -- it orders the picker, it is not an activity log.
     last_used_at: datetime | None = None
+    # True only for the profile created by first-boot adoption. Needed because
+    # its documents carry owner="local", not str(id) -- every owner lookup
+    # after creation time needs to know which value to use, and there is
+    # nothing else that distinguishes "the profile that adopted the
+    # pre-feature library" once more than one profile exists. Its name is no
+    # help: the adopted profile can be called anything.
+    adopted_legacy_owner: bool = False
 
     def owner_id(self) -> str:
         """The value this profile's documents carry in their `owner` field.
 
         Deliberately a method rather than `str(profile.id)` at each call site.
-        First-boot adoption needs the very first profile created on an existing
-        installation to own the documents already there, which carry the
-        pre-feature default `owner: "local"` -- so for that one profile this
-        accessor must return the literal `"local"` and no migration has to run.
-        That branch lands with adoption; every caller going through here now is
-        what makes it a one-line change then instead of a hunt through the
-        services.
+        First-boot adoption gives the very first profile created on an existing
+        installation the documents already there, which carry the pre-feature
+        default `owner: "local"` -- so for that one profile this accessor
+        returns the literal `"local"` and no migration ever runs. Every caller
+        going through here is what made that a one-line change instead of a
+        hunt through the services.
 
-        The `"local"` will come from a stored flag, never from the id: `_id` is
-        always a real ObjectId, because Beanie rejects a string id unless the
-        model overrides the annotation the way `blob.py` does for its digest.
+        The `"local"` comes from the stored `adopted_legacy_owner` flag, never
+        from the id: `_id` is always a real ObjectId, because Beanie rejects a
+        string id unless the model overrides the annotation the way `blob.py`
+        does for its digest.
         """
-        return str(self.id)
+        return "local" if self.adopted_legacy_owner else str(self.id)
 
     class Settings:
         name = "profiles"
         indexes = [
             IndexModel([("username", ASCENDING)], name="uniq_username", unique=True),
+            # At most one profile may adopt the pre-feature library. The
+            # service already refuses a second first-boot create, but two
+            # concurrent setup requests can both read an empty collection
+            # before either inserts, and `uniq_username` does not catch that:
+            # the racers have different usernames, so both inserts succeed and
+            # two profiles end up returning "local" from `owner_id()`, sharing
+            # one library with no way to tell them apart afterwards. Partial,
+            # so the many non-adopted profiles (all False) do not collide.
+            IndexModel(
+                [("adopted_legacy_owner", ASCENDING)],
+                name="uniq_adopted_legacy_owner",
+                unique=True,
+                partialFilterExpression={"adopted_legacy_owner": True},
+            ),
         ]

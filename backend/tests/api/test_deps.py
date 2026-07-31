@@ -46,12 +46,42 @@ class TestGetCurrentOwner:
 
     async def test_local_header_resolves_without_matching_on_username(self):
         """A "local" header must not be resolved by looking for a profile
-        *named* "local" -- the adopted profile is identified by a flag a later
-        task adds, and may be named anything. Only profiles with other names
-        exist here, so a username match would 404."""
-        await Profile(username="deps-not-called-local", display={}).insert()
+        *named* "local" -- the adopted profile is identified by its
+        `adopted_legacy_owner` flag and may be named anything. The profile
+        inserted here has both a different name and the flag set, so a
+        username match would 404."""
+        await Profile(
+            username="deps-not-called-local", display={}, adopted_legacy_owner=True
+        ).insert()
 
         assert await get_current_owner(x_bioflow_profile="local") == "local"
+
+    async def test_local_header_is_rejected_when_no_profile_adopted(self):
+        """The flag is what gets consulted, not mere existence.
+
+        Profiles exist here, but none of them adopted -- so nothing owns the
+        pre-feature library and "local" resolves to an owner no profile
+        answers to. An existence-only check (`Profile.find_one()`) passes this
+        situation happily, which is exactly why the sibling test above cannot
+        tell a correct implementation from that one on its own.
+
+        The inserted profiles are removed again because this module shares a
+        database across its tests.
+        """
+        stranger = await Profile(username="deps-no-adopter", display={}).insert()
+        try:
+            existing_adopters = await Profile.find(
+                {"adopted_legacy_owner": True}
+            ).to_list()
+            await Profile.find({"adopted_legacy_owner": True}).delete()
+            try:
+                with pytest.raises(ProfileUnresolvedError):
+                    await get_current_owner(x_bioflow_profile="local")
+            finally:
+                for profile in existing_adopters:
+                    await profile.insert()
+        finally:
+            await stranger.delete()
 
     async def test_malformed_profile_id_raises_400_not_500(self):
         """`PydanticObjectId("not-an-id")` raises bson's InvalidId, which is a
