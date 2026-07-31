@@ -52,31 +52,23 @@ export function BaseCompositionChart({
   if (!total) return null;
 
   const size = 132;
-  const r = 56;
+  const r = 46;
+  const strokeWidth = 20;
   const cx = size / 2;
   const cy = size / 2;
+  const circumference = 2 * Math.PI * r;
 
-  let angle = -Math.PI / 2; // start at 12 o'clock
+  let offset = 0;
   const slices = composition.map((c) => {
     const frac = c.count / total;
-    const start = angle;
-    const end = angle + frac * Math.PI * 2;
-    angle = end;
-
-    // A single-value composition (an all-A file) cannot be drawn as an arc:
-    // start and end coincide, so the path collapses. Draw a full circle.
-    const full = frac >= 0.9999;
-    const large = end - start > Math.PI ? 1 : 0;
-    const x1 = cx + r * Math.cos(start);
-    const y1 = cy + r * Math.sin(start);
-    const x2 = cx + r * Math.cos(end);
-    const y2 = cy + r * Math.sin(end);
-
-    return {
+    const dash = frac * circumference;
+    const s = {
       ...c,
-      full,
-      d: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`,
+      dash,
+      dashoffset: -offset,
     };
+    offset += dash;
+    return s;
   });
 
   const active = hovered
@@ -87,28 +79,47 @@ export function BaseCompositionChart({
     <div>
       <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
         <svg width={size} height={size} style={{ flexShrink: 0 }}>
-          {slices.map((s) =>
-            s.full ? (
+          <g transform={`rotate(-90 ${cx} ${cy})`}>
+            {slices.map((s) => (
               <circle
                 key={s.base}
                 cx={cx}
                 cy={cy}
                 r={r}
-                fill={BASE_COLORS[s.base] ?? "#888"}
-              />
-            ) : (
-              <path
-                key={s.base}
-                d={s.d}
-                fill={BASE_COLORS[s.base] ?? "#888"}
-                stroke="var(--bg-panel)"
-                strokeWidth="1.5"
+                fill="none"
+                stroke={BASE_COLORS[s.base] ?? "#888"}
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${s.dash} ${circumference - s.dash}`}
+                strokeDashoffset={s.dashoffset}
                 opacity={hovered && hovered !== s.base ? 0.35 : 1}
                 onMouseEnter={() => setHovered(s.base)}
                 onMouseLeave={() => setHovered(null)}
                 style={{ cursor: "default", transition: "opacity 0.12s" }}
               />
-            ),
+            ))}
+          </g>
+          {gcPercent != null && (
+            <>
+              <text
+                x={cx}
+                y={cy - 3}
+                textAnchor="middle"
+                fontSize="18"
+                fontWeight="600"
+                fill="var(--text)"
+              >
+                {gcPercent.toFixed(1)}%
+              </text>
+              <text
+                x={cx}
+                y={cy + 13}
+                textAnchor="middle"
+                fontSize="10"
+                fill="var(--text-faint)"
+              >
+                GC
+              </text>
+            </>
           )}
         </svg>
 
@@ -199,17 +210,11 @@ export function QualityChart({ curve }: { curve: QualityPoint[] }) {
         style={{ maxWidth: w, display: "block" }}
         onMouseLeave={() => setHover(null)}
       >
-        {/* Q20/Q30 quality bands, the conventional reference lines. */}
+        {/* Q20/Q30 quality bands, the conventional reference lines. Labelled
+            only -- no background fill, so the curve reads without the extra
+            tinting competing with it. */}
         {bands.map((b) => (
           <g key={b.label}>
-            <rect
-              x={pad.left}
-              y={y(b.to)}
-              width={plotW}
-              height={y(b.from) - y(b.to)}
-              fill={b.color}
-              opacity={0.1}
-            />
             <text
               x={w - pad.right + 5}
               y={(y(b.to) + y(b.from)) / 2 + 3}

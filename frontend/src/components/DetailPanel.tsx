@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { useUploads } from "../hooks/useUploads";
 import type {
   AlignerName,
+  DataObject,
   ObjectDetail as ObjectDetailData,
   VariantCallerName,
 } from "../api/types";
@@ -13,18 +14,21 @@ import {
   formatBytes,
   formatDate,
   formatKindLabel,
-  shortHash,
 } from "../lib/format";
 import { readQuality } from "../lib/readQuality";
 import { notify } from "../stores/messageStore";
+import { AiSummary } from "./AiSummary";
 import { AssemblyFacts } from "./AssemblyFacts";
-import { FactsTable } from "./FactsTable";
+import { countVisibleFacts, FactsTable } from "./FactsTable";
+import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
 import { BaseCompositionChart, QualityChart } from "./SequenceCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
-import { RoleConverter } from "./RoleConverter";
-import { PairEditor } from "./PairEditor";
+import { OrganismBlurb } from "./OrganismBlurb";
+import { Computations } from "./Computations";
+import { ManageFile } from "./ManageFile";
+import { PipelineSuggestions } from "./PipelineSuggestions";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
 import { DerivedFiles } from "./DerivedFiles";
 import { ActivePipelineJobs } from "./ActivePipelineJobs";
@@ -39,7 +43,7 @@ import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
 import { SraPanel } from "./SraPanel";
 import { TabPanel, Tabs, type TabDef } from "./Tabs";
-import { TagEditor } from "./TagEditor";
+import { TruncatedValue } from "./TruncatedValue";
 
 /** The right panel: details of whatever is selected in the left panel. */
 export function DetailPanel() {
@@ -261,12 +265,31 @@ function ProjectDetail({ id }: { id: string }) {
 /** Ordered so the panel opens on the question people ask most: is this file
  * good? Results sits next to QC -- they answer adjacent questions -- and only
  * appears for BAMs, which is the only format it currently describes. */
-function tabsFor(formatKind: string): TabDef[] {
-  const tabs: TabDef[] = [{ id: "qc", label: "QC" }];
-  if (formatKind === "bam") {
+function tabsFor(obj: DataObject): TabDef[] {
+  const factCount = countVisibleFacts(obj.facts);
+
+  // Hints only where there is something true to say. The mockup shows one on
+  // every tab, but Actions holds tags and delete rather than a list of
+  // pipelines, and inventing a count for it would be worse than leaving it
+  // bare.
+  const tabs: TabDef[] = [
+    {
+      id: "qc",
+      label: "Quality",
+      hint: factCount > 0 ? `${factCount} facts` : undefined,
+    },
+  ];
+  if (obj.format.kind === "bam") {
     tabs.push({ id: "results", label: "Results" });
   }
-  tabs.push({ id: "metadata", label: "Metadata" }, { id: "actions", label: "Actions" });
+  tabs.push(
+    {
+      id: "metadata",
+      label: "Metadata",
+      hint: typeof obj.facts.sra_accession === "string" ? "Provenance" : undefined,
+    },
+    { id: "actions", label: "Actions" },
+  );
   return tabs;
 }
 
@@ -339,16 +362,35 @@ function ObjectDetail({ id }: { id: string }) {
     mutationFn: (metadata: Record<string, unknown>) => api.updateObject(id, { metadata }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["object", id] });
+      // Organism and assay are inputs to the align rule, so editing them can
+      // change which cards are offered and what a gated one gives as its
+      // reason.
+      qc.invalidateQueries({ queryKey: ["suggestions", id] });
       notify.success("Metadata saved");
     },
     onError: (e: Error) => notify.error(e.message),
   });
+
+  // Names the reference the Align button would default to. Same query key the
+  // align dialog uses, so opening it afterwards costs no extra request.
+  //
+  // Must sit above the loading early-return with the other hooks: gating it on
+  // `obj` being present would change the hook order between renders.
+  const { data: refs } = useQuery({
+    queryKey: ["pipelines", "references", obj?.project_id],
+    queryFn: () => api.references(obj!.project_id),
+    enabled: obj?.status === "ready" && obj?.format.kind === "fastq",
+  });
+  const references = refs?.references ?? [];
 
   const reingest = useMutation({
     mutationFn: () => api.reingestObject(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["object", id] });
       qc.invalidateQueries({ queryKey: ["jobs"] });
+      // Re-ingest re-derives format and facts, which is most of what the cards
+      // are computed from.
+      qc.invalidateQueries({ queryKey: ["suggestions", id] });
       notify.info("Re-ingest queued");
     },
     onError: (e: Error) => notify.error(e.message),
@@ -360,6 +402,9 @@ function ObjectDetail({ id }: { id: string }) {
     mutationFn: () => api.launchQC(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
+      // QC is what un-gates the align card, so leaving this stale would keep
+      // "Run QC to determine read chemistry" beside a file that just ran it.
+      qc.invalidateQueries({ queryKey: ["suggestions", id] });
       notify.info("QC queued");
     },
     onError: (e: Error) => notify.error(e.message),
@@ -395,7 +440,7 @@ function ObjectDetail({ id }: { id: string }) {
     );
   }
 
-  const tabs = tabsFor(obj.format.kind);
+  const tabs = tabsFor(obj);
   const raw = params.get("tab");
   const tab = tabs.some((t) => t.id === raw) ? raw! : "qc";
 
@@ -419,6 +464,29 @@ function ObjectDetail({ id }: { id: string }) {
   // Same function the explorer rows use, so the word here and the word there
   // can never disagree.
   const quality = readQuality(obj);
+
+  // "Read file" rather than the bare "File": at a glance the kicker should say
+  // what kind of thing this is, and reads are the case with the most to say.
+  const kindLabel = isReference
+    ? "Reference"
+    : obj.format.kind === "fastq"
+      ? "Read file"
+      : obj.format.kind === "bam"
+        ? "Alignment"
+        : "File";
+
+  const stats = fileStats(obj);
+
+  // Distinguishes "Run QC" from "Re-run QC": qc_tool is written by whichever
+  // QC path actually ran, so its presence is the honest test of whether there
+  // is anything to re-run.
+  const hasQc = typeof obj.facts.qc_tool === "string";
+
+  // Names the reference the Align button would default to, so it can say
+  // "Align to ASM244v1" rather than just "Align". Only when the project holds
+  // exactly the one candidate the dialog would preselect: with several, naming
+  // one would misstate what the button does, and the dialog asks instead.
+  const alignTarget = assemblyLabel(references);
 
   // Offered for reads that are ready to run. Already-trimmed output is
   // deliberately still eligible -- trimming twice is unusual but legitimate,
@@ -445,98 +513,59 @@ function ObjectDetail({ id }: { id: string }) {
 
   return (
     <div className="panel">
-      <div className="panel-header">
-        <span className="panel-title">{isReference ? "Reference" : "File"}</span>
-        {canTrim && (
-          <button
-            type="button"
-            className="btn"
-            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 8 }}
-            onClick={() => startFlow("trim")}
-            title="Adapter-trim and quality-filter these reads"
-          >
-            Trim
-          </button>
-        )}
-        {canAlign && (
-          <button
-            type="button"
-            className="btn"
-            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
-            onClick={() => startFlow("align")}
-            title="Align these reads against a reference"
-          >
-            Align
-          </button>
-        )}
-        {canCallVariants && (
-          <button
-            type="button"
-            className="btn"
-            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
-            onClick={() => startFlow("variant")}
-            title="Call variants from this alignment"
-          >
-            Call variants
-          </button>
-        )}
-        {/* Same eligibility as trimming, and in the header rather than the QC
-            tab so it stays reachable from whichever tab is open -- including
-            from Metadata, where noticing that QC has never been run is most
-            likely. */}
-        {canQC && (
-          <button
-            type="button"
-            className="btn"
-            style={{ padding: "2px 10px", fontSize: 12, marginLeft: 6 }}
-            onClick={() => runQC.mutate()}
-            disabled={runQC.isPending}
-            title="Measure read quality with fastp and FastQC"
-          >
-            {runQC.isPending ? "QC…" : "QC"}
-          </button>
-        )}
+      <div className="panel-body detail">
+        {/* Identity, status and verdict on one line above the name: what kind
+            of file this is and whether it is usable, before what it is called. */}
+        <div className="detail-kicker">
+          <span>{kindLabel}</span>
+          <span>{formatBytes(obj.size)}</span>
+          {obj.format.kind !== "unknown" && (
+            <span>{formatKindLabel(obj.format.kind)}</span>
+          )}
+          {compression && <span>{compression}</span>}
+          <span className={`badge ${obj.status}`}>{obj.status}</span>
+          {/* A judgement about the file rather than a property of it, so it
+              trails the identifying tokens and carries its caveats. */}
+          {quality && (
+            <span
+              className="badge quality"
+              title={quality.tooltip}
+              style={{ cursor: "help" }}
+            >
+              {quality.word}
+            </span>
+          )}
+        </div>
+
+        <div className="detail-headline">
+          <div className="detail-headline-main">
+            <div className="detail-title">{obj.name}</div>
+            {/* Only the species here: size, format and quality already sit in
+                the kicker, and repeating them under the name says nothing new.
+                Read-only -- the editable control lives in the metadata form. */}
+            {species && (
+              <div className="detail-subtitle">
+                <span
+                  style={{ fontStyle: "italic" }}
+                  title="Change under Metadata → Sample → Organism"
+                >
+                  {species}
+                </span>
+              </div>
+            )}
+
+            {/* Background on the species, under its name. Self-suppressing:
+                nothing renders without a known organism and a model server, so
+                a file with neither keeps the bare headline it had before. */}
+            <OrganismBlurb organism={species} />
+          </div>
+
+          <FileHeadlineStats stats={stats} />
+        </div>
+
         {/* A reminder, not a guard: a second run with different settings is
             legitimate, and the dedup key already stops an identical repeat. */}
         <ActivePipelineJobs objectId={obj.id} />
-        <span className={`badge ${obj.status}`} style={{ marginLeft: "auto" }}>
-          {obj.status}
-        </span>
-      </div>
-
-      <div className="panel-body detail">
-        <div className="detail-title">{obj.name}</div>
-        <div className="detail-subtitle">
-          {formatBytes(obj.size)}
-          {obj.format.kind !== "unknown" && ` · ${formatKindLabel(obj.format.kind)}`}
-          {compression && ` · ${compression}`}
-          {/* Read-only here: the species is identifying enough to belong at the
-              top, but one editable control per field is enough, and it already
-              lives in the metadata form. Italic is the convention for a
-              scientific name and separates it from the format tokens without
-              changing the type. */}
-          {species && (
-            <>
-              {" · "}
-              <span
-                style={{ fontStyle: "italic" }}
-                title="Change under Metadata → Sample → Organism"
-              >
-                {species}
-              </span>
-            </>
-          )}
-          {/* Last in the line: it is a judgement about the file rather than
-              an identifying property of it, and it carries the caveats. */}
-          {quality && (
-            <>
-              {" · "}
-              <span title={quality.tooltip} style={{ cursor: "help" }}>
-                {quality.word}
-              </span>
-            </>
-          )}
-        </div>
 
         {obj.status !== "ready" && obj.status !== "error" && (
           <IngestProgress objectId={obj.id} />
@@ -561,7 +590,32 @@ function ObjectDetail({ id }: { id: string }) {
 
         {tab === "qc" && (
           <TabPanel id="qc" idPrefix="obj">
-            <QcTab obj={obj} isReference={isReference} reingest={reingest} />
+            <QcTab
+              obj={obj}
+              isReference={isReference}
+              // Built here because it needs the same runQC mutation the
+              // Computations section drives; QcTab only decides where it sits.
+              runQcPrompt={
+                canQC && !hasQc ? (
+                  <div className="section">
+                    <div className="section-note" style={{ marginBottom: 8 }}>
+                      No QC has been run on this file yet. Read chemistry,
+                      adapter content and the quality distribution all come
+                      from it — and several pipeline suggestions stay disabled
+                      without it.
+                    </div>
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => runQC.mutate()}
+                      disabled={runQC.isPending}
+                    >
+                      {runQC.isPending ? "Running QC…" : "Run QC"}
+                    </button>
+                  </div>
+                ) : null
+              }
+            />
           </TabPanel>
         )}
 
@@ -588,6 +642,22 @@ function ObjectDetail({ id }: { id: string }) {
           <TabPanel id="actions" idPrefix="obj">
             <ActionsTab
               obj={obj}
+              computations={
+                <Computations
+                  canPreprocess={canTrim}
+                  canAlign={canAlign}
+                  canCallVariants={canCallVariants}
+                  canQC={canQC}
+                  hasQc={hasQc}
+                  alignTarget={alignTarget}
+                  onStart={startFlow}
+                  onRunQC={() => runQC.mutate()}
+                  qcPending={runQC.isPending}
+                  onReingest={() => reingest.mutate()}
+                  reingestPending={reingest.isPending}
+                  reingestDisabled={!obj.blob_sha256}
+                />
+              }
               confirmingDelete={confirmingDelete}
               setConfirmingDelete={setConfirmingDelete}
               remove={remove}
@@ -657,99 +727,121 @@ function ObjectDetail({ id }: { id: string }) {
 function QcTab({
   obj,
   isReference,
-  reingest,
+  runQcPrompt,
 }: {
   obj: ObjectDetailData;
   isReference: boolean;
-  reingest: { mutate: () => void; isPending: boolean };
+  /** Offered when QC has never run; see where it is built in ObjectDetail. */
+  runQcPrompt: React.ReactNode;
 }) {
+  const hasFacts = Object.keys(obj.facts).length > 0;
+  const composition = Array.isArray(obj.facts.base_composition)
+    ? obj.facts.base_composition
+    : null;
+  // A FASTA carries no per-base qualities, so the quality curve is meaningless
+  // for a reference.
+  const curve =
+    !isReference && Array.isArray(obj.facts.quality_per_position)
+      ? obj.facts.quality_per_position
+      : null;
+
+  // Which tool produced these numbers. Sits under the tab as one line rather
+  // than being repeated as a note on every group below it.
+  const provenance = [
+    typeof obj.facts.qc_tool === "string"
+      ? `Parsed by ${obj.facts.qc_tool}` +
+        (typeof obj.facts.qc_tool_version === "string"
+          ? ` ${obj.facts.qc_tool_version}`
+          : "")
+      : null,
+    typeof obj.facts.trimmed_by === "string"
+      ? `trimmed with ${obj.facts.trimmed_by}` +
+        (typeof obj.facts.trim_tool_version === "string"
+          ? ` ${obj.facts.trim_tool_version}`
+          : "")
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <>
-      <div className="section">
-        <div
-          className="section-title"
-          style={{ display: "flex", alignItems: "center", gap: 8 }}
-        >
-          <span>{isReference ? "Assembly" : "Parsed facts"}</span>
-          <button
-            type="button"
-            onClick={() => reingest.mutate()}
-            disabled={reingest.isPending || !obj.blob_sha256}
-            style={{
-              marginLeft: "auto",
-              color: "var(--accent)",
-              fontSize: 11,
-              textTransform: "none",
-              letterSpacing: 0,
-            }}
-            title="Re-run format detection and header parsing"
-          >
-            {reingest.isPending ? "queued…" : "re-ingest"}
-          </button>
-        </div>
+      {provenance && <div className="qc-provenance">{provenance}</div>}
 
-        {Object.keys(obj.facts).length > 0 ? (
-          <>
-            {isReference ? (
-              <AssemblyFacts facts={obj.facts} />
-            ) : (
-              <FactsTable facts={obj.facts} />
-            )}
-            <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
-              {Array.isArray(obj.facts.base_composition) && (
-                <div style={{ flex: "0 1 auto" }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-faint)",
-                      marginBottom: 6,
-                    }}
-                  >
-                    Base composition
-                  </div>
-                  <BaseCompositionChart
-                    composition={obj.facts.base_composition as never}
-                    sampledReads={obj.facts.stats_sampled_reads as number | undefined}
-                    sampledBases={obj.facts.stats_sampled_bases as number | undefined}
-                    gcPercent={obj.facts.gc_content_percent as number | undefined}
-                  />
-                </div>
-              )}
-              {/* A FASTA carries no per-base qualities, so the quality curve
-                  is meaningless for a reference. */}
-              {!isReference && Array.isArray(obj.facts.quality_per_position) && (
-                <div style={{ flex: "1 1 auto", minWidth: 300 }}>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: "var(--text-faint)",
-                      marginBottom: 6,
-                    }}
-                  >
-                    Quality per position
-                  </div>
-                  <QualityChart curve={obj.facts.quality_per_position as never} />
-                </div>
-              )}
+      {/* The prompt lives here rather than in the headline, where a Run QC
+          button used to sit permanently: this is the screen where noticing
+          that QC never ran actually happens, and on this data most files are
+          in exactly that state. It also un-gates the align suggestion, which
+          says so from the Actions tab without being able to point at a
+          button on it. */}
+      {runQcPrompt}
+
+      {/* Charts lead: the shape of the data answers "is this any good?" faster
+          than any table of it can, and the numbers below are what you check
+          once the shape has raised a question. */}
+      {(composition || curve) && (
+        <div className="qc-charts">
+          {composition && (
+            <div className="qc-chart">
+              <div className="section-title">Base composition</div>
+              <BaseCompositionChart
+                composition={composition as never}
+                sampledReads={obj.facts.stats_sampled_reads as number | undefined}
+                sampledBases={obj.facts.stats_sampled_bases as number | undefined}
+                gcPercent={obj.facts.gc_content_percent as number | undefined}
+              />
             </div>
-          </>
-        ) : (
-          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-            {obj.status === "ingesting"
-              ? "Parsing headers…"
-              : "No header facts extracted for this format."}
-          </div>
-        )}
-      </div>
+          )}
+          {curve && (
+            <div className="qc-chart">
+              <div className="section-title">Quality per position</div>
+              <QualityChart curve={curve as never} />
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* The file as it is, before anything was done to it. Above the trim
-          comparison because it describes the starting point that comparison
-          is against. */}
-      <QcReport facts={obj.facts} objectId={obj.id} />
+      {!hasFacts && (
+        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+          {obj.status === "ingesting"
+            ? "Parsing headers…"
+            : "No header facts extracted for this format."}
+        </div>
+      )}
 
-      {/* Before/after comparison, on the source file rather than the output:
-          "what did trimming do to my reads" is a question about the input. */}
-      <TrimReport facts={obj.facts} />
+      {/* Ahead of the tables it describes, and outside the reference/reads
+          split because both kinds of file have something worth narrating.
+          Renders nothing at all when there is no summary and no model server,
+          so a user without one sees this tab exactly as it was. */}
+      <AiSummary
+        facts={obj.facts}
+        objectId={obj.id}
+        fingerprint={obj.summary_fingerprint ?? undefined}
+      />
+
+      {isReference ? (
+        hasFacts && <AssemblyFacts facts={obj.facts} />
+      ) : (
+        /* One column flow for everything below the charts: the parsed-fact
+           groups, the QC report and the trim comparison are all cards of the
+           same kind, and they pack by height together rather than the last
+           two spanning the full width under the rest. */
+        <div className="facts-columns">
+          {/* Already grouped by subject -- File contents, Measured quality,
+              Header and so on. */}
+          {hasFacts && <FactsTable facts={obj.facts} columns />}
+
+          {/* The file as it is, before anything was done to it. Ahead of the
+              trim comparison because it describes the starting point that
+              comparison is against. */}
+          <QcReport facts={obj.facts} objectId={obj.id} />
+
+          {/* Before/after comparison, on the source file rather than the
+              output: "what did trimming do to my reads" is a question about
+              the input. */}
+          <TrimReport facts={obj.facts} projectId={obj.project_id} />
+        </div>
+      )}
     </>
   );
 }
@@ -774,69 +866,105 @@ function MetadataTab({
 
   return (
     <>
-      <div className="section">
-        <div className="section-title">Format</div>
-        <dl className="kv">
-          <dt>Detected</dt>
-          <dd>{formatKindLabel(obj.format.kind)}</dd>
-          <dt>Compression</dt>
-          <dd>{compression ?? "None"}</dd>
-          <dt>Confidence</dt>
-          <dd>{obj.format.confidence}</dd>
-          {obj.format.detected_at && (
-            <>
-              <dt>Detected at</dt>
-              <dd>{formatDate(obj.format.detected_at)}</dd>
-            </>
-          )}
-        </dl>
+      <div className="section-note tab-intro">
+        Where this file came from and what has been made from it
       </div>
 
-      <div className="section">
-        <div className="section-title">Storage</div>
-        <dl className="kv">
-          <dt>SHA-256</dt>
-          <dd className="mono" title={obj.blob_sha256 ?? ""}>
-            {shortHash(obj.blob_sha256, 16)}
-          </dd>
-          {obj.blob && (
-            <>
-              <dt>State</dt>
-              <dd>
-                <span className={`badge ${obj.blob.state}`}>{obj.blob.state}</span>
-              </dd>
-              <dt>Mode</dt>
-              <dd>{obj.blob.storage}</dd>
-              <dt>Path</dt>
-              <dd className="mono">
-                {obj.blob.external_path ?? obj.blob.rel_path ?? "—"}
-              </dd>
-              <dt>References</dt>
-              <dd>
-                {obj.blob.ref_count}
-                {obj.blob.ref_count > 1 && (
-                  <span style={{ color: "var(--text-faint)" }}> (deduplicated)</span>
-                )}
-              </dd>
-              <dt>Verified</dt>
-              <dd>{formatDate(obj.blob.last_verified_at)}</dd>
-            </>
-          )}
-        </dl>
+      {/* What is true of the file, in two columns. Read-only: these are facts
+          about the bytes and the archive, not fields anyone edits here. */}
+      <div className="facts-columns">
+        <div className="section">
+          <div className="section-title">Format</div>
+          <dl className="kv">
+            <dt>Detected</dt>
+            <dd>{formatKindLabel(obj.format.kind)}</dd>
+            <dt>Compression</dt>
+            <dd>{compression ?? "None"}</dd>
+            <dt>Confidence</dt>
+            <dd>{obj.format.confidence}</dd>
+            {obj.format.detected_at && (
+              <>
+                <dt>Detected at</dt>
+                <dd>{formatDate(obj.format.detected_at)}</dd>
+              </>
+            )}
+          </dl>
+        </div>
+
+        <div className="section">
+          <div className="section-title">Storage</div>
+          <dl className="kv">
+            <dt>SHA-256</dt>
+            <dd>
+              <TruncatedValue value={obj.blob_sha256} head={16} />
+            </dd>
+            {obj.blob && (
+              <>
+                <dt>State</dt>
+                <dd>
+                  <span className={`badge ${obj.blob.state}`}>{obj.blob.state}</span>
+                </dd>
+                <dt>Mode</dt>
+                <dd>{obj.blob.storage}</dd>
+                <dt>Path</dt>
+                <dd>
+                  <TruncatedValue
+                    value={obj.blob.external_path ?? obj.blob.rel_path}
+                    head={28}
+                  />
+                </dd>
+                <dt>References</dt>
+                <dd>
+                  {obj.blob.ref_count}
+                  {obj.blob.ref_count > 1 && (
+                    <span style={{ color: "var(--text-faint)" }}> (deduplicated)</span>
+                  )}
+                </dd>
+                <dt>Verified</dt>
+                <dd>{formatDate(obj.blob.last_verified_at)}</dd>
+              </>
+            )}
+
+            {/* Record-keeping rather than storage proper, but it belongs with
+                the other facts about this row in the database rather than in
+                a card of its own. */}
+            <dt>Added</dt>
+            <dd>{formatDate(obj.created_at)}</dd>
+            <dt>Updated</dt>
+            <dd>{formatDate(obj.updated_at)}</dd>
+            <dt>ID</dt>
+            <dd>
+              <TruncatedValue value={obj.id} head={24} />
+            </dd>
+          </dl>
+        </div>
+
+        {/* Indexes are hidden from the explorer listing -- five files per
+            reference would bury real work -- so they surface here instead. */}
+        {canIndex && <IndexStatus object={obj} />}
+
+        <DerivedFiles object={obj} />
+
+        {/* SRA run/experiment accessions are the wrong archive for an
+            assembly; assembly_accession links to NCBI Datasets instead. */}
+        {!isReference && (
+          <SraPanel
+            facts={obj.facts}
+            formatKind={obj.format.kind}
+            metadata={obj.metadata}
+          />
+        )}
       </div>
 
-      {/* Indexes are hidden from the explorer listing -- five files per
-          reference would bury real work -- so they surface here instead. */}
-      {canIndex && <IndexStatus object={obj} />}
-
-      <DerivedFiles object={obj} />
-
-      {/* SRA run/experiment accessions are the wrong archive for an
-          assembly; assembly_accession links to NCBI Datasets instead. */}
-      {!isReference && <SraPanel facts={obj.facts} formatKind={obj.format.kind} />}
-
+      {/* The editable form, below everything that merely describes the file.
+          Full width: its groups lay out in columns of their own, which a
+          half-width column would collapse into one cramped stack. */}
       <div className="section">
-        <div className="section-title">Metadata</div>
+        <div className="section-title">Record</div>
+        <div className="section-note">
+          Editable — these fields travel with the file into every pipeline it
+          feeds.
+        </div>
         {/* Keyed on the role so a conversion remounts the editor: its schema
             changes underneath, and in-progress edits belong to the previous
             role's fields. Without this its dirty guard would keep them. */}
@@ -848,27 +976,33 @@ function MetadataTab({
           onSave={onSave}
           saving={saving}
           onDirtyChange={onDirtyChange}
+          // Only when the Public archive section is actually rendered above:
+          // on a reference it is not, and hiding the accessions would leave
+          // them nowhere.
+          dedupeGroups={isReference ? [] : ["Archive"]}
         />
-      </div>
-
-      <div className="section">
-        <div className="section-title">Record</div>
-        <dl className="kv">
-          <dt>Created</dt>
-          <dd>{formatDate(obj.created_at)}</dd>
-          <dt>Updated</dt>
-          <dd>{formatDate(obj.updated_at)}</dd>
-          <dt>ID</dt>
-          <dd className="mono">{obj.id}</dd>
-        </dl>
       </div>
     </>
   );
 }
 
-/** The operations that change the record rather than describe it. */
+/**
+ * Everything you can do to this file, in three sections.
+ *
+ * Computations first, then the suggestion cards, then record-keeping. The
+ * order is not cosmetic: a gated card explains itself with a reason like "Run
+ * QC to determine read chemistry", and the QC button that resolves it has to
+ * be visible above the card saying so -- otherwise the card names a fix that
+ * appears to be nowhere on screen.
+ *
+ * `computations` arrives as a node rather than being built here because those
+ * buttons drive the pipeline dialogs, whose state and mutations live in
+ * ObjectDetail. Passing the finished element keeps that ownership where it is
+ * instead of threading a dozen callbacks through this component.
+ */
 function ActionsTab({
   obj,
+  computations,
   confirmingDelete,
   setConfirmingDelete,
   remove,
@@ -876,114 +1010,42 @@ function ActionsTab({
   metadataDirty,
 }: {
   obj: ObjectDetailData;
+  computations: React.ReactNode;
   confirmingDelete: boolean;
   setConfirmingDelete: (v: boolean) => void;
   remove: { mutate: () => void; isPending: boolean };
   onTagsChanged: () => void;
   metadataDirty: boolean;
 }) {
-  // Nothing to serve until the bytes have actually landed, and a blob the
-  // verifier has marked missing (an unmounted drive, most often) would only
-  // produce a failed download -- so the button says why instead of lying.
-  const hasContent = Boolean(obj.blob && obj.blob_sha256);
-  const contentMissing = obj.blob?.state === "missing";
-  const downloadable = hasContent && !contentMissing;
-
   return (
     <>
+      {computations}
+
       <div className="section">
-        <div className="section-title">Download</div>
-        {downloadable ? (
-          <div>
-            <a
-              className="btn"
-              href={api.objectDownloadUrl(obj.id)}
-              // Named for the user's filename, not the digest. The attribute
-              // only applies same-origin, which this is; the server sets
-              // Content-Disposition regardless, so the name survives either way.
-              download={obj.name}
-            >
-              Download file
-            </a>
-            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}>
-              The original file as stored
-              {obj.blob?.size != null && <> · {formatBytes(obj.blob.size)}</>}
-              {/* compressionLabel returns null for "none", so an uncompressed
-                  file simply says nothing here. */}
-              {compressionLabel(obj.format.compression) && (
-                <> · still {compressionLabel(obj.format.compression)}-compressed</>
-              )}
-            </div>
-          </div>
+        <div className="section-title">Launch a pipeline on this file</div>
+        {/* Gated on readiness here rather than inside the grid: the backend
+            returns an empty list for a file that is not READY, which the
+            component can only render as "no suggestions" -- a verdict, when
+            the truth is "not yet". Answering it from `obj.status`, which this
+            component already has, is simpler than a prop that would only
+            restate what the caller knows. */}
+        {obj.status === "ready" ? (
+          <PipelineSuggestions objectId={obj.id} />
         ) : (
-          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-            {contentMissing
-              ? "The stored file is not currently available. If it lives on an external drive, check that the drive is mounted."
-              : "No stored content to download yet."}
-          </div>
+          <p className="suggestion-none">
+            Suggestions appear once this file has finished ingesting.
+          </p>
         )}
       </div>
 
-      <div className="section">
-        <div className="section-title">Tags</div>
-        <TagEditor
-          objectId={obj.id}
-          tags={obj.tags}
-          onChanged={onTagsChanged}
-        />
-      </div>
-
-      <RoleConverter obj={obj} metadataDirty={metadataDirty} />
-      <PairEditor obj={obj} />
-
-      <div className="section">
-        <div className="section-title">Delete</div>
-
-        {!confirmingDelete ? (
-          <div>
-            <button
-              type="button"
-              className="btn danger"
-              onClick={() => setConfirmingDelete(true)}
-            >
-              Delete file
-            </button>
-            <div
-              style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 6 }}
-            >
-              {obj.blob?.storage === "external"
-                ? "Removes this entry. The original file on disk is left untouched."
-                : (obj.blob?.ref_count ?? 0) > 1
-                  ? `Removes this entry. ${obj.blob!.ref_count - 1} other file(s) share the same content, so the stored data is kept.`
-                  : "Removes this entry. The stored data is reclaimed later by garbage collection."}
-            </div>
-          </div>
-        ) : (
-          <div className="error-box" style={{ marginBottom: 0 }}>
-            <div style={{ marginBottom: 8 }}>
-              Delete <strong>{obj.name}</strong>? This cannot be undone.
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                className="btn danger"
-                onClick={() => remove.mutate()}
-                disabled={remove.isPending}
-              >
-                {remove.isPending ? "Deleting…" : "Yes, delete"}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setConfirmingDelete(false)}
-                disabled={remove.isPending}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+      <ManageFile
+        obj={obj}
+        confirmingDelete={confirmingDelete}
+        setConfirmingDelete={setConfirmingDelete}
+        remove={remove}
+        onTagsChanged={onTagsChanged}
+        metadataDirty={metadataDirty}
+      />
     </>
   );
 }

@@ -4,13 +4,11 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
 import { readQuality } from "../lib/readQuality";
-import { QualityBadge } from "./QualityBadge";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
-import { orderWithPairs, type OrderedFile } from "../lib/pairing";
-import { FileIcon } from "../icons/FileIcon";
+import { groupPairs, orderWithPairs, type OrderedFile } from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
 /**
@@ -296,73 +294,69 @@ function ProjectView({ projectId }: { projectId: string }) {
 
   return (
     <div className="panel panel-left">
-      <div className="panel-header">
+      <div className="panel-header" style={{ flexDirection: "column", alignItems: "stretch" }}>
         <nav className="breadcrumbs">
           <button type="button" onClick={() => navigate("/")}>
             Projects
           </button>
-          {project?.breadcrumbs.map((c, i, all) => (
-            <span key={c.id} style={{ display: "contents" }}>
-              <span className="sep">/</span>
-              {i === all.length - 1 ? (
-                <span className="crumb-current">{c.name}</span>
-              ) : (
-                <button type="button" onClick={() => navigate(`/p/${c.id}`)}>
-                  {c.name}
-                </button>
-              )}
-            </span>
-          ))}
+          <span className="sep">/</span>
+          <span className="crumb-current">Files</span>
         </nav>
 
-        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-          {/* A split button: uploading is much the commoner action and keeps
-              the one-click path, while the chevron reaches the alternative
-              without turning every upload into a menu choice. */}
-          <div className="split-btn">
-            <label className="icon-btn primary" title="Upload files" style={{ cursor: "pointer" }}>
-              +
-              <input
-                type="file"
-                multiple
-                hidden
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  if (files.length) void uploadFiles(files);
-                  e.target.value = "";
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              className="icon-btn primary split-btn-toggle"
-              title="More ways to add files"
-              aria-haspopup="menu"
-              aria-expanded={addMenuOpen}
-              onClick={() => setAddMenuOpen((v) => !v)}
-            >
-              ▾
-            </button>
-            {addMenuOpen && (
-              <>
-                {/* Click-away rather than a focus trap: the menu holds one
-                    item, and dismissing it must not steal focus from the
-                    dialog it opens. */}
-                <div className="menu-scrim" onClick={() => setAddMenuOpen(false)} />
-                <div className="split-btn-menu" role="menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setAddMenuOpen(false);
-                      setNcbiOpen(true);
-                    }}
-                  >
-                    Download from NCBI…
-                  </button>
-                </div>
-              </>
-            )}
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div className="detail-title" style={{ margin: 0 }}>
+            {project?.breadcrumbs.at(-1)?.name}
+          </div>
+
+          <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+            {/* A split button: uploading is much the commoner action and keeps
+                the one-click path, while the chevron reaches the alternative
+                without turning every upload into a menu choice. */}
+            <div className="split-btn">
+              <label className="icon-btn primary" title="Upload files" style={{ cursor: "pointer" }}>
+                +
+                <input
+                  type="file"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length) void uploadFiles(files);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="icon-btn primary split-btn-toggle"
+                title="More ways to add files"
+                aria-haspopup="menu"
+                aria-expanded={addMenuOpen}
+                onClick={() => setAddMenuOpen((v) => !v)}
+              >
+                ▾
+              </button>
+              {addMenuOpen && (
+                <>
+                  {/* Click-away rather than a focus trap: the menu holds one
+                      item, and dismissing it must not steal focus from the
+                      dialog it opens. */}
+                  <div className="menu-scrim" onClick={() => setAddMenuOpen(false)} />
+                  <div className="split-btn-menu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        setNcbiOpen(true);
+                      }}
+                    >
+                      Download from NCBI…
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -440,22 +434,23 @@ function ProjectView({ projectId }: { projectId: string }) {
                 </button>
 
                 {isExpanded &&
-                  displayFiles.map(({ object: o, pair }) => {
-                    const quality = readQuality(o);
-                    return (
+                  groupPairs(displayFiles).map((group) => {
+                    const rows = group.files.map((o) => {
+                      const quality = readQuality(o);
+                      return (
                       <div
                         key={o.id}
                         className={`row ${sel === `object:${o.id}` ? "selected" : ""}${
-                          pair ? ` paired paired-${pair}` : ""
+                          group.pairLabel !== null ? " row-in-pair" : ""
                         }`}
                         onClick={() => select(`object:${o.id}`)}
                       >
-                        <span className="row-icon">
-                          {o.status !== "ready"
-                            ? "⏳"
-                            : <FileIcon formatKind={o.format.kind} role={o.role} />}
-                          {quality && <QualityBadge quality={quality} />}
-                        </span>
+                        {/* The read number leads the name inside a pair: it is
+                            what distinguishes the two rows, and the eye needs
+                            it before the filename, not after the metadata. */}
+                        {group.pairLabel !== null && o.read_number != null && (
+                          <span className="read-badge">R{o.read_number}</span>
+                        )}
                         <div className="row-main">
                           <div className="row-name">{o.name}</div>
                           <div className="row-sub">
@@ -469,7 +464,11 @@ function ProjectView({ projectId }: { projectId: string }) {
                               <span title={quality.tooltip}>{quality.word}</span>
                             )}
                             {o.status !== "ready" && <span>{o.status}</span>}
-                            {o.read_number != null && (
+                            {/* Unpaired files can still carry a read number --
+                                a mate that was deleted, or lives elsewhere. It
+                                stays in the metadata line there, since there is
+                                no sibling row to tell apart. */}
+                            {group.pairLabel === null && o.read_number != null && (
                               <span className="read-badge">R{o.read_number}</span>
                             )}
                           </div>
@@ -502,6 +501,22 @@ function ProjectView({ projectId }: { projectId: string }) {
                         >
                           ×
                         </button>
+                      </div>
+                      );
+                    });
+
+                    // An unpaired file is just its row. A pair is wrapped so
+                    // the label and the spine can span both halves, rather
+                    // than being stitched together from two adjacent rows.
+                    if (group.pairLabel === null) return rows;
+
+                    return (
+                      <div key={group.key} className="pair-group">
+                        <div className="pair-label">
+                          <span>Paired</span>
+                          <span className="pair-stem">{group.pairLabel}</span>
+                        </div>
+                        {rows}
                       </div>
                     );
                   })}

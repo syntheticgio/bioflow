@@ -9,6 +9,75 @@ export interface OrderedFile {
   pair: PairPosition;
 }
 
+/** A run of files rendered together: either one unpaired file, or a mate pair
+ *  drawn as a labelled unit. */
+export interface FileGroup {
+  /** Stable key for React, and the pair's identity. */
+  key: string;
+  files: DataObject[];
+  /** The pair's shared name stem, e.g. "sample" for sample_R1/sample_R2.
+   *  Null for unpaired files, which render as plain rows. */
+  pairLabel: string | null;
+}
+
+/**
+ * The name both mates share, with the read-number marker removed.
+ *
+ * Derived from the pair rather than stored: the mate link is the source of
+ * truth about what pairs with what, and a stem parsed out of one filename
+ * would disagree with it the moment a file is renamed. Falls back to the
+ * common prefix when the usual _R1/_R2 convention is absent, and to null when
+ * that leaves nothing meaningful -- the label is decoration, and a wrong or
+ * empty one is worse than none.
+ */
+export function pairStem(a: string, b: string): string | null {
+  const strip = (n: string) =>
+    n
+      // Drop extensions first (.fastq.gz, .fq), then the read marker, which
+      // sits at the end of the stem: sample_R1.fastq.gz -> sample.
+      .replace(/\.(fastq|fq|fasta|fa)(\.gz)?$/i, "")
+      .replace(/[._-]?R?[12]$/i, "");
+
+  const sa = strip(a);
+  const sb = strip(b);
+  if (sa && sa === sb) return sa;
+
+  // No shared convention: fall back to the literal common prefix, trimmed of
+  // any separator it happens to end on.
+  let i = 0;
+  while (i < sa.length && i < sb.length && sa[i] === sb[i]) i++;
+  const prefix = sa.slice(0, i).replace(/[._-]+$/, "");
+  return prefix.length >= 2 ? prefix : null;
+}
+
+/** Collapse an ordered list into render groups, so a pair can be drawn as one
+ *  labelled unit rather than two rows that happen to be adjacent. */
+export function groupPairs(ordered: OrderedFile[]): FileGroup[] {
+  const groups: FileGroup[] = [];
+
+  for (let i = 0; i < ordered.length; i++) {
+    const entry = ordered[i];
+    const next = ordered[i + 1];
+
+    if (entry.pair === "first" && next?.pair === "second") {
+      groups.push({
+        key: entry.object.id,
+        files: [entry.object, next.object],
+        pairLabel: pairStem(entry.object.name, next.object.name),
+      });
+      i++; // consumed the mate
+      continue;
+    }
+
+    // Includes a "first" whose mate is missing from this list -- orderWithPairs
+    // already declines to mark those, but guarding here keeps the two
+    // functions independently correct.
+    groups.push({ key: entry.object.id, files: [entry.object], pairLabel: null });
+  }
+
+  return groups;
+}
+
 /**
  * Order a category's files so mates sit adjacent, R1 above R2.
  *

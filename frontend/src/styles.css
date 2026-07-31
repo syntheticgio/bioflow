@@ -357,49 +357,48 @@ textarea:focus {
 
 /* ---------- Paired-end reads ---------- */
 
-/* The spine lives in the row's left gutter, which is otherwise unused. Drawn
-   in --border so it reads as structure rather than status: it says "one run",
-   not "something happened". */
-.row.paired {
+/* A pair is one labelled unit: the label names what the two rows have in
+   common, and a single spine runs the height of the group. Drawn in --border
+   so it reads as structure rather than status -- it says "one run", not
+   "something happened".
+
+   The spine belongs to the wrapper rather than being stitched together from
+   each row's pseudo-element, so it cannot break apart when one half is
+   selected and it needs no per-row alignment. */
+.pair-group {
   position: relative;
-  padding-left: 22px;
+  padding-left: 14px;
 }
 
-.row.paired::before {
+.pair-group::before {
   content: "";
   position: absolute;
-  left: 12px;
-  width: 2px;
+  left: 4px;
+  /* Runs the full height of the group, alongside the label rather than
+     starting below it: the label sits within the bracket, not on top of it. */
+  top: 2px;
+  bottom: 6px;
+  width: 1px;
   background: var(--border);
 }
 
-/* Each half covers from its own vertical centre to the shared edge, so the two
-   pseudo-elements meet as one continuous line across the pair. */
-.row.paired-first::before {
-  top: 50%;
-  bottom: 0;
+.pair-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
 }
 
-.row.paired-second::before {
-  top: 0;
-  bottom: 50%;
+/* The shared stem, separated from the word "Paired" by a middot. */
+.pair-stem::before {
+  content: "·";
+  margin-right: 6px;
 }
-
-/* The tick into each row, turning the spine into a bracket. */
-.row.paired::after {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  width: 6px;
-  height: 2px;
-  background: var(--border);
-}
-
-/* The spine sits at a constant left offset whether or not the row is selected:
-   the two halves of a pair must line up, and shifting only the selected half
-   visibly breaks the bracket. The 12px offset already clears the 4px selection
-   edge (see .row.selected), so no nudge is needed. */
 
 .read-badge {
   padding: 0 4px;
@@ -407,6 +406,16 @@ textarea:focus {
   background: var(--bg-hover);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* Inside a pair the badge leads the row instead of trailing the metadata, so
+   it needs to hold a column and not be squeezed by a long filename. */
+.row-in-pair > .read-badge {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 1px;
+  min-width: 22px;
+  text-align: center;
 }
 
 .row-action {
@@ -516,6 +525,37 @@ textarea:focus {
   font-size: 12px;
   color: var(--text-faint);
   margin-bottom: 18px;
+}
+
+/* Background prose about the species, between its name and the actions.
+   Deliberately quiet -- dim, narrow-measure and set in from the left rule --
+   because it is page colour, not a measurement. It must never compete with the
+   file's actual numbers for attention, and the indent reads as an aside. */
+.organism-blurb {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  /* Fills the headline column rather than capping its own measure. A second
+     cap here left the text ending short of the column edge, which reads as a
+     ragged half-column under the file name; the column is the measure. */
+  max-width: none;
+  /* The lower margin clears the action buttons. At the previous 16px the
+     prose ran straight into "Trim reads" with no separation. */
+  margin: -10px 0 24px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.organism-blurb p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+/* First generation takes a few seconds. Holding the space stops the action
+   buttons jumping down under a cursor already on its way to them. */
+.organism-blurb.is-loading {
+  color: var(--text-faint);
+  font-style: italic;
 }
 
 /* Tab strip in the detail panel. The panel body is the only scroll container,
@@ -2316,6 +2356,346 @@ a.btn {
   color: var(--text-dim);
   margin-bottom: 8px;
 }
+
+/* The narrative summary's prose. Wider line-height and a measure that stops
+   short of the panel edge, because this is the one block in the panel meant to
+   be read as sentences rather than scanned as a table. Full text colour, not
+   --text-dim: it is content, not an annotation about content. */
+.ai-summary-body {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  max-width: 68ch;
+  margin: 0 0 8px;
+}
+
+/* ---------- File headline ---------- */
+
+/* Identity and status above the name: what kind of file, how big, and whether
+   it is usable. */
+.detail-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* The name and its actions, with the measured numbers alongside. Wraps to a
+   stack when the pane is too narrow to carry both. */
+.detail-headline {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.detail-headline-main {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+.headline-stats {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* The lead metric, set larger than the rest: the one number that answers
+   "is this any good?" before the eye reaches the others. */
+.headline-lead {
+  margin-bottom: 14px;
+}
+
+.stat-lead-value {
+  font-size: 30px;
+  line-height: 1.05;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-note {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.headline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 12px 28px;
+}
+
+.stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin-bottom: 1px;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Qualifier beside a tab label: a count of what the panel holds, or a word
+   for what it is. */
+.tab-hint {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+}
+
+/* ---------- Fact groups in columns ---------- */
+
+/* CSS columns rather than grid: the groups are wildly uneven (four rows here,
+   twelve there), and column flow packs them by height instead of leaving a
+   grid row as tall as its tallest cell. */
+.facts-columns {
+  columns: 2;
+  column-gap: 32px;
+}
+
+/* A group must never be split across a column boundary -- half of "Measured
+   quality" under the heading and half in the next column would read as two
+   different groups. The same holds for any .section flowing here (the QC
+   report, the trim comparison), which are cards of the same kind. */
+.facts-group,
+.facts-columns > .section {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin-bottom: 20px;
+}
+
+/* .section's default bottom margin would double up with the one above. */
+.facts-columns > .section {
+  margin-top: 0;
+}
+
+.facts-group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts-group-note {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-faint);
+}
+
+/* Below this the two columns are narrower than the label/value pair wants. */
+@media (max-width: 900px) {
+  .facts-columns {
+    columns: 1;
+  }
+}
+
+/* ---------- QC tab ---------- */
+
+.qc-provenance {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-bottom: 16px;
+}
+
+.qc-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 28px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+.qc-chart {
+  min-width: 0;
+}
+
+/* Conclusions under the trim comparison: what it cost, and where the result
+   went. Sentences rather than more table rows. */
+.trim-outcome {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* The output link sits mid-sentence, so it must not carry the block spacing
+   or the baseline shift a standalone text button would. */
+.trim-outcome .btn-text {
+  font-size: inherit;
+  vertical-align: baseline;
+}
+
+/* ---------- Custom metadata fields ---------- */
+
+.custom-fields {
+  margin-bottom: 14px;
+}
+
+.custom-fields-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.custom-fields-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.custom-fields-note {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Underline rather than a full box: fifteen bordered pairs read as a wall of
+   containers, and the row itself already separates one field from the next.
+   The line is what says "editable" -- it stays, and darkens on focus. */
+.custom-fields .meta-row input {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  padding: 5px 2px;
+}
+
+.custom-fields .meta-row input:hover {
+  border-bottom-color: var(--text-faint);
+}
+
+.custom-fields .meta-row input:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+}
+
+/* The key is an identifier, not prose: monospace and in the accent so the
+   name reads as distinct from the value beside it. */
+.custom-fields .meta-row input.meta-key {
+  font-family: var(--mono);
+  color: var(--accent);
+}
+
+/* ---------- Schema metadata editor ---------- */
+
+/* The schema's groups flow through the columns rather than each claiming one:
+   with a column per group the shortest one leaves a screen of white space
+   beside the longest. Column flow balances by height instead, so a heading
+   can begin partway down a column, under the tail of the group before it. */
+.meta-groups {
+  columns: 3;
+  column-gap: 28px;
+  margin-bottom: 14px;
+}
+
+/* A group may break across columns -- that is what makes the balancing work
+   -- but a heading must never be the last thing in a column with its fields
+   in the next one. */
+.meta-group {
+  break-inside: auto;
+  margin-bottom: 18px;
+}
+
+.meta-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  margin-bottom: 8px;
+  break-after: avoid;
+  break-inside: avoid;
+}
+
+/* An individual field is the unit that must stay whole: a label in one column
+   with its input in the next is unusable. */
+.meta-field {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+@media (max-width: 1100px) {
+  .meta-groups {
+    columns: 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .meta-groups {
+    columns: 1;
+  }
+}
+
+/* A one-line caption under a tab's heading, saying what the tab is for. */
+.tab-intro {
+  margin-bottom: 20px;
+}
+
+/* ---------- Truncated values ---------- */
+
+.truncated-value {
+  display: inline;
+}
+
+/* Wraps on any character once expanded -- a 64-char hash has nothing to break
+   on, and letting it overflow would push the column wider than its track. */
+.truncated-value-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.truncated-value-toggle {
+  margin-left: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+/* ---------- Section separation ---------- */
+
+/* Sections carried only a bottom margin, so a section following a multi-column
+   block (which ends at whichever column is tallest) began immediately under it
+   and read as part of it. A top margin that collapses against the neighbour's
+   bottom one gives every section its own guaranteed clearance without doubling
+   the gap between two ordinary siblings. */
+.section {
+  margin-top: 22px;
+}
+
+/* The first section in a panel or tab has nothing above it to clear. */
+.section:first-child,
+.panel-body > .section:first-of-type {
+  margin-top: 0;
+}
+
+/* A column flow ends ragged -- the shortest column leaves white space, but the
+   tallest defines the edge, and a following block sits against that edge with
+   the ragged gap making it look attached to the last card. Extra clearance
+   here rather than a bottom margin on .facts-columns, which would also pad the
+   end of the tab. */
+.facts-columns + .section {
+  margin-top: 32px;
+}
+
 /* Pipeline suggestion cards -- what a file can be run through next.
    Sized off var(--radius) rather than a literal so the broadsheet theme's
    2px corners apply without a second rule here. */

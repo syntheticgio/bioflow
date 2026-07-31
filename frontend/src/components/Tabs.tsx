@@ -3,6 +3,10 @@ import { useRef } from "react";
 export interface TabDef {
   id: string;
   label: string;
+  /** Optional qualifier shown beside the label -- a count of what the panel
+   *  holds, or a word for what it is. Omitted when there is nothing useful to
+   *  say, rather than shown as a zero. */
+  hint?: string;
 }
 
 interface Props {
@@ -76,6 +80,7 @@ export function Tabs({ tabs, active, onChange, idPrefix }: Props) {
             onClick={() => onChange(t.id)}
           >
             {t.label}
+            {t.hint && <span className="tab-hint">{t.hint}</span>}
           </button>
         );
       })}

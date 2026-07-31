@@ -126,10 +126,10 @@
   --warn: #8a6a00;
   --error: var(--color-accent-2-700);
 
-  /* Base composition. The IGV convention holds -- anyone reading sequence
-     data expects these hues -- but each is pulled toward the paper palette
-     so the pie doesn't fluoresce against it. */
-  --base-a: #2f6d3f;
+  /* Base composition donut: A in ink rather than the IGV green, so the ramp
+     reads as this theme's own palette (ink/accent/gold/accent-2) instead of
+     a genome-browser convention transplanted onto paper. */
+  --base-a: var(--color-text);
   --base-c: var(--color-accent-700);
   --base-g: #a97400;
   --base-t: var(--color-accent-2-700);
@@ -438,6 +438,39 @@
   color: var(--color-text);
 }
 
+/* Kicker over a panel's title, in the same quiet all-caps register as a
+   headline stat's label (.stat-label) rather than the panel-title's own
+   voice -- it's metadata about the view, not the view's name. */
+.theme-broadsheet .breadcrumbs {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .breadcrumbs button {
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .breadcrumbs button:hover {
+  background: none;
+  color: var(--color-accent-2);
+}
+
+.theme-broadsheet .breadcrumbs .crumb-current {
+  padding: 0;
+  font-weight: inherit;
+  color: var(--ink-62);
+}
+
 /* The panel header's action reads as a link in the masthead's register. */
 .theme-broadsheet .btn-text {
   font-family: var(--font-body);
@@ -499,11 +532,8 @@
   box-shadow: none;
 }
 
-/* Names are set in italic here, the editorial convention for a specimen or
-   work title -- it is what makes the file list read as a catalogue. */
 .theme-broadsheet .row-name {
   font-size: 15px;
-  font-style: italic;
 }
 
 .theme-broadsheet .row-sub {
@@ -511,9 +541,58 @@
   color: var(--ink-62);
 }
 
+/* Still used by the project rows' folder glyph; file rows no longer carry an
+   icon at all. */
 .theme-broadsheet .row-icon {
   width: 28px;
   color: var(--ink-62);
+}
+
+/* The explorer reuses .detail-title for the project name in its header. The
+   display size is meant for the wide detail pane; in a 290px gutter it wraps
+   to three lines and shoves the upload buttons off. Sized to the column here. */
+.theme-broadsheet .panel-left .detail-title {
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+/* ── Paired reads ───────────────────────────────────────────────────────── */
+
+.theme-broadsheet .pair-group {
+  padding-left: var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.theme-broadsheet .pair-group::before {
+  left: 3px;
+  background: var(--color-divider);
+}
+
+.theme-broadsheet .pair-label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  color: var(--color-accent-700);
+  padding-bottom: var(--space-1);
+}
+
+/* The read number is the pair's own mark, so it takes the accent that the
+   label does -- the two read as one piece of structure. */
+.theme-broadsheet .row-in-pair > .read-badge {
+  background: none;
+  padding: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-accent-700);
+}
+
+/* Rows inside a pair are indented under the label and set a step smaller than
+   a top-level file, so the group reads as one entry with two parts. */
+.theme-broadsheet .row-in-pair .row-name {
+  font-size: 14px;
 }
 
 /* ── Key/value lists ────────────────────────────────────────────────────── */
@@ -698,6 +777,31 @@
   margin-bottom: var(--space-8);
 }
 
+/* The species note reads as a standfirst here rather than a dim aside: this
+   theme already sets the subtitle as running prose, so a bordered indent would
+   fight it. Kept a step down from the subtitle in size and colour so the
+   hierarchy -- title, species, background -- still reads at a glance. */
+/* No max-width of its own: the headline column is already measure-constrained
+   (see .detail-headline-main), so capping again here left the text short of the
+   column's right edge and reading as a ragged half-column under the name. */
+.theme-broadsheet .organism-blurb {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-62);
+  max-width: none;
+  /* --space-6, not the --space-5 this first used: that token does not exist in
+     the scale (it steps 4 -> 6), so the declaration was dropped and the buttons
+     sat directly under the last line of prose. */
+  margin: calc(-1 * var(--space-3)) 0 var(--space-6);
+  padding-left: 0;
+  border-left: none;
+}
+
+.theme-broadsheet .organism-blurb.is-loading {
+  color: var(--ink-55);
+}
+
 /* Overview and Project metadata sit as a spread. auto-fit collapses them back
    to one column when the pane is narrow, so the detail panel stays usable at
    any splitter width without a media query. */
@@ -714,33 +818,325 @@
   margin-bottom: var(--space-3);
 }
 
+/* ── File headline ──────────────────────────────────────────────────────── */
+
+.theme-broadsheet .detail-kicker {
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ink-62);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.theme-broadsheet .detail-headline {
+  gap: var(--space-8);
+  margin-bottom: var(--space-6);
+}
+
+/* The measured numbers are set in the same serif as the headline, at print
+   sizes: they are the second thing the page says, not a sidebar. */
+.theme-broadsheet .stat-lead-value {
+  font-family: var(--font-heading);
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+}
+
+.theme-broadsheet .stat-value {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.theme-broadsheet .stat-label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .stat-note {
+  font-size: 12px;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .headline-grid {
+  gap: var(--space-4) var(--space-8);
+}
+
+/* ── QC tab ─────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .qc-provenance {
+  font-size: 13.5px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-6);
+}
+
+.theme-broadsheet .qc-charts {
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+/* The chart captions are labels, not subheads -- the chart is the content. */
+.theme-broadsheet .qc-chart > .section-title {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+  margin-bottom: var(--space-3);
+}
+
+/* ── Trim report ────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .trim-table {
+  font-size: 14px;
+}
+
+.theme-broadsheet .trim-table th,
+.theme-broadsheet .trim-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.theme-broadsheet .trim-table thead th {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* Row labels are content, not column headings -- the generic `table th` rule
+   above sets every th uppercase and letterspaced, which is right for the
+   BEFORE/AFTER/CHANGE strip and wrong for "Reads" and "Bases". */
+.theme-broadsheet .trim-table tbody th {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .trim-outcome {
+  margin-top: var(--space-3);
+  gap: var(--space-1);
+  font-size: 14px;
+  color: var(--ink-70);
+}
+
+/* ── Section separation ─────────────────────────────────────────────────── */
+
+/* The editorial layout runs on a bigger rhythm than Classic's 22px, and the
+   serif subheads need room above them or they read as part of the block they
+   follow. */
+.theme-broadsheet .section {
+  margin-top: var(--space-6);
+}
+
+.theme-broadsheet .section:first-child,
+.theme-broadsheet .panel-body > .section:first-of-type {
+  margin-top: 0;
+}
+
+.theme-broadsheet .facts-columns + .section {
+  margin-top: var(--space-8);
+}
+
+/* The "see more" control, in the accent so it reads as the one clickable
+   thing on a row of plain values. */
+.theme-broadsheet .truncated-value-toggle {
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .truncated-value-toggle:hover {
+  color: var(--color-accent-2);
+}
+
+/* ── Schema metadata editor ─────────────────────────────────────────────── */
+
+.theme-broadsheet .meta-groups {
+  column-gap: var(--space-8);
+  margin-bottom: var(--space-6);
+}
+
+.theme-broadsheet .meta-group {
+  margin-bottom: var(--space-4);
+}
+
+/* Group labels take the accent, the way the custom-field keys do: both name
+   a field rather than stating one. */
+.theme-broadsheet .meta-group-title {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  color: var(--color-accent-700);
+  margin-bottom: var(--space-3);
+}
+
+.theme-broadsheet .tab-intro {
+  font-size: 14px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-6);
+}
+
+/* ── Custom metadata fields ─────────────────────────────────────────────── */
+
+/* The heading takes the same serif weight as the section subheads it sits
+   among, with the count as its caption on the same line. */
+.theme-broadsheet .custom-fields-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
+}
+
+.theme-broadsheet .custom-fields-note {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .custom-fields-head {
+  margin-bottom: var(--space-3);
+}
+
+/* Ruled rows rather than boxed inputs: the row's own hairline is the only
+   division needed, and the underline doubles as the edit affordance. */
+.theme-broadsheet .custom-fields .meta-row {
+  gap: var(--space-2);
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  margin-bottom: 0;
+}
+
+.theme-broadsheet .custom-fields .meta-row input {
+  font-size: 14px;
+  padding: var(--space-2) 0;
+  border-bottom: 0;
+}
+
+.theme-broadsheet .custom-fields .meta-row input:hover {
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+/* Focus is the one state that needs its own line back -- inset so it does not
+   shift the row it sits in. */
+.theme-broadsheet .custom-fields .meta-row input:focus {
+  border-bottom: 0;
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.theme-broadsheet .custom-fields .meta-row input.meta-key {
+  color: var(--color-accent-700);
+}
+
+/* ── Fact groups ────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .facts-columns {
+  column-gap: var(--space-8);
+}
+
+.theme-broadsheet .facts-group {
+  margin-bottom: var(--space-6);
+}
+
+/* Serif subheads, matching the section headings elsewhere in the panel: in
+   column layout the title is what separates one group from the next, so it
+   takes the same weight "Overview" and "Project metadata" carry.
+   Stacked rather than inline -- the note sits under the heading, which a
+   serif at 22px would otherwise crowd on one line. */
+.theme-broadsheet .facts-group-title {
+  flex-direction: column;
+  gap: 0;
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
+  border-bottom: 0;
+  padding-bottom: 0;
+  margin-bottom: var(--space-2);
+}
+
+.theme-broadsheet .facts-group-note {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink-62);
+  letter-spacing: 0;
+}
+
+/* The QC report and trim comparison flow as cards alongside the fact groups,
+   so their headings take the same weight -- otherwise two kinds of card sit
+   in one column looking like two different levels of the page. */
+.theme-broadsheet .facts-columns > .section > .section-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+
 /* ── Detail tabs ────────────────────────────────────────────────────────── */
 
+/* A rule runs the full width above the strip, and each tab carries its own
+   rule beneath: a hairline when unselected, heavy ink when selected. The
+   contrast between the two weights is what marks the tab, rather than a
+   colour wash. */
 .theme-broadsheet .tabs {
-  gap: var(--space-4);
-  margin: 0 -16px var(--space-4);
-  padding: 0 16px;
+  gap: var(--space-6);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) 0 0;
   background: var(--color-bg);
-  border-bottom: 1px solid var(--color-divider);
+  border-top: 1px solid var(--color-text);
+  border-bottom: 0;
 }
 
 .theme-broadsheet .tab {
   padding: 0 0 var(--space-2);
-  font-family: var(--font-body);
-  font-size: 13px;
-  font-weight: 400;
-  letter-spacing: 0.08em;
-  color: var(--ink-62);
+  font-family: var(--font-heading);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--ink-55);
+  border-bottom: 1px solid var(--color-divider);
 }
 
 .theme-broadsheet .tab:hover {
   color: var(--color-accent-700);
 }
 
-/* The active tab is marked by a heavier rule in ink, not a color wash. */
 .theme-broadsheet .tab.active {
   color: var(--color-text);
-  border-bottom: 2px solid var(--color-text);
+  border-bottom: 3px solid var(--color-text);
+}
+
+/* The qualifier stays small and quiet beside a display-sized label. */
+.theme-broadsheet .tab-hint {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--ink-55);
+  margin-left: var(--space-2);
 }
 
 /* ── Footer ─────────────────────────────────────────────────────────────── */

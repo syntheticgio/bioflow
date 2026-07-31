@@ -672,6 +672,59 @@ async def _apply_run_qc(result: dict) -> None:
         q30=facts.get("qc_before_filtering", {}).get("q30_rate"),
     )
 
+    # QC is the moment there is finally something worth narrating, so this is
+    # where the optional summary is offered. Best-effort in every direction: it
+    # returns None when summaries are disabled or the numbers are unchanged, and
+    # a failure to *queue* it must not undo the QC write that just succeeded.
+    from app.services import pipeline_service
+
+    try:
+        await pipeline_service.launch_summary(object_id=obj.id)
+    except Exception as e:  # noqa: BLE001 - an additive extra cannot fail QC
+        log.warning("summary_launch_failed", object_id=object_id, error=str(e))
+
+
+async def _apply_summarize_object(result: dict) -> None:
+    """Record a generated narrative summary on the object it describes.
+
+    A no-op when the model server was down or the file had too little to say --
+    the handler reports those as a `skipped` reason rather than a failure, and
+    the right response to both is to leave whatever summary already exists
+    alone. Overwriting a good summary with nothing because the server happened
+    to be off would make the feature worse than not having it.
+    """
+    object_id = result.get("object_id")
+    summary = result.get("summary")
+    if not object_id or not summary:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("summary_object_missing", object_id=object_id)
+        return
+
+    facts = {
+        **obj.facts,
+        "ai_summary": summary,
+        "ai_summary_model": result.get("model"),
+        "ai_summary_at": datetime.now(UTC).isoformat(),
+    }
+    # The fingerprint of the inputs this summary was written from. Present only
+    # when the launcher computed one; the UI compares it against the current
+    # facts to mark a summary stale after a QC or trim run changes the numbers.
+    fingerprint = result.get("facts_fingerprint")
+    if fingerprint:
+        facts["ai_summary_fingerprint"] = fingerprint
+
+    await obj.set(
+        {
+            DataObject.facts: facts,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info("summary_applied", object_id=object_id, model=result.get("model"))
+
 
 async def _apply_build_index(result: dict) -> None:
     """Turn a finished index build into sidecar objects on the reference.
@@ -1092,6 +1145,7 @@ _APPLIERS = {
     "ingest_headers": _apply_ingest_headers,
     "trim_reads": _apply_trim_reads,
     "run_qc": _apply_run_qc,
+    "summarize_object": _apply_summarize_object,
     "download_sra_run": _apply_sra_download,
     "download_assembly": _apply_assembly_download,
     "build_index": _apply_build_index,

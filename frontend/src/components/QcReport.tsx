@@ -177,6 +177,15 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
           </>
         )}
 
+        {/* The spread matters as much as the averages for long reads: a wide
+            one is the normal shape of a Nanopore run, not a fault. */}
+        {qc.qc_read_length_stdev != null && (
+          <>
+            <dt>Length std. dev.</dt>
+            <dd>{count(qc.qc_read_length_stdev)} bp</dd>
+          </>
+        )}
+
         {qc.qc_mean_quality != null && (
           <>
             <dt>Mean quality</dt>
@@ -203,6 +212,22 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
                 </span>
               )}
             </dd>
+          </>
+        )}
+
+        {qc.qc_platform && (
+          <>
+            <dt>Platform</dt>
+            <dd>{qc.qc_platform}</dd>
+          </>
+        )}
+
+        {/* Only worth a row when it is not the ordinary outcome -- "ok" on
+            every file is a row that never says anything. */}
+        {qc.qc_status && qc.qc_status !== "ok" && (
+          <>
+            <dt>Status</dt>
+            <dd>{qc.qc_status}</dd>
           </>
         )}
 

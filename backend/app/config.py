@@ -97,6 +97,27 @@ class Settings(BaseSettings):
     # is not worth keeping forever on a drive holding sequencing data.
     pipeline_log_retention_days: int = 30
 
+    # --- Local narrative summaries ---
+    # A local OpenAI-compatible model server that turns a file's QC numbers and
+    # metadata into a few sentences of prose. Entirely optional: when the server
+    # is not running, nothing new is populated and nothing else changes.
+    llm_summaries_enabled: bool = True
+    # host.docker.internal because the server runs on the host, not in the
+    # stack. Override with LLM_BASE_URL if it lives elsewhere.
+    llm_base_url: str = "http://host.docker.internal:11234"
+    # Empty means "ask /v1/models and use whatever is loaded", which is the
+    # right default for a single-model server.
+    llm_model: str = ""
+    # Generous: a small local model on CPU is not fast, and the alternative to
+    # waiting is a summary that never appears.
+    llm_timeout_seconds: float = 120.0
+    # The health and models probes decide *whether* to bother, so they must be
+    # quick -- a slow "is it up" check would cost more than it saves.
+    llm_health_timeout_seconds: float = 3.0
+    # A few sentences, with headroom. Small models overshoot a length request,
+    # and a summary cut off mid-sentence reads worse than a slightly long one.
+    llm_max_tokens: int = 400
+
     log_level: str = "INFO"
     owner: str = "local"
 
