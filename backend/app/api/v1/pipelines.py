@@ -521,7 +521,9 @@ async def list_references(project_id: PydanticObjectId) -> dict:
     """
     from app.services import object_service
 
-    objects = await object_service.list_objects(project_id, limit=500)
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
+    objects = await object_service.list_objects(project_id, owner="local", limit=500)
     references = [
         o
         for o in objects

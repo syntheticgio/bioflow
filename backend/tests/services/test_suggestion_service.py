@@ -108,8 +108,10 @@ def _fake_obj(
     because the launch body carries it -- the card assembles the complete
     request body server-side.
 
-    `status` and `project_id` are read only by `suggestions_for`, the one
-    non-pure function here; the individual builders never look at them.
+    `status`, `project_id` and `owner` are read only by `suggestions_for`, the
+    one non-pure function here; the individual builders never look at them.
+    `owner` joins them now that the reference listing is owner-scoped -- a card
+    must not be built from another profile's references.
     """
     from types import SimpleNamespace
     return SimpleNamespace(
@@ -119,6 +121,7 @@ def _fake_obj(
         metadata=metadata or {},
         status=status,
         project_id=project_id,
+        owner="local",
     )
 
 

@@ -101,7 +101,9 @@ async def list_project_objects(
     # TODO(profiles): thread owner from the route once its API layer resolves
     # get_current_owner
     await project_service.get_project(project_id, owner="local")  # 404 if it is gone
-    objects = await object_service.list_objects(project_id, status=obj_status, limit=limit)
+    objects = await object_service.list_objects(
+        project_id, owner="local", status=obj_status, limit=limit
+    )
     return [ObjectOut.of(o) for o in objects]
 
 
@@ -128,8 +130,10 @@ async def register_object(
     Returns 202: the file is recorded immediately, but hashing a large file runs
     on the queue. The object reaches `ready` once that finishes.
     """
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
     obj, job_id = await object_service.register_in_place(
-        project_id=project_id, path_str=body.path, name=body.name
+        owner="local", project_id=project_id, path_str=body.path, name=body.name
     )
     return RegisterAccepted(object=ObjectOut.of(obj), job_id=job_id)
 
@@ -158,7 +162,10 @@ async def upload_object(
 
     # Bridge the async request stream into the sync iterator that the hashing
     # thread consumes, with a small buffer for backpressure.
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
     obj = await object_service.ingest_stream(
+        owner="local",
         project_id=project_id,
         filename=filename,
         stream=_SyncStreamBridge(request.stream()),

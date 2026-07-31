@@ -36,7 +36,7 @@ class TestReportDirCleanup:
             (d / "artifact.txt").write_text("generated")
             made.append(d)
 
-        await object_service.delete_object(obj.id)
+        await object_service.delete_object(obj.id, owner=TEST_OWNER)
 
         for d in made:
             assert not d.exists(), f"leaked {d}"
@@ -56,7 +56,7 @@ class TestReportDirCleanup:
         doomed = settings.vcf_stats_dir / str(target.id)
         doomed.mkdir(parents=True, exist_ok=True)
 
-        await object_service.delete_object(target.id)
+        await object_service.delete_object(target.id, owner=TEST_OWNER)
 
         assert not doomed.exists()
         assert (kept / "variants.tsv").read_text() == "keep me"
@@ -72,7 +72,7 @@ class TestReportDirCleanup:
         for parent in report_dirs():
             assert not (parent / str(obj.id)).exists()
 
-        await object_service.delete_object(obj.id)
+        await object_service.delete_object(obj.id, owner=TEST_OWNER)
 
         assert await DataObject.get(obj.id) is None
 
@@ -94,7 +94,7 @@ class TestReportDirCleanup:
         d.mkdir(parents=True, exist_ok=True)
         (d / "contigs.tsv").write_text("x")
 
-        await object_service.delete_object(bam.id)
+        await object_service.delete_object(bam.id, owner=TEST_OWNER)
 
         assert not d.exists()
 

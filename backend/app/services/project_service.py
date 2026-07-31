@@ -260,24 +260,27 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
 
     ids = [PydanticObjectId(i) for i in preview["project_ids"]]
 
-    # The `owner` filters on DataObject, UploadSession, PipelineRun and Job
-    # below are written for the end state and are inert today: no production
-    # writer sets `owner` on any of those documents yet, so every row carries
-    # the "local" default from TimestampedDocument. Threading owner through
-    # object_service, run_service and the queue is deliberately later work
-    # (Tasks 4 and 5; upload_service is tracked separately), which leaves a
-    # window where the ordering matters. If a real profile lands before those
-    # writers do, a non-"local" project's cascade matches nothing: the project
-    # document is deleted while its objects, sessions, runs and jobs survive as
-    # orphans pointing at a dead project_id, their blobs never decremented, and
-    # the log line below cheerfully reports objects=0 while doing it. That is
-    # precisely the "stranded at refcount 1, where GC can never reach them"
-    # failure delete_project's docstring says this design prevents. It is
-    # unreachable at the moment only because every route in api/v1/projects.py
-    # hardcodes owner="local" pending get_current_owner, so every document on
-    # both sides of these filters is "local" and they all match.
-    # Do not read a green suite as evidence the gap is closed -- the deletion
-    # fixtures in tests/services/helpers.py set the owner the writers do not.
+    # The DataObject filter below is live: object_service now stamps `owner` on
+    # every object it creates, so a non-"local" project's objects really are
+    # matched here and really are reclaimed. test_object_service_owner.py's
+    # cascade test drives ingest_local_file end to end to hold that down.
+    #
+    # The UploadSession, PipelineRun and Job filters are still written for the
+    # end state and inert: no production writer sets `owner` on those documents
+    # yet, so every such row carries the "local" default from
+    # TimestampedDocument. Threading owner through run_service and the queue is
+    # deliberately later work (Task 5; upload_service is tracked separately),
+    # which leaves a window where the ordering matters. If a real profile lands
+    # before those writers do, a non-"local" project's cascade matches none of
+    # them: the project document is deleted while its sessions, runs and jobs
+    # survive as orphans pointing at a dead project_id. That is a milder
+    # failure than the object leak this used to describe -- those rows hold no
+    # blob refcount -- but it is the same shape, and it is unreachable at the
+    # moment only because every route in api/v1/projects.py hardcodes
+    # owner="local" pending get_current_owner.
+    # Do not read a green suite as evidence the remaining gap is closed -- the
+    # deletion fixtures in tests/services/helpers.py set the owner on Job that
+    # queue/queue.py does not.
 
     # Deepest first: if this fails partway, what remains is a valid tree rather
     # than orphans pointing at a parent that no longer exists.
@@ -287,7 +290,7 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
         ).to_list():
             # A sidecar may already be gone, cascaded with its parent above.
             if await DataObject.get(obj.id) is not None:
-                await object_service.delete_object(obj.id)
+                await object_service.delete_object(obj.id, owner=owner)
 
         for session in await UploadSession.find(
             UploadSession.project_id == pid, UploadSession.owner == owner

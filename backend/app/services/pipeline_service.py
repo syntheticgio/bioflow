@@ -782,7 +782,7 @@ async def reference_index_status(reference: DataObject) -> dict:
     """
     from app.services import object_service
 
-    sidecars = await object_service.list_sidecars(reference.id)
+    sidecars = await object_service.list_sidecars(reference.id, owner=reference.owner)
     have = {s.sidecar_role for s in sidecars if s.sidecar_role}
     return {
         aligner.value: aligners.INDEX_ROLE[aligner] in have for aligner in Aligner
@@ -846,7 +846,7 @@ async def sidecar_payload(reference: DataObject, aligner: Aligner) -> dict:
 
     wanted = {aligners.INDEX_ROLE[aligner], SidecarRole.FAI}
     payload: dict = {}
-    for sidecar in await object_service.list_sidecars(reference.id):
+    for sidecar in await object_service.list_sidecars(reference.id, owner=reference.owner):
         if sidecar.sidecar_role not in wanted or not sidecar.blob_sha256:
             continue
         digest, path = await _resolve_readable(sidecar)
@@ -1472,7 +1472,7 @@ async def default_variant_params(obj: DataObject | None = None) -> dict:
 async def _sidecar_of_role(obj: DataObject, role: SidecarRole) -> DataObject | None:
     from app.services import object_service
 
-    for sidecar in await object_service.list_sidecars(obj.id):
+    for sidecar in await object_service.list_sidecars(obj.id, owner=obj.owner):
         if sidecar.sidecar_role is role and sidecar.blob_sha256:
             return sidecar
     return None
@@ -1757,7 +1757,7 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
         )
 
     candidates = await object_service.list_objects(
-        vcf.project_id, limit=500, status=ObjectStatus.READY
+        vcf.project_id, owner=vcf.owner, limit=500, status=ObjectStatus.READY
     )
     annotation = None
     for obj in candidates:

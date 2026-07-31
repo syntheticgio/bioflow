@@ -199,7 +199,10 @@ async def assemble_upload(ctx: JobContext) -> dict:
         object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
     )
     await project_service.bump_counters(obj.project_id, objects=1, total_bytes=size)
-    await object_service.enqueue_ingest(obj, digest=digest)
+    # The object's own owner, rather than a "local" placeholder: this reaches an
+    # object that already exists, so its stamped owner is the real answer and
+    # stays correct once upload_service starts setting a non-"local" one.
+    await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
 
     await session.set(
         {
@@ -396,7 +399,7 @@ async def register_hash(ctx: JobContext) -> dict:
         external_path=str(path) if storage is BlobStorage.EXTERNAL else None,
         observed_mtime=stat.st_mtime,
     )
-    await object_service.enqueue_ingest(obj, path=path)
+    await object_service.enqueue_ingest(obj, owner=obj.owner, path=path)
 
     log.info("register_hashed", path=str(path), digest=digest, storage=storage.value)
     return {"sha256": digest, "size": size, "storage": storage.value}

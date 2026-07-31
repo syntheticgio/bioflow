@@ -651,7 +651,7 @@ async def suggestions_for(obj) -> list[dict]:
         # after: a project whose non-ready objects fill the limit would
         # otherwise come back with references silently missing.
         candidates = await object_service.list_objects(
-            obj.project_id, limit=500, status=ObjectStatus.READY
+            obj.project_id, owner=obj.owner, limit=500, status=ObjectStatus.READY
         )
         # Role, not just format. `REFERENCE_KINDS` is FASTA, and a project that
         # downloaded an assembly from NCBI also holds `protein.faa` and

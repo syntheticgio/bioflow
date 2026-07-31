@@ -145,7 +145,11 @@ async def _try_dedup(
         object_id=obj.id, digest=digest, size=blob.size
     )
     await project_service.bump_counters(project_id, objects=1, total_bytes=blob.size)
-    await object_service.enqueue_ingest(obj, digest=digest)
+    # The object's own owner. upload_service does not set one yet (that is
+    # tracked separately from Task 4), so this is "local" in practice today --
+    # but it becomes correct on its own the moment that writer lands, rather
+    # than leaving a literal behind to be found.
+    await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
     return await DataObject.get(obj.id)
 
 
