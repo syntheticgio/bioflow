@@ -23,7 +23,13 @@
 
 `GET /api/v1/pipelines/tools` (`backend/app/api/v1/pipelines.py:39`) already serves the merged result, and `frontend/src/api/client.ts:313` already has `api.pipelineTools()`. Neither needs changing.
 
-**Two different "is it usable" questions.** `available` means the binary works. `runnable` (a `ToolMeta` field, line 303) means a job handler actually dispatches to it. `cutadapt` and `trimmomatic` are `available: true, runnable: false` -- real working binaries with no code path. The help page must show both states distinctly; see Task 9.
+**Two different "is it usable" questions.** `available` means the binary works. `runnable` (a `ToolMeta` field, line 303) means a job handler actually dispatches to it.
+
+**Corrected 2026-07-31, during Task 3.** This plan originally said `cutadapt` and `trimmomatic` are `runnable: false`. They are not. `pipeline_handlers.py:67-69` dispatches a trim job to `_run_fastp_trim`, `_run_cutadapt_trim`, or `_run_trimmomatic_trim` -- three real handlers -- and **no `TOOL_META` entry sets `runnable=False` at all**. The claim came from a stale comment on the `runnable` field itself, which still describes cutadapt and Trimmomatic as unwired.
+
+So today **every described tool is runnable**, and the "not yet wired up" chip renders for nothing. Keep it anyway: `tool_with_meta`'s fallback still defaults `runnable` to `False` for any tool with no `TOOL_META` entry, so the state is reachable and the distinction is real. Do not build a test around it firing.
+
+**`nanoplot` is genuinely not installed** in the current image (`available: false`). That is the real not-installed case to verify the error state against in Task 11 -- no synthetic patching needed.
 
 **Theme.** Broadsheet is the only theme as of the 2026-07-30 removal. `frontend/index.html:2` hardcodes `class="theme-broadsheet"` on `<html>`. `styles.css` still provides structural CSS; `broadsheet.css` overrides appearance only. Keep that split.
 
@@ -324,7 +330,7 @@ Good: `"Runs on every alignment job to sort and index the BAM, and produces the 
 
 Bad: `"Invoked as samtools sort -@ 4 -m 768M."`
 
-For `cutadapt` and `trimmomatic`, which are `runnable: False`, say so plainly: `"Installed and probed, but no trimming job dispatches to it yet -- fastp handles trimming today."`
+**Done, and it corrected this plan.** cutadapt and trimmomatic are *not* unwired -- `pipeline_handlers.py:67-69` dispatches to all three trimmers. Their `usage` describes them as two of three selectable trimmers, which is what the code actually does.
 
 - [ ] **Step 3: Fill in the entries**
 
@@ -967,8 +973,11 @@ function ToolEntry({ tool }: { tool: PipelineTool }) {
  *
  * `available` is whether the binary works; `runnable` is whether any job
  * handler dispatches to it. Conflating them would tell a reader a tool is
- * ready when nothing calls it -- which is true of cutadapt and Trimmomatic
- * today. A static page could not express this at all.
+ * ready when nothing calls it.
+ *
+ * No described tool is currently unrunnable -- all three trimmers have
+ * handlers -- but an undescribed one defaults to `runnable: false` in
+ * tool_with_meta's fallback, so the state stays reachable.
  */
 function VersionChip({ tool }: { tool: PipelineTool }) {
   if (!tool.available) {
@@ -1498,7 +1507,7 @@ Expected: exact match with the version chips. A mismatch means the probe or the 
 
 - [ ] **Step 5: Verify the not-yet-wired-up state**
 
-`cutadapt` and `trimmomatic` are `runnable: false`. Confirm both show the "not yet wired up" chip alongside a real version, not a bare version and not "not installed".
+**No tool is `runnable: false` today** (see the correction in Background), so this chip should render for nothing. Confirm that `cutadapt` and `trimmomatic` show a plain version chip -- *not* "not yet wired up", which would mean the component is reading the wrong field.
 
 ```bash
 docker compose exec api python -c "
@@ -1521,7 +1530,9 @@ print('missing:', missing or 'none')
 "
 ```
 
-If any are missing, confirm the page shows the "not installed" chip for exactly those. If none are missing, the image ships everything -- per the CLAUDE.md warning about tests that pass whether or not the patch worked, do not assume the branch works because nothing exercised it. Temporarily set a bogus path to force the state:
+**As of 2026-07-31 this prints `['nanoplot']`** -- it is genuinely absent from the image, so the not-installed state has a real subject and needs no synthetic patching. Confirm the page shows the "not installed" chip on nanoplot's entry and on no other, and that nanoplot's description still renders in full: the absence is the news, but the entry must not disappear.
+
+If the list is ever empty, the image ships everything and this branch goes unexercised. Per the CLAUDE.md warning about tests that pass whether or not the patch worked, do not assume it renders -- force the state with a bogus path:
 
 ```bash
 docker compose exec -e FASTP_PATH=/nonexistent api python -c "
@@ -1531,7 +1542,7 @@ print(tools.tool_with_meta(tools.fastp())['available'])
 "
 ```
 
-Expected: `False`. Confirm the page's rendering of that state by whatever means is available -- the point is to see the branch render, not to trust it.
+Expected: `False`.
 
 - [ ] **Step 7: Check the responsive collapse**
 

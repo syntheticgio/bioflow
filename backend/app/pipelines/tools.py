@@ -295,14 +295,19 @@ class ToolMeta:
     # since a sentence cut at 60 characters reads as a bug.
     one_liner: str = ""
     # Whether a job handler actually branches on this tool, independent of
-    # whether the binary is installed. cutadapt and Trimmomatic probe cleanly
-    # -- they are real, working binaries -- but trim_reads only knows fastp;
-    # there is no cutadapt/Trimmomatic code path for it to dispatch into yet.
-    # `available` (on `Tool`, not here) answers "is the binary usable"; this
-    # answers "does anything in this application call it". A tool selector
-    # conflating the two would offer a card that fails not with "not
-    # installed" but with a confusing error from a handler that silently
-    # ignored the choice.
+    # whether the binary is installed. `available` (on `Tool`, not here)
+    # answers "is the binary usable"; this answers "does anything in this
+    # application call it". A tool selector conflating the two would offer a
+    # card that fails not with "not installed" but with a confusing error
+    # from a handler that silently ignored the choice.
+    #
+    # This comment used to cite cutadapt and Trimmomatic as the unrunnable
+    # examples. That stopped being true once trim_reads grew its three-way
+    # dispatch (pipeline_handlers.py) and was not updated -- it then misled a
+    # later change into documenting both tools as unwired on a user-facing
+    # page. No entry below sets this to False today; the default that matters
+    # is the False in tool_with_meta's fallback, for a tool with no entry here
+    # at all.
     runnable: bool = True
 
     # --- Reference data for the Software help page. ---
