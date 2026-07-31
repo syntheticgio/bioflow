@@ -10,6 +10,8 @@ missing binary shows up as "fastp not found" in the launch dialog instead of a
 job that dies thirty seconds after the user walks away.
 """
 
+import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -62,6 +64,27 @@ class Tool:
         }
 
 
+# Probe results supplied from outside, keyed by tool name and holding the
+# fingerprint of the binary they describe. Populated at startup from Redis (see
+# `tool_cache.py`) so a restart does not re-pay the probe cost -- NanoPlot alone
+# is 12s of it.
+#
+# Keyed by fingerprint rather than trusted outright: an entry describing a
+# binary that has since been upgraded must be ignored, not served.
+_seeded: dict[str, tuple[str, Tool]] = {}
+
+
+def seed(name: str, fingerprint: str | None, tool: Tool) -> None:
+    """Offer a previously-probed result for `name`.
+
+    Ignored at use time unless the binary still fingerprints identically, so a
+    caller cannot force a stale version into the cache.
+    """
+    if fingerprint is None:
+        return
+    _seeded[name] = (fingerprint, tool)
+
+
 def _probe(
     name: str,
     configured: str,
@@ -84,6 +107,10 @@ def _probe(
                 f"or set {name.upper()}_PATH."
             ),
         )
+
+    seeded = _seeded.get(name)
+    if seeded is not None and seeded[0] == _fingerprint(resolved):
+        return seeded[1]
 
     try:
         proc = subprocess.run(
@@ -162,6 +189,44 @@ def _clean_version(raw: str) -> str:
         if match:
             return match.group(1)
     return raw.splitlines()[0].strip() if raw else ""
+
+
+def _fingerprint(path: str | None) -> str | None:
+    """Identity of the binary at `path`, for deciding whether a cached probe
+    still describes it.
+
+    Returns None when there is nothing to fingerprint -- an unresolved tool, or
+    one that vanished between `which` and here. None means "always probe",
+    which is the safe direction: a cached version string that no longer matches
+    the installed binary is the half of a run's provenance a methods section
+    reports.
+
+    Combines path, mtime/size and a content hash, because each catches a change
+    the others miss. Content alone drops path, so two tools resolving to
+    identical bytes -- or one tool moving to a new PATH entry unchanged --
+    would look the same. mtime/size alone missed an in-place same-size
+    replacement landing in one filesystem timestamp tick, measured happening in
+    this repo's test container. And mtime moves on a package upgrade even when
+    the bytes do not.
+
+    Known gap: fastqc, bowtie2, hisat2 and cutadapt are interpreter wrappers
+    that dispatch to a separate payload (JARs, installed packages). This
+    fingerprints the wrapper, not the payload -- so an upgrade replacing only
+    the payload, leaving the wrapper byte- and mtime-identical, goes
+    undetected. Accepted rather than silent; the probe cache's TTL is the
+    backstop.
+    """
+    if path is None:
+        return None
+    try:
+        st = os.stat(path)
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return f"{path}:{st.st_mtime_ns}:{st.st_size}:{digest.hexdigest()}"
 
 
 @lru_cache(maxsize=1)
@@ -906,6 +971,7 @@ def require(tool: Tool) -> Tool:
 
 def reset_cache() -> None:
     """Forget probed versions. For tests, and for a config change at runtime."""
+    _seeded.clear()
     fastp.cache_clear()
     fastqc.cache_clear()
     cutadapt.cache_clear()
