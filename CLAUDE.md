@@ -124,6 +124,32 @@ should now pick it, or a card whose `unavailable` reason has just stopped
 being true. The rules have tests in
 `backend/tests/services/test_suggestion_service.py`; add the case there.
 
+Third, the Software help page (`/help/software`) renders `TOOL_META`
+directly, and `test_every_tool_is_documented` requires every entry to carry
+`homepage`, `citation`, `license`, and `usage`. A new tool fails that test
+until those are filled in -- which is the point, since the alternative is a
+reference page that silently omits it.
+
+Verify the license and citation against the project's own repository rather
+than recalling them. A wrong license claim on a page that reads as
+authoritative is worse than a blank field, which is why `repository` and
+`citation_url` are deliberately *not* required: a tool with no public repo or
+no paper should leave them empty rather than invite a fabricated value.
+
+`usage` says how BioFlow uses the tool. Write behaviour, not flags -- flags
+change whenever a runner is tuned, and nothing can mechanically catch a
+`usage` string that has gone stale. The same applies to
+`backend/app/pipelines/sources.py`, which backs `/help/sources` and has its
+own completeness test.
+
+A related trap, since it already cost a wrong claim once: the comment on
+`ToolMeta.runnable` spent a long time citing cutadapt and Trimmomatic as
+tools nothing dispatches to, years after `trim_reads` grew its three-way
+dispatch. Nothing failed, because a comment cannot. When a `runnable` value
+or the prose around it looks surprising, check
+`backend/app/queue/pipeline_handlers.py` for what actually dispatches rather
+than trusting the note.
+
 Two traps when testing tool availability, both of which produced tests that
 silently read the host machine while appearing to control it:
 
