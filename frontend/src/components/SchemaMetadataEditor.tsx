@@ -16,6 +16,12 @@ interface Props {
    * editor is fully functional without it.
    */
   onDirtyChange?: (dirty: boolean) => void;
+  /**
+   * Groups whose values another section already displays. Collapsed by
+   * default so the same value is not on screen twice, and revealed by "show
+   * all fields" -- they remain editable, just not duplicated at rest.
+   */
+  dedupeGroups?: string[];
 }
 
 type Custom = { key: string; value: string };
@@ -28,7 +34,15 @@ type Custom = { key: string; value: string };
  * a free key/value pair. The schema is a convenience, never a restriction — no
  * fixed vocabulary survives contact with a real lab.
  */
-export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving, onDirtyChange }: Props) {
+export function SchemaMetadataEditor({
+  value,
+  formatKind,
+  role,
+  onSave,
+  saving,
+  onDirtyChange,
+  dedupeGroups = [],
+}: Props) {
   const { data: schema } = useQuery({
     // Role is part of the key: a conversion changes which fields apply, and a
     // stale cache would serve the previous role's form.
@@ -65,6 +79,11 @@ export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving, 
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
+  // How many of the custom rows came from the archive. Used only to choose
+  // the wording below: with any SRA fields present, the whole set is
+  // effectively the archive's, and naming that explains the variability.
+  const sraCount = custom.filter((r) => r.key.startsWith("sra_")).length;
+
   const setField = (key: string, v: unknown) => {
     setValues((prev) => ({ ...prev, [key]: v }));
     setDirty(true);
@@ -91,53 +110,61 @@ export function SchemaMetadataEditor({ value, formatKind, role, onSave, saving, 
 
   return (
     <div>
-      {schema.groups.map((group) => {
-        // Show suggested fields and anything already filled in; the rest hide
-        // behind "show all" so the form does not open as a wall of inputs.
-        const visible = group.fields.filter(
-          (f) => showAll || f.suggested || hasValue(values[f.key]),
-        );
-        if (visible.length === 0) return null;
+      {/* Groups sit side by side rather than in one tall stack: they are
+          independent sets of short fields, and a single column makes the form
+          taller than the screen for no gain. */}
+      <div className="meta-groups">
+        {schema.groups.map((group) => {
+          // Show suggested fields and anything already filled in; the rest
+          // hide behind "show all" so the form does not open as a wall of
+          // inputs.
+          //
+          // Archive is the exception: the Public archive section above states
+          // every one of these accessions read-only and links them out, so
+          // showing them again as filled inputs is the same value twice on
+          // one screen. They stay editable behind "show all" -- correcting a
+          // wrong accession is the whole reason they are fields at all.
+          const duplicatedAbove = !showAll && dedupeGroups.includes(group.group);
+          const visible = duplicatedAbove
+            ? []
+            : group.fields.filter(
+                (f) => showAll || f.suggested || hasValue(values[f.key]),
+              );
+          if (visible.length === 0) return null;
 
-        return (
-          <div key={group.group} style={{ marginBottom: 14 }}>
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-faint)",
-                marginBottom: 6,
-                fontWeight: 600,
-              }}
-            >
-              {group.group}
+          return (
+            <div className="meta-group" key={group.group}>
+              <div className="meta-group-title">{group.group}</div>
+              {visible.map((f) => (
+                <FieldInput
+                  key={f.key}
+                  field={f}
+                  value={values[f.key]}
+                  onChange={(v) => setField(f.key, v)}
+                />
+              ))}
             </div>
-            {visible.map((f) => (
-              <FieldInput
-                key={f.key}
-                field={f}
-                value={values[f.key]}
-                onChange={(v) => setField(f.key, v)}
-              />
-            ))}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       {custom.length > 0 && (
-        <div style={{ marginBottom: 14 }}>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--text-faint)",
-              marginBottom: 6,
-              fontWeight: 600,
-            }}
-          >
-            Custom fields
+        <div className="custom-fields">
+          <div className="custom-fields-head">
+            <span className="custom-fields-title">Custom fields</span>
+            {/* Says where these came from and why the list is not the same on
+                every file -- otherwise a set that changes per file reads as
+                the editor losing fields. */}
+            <span className="custom-fields-note">
+              {sraCount > 0
+                ? `${custom.length} parsed from the SRA record for this file — the set differs file to file`
+                : `${custom.length} not covered by the schema for this file type`}
+            </span>
           </div>
           {custom.map((row, i) => (
             <div className="meta-row" key={i}>
               <input
+                className="meta-key"
                 value={row.key}
                 placeholder="key"
                 onChange={(e) => {
@@ -220,7 +247,9 @@ function FieldInput({
   const externalUrl = accessionUrl(field.key, str);
 
   return (
-    <div style={{ marginBottom: 7 }}>
+    // .meta-field lets the column flow keep a label and its input together:
+    // split across a break they are unusable.
+    <div className="meta-field" style={{ marginBottom: 7 }}>
       <label
         style={{
           display: "block",

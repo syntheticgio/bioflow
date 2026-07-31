@@ -8,10 +8,32 @@ interface Props {
   obj: DataObject;
   /** True when the metadata editor holds unsaved edits. */
   metadataDirty?: boolean;
+  /**
+   * Omit the `.section` wrapper and its title, returning only the control.
+   *
+   * For callers that supply their own heading -- the Manage grid labels each
+   * row itself, so the built-in title would render twice.
+   */
+  bare?: boolean;
 }
 
 /** Formats where reference-vs-reads is genuinely ambiguous. */
 const CONVERTIBLE_FORMATS = ["fasta", "fastq"];
+
+/**
+ * Whether this file has a role worth offering to change.
+ *
+ * Exported so a caller laying out a label beside this component can drop the
+ * whole row rather than leaving the label stranded over nothing -- the
+ * component itself renders null here, which a static grid cannot see.
+ * Mirrors `canPair` in PairEditor, which exists for the same reason.
+ */
+export function canConvertRole(obj: { role?: string | null; format: { kind: string } }): boolean {
+  return (
+    obj.role === "reference" ||
+    CONVERTIBLE_FORMATS.includes(obj.format.kind.toLowerCase())
+  );
+}
 
 /**
  * Converts a file between reads and reference.
@@ -25,7 +47,11 @@ const CONVERTIBLE_FORMATS = ["fasta", "fastq"];
  * That is correct but not something to do silently, so a dirty editor gets a
  * confirm step.
  */
-export function RoleConverter({ obj, metadataDirty = false }: Props) {
+export function RoleConverter({
+  obj,
+  metadataDirty = false,
+  bare = false,
+}: Props) {
   const qc = useQueryClient();
   const isReference = obj.role === "reference";
   const [confirming, setConfirming] = useState(false);
@@ -44,6 +70,10 @@ export function RoleConverter({ obj, metadataDirty = false }: Props) {
       // The left panel re-sections off this value.
       qc.invalidateQueries({ queryKey: ["objects", obj.project_id] });
       qc.invalidateQueries({ queryKey: ["search"] });
+      // Deliberately the broad key, not this object's: making a file a
+      // reference gives every set of reads in the project something to align
+      // against, so it changes the align card of files other than this one.
+      qc.invalidateQueries({ queryKey: ["suggestions"] });
       notify.success(
         role === "reference"
           ? `${obj.name} is now a reference`
@@ -54,11 +84,9 @@ export function RoleConverter({ obj, metadataDirty = false }: Props) {
   });
 
   // A BAM or VCF has an unambiguous role already; offering to convert it
-  // invites confusion rather than solving a problem.
-  if (
-    !isReference &&
-    !CONVERTIBLE_FORMATS.includes(obj.format.kind.toLowerCase())
-  ) {
+  // invites confusion rather than solving a problem. Shares its condition with
+  // `canConvertRole` so a caller's guard cannot disagree with what renders.
+  if (!canConvertRole(obj)) {
     return null;
   }
 
@@ -72,9 +100,8 @@ export function RoleConverter({ obj, metadataDirty = false }: Props) {
     doConvert();
   };
 
-  return (
-    <div className="section">
-      <div className="section-title">Role</div>
+  const body = (
+    <>
       {confirming && (
         <div className="warn-box" style={{ marginBottom: 8 }}>
           You have unsaved metadata edits. Converting will discard them.
@@ -110,6 +137,15 @@ export function RoleConverter({ obj, metadataDirty = false }: Props) {
           ? "Moves this back to the Reads section and restores the sequencing metadata fields. Nothing is lost either way."
           : "Marks this as a reference genome. It will move to the References section and show assembly metadata."}
       </div>
+    </>
+  );
+
+  if (bare) return body;
+
+  return (
+    <div className="section">
+      <div className="section-title">Role</div>
+      {body}
     </div>
   );
 }

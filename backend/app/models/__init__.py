@@ -31,6 +31,7 @@ from app.models.object import (
     SourceInfo,
     SourceMode,
 )
+from app.models.organism import OrganismBlurb, normalize_organism
 from app.models.project import Project, ProjectCounters
 from app.models.run import (
     OPTIONAL_ROLES,
@@ -56,6 +57,7 @@ ALL_MODELS = [
     JobRunTiming,
     PipelineRun,
     RunJob,
+    OrganismBlurb,
 ]
 
 __all__ = [
@@ -84,6 +86,7 @@ __all__ = [
     "ObjectError",
     "ObjectRole",
     "ObjectStatus",
+    "OrganismBlurb",
     "PipelineRun",
     "Project",
     "ProjectCounters",
@@ -99,4 +102,5 @@ __all__ = [
     "SourceMode",
     "UploadSession",
     "UploadState",
+    "normalize_organism",
 ]

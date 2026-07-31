@@ -107,6 +107,12 @@ export interface Blob {
 
 export interface ObjectDetail extends DataObject {
   blob: Blob | null;
+  /**
+   * Digest of the object's current facts and metadata, for comparison against
+   * `ai_summary_fingerprint`. Detail-only, and null when the server did not
+   * compute one -- in which case staleness is simply not claimed.
+   */
+  summary_fingerprint?: string | null;
 }
 
 export interface SystemStats {
@@ -743,6 +749,9 @@ export interface QcFacts {
   qc_tool?: string;
   qc_tool_version?: string | null;
   qc_sequencing?: string | null;
+  /** NCBI's platform spelling, e.g. OXFORD_NANOPORE. Written by the long-read
+   *  QC path alongside the chemistry it inferred. */
+  qc_platform?: string | null;
   qc_before_filtering?: TrimSide;
   qc_duplication_rate?: number | null;
   qc_insert_size_peak?: number | null;
@@ -770,6 +779,28 @@ export interface QcFacts {
   /** Inferred by qc_stats.infer_chemistry; see ReadChemistry on the backend. */
   qc_read_chemistry?: string;
   qc_read_chemistry_reason?: string;
+}
+
+/**
+ * A narrative summary written by the local model, if one is running.
+ *
+ * Entirely optional and entirely derived: every one of these keys is absent
+ * unless a `summarize_object` job has succeeded, and nothing in the app
+ * depends on their presence. The model and timestamp ride along because a
+ * summary is only as trustworthy as the thing that wrote it and the numbers it
+ * saw -- both of which can have moved on since.
+ */
+export interface AiSummaryFacts {
+  ai_summary?: string;
+  ai_summary_model?: string | null;
+  /** ISO 8601, UTC. */
+  ai_summary_at?: string;
+  /**
+   * Digest of the facts and metadata this summary was written from. Compared
+   * against the object's current inputs to tell a summary that still describes
+   * the file from one written before the last QC or trim run.
+   */
+  ai_summary_fingerprint?: string;
 }
 
 // --- NCBI SRA ---
@@ -920,4 +951,30 @@ export interface DeletionPreview {
   upload_session_count: number;
   active_jobs: ActiveJob[];
   blocked: boolean;
+}
+
+/**
+ * One pipeline offer for a data file, as rendered in the Actions tab.
+ *
+ * Every card is either `available` with a `launch` payload or `unavailable`
+ * with a `reason` -- the two always agree, since an available card without a
+ * payload would render as a button that does nothing. `why` is populated only
+ * on available cards, `reason` only on unavailable ones.
+ *
+ * `body` is deliberately opaque. It is the *complete* JSON body for
+ * `endpoint`, assembled server-side where the object id and its defaults are
+ * known, and the client posts it verbatim rather than merging anything in:
+ * the three launch endpoints do not share a request shape (`/variants` keys
+ * on `bam_id`, the others on `object_id`), so anything the client had to add
+ * would be a shape it had to know about.
+ */
+export interface PipelineSuggestion {
+  kind: string;
+  category: string;
+  title: string;
+  description: string;
+  why: string | null;
+  status: "available" | "unavailable";
+  reason: string | null;
+  launch: { endpoint: string; body: Record<string, unknown> } | null;
 }

@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from app.api.v1.schemas import BlobOut, ObjectDetail, ObjectOut, ObjectUpdate, PairRequest
 from app.errors import NotFoundError, ValidationError
 from app.models import BlobStorage, JobClass
-from app.services import object_service
+from app.services import object_service, pipeline_service
 from app.storage.paths import blob_path
 
 router = APIRouter(prefix="/objects", tags=["objects"])
@@ -21,6 +21,7 @@ async def get_object(object_id: PydanticObjectId) -> ObjectDetail:
     return ObjectDetail(
         **ObjectOut.of(obj).model_dump(),
         blob=BlobOut.of(blob) if blob else None,
+        summary_fingerprint=pipeline_service.summary_fingerprint(obj),
     )
 
 

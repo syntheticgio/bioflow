@@ -360,7 +360,7 @@ def is_long_read(obj: DataObject) -> bool:
     falls back to platform, the same way `suggested_preset` does, since most
     files reach the trim dialog before anyone has run QC on them.
     """
-    chemistry = _read_chemistry(obj)
+    chemistry = read_chemistry(obj)
     if chemistry is not None and chemistry is not align_runner.ReadChemistry.UNKNOWN:
         return chemistry in (
             align_runner.ReadChemistry.HIFI,
@@ -434,6 +434,104 @@ async def launch_qc(*, object_id: PydanticObjectId):
         )
 
     log.info("qc_launched", job_id=str(job.id), object_id=str(obj.id))
+    return job
+
+
+# --- Narrative summaries ----------------------------------------------------
+
+
+def summary_fingerprint(obj: DataObject) -> str:
+    """A digest of the inputs a summary would be written from.
+
+    Covers facts and metadata but deliberately excludes the `ai_summary_*` keys
+    themselves -- otherwise writing a summary would change the fingerprint that
+    describes what it summarized, and every summary would be born stale.
+    """
+    import hashlib
+    import json
+
+    material = {
+        "facts": {k: v for k, v in obj.facts.items() if not k.startswith("ai_summary")},
+        "metadata": obj.metadata,
+        "role": obj.role.value if obj.role else None,
+    }
+    encoded = json.dumps(material, sort_keys=True, default=str).encode()
+    return hashlib.sha256(encoded).hexdigest()[:16]
+
+
+async def launch_summary(
+    *,
+    object_id: PydanticObjectId,
+    force: bool = False,
+    job_class: JobClass = JobClass.USER_BACKGROUND,
+) -> Job | None:
+    """Queue a narrative summary of a file's QC data and metadata.
+
+    Returns None rather than raising when there is nothing to do -- the feature
+    is additive, and both of its "no" answers (disabled by configuration, or a
+    summary that already covers exactly these numbers) are ordinary outcomes
+    rather than errors. The API turns None into a 409 only for the explicit
+    user-clicked path, where silence would look like a broken button.
+
+    `force` re-runs even when a current summary exists, which is what the
+    regenerate button wants: the numbers are unchanged but the user has asked
+    for another attempt, perhaps against a different model.
+    """
+    from app.queue import queue
+
+    if not settings.llm_summaries_enabled:
+        return None
+
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    # Nothing to describe. Checked here rather than in the handler so an
+    # unsummarizable file never becomes a queued job at all.
+    if not obj.facts and not obj.metadata:
+        return None
+
+    fingerprint = summary_fingerprint(obj)
+    if not force and obj.facts.get("ai_summary_fingerprint") == fingerprint:
+        return None
+
+    organism = obj.metadata.get("organism")
+    payload = {
+        "object_id": str(obj.id),
+        "project_id": str(obj.project_id),
+        "name": obj.name,
+        "format_kind": obj.format.kind.value,
+        "role": obj.role.value if obj.role else None,
+        "organism": organism.strip() if isinstance(organism, str) and organism.strip() else None,
+        # Sent whole: the handler runs in a thread and cannot read the database,
+        # and the prompt builder is what decides which of these keys matter.
+        "facts": {k: v for k, v in obj.facts.items() if not k.startswith("ai_summary")},
+        "metadata": obj.metadata,
+        "facts_fingerprint": fingerprint,
+    }
+
+    # Keyed on the inputs, not just the object: a summary of unchanged numbers
+    # is the same job, while a post-QC re-summary has a different key and is
+    # allowed to queue alongside. `force` adds a nonce so an explicit re-run is
+    # never deduplicated away against its own prior result.
+    dedup = f"summary:{obj.id}:{fingerprint}"
+    if force:
+        from uuid import uuid4
+
+        dedup = f"{dedup}:{uuid4().hex[:8]}"
+
+    job = await queue.enqueue(
+        "summarize_object",
+        payload=payload,
+        job_class=job_class,
+        resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=dedup,
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is not None:
+        log.info("summary_launched", job_id=str(job.id), object_id=str(obj.id))
     return job
 
 
@@ -572,7 +670,7 @@ def default_library(metadata: dict, *, sample: str) -> str:
     return sample
 
 
-def _read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None:
+def read_chemistry(obj: DataObject | None) -> align_runner.ReadChemistry | None:
     """The chemistry QC already inferred, read from facts rather than
     recomputed -- QC runs before alignment, so the fact is known by the time
     the align dialog opens. Facts are tool-written data, not a validated
@@ -606,7 +704,7 @@ async def read_chemistry_for_alignment(
     if obj is None:
         return None
 
-    chemistry = _read_chemistry(obj)
+    chemistry = read_chemistry(obj)
     if chemistry is not None:
         return chemistry
 
@@ -614,7 +712,7 @@ async def read_chemistry_for_alignment(
         parent = await DataObject.get(parent_id)
         if parent is None or parent.format.kind is not FormatKind.FASTQ:
             continue
-        chemistry = _read_chemistry(parent)
+        chemistry = read_chemistry(parent)
         if chemistry is not None:
             return chemistry
     return None
@@ -632,7 +730,7 @@ def default_align_params(obj: DataObject | None = None) -> dict:
     aligner = Aligner.BWA_MEM2 if bwa.available else Aligner.MINIMAP2
 
     platform = sam_platform((obj.metadata or {}).get("platform")) if obj else "ILLUMINA"
-    preset = suggested_preset(platform, chemistry=_read_chemistry(obj))
+    preset = suggested_preset(platform, chemistry=read_chemistry(obj))
 
     # Long reads are minimap2's domain regardless of what else is installed:
     # bwa-mem2 is a short-read aligner and would produce poor alignments.

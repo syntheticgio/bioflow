@@ -1,0 +1,1153 @@
+/* Broadsheet — an editorial skin for the app, selectable from View > Theme.
+ *
+ * Everything here is scoped to .theme-broadsheet on <html>, so this file is
+ * inert until the theme is chosen. It is loaded unconditionally; switching is
+ * a class toggle, not a stylesheet swap.
+ *
+ * The design comes from the "BioFlow Broadsheet" mockup and the Broadsheet
+ * design system behind it. That system names its tokens --color-bg /
+ * --color-text / --space-4; this file deliberately maps them onto the token
+ * names the app already uses (--bg, --text, --accent, ...) instead of
+ * renaming anything in the components. That mapping is why the theme needs
+ * almost no component changes -- keep it that way.
+ *
+ * Broadsheet is a paper design and has no dark variant by design. It must
+ * therefore beat the prefers-color-scheme: light block in styles.css, which
+ * the class selector's specificity handles.
+ */
+
+/* Source Serif 4, vendored under src/fonts (see the README there for why).
+   These sit outside the theme scope because @font-face cannot be nested in a
+   class -- but a declared face costs nothing until something references it,
+   and only Broadsheet rules ever do. */
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/SourceSerif4-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/SourceSerif4-SemiBold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/SourceSerif4-Italic.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../fonts/SourceSerif4-SemiBoldItalic.woff2") format("woff2");
+}
+
+.theme-broadsheet {
+  /* --- Broadsheet's own palette, kept under its source names so the
+     editorial rules below read like the design system. --- */
+  --color-bg: #f3f2f2;
+  --color-surface: #eae9e9;
+  --color-text: #201e1d;
+  --color-accent: #0088b0;
+  --color-accent-2: #d6006c;
+  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+
+  /* Tonal ramps, one shared lightness scale across roles. */
+  --color-neutral-100: #f8f4f4;
+  --color-neutral-200: #eae7e7;
+  --color-neutral-300: #d7d3d3;
+  --color-neutral-400: #bab6b6;
+  --color-neutral-500: #9b9797;
+  --color-neutral-600: #7d7979;
+  --color-neutral-700: #605d5d;
+  --color-neutral-800: #444141;
+  --color-neutral-900: #2d2b2b;
+
+  --color-accent-100: #e9f8ff;
+  --color-accent-200: #cbeeff;
+  --color-accent-300: #99e0ff;
+  --color-accent-400: #62c5ee;
+  --color-accent-500: #38a6cf;
+  --color-accent-600: #1186ac;
+  --color-accent-700: #006786;
+  --color-accent-800: #004961;
+  --color-accent-900: #0a303e;
+
+  --color-accent-2-100: #fff1f4;
+  --color-accent-2-200: #ffdee6;
+  --color-accent-2-300: #ffc0d0;
+  --color-accent-2-400: #ff90b1;
+  --color-accent-2-500: #ff458e;
+  --color-accent-2-600: #d82071;
+  --color-accent-2-700: #aa0b56;
+  --color-accent-2-800: #790e3d;
+  --color-accent-2-900: #4b1528;
+
+  /* Ink at fixed strengths. The mockup leans on color-mix() with these exact
+     percentages for secondary text; naming them keeps the rules readable. */
+  --ink-78: color-mix(in srgb, var(--color-text) 78%, transparent);
+  --ink-70: color-mix(in srgb, var(--color-text) 70%, transparent);
+  --ink-62: color-mix(in srgb, var(--color-text) 62%, transparent);
+  --ink-55: color-mix(in srgb, var(--color-text) 55%, transparent);
+
+  --space-1: 5px;
+  --space-2: 10px;
+  --space-3: 15px;
+  --space-4: 20px;
+  --space-6: 30px;
+  --space-8: 40px;
+
+  /* --- The mapping onto the app's existing tokens. Every component in the
+     tree reads these names, so this block is what actually reskins the UI. --- */
+  --bg: var(--color-bg);
+  --bg-panel: var(--color-bg);
+  --bg-elevated: var(--color-surface);
+  --bg-hover: color-mix(in srgb, var(--color-text) 5%, transparent);
+  --border: var(--color-divider);
+  --text: var(--color-text);
+  --text-dim: var(--ink-70);
+  --text-faint: var(--ink-55);
+  --accent: var(--color-accent-700);
+  --accent-dim: var(--color-accent-500);
+
+  /* Status inks, muted to the press register rather than screen-bright.
+     --success must stay distinct from --accent: the quality chart draws its
+     "good" band from --success and the curve itself from --accent, so
+     folding success into the accent would erase that band. Badges get the
+     mockup's cyan pill treatment through the .badge rules instead. */
+  --success: #2f6d3f;
+  --warn: #8a6a00;
+  --error: var(--color-accent-2-700);
+
+  /* Base composition donut: A in ink rather than the IGV green, so the ramp
+     reads as this theme's own palette (ink/accent/gold/accent-2) instead of
+     a genome-browser convention transplanted onto paper. */
+  --base-a: var(--color-text);
+  --base-c: var(--color-accent-700);
+  --base-g: #a97400;
+  --base-t: var(--color-accent-2-700);
+  --base-n: var(--color-neutral-600);
+  --base-other: #6b4ea8;
+
+  --radius: 2px;
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
+  --shadow-md: 0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
+  --shadow-lg: 0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
+
+  --font-heading: "Source Serif 4", Georgia, serif;
+  --font-body: "Source Serif 4", Georgia, serif;
+  /* --mono is inherited from styles.css unchanged: IDs, sequences, job names
+     and file paths stay monospace in both themes, as the mockup has them. */
+
+  /* The masthead and status strip are laid out by the theme, so their heights
+     belong to the theme too. Classic's compact 48/32 would crowd them. */
+  --header-h: auto;
+  --footer-h: auto;
+}
+
+/* ── Type ───────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet body {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+.theme-broadsheet h1,
+.theme-broadsheet h2,
+.theme-broadsheet h3,
+.theme-broadsheet h4,
+.theme-broadsheet h5,
+.theme-broadsheet h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+}
+
+/* Inputs and buttons don't inherit the page font on their own. */
+.theme-broadsheet button,
+.theme-broadsheet input,
+.theme-broadsheet select,
+.theme-broadsheet textarea {
+  font-family: inherit;
+}
+
+/* Monospace runs a touch large next to a serif at the same nominal size --
+   the serif's x-height is smaller. Knock it back so the two sit level. */
+.theme-broadsheet code,
+.theme-broadsheet pre,
+.theme-broadsheet .mono {
+  font-size: 0.92em;
+}
+
+/* ── Shell and scroll model ─────────────────────────────────────────────── */
+
+/* Classic pins the app to the viewport and scrolls each pane internally.
+   Broadsheet is a page: the sheet scrolls under the masthead. This is the
+   one genuinely structural difference between the two themes. */
+.theme-broadsheet,
+.theme-broadsheet body,
+.theme-broadsheet #root {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
+/* Column, not block: it lets .main take the slack so a short page still
+   carries its footer to the bottom of the sheet instead of leaving it
+   stranded under the content. */
+.theme-broadsheet .shell {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  min-height: 100vh;
+  padding: 0 var(--space-8) var(--space-8);
+}
+
+.theme-broadsheet .shell > .main {
+  flex: 1 0 auto;
+}
+
+/* ── Masthead ───────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .header {
+  display: grid;
+  /* wordmark+nav / heavy rule / status strip / hairline */
+  grid-template-areas: "brand nav" "rule rule" "status status" "hair hair";
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-6);
+  padding: var(--space-6) 0 0;
+  background: none;
+  border-bottom: 0;
+}
+
+/* The two rules under the masthead: a heavy one directly under the wordmark,
+   a hairline under the status strip. Drawn as pseudo-elements so the theme
+   needs no extra markup in Header.tsx. */
+.theme-broadsheet .header::before {
+  content: "";
+  grid-area: rule;
+  height: 4px;
+  background: var(--color-text);
+}
+
+.theme-broadsheet .header::after {
+  content: "";
+  grid-area: hair;
+  height: 1px;
+  background: var(--color-text);
+}
+
+.theme-broadsheet .header-brand {
+  grid-area: brand;
+  gap: var(--space-4);
+  align-items: baseline;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 34px;
+  letter-spacing: -0.01em;
+  line-height: 1;
+}
+
+/* The rounded gradient chip is a product-UI device; the masthead wants the
+   kicker instead. Hidden rather than removed -- Classic still uses it. */
+.theme-broadsheet .header-logo {
+  display: none;
+}
+
+/* "Genomics pipeline desk" -- set from CSS so Header.tsx stays shared. */
+.theme-broadsheet .header-brand::after {
+  content: "Genomics pipeline desk";
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+  white-space: nowrap;
+}
+
+.theme-broadsheet .header-menu {
+  grid-area: nav;
+  justify-self: end;
+  align-items: baseline;
+  gap: var(--space-4);
+}
+
+/* Text buttons on paper: no chip, no fill, colour is the only state. */
+.theme-broadsheet .header-menu button,
+.theme-broadsheet .header-menu a {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 15px;
+  color: var(--color-text);
+}
+
+.theme-broadsheet .header-menu button:hover,
+.theme-broadsheet .header-menu a:hover,
+.theme-broadsheet .header-menu a.active {
+  background: none;
+  color: var(--color-accent-700);
+}
+
+/* The right-hand cluster (load indicator, stored bytes) becomes the left of
+   the uppercase status strip beneath the heavy rule. */
+.theme-broadsheet .header-right {
+  grid-area: status;
+  margin-left: 0;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-1) 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .load-indicator,
+.theme-broadsheet .header-stats {
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  gap: var(--space-2);
+}
+
+/* The strip reads as running text in the design, its parts divided by middots
+   rather than whitespace. Generated between siblings so the components stay
+   plain lists of spans and Classic keeps its own spacing. */
+.theme-broadsheet .header-stats > span + span::before,
+.theme-broadsheet .load-indicator > span + span::before {
+  content: "·";
+  margin-right: var(--space-2);
+  color: var(--ink-55);
+}
+
+/* The status dot is the one child that is a mark, not a word -- it takes no
+   separator and sits tight against the state it belongs to. */
+.theme-broadsheet .load-indicator > .dot + span::before {
+  content: none;
+}
+
+.theme-broadsheet .load-indicator .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+/* The idle dot takes the cyan accent here, as the design has it. Only this one
+   state: busy and loaded keep their amber and red, which are warnings and must
+   stay legible as such. --success itself cannot move -- the quality chart's
+   "good" band reads it. */
+.theme-broadsheet .load-indicator .dot.state-open {
+  --dot-color: var(--color-accent);
+}
+
+/* The strip is one uniform ink in the design. LoadIndicator dims its trailing
+   items for Classic's denser header; here that reads as two tones in a line of
+   running text, so pull them back level. The dot keeps its own colour -- that
+   one is load state, not decoration. */
+.theme-broadsheet .load-indicator .load-metric {
+  color: inherit;
+}
+
+/* Menus hang from the right in the masthead: View and Help sit at the page's
+   right edge here (Classic's nav starts at the left), so a left-anchored
+   dropdown runs off the sheet. */
+.theme-broadsheet .menu-dropdown {
+  left: auto;
+  right: 0;
+  border-radius: var(--radius-md);
+  border-color: var(--color-divider);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Gutter and main column ─────────────────────────────────────────────── */
+
+/* The mockup's fixed 290px gutter. App.tsx sets --left-w inline from the
+   drag state, so the theme overrides the track rather than the variable --
+   an inline style would win over any --left-w declared here. */
+.theme-broadsheet .main {
+  grid-template-columns: 290px minmax(0, 1fr);
+  gap: var(--space-8);
+  align-items: start;
+  padding-top: var(--space-6);
+  overflow: visible;
+}
+
+.theme-broadsheet .main-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Drag-to-resize has no place in a fixed editorial gutter. Hidden, not
+   deleted: Classic still uses the same element. */
+.theme-broadsheet .splitter {
+  display: none;
+}
+
+/* Panes are regions of one page now, not independently scrolling boxes. */
+.theme-broadsheet .panel {
+  background: none;
+  overflow: visible;
+}
+
+.theme-broadsheet .panel-left {
+  border-right: 0;
+  position: sticky;
+  top: var(--space-4);
+}
+
+.theme-broadsheet .panel-body,
+.theme-broadsheet .panel-left .panel-body {
+  overflow: visible;
+}
+
+/* ── Section headers ────────────────────────────────────────────────────── */
+
+.theme-broadsheet .panel-header {
+  padding: 0 0 var(--space-2);
+  border-bottom: 0;
+  min-height: 0;
+  margin-bottom: var(--space-2);
+}
+
+.theme-broadsheet .panel-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--color-text);
+}
+
+/* Kicker over a panel's title, in the same quiet all-caps register as a
+   headline stat's label (.stat-label) rather than the panel-title's own
+   voice -- it's metadata about the view, not the view's name. */
+.theme-broadsheet .breadcrumbs {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .breadcrumbs button {
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .breadcrumbs button:hover {
+  background: none;
+  color: var(--color-accent-2);
+}
+
+.theme-broadsheet .breadcrumbs .crumb-current {
+  padding: 0;
+  font-weight: inherit;
+  color: var(--ink-62);
+}
+
+/* The panel header's action reads as a link in the masthead's register. */
+.theme-broadsheet .btn-text {
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .btn-text:hover {
+  color: var(--color-accent-2);
+  text-decoration: none;
+}
+
+/* ── Filter ─────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .panel-filter {
+  padding: 0 0 var(--space-3);
+}
+
+.theme-broadsheet .panel-filter input {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  caret-color: var(--color-accent);
+}
+
+.theme-broadsheet .panel-filter input::placeholder {
+  color: var(--ink-62);
+  opacity: 1;
+}
+
+.theme-broadsheet .panel-filter input:focus {
+  border-color: var(--color-accent);
+}
+
+/* ── Rows ───────────────────────────────────────────────────────────────── */
+
+/* The mockup marks the selected row with a 3px accent bar in the left gutter
+   over a tinted ground, rather than Classic's inset shadow. */
+/* The left padding is what separates the 3px selection bar from the icon --
+   without it the two collide and the bar reads as part of the glyph. */
+.theme-broadsheet .row {
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-1);
+  border-bottom: 0;
+  border-left: 3px solid transparent;
+}
+
+.theme-broadsheet .row:hover {
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.theme-broadsheet .row.selected {
+  background: var(--color-accent-100);
+  border-left-color: var(--color-accent);
+  box-shadow: none;
+}
+
+.theme-broadsheet .row-name {
+  font-size: 15px;
+}
+
+.theme-broadsheet .row-sub {
+  font-size: 12px;
+  color: var(--ink-62);
+}
+
+/* Still used by the project rows' folder glyph; file rows no longer carry an
+   icon at all. */
+.theme-broadsheet .row-icon {
+  width: 28px;
+  color: var(--ink-62);
+}
+
+/* The explorer reuses .detail-title for the project name in its header. The
+   display size is meant for the wide detail pane; in a 290px gutter it wraps
+   to three lines and shoves the upload buttons off. Sized to the column here. */
+.theme-broadsheet .panel-left .detail-title {
+  font-size: 20px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+/* ── Paired reads ───────────────────────────────────────────────────────── */
+
+.theme-broadsheet .pair-group {
+  padding-left: var(--space-3);
+  margin: var(--space-2) 0;
+}
+
+.theme-broadsheet .pair-group::before {
+  left: 3px;
+  background: var(--color-divider);
+}
+
+.theme-broadsheet .pair-label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  color: var(--color-accent-700);
+  padding-bottom: var(--space-1);
+}
+
+/* The read number is the pair's own mark, so it takes the accent that the
+   label does -- the two read as one piece of structure. */
+.theme-broadsheet .row-in-pair > .read-badge {
+  background: none;
+  padding: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-accent-700);
+}
+
+/* Rows inside a pair are indented under the label and set a step smaller than
+   a top-level file, so the group reads as one entry with two parts. */
+.theme-broadsheet .row-in-pair .row-name {
+  font-size: 14px;
+}
+
+/* ── Key/value lists ────────────────────────────────────────────────────── */
+
+/* The Overview list is a table in the design: ruled rows, label in muted ink
+   at the same size as its value, not a smaller caption. */
+.theme-broadsheet .kv {
+  font-size: 14px;
+  gap: 0;
+  align-items: baseline;
+}
+
+.theme-broadsheet .kv dt,
+.theme-broadsheet .kv dd {
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.theme-broadsheet .kv dt {
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .kv dd.mono {
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+/* ── Tables ─────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet table th {
+  text-align: left;
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-divider);
+  background: none;
+}
+
+.theme-broadsheet table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.theme-broadsheet tbody tr:hover {
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────────── */
+
+/* This app's buttons are .btn, with .primary for the emphasized variant --
+   there is no .btn-primary here. */
+.theme-broadsheet button,
+.theme-broadsheet .btn {
+  border-radius: var(--radius-md);
+  font-family: var(--font-heading);
+  font-weight: 600;
+}
+
+.theme-broadsheet .btn:not(.primary) {
+  background: #fff;
+}
+
+.theme-broadsheet .btn.primary,
+.theme-broadsheet .icon-btn.primary {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border-color: transparent;
+}
+
+.theme-broadsheet .btn.primary:hover,
+.theme-broadsheet .icon-btn.primary:hover {
+  background: var(--color-accent-600);
+}
+
+/* ── Badges and chips ───────────────────────────────────────────────────── */
+
+/* The mockup's status pill: near-square, quiet ground, ink from the same
+   ramp as the ground so the pair always carries contrast. */
+.theme-broadsheet .badge,
+.theme-broadsheet .chip {
+  border-radius: 1px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  padding: 3px 10px;
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-800);
+}
+
+/* Flat ramp pairs rather than Classic's color-mix washes: on paper a 18%
+   tint of the ink goes chalky, while the ramp's own 100/800 steps are
+   measured against each other. */
+.theme-broadsheet .badge.ready,
+.theme-broadsheet .badge.present,
+.theme-broadsheet .badge.succeeded {
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+}
+
+.theme-broadsheet .badge.error,
+.theme-broadsheet .badge.missing,
+.theme-broadsheet .badge.failed,
+.theme-broadsheet .badge.dead {
+  background: var(--color-accent-2-100);
+  color: var(--color-accent-2-800);
+}
+
+/* ── Dialogs ────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .modal {
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.theme-broadsheet .modal-backdrop {
+  background: color-mix(in srgb, var(--color-neutral-900) 50%, transparent);
+}
+
+/* ── Sections ───────────────────────────────────────────────────────────── */
+
+/* Section headings are serif subheads, matching "Overview" and "Project
+   metadata" in the design -- one clear step below the display title and one
+   above body text, with no rule under them. The uppercase letterspaced
+   treatment stays only where a label really is a label (.group-title). */
+.theme-broadsheet .section-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--color-text);
+  padding-bottom: 0;
+  margin-bottom: var(--space-3);
+  border-bottom: 0;
+}
+
+/* The file explorer's collapsible group headings are labels, not subheads --
+   they keep the quiet uppercase register so the filenames stay the content. */
+.theme-broadsheet .group-title {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--ink-62);
+}
+
+/* ── Detail pane ────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .detail {
+  padding: 0;
+}
+
+/* The subject of the page gets the display treatment -- the mockup's
+   clamp()ed serif headline. Italic for the same reason row names are. */
+.theme-broadsheet .detail-title {
+  font-family: var(--font-heading);
+  font-size: clamp(26px, 2.6vw, 38px);
+  font-weight: 600;
+  font-style: italic;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin-bottom: var(--space-2);
+}
+
+.theme-broadsheet .detail-subtitle {
+  font-size: 17px;
+  line-height: 1.5;
+  max-width: 46ch;
+  text-wrap: pretty;
+  color: var(--ink-78);
+  margin-bottom: var(--space-4);
+}
+
+.theme-broadsheet .detail-actions {
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+}
+
+/* The species note reads as a standfirst here rather than a dim aside: this
+   theme already sets the subtitle as running prose, so a bordered indent would
+   fight it. Kept a step down from the subtitle in size and colour so the
+   hierarchy -- title, species, background -- still reads at a glance. */
+/* No max-width of its own: the headline column is already measure-constrained
+   (see .detail-headline-main), so capping again here left the text short of the
+   column's right edge and reading as a ragged half-column under the name. */
+.theme-broadsheet .organism-blurb {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ink-62);
+  max-width: none;
+  /* --space-6, not the --space-5 this first used: that token does not exist in
+     the scale (it steps 4 -> 6), so the declaration was dropped and the buttons
+     sat directly under the last line of prose. */
+  margin: calc(-1 * var(--space-3)) 0 var(--space-6);
+  padding-left: 0;
+  border-left: none;
+}
+
+.theme-broadsheet .organism-blurb.is-loading {
+  color: var(--ink-55);
+}
+
+/* Overview and Project metadata sit as a spread. auto-fit collapses them back
+   to one column when the pane is narrow, so the detail panel stays usable at
+   any splitter width without a media query. */
+.theme-broadsheet .detail-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--space-8);
+  align-items: start;
+}
+
+.theme-broadsheet .section-note {
+  font-size: 13.5px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-3);
+}
+
+/* ── File headline ──────────────────────────────────────────────────────── */
+
+.theme-broadsheet .detail-kicker {
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ink-62);
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.theme-broadsheet .detail-headline {
+  gap: var(--space-8);
+  margin-bottom: var(--space-6);
+}
+
+/* The measured numbers are set in the same serif as the headline, at print
+   sizes: they are the second thing the page says, not a sidebar. */
+.theme-broadsheet .stat-lead-value {
+  font-family: var(--font-heading);
+  font-size: 38px;
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+}
+
+.theme-broadsheet .stat-value {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.theme-broadsheet .stat-label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .stat-note {
+  font-size: 12px;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .headline-grid {
+  gap: var(--space-4) var(--space-8);
+}
+
+/* ── QC tab ─────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .qc-provenance {
+  font-size: 13.5px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-6);
+}
+
+.theme-broadsheet .qc-charts {
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+/* The chart captions are labels, not subheads -- the chart is the content. */
+.theme-broadsheet .qc-chart > .section-title {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+  margin-bottom: var(--space-3);
+}
+
+/* ── Trim report ────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .trim-table {
+  font-size: 14px;
+}
+
+.theme-broadsheet .trim-table th,
+.theme-broadsheet .trim-table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+
+.theme-broadsheet .trim-table thead th {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+/* Row labels are content, not column headings -- the generic `table th` rule
+   above sets every th uppercase and letterspaced, which is right for the
+   BEFORE/AFTER/CHANGE strip and wrong for "Reads" and "Bases". */
+.theme-broadsheet .trim-table tbody th {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .trim-outcome {
+  margin-top: var(--space-3);
+  gap: var(--space-1);
+  font-size: 14px;
+  color: var(--ink-70);
+}
+
+/* ── Section separation ─────────────────────────────────────────────────── */
+
+/* The editorial layout runs on a bigger rhythm than Classic's 22px, and the
+   serif subheads need room above them or they read as part of the block they
+   follow. */
+.theme-broadsheet .section {
+  margin-top: var(--space-6);
+}
+
+.theme-broadsheet .section:first-child,
+.theme-broadsheet .panel-body > .section:first-of-type {
+  margin-top: 0;
+}
+
+.theme-broadsheet .facts-columns + .section {
+  margin-top: var(--space-8);
+}
+
+/* The "see more" control, in the accent so it reads as the one clickable
+   thing on a row of plain values. */
+.theme-broadsheet .truncated-value-toggle {
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .truncated-value-toggle:hover {
+  color: var(--color-accent-2);
+}
+
+/* ── Schema metadata editor ─────────────────────────────────────────────── */
+
+.theme-broadsheet .meta-groups {
+  column-gap: var(--space-8);
+  margin-bottom: var(--space-6);
+}
+
+.theme-broadsheet .meta-group {
+  margin-bottom: var(--space-4);
+}
+
+/* Group labels take the accent, the way the custom-field keys do: both name
+   a field rather than stating one. */
+.theme-broadsheet .meta-group-title {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  color: var(--color-accent-700);
+  margin-bottom: var(--space-3);
+}
+
+.theme-broadsheet .tab-intro {
+  font-size: 14px;
+  color: var(--ink-62);
+  margin-bottom: var(--space-6);
+}
+
+/* ── Custom metadata fields ─────────────────────────────────────────────── */
+
+/* The heading takes the same serif weight as the section subheads it sits
+   among, with the count as its caption on the same line. */
+.theme-broadsheet .custom-fields-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
+}
+
+.theme-broadsheet .custom-fields-note {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .custom-fields-head {
+  margin-bottom: var(--space-3);
+}
+
+/* Ruled rows rather than boxed inputs: the row's own hairline is the only
+   division needed, and the underline doubles as the edit affordance. */
+.theme-broadsheet .custom-fields .meta-row {
+  gap: var(--space-2);
+  align-items: center;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+  margin-bottom: 0;
+}
+
+.theme-broadsheet .custom-fields .meta-row input {
+  font-size: 14px;
+  padding: var(--space-2) 0;
+  border-bottom: 0;
+}
+
+.theme-broadsheet .custom-fields .meta-row input:hover {
+  border-bottom: 0;
+  background: color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+
+/* Focus is the one state that needs its own line back -- inset so it does not
+   shift the row it sits in. */
+.theme-broadsheet .custom-fields .meta-row input:focus {
+  border-bottom: 0;
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+.theme-broadsheet .custom-fields .meta-row input.meta-key {
+  color: var(--color-accent-700);
+}
+
+/* ── Fact groups ────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .facts-columns {
+  column-gap: var(--space-8);
+}
+
+.theme-broadsheet .facts-group {
+  margin-bottom: var(--space-6);
+}
+
+/* Serif subheads, matching the section headings elsewhere in the panel: in
+   column layout the title is what separates one group from the next, so it
+   takes the same weight "Overview" and "Project metadata" carry.
+   Stacked rather than inline -- the note sits under the heading, which a
+   serif at 22px would otherwise crowd on one line. */
+.theme-broadsheet .facts-group-title {
+  flex-direction: column;
+  gap: 0;
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
+  border-bottom: 0;
+  padding-bottom: 0;
+  margin-bottom: var(--space-2);
+}
+
+.theme-broadsheet .facts-group-note {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--ink-62);
+  letter-spacing: 0;
+}
+
+/* The QC report and trim comparison flow as cards alongside the fact groups,
+   so their headings take the same weight -- otherwise two kinds of card sit
+   in one column looking like two different levels of the page. */
+.theme-broadsheet .facts-columns > .section > .section-title {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+
+/* ── Detail tabs ────────────────────────────────────────────────────────── */
+
+/* A rule runs the full width above the strip, and each tab carries its own
+   rule beneath: a hairline when unselected, heavy ink when selected. The
+   contrast between the two weights is what marks the tab, rather than a
+   colour wash. */
+.theme-broadsheet .tabs {
+  gap: var(--space-6);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) 0 0;
+  background: var(--color-bg);
+  border-top: 1px solid var(--color-text);
+  border-bottom: 0;
+}
+
+.theme-broadsheet .tab {
+  padding: 0 0 var(--space-2);
+  font-family: var(--font-heading);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-transform: none;
+  color: var(--ink-55);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.theme-broadsheet .tab:hover {
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .tab.active {
+  color: var(--color-text);
+  border-bottom: 3px solid var(--color-text);
+}
+
+/* The qualifier stays small and quiet beside a display-sized label. */
+.theme-broadsheet .tab-hint {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  color: var(--ink-55);
+  margin-left: var(--space-2);
+}
+
+/* ── Footer ─────────────────────────────────────────────────────────────── */
+
+.theme-broadsheet .footer {
+  background: none;
+  border-top: 1px solid var(--color-divider);
+  margin-top: var(--space-8);
+  padding: var(--space-3) 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+}

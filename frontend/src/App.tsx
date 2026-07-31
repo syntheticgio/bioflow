@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
@@ -43,6 +44,13 @@ function Shell() {
   // /activity is one long list, and the help pages are prose.
   const pathname = useLocation().pathname;
   const singleColumn = pathname === "/activity" || pathname.startsWith("/help/");
+
+  // Themes that scroll the window rather than the panes (Broadsheet) would
+  // otherwise land mid-page on every route change, carrying the previous
+  // view's offset with them. Harmless where the panes scroll instead.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
 
   return (
     <div className="shell">

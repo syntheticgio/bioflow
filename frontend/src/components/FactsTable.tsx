@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { formatDate, isIsoTimestamp } from "../lib/format";
+import { TruncatedValue } from "./TruncatedValue";
 
 /**
  * Renders parser output with human labels and honest units.
@@ -52,8 +53,8 @@ const LABELS: Record<string, string> = {
   bam_stats_computed_at: "Computed",
   bam_stats_tool_version: "Tool",
   bam_stats_status: "Status",
-  qc_tool: "Tool",
-  qc_tool_version: "Version",
+  // No qc_* labels: those facts are rendered by QcReport and never reach this
+  // table (see isSuppressed).
   trimmed_by: "Tool",
   trim_tool_version: "Version",
   aligned_by: "Tool",
@@ -107,6 +108,8 @@ const SUPPRESSED = new Set([
   "trim_params",
   "trimmed_by",
   "trim_tool_version",
+  // Every qc_* key is suppressed by isSuppressed() below -- QcReport renders
+  // them properly, with units and the report links. See the note there.
   // BAM results have their own charts, summary row and per-contig table; see
   // BamResults. These are arrays of objects that the generic renderer can only
   // print as a wall of key: value chips, duplicating what's drawn below.
@@ -173,12 +176,10 @@ const GROUPS: FactGroup[] = [
       "has_index",
     ],
   },
-  {
-    title: "Quality control",
-    note: "Written by the QC step.",
-    keys: ["qc_tool", "qc_tool_version"],
-    match: (k) => k.startsWith("qc_"),
-  },
+  // There is deliberately no "Quality control" group here. QcReport renders
+  // QC's facts with their units and report links, and isSuppressed() filters
+  // every qc_* key before grouping -- a group here would collect nothing and
+  // previously produced a second, worse copy of that section.
   {
     title: "Trimming",
     note: "Written by the trim step.",
@@ -410,19 +411,73 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
     );
   }
 
-  return String(value);
+  const text = String(value);
+
+  // Long unbroken strings -- hashes, paths, adapter sequences -- are truncated
+  // with a control to see the rest. Prose is left alone: it wraps readably on
+  // its spaces, and hiding the end of a sentence helps nobody. The test is
+  // whether the value has whitespace to wrap on, not how long it is.
+  if (text.length > 40 && !/\s/.test(text)) {
+    return <TruncatedValue value={text} head={28} />;
+  }
+
+  return text;
 }
 
-export function FactsTable({ facts }: { facts: Record<string, unknown> }) {
-  const keys = Object.keys(facts).filter((k) => !SUPPRESSED.has(k));
+/**
+ * How many facts this table would actually render.
+ *
+ * Exported so a tab label can count them without duplicating the suppression
+ * list -- a count that disagreed with the rows below it would be worse than
+ * no count at all.
+ */
+/**
+ * Whether a fact is rendered somewhere better than this generic table.
+ *
+ * The named entries are one-offs; the `qc_` prefix is a whole family. QcReport
+ * renders those with their units ("17,230 bp", "Q16.8"), folds the chemistry
+ * and its reasoning into one row, and links the tool's own HTML report -- so
+ * repeating them here produced two "Quality control" sections saying the same
+ * thing, one of them worse. Anything QC writes that QcReport does not show
+ * should be added there rather than un-suppressed here.
+ */
+function isSuppressed(key: string): boolean {
+  return SUPPRESSED.has(key) || key.startsWith("qc_");
+}
+
+export function countVisibleFacts(facts: Record<string, unknown>): number {
+  return Object.keys(facts).filter((k) => !isSuppressed(k)).length;
+}
+
+export function FactsTable({
+  facts,
+  columns = false,
+}: {
+  facts: Record<string, unknown>;
+  /** Lay the groups out in columns rather than one stack. Each group is a
+   *  self-contained card, so they can flow into however many columns fit. */
+  columns?: boolean;
+}) {
+  const keys = Object.keys(facts).filter((k) => !isSuppressed(k));
   if (keys.length === 0 && !facts.parse_error && !facts.parse_warning) return null;
 
   const groups = groupKeys(keys);
   // One group is just a list; a heading over the whole table would be noise.
-  const showTitles = groups.length > 1;
+  // In column layout the titles are what make the groups legible as groups,
+  // so they always show there.
+  const showTitles = columns || groups.length > 1;
+
+  // In column mode the caller owns the .facts-columns container, so its own
+  // sections can flow in the same columns as these groups instead of sitting
+  // full-width beneath them. That means emitting the groups as bare siblings:
+  // any wrapper here would become a single column item and take the whole
+  // width with it.
+  const Wrapper = columns ? Fragment : "div";
 
   return (
-    <div>
+    <Wrapper>
+      {/* Parse problems are about the file as a whole, so they stay above the
+          columns rather than flowing as one more card. */}
       {typeof facts.parse_error === "string" && (
         <div className="error-box">
           Could not parse this file: {facts.parse_error}
@@ -432,43 +487,83 @@ export function FactsTable({ facts }: { facts: Record<string, unknown> }) {
         <div className="warn-box">{facts.parse_warning}</div>
       )}
 
-      {groups.map((group, i) => (
-        <div key={group.title} style={{ marginTop: i === 0 ? 0 : 14 }}>
-          {showTitles && (
-            <div
-              style={{
-                fontSize: 11,
-                color: "var(--text-faint)",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                marginBottom: 6,
-              }}
-            >
-              {group.title}
-              {group.note && (
-                <span style={{ textTransform: "none", letterSpacing: 0 }}>
-                  {" · "}
-                  {group.note}
+      <ColumnHost columns={columns}>
+        {groups.map((group, i) => (
+          <div
+            key={group.title}
+            className={columns ? "facts-group" : undefined}
+            style={columns ? undefined : { marginTop: i === 0 ? 0 : 14 }}
+          >
+            {showTitles &&
+              (columns ? (
+                /* A real heading in column layout: it is the only thing
+                   telling one card from the next, so it carries the weight
+                   the stacked layout got from position alone. */
+                <div className="facts-group-title">
+                  <span>{group.title}</span>
+                  {group.note && (
+                    <span className="facts-group-note">{group.note}</span>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-faint)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    marginBottom: 6,
+                  }}
+                >
+                  {group.title}
+                  {group.note && (
+                    <span style={{ textTransform: "none", letterSpacing: 0 }}>
+                      {" · "}
+                      {group.note}
+                    </span>
+                  )}
+                </div>
+              ))}
+            <dl className="kv">
+              {group.keys.map((k) => (
+                <span key={k} style={{ display: "contents" }}>
+                  <dt>{label(k)}</dt>
+                  <dd>{renderValue(k, facts[k], facts)}</dd>
                 </span>
-              )}
-            </div>
-          )}
-          <dl className="kv">
-            {group.keys.map((k) => (
-              <span key={k} style={{ display: "contents" }}>
-                <dt>{label(k)}</dt>
-                <dd>{renderValue(k, facts[k], facts)}</dd>
-              </span>
-            ))}
-          </dl>
-        </div>
-      ))}
+              ))}
+            </dl>
 
-      {typeof facts.estimate_note === "string" && (
-        <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 8 }}>
-          {facts.estimate_note}
-        </div>
-      )}
-    </div>
+            {/* The note qualifies the estimated count, so it sits inside the
+                group holding that key. As a sibling of the groups it would
+                become its own column item and drift away from the row it
+                explains. */}
+            {typeof facts.estimate_note === "string" &&
+              group.keys.some((k) => k.endsWith("_estimate")) && (
+                <div
+                  style={{
+                    color: "var(--text-faint)",
+                    fontSize: 11,
+                    marginTop: 8,
+                  }}
+                >
+                  {facts.estimate_note}
+                </div>
+              )}
+          </div>
+        ))}
+      </ColumnHost>
+    </Wrapper>
   );
+}
+
+/** Wraps the groups in the column container, or passes them straight through
+ *  when the caller is providing one. */
+function ColumnHost({
+  columns,
+  children,
+}: {
+  columns: boolean;
+  children: React.ReactNode;
+}) {
+  return columns ? <>{children}</> : <div>{children}</div>;
 }

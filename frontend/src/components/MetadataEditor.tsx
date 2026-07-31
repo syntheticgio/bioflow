@@ -79,7 +79,7 @@ export function MetadataEditor({ value, onSave, saving }: Props) {
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
         <button
           type="button"
-          className="btn"
+          className="btn-text"
           onClick={() => {
             setPairs((p) => [...p, { key: "", value: "" }]);
             setDirty(true);

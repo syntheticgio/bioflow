@@ -19,6 +19,7 @@ import type {
   ObjectDetail,
   ObjectRole,
   OverdueSchedule,
+  PipelineSuggestion,
   PipelineTools,
   Project,
   ProjectDetail,
@@ -330,6 +331,38 @@ export const api = {
     }),
 
   /**
+   * Whether a local model is up and could write a summary right now.
+   *
+   * Probed rather than assumed: the model server is a process on the host that
+   * the user starts and stops independently of this app, so the answer is only
+   * good for as long as it takes to read it.
+   */
+  summaryStatus: () =>
+    request<{ available: boolean; reason?: string; model?: string | null }>(
+      "/pipelines/summary/status",
+    ),
+
+  /**
+   * Background prose about a species. Null when there is nothing to say --
+   * an unrecognized organism or no model server both land here, and neither is
+   * an error for a decorative field.
+   *
+   * Cached server-side per species, so this is an indexed read for every file
+   * after the first of a given organism.
+   */
+  organismBlurb: (organism: string) =>
+    request<{ organism: string; text: string; model: string | null } | null>(
+      `/pipelines/organism/${encodeURIComponent(organism)}`,
+    ),
+
+  /** Queue a narrative summary of a file's QC data and metadata. */
+  launchSummary: (objectId: string) =>
+    request<JobSummary>("/pipelines/summary", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId, force: true }),
+    }),
+
+  /**
    * URL of a generated QC report.
    *
    * Not fetched through `request`: the report is an HTML page opened in a new
@@ -407,6 +440,22 @@ export const api = {
   /** Candidate references in a project, each with its index status. */
   references: (projectId: string) =>
     request<{ references: ReferenceOption[] }>(`/pipelines/references/${projectId}`),
+
+  /** Which pipelines to offer for one file, each with the reason it can or
+   * cannot run. Advisory: a failure here costs the Actions tab its cards, not
+   * its manual controls. */
+  suggestions: (objectId: string) =>
+    request<{ suggestions: PipelineSuggestion[] }>(
+      `/pipelines/suggestions/${objectId}`,
+    ),
+
+  /** Post a suggestion's launch payload verbatim. The endpoint and body both
+   * come from the card, so this adds nothing -- see `PipelineSuggestion`. */
+  launchSuggestion: (endpoint: string, body: Record<string, unknown>) =>
+    request<JobSummary>(endpoint, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
   buildIndex: (body: { reference_id: string; aligner: string }) =>
     request<JobSummary>("/pipelines/index", {

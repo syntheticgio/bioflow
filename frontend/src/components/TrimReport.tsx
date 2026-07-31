@@ -1,3 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
+import { api } from "../api/client";
 import type { TrimReport as Report } from "../api/types";
 
 /**
@@ -8,19 +11,53 @@ import type { TrimReport as Report } from "../api/types";
  * default path needs no FastQC. The point is the delta: whether reads were
  * lost, whether quality improved, how much adapter was there.
  */
-export function TrimReport({ facts }: { facts: Record<string, unknown> }) {
+export function TrimReport({
+  facts,
+  projectId,
+}: {
+  facts: Record<string, unknown>;
+  /** Resolves output ids to names, so the produced files can be linked. */
+  projectId?: string;
+}) {
+  const [, setParams] = useSearchParams();
+
+  const outputs = Array.isArray(facts.trim_outputs)
+    ? (facts.trim_outputs as string[])
+    : [];
+
+  // Already fetched for the explorer, so naming the outputs costs no extra
+  // round trip. Hooks run before the early return below.
+  const { data: siblings = [] } = useQuery({
+    queryKey: ["objects", projectId],
+    queryFn: () => api.listObjects(projectId!),
+    enabled: !!projectId && outputs.length > 0,
+  });
+
   const report = facts.trim_report as Report | undefined;
   if (!report?.before || !report?.after) return null;
 
   const { before, after } = report;
   const readsLost = delta(before.total_reads, after.total_reads);
-  const outputs = Array.isArray(facts.trim_outputs)
-    ? (facts.trim_outputs as string[])
-    : [];
+
+  const outputFiles = outputs
+    .map((id) => siblings.find((s) => s.id === id))
+    .filter((o): o is NonNullable<typeof o> => !!o);
+
+  // Tool and what it produced, as one line under the heading: they are the
+  // caption for the comparison rather than two more rows to read.
+  const caption = [
+    `${report.tool}${report.tool_version ? ` ${report.tool_version}` : ""}`,
+    outputs.length > 0
+      ? `produced ${outputs.length} trimmed ${outputs.length === 1 ? "file" : "files"}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <div className="section">
       <div className="section-title">Trimming</div>
+      <div className="section-note">{caption}</div>
 
       <table className="trim-table">
         <thead>
@@ -100,16 +137,6 @@ export function TrimReport({ facts }: { facts: Record<string, unknown> }) {
           </>
         )}
 
-        {readsLost != null && readsLost !== 0 && (
-          <>
-            <dt>Reads discarded</dt>
-            <dd>
-              {count(Math.abs(readsLost))}
-              {discardBreakdown(report)}
-            </dd>
-          </>
-        )}
-
         {report.duplication_rate != null && (
           <>
             <dt>Duplication</dt>
@@ -124,20 +151,51 @@ export function TrimReport({ facts }: { facts: Record<string, unknown> }) {
           </>
         ) : null}
 
-        <dt>Tool</dt>
-        <dd>
-          {report.tool} {report.tool_version}
-        </dd>
-
-        {outputs.length > 0 && (
-          <>
-            <dt>Produced</dt>
-            <dd>
-              {outputs.length} trimmed {outputs.length === 1 ? "file" : "files"}
-            </dd>
-          </>
-        )}
       </dl>
+
+      {/* The outcome, as sentences under the table: what the comparison cost
+          and where the result went. Both are conclusions drawn from the rows
+          above, which is why they read as prose rather than more rows. */}
+      {(readsLost != null && readsLost !== 0) || outputFiles.length > 0 ? (
+        <div className="trim-outcome">
+          {readsLost != null && readsLost !== 0 && (
+            <div>
+              {count(Math.abs(readsLost))} reads discarded
+              {discardBreakdown(report, Math.abs(readsLost))}.
+            </div>
+          )}
+
+          {outputFiles.length > 0 && (
+            <div>
+              Output:{" "}
+              {outputFiles.map((o, i) => (
+                <span key={o.id}>
+                  {i > 0 && ", "}
+                  {/* Selects the output in this same panel, the way the
+                      derived-files list does -- staying put beats navigating
+                      away from the comparison you were reading. */}
+                  <button
+                    type="button"
+                    className="btn-text"
+                    onClick={() => {
+                      setParams(
+                        (p) => {
+                          const next = new URLSearchParams(p);
+                          next.set("sel", `object:${o.id}`);
+                          return next;
+                        },
+                        { replace: true },
+                      );
+                    }}
+                  >
+                    {o.name}
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -201,14 +259,25 @@ function formatDelta(
   return `${sign}${format(d)}`;
 }
 
-/** Why reads went away, when fastp said. */
-function discardBreakdown(report: Report): string {
+/**
+ * Why reads went away, when the tool said, as a clause continuing "N reads
+ * discarded".
+ *
+ * When one reason accounts for the whole loss it is stated as such -- "all of
+ * them too short" says more than repeating the number the sentence just gave.
+ */
+function discardBreakdown(report: Report, discarded: number): string {
   const f = report.filtering;
-  const parts: string[] = [];
-  if (f.low_quality_reads) parts.push(`${count(f.low_quality_reads)} low quality`);
-  if (f.too_short_reads) parts.push(`${count(f.too_short_reads)} too short`);
-  if (f.too_many_n_reads) parts.push(`${count(f.too_many_n_reads)} too many N`);
-  return parts.length ? ` — ${parts.join(", ")}` : "";
+  const reasons: { n: number; label: string }[] = [];
+  if (f.low_quality_reads) reasons.push({ n: f.low_quality_reads, label: "low quality" });
+  if (f.too_short_reads) reasons.push({ n: f.too_short_reads, label: "too short" });
+  if (f.too_many_n_reads) reasons.push({ n: f.too_many_n_reads, label: "too many N" });
+  if (reasons.length === 0) return "";
+
+  if (reasons.length === 1 && reasons[0].n === discarded) {
+    return `, all of them ${reasons[0].label}`;
+  }
+  return `, ${reasons.map((r) => `${count(r.n)} ${r.label}`).join(", ")}`;
 }
 
 function count(v: number | null): string {

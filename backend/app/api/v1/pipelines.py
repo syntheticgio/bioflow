@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.api.v1.jobs import JobOut
 from app.config import settings
-from app.errors import NotFoundError
+from app.errors import ConflictError, NotFoundError
 from app.models import DataObject, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, bam_stats_runner, tools
 from app.pipelines.aligners import Aligner
@@ -55,6 +55,24 @@ async def list_tools() -> dict:
         "tools": tools_list,
         "all_available": all(t["available"] for t in tools_list),
     }
+
+
+@router.get("/suggestions/{object_id}")
+async def list_suggestions(object_id: PydanticObjectId) -> dict:
+    """Pipelines worth offering for this file, with the reason for each.
+
+    Advisory: a card is a pre-answered instance of an operation the
+    Computations section also offers with a picker in front of it. Nothing
+    here launches anything -- the cards carry the same payloads the dialogs
+    post.
+    """
+    from app.services import suggestion_service
+
+    obj = await DataObject.get(object_id)
+    if obj is None:
+        raise NotFoundError(f"Object not found: {object_id}")
+
+    return {"suggestions": await suggestion_service.suggestions_for(obj)}
 
 
 @router.get("/defaults")
@@ -107,6 +125,80 @@ async def launch_qc(body: QCRequest) -> JobOut:
     """Queue a QC run over a FASTQ file. Read-only: produces a report."""
     job = await pipeline_service.launch_qc(object_id=body.object_id)
     return JobOut.of(job)
+
+
+class SummaryRequest(BaseModel):
+    object_id: PydanticObjectId
+    # The regenerate button sets this: the numbers have not changed, but the
+    # user has asked for another pass anyway.
+    force: bool = True
+
+
+@router.get("/summary/status")
+async def summary_status() -> dict:
+    """Whether narrative summaries can be produced right now.
+
+    Exists so the UI can hide an affordance that would only fail. Probed live
+    rather than cached -- the model server is a process the user starts and
+    stops by hand, so a remembered answer is the one most likely to be wrong.
+    """
+    import asyncio
+
+    from app.services import llm_client
+
+    if not settings.llm_summaries_enabled:
+        return {"available": False, "reason": "disabled"}
+
+    # Off the event loop: the probe is a blocking socket call, short-timeout but
+    # not instant when the host is unreachable rather than merely refusing.
+    available = await asyncio.to_thread(llm_client.is_available)
+    if not available:
+        return {"available": False, "reason": "server_unavailable"}
+
+    model = await asyncio.to_thread(llm_client.default_model)
+    return {"available": True, "model": model}
+
+
+@router.post("/summary", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_summary(body: SummaryRequest) -> JobOut:
+    """Queue a narrative summary of a file's QC data and metadata."""
+    job = await pipeline_service.launch_summary(object_id=body.object_id, force=body.force)
+    if job is None:
+        # Only reachable on the explicit user path, where returning nothing
+        # would read as a dead button. The service's other "no" -- an existing
+        # summary of unchanged inputs -- cannot occur here, since the button
+        # always forces.
+        raise ConflictError(
+            "Summaries are disabled or this file has nothing to summarize",
+            details={"object_id": str(body.object_id)},
+        )
+    return JobOut.of(job)
+
+
+class OrganismBlurbOut(BaseModel):
+    organism: str
+    text: str
+    model: str | None = None
+
+
+@router.get("/organism/{organism}", response_model=OrganismBlurbOut | None)
+async def get_organism_blurb(organism: str, refresh: bool = False) -> OrganismBlurbOut | None:
+    """Background prose about a species, from cache or freshly generated.
+
+    Returns null rather than 404 when there is nothing to say -- an unknown
+    organism, a disabled feature and a model server that is not running are all
+    ordinary states for a decorative field, and none of them is an error the
+    client should handle differently.
+
+    Reads are cheap after the first: the text is cached per species, so every
+    file of one organism after the first is an indexed document read.
+    """
+    from app.services import organism_service
+
+    blurb = await organism_service.get_or_generate(organism, force=refresh)
+    if blurb is None:
+        return None
+    return OrganismBlurbOut(organism=blurb.organism, text=blurb.text, model=blurb.model)
 
 
 @router.get("/qc/report/{object_id}/{report_path:path}")

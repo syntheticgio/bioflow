@@ -166,6 +166,11 @@ class ObjectOut(BaseModel):
 
 class ObjectDetail(ObjectOut):
     blob: BlobOut | None = None
+    # Digest of the object's current facts and metadata. Compared client-side
+    # against the digest stored with a narrative summary to tell one that still
+    # describes the file from one written before the last QC or trim run.
+    # Detail-only: the listing has no use for it and it costs a hash per row.
+    summary_fingerprint: str | None = None
 
 
 # --- System ---

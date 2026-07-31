@@ -3,6 +3,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
+import { useThemeStore } from "../stores/themeStore";
 import { LoadIndicator } from "./LoadIndicator";
 import { Menu } from "./Menu";
 
@@ -26,6 +27,9 @@ export function Header() {
   });
 
   const navigate = useNavigate();
+
+  const theme = useThemeStore((s) => s.theme);
+  const toggleTheme = useThemeStore((s) => s.toggleTheme);
 
   const cleanUp = useMutation({
     mutationFn: () => api.runScheduleNow("gc_blobs"),
@@ -68,7 +72,20 @@ export function Header() {
             },
           ]}
         />
-        <Menu label="View" items={[]} />
+        {/* Menu items carry no checked state, so the label names the theme
+            you'd be switching to rather than the one you're in. */}
+        <Menu
+          label="View"
+          items={[
+            {
+              label:
+                theme === "broadsheet"
+                  ? "Switch to Classic theme"
+                  : "Switch to Broadsheet theme",
+              onSelect: toggleTheme,
+            },
+          ]}
+        />
         <Menu
           label="Help"
           items={HELP_ITEMS.map((item) => ({
@@ -79,19 +96,21 @@ export function Header() {
       </nav>
 
       <div className="header-right">
-        <LoadIndicator />
-        {/* Library size rather than free space: under Docker Desktop the
-            container cannot see the external drive's real capacity, and a
-            confidently wrong "192 GB free" is worse than not saying. This we
-            can count exactly. */}
+        {/* What the library holds, then what it is doing. Library size rather
+            than free space: under Docker Desktop the container cannot see the
+            external drive's real capacity, and a confidently wrong "192 GB
+            free" is worse than not saying. These we can count exactly. */}
         {data && (
           <div
-            className="load-indicator"
+            className="header-stats"
             title={`${data.counts.objects} files at ${data.storage.path}`}
           >
+            <span>{data.counts.objects} files</span>
+            <span>{data.counts.projects} projects</span>
             <span>{formatBytes(data.storage.library_bytes)} stored</span>
           </div>
         )}
+        <LoadIndicator />
       </div>
     </header>
   );
