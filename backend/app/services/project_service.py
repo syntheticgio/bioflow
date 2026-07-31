@@ -260,6 +260,25 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
 
     ids = [PydanticObjectId(i) for i in preview["project_ids"]]
 
+    # The `owner` filters on DataObject, UploadSession, PipelineRun and Job
+    # below are written for the end state and are inert today: no production
+    # writer sets `owner` on any of those documents yet, so every row carries
+    # the "local" default from TimestampedDocument. Threading owner through
+    # object_service, run_service and the queue is deliberately later work
+    # (Tasks 4 and 5; upload_service is tracked separately), which leaves a
+    # window where the ordering matters. If a real profile lands before those
+    # writers do, a non-"local" project's cascade matches nothing: the project
+    # document is deleted while its objects, sessions, runs and jobs survive as
+    # orphans pointing at a dead project_id, their blobs never decremented, and
+    # the log line below cheerfully reports objects=0 while doing it. That is
+    # precisely the "stranded at refcount 1, where GC can never reach them"
+    # failure delete_project's docstring says this design prevents. It is
+    # unreachable at the moment only because every route in api/v1/projects.py
+    # hardcodes owner="local" pending get_current_owner, so every document on
+    # both sides of these filters is "local" and they all match.
+    # Do not read a green suite as evidence the gap is closed -- the deletion
+    # fixtures in tests/services/helpers.py set the owner the writers do not.
+
     # Deepest first: if this fails partway, what remains is a valid tree rather
     # than orphans pointing at a parent that no longer exists.
     for pid in reversed(ids):
@@ -279,11 +298,12 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
         for run in await PipelineRun.find(
             PipelineRun.project_id == pid, PipelineRun.owner == owner
         ).to_list():
-            # Deliberately not owner-filtered. RunJob is a link row belonging to
-            # `run`, which is already confirmed to be this owner's, and a row
-            # linking a shared build_index job can carry the owner of whichever
-            # profile enqueued that job first. Filtering here would strand
-            # exactly those rows pointing at a run that no longer exists.
+            # Deliberately not owner-filtered. RunJob is a link row with no
+            # owner of its own to speak of -- it is reached only through `run`,
+            # which get_project and collect_subtree have already confirmed
+            # belongs to this owner, so run_id is the whole scope. Adding an
+            # owner filter would at best repeat a check already made, and at
+            # worst strand link rows pointing at a run that no longer exists.
             await RunJob.find(RunJob.run_id == run.id).delete()
             await run.delete()
 
@@ -297,9 +317,11 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
         await Job.find(Job.project_id == pid, Job.owner == owner).delete()
 
         project = await Project.get(pid)
-        # The owner re-check is redundant -- collect_subtree only returned this
-        # owner's projects -- but it is the last statement that destroys a
-        # project document, and it costs one comparison.
+        # Belt and braces, kept on purpose. collect_subtree should only have
+        # returned this owner's projects, but this is the statement that
+        # actually destroys a project document, and a bug upstream in the
+        # traversal would spend itself here rather than on another profile's
+        # tree. One comparison is a cheap place to stop being clever.
         if project is not None and project.owner == owner:
             await project.delete()
 
@@ -313,7 +335,15 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
 
 
 async def bump_counters(project_id: PydanticObjectId, *, objects: int, total_bytes: int) -> None:
-    """Adjust denormalized rollups. Used outside the transactional paths."""
+    """Adjust denormalized rollups. Used outside the transactional paths.
+
+    The lone owner-less query on a partitioned collection, and deliberately so:
+    every call site reaches here holding an object it has already resolved
+    through an owner-scoped lookup, so the project id is pre-verified by the
+    time it arrives. Counters are also derived rollups rather than readable
+    data -- nothing here reveals or returns another profile's content -- so an
+    owner parameter would be threading for symmetry without buying isolation.
+    """
     await get_db().projects.update_one(
         {"_id": project_id},
         {
