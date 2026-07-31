@@ -85,34 +85,66 @@ Touches: `backend/app/pipelines/aligners.py`,
 `backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
-## DeepVariant: recognized, refused, not installed
+## DeepVariant: refused for a reason that is no longer true
 
-Raised: 2026-07-31, requested. Blocked on architecture, not effort.
+Raised: 2026-07-31, requested. **Unblocked 2026-07-31** -- a native Linux
+arm64 build now exists.
 
 `VariantCaller.DEEPVARIANT` already exists in
 `backend/app/pipelines/variant_runner.py`, and two paths refuse it with the
 same message -- `backend/app/queue/variant_handlers.py` (~line 52) and
-`backend/app/services/pipeline_service.py` (~line 1533). The reason is that
-upstream ships no arm64 Linux build.
+`backend/app/services/pipeline_service.py` (~line 1533). Both say it "has no
+arm64 Linux build". **That claim is now false and the messages are wrong.**
 
-So this is not "write a handler". The handler shape is already decided; what
-is missing is a way to run the binary on this machine. Options, roughly in
-order of how much they cost:
+A community port ships a prebuilt multi-arch image, verified pullable from this
+machine on 2026-07-31:
 
-1. **Wait for / find an arm64 build.** Cheapest if one now exists -- check
-   before assuming, this refusal was written some time ago.
-2. **Run it under emulation.** `--platform linux/amd64` for one tool in a
-   separate container. Works, slowly, and a variant caller is not the place
-   you want a large constant factor.
-3. **Only enable it on x86-64 hosts.** Ties directly to the Linux-support entry
-   below: on an x86-64 Linux box this is a non-problem, and the refusal could
-   become conditional on `TARGETARCH` rather than absolute.
+```
+ghcr.io/antomicblitz/deepvariant-arm64:v1.9.0-arm64.6
+```
 
-Option 3 is probably the honest one, and it is worth doing *with* the Linux
-work rather than before it.
+`docker manifest inspect` reports `"architecture": "arm64", "os": "linux"`,
+~3 GB compressed. Source: https://github.com/antomicblitz/deepvariant-linux-arm64
+
+**Do not reach for the Homebrew tap.** The same author also publishes
+`brew tap antomicblitz/deepvariant`, which is a native *macOS* build using
+Apple Clang and Metal GPU acceleration. It is the more famous of the two and
+the easy thing to find, but it is useless here: this app runs entirely inside a
+Linux container, where `brew` has nowhere to run and Metal does not exist. The
+Linux arm64 image is the artifact this project needs.
+
+Note also that bwa-mem2's arm64 support is *not* a brew install and is not a
+precedent for one -- `backend/Dockerfile` (~line 80) builds it from source with
+sse2neon inside the image, having only borrowed the *technique* the Homebrew
+formula uses. Nothing in this repo's build touches Homebrew.
+
+The open question is how to invoke it, since it is a separate image rather than
+a binary in ours:
+
+1. **Pull the tool into our image.** Copy the built artifacts out of that image
+   in a Dockerfile stage. Keeps the "one image, tools on PATH" model every
+   other tool follows, so `tools.py` probing and `require()` work unchanged.
+   Cost: ~3 GB, and it inherits their build rather than ours.
+2. **Invoke the container per job.** The handler shells out to `docker run`.
+   Avoids the image bloat but means the API container needs the Docker socket,
+   which is a real privilege and architecture change this app has so far
+   avoided entirely.
+
+Option 1 is much more in keeping with how everything else here works, and the
+3 GB is a one-time image cost on a machine that already stores sequencing data.
+Worth checking whether the model files can be fetched separately, since a good
+chunk of that size is likely weights.
+
+Whichever route, per CLAUDE.md: `TOOL_META` needs
+`homepage`/`citation`/`license`/`usage` filled in (cite Google's DeepVariant
+paper, but be accurate that this is a community arm64 port, and check the
+port's own license), and `suggestion_service.py` needs a rule that can pick it
+or its card will never light up. The two refusal messages must be removed or
+made conditional on `TARGETARCH` rather than absolute.
 
 Touches: `backend/app/queue/variant_handlers.py`,
-`backend/app/services/pipeline_service.py`, `backend/Dockerfile`.
+`backend/app/services/pipeline_service.py`, `backend/app/pipelines/tools.py`,
+`backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
 ## Post-assembly QC: BUSCO and QUAST
 
@@ -269,8 +301,9 @@ of that. Going to Linux means checking each one:
   already branches on `TARGETARCH` and builds bwa-mem2 from source with
   sse2neon for arm64 (`backend/scripts/build-bwa-mem2-arm64.sh`). On x86-64 the
   upstream binaries work, so that branch should not fire -- verify it does not.
-- **DeepVariant becomes possible.** See its entry above; on x86-64 Linux the
-  refusal could be conditional rather than absolute.
+- **DeepVariant is no longer arch-blocked at all.** See its entry above: a
+  native Linux arm64 image now exists, so it should work on both architectures
+  and is not a reason to wait for Linux.
 - **The governor's disk problem may disappear.** The entry below is a
   Docker-Desktop-on-macOS VirtioFS artifact. On Linux, `shutil.disk_usage`
   through a bind mount reports the real filesystem, so the host-side reporter
