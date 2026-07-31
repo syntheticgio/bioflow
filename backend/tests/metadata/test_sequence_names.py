@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from app.metadata import assembly
+from app.metadata import assembly, enrich
+from app.models import FormatKind
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -119,3 +120,54 @@ class TestLookupSequenceNames:
     def test_never_raises_when_the_helper_explodes(self):
         with patch("app.metadata.assembly._get", side_effect=RuntimeError("boom")):
             assert assembly.lookup_sequence_names("GCF_000146045.2") is None
+
+
+class TestEnrichmentStoresLabels:
+    def _meta(self):
+        return assembly.AssemblyMetadata(
+            accession="GCF_000146045.2", assembly_name="R64"
+        )
+
+    def test_labels_land_in_facts(self):
+        labels = {"NC_001133.9": "I"}
+        with (
+            patch("app.metadata.assembly.lookup", return_value=self._meta()),
+            patch("app.metadata.assembly.lookup_sequence_names", return_value=labels),
+        ):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000146045.2_R64_genomic.fna",
+                existing_metadata={},
+                format_kind=FormatKind.FASTA,
+            )
+        assert result.facts["sequence_labels"] == labels
+
+    def test_a_failed_name_lookup_leaves_the_rest_intact(self):
+        """The names are a bonus. Losing them must not cost the stats that the
+        assembly lookup already succeeded in fetching."""
+        with (
+            patch("app.metadata.assembly.lookup", return_value=self._meta()),
+            patch("app.metadata.assembly.lookup_sequence_names", return_value=None),
+        ):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000146045.2_R64_genomic.fna",
+                existing_metadata={},
+                format_kind=FormatKind.FASTA,
+            )
+        assert "sequence_labels" not in result.facts
+        assert result.facts["ncbi_assembly_name"] == "R64"
+
+    def test_a_raising_name_lookup_does_not_break_ingest(self):
+        with (
+            patch("app.metadata.assembly.lookup", return_value=self._meta()),
+            patch(
+                "app.metadata.assembly.lookup_sequence_names",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            result = enrich.enrich_from_assembly(
+                filename="GCF_000146045.2_R64_genomic.fna",
+                existing_metadata={},
+                format_kind=FormatKind.FASTA,
+            )
+        assert "sequence_labels" not in result.facts
+        assert result.facts["ncbi_assembly_name"] == "R64"
