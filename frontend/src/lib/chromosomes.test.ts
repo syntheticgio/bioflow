@@ -26,4 +26,54 @@ describe("classifyChromosomes", () => {
     });
     expect(view.kind).toBe("needs-qc");
   });
+
+  /** N sequences of `len` bases, named by the given pattern. */
+  function lengths(n: number, len: number, name: (i: number) => string) {
+    const out: Record<string, number> = {};
+    for (let i = 0; i < n; i++) out[name(i)] = len;
+    return out;
+  }
+
+  // cds_from_genomic.fna, as it really is: 8,769 coding records whose names
+  // are `lcl|` local identifiers NCBI cannot resolve.
+  it("rejects a CDS file as not chromosomal", () => {
+    const view = classifyChromosomes({
+      sequence_count: 8769,
+      sequence_names: ["lcl|NC_008409.1_cds_XP_001218755.1_1"],
+      sequence_lengths: lengths(
+        8769,
+        1400,
+        (i) => `lcl|NC_008409.1_cds_XP_${i}_1`,
+      ),
+    });
+    expect(view.kind).toBe("not-chromosomal");
+    if (view.kind === "not-chromosomal") {
+      expect(view.reason).toContain("8,769");
+    }
+  });
+
+  // protein.faa: 8,758 XP_ protein accessions. Real accessions, wrong molecule.
+  it("rejects a protein file as not chromosomal", () => {
+    const view = classifyChromosomes({
+      sequence_count: 8758,
+      sequence_names: ["XP_001218755.1"],
+      sequence_lengths: lengths(8758, 450, (i) => `XP_00121${i}.1`),
+    });
+    expect(view.kind).toBe("not-chromosomal");
+  });
+
+  // A plasmid-only or single-contig file: real DNA, too few chromosome-scale
+  // sequences to be a chromosome set.
+  it("rejects a file with too few chromosome-scale sequences", () => {
+    const view = classifyChromosomes({
+      sequence_count: 3,
+      sequence_names: ["NC_000001.1", "NC_000002.1", "NC_000003.1"],
+      sequence_lengths: {
+        "NC_000001.1": 500_000,
+        "NC_000002.1": 4_000,
+        "NC_000003.1": 3_000,
+      },
+    });
+    expect(view.kind).toBe("not-chromosomal");
+  });
 });

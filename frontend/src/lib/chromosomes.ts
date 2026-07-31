@@ -23,6 +23,13 @@ export interface Bar {
   length: number;
 }
 
+/** Below this, a sequence is not a chromosome or a large scaffold. */
+const CHROMOSOME_SCALE_BP = 100_000;
+
+/** Fewer chromosome-scale sequences than this and the file is something else
+ *  -- coding sequences, proteins, a lone plasmid. */
+const MIN_CHROMOSOME_SCALE = 5;
+
 export function classifyChromosomes(
   facts: Record<string, unknown>,
 ): ChromosomeView {
@@ -38,5 +45,31 @@ export function classifyChromosomes(
   if (!names.length && !lengthCount) return { kind: "nothing" };
   if (!lengthCount) return { kind: "needs-qc" };
 
+  const entries: Bar[] = Object.entries(lengths).map(([name, length]) => ({
+    name,
+    length: Number(length) || 0,
+  }));
+  const bigEnough = entries.filter((e) => e.length >= CHROMOSOME_SCALE_BP);
+
+  if (bigEnough.length < MIN_CHROMOSOME_SCALE) {
+    return { kind: "not-chromosomal", reason: describeNonChromosomal(entries) };
+  }
+
   return { kind: "nothing" };
+}
+
+/**
+ * Why this file is not a chromosome set, in terms of what it actually holds.
+ *
+ * "None over 100 kb" is the useful half of the message: it tells the user the
+ * file is short records, without claiming to know whether they are CDS,
+ * proteins or something else.
+ */
+function describeNonChromosomal(entries: Bar[]): string {
+  const count = entries.length.toLocaleString();
+  const longest = entries.reduce((m, e) => Math.max(m, e.length), 0);
+  if (longest < CHROMOSOME_SCALE_BP) {
+    return `${count} sequences, none over 100 kb — this looks like coding sequences or proteins, not chromosomes.`;
+  }
+  return `${count} sequences, too few of them chromosome-scale to draw a chromosome map.`;
 }
