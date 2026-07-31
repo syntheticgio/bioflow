@@ -364,6 +364,7 @@ async def get_vcf_stats_variants(
     filter_value: str | None = None,
     variant_type: str | None = None,
     min_qual: float | None = None,
+    consequence: str | None = None,
     skip_count: bool = False,
 ) -> dict:
     """A page of the variant table, filtered.
@@ -390,6 +391,7 @@ async def get_vcf_stats_variants(
         filter_value=filter_value,
         variant_type=variant_type,
         min_qual=min_qual,
+        consequence=consequence,
     )
 
     rows = variant_db.query_variants(

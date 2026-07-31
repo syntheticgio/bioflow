@@ -40,6 +40,7 @@ export function VariantTable({
   const [filterValue, setFilterValue] = useState("");
   const [variantType, setVariantType] = useState("");
   const [minQualInput, setMinQualInput] = useState("");
+  const [consequence, setConsequence] = useState("");
   const [sampleIdx, setSampleIdx] = useState(0);
   // Holds the last known total across a skip_count page turn, so the row
   // count does not flash to nothing while only the page changed.
@@ -60,7 +61,7 @@ export function VariantTable({
   // should leave it alone.
   useEffect(() => {
     setPage(0);
-  }, [contig, filterValue, variantType, minQual]);
+  }, [contig, filterValue, variantType, minQual, consequence]);
 
   const parsedMinQual = minQual.trim() === "" ? undefined : Number(minQual);
   const minQualValid = parsedMinQual == null || !Number.isNaN(parsedMinQual);
@@ -75,6 +76,7 @@ export function VariantTable({
       filterValue,
       variantType,
       minQualValid ? parsedMinQual : undefined,
+      consequence,
     ],
     queryFn: () =>
       api.vcfStatsVariants(objectId, {
@@ -84,6 +86,7 @@ export function VariantTable({
         filterValue: filterValue || undefined,
         variantType: variantType || undefined,
         minQual: minQualValid ? parsedMinQual : undefined,
+        consequence: consequence || undefined,
         skipCount: page > 0,
       }),
     placeholderData: keepPreviousData,
@@ -97,6 +100,22 @@ export function VariantTable({
   const total = data?.total ?? lastTotal;
   const rows = data?.rows ?? [];
   const hasNext = rows.length === PAGE_SIZE;
+
+  // Populated from whatever consequences appear on the current page rather
+  // than a hardcoded vocabulary -- bcftools csq emits terms this list should
+  // not need to anticipate. This means the option list only ever reflects
+  // what's visible right now, not the whole callset; an honest limitation
+  // rather than a facet query this task doesn't need. The active selection
+  // is kept in the list even when filtering has narrowed the page to other
+  // values, so choosing an option never makes it vanish from the dropdown.
+  const consequenceOptions = useMemo(() => {
+    const seen = new Set<string>();
+    if (consequence) seen.add(consequence);
+    for (const row of rows) {
+      if (row.consequence) seen.add(row.consequence);
+    }
+    return [...seen].sort();
+  }, [rows, consequence]);
 
   return (
     <div className="section">
@@ -170,6 +189,20 @@ export function VariantTable({
           />
         </label>
 
+        {consequenceOptions.length > 0 && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ color: "var(--text-faint)" }}>Consequence</span>
+            <select value={consequence} onChange={(e) => setConsequence(e.target.value)}>
+              <option value="">All</option>
+              {consequenceOptions.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
         {samples.length > 1 && (
           <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ color: "var(--text-faint)" }}>Sample</span>
@@ -202,6 +235,9 @@ export function VariantTable({
                 <th style={{ textAlign: "right" }}>Pos</th>
                 <th>Ref</th>
                 <th>Alt</th>
+                <th>Gene</th>
+                <th>Consequence</th>
+                <th>AA change</th>
                 <th style={{ textAlign: "right" }}>Qual</th>
                 <th>Filter</th>
                 <th style={{ textAlign: "right" }}>Depth</th>
@@ -222,6 +258,12 @@ export function VariantTable({
                   <td className="mono">
                     <Truncated value={row.alt} />
                   </td>
+                  {/* Empty on every row of an un-annotated VCF, which is the
+                      common case -- so this renders as an ordinary dash
+                      rather than anything that suggests something failed. */}
+                  <td className="mono">{row.gene ?? "—"}</td>
+                  <td>{row.consequence ?? "—"}</td>
+                  <td className="mono">{row.aa_change ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     {row.qual == null ? "—" : row.qual.toFixed(1)}
                   </td>

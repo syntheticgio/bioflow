@@ -1075,6 +1075,12 @@ export interface VariantRow {
   filter: string;
   dp: number | null;
   gt: string;
+  /** Present only on an annotated VCF; null on every row of an un-annotated
+   *  one, which is the common case. */
+  gene: string | null;
+  consequence: string | null;
+  aa_change: string | null;
+  aa_pos: number | null;
 }
 
 export interface VariantsPage {
@@ -1093,5 +1099,6 @@ export interface VariantQuery {
   filterValue?: string;
   variantType?: string;
   minQual?: number;
+  consequence?: string;
   skipCount?: boolean;
 }
