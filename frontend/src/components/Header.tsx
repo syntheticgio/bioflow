@@ -3,7 +3,6 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import { useThemeStore } from "../stores/themeStore";
 import { LoadIndicator } from "./LoadIndicator";
 import { Menu } from "./Menu";
 
@@ -27,9 +26,6 @@ export function Header() {
   });
 
   const navigate = useNavigate();
-
-  const theme = useThemeStore((s) => s.theme);
-  const toggleTheme = useThemeStore((s) => s.toggleTheme);
 
   const cleanUp = useMutation({
     mutationFn: () => api.runScheduleNow("gc_blobs"),
@@ -69,20 +65,6 @@ export function Header() {
               label: "Clean up storage now",
               onSelect: () => cleanUp.mutate(),
               disabled: cleanUp.isPending,
-            },
-          ]}
-        />
-        {/* Menu items carry no checked state, so the label names the theme
-            you'd be switching to rather than the one you're in. */}
-        <Menu
-          label="View"
-          items={[
-            {
-              label:
-                theme === "broadsheet"
-                  ? "Switch to Classic theme"
-                  : "Switch to Broadsheet theme",
-              onSelect: toggleTheme,
             },
           ]}
         />
