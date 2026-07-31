@@ -17,7 +17,7 @@ import pytest_asyncio
 from pymongo.errors import DuplicateKeyError
 
 from app.errors import ConflictError, ValidationError
-from app.models import Profile
+from app.models import DataObject, Profile, Project
 from app.services import profile_service, project_service
 
 pytestmark = [
@@ -28,15 +28,30 @@ pytestmark = [
 
 @pytest_asyncio.fixture(autouse=True, loop_scope="module")
 async def _empty_profiles(beanie_models):
-    """An empty Profile collection before and after each test in this file.
+    """An empty Profile collection *and* an empty library before and after each
+    test in this file.
+
+    Clearing profiles alone is not enough, and the gap was live: several tests
+    create projects at `owner="local"` to stand in for a pre-feature library
+    and leave them behind. A later test whose profile adopts `"local"`
+    inherits them, so `test_refuses_the_last_profile_even_when_empty` was not
+    running against an empty profile at all -- it passed with its own guard
+    deleted, because the *documents* branch raised the ConflictError it was
+    catching. Anything owner-scoped this file creates has to go with it.
 
     `loop_scope="module"` to match `beanie_models`: a function-scoped async
     fixture runs on a different event loop than the module-scoped Motor client,
     and every await here fails with "attached to a different loop".
     """
-    await Profile.find_all().delete()
+    await _clear()
     yield
+    await _clear()
+
+
+async def _clear():
     await Profile.find_all().delete()
+    await Project.find_all().delete()
+    await DataObject.find_all().delete()
 
 
 class TestFirstBootAdoption:
@@ -166,6 +181,16 @@ class TestCreateProfile:
         assert profile_service.verify_password(profile, "") is True
         assert profile_service.verify_password(profile, "whatever") is True
 
+    async def test_a_non_ascii_stored_hash_verifies_false_rather_than_raising(self):
+        """`_hash_password` only ever writes a hexdigest, so this needs a
+        hand-edited or corrupted document to reach -- but `compare_digest`
+        raises TypeError on non-ASCII `str`, and every other malformed shape
+        of `password_hash` already returns False rather than exploding."""
+        profile = await profile_service.create_profile(username="corrupted")
+        profile.password_hash = "salt$dígest"
+
+        assert profile_service.verify_password(profile, "anything") is False
+
     async def test_two_profiles_with_the_same_password_get_different_hashes(self):
         """Salted, so a glance at the collection does not reveal that two
         people picked the same word."""
@@ -176,18 +201,37 @@ class TestCreateProfile:
 
 
 class TestCountOwnedDocuments:
-    async def test_counts_are_read_under_owner_id_not_the_raw_id(self):
-        """The adopted profile's documents are filed under "local"; counting
-        by `str(profile.id)` would report zero and let a deletion through that
-        strands the entire pre-feature library."""
+    async def test_delete_counts_the_adopted_profiles_documents_under_local(self):
+        """`delete_profile` must count by `owner_id()`, never
+        `str(profile.id)`.
+
+        This exercises `delete_profile` rather than calling
+        `count_owned_documents` itself -- calling it directly with
+        `profile.owner_id()` only re-asserts that `owner_id()` works and can
+        never observe what the deletion path passes, which is the thing at
+        risk.
+
+        The adopted profile is the *only* profile where the two differ: for
+        every other one `owner_id()` is `str(id)` and the mutation is
+        invisible. So the assertion is on the refusal's contents, not merely
+        that it refuses. Counting by the ObjectId finds zero documents, and
+        the deletion falls through to the adopted-owner guard -- a
+        ConflictError still, but one carrying no `projects` count. Asserting
+        the real count is what distinguishes them.
+        """
         await project_service.create_project(name="counted-legacy", owner="local")
-        profile = await profile_service.create_profile(
+        adopter = await profile_service.create_profile(
             username="counter", is_first_boot=True
         )
+        # Second profile so the last-profile guard does not fire first and
+        # refuse for an unrelated reason.
+        await profile_service.create_profile(username="bystander")
 
-        counts = await profile_service.count_owned_documents(profile.owner_id())
+        with pytest.raises(ConflictError) as exc_info:
+            await profile_service.delete_profile(adopter.id)
 
-        assert counts["projects"] >= 1
+        assert exc_info.value.details["projects"] == 1
+        assert "counter" in exc_info.value.message
 
 
 class TestDeleteProfile:
@@ -216,16 +260,73 @@ class TestDeleteProfile:
         """Deleting the last profile drops the installation into the
         first-boot setup screen, and a setup screen on an installation that
         already has blobs on disk is a state nothing else in the app is
-        designed for."""
-        only = await profile_service.create_profile(username="only", is_first_boot=True)
+        designed for.
 
-        with pytest.raises(ConflictError):
+        Two things here are load-bearing against a test that passes with its
+        own guard deleted. The profile must not be the adopted one -- the
+        adopted-owner guard refuses that too, so an adopted `only` would still
+        raise ConflictError with this guard gone. Hence a spare profile
+        created and deleted to leave a *non-adopted* last profile behind.
+        And the assertion names this guard's message rather than accepting any
+        ConflictError, since three separate branches raise that type.
+        """
+        only = await profile_service.create_profile(username="only")
+        spare = await profile_service.create_profile(username="spare-to-remove")
+        await profile_service.delete_profile(spare.id)
+
+        assert only.adopted_legacy_owner is False
+        assert await Profile.find_all().count() == 1
+
+        with pytest.raises(ConflictError) as exc_info:
             await profile_service.delete_profile(only.id)
 
+        assert "the only profile" in exc_info.value.message
         assert await Profile.get(only.id) is not None
+
+    async def test_refuses_the_adopted_profile_even_when_it_owns_nothing(self):
+        """The one deletion that has no recovery path.
+
+        An adopted profile owning no projects or objects but not the last one
+        would sail through both other guards -- and it is reachable, because
+        `owner` also lives on runs, jobs, upload sessions and schedules, which
+        the count does not see. An installation that deleted its projects but
+        kept its run history counts zero here.
+
+        What makes it unrecoverable rather than merely bad: nothing else
+        carries `adopted_legacy_owner=True` afterwards, so `get_current_owner`
+        raises for every `"local"` header from then on, and no new profile can
+        take over because `create_profile` refuses `is_first_boot` once any
+        profile exists. The pre-feature library becomes unreachable with no
+        message and no way back.
+        """
+        adopter = await profile_service.create_profile(
+            username="adopter", is_first_boot=True
+        )
+        await profile_service.create_profile(username="latecomer")
+
+        assert await profile_service.count_owned_documents(adopter.owner_id()) == {
+            "projects": 0,
+            "objects": 0,
+        }
+
+        with pytest.raises(ConflictError) as exc_info:
+            await profile_service.delete_profile(adopter.id)
+
+        assert "adopter" in exc_info.value.message
+        assert await Profile.get(adopter.id) is not None
+        assert await Profile.find_one({"adopted_legacy_owner": True}) is not None
 
     async def test_unknown_profile_is_a_validation_error(self):
         await profile_service.create_profile(username="bystander")
 
         with pytest.raises(ValidationError):
             await profile_service.delete_profile("000000000000000000000000")
+
+    async def test_malformed_profile_id_is_a_validation_error(self):
+        """Beanie validates the id before querying, so this raises pydantic's
+        ValidationError -- which has no handler registered, and would surface
+        as an unhandled 500 from a DELETE route rather than a 422."""
+        await profile_service.create_profile(username="onlooker")
+
+        with pytest.raises(ValidationError):
+            await profile_service.delete_profile("not-an-object-id")

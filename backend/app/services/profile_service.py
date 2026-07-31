@@ -24,6 +24,7 @@ import hashlib
 import secrets
 
 from beanie import PydanticObjectId
+from pydantic import ValidationError as PydanticValidationError
 from pymongo.errors import DuplicateKeyError
 
 from app.errors import ConflictError, ValidationError
@@ -57,7 +58,11 @@ def verify_password(profile: Profile, password: str) -> bool:
 
     salt, _, expected = profile.password_hash.partition("$")
     candidate = hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
-    return secrets.compare_digest(candidate, expected)
+    # Compared as bytes: compare_digest raises TypeError on str arguments
+    # containing non-ASCII, which `_hash_password` can never produce but a
+    # hand-edited or corrupted `password_hash` can. Every other malformed shape
+    # here already returns False, and encoding makes that true for this one too.
+    return secrets.compare_digest(candidate.encode(), expected.encode())
 
 
 async def create_profile(
@@ -115,8 +120,22 @@ async def create_profile(
 
 
 async def count_owned_documents(owner: str) -> dict[str, int]:
-    """How many projects and objects a profile owns, so a deletion refusal
-    can report real counts rather than a generic "not empty"."""
+    """Projects and objects owned by `owner`, so a deletion refusal can report
+    real counts rather than a generic "not empty".
+
+    Deliberately not a complete tally of everything carrying an `owner`. That
+    field lives on TimestampedDocument, so `PipelineRun`, `Job`,
+    `UploadSession` and `Schedule` have it too -- but those are derived or
+    transient, and none of them is something a user would go and delete to
+    empty a profile. Projects and objects are what the refusal message tells
+    them to clear, so those are what it counts.
+
+    This is safe to be partial only because `delete_profile` refuses the
+    adopted profile outright. Without that guard, an installation whose
+    `owner="local"` documents were all runs and jobs -- projects deleted, run
+    history kept -- would count zero here and delete the one profile that
+    answers for "local".
+    """
     return {
         "projects": await Project.find({"owner": owner}).count(),
         "objects": await DataObject.find({"owner": owner}).count(),
@@ -124,15 +143,27 @@ async def count_owned_documents(owner: str) -> dict[str, int]:
 
 
 async def delete_profile(profile_id: PydanticObjectId | str) -> None:
-    """Delete an empty, non-last profile.
+    """Delete an empty, non-last, non-adopted profile.
 
     Refuses to delete the last profile even when it owns nothing. A BioFlow
     with zero profiles drops into the first-boot setup screen, and a setup
     screen on an installation that already has blobs on disk is a state
     nothing else in the app is designed for -- the next profile created there
     would adopt a library it has no relationship to.
+
+    Refuses the adopted profile unconditionally, for a related reason: it is
+    the only thing that answers for `owner: "local"`, and `create_profile`
+    will not let another profile adopt once any profile exists. See the guard
+    below.
     """
-    profile = await Profile.get(profile_id)
+    try:
+        profile = await Profile.get(profile_id)
+    except PydanticValidationError as e:
+        # Beanie validates the id before it ever queries, so a malformed one
+        # raises pydantic's ValidationError -- which is not an AppError and so
+        # has no handler, turning a typo'd path parameter into a 500. Same
+        # shape of fix as `get_current_owner` in app/api/deps.py.
+        raise ValidationError(f"Malformed profile id: {profile_id}") from e
     if profile is None:
         raise ValidationError(f"Profile not found: {profile_id}")
 
@@ -152,6 +183,23 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
             f"Cannot delete {profile.username!r}: it still owns "
             f"{counts['projects']} project(s) and {counts['objects']} object(s)",
             details={**counts, "username": profile.username},
+        )
+
+    # Deliberately *after* the count, not before. Both refuse the adopted
+    # profile, so ordering cannot change the outcome -- but running the count
+    # first is the only place `owner_id()` is observably different from
+    # `str(profile.id)`, which keeps that distinction testable instead of
+    # short-circuited away. The clearer message wins when the library is
+    # non-empty; this one covers the case the count cannot see.
+    if profile.adopted_legacy_owner:
+        raise ConflictError(
+            f"Cannot delete {profile.username!r}: it holds the library that "
+            "predates profiles. Everything from before this installation had "
+            "profiles is filed under the owner this profile alone answers "
+            "for, and no replacement can claim it -- first-boot adoption only "
+            "runs when no profile exists. Deleting it would strand that data "
+            "with no way to reach it again.",
+            details={"username": profile.username, "adopted_legacy_owner": True},
         )
 
     await profile.delete()
