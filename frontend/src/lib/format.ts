@@ -118,6 +118,14 @@ const ACCESSION_LINKS: Record<
     url: (v) => `https://www.ncbi.nlm.nih.gov/datasets/genome/${v}`,
     label: "Assembly",
   },
+  // A single chromosome or scaffold record, for the Sequence Viewer's
+  // "View at NCBI" escape hatch. Separate from assembly_accession, which
+  // points at a whole genome's Datasets page.
+  nucleotide_accession: {
+    pattern: /^[A-Z]{2}_?\d+(\.\d+)?$|^[A-Z]{4}\d{8,}(\.\d+)?$/i,
+    url: (v) => `https://www.ncbi.nlm.nih.gov/nuccore/${v}`,
+    label: "Sequence",
+  },
 };
 
 /** External URL for an accession field, or null if it does not look valid. */

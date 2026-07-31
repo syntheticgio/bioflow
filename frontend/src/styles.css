@@ -2801,3 +2801,77 @@ a.btn {
   font-size: 11px;
   margin-top: 6px;
 }
+
+/* Chromosome strip: bars are proportional to sequence length, drawn from
+   facts the ingest already stored. Sits in the second column of .qc-charts,
+   which on a reference is otherwise empty -- the quality curve is suppressed
+   for a FASTA. */
+.chrom-strip {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.chrom-bar rect {
+  fill: var(--text-faint);
+  transition: fill 0.12s ease;
+}
+
+.chrom-bar.is-clickable {
+  cursor: pointer;
+}
+
+.chrom-bar.is-clickable:hover rect {
+  fill: var(--accent);
+}
+
+/* Keyboard focus must be visible: these bars are the only way to reach the
+   primary chromosomes, since the overflow picker holds only rank 25+. The
+   outline goes on the rect rather than the <g>, whose box would wrap the
+   label too. Focus repeats the hover fill so the focused bar reads the same
+   way a hovered one does. */
+.chrom-bar.is-clickable:focus {
+  outline: none;
+}
+
+.chrom-bar.is-clickable:focus-visible rect {
+  fill: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Abbreviated accession under each bar -- the full one is in the tooltip and
+   the accessible name. */
+.chrom-bar-label {
+  fill: var(--text-faint);
+  font-size: 9px;
+}
+
+.chrom-bar.is-clickable:hover .chrom-bar-label,
+.chrom-bar.is-clickable:focus-visible .chrom-bar-label {
+  fill: var(--accent);
+}
+
+.chrom-note {
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-top: 8px;
+  line-height: 1.45;
+}
+
+.chrom-overflow {
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+/* The reason this is a modal at all: the viewer is unusable in a column. */
+.sviewer-modal {
+  width: min(1100px, 92vw);
+  max-width: 92vw;
+}
+
+.sviewer-external {
+  float: right;
+  font-size: 12px;
+  font-weight: 400;
+}
