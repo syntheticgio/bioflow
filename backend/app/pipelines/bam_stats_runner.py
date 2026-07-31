@@ -153,18 +153,61 @@ def allocate_bins(
     entirely. Rounding discrepancies are absorbed by the last contig, so the
     allocation always sums to exactly `bin_count`.
 
+    That floor is unsatisfiable when there are more contigs than bins (a
+    fragmented draft assembly can have thousands of scaffolds against a
+    default `bin_count` in the hundreds) -- there simply are not enough bins
+    for one each. Rather than let the floor go negative, this degrades to
+    grouping contigs by index into `bin_count` contiguous runs (`floor(i *
+    bin_count / n)`), one bin per run: every contig in a run maps its full
+    length onto that single shared bin, and only the run's first contig is
+    credited in `counts` so the total still sums to `bin_count`. Per-contig
+    resolution is lost in that regime -- unavoidable when scaffolds outnumber
+    bins -- but every `start_bin` stays in range and no allocation goes
+    negative.
+
     Extracted from `bin_depth` so variant density (which counts per bin) and
     read depth (which averages per bin) share one definition of where a
     contig sits on the axis. Returns `(geometry, boundaries, counts)`:
     `geometry` maps contig -> (start_bin, positions_per_bin), `boundaries`
     marks which bin index starts each contig for drawing separators, and
-    `counts` maps contig -> how many bins it was given.
+    `counts` maps contig -> how many bins it was given (0 for a contig that
+    shares its run's bin with an earlier contig).
     """
     total_length = sum(length for _, length in contig_lengths)
     if total_length <= 0 or bin_count <= 0:
         return {}, [], {}
 
     n = len(contig_lengths)
+
+    if n > bin_count:
+        # More scaffolds than bins: the one-bin-per-contig floor cannot hold,
+        # so fall back to one bin per contiguous run of contigs. `i *
+        # bin_count // n` is non-decreasing in `i` and hits every value in
+        # `0..bin_count-1` at least once, so every bin is covered and every
+        # start_bin is in range by construction -- no correction pass needed.
+        contig_bin_counts = {}
+        geometry = {}
+        boundaries = []
+        prev_start = -1
+        for i, (name, length) in enumerate(contig_lengths):
+            start_bin = (i * bin_count) // n
+            # The whole contig collapses onto its one shared bin.
+            positions_per_bin = max(length, 1)
+            geometry[name] = (start_bin, positions_per_bin)
+            if start_bin != prev_start:
+                contig_bin_counts[name] = 1
+                boundaries.append({"contig": name, "bin_start": start_bin})
+                prev_start = start_bin
+            else:
+                # Shares its run's bin with the contig before it -- credited
+                # with 0 bins of its own so `counts` still sums to
+                # `bin_count`. `start_bin` above is still the correct (in
+                # range) shared bin; bin_depth treats a 0 count as "this
+                # contig's whole span is bin 0 of its run" rather than
+                # letting the offset clamp go negative.
+                contig_bin_counts[name] = 0
+        return geometry, boundaries, contig_bin_counts
+
     floor_bins = min(bin_count, n)
     remaining_bins = bin_count - floor_bins
 
@@ -202,7 +245,9 @@ def bin_depth(
     Bins are allocated proportionally to each contig's length, laid end to
     end, with one floor: every contig gets at least one bin regardless of its
     share of the total, so a short scaffold is never averaged away into a
-    neighbour's bin or omitted from the plot entirely.
+    neighbour's bin or omitted from the plot entirely. When a fragmented
+    assembly has more contigs than bins, that floor degrades instead of
+    overflowing -- see `allocate_bins` for how contigs then share bins.
 
     `depth_lines` is consumed once, in the streaming order `samtools depth -a`
     produces (contig order, then position order) -- never materialized as a
@@ -230,9 +275,13 @@ def bin_depth(
             continue
         start_bin, positions_per_bin = geometry[contig]
         position = int(pos_str)
-        offset_in_contig = min(
-            int((position - 1) / positions_per_bin), contig_bin_counts[contig] - 1
-        )
+        # `contig_bin_counts[contig]` can be 0 when contigs outnumber bins
+        # (see allocate_bins): that contig shares its run's single bin
+        # rather than owning one, so clamp against a span of at least 1
+        # instead of letting the upper bound go negative and push idx
+        # before the run's start_bin.
+        span = max(contig_bin_counts[contig], 1)
+        offset_in_contig = min(int((position - 1) / positions_per_bin), span - 1)
         idx = start_bin + offset_in_contig
         bin_sum[idx] += float(depth_str)
         bin_n[idx] += 1
