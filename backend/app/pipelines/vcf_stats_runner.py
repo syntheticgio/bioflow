@@ -25,7 +25,15 @@ VARIANT_COLUMNS = (
 # Real tab and newline escapes. A literal backslash-t here makes bcftools emit
 # one unsplittable column, and every variant lands in the database as a single
 # field -- verified against bcftools 1.21, this yields exactly 8 columns.
-QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER\t%INFO/DP[\t%GT]\n"
+#
+# DP is bracketed rather than pinned to %INFO/DP because where a caller
+# declares it varies: bcftools call declares DP in INFO, but Clair3 declares
+# it only in FORMAT and has no INFO/DP at all. %INFO/DP hardcodes the first
+# and fails outright -- "no such tag defined in the VCF header" -- on the
+# second, breaking the feature for half the callers this app offers. Inside
+# square brackets bcftools resolves %DP from whichever section declares it,
+# so the same format string works for both.
+QUERY_FORMAT = "%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%FILTER[\t%DP][\t%GT]\n"
 
 # `number of X:` keys in the SN section, mapped to the names used in facts.
 _SN_KEYS = {
@@ -52,8 +60,14 @@ def build_query_command(*, bcftools_path: str, vcf) -> list[str]:
 
     Streamed rather than collected: at plant scale this is tens of millions of
     lines, and materializing them would exhaust the container.
+
+    `-u` (--allow-undef-tags) makes a VCF with no DP anywhere -- not even in
+    FORMAT -- emit '.' for that field instead of erroring the whole job. That
+    is on top of, not instead of, bracketing %DP: bracketing picks the right
+    section when DP exists somewhere (Clair3's FORMAT vs. bcftools call's
+    INFO), and -u covers the case where it exists nowhere.
     """
-    return [bcftools_path, "query", "-f", QUERY_FORMAT, str(vcf)]
+    return [bcftools_path, "query", "-u", "-f", QUERY_FORMAT, str(vcf)]
 
 
 def parse_stats(text: str) -> dict:
