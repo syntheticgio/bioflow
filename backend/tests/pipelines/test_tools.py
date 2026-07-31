@@ -431,3 +431,30 @@ class TestBibliographicFields:
         assert payload["citation"] == ""
         assert payload["license"] == ""
         assert payload["usage"] == ""
+
+    def test_every_tool_is_documented(self):
+        """Adding a tool without documenting it must fail here rather than
+        render a blank help entry.
+
+        repository and citation_url are exempt on purpose: some tools have no
+        public repo and some have no paper, and a test that demanded a value
+        would only invite a fabricated one.
+        """
+        required = ("homepage", "citation", "license", "usage")
+        missing = {
+            name: [f for f in required if not getattr(meta, f)]
+            for name, meta in tools.TOOL_META.items()
+        }
+        missing = {k: v for k, v in missing.items() if v}
+        assert not missing, f"undocumented tools: {missing}"
+
+    def test_documented_urls_are_urls(self):
+        """A citation string in the homepage field would render as a dead
+        link, which is worse than a blank."""
+        for name, meta in tools.TOOL_META.items():
+            for field in ("homepage", "repository", "citation_url"):
+                value = getattr(meta, field)
+                if value:
+                    assert value.startswith("https://"), (
+                        f"{name}.{field} is not a URL: {value!r}"
+                    )
