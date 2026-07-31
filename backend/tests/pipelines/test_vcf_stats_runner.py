@@ -13,6 +13,7 @@ from app.pipelines.vcf_stats_runner import (
     build_stats_command,
     parse_stats,
     rebin_distribution,
+    variant_summary,
 )
 
 STATS = """# This file was produced by bcftools stats
@@ -190,3 +191,46 @@ class TestRebinDistribution:
         out = rebin_distribution(rows, value_key="depth", bucket_count=20)
         assert sum(b["count"] for b in out) == 8
         assert len(out) == 2
+
+
+class TestVariantSummary:
+    def test_headline_counts_come_from_the_sn_section(self):
+        out = variant_summary(parse_stats(STATS), filter_counts={".": 6641})
+        assert out["variants"] == 6641
+        assert out["snps"] == 6157
+        assert out["indels"] == 484
+        assert out["ti_tv"] == 2.42
+
+    def test_pass_rate_is_absent_when_the_file_does_not_use_filter(self):
+        """Every record in the real bcftools test file has FILTER='.'. A
+        '100% PASS' headline on a file where nothing was ever filtered is
+        misleading, so the rate is omitted rather than guessed."""
+        out = variant_summary(parse_stats(STATS), filter_counts={".": 6641})
+        assert "pass_pct" not in out
+        assert out["no_filter_count"] == 6641
+
+    def test_pass_rate_is_reported_when_the_file_does_use_filter(self):
+        """The rate is PASS over the record count from the SN section, not
+        over the sum of filter_counts -- those agree for a well-formed file,
+        and SN is the authority on how many records there are."""
+        out = variant_summary(
+            parse_stats(STATS),
+            filter_counts={"PASS": 6000, "LowQual": 600, "RefCall": 41},
+        )
+        assert out["pass_count"] == 6000
+        # 6000 / 6641 records
+        assert out["pass_pct"] == 90.35
+        assert out["no_filter_count"] == 0
+
+    def test_mixed_filter_and_dot_still_reports_a_rate(self):
+        """A partially-filtered file uses FILTER, so the rate is meaningful."""
+        out = variant_summary(
+            parse_stats(STATS), filter_counts={"PASS": 6000, ".": 641}
+        )
+        assert out["pass_pct"] == 90.35
+        assert out["no_filter_count"] == 641
+
+    def test_empty_vcf_summarises_to_zero_without_dividing(self):
+        out = variant_summary(parse_stats(EMPTY_STATS), filter_counts={})
+        assert out["variants"] == 0
+        assert "pass_pct" not in out
