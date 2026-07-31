@@ -695,11 +695,20 @@ class TestAnnotateCard:
         """Guards every other test in this class. bcftools 1.21 ships in the
         image and `bcftools_csq` is lru_cached, so the available-card tests
         assert exactly the value an escaped patch would also produce -- they
-        cannot themselves tell a working seam from a broken one."""
+        cannot themselves tell a working seam from a broken one.
+
+        The card assertion is the load-bearing one. Reading the probe back
+        only proves `patch` replaced the attribute, which it always does; it
+        would still pass if `build_annotate_card` reached some other reference
+        to `bcftools_csq` entirely. Driving the *card* to UNAVAILABLE is what
+        fails when the patch stops reaching the call site."""
         from app.services import suggestion_service
 
         with installed_csq(False, error="nope"):
             assert not suggestion_service.tools.bcftools_csq().available
+            card = build_annotate_card(_vcf(), None)
+            assert card.status is CardStatus.UNAVAILABLE
+            assert card.reason == "nope"
 
     def test_no_card_on_a_non_vcf(self):
         with installed_csq(True):

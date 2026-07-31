@@ -117,6 +117,17 @@ export function VariantTable({
     return [...seen].sort();
   }, [rows, consequence]);
 
+  // Whether this callset is annotated at all is a property of the file, not of
+  // the page you happen to be on. Deciding it per page made the whole control
+  // unmount on any page whose rows all fell outside a transcript -- common,
+  // since csq only annotates variants inside one -- so the filter bar reflowed
+  // as you paged. Latched instead: once a consequence has been seen, the
+  // control stays.
+  const [isAnnotated, setIsAnnotated] = useState(false);
+  useEffect(() => {
+    if (rows.some((r) => r.consequence)) setIsAnnotated(true);
+  }, [rows]);
+
   return (
     <div className="section">
       <div
@@ -189,9 +200,13 @@ export function VariantTable({
           />
         </label>
 
-        {consequenceOptions.length > 0 && (
+        {isAnnotated && (
           <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: "var(--text-faint)" }}>Consequence</span>
+            {/* "(this page)" because the options come from the rows currently
+                loaded, not the whole callset -- a consequence that only occurs
+                on page 90 is not offered on page 1. Saying so turns a dropdown
+                that looks unstable into one that is visibly scoped. */}
+            <span style={{ color: "var(--text-faint)" }}>Consequence (this page)</span>
             <select value={consequence} onChange={(e) => setConsequence(e.target.value)}>
               <option value="">All</option>
               {consequenceOptions.map((c) => (
