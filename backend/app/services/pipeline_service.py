@@ -1083,6 +1083,18 @@ async def launch_alignment(
         else:
             # Deduplicated away: an identical build is already queued or
             # running. Wait on *that* job rather than racing it.
+            #
+            # This lookup is not owner-filtered, and it does not need to be --
+            # but the reason it is safe changed when the dedup key became
+            # owner-scoped, so it is worth stating rather than leaving implicit.
+            # It keys on `object_id`, a specific DataObject id, and objects are
+            # owner-scoped, so two profiles holding the same genome necessarily
+            # have distinct reference rows and cannot match each other here.
+            # Before the key carried an owner this query was the thing that
+            # turned a cross-profile collision into "wait for the other
+            # profile's build" instead of no index at all; now `enqueue` never
+            # produces that collision, and this branch is reached only for a
+            # same-owner duplicate, which is exactly what it handles.
             existing = await Job.find_one(active_index_job_query(reference.id))
             if existing is not None:
                 depends_on.append(existing.id)

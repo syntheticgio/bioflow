@@ -90,6 +90,15 @@ async def enqueue(
     to ask for the same thing first -- but it does mean a shared `build_index`
     is no longer actually shared.
 
+    Worth knowing the size of that cost before it surprises someone: an aligner
+    index of a large genome is gigabytes, not megabytes, so each additional
+    profile aligning against the same reference pays that again in both disk
+    and build time. Acceptable for the handful of profiles this tool is built
+    for; it would not be at a scale this tool does not target. Note the *blobs*
+    are still shared -- only the derived index is duplicated, because it is a
+    sidecar of a per-profile reference object rather than content-addressed
+    work.
+
     `depends_on` holds the job back until every listed job has *succeeded*.
     Such a job is never pushed to Redis; `_release_dependents` puts it there
     when its last dependency finishes. If any dependency fails, the dependent
