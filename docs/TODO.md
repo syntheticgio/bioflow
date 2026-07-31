@@ -1,6 +1,127 @@
 # TODO
 
-Deferred work, with enough context to pick up cold. Newest first.
+Two kinds of entry, kept apart because they are read differently.
+
+**Planned features** are things we have decided to build, described from the
+user's side. **Deferred findings** are problems discovered while building
+something else, recorded with enough context to pick up cold. Findings are
+newest first.
+
+---
+
+# Planned features
+
+## Profiles — SPECCED
+
+Design: `docs/superpowers/specs/2026-07-31-profiles-design.md` (2026-07-31).
+
+Segregate the library into named profiles chosen at startup, so several people
+sharing one machine each see their own projects, files and runs. A startup
+screen shows a clickable square per profile plus a `+` to add one; the
+add-profile modal collects a unique username, an optional password, an optional
+email, and an expandable Details section for name, institution and research
+areas. An auto-login checkbox skips the picker on subsequent launches. A profile
+menu in the header carries Switch profile / Edit details / Logout.
+
+Not a security mechanism. The optional password stops someone entering the
+*wrong* profile by accident; the API stays unauthenticated and the spec says so
+explicitly rather than implying protection.
+
+What the design settled that the original note left open:
+
+- **Storage does not nest under a profile.** The original note asked whether to
+  add a profile level above the current layout. It should not: `blob_rel_path`
+  builds `objects/ab/abcdef...` from the SHA-256 alone, so the path *is* the
+  content hash. Profiles partition the *metadata* collections (`projects`,
+  `objects`, `runs`, `jobs`, `schedules`) via the `owner` field already on every
+  document; `blobs` and `objects/` stay **global**. Two profiles holding the
+  same reference genome then store it once, and cross-profile sharing becomes
+  nearly free instead of impossible.
+- **Emoji are safe**, and the numeric id the note proposed is not needed for
+  paths — `owner` never becomes a path component. A profile's `ObjectId`
+  supplies the stable id so renaming does not rewrite every document.
+- **No data migration.** The first profile adopts `owner: "local"` literally, so
+  the existing library belongs to it with zero documents rewritten. This matters
+  because this repo has no migrations mechanism — see the index-definition entry
+  below for what that costs.
+
+Two traps found in the code, both silent:
+
+- `enqueue`'s `dedup_key` is global. A key not carrying a per-profile id would
+  let one profile's job silently cancel another's identical request.
+- The worker has no HTTP request, and `Job.owner` defaults to `"local"` — so
+  every job would be attributed to the first profile unless `enqueue` takes an
+  owner and the handlers propagate it.
+
+## Sharing between profiles
+
+Depends on profiles. Share a file with another profile without copying the
+bytes — which the storage layer already supports: a second `DataObject` with a
+different `owner` pointing at the same digest, with the existing refcount
+governing lifetime. The open work is policy and UI, not storage: how a share is
+offered and revoked, whether the recipient sees it in their own explorer or a
+separate shared area, and what happens to a share when the owner deletes their
+copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
+refcount reaching zero and the bytes being unlinked).
+
+## Non-local / remote NCBI data
+
+Keep an NCBI download remote rather than ingesting it: store a pointer, fetch
+just-in-time when used. `BlobStorage` already distinguishes `MANAGED` from
+`EXTERNAL` (`models/blob.py`); this wants a third mode for content that is not
+on this machine at all.
+
+The file explorer badges files `Local`, `NCBI`, or both — a file uploaded by the
+user whose name matches the NCBI accession regex gets the `NCBI` badge too. For
+anything re-downloadable, an Actions entry deletes the bytes but keeps the
+metadata, so the file stays listed and usable on demand while freeing the space.
+Remote files skip QC and ingestion parsing; triggering either downloads the file
+first.
+
+Undecided, and worth settling before building: whether the just-in-time fetch
+happens *inside* the job that needs the file or as a *prerequisite* job. The
+existing `depends_on` gate (`models/job.py`) already supports the second shape,
+and it is the one that keeps a stalled multi-gigabyte download visible in the
+queue rather than hidden inside a pipeline step that looks hung.
+
+## Helper install program
+
+A native executable that removes `docker compose` from the user's vocabulary.
+On launch it checks whether Docker is installed and running, then whether
+BioFlow is already up. If not installed, it walks through a first-run setup:
+where storage lives, where the program is installed (a good default), which port
+to serve on — then writes a `docker-compose.yml` in the install directory and
+offers a Run button. Thereafter it is a launcher and a status check, with Run and
+Shutdown buttons. Upgrading (bumping container image tags) is explicitly a
+later generation.
+
+**This collides with profiles and the two cannot be specced independently.** The
+setup flow above says it should ask the user to create an initial profile — but
+at install time the stack is not running, so there is no API to create one
+against. Either the installer writes a seed file the backend consumes on first
+boot, or it does not ask and profile creation stays in the web UI's first-run
+screen. Worth deciding when profiles land.
+
+Also note this is a different *kind* of artifact from everything else here: a
+native desktop app, outside this repo's Python/React/Docker toolchain, needing
+its own repo and build/signing story.
+
+## Software help page: filter by column
+
+On `/help/software`, clicking a column header (Alignment, Quality Control, ...)
+filters the page to the tools matching that column — primary *or* secondary, and
+including uninstalled ones. All columns stay visible, since a tool can occupy
+several. Separately, make the tool names in the matrix clickable so they jump to
+that tool's description further down the page.
+
+The matrix already exists and already distinguishes primary from secondary rank
+(`ToolMatrix` in `frontend/src/components/HelpSoftware.tsx`), and its rows are
+built from the same list the sections render, so an anchor per tool is
+straightforward. Contained frontend work, no backend change.
+
+---
+
+# Deferred findings
 
 ## The first `/pipelines/tools` request stalls 6-15s on NanoPlot
 
@@ -170,28 +291,6 @@ Touches when built: `backend/app/models/run.py`, `backend/app/models/object.py`
 `variant_runner.py` / `assembly_runner.py`, mirroring `align_runner.py`'s
 split between command construction and progress parsing), and the
 corresponding frontend dialogs alongside `AlignDialog.tsx`/`TrimDialog.tsx`.
-
-## The align dialog's submit button needs scrolling when expanded — FIXED
-
-Fixed in `d4d9f2a` (merged to main). `.trim-modal` converted from
-`overflow-y: auto` to a flex column; `.modal-body` scrolls, `.modal-actions`
-pins to the bottom via `margin-top: auto`.
-
-Raised: 2026-07-27, during alignment, found by driving the real UI.
-
-With "Aligner and performance" expanded, `.trim-modal` is 822px of content in
-a 633px `max-height`. It scrolls, so nothing is unreachable, but the primary
-action leaves the viewport at the moment the user is most likely to want it --
-they have just finished changing settings.
-
-The trim dialog has the same structure and never hit this because it has fewer
-advanced fields. Worth fixing for both at once rather than tuning one modal:
-pinning `.modal-actions` to the bottom of the modal with the body scrolling
-between the heading and the actions would fix the class of problem.
-
-Not urgent -- the flow works, and the section is collapsed by default.
-
-Touches: `frontend/src/styles.css`, `frontend/src/components/AlignDialog.tsx`.
 
 ## Changing an index definition is a hard startup failure
 
@@ -377,25 +476,3 @@ overwritten once set, so a wrong guess is visible and correctable rather than
 silent.
 
 Touches: `backend/app/pipelines/pairing.py`, `backend/app/queue/results.py`.
-
-## Re-ingest re-asserts a reference role the user cleared
-
-Raised: 2026-07-26, during assembly-accession enrichment.
-
-`should_assign_reference_role` in `backend/app/queue/results.py` assigns the
-reference role when an assembly accession is found and `role is None`. A role
-the user *cleared* is indistinguishable from one never set, so converting a
-reference back to reads and then re-ingesting will silently re-assign it.
-
-Rare in practice — it needs a deliberate conversion plus a re-ingest of a file
-whose name carries a GCA/GCF accession — but it quietly contradicts the promise
-that an explicit choice is never overruled.
-
-The fix needs a way to record that a user has touched the role: either a
-nullable `role_set_by` field (`"user"` vs `"ingest"`), or a general
-`user_touched: list[str]` on the object. The second generalizes to the same
-problem for metadata fields, so it is probably the better shape. Deferred
-because it is a schema change that this feature does not otherwise need.
-
-Touches: `backend/app/models/object.py`, `backend/app/queue/results.py`,
-`backend/app/services/object_service.py`.
