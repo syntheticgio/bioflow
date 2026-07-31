@@ -299,3 +299,41 @@ class TestDensityAccumulator:
         assert len(acc.bins()) == 10
         assert sum(acc.bins()) == 50
         assert len(acc.contigs()) == 50
+
+    def test_multiallelic_indel_counts_as_an_indel(self):
+        """bcftools stats counts multiallelic indel sites in its indel total.
+        Excluding them here made the per-contig table sum to 462 while the
+        summary above it said 484 on the real test file -- the same screen
+        disagreeing with itself."""
+        acc = DensityAccumulator(contig_lengths=[("chr1", 1000)], bin_count=10)
+        acc.add("chr1", 10, ref="AGGGGGGG", alt="AGGGGGGGG,AGGGGGGGGG")
+        row = acc.contigs()[0]
+        assert row["variants"] == 1
+        assert row["indels"] == 1
+        assert row["snps"] == 0
+
+    def test_multiallelic_snp_counts_as_a_snp(self):
+        """Every allele a single base against a single-base REF is what
+        bcftools calls a multiallelic SNP site."""
+        acc = DensityAccumulator(contig_lengths=[("chr1", 1000)], bin_count=10)
+        acc.add("chr1", 10, ref="A", alt="G,T")
+        row = acc.contigs()[0]
+        assert row["snps"] == 1
+        assert row["indels"] == 0
+
+    def test_mixed_multiallelic_with_one_indel_allele_is_an_indel(self):
+        """One length-changing allele makes the site an indel site."""
+        acc = DensityAccumulator(contig_lengths=[("chr1", 1000)], bin_count=10)
+        acc.add("chr1", 10, ref="A", alt="G,ATT")
+        row = acc.contigs()[0]
+        assert row["indels"] == 1
+        assert row["snps"] == 0
+
+    def test_same_length_multibase_substitution_is_neither(self):
+        """An MNP in bcftools' vocabulary: counted in the total only."""
+        acc = DensityAccumulator(contig_lengths=[("chr1", 1000)], bin_count=10)
+        acc.add("chr1", 10, ref="AT", alt="GC")
+        row = acc.contigs()[0]
+        assert row["variants"] == 1
+        assert row["snps"] == 0
+        assert row["indels"] == 0
