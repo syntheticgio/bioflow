@@ -129,9 +129,7 @@ async def link_job(
     `link_job_to_run_of` below. RunJob is a link row with no owner of its own:
     nothing sets one (the constructor here does not), so every row carries
     TimestampedDocument's "local" default, and a filter on it would strand link
-    rows rather than protect anything. Nor could it carry a meaningful one --
-    the docstring on RunJob explains that a deduplicated `build_index` belongs
-    to more than one run, so "whose is this row" has no single answer.
+    rows rather than protect anything.
 
     What actually scopes these is the caller: each is reached through a run or
     a job the caller already holds, from a flow that resolved ownership before
@@ -173,8 +171,18 @@ async def status_for(run_id: PydanticObjectId, *, owner: str) -> tuple[RunStatus
     fetching the jobs is the expensive half.
 
     The run itself is the boundary: another owner's run resolves to no members
-    and so reports the empty-run answer, which is what a profile that cannot
-    see the run should get.
+    and so reports the empty-run answer.
+
+    Note this diverges from `get_project` and `get_object`, which raise
+    NotFoundError on a wrong-owner lookup. Returning SUCCEEDED is a stronger
+    claim than "nothing to show" -- it is an answer about a run the caller may
+    not see, and it is the same conflation `status_for_many` avoids by omitting
+    the run from its result rather than answering for it. Unreachable today
+    (both callers in api/v1/runs.py pass the run's own owner, so the guard
+    never fires), which is why it is left as-is rather than changed blind.
+    TODO(profiles): Task 10 wires these routes and should decide then whether
+    this becomes a raise, matching the other services, or an explicit
+    "not visible" state distinct from an empty run.
     """
     run = await PipelineRun.get(run_id)
     if run is None or run.owner != owner:
@@ -242,17 +250,26 @@ async def status_for_many(
         return {rid: RunStatus.SUCCEEDED for rid in run_ids}
 
     # The Job lookup stays unscoped, and that is the considered choice rather
-    # than an oversight. queue/queue.py builds every Job without an owner, so
-    # they all carry the "local" default until Task 8; adding `"owner": owner`
-    # here today would match nothing for a real profile and quietly report each
-    # of its runs as having no jobs -- an activity view claiming a running
-    # alignment had already succeeded. Leaving it unscoped is also correct
-    # *after* Task 8 lands, because these job ids come from RunJob rows whose
-    # run this function has already confirmed belongs to `owner`; the run is
-    # the boundary and the job id is downstream of it. A shared build_index is
-    # the case that settles it either way: it legitimately serves runs
-    # belonging to different profiles, so its own owner field could never be
-    # the right thing to filter a member lookup by.
+    # than an oversight.
+    #
+    # Today it would be actively wrong: queue/queue.py builds every Job without
+    # an owner, so they all carry the "local" default, and adding
+    # `"owner": owner` here would match nothing for a real profile. That is not
+    # a missing row -- `derive_status` maps an empty member list to SUCCEEDED,
+    # so the activity view would claim a running alignment had already
+    # finished. An affirmative lie is a worse failure than the gap it closes.
+    #
+    # It stays right once jobs do carry an owner, for a different reason: these
+    # job ids come from RunJob rows whose run this function has already
+    # confirmed belongs to `owner`. The run is the authorization boundary and
+    # the job id is downstream of it, so a job filter is redundant -- and a
+    # redundant filter here buys nothing while keeping the empty-member failure
+    # above permanently reachable.
+    #
+    # Do not reach for the "a shared build_index serves several profiles"
+    # argument: that stops being true when owner is folded into the dedup key,
+    # at which point each profile gets its own copy of otherwise-identical
+    # work. The reason above survives that change; that one does not.
     jobs = await Job.find({"_id": {"$in": [link.job_id for link in links]}}).to_list()
     states = {job.id: job.state for job in jobs}
 
