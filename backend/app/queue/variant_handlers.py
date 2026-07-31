@@ -460,16 +460,32 @@ def run_vcf_stats(ctx: JobContext) -> dict:
     job_class=JobClass.COMPUTE,
     resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
 )
+def _csq_line_logger(ctx: JobContext) -> "callable":
+    """A line callback that classifies `csq`'s stderr as it streams.
+
+    Real NCBI GFF3 files emit parse warnings on every successful run -- see
+    `csq_runner.is_benign_gff_warning` -- so those are logged at debug and
+    everything else at warning, rather than either failing the job on routine
+    noise or hiding an unrecognised line that might matter.
+    """
+
+    def on_line(line: str) -> None:
+        if not line.strip():
+            return
+        if csq_runner.is_benign_gff_warning(line):
+            log.debug("csq_gff_warning", job_id=ctx.job_id, line=line)
+        else:
+            log.warning("csq_stderr", job_id=ctx.job_id, line=line)
+
+    return on_line
+
+
 def annotate_variants(ctx: JobContext) -> dict:
     """Add consequence annotations to a VCF with `bcftools csq`.
 
     Produces a new VCF object rather than mutating the input: the original is
     what the caller actually emitted, and an annotation run is a derivation of
     it like every other step here.
-
-    GFF3 parse warnings are expected on real NCBI annotations -- the T. brucei
-    file emits three kinds -- and are logged rather than failed on. See
-    `csq_runner.is_benign_gff_warning`.
     """
     object_id = ctx.payload.get("object_id")
     if not object_id:
@@ -487,27 +503,36 @@ def annotate_variants(ctx: JobContext) -> dict:
     vcf = _named_link(
         work, _resolve_blob(ctx.payload, "vcf"), ctx.payload.get("vcf_name")
     )
-    reference = _named_link(
-        work, _resolve_blob(ctx.payload, "reference"), ctx.payload.get("reference_name")
-    )
     annotation = _named_link(
         work,
         _resolve_blob(ctx.payload, "annotation"),
         ctx.payload.get("annotation_name"),
     )
 
+    # The reference and its .fai, laid out as real siblings the way
+    # call_variants does -- not a symlink `samtools faidx` would resolve
+    # through, writing a stray `.fai` into the content-addressed store beside
+    # the blob instead of beside the name csq actually looks next to.
+    ref_name = Path(ctx.payload.get("reference_name") or "reference.fa").name
+    materialized = aligners.materialize(
+        workdir=work / "ref",
+        reference_name=ref_name,
+        reference_blob=_resolve_blob(ctx.payload, "reference"),
+        sidecars={f"{ref_name}{aligners.FAI_SUFFIX}": str(_resolve_blob(ctx.payload, "fai"))},
+    )
+    if materialized.missing_index:
+        raise PermanentError(
+            f"The reference index for {ref_name!r} could not be laid out. Its "
+            f".fai may be recorded against a different reference."
+        )
+    reference = materialized.reference
+
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # csq needs a .fai beside the reference, exactly as the aligners do.
-    ctx.progress(phase="index", pct=0.1, message="indexing the reference")
-    code = run_subprocess(
-        ctx,
-        [tools.require(tools.samtools()).path, "faidx", str(reference)],
-        log_path=str(log_path),
-    )
-    if code != 0:
-        raise _failure(code, log_path, "samtools faidx")
+    # csq's own log, separate from the shared job log: `_failure` only shows
+    # the last 5 lines, and a real NCBI GFF3 buries a genuine failure under
+    # routine "unknown biotype" parse warnings if the two share one file.
+    csq_log_path = work / "csq.log"
 
     ctx.progress(phase="annotate", pct=0.3, message="calling consequences")
     out = work / "annotated.vcf.gz"
@@ -520,24 +545,32 @@ def annotate_variants(ctx: JobContext) -> dict:
             annotation=annotation,
             out=out,
         ),
-        log_path=str(log_path),
+        log_path=str(csq_log_path),
+        on_line=_csq_line_logger(ctx),
     )
     if code != 0:
-        raise _failure(code, log_path, "bcftools csq")
+        raise _failure(code, csq_log_path, "bcftools csq")
 
     # Not `_rename_output`: it calls `variant_runner.output_name`, which takes
     # `Path(name).stem` on the assumption its input is a BAM. Handed a
     # `.vcf.gz` that yields `foo.bcftools.vcf.csq.vcf.gz`.
-    produced = out.parent / csq_runner.annotated_name(
-        ctx.payload.get("vcf_name") or vcf.name
-    )
+    name = csq_runner.annotated_name(ctx.payload.get("vcf_name") or vcf.name)
+    produced = out.parent / name
     if produced != out:
         out.rename(produced)
     index = _index_vcf(ctx, produced, log_path)
 
+    ctx.progress(phase="done", pct=1.0, message="annotation complete")
+    log.info("annotate_variants_finished", job_id=ctx.job_id, output=produced.name)
+
     return {
-        "produced": str(produced),
-        "index": str(index),
+        "object_id": object_id,
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "annotation_object_id": ctx.payload.get("annotation_object_id"),
+        "project_id": ctx.payload.get("project_id"),
+        "job_id": ctx.job_id,
+        "output": {"tmp_path": str(produced), "name": produced.name},
+        "index": {"tmp_path": str(index), "name": index.name, "role": "tbi"},
         "tool": "bcftools csq",
         "tool_version": bcftools.version,
     }

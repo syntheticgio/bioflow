@@ -8,12 +8,21 @@ missing one otherwise fails thirty seconds into a job rather than at launch.
 import pytest
 
 from app.errors import PermanentError
-from app.queue import variant_handlers
+from app.queue import results, variant_handlers
 from app.queue.registry import JobContext
 
 
 def _ctx(payload: dict) -> JobContext:
     return JobContext(job_id="job-1", payload=payload, epoch=1, attempts=1)
+
+
+class TestAnnotateVariantsRegistered:
+    # The specific omission that would otherwise ship silently green: without
+    # an _APPLIERS entry, annotate_variants runs, the job goes green, and the
+    # produced VCF just sits in tmp/annotate/<job_id>/ until the scratch
+    # reaper deletes it -- nothing is ever ingested or shown in the UI.
+    def test_has_a_result_applier(self):
+        assert "annotate_variants" in results._APPLIERS
 
 
 class TestAnnotateVariantsPayload:

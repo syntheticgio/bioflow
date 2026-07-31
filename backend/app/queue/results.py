@@ -1160,6 +1160,89 @@ async def _apply_call_variants(result: dict) -> None:
             await run_service.record_outputs(run_id, [vcf.id])
 
 
+def annotation_provenance(result: dict) -> dict:
+    """The facts an annotation run stamps onto the VCF it produced."""
+    return {
+        "variants_annotated_by": result.get("tool"),
+        "variant_annotation_tool_version": result.get("tool_version"),
+    }
+
+
+async def _apply_annotate_variants(result: dict) -> None:
+    """Turn a finished annotation run into a new VCF object and its index.
+
+    Mirrors `_apply_call_variants`: the annotated VCF descends from the
+    source VCF, the reference and the annotation (GFF3) it was called
+    against, since the annotations mean nothing without knowing which genes
+    they were read from. The `.tbi` is a sidecar of the new VCF, exactly as
+    `_apply_call_variants` attaches one to its own output.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    vcf_id = result.get("object_id")
+    if not output or not vcf_id:
+        return
+
+    vcf = await DataObject.get(PydanticObjectId(vcf_id))
+    if vcf is None:
+        log.warning("annotate_variants_parent_missing", object_id=vcf_id)
+        return
+
+    parents = [vcf.id]
+    for key in ("reference_object_id", "annotation_object_id"):
+        parent_id = result.get(key)
+        if parent_id:
+            parents.append(PydanticObjectId(parent_id))
+
+    job_id = result.get("job_id")
+    try:
+        annotated = await object_service.ingest_local_file(
+            project_id=vcf.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.VARIANTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=annotation_provenance(result),
+            # Sample-level metadata describes the biology, which annotating
+            # does not change -- same reasoning as call_variants' copy.
+            metadata=dict(vcf.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("annotate_variants_ingest_failed", object_id=vcf_id, error=str(e))
+        return
+
+    log.info("annotate_variants_applied", vcf_id=vcf_id, annotated_id=str(annotated.id))
+
+    # The index is attached after the VCF exists, and its failure is logged
+    # rather than raised: the VCF is the deliverable, and an index can be
+    # rebuilt from it at any time.
+    index = result.get("index")
+    if index:
+        try:
+            await object_service.ingest_local_file(
+                project_id=vcf.project_id,
+                path=Path(index["tmp_path"]),
+                name=index["name"],
+                derived_from=[annotated.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                sidecar_of=annotated.id,
+                sidecar_role=SidecarRole.TBI,
+            )
+        except Exception as e:  # noqa: BLE001
+            log.error(
+                "annotate_variants_tbi_ingest_failed",
+                vcf_id=str(annotated.id),
+                error=str(e),
+            )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [annotated.id])
+
+
 _SIDECAR_ROLES = {
     "fai": SidecarRole.FAI,
     "bai": SidecarRole.BAI,
@@ -1184,4 +1267,5 @@ _APPLIERS = {
     "call_variants": _apply_call_variants,
     "run_bam_stats": _apply_run_bam_stats,
     "run_vcf_stats": _apply_run_vcf_stats,
+    "annotate_variants": _apply_annotate_variants,
 }

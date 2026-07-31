@@ -1806,8 +1806,22 @@ async def launch_annotation(*, object_id: PydanticObjectId):
     if not inputs.ok:
         raise ValidationError(inputs.reason)
 
+    # The handler stages the reference the same way call_variants does --
+    # materialized as a real sibling of its .fai, not a symlink `samtools
+    # faidx` would resolve through -- so the .fai has to exist and be
+    # resolvable here, exactly as launch_variant_calling requires one.
+    fai = await _sidecar_of_role(inputs.reference, SidecarRole.FAI)
+    if fai is None:
+        raise ValidationError(
+            f"Reference {inputs.reference.name!r} has no FASTA index (.fai). "
+            f"Build its index first.",
+            details={"reference_id": str(inputs.reference.id), "needs": "build_index"},
+        )
+
     payload: dict = {
         "object_id": str(vcf.id),
+        "reference_object_id": str(inputs.reference.id),
+        "annotation_object_id": str(inputs.annotation.id),
         "project_id": str(vcf.project_id),
         "vcf_name": vcf.name,
         "reference_name": inputs.reference.name,
@@ -1817,6 +1831,7 @@ async def launch_annotation(*, object_id: PydanticObjectId):
         ("vcf", vcf),
         ("reference", inputs.reference),
         ("annotation", inputs.annotation),
+        ("fai", fai),
     ):
         digest, path = await _resolve_readable(obj)
         if digest:
