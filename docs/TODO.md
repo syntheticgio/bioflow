@@ -689,6 +689,28 @@ Touches when built: `backend/app/models/run.py`, `backend/app/models/object.py`
 split between command construction and progress parsing), and the
 corresponding frontend dialogs alongside `AlignDialog.tsx`/`TrimDialog.tsx`.
 
+## The align dialog's submit button needs scrolling when expanded — FIXED
+
+Fixed in `d4d9f2a` (merged to main). `.trim-modal` converted from
+`overflow-y: auto` to a flex column; `.modal-body` scrolls, `.modal-actions`
+pins to the bottom via `margin-top: auto`.
+
+Raised: 2026-07-27, during alignment, found by driving the real UI.
+
+With "Aligner and performance" expanded, `.trim-modal` is 822px of content in
+a 633px `max-height`. It scrolls, so nothing is unreachable, but the primary
+action leaves the viewport at the moment the user is most likely to want it --
+they have just finished changing settings.
+
+The trim dialog has the same structure and never hit this because it has fewer
+advanced fields. Worth fixing for both at once rather than tuning one modal:
+pinning `.modal-actions` to the bottom of the modal with the body scrolling
+between the heading and the actions would fix the class of problem.
+
+Not urgent -- the flow works, and the section is collapsed by default.
+
+Touches: `frontend/src/styles.css`, `frontend/src/components/AlignDialog.tsx`.
+
 ## Changing an index definition is a hard startup failure
 
 Raised: 2026-07-27, during alignment. **The migration below has been applied to
