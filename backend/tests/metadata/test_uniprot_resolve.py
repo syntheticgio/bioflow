@@ -192,3 +192,47 @@ class TestFailureIsNotFatal:
 
         assert result.proteome is None
         assert result.candidates == []
+
+
+class TestMalformedPayloads:
+    """UniProt returning an unexpected shape must not raise.
+
+    The `or {}` idiom guards only against None. A field present but holding a
+    string raises on `.get()`, and that escapes the try/except around the
+    request -- parsing happens after it. Measured before the guard existed:
+    one bad entry in a batch took down the whole response.
+    """
+
+    def test_a_non_dict_nested_field_does_not_raise(self, stub_transport):
+        calls, responses = stub_transport
+        responses["organism_id"] = {
+            "results": [{"id": "UP000000001", "taxonomy": "Saccharomyces cerevisiae"}]
+        }
+
+        result = uniprot.resolve_taxon(559292)
+
+        assert result.proteome is not None
+        assert result.proteome.id == "UP000000001"
+        assert result.proteome.taxon_id is None
+
+    def test_a_protein_with_string_organism_does_not_raise(self, stub_transport):
+        calls, responses = stub_transport
+        responses["uniprotkb"] = {
+            "results": [{"primaryAccession": "P0DTC2", "organism": "SARS-CoV-2"}]
+        }
+
+        hits = uniprot.search_proteins("anything")
+
+        assert len(hits) == 1
+        assert hits[0].accession == "P0DTC2"
+        assert hits[0].organism is None
+
+    def test_a_null_completeness_report_does_not_raise(self, stub_transport):
+        calls, responses = stub_transport
+        responses["organism_id"] = {
+            "results": [{"id": "UP000000002", "proteomeCompletenessReport": None}]
+        }
+
+        result = uniprot.resolve_taxon(559292)
+
+        assert result.proteome.busco_score is None

@@ -241,13 +241,25 @@ def count_results(query: str, *, timeout: float = _TIMEOUT_SECONDS) -> int | Non
         return None
 
 
+def _obj(value: object) -> dict:
+    """A nested field as a dict, whatever it actually is.
+
+    `x.get("k") or {}` guards only against None. UniProt occasionally returns
+    a field as a string or a list where a dict is expected, and `.get()` on
+    that raises -- escaping the try/except around the request, since parsing
+    happens after it. A raise here would surface as a 500 from what this
+    module promises to report as "found nothing".
+    """
+    return value if isinstance(value, dict) else {}
+
+
 def _proteome_info(entry: dict) -> ProteomeInfo | None:
     pid = entry.get("id")
     if not isinstance(pid, str):
         return None
-    taxonomy = entry.get("taxonomy") or {}
-    busco = (entry.get("proteomeCompletenessReport") or {}).get("buscoReport") or {}
-    assembly = entry.get("genomeAssembly") or {}
+    taxonomy = _obj(entry.get("taxonomy"))
+    busco = _obj(_obj(entry.get("proteomeCompletenessReport")).get("buscoReport"))
+    assembly = _obj(entry.get("genomeAssembly"))
     return ProteomeInfo(
         id=pid,
         name=taxonomy.get("scientificName") or pid,
@@ -341,16 +353,15 @@ def _protein_hit(entry: dict) -> ProteinHit | None:
     accession = entry.get("primaryAccession")
     if not isinstance(accession, str):
         return None
-    description = entry.get("proteinDescription") or {}
-    recommended = description.get("recommendedName") or {}
-    full_name = (recommended.get("fullName") or {}).get("value")
+    description = _obj(entry.get("proteinDescription"))
+    recommended = _obj(description.get("recommendedName"))
+    full_name = _obj(recommended.get("fullName")).get("value")
     return ProteinHit(
         accession=accession,
         entry_id=entry.get("uniProtkbId"),
-        # Unreviewed entries frequently carry no recommendedName at all.
         name=full_name if isinstance(full_name, str) else None,
-        organism=(entry.get("organism") or {}).get("scientificName"),
-        length=(entry.get("sequence") or {}).get("length"),
+        organism=_obj(entry.get("organism")).get("scientificName"),
+        length=_obj(entry.get("sequence")).get("length"),
         reviewed="reviewed" in (entry.get("entryType") or "").lower()
         and "unreviewed" not in (entry.get("entryType") or "").lower(),
     )
