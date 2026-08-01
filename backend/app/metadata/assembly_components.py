@@ -45,6 +45,11 @@ class ComponentSpec:
     # `dataset_catalog.json`'s fileType for this component -- the primary
     # labeling source after extraction.
     file_type: str
+    # The `sequence_type` metadata value its file lands with. Set from the
+    # component rather than guessed from the filename the way an uploaded FASTA
+    # is: here we already know what NCBI was asked for, and knowing beats
+    # inferring. None for components that are not sequence at all (GFF3).
+    sequence_type: str | None = None
     mandatory: bool = False
 
 
@@ -55,6 +60,7 @@ COMPONENTS: dict[str, ComponentSpec] = {
         role="reference",
         preview_key="all_genomic_fasta",
         file_type="GENOMIC_NUCLEOTIDE_FASTA",
+        sequence_type="Genomic",
         # Not selectable-off: every other component describes coordinates or
         # products of this sequence.
         mandatory=True,
@@ -72,6 +78,7 @@ COMPONENTS: dict[str, ComponentSpec] = {
         role="protein",
         preview_key="prot_fasta",
         file_type="PROTEIN_FASTA",
+        sequence_type="Protein",
     ),
     "cds": ComponentSpec(
         key="cds",
@@ -79,6 +86,7 @@ COMPONENTS: dict[str, ComponentSpec] = {
         role="transcript",
         preview_key="cds_fasta",
         file_type="CDS_NUCLEOTIDE_FASTA",
+        sequence_type="CDS",
     ),
 }
 

@@ -315,11 +315,24 @@ def ingest_headers(ctx: JobContext) -> dict:
             format_kind=detection.kind,
         ).to_dict()
 
+    # Sequence type: purely a read of the filename, so unlike the two lookups
+    # above it costs nothing, never fails and needs no setting to gate it. It
+    # returns None whenever the name does not say, or the user has already
+    # answered.
+    from app.metadata import enrich
+
+    sequence_type = enrich.detect_sequence_type(
+        filename=name,
+        existing_metadata=ctx.payload.get("metadata") or {},
+        format_kind=detection.kind,
+    )
+
     ctx.progress(phase="done", pct=1.0)
     return {
         "object_id": object_id,
         "enrichment": enrichment,
         "assembly_enrichment": assembly_enrichment,
+        "sequence_type": sequence_type,
         "format": {
             "kind": detection.kind.value,
             "compression": detection.compression.value,

@@ -105,3 +105,25 @@ class TestComponentRoles:
         genome sequence and is close to uninterpretable without it."""
         assert ac.COMPONENTS["genome"].mandatory is True
         assert ac.COMPONENTS["gff3"].mandatory is False
+
+
+class TestComponentSequenceTypes:
+    def test_each_sequence_component_declares_its_type(self):
+        """Known from what NCBI was asked for, so these are set rather than
+        guessed from the downloaded filename."""
+        assert ac.COMPONENTS["genome"].sequence_type == "Genomic"
+        assert ac.COMPONENTS["protein"].sequence_type == "Protein"
+        assert ac.COMPONENTS["cds"].sequence_type == "CDS"
+
+    def test_annotation_has_no_sequence_type(self):
+        """A GFF3 holds coordinates, not sequence. Tagging it would be a
+        category error the dropdown then invites the user to 'correct'."""
+        assert ac.COMPONENTS["gff3"].sequence_type is None
+
+    def test_declared_types_are_valid_schema_options(self):
+        from app.metadata import schemas
+
+        options = set(schemas.all_known_fields()["sequence_type"].options)
+        for spec in ac.COMPONENTS.values():
+            if spec.sequence_type:
+                assert spec.sequence_type in options

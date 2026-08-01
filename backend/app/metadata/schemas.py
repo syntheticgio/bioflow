@@ -56,6 +56,19 @@ class FieldDef:
 # --- Fields that apply to any file -----------------------------------------
 
 COMMON_FIELDS: tuple[FieldDef, ...] = (
+    # Common rather than reference-only on purpose: any sequence file can be
+    # genomic, CDS, protein or RNA, and the tag is worth being able to set by
+    # hand on a BAM or a FASTQ that came from one. Only *autodetection* is
+    # scoped to references -- see `detect_sequence_type` in app.metadata.enrich.
+    FieldDef(
+        "sequence_type",
+        "Sequence type",
+        type=FieldType.ENUM,
+        options=("Genomic", "CDS", "Protein", "RNA"),
+        help="What kind of sequence this file holds. Detected from the name for "
+             "references; set it here if that was absent or wrong.",
+        group="Sequence",
+    ),
     FieldDef(
         "sample_id",
         "Sample ID",

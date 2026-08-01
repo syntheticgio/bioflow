@@ -481,6 +481,15 @@ function ObjectDetail({ id }: { id: string }) {
   const species =
     typeof organism === "string" && organism.trim() ? organism.trim() : null;
 
+  // Same free-form-metadata read as `organism` above, and for the same reason:
+  // the enum stores off-list values, so render whatever string is there rather
+  // than matching it against the schema's four options.
+  const sequenceTypeRaw = obj.metadata.sequence_type;
+  const sequenceType =
+    typeof sequenceTypeRaw === "string" && sequenceTypeRaw.trim()
+      ? sequenceTypeRaw.trim()
+      : null;
+
   // Same function the explorer rows use, so the word here and the word there
   // can never disagree.
   const quality = readQuality(obj);
@@ -542,6 +551,11 @@ function ObjectDetail({ id }: { id: string }) {
           {obj.format.kind !== "unknown" && (
             <span>{formatKindLabel(obj.format.kind)}</span>
           )}
+          {/* Sits with the format tokens rather than the badges: it says what
+              the file holds, which is the same kind of fact as "FASTA", not a
+              judgement about it. Absent when unset -- for most files nothing
+              detects it, and an "unknown" chip on every FASTQ would be noise. */}
+          {sequenceType && <span>{sequenceType}</span>}
           {compression && <span>{compression}</span>}
           <span className={`badge ${obj.status}`}>{obj.status}</span>
           {/* A judgement about the file rather than a property of it, so it
