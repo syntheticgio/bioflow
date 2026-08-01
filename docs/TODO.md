@@ -53,6 +53,70 @@ Two traps found in the code, both silent:
   every job would be attributed to the first profile unless `enqueue` takes an
   owner and the handlers propagate it.
 
+## Profiles: the routes still outside the partition
+
+Raised: 2026-08-01, probing the running app after wiring `OwnerDep` into every
+route that carried a `TODO(profiles)` marker.
+
+**The marker count was never the real measure.** A marker was only left where a
+service call *already* took an `owner` and the route had nothing to give it.
+Routes whose service never took an owner in the first place carried no marker,
+so "0 markers left" reads as done while whole routers are still unscoped.
+
+Measured against the running app, with no `X-BioFlow-Profile` header at all:
+
+```
+GET /api/v1/jobs      -> 200, 100 jobs      <-- every profile's jobs
+GET /api/v1/uploads   -> 200                 <-- 0 only because none in flight
+GET /api/v1/projects  -> 400 profile_unresolved   (correctly scoped)
+GET /api/v1/runs      -> 400 profile_unresolved   (correctly scoped)
+```
+
+`OwnerDep` coverage by router, as routes-to-references:
+
+| Router | Routes | Wired | Note |
+|---|---|---|---|
+| `projects.py` | 9 | 10 | done |
+| `objects.py` | 7 | 8 | done |
+| `runs.py` | 4 | 5 | done |
+| `pipelines.py` | 25 | 2 | **the big gap** |
+| `jobs.py` | 8 | 2 | `list_jobs` leaks |
+| `uploads.py` | 6 | 2 | |
+| `search.py` | 7 | 0 | **service has no owner at all** |
+| `ncbi.py` | 2 | 0 | |
+| `system.py`, `schedules.py`, `events.py`, `health.py` | | 0 | correct -- system-wide |
+| `profiles.py` | 4 | 1 | correct -- called before you have a profile |
+
+Three different kinds of work, worth separating:
+
+1. **Route-only.** `jobs.py`'s `list_jobs` builds its own `Job.find(query)`;
+   add `"owner": owner` to the query dict. Same shape for the rest of
+   `jobs.py` and `uploads.py`, whose services already take an owner.
+
+2. **`search.py` needs service work first.** `search_service.py` contains
+   **zero occurrences of `owner`** -- verified. `build_filter` builds an
+   unscoped Mongo filter, so global search, facets and metadata values span
+   every profile. Worse, `bulk_update_metadata` and `bulk_update_tags` take
+   raw `object_ids` with no owner filter: those are **writes**, so one profile
+   can currently modify another's metadata and tags by id. Adding `OwnerDep`
+   to the routes does nothing until `build_filter` and both bulk paths take an
+   owner. This is the most user-visible leak of the three -- search returns
+   other profiles' filenames and metadata.
+
+3. **`pipelines.py` is 25 routes and mostly launch paths.** Its services take
+   owners already (Tasks 3-8), so this is threading rather than design, but it
+   is the largest single file and deserves its own pass rather than being
+   tacked onto another.
+
+Nothing here is reachable today: no client sends the header, so every request
+resolves nothing and the app behaves exactly as it did before profiles. It
+becomes reachable the moment the frontend picker lands, which is why this
+should close before that does.
+
+Touches: `backend/app/api/v1/{jobs,uploads,search,ncbi,pipelines}.py`,
+`backend/app/services/search_service.py`,
+`backend/app/services/{sra,assembly}_service.py`.
+
 ## Sharing between profiles
 
 Depends on profiles. Share a file with another profile without copying the
