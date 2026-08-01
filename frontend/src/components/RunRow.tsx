@@ -3,23 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { formatDate } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import type { RunMemberJob, RunStatus, RunSummary } from "../api/types";
-
-const ROLE_LABELS: Record<string, string> = {
-  index: "Build index",
-  align: "Align",
-  trim: "Trim",
-  index_bam: "Index BAM",
-  ingest: "Read headers",
-};
-
-const STATUS_LABELS: Record<RunStatus, string> = {
-  waiting: "waiting",
-  running: "running",
-  succeeded: "succeeded",
-  failed: "failed",
-  partial: "partial",
-};
+import type { RunMemberJob, RunSummary } from "../api/types";
+import { ROLE_LABELS, STATUS_LABELS, describeParams } from "../lib/runFormat";
 
 /**
  * One user action -- "align these reads against this reference" -- and the jobs
@@ -233,25 +218,4 @@ function IngestSummary({ jobs }: { jobs: RunMemberJob[] }) {
       )}
     </div>
   );
-}
-
-/** The parameters worth showing in a summary, labelled for a person. */
-function describeParams(params: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (params.aligner) out.Aligner = String(params.aligner);
-  if (params.preset) out["Read type"] = String(params.preset);
-  if (params.threads) out.Threads = String(params.threads);
-  if (params.mark_duplicates) out.Duplicates = "marked";
-
-  const rg = params.read_group as Record<string, unknown> | undefined;
-  if (rg?.sample) {
-    out["Read group"] = [rg.sample, rg.library, rg.platform]
-      .filter(Boolean)
-      .join(" · ");
-  }
-
-  // Trim parameters, which share the row with alignment ones.
-  if (params.min_length) out["Min length"] = String(params.min_length);
-  if (params.quality_threshold) out["Min quality"] = String(params.quality_threshold);
-  return out;
 }

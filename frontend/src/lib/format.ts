@@ -28,6 +28,24 @@ export function formatDate(iso: string | null | undefined): string {
   });
 }
 
+/**
+ * Just the clock time, for rows that are all from today.
+ *
+ * The activity page's ledger carries one date in its heading and then a column
+ * of times; repeating "Aug 1, 2026" on every line would be six words of
+ * furniture per row to distinguish runs that are minutes apart.
+ */
+export function formatClock(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 // Matches an ISO-8601 instant: date, T, time, and a zone offset or Z. Anchored
 // and zone-required on purpose -- a bare "2026-07-29" or an accession that
 // happens to contain digits must not be silently reinterpreted as a date.
