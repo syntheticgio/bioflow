@@ -464,8 +464,20 @@ export interface MateSuggestion {
   mate: "R1" | "R2" | null;
 }
 
-/** What a user asked for, and the jobs that served it. */
-export type RunKind = "alignment" | "trim" | "sra_download" | "variant_calling";
+/** What a user asked for, and the jobs that served it.
+ *
+ * Mirrors the backend `RunKind` enum. Nothing switches exhaustively on this
+ * today, which is why `assembly_download` went missing here for a while
+ * without anything failing -- a reason to keep it in step deliberately rather
+ * than a reason not to bother.
+ */
+export type RunKind =
+  | "alignment"
+  | "trim"
+  | "sra_download"
+  | "variant_calling"
+  | "assembly_download"
+  | "uniprot_download";
 
 /** Derived from member job states on the server, never stored. */
 export type RunStatus =
