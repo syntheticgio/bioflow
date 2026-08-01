@@ -64,17 +64,24 @@ job appears to run with the fix but is silently still executing the old
 in-memory code, which reads as "the fix didn't work" when it actually just
 never got picked up.
 
-**Always run `docker compose` from the main repo root, never from a
-worktree.** The bind mounts in `docker-compose.override.yml` are relative
-paths (`./backend/app`, `./frontend/src`), so Compose resolves them against
+**Plain `docker compose` always targets the one main-checkout stack on
+5173/8000; testing a worktree's code goes through `./ops/worktree-up.sh`
+instead (below), never through plain `docker compose` in the worktree.** The
+bind mounts in `docker-compose.override.yml` are relative paths
+(`./backend/app`, `./frontend/src`), so Compose resolves them against
 whatever directory it was invoked from -- while the project name is pinned to
-`biopipe` in `docker-compose.yml`. Running `docker compose up` inside
-`.claude/worktrees/<something>/` therefore does not create a second stack: it
-silently recreates *the* stack with its source pointing at that worktree, with
-no error and no warning. Port 5173 then serves that branch's code, and
-`docker compose restart worker` from anywhere just reloads it again -- so a
-change merged to main appears to be missing from the running app, and the
-handler simply never shows up in the worker's `handlers_loaded` log line.
+`biopipe` in `docker-compose.yml`. Running `docker compose up` inside a
+worktree therefore does not create a second stack: it silently recreates
+*the* stack with its source pointing at that worktree, with no error and no
+warning. Port 5173 then serves that branch's code, and `docker compose
+restart worker` from anywhere just reloads it again -- so a change merged to
+main appears to be missing from the running app, and the handler simply never
+shows up in the worker's `handlers_loaded` log line. A `PreToolUse` hook
+(`ops/hooks/block-compose-in-worktree.sh`, registered in
+`.claude/settings.json`) blocks bare `docker compose` from a worktree for
+exactly this reason; naming a project explicitly (`-p`,
+`COMPOSE_PROJECT_NAME=`) passes through, which is also what lets
+`worktree-up.sh`'s own compose calls work.
 
 To check what the stack is actually serving:
 
@@ -82,18 +89,17 @@ To check what the stack is actually serving:
 docker inspect biopipe-worker-1 --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}'
 ```
 
-If any source path contains `.claude/worktrees/`, the stack is on the wrong
-tree; fix it by re-running the rebuild from the main repo root (wherever this
-repo is checked out on this machine -- `git rev-parse --show-toplevel` from
-the main checkout, not from the worktree):
+If that source path is a worktree instead of the main checkout, the stack is
+on the wrong tree; fix it by re-running the rebuild from the main repo root
+(wherever this repo is checked out on this machine -- `git rev-parse
+--show-toplevel` from the main checkout, not from the worktree):
 
 ```bash
 docker compose up -d --build api web worker
 ```
 
-**To exercise a worktree's code before it merges, use
-`./ops/worktree-up.sh`.** It brings up a second, fully separate stack for
-whatever worktree it is run from:
+**To exercise a worktree's code before it merges, run `./ops/worktree-up.sh`
+from that worktree.** It brings up a second, fully separate stack:
 
 ```bash
 ./ops/worktree-up.sh             # UI on 5273, API on 8100
@@ -116,20 +122,17 @@ a snapshot, not a live mirror; `--reseed` refreshes it. `/data` *is* shared
 with the main stack, deliberately -- fine for a UI or read-path check, worth a
 thought before running a pipeline that rewrites an existing artifact.
 
-A `PreToolUse` hook (`ops/hooks/block-compose-in-worktree.sh`, registered in
-`.claude/settings.json`) blocks bare `docker compose` from a worktree and
-points at the two scripts, since the failure it prevents is silent. Naming a
-project explicitly (`-p`, `COMPOSE_PROJECT_NAME=`) passes through.
-
 ## Verifying changes
 
 Manual testing in the browser at localhost:5173 is the actual verification
 step for anything UI-facing -- there is no headless component-testing setup
 in this repo (no jsdom/testing-library, zero `.test.tsx` files) and none is
-expected. Backend changes are covered by `pytest`; run it inside the `api`
-container (`docker compose exec api python -m pytest tests/ -q`) rather than
-a bare host `.venv`, since the host venv hits Mongo replica-set connection
-errors that the container's network doesn't have.
+expected. From a worktree, `./ops/worktree-up.sh` serves the same UI at
+localhost:5273 against that worktree's code. Backend changes are covered by
+`pytest`; run it inside the `api` container (`docker compose exec api python
+-m pytest tests/ -q`) rather than a bare host `.venv`, since the host venv
+hits Mongo replica-set connection errors that the container's network doesn't
+have.
 
 **That `docker compose exec api` command is only correct from the main repo
 root.** Run it inside a worktree and it silently tests *main's* code, not the
