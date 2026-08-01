@@ -116,6 +116,11 @@ async def tick() -> list[str]:
         bucket = now_ms // interval_ms
         job = await queue_mod.enqueue(
             schedule.job_type,
+            # System-wide maintenance -- GC, file verification -- runs against
+            # the whole installation, not any one profile's library. There is
+            # no owner to inherit here and there never will be, so "local" is
+            # the answer rather than a placeholder waiting on route wiring.
+            owner="local",
             payload=schedule.payload,
             job_class=schedule.job_class,
             resources=RESOURCES.get(schedule.job_type, JobResources()),
@@ -150,6 +155,10 @@ async def run_now(name: str) -> str | None:
 
     job = await queue_mod.enqueue(
         schedule.job_type,
+        # The same system-wide maintenance as `tick` fires, just at user
+        # priority because someone pressed the button. Forcing a GC sweep does
+        # not make that sweep belong to the profile that asked for it.
+        owner="local",
         payload=schedule.payload,
         # A human asked for this, so it should not queue behind maintenance.
         job_class=JobClass.USER_INTERACTIVE,

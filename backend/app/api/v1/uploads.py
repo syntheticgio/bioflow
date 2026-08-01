@@ -6,6 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.api.v1.schemas import ObjectOut
 from app.errors import ValidationError
 from app.models import UploadSession
@@ -85,9 +86,10 @@ class CompleteAccepted(BaseModel):
 
 
 @router.post("", response_model=UploadCreated, status_code=status.HTTP_201_CREATED)
-async def create_upload(body: UploadCreate) -> UploadCreated:
+async def create_upload(body: UploadCreate, owner: OwnerDep) -> UploadCreated:
     session, obj = await upload_service.create_session(
         project_id=PydanticObjectId(body.project_id),
+        owner=owner,
         filename=body.filename,
         total_size=body.total_size,
         client_sha256=body.client_sha256,
@@ -99,24 +101,26 @@ async def create_upload(body: UploadCreate) -> UploadCreated:
 
 @router.get("", response_model=list[UploadSessionOut])
 async def list_uploads(
-    project_id: str | None = None, limit: int = Query(50, le=200)
+    owner: OwnerDep,
+    project_id: str | None = None,
+    limit: int = Query(50, le=200),
 ) -> list[UploadSessionOut]:
     """Active sessions, so a client that reloaded can offer to resume."""
     sessions = await upload_service.list_active_sessions(
-        PydanticObjectId(project_id) if project_id else None, limit=limit
+        PydanticObjectId(project_id) if project_id else None, owner=owner, limit=limit
     )
     return [UploadSessionOut.of(s) for s in sessions]
 
 
 @router.get("/{session_id}", response_model=UploadSessionOut)
-async def get_upload(session_id: PydanticObjectId) -> UploadSessionOut:
+async def get_upload(session_id: PydanticObjectId, owner: OwnerDep) -> UploadSessionOut:
     """Resume source of truth: reports exactly which chunks are still missing."""
-    return UploadSessionOut.of(await upload_service.get_session(session_id))
+    return UploadSessionOut.of(await upload_service.get_session(session_id, owner=owner))
 
 
 @router.put("/{session_id}/chunks/{index}", response_model=ChunkAccepted)
 async def put_chunk(
-    session_id: PydanticObjectId, index: int, request: Request
+    session_id: PydanticObjectId, index: int, request: Request, owner: OwnerDep
 ) -> ChunkAccepted:
     """Upload one chunk. The body is raw bytes.
 
@@ -127,10 +131,15 @@ async def put_chunk(
     if not body:
         raise ValidationError("Chunk body is empty")
 
+    # Scoped like the rest, and this is the sharpest case in the file: an
+    # unscoped chunk write does not read another profile's upload, it writes
+    # bytes *into* the file they are assembling, and the corruption only
+    # surfaces later as a digest mismatch on their completed object.
     session = await upload_service.write_chunk(
         session_id,
         index,
         body,
+        owner=owner,
         expected_sha256=request.headers.get("X-Chunk-SHA256"),
     )
     return ChunkAccepted(
@@ -147,20 +156,20 @@ async def put_chunk(
     response_model=CompleteAccepted,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def complete_upload(session_id: PydanticObjectId) -> CompleteAccepted:
+async def complete_upload(session_id: PydanticObjectId, owner: OwnerDep) -> CompleteAccepted:
     """Finalize the session and enqueue assembly.
 
     Returns 202: assembling and hashing a large file takes minutes, so the work
     happens on the queue and the client follows the job.
     """
-    session, obj, job_id = await upload_service.complete_session(session_id)
+    session, obj, job_id = await upload_service.complete_session(session_id, owner=owner)
     return CompleteAccepted(
         session_id=str(session.id), object_id=str(obj.id), job_id=job_id
     )
 
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def abort_upload(session_id: PydanticObjectId) -> Response:
+async def abort_upload(session_id: PydanticObjectId, owner: OwnerDep) -> Response:
     """Abort and purge the staging directory."""
-    await upload_service.abort_session(session_id)
+    await upload_service.abort_session(session_id, owner=owner)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

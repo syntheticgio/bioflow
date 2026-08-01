@@ -32,6 +32,7 @@ from app.models.object import (
     SourceMode,
 )
 from app.models.organism import OrganismBlurb, normalize_organism
+from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
 from app.models.run import (
     OPTIONAL_ROLES,
@@ -59,6 +60,7 @@ ALL_MODELS = [
     PipelineRun,
     RunJob,
     OrganismBlurb,
+    Profile,
     StructureLookup,
 ]
 
@@ -90,6 +92,8 @@ __all__ = [
     "ObjectStatus",
     "OrganismBlurb",
     "PipelineRun",
+    "Profile",
+    "ProfileDisplay",
     "Project",
     "ProjectCounters",
     "RunInput",

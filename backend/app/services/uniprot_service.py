@@ -14,10 +14,10 @@ import re
 
 from beanie import PydanticObjectId
 
-from app.errors import ConflictError, NotFoundError, ValidationError
+from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
 from app.metadata import uniprot
-from app.models import IoClass, JobClass, JobResources, Project, RunJobRole, RunKind
+from app.models import IoClass, JobClass, JobResources, RunJobRole, RunKind
 from app.services import run_service
 
 log = get_logger(__name__)
@@ -128,17 +128,25 @@ async def launch_download(
     proteome_id: str | None,
     accessions: list[str],
     reviewed_only: bool,
+    owner: str,
     organism: str | None = None,
     protein_count: int | None = None,
 ):
-    """Queue the download and the run that groups it."""
+    """Queue the download and the run that groups it.
+
+    `owner` gates the project lookup, as in `assembly_service.launch_download`:
+    the FASTA lands in whichever project it was pointed at, and an unscoped
+    lookup would let one profile deposit a proteome into another profile's
+    library.
+    """
     from app.queue import queue
+    from app.services import project_service
 
     validate_request(proteome_id=proteome_id, accessions=accessions)
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
+    # Resolved for the refusal, not for the value: a project the caller does
+    # not own raises NotFoundError here, before any network work.
+    await project_service.get_project(project_id, owner=owner)
 
     query = uniprot.download_query(
         proteome_id=proteome_id, accessions=accessions, reviewed_only=reviewed_only
@@ -164,6 +172,10 @@ async def launch_download(
             "query": query,
             "source": "uniprot",
         },
+        # The caller's profile. The project lookup above is scoped to it, so
+        # this is the project's owner too -- the download lands where the
+        # person who asked for it can see it.
+        owner=owner,
     )
 
     payload = {
@@ -178,6 +190,7 @@ async def launch_download(
 
     job = await queue.enqueue(
         "download_uniprot",
+        owner=owner,
         payload=payload,
         job_class=JobClass.USER_INTERACTIVE,
         # Far lighter than the assembly download's HEAVY: a yeast proteome is
@@ -193,7 +206,7 @@ async def launch_download(
     if job is None:
         # Already queued or running from an earlier click, so this run
         # describes no work and must not linger in the activity view.
-        await run_service.discard_run(run.id)
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "That download is already running",
             details={"query": query},

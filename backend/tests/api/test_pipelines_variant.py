@@ -6,13 +6,19 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.pipelines import VariantRequest, router
 from app.errors import register_exception_handlers
+from tests.api.bare_app import override_owner
 
 
 @pytest.fixture
 def client():
+    """The owner dependency is overridden so body validation is what these
+    tests actually reach. Without it every request 400s on the missing profile
+    header before FastAPI parses the body, which would silently turn the 422
+    assertions below into assertions about `get_current_owner`."""
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router)
+    override_owner(app)
     return TestClient(app)
 
 

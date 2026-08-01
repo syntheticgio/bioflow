@@ -32,7 +32,7 @@ TBRUCEI_TAXID = 185431
 
 async def _vcf_with_reference(project_name, *, metadata, role=ObjectRole.REFERENCE):
     """A VCF derived from a BAM and a reference carrying `metadata`."""
-    project = await project_service.create_project(name=project_name)
+    project = await project_service.create_project(name=project_name, owner="test-owner")
     bam = await make_object(project, "sample.bam")
 
     reference = await make_object(project, "genome.fna")
@@ -65,7 +65,7 @@ async def vcf_without_taxid():
 @pytest_asyncio.fixture(loop_scope="module")
 async def vcf_without_reference():
     """An uploaded VCF, carrying no record of what it was called against."""
-    project = await project_service.create_project(name="no-reference")
+    project = await project_service.create_project(name="no-reference", owner="test-owner")
     vcf = await make_object(project, "uploaded.vcf.gz")
     vcf.role = ObjectRole.VARIANTS
     await vcf.save()
@@ -97,7 +97,7 @@ async def test_ignores_non_reference_parents():
     its unannotated parent and the GFF3 -- four parents, one of which is the
     reference.
     """
-    project = await project_service.create_project(name="mixed-parents")
+    project = await project_service.create_project(name="mixed-parents", owner="test-owner")
 
     bam = await make_object(project, "sample.bam")
     bam.metadata = {"tax_id": 9606}  # a wrong answer sitting in reach
@@ -123,7 +123,7 @@ async def test_annotated_vcf_reaches_its_reference():
     This is the shape `bcftools csq` output actually has on this machine, and
     the reference is still a direct parent -- so the walk needs no recursion.
     """
-    project = await project_service.create_project(name="annotated-vcf")
+    project = await project_service.create_project(name="annotated-vcf", owner="test-owner")
 
     parent_vcf = await make_object(project, "sample.vcf.gz")
     parent_vcf.role = ObjectRole.VARIANTS
@@ -152,7 +152,7 @@ async def test_non_integer_taxid_is_rejected():
     A string that happens to parse is still not something to pass into a
     remote query unchecked, and a non-numeric one must not raise.
     """
-    project = await project_service.create_project(name="bad-taxid")
+    project = await project_service.create_project(name="bad-taxid", owner="test-owner")
     reference = await make_object(project, "genome.fna")
     reference.role = ObjectRole.REFERENCE
     reference.metadata = {"tax_id": "not a number"}
@@ -169,7 +169,7 @@ async def test_non_integer_taxid_is_rejected():
 async def test_numeric_string_taxid_is_accepted():
     """The NCBI path stores an int, but a hand-entered value arrives as text
     and means the same thing."""
-    project = await project_service.create_project(name="string-taxid")
+    project = await project_service.create_project(name="string-taxid", owner="test-owner")
     reference = await make_object(project, "genome.fna")
     reference.role = ObjectRole.REFERENCE
     reference.metadata = {"tax_id": str(YEAST_TAXID)}

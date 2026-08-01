@@ -110,19 +110,19 @@ class TestSetPairValidation:
         pid = PydanticObjectId()
         a = await _saved(pid, "a.fastq.gz")
         with pytest.raises(ValidationError, match="itself"):
-            await object_service.set_pair(a.id, a.id, 1)
+            await object_service.set_pair(a.id, a.id, 1, owner="local")
 
     async def test_rejects_a_missing_mate(self):
         pid = PydanticObjectId()
         a = await _saved(pid, "a.fastq.gz")
         with pytest.raises(NotFoundError):
-            await object_service.set_pair(a.id, PydanticObjectId(), 1)
+            await object_service.set_pair(a.id, PydanticObjectId(), 1, owner="local")
 
     async def test_rejects_a_mate_in_another_project(self):
         a = await _saved(PydanticObjectId(), "a.fastq.gz")
         b = await _saved(PydanticObjectId(), "b.fastq.gz")
         with pytest.raises(ValidationError, match="same project"):
-            await object_service.set_pair(a.id, b.id, 1)
+            await object_service.set_pair(a.id, b.id, 1, owner="local")
 
     async def test_rejects_when_the_subject_is_already_paired(self):
         pid = PydanticObjectId()
@@ -130,7 +130,7 @@ class TestSetPairValidation:
         a = await _saved(pid, "a.fastq.gz", mate_object_id=other.id)
         b = await _saved(pid, "b.fastq.gz")
         with pytest.raises(ValidationError, match="already paired"):
-            await object_service.set_pair(a.id, b.id, 1)
+            await object_service.set_pair(a.id, b.id, 1, owner="local")
 
     async def test_rejects_when_the_mate_is_already_paired(self):
         """Never displace a third file's pairing as a side effect."""
@@ -139,14 +139,14 @@ class TestSetPairValidation:
         a = await _saved(pid, "a.fastq.gz")
         b = await _saved(pid, "b.fastq.gz", mate_object_id=third.id)
         with pytest.raises(ValidationError, match="already paired"):
-            await object_service.set_pair(a.id, b.id, 1)
+            await object_service.set_pair(a.id, b.id, 1, owner="local")
 
     async def test_rejects_a_reference(self):
         pid = PydanticObjectId()
         a = await _saved(pid, "a.fastq.gz")
         ref = await _saved(pid, "genome.fa", role=ObjectRole.REFERENCE)
         with pytest.raises(ValidationError, match="reads"):
-            await object_service.set_pair(a.id, ref.id, 1)
+            await object_service.set_pair(a.id, ref.id, 1, owner="local")
 
     async def test_rejects_a_sidecar(self):
         pid = PydanticObjectId()
@@ -156,7 +156,7 @@ class TestSetPairValidation:
             pid, "genome.fa.fai", sidecar_of=parent.id, sidecar_role=SidecarRole.FAI
         )
         with pytest.raises(ValidationError, match="reads"):
-            await object_service.set_pair(a.id, bai.id, 1)
+            await object_service.set_pair(a.id, bai.id, 1, owner="local")
 
     async def test_rejects_when_the_subject_is_a_reference(self):
         """Checked on both sides, not just the candidate."""
@@ -164,7 +164,7 @@ class TestSetPairValidation:
         ref = await _saved(pid, "genome.fa", role=ObjectRole.REFERENCE)
         b = await _saved(pid, "b.fastq.gz")
         with pytest.raises(ValidationError, match="reads"):
-            await object_service.set_pair(ref.id, b.id, 1)
+            await object_service.set_pair(ref.id, b.id, 1, owner="local")
 
     async def test_allows_trimmed_reads(self):
         """Trimmed output pairs like any other reads -- the point of the
@@ -173,7 +173,7 @@ class TestSetPairValidation:
         pid = PydanticObjectId()
         a = await _saved(pid, "a.trimmed.fastq.gz", role=ObjectRole.TRIMMED_READS)
         b = await _saved(pid, "b.trimmed.fastq.gz", role=ObjectRole.TRIMMED_READS)
-        result = await object_service.set_pair(a.id, b.id, 1)
+        result = await object_service.set_pair(a.id, b.id, 1, owner="local")
         assert result.mate_object_id == b.id
 
 
@@ -183,7 +183,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
 
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
         a_after = await DataObject.get(a.id)
         b_after = await DataObject.get(b.id)
@@ -196,7 +196,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
 
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
         assert (await DataObject.get(a.id)).read_number == 1
         assert (await DataObject.get(b.id)).read_number == 2
@@ -206,7 +206,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "rev.fastq.gz")
         b = await _saved(pid, "fwd.fastq.gz")
 
-        await object_service.set_pair(a.id, b.id, 2)
+        await object_service.set_pair(a.id, b.id, 2, owner="local")
 
         assert (await DataObject.get(a.id)).read_number == 2
         assert (await DataObject.get(b.id)).read_number == 1
@@ -217,7 +217,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
 
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
         assert "mate" in (await DataObject.get(a.id)).user_touched
         assert "mate" in (await DataObject.get(b.id)).user_touched
@@ -228,7 +228,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "fwd.fastq.gz", user_touched=["mate"])
         b = await _saved(pid, "rev.fastq.gz")
 
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
         assert (await DataObject.get(a.id)).user_touched.count("mate") == 1
 
@@ -238,7 +238,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "fwd.fastq.gz", user_touched=["role"])
         b = await _saved(pid, "rev.fastq.gz")
 
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
         touched = (await DataObject.get(a.id)).user_touched
         assert "role" in touched
@@ -249,7 +249,7 @@ class TestSetPairWrites:
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
 
-        result = await object_service.set_pair(a.id, b.id, 1)
+        result = await object_service.set_pair(a.id, b.id, 1, owner="local")
 
         assert result.mate_object_id == b.id
         assert result.read_number == 1
@@ -263,11 +263,11 @@ class TestSetPairWrites:
         b = await _saved(pid, "rev.fastq.gz")
 
         # Validation reads both as unpaired, then the mate is taken.
-        obj = await object_service.get_object(a.id)
+        obj = await object_service.get_object(a.id, owner="local")
         await b.set({DataObject.mate_object_id: third.id})
 
         with pytest.raises(ValidationError):
-            await object_service.set_pair(obj.id, b.id, 1)
+            await object_service.set_pair(obj.id, b.id, 1, owner="local")
 
         assert (await DataObject.get(a.id)).mate_object_id is None
         assert (await DataObject.get(a.id)).read_number is None
@@ -278,9 +278,9 @@ class TestClearPair:
         pid = PydanticObjectId()
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
-        await object_service.clear_pair(a.id)
+        await object_service.clear_pair(a.id, owner="local")
 
         assert (await DataObject.get(a.id)).mate_object_id is None
         assert (await DataObject.get(b.id)).mate_object_id is None
@@ -291,9 +291,9 @@ class TestClearPair:
         pid = PydanticObjectId()
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
-        await object_service.clear_pair(a.id)
+        await object_service.clear_pair(a.id, owner="local")
 
         assert (await DataObject.get(a.id)).read_number is None
         assert (await DataObject.get(b.id)).read_number is None
@@ -304,9 +304,9 @@ class TestClearPair:
         pid = PydanticObjectId()
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
-        await object_service.clear_pair(a.id)
+        await object_service.clear_pair(a.id, owner="local")
 
         assert "mate" in (await DataObject.get(a.id)).user_touched
         assert "mate" in (await DataObject.get(b.id)).user_touched
@@ -316,9 +316,9 @@ class TestClearPair:
         pid = PydanticObjectId()
         a = await _saved(pid, "fwd.fastq.gz")
         b = await _saved(pid, "rev.fastq.gz")
-        await object_service.set_pair(a.id, b.id, 1)
+        await object_service.set_pair(a.id, b.id, 1, owner="local")
 
-        await object_service.clear_pair(b.id)
+        await object_service.clear_pair(b.id, owner="local")
 
         assert (await DataObject.get(a.id)).mate_object_id is None
         assert (await DataObject.get(b.id)).mate_object_id is None
@@ -328,7 +328,7 @@ class TestClearPair:
         pid = PydanticObjectId()
         a = await _saved(pid, "lonely.fastq.gz")
 
-        result = await object_service.clear_pair(a.id)
+        result = await object_service.clear_pair(a.id, owner="local")
 
         assert result.mate_object_id is None
         assert result.user_touched == []
@@ -338,7 +338,7 @@ class TestClearPair:
         pid = PydanticObjectId()
         a = await _saved(pid, "fwd.fastq.gz", mate_object_id=PydanticObjectId(), read_number=1)
 
-        result = await object_service.clear_pair(a.id)
+        result = await object_service.clear_pair(a.id, owner="local")
 
         assert result.mate_object_id is None
         assert result.read_number is None
@@ -349,10 +349,10 @@ class TestClearPair:
         a = await _saved(pid, "fwd.fastq.gz")
         wrong = await _saved(pid, "wrong.fastq.gz")
         right = await _saved(pid, "right.fastq.gz")
-        await object_service.set_pair(a.id, wrong.id, 1)
+        await object_service.set_pair(a.id, wrong.id, 1, owner="local")
 
-        await object_service.clear_pair(a.id)
-        await object_service.set_pair(a.id, right.id, 1)
+        await object_service.clear_pair(a.id, owner="local")
+        await object_service.set_pair(a.id, right.id, 1, owner="local")
 
         assert (await DataObject.get(a.id)).mate_object_id == right.id
         assert (await DataObject.get(right.id)).read_number == 2
@@ -371,7 +371,7 @@ class TestInferenceRespectsManualPairing:
         r2 = await _saved(pid, "s_R2.fastq.gz")
         # But the user pairs R1 with an unconventionally named file instead.
         odd = await _saved(pid, "sampleA_forward.fastq.gz")
-        await object_service.set_pair(r1.id, odd.id, 1)
+        await object_service.set_pair(r1.id, odd.id, 1, owner="local")
 
         await _link_mate(await DataObject.get(r1.id))
 
@@ -383,8 +383,8 @@ class TestInferenceRespectsManualPairing:
         pid = PydanticObjectId()
         r1 = await _saved(pid, "s_R1.fastq.gz")
         r2 = await _saved(pid, "s_R2.fastq.gz")
-        await object_service.set_pair(r1.id, r2.id, 1)
-        await object_service.clear_pair(r1.id)
+        await object_service.set_pair(r1.id, r2.id, 1, owner="local")
+        await object_service.clear_pair(r1.id, owner="local")
 
         await _link_mate(await DataObject.get(r1.id))
 

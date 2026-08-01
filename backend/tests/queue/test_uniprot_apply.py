@@ -18,6 +18,11 @@ from app.queue import results
 PROJECT_ID = "507f1f77bcf86cd799439011"
 JOB_ID = "507f1f77bcf86cd799439012"
 
+# Deliberately not "local". A download applier has no parent object to inherit
+# from, so the launching profile is the only owner that exists -- and a
+# hardcoded "local" would pass while the propagation was broken.
+OWNER = "uniprot-apply-owner"
+
 
 @pytest.fixture
 def staged_file(tmp_path: Path) -> Path:
@@ -52,10 +57,29 @@ class TestApply:
             "app.services.run_service.run_for_job", AsyncMock(return_value=None)
         )
 
-        await results._apply_uniprot_download(_result(staged_file))
+        await results._apply_uniprot_download(_result(staged_file), owner=OWNER)
 
         assert ingest.await_count == 1
         assert ingest.await_args.kwargs["role"] is ObjectRole.PROTEIN
+
+    async def test_the_launching_owner_reaches_the_ingest(
+        self, staged_file, monkeypatch
+    ):
+        """A download creates the first object in a chain from nothing but a
+        project id, so there is no parent whose owner it could inherit. The
+        launching profile is the only owner that exists, and dropping it here
+        would deposit the proteome in the wrong profile's library."""
+        ingest = AsyncMock()
+        monkeypatch.setattr(
+            "app.services.object_service.ingest_local_file", ingest
+        )
+        monkeypatch.setattr(
+            "app.services.run_service.run_for_job", AsyncMock(return_value=None)
+        )
+
+        await results._apply_uniprot_download(_result(staged_file), owner=OWNER)
+
+        assert ingest.await_args.kwargs["owner"] == OWNER
 
     async def test_provenance_lands_in_facts(self, staged_file, monkeypatch):
         """The query, the release, and whether unreviewed entries were
@@ -69,7 +93,7 @@ class TestApply:
             "app.services.run_service.run_for_job", AsyncMock(return_value=None)
         )
 
-        await results._apply_uniprot_download(_result(staged_file))
+        await results._apply_uniprot_download(_result(staged_file), owner=OWNER)
 
         facts = ingest.await_args.kwargs["facts"]
         assert facts["uniprot_query"] == "proteome:UP000002311 AND reviewed:true"
@@ -85,7 +109,7 @@ class TestApply:
         )
 
         await results._apply_uniprot_download(
-            {"staged": [], "project_id": PROJECT_ID}
+            {"staged": [], "project_id": PROJECT_ID}, owner=OWNER
         )
 
         assert ingest.await_count == 0
@@ -98,7 +122,7 @@ class TestApply:
             AsyncMock(side_effect=RuntimeError("disk gone")),
         )
 
-        await results._apply_uniprot_download(_result(staged_file))
+        await results._apply_uniprot_download(_result(staged_file), owner=OWNER)
 
 
 class TestRegistration:

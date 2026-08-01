@@ -4,6 +4,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.api.v1.schemas import ObjectOut
 from app.errors import ValidationError
 from app.metadata import schemas as meta_schemas
@@ -22,6 +23,7 @@ class SearchResults(BaseModel):
 
 @router.get("/search/objects", response_model=SearchResults)
 async def search_objects(
+    owner: OwnerDep,
     q: str | None = Query(None, description="Substring match on filename"),
     project_id: str | None = None,
     kind: list[str] = Query(default_factory=list),
@@ -37,10 +39,14 @@ async def search_objects(
     limit: int = Query(100, le=search_service.MAX_LIMIT),
     cursor: str | None = None,
 ) -> SearchResults:
-    """Find objects across all projects, or within one.
+    """Find objects across the caller's projects, or within one.
 
     Metadata filters use a compact `key=value` syntax so a search is fully
     described by its URL -- shareable, and it survives a reload.
+
+    "Across all projects" now means across the caller's own. This is the widest
+    read in the API and the one a person is most likely to notice going wrong:
+    an unscoped search answered with another profile's filenames.
     """
     query = search_service.SearchQuery(
         text=q,
@@ -55,7 +61,7 @@ async def search_objects(
         limit=limit,
         cursor=cursor,
     )
-    result = await search_service.search_objects(query)
+    result = await search_service.search_objects(query, owner=owner)
     return SearchResults(
         objects=[ObjectOut.of(o) for o in result["objects"]],
         total=result["total"],
@@ -65,25 +71,37 @@ async def search_objects(
 
 
 @router.get("/search/facets")
-async def search_facets(project_id: str | None = None) -> dict:
+async def search_facets(owner: OwnerDep, project_id: str | None = None) -> dict:
     """Distinct values and counts, for building filter controls."""
     return await search_service.facets(
-        PydanticObjectId(project_id) if project_id else None
+        PydanticObjectId(project_id) if project_id else None, owner=owner
     )
 
 
 @router.get("/search/metadata-values/{key}")
-async def metadata_values(key: str, project_id: str | None = None) -> dict:
+async def metadata_values(key: str, owner: OwnerDep, project_id: str | None = None) -> dict:
     """Distinct values for one metadata key, for a value picker."""
     values = await search_service.metadata_values(
-        key, PydanticObjectId(project_id) if project_id else None
+        key, PydanticObjectId(project_id) if project_id else None, owner=owner
     )
     return {"key": key, "values": values}
 
 
 @router.get("/metadata/schemas")
 async def list_schemas() -> dict:
-    """Every format's field definitions, keyed by format kind."""
+    """Every format's field definitions, keyed by format kind.
+
+    Deliberately *not* owner-scoped, unlike the five routes around it. This and
+    `get_schema` below build their answer from the `FormatKind` and `ObjectRole`
+    enums via `schemas.schema_for_api`, which touches no collection and reads
+    nothing anyone stored -- the response is identical for every profile because
+    it is a property of the code, not of the library. Requiring a header here
+    would buy no isolation and would break the metadata editor's field pickers
+    for a client that has not resolved a profile yet.
+
+    The line to hold is whether a route reads user data. These two do not; the
+    search, facet, metadata-value and bulk-edit routes all do.
+    """
     return {
         "schemas": {
             kind.value: meta_schemas.schema_for_api(kind)
@@ -129,18 +147,23 @@ class BulkMetadata(BaseModel):
 
 
 @router.post("/objects/bulk-metadata")
-async def bulk_metadata(body: BulkMetadata) -> dict:
+async def bulk_metadata(body: BulkMetadata, owner: OwnerDep) -> dict:
     """Apply metadata to many objects at once.
 
     Values are merged into existing metadata rather than replacing it, so
     assigning one field cannot silently erase the others.
+
+    A batch containing any id the caller does not own is refused whole, rather
+    than quietly applied to the subset they do own -- see
+    `search_service._assert_all_owned` for why a short count is a worse answer
+    than a 404.
     """
     if not body.set and not body.unset:
         raise ValidationError("Provide at least one of 'set' or 'unset'")
 
     ids = [PydanticObjectId(i) for i in body.object_ids]
     return await search_service.bulk_update_metadata(
-        ids, set_values=body.set or None, unset_keys=body.unset or None
+        ids, owner=owner, set_values=body.set or None, unset_keys=body.unset or None
     )
 
 
@@ -151,11 +174,12 @@ class BulkTags(BaseModel):
 
 
 @router.post("/objects/bulk-tags")
-async def bulk_tags(body: BulkTags) -> dict:
+async def bulk_tags(body: BulkTags, owner: OwnerDep) -> dict:
+    """Add or remove tags across many objects, all-or-nothing on ownership."""
     if not body.add and not body.remove:
         raise ValidationError("Provide at least one of 'add' or 'remove'")
 
     ids = [PydanticObjectId(i) for i in body.object_ids]
     return await search_service.bulk_update_tags(
-        ids, add=body.add or None, remove=body.remove or None
+        ids, owner=owner, add=body.add or None, remove=body.remove or None
     )

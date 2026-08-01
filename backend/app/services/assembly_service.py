@@ -10,7 +10,7 @@ package, so splitting would mean four downloads of overlapping data.
 
 from beanie import PydanticObjectId
 
-from app.errors import ConflictError, NotFoundError, ValidationError
+from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
 from app.metadata import assembly, assembly_components
 from app.models import (
@@ -19,7 +19,6 @@ from app.models import (
     JobClass,
     JobResources,
     ObjectRole,
-    Project,
     RunJobRole,
     RunKind,
 )
@@ -63,7 +62,7 @@ def download_label(accession: str, components: list[str]) -> str:
 
 
 async def already_downloaded(
-    project_id: PydanticObjectId, accession: str
+    project_id: PydanticObjectId, accession: str, *, owner: str
 ) -> bool:
     """Whether this project already holds this assembly's genome.
 
@@ -73,9 +72,16 @@ async def already_downloaded(
 
     Matched on `assembly_accession`, which ingest enrichment also writes, so a
     hand-uploaded reference counts too.
+
+    Owner-filtered for the same reason as `sra_service.already_downloaded`:
+    `project_id` already narrows this to one profile in practice, but a false
+    "yes" here is what disables the download button, and a user told they
+    already hold a genome they do not hold has no way to find out otherwise
+    from this screen.
     """
     existing = await DataObject.find_one(
         DataObject.project_id == project_id,
+        DataObject.owner == owner,
         DataObject.role == ObjectRole.REFERENCE,
         {"metadata.assembly_accession": accession},
     )
@@ -87,20 +93,28 @@ async def launch_download(
     project_id: PydanticObjectId,
     accession: str,
     components: list[str],
+    owner: str,
 ):
-    """Queue the download and the run that groups it."""
+    """Queue the download and the run that groups it.
+
+    `owner` gates the project lookup, as in `sra_service.launch_download`: the
+    reference this fetches lands in whichever project it was pointed at, and
+    an unscoped lookup would let one profile deposit a multi-gigabyte genome
+    into another profile's library.
+    """
     import asyncio
 
     from app.queue import queue
+    from app.services import project_service
 
     tools.require(tools.datasets())
 
     accession = (accession or "").strip().upper()
     selected = validate_selection(accession, components)
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
+    # Resolved for the refusal, not for the value: a project the caller does
+    # not own raises NotFoundError here, before any network work below.
+    await project_service.get_project(project_id, owner=owner)
 
     # Fetched once here so the handler's disk pre-flight and the ingest
     # metadata are both available: the handler runs in a worker thread and can
@@ -128,6 +142,10 @@ async def launch_download(
             "components": selected,
             "source": "ncbi_datasets",
         },
+        # The caller's profile. The project lookup above is scoped to it, so
+        # this is the project's owner too -- the download lands where the
+        # person who asked for it can see it.
+        owner=owner,
     )
 
     payload = {
@@ -142,6 +160,7 @@ async def launch_download(
 
     job = await queue.enqueue(
         "download_assembly",
+        owner=owner,
         payload=payload,
         job_class=JobClass.USER_INTERACTIVE,
         resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
@@ -155,7 +174,7 @@ async def launch_download(
     if job is None:
         # Already queued or running from an earlier click, so this run
         # describes no work and must not linger in the activity view.
-        await run_service.discard_run(run.id)
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             f"{accession} is already downloading",
             details={"accession": accession},

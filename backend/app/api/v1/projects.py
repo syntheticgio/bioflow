@@ -6,6 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query, Request, status
 from pydantic import BaseModel
 
+from app.api.deps import OwnerDep
 from app.api.v1.schemas import (
     DeletionPreviewOut,
     ObjectOut,
@@ -23,21 +24,26 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(
+    owner: OwnerDep,
     parent_id: str | None = None,
     include_archived: bool = False,
     limit: int = Query(200, le=1000),
 ) -> list[ProjectOut]:
     parent = PydanticObjectId(parent_id) if parent_id else None
     projects = await project_service.list_projects(
-        parent_id=parent, include_archived=include_archived, limit=limit
+        owner=owner,
+        parent_id=parent,
+        include_archived=include_archived,
+        limit=limit,
     )
     return [ProjectOut.of(p) for p in projects]
 
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-async def create_project(body: ProjectCreate) -> ProjectOut:
+async def create_project(body: ProjectCreate, owner: OwnerDep) -> ProjectOut:
     project = await project_service.create_project(
         name=body.name,
+        owner=owner,
         description=body.description,
         parent_id=PydanticObjectId(body.parent_id) if body.parent_id else None,
         metadata=body.metadata,
@@ -47,39 +53,52 @@ async def create_project(body: ProjectCreate) -> ProjectOut:
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
-async def get_project(project_id: PydanticObjectId) -> ProjectDetail:
-    project = await project_service.get_project(project_id)
-    trail = await project_service.breadcrumbs(project)
+async def get_project(project_id: PydanticObjectId, owner: OwnerDep) -> ProjectDetail:
+    project = await project_service.get_project(project_id, owner=owner)
+    trail = await project_service.breadcrumbs(project, owner=owner)
     return ProjectDetail(**ProjectOut.of(project).model_dump(), breadcrumbs=trail)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
-async def update_project(project_id: PydanticObjectId, body: ProjectUpdate) -> ProjectOut:
+async def update_project(
+    project_id: PydanticObjectId, body: ProjectUpdate, owner: OwnerDep
+) -> ProjectOut:
     project = await project_service.update_project(
-        project_id, body.model_dump(exclude_unset=True)
+        project_id,
+        body.model_dump(exclude_unset=True),
+        owner=owner,
     )
     return ProjectOut.of(project)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_project(project_id: PydanticObjectId, cascade: bool = False) -> None:
-    await project_service.delete_project(project_id, cascade=cascade)
+async def delete_project(
+    project_id: PydanticObjectId, owner: OwnerDep, cascade: bool = False
+) -> None:
+    await project_service.delete_project(project_id, owner=owner, cascade=cascade)
 
 
 @router.get("/{project_id}/deletion-preview", response_model=DeletionPreviewOut)
-async def project_deletion_preview(project_id: PydanticObjectId) -> DeletionPreviewOut:
+async def project_deletion_preview(
+    project_id: PydanticObjectId, owner: OwnerDep
+) -> DeletionPreviewOut:
     """Counts and blockers for a delete, so the confirmation can be specific."""
-    return DeletionPreviewOut(**await project_service.deletion_preview(project_id))
+    return DeletionPreviewOut(
+        **await project_service.deletion_preview(project_id, owner=owner)
+    )
 
 
 @router.get("/{project_id}/objects", response_model=list[ObjectOut])
 async def list_project_objects(
     project_id: PydanticObjectId,
+    owner: OwnerDep,
     obj_status: ObjectStatus | None = Query(None, alias="status"),
     limit: int = Query(200, le=1000),
 ) -> list[ObjectOut]:
-    await project_service.get_project(project_id)  # 404 if the project is gone
-    objects = await object_service.list_objects(project_id, status=obj_status, limit=limit)
+    await project_service.get_project(project_id, owner=owner)  # 404 if it is gone
+    objects = await object_service.list_objects(
+        project_id, owner=owner, status=obj_status, limit=limit
+    )
     return [ObjectOut.of(o) for o in objects]
 
 
@@ -99,7 +118,7 @@ class RegisterAccepted(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def register_object(
-    project_id: PydanticObjectId, body: RegisterInPlace
+    project_id: PydanticObjectId, body: RegisterInPlace, owner: OwnerDep
 ) -> RegisterAccepted:
     """Register a file already on disk, without copying it.
 
@@ -107,7 +126,7 @@ async def register_object(
     on the queue. The object reaches `ready` once that finishes.
     """
     obj, job_id = await object_service.register_in_place(
-        project_id=project_id, path_str=body.path, name=body.name
+        owner=owner, project_id=project_id, path_str=body.path, name=body.name
     )
     return RegisterAccepted(object=ObjectOut.of(obj), job_id=job_id)
 
@@ -120,6 +139,7 @@ async def register_object(
 async def upload_object(
     project_id: PydanticObjectId,
     request: Request,
+    owner: OwnerDep,
 ) -> ObjectOut:
     """Simple streamed upload (Phase 0; capped, see MAX_SIMPLE_UPLOAD_BYTES).
 
@@ -137,6 +157,7 @@ async def upload_object(
     # Bridge the async request stream into the sync iterator that the hashing
     # thread consumes, with a small buffer for backpressure.
     obj = await object_service.ingest_stream(
+        owner=owner,
         project_id=project_id,
         filename=filename,
         stream=_SyncStreamBridge(request.stream()),

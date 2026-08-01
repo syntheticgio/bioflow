@@ -19,7 +19,6 @@ from app.models import (
     JobResources,
     ObjectRole,
     ObjectStatus,
-    Project,
     RunJobRole,
     SidecarRole,
     SourceInfo,
@@ -32,9 +31,19 @@ from app.storage.home import require_home
 log = get_logger(__name__)
 
 
-async def get_object(object_id: PydanticObjectId) -> DataObject:
+async def get_object(object_id: PydanticObjectId, *, owner: str) -> DataObject:
+    """Fetch an object, scoped to its owner.
+
+    A wrong-owner lookup raises the same NotFoundError as a missing one, on
+    purpose -- same reasoning as project_service.get_project: it keeps every
+    existing caller's error handling working unchanged, and it does not confirm
+    to one profile that another profile's id exists.
+
+    This is also the choke point the mutating helpers below resolve through, so
+    scoping it here scopes update, delete and pairing at the same time.
+    """
     obj = await DataObject.get(object_id)
-    if obj is None:
+    if obj is None or obj.owner != owner:
         raise NotFoundError(f"Object not found: {object_id}")
     return obj
 
@@ -42,6 +51,7 @@ async def get_object(object_id: PydanticObjectId) -> DataObject:
 async def list_objects(
     project_id: PydanticObjectId,
     *,
+    owner: str,
     limit: int = 200,
     status: ObjectStatus | None = None,
     include_sidecars: bool = False,
@@ -57,7 +67,7 @@ async def list_objects(
     from this listing, not from the system. `sidecar_of` is how the explorer
     surfaces them on their parent instead.
     """
-    query: dict = {"project_id": project_id}
+    query: dict = {"owner": owner, "project_id": project_id}
     if status is not None:
         query["status"] = status.value
     if not include_sidecars:
@@ -67,13 +77,16 @@ async def list_objects(
     return await DataObject.find(query).sort("-created_at").limit(limit).to_list()
 
 
-async def list_sidecars(parent_id: PydanticObjectId) -> list[DataObject]:
+async def list_sidecars(parent_id: PydanticObjectId, *, owner: str) -> list[DataObject]:
     """The scaffolding attached to one object."""
-    return await DataObject.find(DataObject.sidecar_of == parent_id).to_list()
+    return await DataObject.find(
+        DataObject.sidecar_of == parent_id, DataObject.owner == owner
+    ).to_list()
 
 
 async def ingest_stream(
     *,
+    owner: str,
     project_id: PydanticObjectId,
     filename: str,
     stream,
@@ -92,9 +105,11 @@ async def ingest_stream(
     require_home()
     max_bytes = max_bytes or settings.max_simple_upload_bytes
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
+    # Resolved through the owner-scoped lookup rather than Project.get, which
+    # would let one profile ingest into another's project. Raises NotFoundError
+    # for a wrong owner exactly as it does for a missing project, so the
+    # explicit None branch this replaces is no longer needed.
+    await project_service.get_project(project_id, owner=owner)
 
     name = Path(filename).name.strip()
     if not name or name in (".", ".."):
@@ -102,6 +117,7 @@ async def ingest_stream(
 
     obj = DataObject(
         project_id=project_id,
+        owner=owner,
         name=name,
         status=ObjectStatus.UPLOADING,
         source=SourceInfo(mode=SourceMode.UPLOAD, original_name=name),
@@ -131,7 +147,7 @@ async def ingest_stream(
             object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
         )
         await project_service.bump_counters(project_id, objects=1, total_bytes=size)
-        await enqueue_ingest(obj, digest=digest)
+        await enqueue_ingest(obj, owner=owner, digest=digest)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         await obj.set(
@@ -142,11 +158,12 @@ async def ingest_stream(
         )
         raise
 
-    return await get_object(obj.id)
+    return await get_object(obj.id, owner=owner)
 
 
 async def ingest_local_file(
     *,
+    owner: str,
     project_id: PydanticObjectId,
     path: Path,
     name: str,
@@ -174,9 +191,9 @@ async def ingest_local_file(
     """
     require_home()
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
+    # Owner-scoped, so a pipeline cannot deposit its output into a project
+    # belonging to another profile. See the note in ingest_stream.
+    await project_service.get_project(project_id, owner=owner)
 
     safe_name = Path(name).name.strip()
     if not safe_name or safe_name in (".", ".."):
@@ -187,6 +204,7 @@ async def ingest_local_file(
 
     obj = DataObject(
         project_id=project_id,
+        owner=owner,
         name=safe_name,
         status=ObjectStatus.HASHING,
         role=role,
@@ -221,7 +239,7 @@ async def ingest_local_file(
             object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
         )
         await project_service.bump_counters(project_id, objects=1, total_bytes=size)
-        ingest_job_id = await enqueue_ingest(obj, digest=digest)
+        ingest_job_id = await enqueue_ingest(obj, owner=owner, digest=digest)
 
         # Join the run that produced this file, so its header parse groups with
         # the alignment or trim that caused it rather than appearing loose.
@@ -246,7 +264,7 @@ async def ingest_local_file(
         )
         raise
 
-    return await get_object(obj.id)
+    return await get_object(obj.id, owner=owner)
 
 
 async def _discard(path: Path) -> None:
@@ -292,6 +310,7 @@ def _blob_bytes_present(blob: Blob) -> bool:
 async def enqueue_ingest(
     obj: DataObject,
     *,
+    owner: str,
     digest: str | None = None,
     path: Path | None = None,
     job_class: JobClass = JobClass.USER_BACKGROUND,
@@ -301,6 +320,10 @@ async def enqueue_ingest(
     Detection and parsing move off the request path: opening a CRAM header or a
     heavily-scaffolded BAM is slow enough to hurt a response, and a malformed
     file must not take the upload down with it.
+
+    `owner` is forwarded to `queue.enqueue`, so the queued job is attributed to
+    the profile whose file it is -- not to whichever profile happened to boot
+    first, which is what the inherited "local" default gave before.
     """
     from app.queue import queue
 
@@ -322,6 +345,7 @@ async def enqueue_ingest(
 
     job = await queue.enqueue(
         "ingest_headers",
+        owner=owner,
         payload=payload,
         job_class=job_class,
         resources=JobResources(cpu=1, mem_mb=256, io=IoClass.LIGHT),
@@ -377,6 +401,7 @@ async def _apply_detection(obj: DataObject, digest: str) -> None:
 
 async def register_in_place(
     *,
+    owner: str,
     project_id: PydanticObjectId,
     path_str: str,
     name: str | None = None,
@@ -396,9 +421,9 @@ async def register_in_place(
 
     require_home()
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
+    # Owner-scoped, so registering a path cannot attach it to another
+    # profile's project. See the note in ingest_stream.
+    await project_service.get_project(project_id, owner=owner)
 
     # Resolves symlinks *before* checking containment, so a link pointing
     # outside the allowlist is rejected rather than followed.
@@ -420,6 +445,7 @@ async def register_in_place(
 
     obj = DataObject(
         project_id=project_id,
+        owner=owner,
         name=name or resolved.name,
         status=ObjectStatus.HASHING,
         size=stat.st_size,
@@ -434,6 +460,7 @@ async def register_in_place(
     # Hashing a 100 GB file cannot happen in a request, so it goes to the queue.
     job = await queue.enqueue(
         "register_hash",
+        owner=owner,
         payload={
             "object_id": str(obj.id),
             "path": str(resolved),
@@ -486,6 +513,8 @@ async def set_pair(
     object_id: PydanticObjectId,
     mate_object_id: PydanticObjectId,
     read_number: int,
+    *,
+    owner: str,
 ) -> DataObject:
     """Pair two reads files by hand, symmetrically.
 
@@ -501,8 +530,10 @@ async def set_pair(
     if object_id == mate_object_id:
         raise ValidationError("A file cannot be paired with itself")
 
-    obj = await get_object(object_id)
-    mate = await get_object(mate_object_id)
+    # Both sides resolve through the owner-scoped lookup, so pairing cannot
+    # reach across the partition from either direction.
+    obj = await get_object(object_id, owner=owner)
+    mate = await get_object(mate_object_id, owner=owner)
 
     if obj.project_id != mate.project_id:
         raise ValidationError("Both files must be in the same project")
@@ -518,6 +549,7 @@ async def set_pair(
     # Same shape as _link_mate's double write.
     linked = await DataObject.find_one(
         DataObject.id == mate.id,
+        DataObject.owner == owner,
         DataObject.mate_object_id == None,  # noqa: E711
     ).update(
         {
@@ -534,6 +566,7 @@ async def set_pair(
 
     await DataObject.find_one(
         DataObject.id == obj.id,
+        DataObject.owner == owner,
         DataObject.mate_object_id == None,  # noqa: E711
     ).update(
         {
@@ -552,10 +585,10 @@ async def set_pair(
         mate_id=str(mate.id),
         read_number=read_number,
     )
-    return await get_object(object_id)
+    return await get_object(object_id, owner=owner)
 
 
-async def clear_pair(object_id: PydanticObjectId) -> DataObject:
+async def clear_pair(object_id: PydanticObjectId, *, owner: str) -> DataObject:
     """Undo a pairing, from either side.
 
     Clears the pointer *and* the read number on both files, but leaves "mate"
@@ -565,7 +598,7 @@ async def clear_pair(object_id: PydanticObjectId) -> DataObject:
 
     A no-op on an unpaired object, so the button is idempotent.
     """
-    obj = await get_object(object_id)
+    obj = await get_object(object_id, owner=owner)
 
     if obj.mate_object_id is None:
         return obj
@@ -581,16 +614,25 @@ async def clear_pair(object_id: PydanticObjectId) -> DataObject:
 
     # The mate is cleared by id rather than by fetching it first: the row may
     # be gone (deleted out from under a stale tab), and that must not block
-    # unpairing the file the user is actually looking at.
-    await DataObject.find_one(DataObject.id == obj.mate_object_id).update(cleared)
-    await DataObject.find_one(DataObject.id == obj.id).update(cleared)
+    # unpairing the file the user is actually looking at. Still owner-scoped --
+    # a mate always shares its parent's owner, so the clause never costs a
+    # legitimate clear, and a cross-owner mate pointer arriving some other way
+    # must not become a write into another profile's row.
+    await DataObject.find_one(
+        DataObject.id == obj.mate_object_id, DataObject.owner == owner
+    ).update(cleared)
+    await DataObject.find_one(
+        DataObject.id == obj.id, DataObject.owner == owner
+    ).update(cleared)
 
     log.info("pair_cleared_manually", object_id=str(obj.id), mate_id=str(obj.mate_object_id))
-    return await get_object(object_id)
+    return await get_object(object_id, owner=owner)
 
 
-async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObject:
-    obj = await get_object(object_id)
+async def update_object(
+    object_id: PydanticObjectId, updates: dict, *, owner: str
+) -> DataObject:
+    obj = await get_object(object_id, owner=owner)
 
     if updates.get("name") is not None:
         new_name = Path(updates["name"]).name.strip()
@@ -627,7 +669,7 @@ async def update_object(object_id: PydanticObjectId, updates: dict) -> DataObjec
     return obj
 
 
-async def delete_object(object_id: PydanticObjectId) -> None:
+async def delete_object(object_id: PydanticObjectId, *, owner: str) -> None:
     """Delete an object, and any sidecars that exist only to accompany it.
 
     The cascade is required rather than tidy. Blob GC is refcount-driven, and a
@@ -645,14 +687,19 @@ async def delete_object(object_id: PydanticObjectId) -> None:
     are not content-addressed, which means blob GC never sees them: nothing but
     this call will ever free them.
     """
-    await get_object(object_id)
+    # The ownership check for the whole cascade: a wrong-owner call raises here,
+    # before any sidecar is touched or any blob decremented.
+    await get_object(object_id, owner=owner)
 
-    sidecars = await DataObject.find(DataObject.sidecar_of == object_id).to_list()
+    sidecars = await list_sidecars(object_id, owner=owner)
     for sidecar in sidecars:
         # Sidecars of sidecars are not a shape this produces today (a .bai
         # attaches to a BAM, not to another sidecar), but recursing costs
         # nothing and means a future two-level artifact cannot strand a blob.
-        await delete_object(sidecar.id)
+        # The owner goes down with it: a sidecar always shares its parent's
+        # owner, so passing anything else would fail its own get_object and
+        # leave the index behind at refcount 1.
+        await delete_object(sidecar.id, owner=owner)
         log.info(
             "sidecar_deleted_with_parent",
             object_id=str(sidecar.id),
@@ -699,7 +746,9 @@ def remove_report_dirs(object_id: PydanticObjectId) -> None:
             log.info("report_dir_removed", object_id=str(object_id), path=str(path))
 
 
-async def object_with_blob(object_id: PydanticObjectId) -> tuple[DataObject, Blob | None]:
-    obj = await get_object(object_id)
+async def object_with_blob(
+    object_id: PydanticObjectId, *, owner: str
+) -> tuple[DataObject, Blob | None]:
+    obj = await get_object(object_id, owner=owner)
     blob = await Blob.get(obj.blob_sha256) if obj.blob_sha256 else None
     return obj, blob

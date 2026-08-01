@@ -16,6 +16,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.errors import ValidationError
 from app.logging import get_logger
 from app.metadata import uniprot
@@ -230,13 +231,14 @@ async def _taxon_response(
     response_model=DownloadAccepted,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def download(body: DownloadRequest) -> DownloadAccepted:
+async def download(body: DownloadRequest, owner: OwnerDep) -> DownloadAccepted:
     """Queue a proteome or a set of proteins for download."""
     run, job_ids = await uniprot_service.launch_download(
         project_id=body.project_id,
         proteome_id=body.proteome_id,
         accessions=body.accessions,
         reviewed_only=body.reviewed_only,
+        owner=owner,
         organism=body.organism,
         protein_count=body.protein_count,
     )

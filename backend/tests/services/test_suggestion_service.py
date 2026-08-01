@@ -108,8 +108,10 @@ def _fake_obj(
     because the launch body carries it -- the card assembles the complete
     request body server-side.
 
-    `status` and `project_id` are read only by `suggestions_for`, the one
-    non-pure function here; the individual builders never look at them.
+    `status`, `project_id` and `owner` are read only by `suggestions_for`, the
+    one non-pure function here; the individual builders never look at them.
+    `owner` joins them now that the reference listing is owner-scoped -- a card
+    must not be built from another profile's references.
     """
     from types import SimpleNamespace
     return SimpleNamespace(
@@ -119,6 +121,7 @@ def _fake_obj(
         metadata=metadata or {},
         status=status,
         project_id=project_id,
+        owner="local",
     )
 
 
@@ -1007,16 +1010,26 @@ class TestSuggestionsEndpoint:
 
         from app.api.v1.pipelines import router
         from app.errors import register_exception_handlers
+        from tests.api.bare_app import override_owner
 
         app = FastAPI()
         register_exception_handlers(app)
         app.include_router(router)
+        override_owner(app)
         return TestClient(app)
 
     def test_unknown_object_id_is_a_404_not_an_empty_grid(self, client):
         """An empty `suggestions` list would render as "nothing to do here",
         which is a different and wrong answer to "that file does not exist"."""
-        with patch("app.api.v1.pipelines.DataObject.get", return_value=None):
+        from app.errors import NotFoundError
+
+        # The lookup is now owner-scoped, and it signals both "no such id" and
+        # "not yours" by raising rather than returning None -- so the stub
+        # raises, matching what `object_service.get_object` really does.
+        with patch(
+            "app.api.v1.pipelines.object_service.get_object",
+            side_effect=NotFoundError("Object not found"),
+        ):
             resp = client.get(
                 "/pipelines/suggestions/000000000000000000000001"
             )
@@ -1027,7 +1040,7 @@ class TestSuggestionsEndpoint:
         assert resp.status_code == 422
 
     def test_a_found_object_is_answered_with_its_cards(self, client):
-        with patch("app.api.v1.pipelines.DataObject.get",
+        with patch("app.api.v1.pipelines.object_service.get_object",
                    return_value=_bam()), stub_db(
                        chemistry=align_runner.ReadChemistry.SHORT), \
                 installed_callers():

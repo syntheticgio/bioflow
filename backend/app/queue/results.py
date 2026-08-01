@@ -29,10 +29,37 @@ from app.pipelines.aligners import Aligner
 log = get_logger(__name__)
 
 
-async def apply(job_type: str, result: dict) -> None:
+async def apply(job_type: str, result: dict, *, owner: str) -> None:
+    """Run the applier for a finished job, telling it who launched the job.
+
+    `owner` is the *launching profile*, not necessarily the owner of every
+    object an applier writes. Most appliers resolve a parent object first and
+    take that parent's owner instead, because a sidecar's owner has to match
+    the object it hangs off -- `list_sidecars` and `delete_object`'s cascade
+    both key on that relationship, so an inherited owner is the more specific
+    fact and the one those appliers must use.
+
+    The two download appliers have no parent to inherit from: they create the
+    first object in a chain from nothing but a project_id, so the launching
+    profile is the only owner that exists. That is the whole reason this
+    parameter is here. It is passed to every applier uniformly rather than only
+    to those two, so that dispatch stays one line and a new applier that *does*
+    need it is not silently handed nothing. Those appliers name it
+    `launching_owner` and do not read it, which is the intended reading: the
+    value arrived, and inheriting from the parent was a decision rather than an
+    oversight.
+
+    The two should never actually disagree. Every `queue.enqueue` call in the
+    services derives its owner from the very object or project the job acts on
+    (`owner=bam.owner`, `owner=project.owner`, ...), so the launching profile is
+    already the parent's owner by construction. A disagreement would mean one
+    profile's job producing another profile's object, which nothing can reach
+    today -- but the parent-derived owner is still the one to trust if it ever
+    happened, because it is what `list_sidecars` will later query with.
+    """
     handler = _APPLIERS.get(job_type)
     if handler is not None:
-        await handler(result)
+        await handler(result, owner=owner)
 
 
 def should_assign_reference_role(
@@ -57,7 +84,7 @@ def should_assign_reference_role(
     return bool((enrichment or {}).get("accession"))
 
 
-async def _apply_ingest_headers(result: dict) -> None:
+async def _apply_ingest_headers(result: dict, *, launching_owner: str) -> None:
     object_id = result.get("object_id")
     if not object_id:
         return
@@ -280,7 +307,7 @@ async def _link_mate(obj: DataObject) -> None:
     )
 
 
-async def _apply_trim_reads(result: dict) -> None:
+async def _apply_trim_reads(result: dict, *, launching_owner: str) -> None:
     """Turn a finished trim run into objects.
 
     The handler ran in a worker thread and could not touch the database, so
@@ -328,6 +355,7 @@ async def _apply_trim_reads(result: dict) -> None:
         tmp_path = Path(output["tmp_path"])
         try:
             obj = await object_service.ingest_local_file(
+                owner=parent.owner,
                 project_id=parent.project_id,
                 path=tmp_path,
                 name=output["name"],
@@ -384,7 +412,16 @@ async def _apply_trim_reads(result: dict) -> None:
 
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [o.id for o in created])
+            # The owner comes from a file this apply just produced, which
+            # object_service stamped with the project's owner. An applier has
+            # no request and so no get_current_owner to ask; carrying the owner
+            # in the job payload is Task 9's work, and this is the same value
+            # that task will arrive at -- an output and the run that produced
+            # it always share a project. `created` is non-empty here: the
+            # produced-nothing case returned above.
+            await run_service.record_outputs(
+                run_id, [o.id for o in created], owner=created[0].owner
+            )
 
     log.info(
         "trim_applied",
@@ -395,7 +432,7 @@ async def _apply_trim_reads(result: dict) -> None:
     )
 
 
-async def _apply_sra_download(result: dict) -> None:
+async def _apply_sra_download(result: dict, *, owner: str) -> None:
     """Take a finished SRA download into the project, and chain its QC.
 
     The handler ran in a worker thread and could not touch the database, so
@@ -432,6 +469,13 @@ async def _apply_sra_download(result: dict) -> None:
     for entry in staged:
         try:
             obj = await object_service.ingest_local_file(
+                # The launching job's owner, threaded through `apply`. Unlike
+                # the appliers that resolve a parent object, a download has only
+                # the payload's project_id -- a freshly downloaded FASTQ is
+                # derived from nothing, so there is no parent here to read an
+                # owner off, and the profile that asked for the download is the
+                # only answer.
+                owner=owner,
                 project_id=project_id,
                 path=Path(entry["path"]),
                 name=entry["name"],
@@ -468,7 +512,11 @@ async def _apply_sra_download(result: dict) -> None:
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [o.id for o in created.values()])
+        await run_service.record_outputs(
+            run_id,
+            [o.id for o in created.values()],
+            owner=next(iter(created.values())).owner,
+        )
 
     log.info(
         "sra_download_applied",
@@ -483,6 +531,7 @@ async def _apply_sra_download(result: dict) -> None:
     for obj in created.values():
         qc_job = await queue.enqueue(
             "run_qc",
+            owner=obj.owner,
             payload={
                 "object_id": str(obj.id),
                 "project_id": str(project_id),
@@ -567,7 +616,7 @@ def _component_metadata(base: dict, accession: str, component: str) -> dict:
     return out
 
 
-async def _apply_assembly_download(result: dict) -> None:
+async def _apply_assembly_download(result: dict, *, owner: str) -> None:
     """Take a finished assembly download into the project.
 
     Mirrors `_apply_sra_download`: the handler ran in a worker thread and
@@ -606,6 +655,10 @@ async def _apply_assembly_download(result: dict) -> None:
         )
         try:
             obj = await object_service.ingest_local_file(
+                # As in `_apply_sra_download`: a download has only the payload's
+                # project_id and no parent object to inherit from, so the owner
+                # of the job that asked for it is the one that reaches here.
+                owner=owner,
                 project_id=project_id,
                 path=Path(entry["path"]),
                 name=entry["name"],
@@ -630,7 +683,9 @@ async def _apply_assembly_download(result: dict) -> None:
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [o.id for o in created])
+        await run_service.record_outputs(
+            run_id, [o.id for o in created], owner=created[0].owner
+        )
 
     log.info(
         "assembly_download_applied",
@@ -640,7 +695,7 @@ async def _apply_assembly_download(result: dict) -> None:
     )
 
 
-async def _apply_uniprot_download(result: dict) -> None:
+async def _apply_uniprot_download(result: dict, *, owner: str) -> None:
     """Take a finished UniProt download into the project.
 
     Mirrors `_apply_assembly_download`: the handler ran in a worker thread
@@ -684,6 +739,11 @@ async def _apply_uniprot_download(result: dict) -> None:
     for entry in staged:
         try:
             obj = await object_service.ingest_local_file(
+                # As in `_apply_assembly_download`: a download has only the
+                # payload's project_id and no parent object to inherit from,
+                # so the owner of the job that asked for it is the one that
+                # reaches here.
+                owner=owner,
                 project_id=project_id,
                 path=Path(entry["path"]),
                 name=entry["name"],
@@ -714,7 +774,9 @@ async def _apply_uniprot_download(result: dict) -> None:
     # to this job" call.
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [o.id for o in created])
+        await run_service.record_outputs(
+            run_id, [o.id for o in created], owner=created[0].owner
+        )
 
     log.info(
         "uniprot_download_applied",
@@ -724,7 +786,7 @@ async def _apply_uniprot_download(result: dict) -> None:
     )
 
 
-async def _apply_run_qc(result: dict) -> None:
+async def _apply_run_qc(result: dict, *, launching_owner: str) -> None:
     """Record a QC run's numbers on the object it described.
 
     QC derives no files, so unlike trim or align there is nothing to ingest --
@@ -763,12 +825,17 @@ async def _apply_run_qc(result: dict) -> None:
     from app.services import pipeline_service
 
     try:
-        await pipeline_service.launch_summary(object_id=obj.id)
+        # `launching_owner`, not `obj.owner`: launch_summary now scopes its own
+        # lookup, and the QC job that got here was enqueued under the profile
+        # that owns this file, so the two agree. Passing the launching profile
+        # keeps the chained job in the same partition as the job that spawned
+        # it, which is what the activity view groups on.
+        await pipeline_service.launch_summary(object_id=obj.id, owner=launching_owner)
     except Exception as e:  # noqa: BLE001 - an additive extra cannot fail QC
         log.warning("summary_launch_failed", object_id=object_id, error=str(e))
 
 
-async def _apply_summarize_object(result: dict) -> None:
+async def _apply_summarize_object(result: dict, *, launching_owner: str) -> None:
     """Record a generated narrative summary on the object it describes.
 
     A no-op when the model server was down or the file had too little to say --
@@ -810,7 +877,7 @@ async def _apply_summarize_object(result: dict) -> None:
     log.info("summary_applied", object_id=object_id, model=result.get("model"))
 
 
-async def _apply_build_index(result: dict) -> None:
+async def _apply_build_index(result: dict, *, launching_owner: str) -> None:
     """Turn a finished index build into sidecar objects on the reference.
 
     Every produced file becomes an object in its own right -- verified,
@@ -844,6 +911,7 @@ async def _apply_build_index(result: dict) -> None:
             continue
         try:
             obj = await object_service.ingest_local_file(
+                owner=reference.owner,
                 project_id=reference.project_id,
                 path=Path(output["tmp_path"]),
                 name=output["name"],
@@ -868,7 +936,9 @@ async def _apply_build_index(result: dict) -> None:
 
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [o.id for o in created])
+            await run_service.record_outputs(
+                run_id, [o.id for o in created], owner=created[0].owner
+            )
 
     log.info(
         "index_applied",
@@ -959,7 +1029,7 @@ def align_provenance(*, result: dict, reads_facts: dict | None) -> dict:
     return provenance
 
 
-async def _apply_align_reads(result: dict) -> None:
+async def _apply_align_reads(result: dict, *, launching_owner: str) -> None:
     """Turn a finished alignment into a BAM object, and chain its indexing.
 
     The BAM descends from both the reads and the reference: all three are
@@ -990,6 +1060,7 @@ async def _apply_align_reads(result: dict) -> None:
 
     try:
         bam = await object_service.ingest_local_file(
+            owner=reads.owner,
             project_id=reads.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1011,13 +1082,14 @@ async def _apply_align_reads(result: dict) -> None:
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:
-        await run_service.record_outputs(run_id, [bam.id])
+        await run_service.record_outputs(run_id, [bam.id], owner=bam.owner)
 
     # Chain the follow-on index. Enqueued here rather than at launch because it
     # needs the BAM's digest, which does not exist until the alignment has run.
     if bam.blob_sha256:
         index_job = await queue.enqueue(
             "index_bam",
+            owner=bam.owner,
             payload={
                 "bam_object_id": str(bam.id),
                 "bam_sha256": bam.blob_sha256,
@@ -1039,7 +1111,7 @@ async def _apply_align_reads(result: dict) -> None:
             await run_service.link_job(run_id, index_job.id, RunJobRole.INDEX_BAM)
 
 
-async def _apply_index_bam(result: dict) -> None:
+async def _apply_index_bam(result: dict, *, launching_owner: str) -> None:
     """Attach a `.bai` to its BAM and record the flagstat numbers."""
     from app.services import object_service
 
@@ -1057,6 +1129,7 @@ async def _apply_index_bam(result: dict) -> None:
     bai_ingested = False
     try:
         await object_service.ingest_local_file(
+            owner=bam.owner,
             project_id=bam.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1096,12 +1169,16 @@ async def _apply_index_bam(result: dict) -> None:
         from app.services import pipeline_service
 
         try:
-            await pipeline_service.launch_bam_stats(object_id=bam.id)
+            # Same reasoning as the QC -> summary chain: the index job carried
+            # the launching profile, and launch_bam_stats now scopes its own
+            # BAM lookup, so handing it that profile is what lets the chained
+            # computation resolve the very BAM the index was just built for.
+            await pipeline_service.launch_bam_stats(object_id=bam.id, owner=launching_owner)
         except AppError as e:
             log.warning("bam_stats_chain_failed", object_id=bam_id, error=str(e))
 
 
-async def _apply_run_bam_stats(result: dict) -> None:
+async def _apply_run_bam_stats(result: dict, *, launching_owner: str) -> None:
     """Record a Results computation's numbers on the BAM it described.
 
     Read-only like QC: no files to ingest, just facts merged onto the object.
@@ -1130,7 +1207,7 @@ async def _apply_run_bam_stats(result: dict) -> None:
     )
 
 
-async def _apply_run_vcf_stats(result: dict) -> None:
+async def _apply_run_vcf_stats(result: dict, *, launching_owner: str) -> None:
     """Record a Variant Results computation on the VCF it described.
 
     Read-only like QC and BAM stats: no files to ingest, just facts merged
@@ -1174,7 +1251,7 @@ def variant_provenance(result: dict) -> dict:
     }
 
 
-async def _apply_call_variants(result: dict) -> None:
+async def _apply_call_variants(result: dict, *, launching_owner: str) -> None:
     """Turn a finished variant calling run into a VCF object and its index.
 
     The VCF descends from both the BAM and the reference: a variant call is a
@@ -1202,6 +1279,7 @@ async def _apply_call_variants(result: dict) -> None:
     job_id = result.get("job_id")
     try:
         vcf = await object_service.ingest_local_file(
+            owner=bam.owner,
             project_id=bam.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1227,6 +1305,7 @@ async def _apply_call_variants(result: dict) -> None:
     if index:
         try:
             await object_service.ingest_local_file(
+                owner=vcf.owner,
                 project_id=bam.project_id,
                 path=Path(index["tmp_path"]),
                 name=index["name"],
@@ -1241,7 +1320,7 @@ async def _apply_call_variants(result: dict) -> None:
     if job_id:
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [vcf.id])
+            await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
 
 
 def annotation_provenance(result: dict) -> dict:
@@ -1252,7 +1331,7 @@ def annotation_provenance(result: dict) -> dict:
     }
 
 
-async def _apply_annotate_variants(result: dict) -> None:
+async def _apply_annotate_variants(result: dict, *, launching_owner: str) -> None:
     """Turn a finished annotation run into a new VCF object and its index.
 
     Mirrors `_apply_call_variants`: the annotated VCF descends from the
@@ -1282,6 +1361,7 @@ async def _apply_annotate_variants(result: dict) -> None:
     job_id = result.get("job_id")
     try:
         annotated = await object_service.ingest_local_file(
+            owner=vcf.owner,
             project_id=vcf.project_id,
             path=Path(output["tmp_path"]),
             name=output["name"],
@@ -1306,6 +1386,7 @@ async def _apply_annotate_variants(result: dict) -> None:
     if index:
         try:
             await object_service.ingest_local_file(
+                owner=annotated.owner,
                 project_id=vcf.project_id,
                 path=Path(index["tmp_path"]),
                 name=index["name"],
@@ -1324,7 +1405,7 @@ async def _apply_annotate_variants(result: dict) -> None:
     if job_id:
         run_id = await run_service.run_for_job(PydanticObjectId(job_id))
         if run_id is not None:
-            await run_service.record_outputs(run_id, [annotated.id])
+            await run_service.record_outputs(run_id, [annotated.id], owner=annotated.owner)
 
 
 _SIDECAR_ROLES = {

@@ -60,8 +60,21 @@ const GROUP_TITLES: Record<PipelineType, string> = Object.fromEntries(
  * reader who has finished with it, not a default state to be discovered.
  * The toggle reuses .group-title from the explorer's category headers rather
  * than inventing a second disclosure idiom for one page.
+ *
+ * Column heads are buttons that filter the whole page to that pipeline. They
+ * are `th > button` rather than a click handler on the `th` so the control is
+ * focusable and announces itself; a bare clickable table header is invisible
+ * to the keyboard.
  */
-function ToolMatrix({ tools }: { tools: PipelineTool[] }) {
+function ToolMatrix({
+  tools,
+  filter,
+  onFilter,
+}: {
+  tools: PipelineTool[];
+  filter: PipelineType | null;
+  onFilter: (type: PipelineType | null) => void;
+}) {
   const [expanded, setExpanded] = useState(true);
 
   if (tools.length === 0) return null;
@@ -95,11 +108,31 @@ function ToolMatrix({ tools }: { tools: PipelineTool[] }) {
               <th scope="col" className="software-matrix-corner">
                 Tool
               </th>
-              {GROUPS.map(({ type, title }) => (
-                <th key={type} scope="col">
-                  {title}
-                </th>
-              ))}
+              {GROUPS.map(({ type, title }) => {
+                const active = filter === type;
+                return (
+                  <th
+                    key={type}
+                    scope="col"
+                    className={active ? "is-filtered" : undefined}
+                    aria-sort={active ? "other" : undefined}
+                  >
+                    <button
+                      type="button"
+                      className="software-matrix-filter"
+                      aria-pressed={active}
+                      onClick={() => onFilter(active ? null : type)}
+                      title={
+                        active
+                          ? `Show all tools again`
+                          : `Show only ${title.toLowerCase()} tools`
+                      }
+                    >
+                      {title}
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -298,7 +331,24 @@ export function HelpSoftware() {
     queryFn: api.pipelineTools,
   });
 
-  const tools = data?.tools ?? [];
+  // Which pipeline the page is narrowed to, or null for everything. Held here
+  // rather than inside ToolMatrix because it filters the entries below as well
+  // -- narrowing the grid while leaving six sections of prose underneath would
+  // answer "what aligners have I got" and then still make the reader scroll
+  // past every QC tool to read about them.
+  const [filter, setFilter] = useState<PipelineType | null>(null);
+
+  const allTools = data?.tools ?? [];
+
+  // Membership is `pipelines.includes`, not `pipelines[0] === type`: a filter
+  // for Quality control that hid samtools would be lying about the toolchain,
+  // since flagstat is exactly what a reader filtering for QC is looking for.
+  // Uninstalled tools stay in for the same reason the matrix marks rather than
+  // drops them -- "what could do this job" is the question being asked, and
+  // omitting the answer because it needs installing is worse than dimming it.
+  const tools = filter
+    ? allTools.filter((t) => t.pipelines.includes(filter))
+    : allTools;
 
   // A tool in two pipelines is placed once and cross-referenced, never
   // repeated: fastp is trim+qc and samtools is utility+qc, and rendering
@@ -344,22 +394,51 @@ export function HelpSoftware() {
         </p>
       )}
 
-      <ToolMatrix tools={matrixRows} />
+      <ToolMatrix tools={matrixRows} filter={filter} onFilter={setFilter} />
+
+      {/* Says why the page is short, and gives the way back. Without it a
+          filtered page is indistinguishable from a page that only ever had two
+          tools on it -- the pressed column head is the only other clue, and it
+          scrolls out of view. */}
+      {filter && (
+        <p className="software-filter-note">
+          <span>
+            Showing {tools.length}{" "}
+            {tools.length === 1 ? "tool" : "tools"} for{" "}
+            <strong>{GROUP_TITLES[filter].toLowerCase()}</strong>.
+          </span>
+          <button
+            type="button"
+            className="software-filter-clear"
+            onClick={() => setFilter(null)}
+          >
+            Show all {allTools.length}
+          </button>
+        </p>
+      )}
 
       {grouped.map(({ type, title, entries }) =>
         entries.length === 0 ? null : (
           <section key={type} className="software-group">
             <h2 className="software-group-title">{title}</h2>
-            {entries.map((tool) => (
-              <ToolEntry
-                key={tool.name}
-                tool={tool}
-                alsoIn={tool.pipelines
-                  .slice(1)
-                  .map((p) => GROUP_TITLES[p]?.toLowerCase())
-                  .filter(Boolean)}
-              />
-            ))}
+            {/* Entries are wrapped rather than laid out by .software-group
+                itself: the grid must contain only entries, so the heading is
+                not pulled into a column beside the first tool. It also makes
+                each section its own grid, which is what keeps a new section
+                starting at the left column instead of continuing next to the
+                previous section's last tool. */}
+            <div className="software-group-entries">
+              {entries.map((tool) => (
+                <ToolEntry
+                  key={tool.name}
+                  tool={tool}
+                  alsoIn={tool.pipelines
+                    .slice(1)
+                    .map((p) => GROUP_TITLES[p]?.toLowerCase())
+                    .filter(Boolean)}
+                />
+              ))}
+            </div>
           </section>
         ),
       )}

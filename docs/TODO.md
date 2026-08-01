@@ -1,6 +1,203 @@
 # TODO
 
-Deferred work, with enough context to pick up cold. Newest first.
+Two kinds of entry, kept apart because they are read differently.
+
+**Planned features** are things we have decided to build, described from the
+user's side. **Deferred findings** are problems discovered while building
+something else, recorded with enough context to pick up cold. Findings are
+newest first.
+
+---
+
+# Planned features
+
+## Profiles — SPECCED
+
+Design: `docs/superpowers/specs/2026-07-31-profiles-design.md` (2026-07-31).
+
+Segregate the library into named profiles chosen at startup, so several people
+sharing one machine each see their own projects, files and runs. A startup
+screen shows a clickable square per profile plus a `+` to add one; the
+add-profile modal collects a unique username, an optional password, an optional
+email, and an expandable Details section for name, institution and research
+areas. An auto-login checkbox skips the picker on subsequent launches. A profile
+menu in the header carries Switch profile / Edit details / Logout.
+
+Not a security mechanism. The optional password stops someone entering the
+*wrong* profile by accident; the API stays unauthenticated and the spec says so
+explicitly rather than implying protection.
+
+What the design settled that the original note left open:
+
+- **Storage does not nest under a profile.** The original note asked whether to
+  add a profile level above the current layout. It should not: `blob_rel_path`
+  builds `objects/ab/abcdef...` from the SHA-256 alone, so the path *is* the
+  content hash. Profiles partition the *metadata* collections (`projects`,
+  `objects`, `runs`, `jobs`, `schedules`) via the `owner` field already on every
+  document; `blobs` and `objects/` stay **global**. Two profiles holding the
+  same reference genome then store it once, and cross-profile sharing becomes
+  nearly free instead of impossible.
+- **Emoji are safe**, and the numeric id the note proposed is not needed for
+  paths — `owner` never becomes a path component. A profile's `ObjectId`
+  supplies the stable id so renaming does not rewrite every document.
+- **No data migration.** The first profile adopts `owner: "local"` literally, so
+  the existing library belongs to it with zero documents rewritten. This matters
+  because this repo has no migrations mechanism — see the index-definition entry
+  below for what that costs.
+
+Two traps found in the code, both silent:
+
+- `enqueue`'s `dedup_key` is global. A key not carrying a per-profile id would
+  let one profile's job silently cancel another's identical request.
+- The worker has no HTTP request, and `Job.owner` defaults to `"local"` — so
+  every job would be attributed to the first profile unless `enqueue` takes an
+  owner and the handlers propagate it.
+
+## Profiles: events and schedules are the last unscoped routes
+
+Raised: 2026-08-01. The rest of this entry's original subject -- `jobs`,
+`uploads`, `search`, `pipelines`, `ncbi` -- was closed on 2026-08-01 in
+`414f146`, `67931f4` and `a99e044`. What follows is what is left.
+
+**`events.py` (1 route, 0 scoped).** The SSE stream subscribes to a single
+global Redis channel (`keys.EVENTS`, `events.py:30`) and forwards every
+payload to every client. The word `owner` does not appear in the file. Once
+two profiles are in use, profile B's browser receives job-progress and
+object-created events for profile A's files, filenames included.
+
+Two shapes, and the difference matters: stamping an `owner` on the payload and
+filtering server-side means a publisher that forgets leaks silently, which is
+the same failure the dedup-key trap had. Per-owner channels
+(`keys.EVENTS + ":" + owner`) mean a publisher that forgets emits into a
+channel nobody reads -- a missing event rather than a leaked one. Failing
+closed is worth the extra channel. `publish_event` has call sites in
+`queue/queue.py`, `queue/results.py` and the executor; audit all of them.
+
+**`schedules.py` (5 routes, 0 scoped).** Probably correct as-is -- these read
+like system-level cron entries (GC, file verification) rather than user data --
+but nobody has said so. Either scope it or document it as deliberately global
+in the route docstrings, the way `search.py`'s `/metadata/schemas` does.
+
+Neither is reachable today: nothing in the frontend sends
+`X-BioFlow-Profile`, so no request resolves a profile at all. Both become
+reachable the moment the picker ships, which is why they should close first.
+
+### What the rest of the sweep found, worth remembering
+
+The `TODO(profiles)` marker count was a **bad measure of completeness**. A
+marker was only left where a service call already took an `owner` and the
+route had nothing to give it, so routers whose service never took one carried
+no marker. "0 markers" read as done while `/api/v1/jobs` still answered with
+100 jobs and no header.
+
+Seven unscoped **writes** were found, none of them marked, each reachable by
+guessing an id: `cancel_run`, `cancel_job`, `retry_job`,
+`PUT /uploads/{id}/chunks/{i}` (writes bytes into another profile's
+in-flight file, surfacing much later as a digest mismatch), `abort_upload`,
+and both `bulk_update_metadata` / `bulk_update_tags`.
+
+And a warning for anyone adding isolation tests here: **a test asserting only
+"profile B sees nothing" also passes against a route hardcoded to `"local"`,**
+because A's rows are not under `"local"` either. Ten such tests were written
+and shipped green across three passes; every one was caught only by mutating
+the route and noticing the test survived. Assert both directions -- A sees its
+own rows, and B does not.
+
+Touches: `backend/app/api/v1/events.py`, `backend/app/api/v1/schedules.py`,
+`backend/app/queue/queue.py` (`publish_event` call sites).
+
+## Sharing between profiles
+
+Depends on profiles. Share a file with another profile without copying the
+bytes — which the storage layer already supports: a second `DataObject` with a
+different `owner` pointing at the same digest, with the existing refcount
+governing lifetime. The open work is policy and UI, not storage: how a share is
+offered and revoked, whether the recipient sees it in their own explorer or a
+separate shared area, and what happens to a share when the owner deletes their
+copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
+refcount reaching zero and the bytes being unlinked).
+
+## Non-local / remote NCBI data — SPECCED
+
+Design: `docs/superpowers/specs/2026-07-31-remote-data-design.md` (2026-07-31).
+
+Keep an NCBI download remote rather than ingesting it: store a pointer, fetch
+just-in-time when used. The file explorer badges files `Local`, `NCBI`, or both,
+and an Actions entry drops the bytes of anything re-fetchable while keeping its
+metadata, QC reports and provenance.
+
+What the design settled:
+
+- **The fetch is a real job**, gated by `depends_on` and reusing the
+  `build_index` → `align_reads` pattern — so a multi-gigabyte download is
+  visible in the queue with its own progress instead of making a pipeline job
+  look hung, and a failed fetch names itself as the reason.
+- **`locality`, not a new `ObjectStatus`.** This was the trap. `ObjectStatus`
+  `.READY` is guarded in ~14 places, and two of them — the reference picker
+  (`api/v1/pipelines.py:529`) and the Actions rules
+  (`suggestion_service.py:654`) — *filter collections* on it. A remote file
+  carrying a new status would silently disappear from both. So `status` keeps
+  meaning "is this file understood" and a new `locality` field says "are its
+  bytes here", leaving every existing guard working unchanged.
+- **No blob row until first fetch**, since `Blob.id` *is* the SHA-256 and the
+  digest of an un-downloaded file is unknown.
+
+Two things came out free: `_resolve_readable`
+(`services/pipeline_service.py:129`) is a single chokepoint that already
+branches on storage mode, so no handler or runner is touched; and
+`qc_reports/`, `bam_stats/` and `vcf_stats/` are keyed by object id outside
+`objects/`, so dropping a blob cannot disturb them.
+
+## Helper install program
+
+A native executable that removes `docker compose` from the user's vocabulary.
+On launch it checks whether Docker is installed and running, then whether
+BioFlow is already up. If not installed, it walks through a first-run setup:
+where storage lives, where the program is installed (a good default), which port
+to serve on — then writes a `docker-compose.yml` in the install directory and
+offers a Run button. Thereafter it is a launcher and a status check, with Run and
+Shutdown buttons. Upgrading (bumping container image tags) is explicitly a
+later generation.
+
+**The installer does not create the initial profile.** The original note had it
+collecting one during setup, but at install time the stack is not running and
+there is no API to create a profile against. The installer would have to know
+the `Profile` schema, hash a password, and write a seed file the backend parses
+on boot — duplicating logic that already exists behind the API, and adding a
+second way to create a profile that could drift from the first.
+
+Instead the installer's job ends at "the stack is up and a browser is pointing
+at it", and profile creation belongs to the web UI's first-run screen — which
+the profiles design already requires for the empty-database case, and which is
+also where a *second* profile gets added later. One code path, in the place that
+already owns it.
+
+So the installer collects only what the compose file needs: storage location,
+install directory, and port. That leaves it with no dependency on the profiles
+feature at all, and the two can be built in either order.
+
+Also note this is a different *kind* of artifact from everything else here: a
+native desktop app, outside this repo's Python/React/Docker toolchain, needing
+its own repo and build/signing story.
+
+## Software help page: filter by column — DONE
+
+Built 2026-07-31 in `43cf771`. Clicking a column head narrows the whole page —
+grid *and* entries — to that pipeline; clicking again or "Show all" restores it.
+
+The clickable tool names asked for alongside this already worked: matrix rows
+have linked to `#tool-<name>` against ids on the entry headings since the matrix
+was written, which `ToolMatrix`'s docstring describes as the point of it.
+
+Two decisions worth keeping: membership is `pipelines.includes`, not
+`pipelines[0] === type`, so fastp, samtools and bcftools each appear under both
+their roles — a QC filter that hid samtools would be lying about the toolchain.
+And availability is deliberately absent from the predicate, so an uninstalled
+tool is still listed for the job it would do.
+
+---
+
+# Deferred findings
 
 See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never

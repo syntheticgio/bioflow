@@ -21,6 +21,7 @@ from app.config import settings
 from app.errors import register_exception_handlers
 from app.pipelines.variant_db import build_variant_db
 from app.services import structure_lookup
+from tests.api.bare_app import override_owner, stub_get_object
 
 OBJECT_ID = "507f1f77bcf86cd799439011"
 MISSING_ID = "507f191e810c19729de860ea"
@@ -51,6 +52,7 @@ def client(tmp_path, monkeypatch):
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router)
+    override_owner(app)
     return TestClient(app)
 
 
@@ -89,13 +91,14 @@ def taxid(monkeypatch):
 
 @pytest.fixture
 def vcf_object(monkeypatch):
-    """A VCF object exists for OBJECT_ID."""
-    async def _get(object_id):
-        return _get.value
+    """A VCF object exists for OBJECT_ID, and only for it.
 
-    _get.value = object()
-    monkeypatch.setattr(pipelines_api.DataObject, "get", staticmethod(_get))
-    return _get
+    MISSING_ID deliberately stays unknown so the stub raises `NotFoundError`
+    for it, exactly as the real owner-scoped lookup does. That is what keeps
+    TestGuards' 404 cases honest -- a stub that resolved every id would turn
+    them into assertions about the SQLite path instead.
+    """
+    return stub_get_object(monkeypatch, pipelines_api, known={OBJECT_ID})
 
 
 def get_structure(client, gene="PKC1", object_id=OBJECT_ID):
