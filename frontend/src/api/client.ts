@@ -39,6 +39,8 @@ import type {
   SearchResults,
   SystemLoad,
   SystemStats,
+  UniProtAccepted,
+  UniProtResolveResponse,
   UploadCreated,
   UploadSessionInfo,
   VariantDefaults,
@@ -425,6 +427,33 @@ export const api = {
     components: string[];
   }) =>
     request<AssemblyAccepted>("/ncbi/download-assembly", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  // --- UniProt ---
+
+  /**
+   * Resolve whatever was typed into the UniProt box without knowing in
+   * advance what it names. `kind` says which branch is populated: a
+   * `proteome` (with `candidates` when the organism has no reference one and
+   * a choice must be made), `proteins`, or `empty`.
+   */
+  uniprotResolve: (body: { query: string; project_id?: string | null }) =>
+    request<UniProtResolveResponse>("/uniprot/resolve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  uniprotDownload: (body: {
+    project_id: string;
+    proteome_id?: string | null;
+    accessions?: string[];
+    reviewed_only: boolean;
+    organism?: string | null;
+    protein_count?: number | null;
+  }) =>
+    request<UniProtAccepted>("/uniprot/download", {
       method: "POST",
       body: JSON.stringify(body),
     }),

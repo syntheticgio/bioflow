@@ -1133,3 +1133,53 @@ export interface VariantQuery {
   consequence?: string;
   skipCount?: boolean;
 }
+
+// --- UniProt ---
+
+/** One proteome, as the download dialog's card and picker render it. */
+export type UniProtProteome = {
+  id: string;
+  name: string;
+  taxon_id: number | null;
+  strain: string | null;
+  protein_count: number | null;
+  is_reference: boolean;
+  /** Completeness, which is what makes choosing between strains possible. */
+  busco_score: number | null;
+  /** The NCBI assembly this proteome's genome came from, when UniProt names
+   *  one. Offered as a link to the other dialog rather than a joint download. */
+  genome_assembly: string | null;
+  /** Both counts, so the reviewed/unreviewed difference is visible before the
+   *  download rather than discovered after it -- roughly sevenfold for human,
+   *  and identical for a fully curated organism like yeast. Null when the
+   *  count request failed; the card then omits the choice rather than
+   *  guessing. */
+  reviewed_count: number | null;
+  total_count: number | null;
+};
+
+export type UniProtProtein = {
+  accession: string;
+  entry_id: string | null;
+  name: string | null;
+  organism: string | null;
+  length: number | null;
+  reviewed: boolean;
+};
+
+export type UniProtResolveResponse = {
+  kind: "proteome" | "proteins" | "empty";
+  proteome: UniProtProteome | null;
+  /** Other proteomes for the same organism. Populated on both branches: behind
+   *  a disclosure when a reference proteome was found, and as the whole answer
+   *  when it was not (taxon 4932 has none, but 360 sit behind it). */
+  candidates: UniProtProteome[];
+  needs_picker: boolean;
+  proteins: UniProtProtein[];
+  message: string | null;
+};
+
+export type UniProtAccepted = {
+  run_id: string;
+  job_ids: string[];
+};
