@@ -18,6 +18,7 @@ turn an isolation assertion into an ordering one.
 import pytest
 from beanie import PydanticObjectId
 
+from app.errors import NotFoundError
 from app.models import (
     Job,
     JobClass,
@@ -99,15 +100,20 @@ class TestRunServiceOwnerScoping:
         assert theirs.id not in statuses
         assert statuses[mine.id] is RunStatus.RUNNING
 
-    async def test_status_for_returns_nothing_for_another_owners_run(self):
+    async def test_status_for_refuses_another_owners_run(self):
+        """It must not answer at all, not even with an empty answer.
+
+        This used to return (SUCCEEDED, []), which was wrong twice over: it
+        reported another profile's run as *finished*, and it made "not yours"
+        indistinguishable from a real run that has no member jobs yet.
+        Raising is what get_project and get_object already do.
+        """
         run = await _make_run("run-one-a", "one")
         job = await _make_job()
         await run_service.link_job(run.id, job.id, RunJobRole.ALIGN)
 
-        status, detail = await run_service.status_for(run.id, owner="run-one-b")
-
-        assert detail == []
-        assert status is RunStatus.SUCCEEDED
+        with pytest.raises(NotFoundError):
+            await run_service.status_for(run.id, owner="run-one-b")
 
     async def test_discard_run_refuses_and_destroys_nothing(self):
         """The dangerous one.

@@ -6,6 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.api.deps import OwnerDep
 from app.errors import NotFoundError
 from app.logging import get_logger
 from app.models import PipelineRun, RunJob
@@ -63,36 +64,25 @@ class RunDetail(RunOut):
 
 @router.get("", response_model=list[RunOut])
 async def list_runs(
+    owner: OwnerDep,
     project_id: str | None = None,
     limit: int = Query(50, le=200),
 ) -> list[RunOut]:
     """Runs, newest first, each with its derived status."""
-    query: dict = {}
+    query: dict = {"owner": owner}
     if project_id:
         query["project_id"] = PydanticObjectId(project_id)
 
     runs = await PipelineRun.find(query).sort("-created_at").limit(limit).to_list()
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner (Task 10), at which point the listing query above gains
-    # the same filter and this collapses to a single call.
-    #
-    # Until then the listing itself is unscoped, so passing a fixed "local"
-    # here would report no status at all for any run belonging to another
-    # profile that the listing nonetheless returned. Grouping by the runs' own
-    # owner keeps the route's behaviour identical to before the partition, and
-    # keeps the batching this function exists for: one query per distinct
-    # owner, which is one query until profiles actually exist.
-    statuses: dict = {}
-    by_owner: dict[str, list[PydanticObjectId]] = {}
-    for r in runs:
-        by_owner.setdefault(r.owner, []).append(r.id)
-    for owner, ids in by_owner.items():
-        statuses.update(await run_service.status_for_many(ids, owner=owner))
+    # One status query for the whole page: the listing is scoped to a single
+    # owner, so every run here shares one, and the batching this function
+    # exists for needs no grouping.
+    statuses = await run_service.status_for_many([r.id for r in runs], owner=owner)
     return [RunOut.of(r, statuses.get(r.id, "succeeded")) for r in runs]
 
 
 @router.get("/for-job/{job_id}", response_model=RunOut | None)
-async def run_for_job(job_id: PydanticObjectId) -> RunOut | None:
+async def run_for_job(job_id: PydanticObjectId, owner: OwnerDep) -> RunOut | None:
     """The run a job belongs to, if any. Lets a job view link back to context.
 
     Declared before `/{run_id}`: a path parameter would otherwise swallow
@@ -102,29 +92,33 @@ async def run_for_job(job_id: PydanticObjectId) -> RunOut | None:
     if link is None:
         return None
     run = await PipelineRun.get(link.run_id)
-    if run is None:
+    # Another profile's run is reported the same way as no run at all. This
+    # route already answers "no run" with None, so the partition needs no
+    # second shape -- and collapsing the two means the response cannot be read
+    # as evidence that a run exists somewhere the caller cannot see.
+    if run is None or run.owner != owner:
         return None
-    # TODO(profiles): use the request's owner once Task 10 wires
-    # get_current_owner into this router.
-    status, _ = await run_service.status_for(run.id, owner=run.owner)
+    status, _ = await run_service.status_for(run.id, owner=owner)
     return RunOut.of(run, status.value)
 
 
 @router.get("/{run_id}", response_model=RunDetail)
-async def get_run(run_id: PydanticObjectId) -> RunDetail:
+async def get_run(run_id: PydanticObjectId, owner: OwnerDep) -> RunDetail:
     """One run, with the state of every job that served it."""
     run = await PipelineRun.get(run_id)
-    if run is None:
+    # Wrong owner is answered as "not found", matching get_project and
+    # get_object: another profile's run has to be indistinguishable from one
+    # that never existed, or the 404-vs-403 difference itself tells the caller
+    # that some other profile holds this id.
+    if run is None or run.owner != owner:
         raise NotFoundError(f"Run not found: {run_id}")
 
-    # TODO(profiles): use the request's owner once Task 10 wires
-    # get_current_owner into this router; `run` is unscoped above.
-    status, jobs = await run_service.status_for(run_id, owner=run.owner)
+    status, jobs = await run_service.status_for(run_id, owner=owner)
     return RunDetail(**RunOut.of(run, status.value).model_dump(), jobs=jobs)
 
 
 @router.post("/{run_id}/cancel")
-async def cancel_run(run_id: PydanticObjectId) -> dict:
+async def cancel_run(run_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Cancel every job still in flight for this run.
 
     Reports per-job outcomes rather than a single verdict: a run part-way
@@ -134,7 +128,10 @@ async def cancel_run(run_id: PydanticObjectId) -> dict:
     from app.queue import queue
 
     run = await PipelineRun.get(run_id)
-    if run is None:
+    # Scoped like get_run, and more urgently: this route cancels work rather
+    # than reading it, so an unscoped fetch would let one profile kill another
+    # profile's jobs by guessing an id.
+    if run is None or run.owner != owner:
         raise NotFoundError(f"Run not found: {run_id}")
 
     outcomes: dict[str, str] = {}

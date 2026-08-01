@@ -35,6 +35,10 @@ pytestmark = [
 
 PROJECT_ID = PydanticObjectId("507f191e810c19729de860ea")
 
+# The fixture's objects carry TimestampedDocument's "local" default, so this is
+# the owner the route must resolve for them to be visible at all.
+OWNER = "local"
+
 # Content-addressed: the managed file has to sit at the path the digest names,
 # because that derivation is what the route relies on.
 MANAGED_BYTES = b"@read1\nACGT\n+\nIIII\n"
@@ -101,20 +105,20 @@ async def objects(tmp_path_factory, monkeypatch):
 
 class TestServingContent:
     async def test_serves_a_managed_blob(self, objects):
-        r = await download_object(objects["managed"])
+        r = await download_object(objects["managed"], OWNER)
         assert r.path.read_bytes() == MANAGED_BYTES
 
     async def test_serves_an_external_blob_from_where_it_lives(self, objects):
         """External blobs are registered in place and never copied into the
         store, so the route must follow external_path rather than derive a
         path from the digest."""
-        r = await download_object(objects["external"])
+        r = await download_object(objects["external"], OWNER)
         assert r.path.read_bytes() == EXTERNAL_BYTES
         assert str(r.path) == str(objects["external_file"])
 
     async def test_downloads_under_the_users_filename(self, objects):
         """Not the digest: getting your own file back is the entire point."""
-        r = await download_object(objects["managed"])
+        r = await download_object(objects["managed"], OWNER)
         assert r.filename == "reads_R1.fastq"
         assert "attachment" in r.headers["content-disposition"]
         assert "reads_R1.fastq" in r.headers["content-disposition"]
@@ -123,7 +127,7 @@ class TestServingContent:
         """These are payloads for the user's own tools. Letting a browser pick
         a renderable type for bytes that came from outside is how a download
         turns into a page."""
-        r = await download_object(objects["managed"])
+        r = await download_object(objects["managed"], OWNER)
         assert r.media_type == "application/octet-stream"
         assert r.headers["x-content-type-options"] == "nosniff"
 
@@ -132,15 +136,26 @@ class TestUnavailableContent:
     async def test_an_object_with_no_blob_yet_is_a_404(self, objects):
         """Still uploading, or hashing never finished."""
         with pytest.raises(NotFoundError):
-            await download_object(objects["pending"])
+            await download_object(objects["pending"], OWNER)
 
     async def test_a_vanished_external_file_is_a_404(self, objects):
         """An unmounted drive is the ordinary case. It has to fail as a clean
         404 rather than raising once the response has already begun."""
         objects["external_file"].unlink()
         with pytest.raises(NotFoundError):
-            await download_object(objects["external"])
+            await download_object(objects["external"], OWNER)
 
     async def test_an_unknown_object_is_a_404(self, objects):
         with pytest.raises(NotFoundError):
-            await download_object(PydanticObjectId("507f1f77bcf86cd799439011"))
+            await download_object(PydanticObjectId("507f1f77bcf86cd799439011"), OWNER)
+
+    async def test_another_profile_cannot_download_the_bytes(self, objects):
+        """The one that fails if the route resolves an owner and ignores it.
+
+        Everything above passes whether or not the filter reaches the query --
+        the objects belong to the owner being asked for. Only a request under a
+        *different* owner distinguishes a scoped route from a hardcoded one,
+        and it must not hand back the file.
+        """
+        with pytest.raises(NotFoundError):
+            await download_object(objects["managed"], "someone-else")

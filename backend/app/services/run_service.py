@@ -10,6 +10,7 @@ been pruned by the TTL, a run that produced its output but failed to parse it.
 from beanie import PydanticObjectId
 from pymongo.errors import DuplicateKeyError
 
+from app.errors import NotFoundError
 from app.logging import get_logger
 from app.models import (
     OPTIONAL_ROLES,
@@ -170,23 +171,22 @@ async def status_for(run_id: PydanticObjectId, *, owner: str) -> tuple[RunStatus
     Returns both because every caller that wants one wants the other, and
     fetching the jobs is the expensive half.
 
-    The run itself is the boundary: another owner's run resolves to no members
-    and so reports the empty-run answer.
+    A missing run and another owner's run both raise NotFoundError, matching
+    `get_project` and `get_object` so the whole codebase denies the same way.
+    This used to return `(SUCCEEDED, [])`, which was the wrong answer twice
+    over: it reported someone else's run as *finished*, and it made "not
+    yours" indistinguishable from a real run that happens to have no members
+    yet. `status_for_many` avoids the same conflation by omitting a run from
+    its result rather than answering for it -- a raise is this function's
+    equivalent, since it has only one run to speak about.
 
-    Note this diverges from `get_project` and `get_object`, which raise
-    NotFoundError on a wrong-owner lookup. Returning SUCCEEDED is a stronger
-    claim than "nothing to show" -- it is an answer about a run the caller may
-    not see, and it is the same conflation `status_for_many` avoids by omitting
-    the run from its result rather than answering for it. Unreachable today
-    (both callers in api/v1/runs.py pass the run's own owner, so the guard
-    never fires), which is why it is left as-is rather than changed blind.
-    TODO(profiles): Task 10 wires these routes and should decide then whether
-    this becomes a raise, matching the other services, or an explicit
-    "not visible" state distinct from an empty run.
+    Callers should scope the run before calling, and the ones in
+    api/v1/runs.py do; the check here is the backstop for the one that
+    forgets, which is exactly when returning a confident answer would hurt.
     """
     run = await PipelineRun.get(run_id)
     if run is None or run.owner != owner:
-        return RunStatus.SUCCEEDED, []
+        raise NotFoundError(f"Run not found: {run_id}")
 
     links = await members(run_id)
     if not links:

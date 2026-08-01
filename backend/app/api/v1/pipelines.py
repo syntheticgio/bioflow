@@ -7,6 +7,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.api.v1.jobs import JobOut
 from app.config import settings
 from app.errors import ConflictError, NotFoundError
@@ -570,7 +571,7 @@ async def align_envelope(object_id: PydanticObjectId, reference_id: PydanticObje
 
 
 @router.get("/references/{project_id}")
-async def list_references(project_id: PydanticObjectId) -> dict:
+async def list_references(project_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Candidate references in a project, each with its index status.
 
     Index status rides along so the dialog can say "this will build an index
@@ -578,9 +579,7 @@ async def list_references(project_id: PydanticObjectId) -> dict:
     """
     from app.services import object_service
 
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
-    objects = await object_service.list_objects(project_id, owner="local", limit=500)
+    objects = await object_service.list_objects(project_id, owner=owner, limit=500)
     references = [
         o
         for o in objects

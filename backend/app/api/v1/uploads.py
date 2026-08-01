@@ -6,6 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.api.v1.schemas import ObjectOut
 from app.errors import ValidationError
 from app.models import UploadSession
@@ -85,12 +86,10 @@ class CompleteAccepted(BaseModel):
 
 
 @router.post("", response_model=UploadCreated, status_code=status.HTTP_201_CREATED)
-async def create_upload(body: UploadCreate) -> UploadCreated:
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
+async def create_upload(body: UploadCreate, owner: OwnerDep) -> UploadCreated:
     session, obj = await upload_service.create_session(
         project_id=PydanticObjectId(body.project_id),
-        owner="local",
+        owner=owner,
         filename=body.filename,
         total_size=body.total_size,
         client_sha256=body.client_sha256,

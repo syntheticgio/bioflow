@@ -6,6 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Query, status
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.errors import NotFoundError, ValidationError
 from app.models import Job, JobClass, JobState
 from app.queue import queue
@@ -135,7 +136,7 @@ async def list_jobs(
 
 
 @router.post("", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def create_job(body: JobCreate) -> JobOut:
+async def create_job(body: JobCreate, owner: OwnerDep) -> JobOut:
     """Enqueue a job directly. Primarily for development and smoke testing."""
     spec = get_handler(body.type)
     if spec is None:
@@ -146,10 +147,7 @@ async def create_job(body: JobCreate) -> JobOut:
 
     job = await queue.enqueue(
         body.type,
-        # TODO(profiles): route wiring is Task 10 -- once this endpoint takes
-        # the OwnerDep, pass the caller's owner instead of the literal. It is a
-        # dev/smoke-test endpoint, so nothing user-facing depends on the gap.
-        owner="local",
+        owner=owner,
         payload=body.payload,
         job_class=body.job_class or spec.default_class,
         resources=spec.default_resources,

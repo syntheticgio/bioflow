@@ -53,54 +53,51 @@ async def create_project(body: ProjectCreate, owner: OwnerDep) -> ProjectOut:
 
 
 @router.get("/{project_id}", response_model=ProjectDetail)
-async def get_project(project_id: PydanticObjectId) -> ProjectDetail:
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
-    project = await project_service.get_project(project_id, owner="local")
-    trail = await project_service.breadcrumbs(project, owner="local")
+async def get_project(project_id: PydanticObjectId, owner: OwnerDep) -> ProjectDetail:
+    project = await project_service.get_project(project_id, owner=owner)
+    trail = await project_service.breadcrumbs(project, owner=owner)
     return ProjectDetail(**ProjectOut.of(project).model_dump(), breadcrumbs=trail)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
-async def update_project(project_id: PydanticObjectId, body: ProjectUpdate) -> ProjectOut:
+async def update_project(
+    project_id: PydanticObjectId, body: ProjectUpdate, owner: OwnerDep
+) -> ProjectOut:
     project = await project_service.update_project(
         project_id,
         body.model_dump(exclude_unset=True),
-        # TODO(profiles): thread owner from the route once its API layer resolves
-        # get_current_owner
-        owner="local",
+        owner=owner,
     )
     return ProjectOut.of(project)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_project(project_id: PydanticObjectId, cascade: bool = False) -> None:
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
-    await project_service.delete_project(project_id, owner="local", cascade=cascade)
+async def delete_project(
+    project_id: PydanticObjectId, owner: OwnerDep, cascade: bool = False
+) -> None:
+    await project_service.delete_project(project_id, owner=owner, cascade=cascade)
 
 
 @router.get("/{project_id}/deletion-preview", response_model=DeletionPreviewOut)
-async def project_deletion_preview(project_id: PydanticObjectId) -> DeletionPreviewOut:
+async def project_deletion_preview(
+    project_id: PydanticObjectId, owner: OwnerDep
+) -> DeletionPreviewOut:
     """Counts and blockers for a delete, so the confirmation can be specific."""
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
     return DeletionPreviewOut(
-        **await project_service.deletion_preview(project_id, owner="local")
+        **await project_service.deletion_preview(project_id, owner=owner)
     )
 
 
 @router.get("/{project_id}/objects", response_model=list[ObjectOut])
 async def list_project_objects(
     project_id: PydanticObjectId,
+    owner: OwnerDep,
     obj_status: ObjectStatus | None = Query(None, alias="status"),
     limit: int = Query(200, le=1000),
 ) -> list[ObjectOut]:
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
-    await project_service.get_project(project_id, owner="local")  # 404 if it is gone
+    await project_service.get_project(project_id, owner=owner)  # 404 if it is gone
     objects = await object_service.list_objects(
-        project_id, owner="local", status=obj_status, limit=limit
+        project_id, owner=owner, status=obj_status, limit=limit
     )
     return [ObjectOut.of(o) for o in objects]
 
@@ -121,17 +118,15 @@ class RegisterAccepted(BaseModel):
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def register_object(
-    project_id: PydanticObjectId, body: RegisterInPlace
+    project_id: PydanticObjectId, body: RegisterInPlace, owner: OwnerDep
 ) -> RegisterAccepted:
     """Register a file already on disk, without copying it.
 
     Returns 202: the file is recorded immediately, but hashing a large file runs
     on the queue. The object reaches `ready` once that finishes.
     """
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
     obj, job_id = await object_service.register_in_place(
-        owner="local", project_id=project_id, path_str=body.path, name=body.name
+        owner=owner, project_id=project_id, path_str=body.path, name=body.name
     )
     return RegisterAccepted(object=ObjectOut.of(obj), job_id=job_id)
 
@@ -144,6 +139,7 @@ async def register_object(
 async def upload_object(
     project_id: PydanticObjectId,
     request: Request,
+    owner: OwnerDep,
 ) -> ObjectOut:
     """Simple streamed upload (Phase 0; capped, see MAX_SIMPLE_UPLOAD_BYTES).
 
@@ -160,10 +156,8 @@ async def upload_object(
 
     # Bridge the async request stream into the sync iterator that the hashing
     # thread consumes, with a small buffer for backpressure.
-    # TODO(profiles): thread owner from the route once its API layer resolves
-    # get_current_owner
     obj = await object_service.ingest_stream(
-        owner="local",
+        owner=owner,
         project_id=project_id,
         filename=filename,
         stream=_SyncStreamBridge(request.stream()),
