@@ -501,6 +501,7 @@ class TestBibliographicFields:
         missing = {k: v for k, v in missing.items() if v}
         assert not missing, f"undocumented tools: {missing}"
 
+
     def test_documented_urls_are_urls(self):
         """A citation string in the homepage field would render as a dead
         link, which is worse than a blank."""

@@ -12,6 +12,12 @@ interface Props {
   onClose: () => void;
 }
 
+// Exhaustive by type, deliberately: this is the one mirror of PipelineType
+// that TypeScript can police, and it earned its keep on 2026-08-01 by being
+// the only thing that noticed `expression` had reached the backend without
+// reaching the frontend at all. Leave it as Record<PipelineType, string>
+// rather than a partial map with a fallback -- the compile error is the
+// feature.
 const PIPELINE_LABEL: Record<PipelineType, string> = {
   trim: "a trimmer",
   align: "an aligner",
@@ -19,6 +25,8 @@ const PIPELINE_LABEL: Record<PipelineType, string> = {
   utility: "a tool",
   download: "a download tool",
   variant: "a variant caller",
+  expression: "an expression tool",
+  assemble: "an assembler",
 };
 
 /**

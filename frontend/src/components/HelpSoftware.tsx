@@ -19,30 +19,74 @@ import type { PipelineTool, PipelineType } from "../api/types";
  * than what was true when it was written.
  */
 
-/** Reading order, not the enum's order. Roughly the order a user meets these
- *  tools in a run -- retrieval is late because it precedes analysis in time
- *  but is the least interesting group to read about. */
-const GROUPS: { type: PipelineType; title: string }[] = [
-  { type: "qc", title: "Quality control" },
-  { type: "trim", title: "Trimming" },
-  // Before alignment: a de novo assembly is what you align *to* when there is
-  // no published reference, so this is the earlier step for that workflow.
-  { type: "assemble", title: "Assembly" },
-  { type: "align", title: "Alignment" },
-  // Added while merging the assembly work: `PipelineType.EXPRESSION` reached
-  // the backend with featureCounts and pydeseq2 documented against it, but not
-  // this list, so both tools were absent from /help/software with nothing
-  // failing. That is the same silent omission `suggestion_service`'s
-  // hand-maintained mapping is warned about in CLAUDE.md, in a second place.
-  { type: "expression", title: "Expression" },
-  { type: "variant", title: "Variant calling" },
-  { type: "download", title: "Data retrieval" },
-  { type: "utility", title: "Utilities" },
+/** Display names and reading order. Reading order is roughly the order a user
+ *  meets these tools in a run -- assembly before alignment because a de novo
+ *  assembly is what you align *to* when there is no published reference, and
+ *  retrieval late because it precedes analysis in time but is the least
+ *  interesting group to read about.
+ *
+ *  This is presentation only. It is deliberately *not* the list of sections:
+ *  see `groupsFrom` below for why. */
+const TITLES: Record<string, string> = {
+  qc: "Quality control",
+  trim: "Trimming",
+  assemble: "Assembly",
+  align: "Alignment",
+  expression: "Expression",
+  variant: "Variant calling",
+  download: "Data retrieval",
+  utility: "Utilities",
+};
+
+const ORDER: PipelineType[] = [
+  "qc", "trim", "assemble", "align", "expression", "variant", "download",
+  "utility",
 ];
 
-const GROUP_TITLES: Record<PipelineType, string> = Object.fromEntries(
-  GROUPS.map((g) => [g.type, g.title]),
-) as Record<PipelineType, string>;
+/**
+ * The sections to render, derived from the tools themselves.
+ *
+ * This used to be a hardcoded list, and it silently lost tools twice in one
+ * day: the expression vertical shipped featureCounts and pydeseq2 with no
+ * section to render them in, and the assembly work nearly did the same for
+ * Flye. Both times TOOL_META was complete and every backend test passed --
+ * the page just quietly omitted them, because a list of sections maintained
+ * by hand beside a list of tools maintained by hand is a mirror with nothing
+ * holding it.
+ *
+ * Deriving removes the mirror rather than testing it. A new PipelineType now
+ * renders the moment a tool declares it; an unknown type gets a title-cased
+ * fallback heading, which is mildly ugly and infinitely better than the tool
+ * being invisible. Types with no tools are dropped, so an enum member nothing
+ * uses does not leave an empty heading.
+ *
+ * A cross-language test was the other option and was tried first. It cannot
+ * work here: run-worktree-tests.sh mounts only backend/app and backend/tests,
+ * so the .tsx is not visible to pytest at all.
+ */
+export function groupsFrom(
+  tools: PipelineTool[],
+): { type: PipelineType; title: string }[] {
+  const present = new Set<PipelineType>();
+  for (const tool of tools) for (const p of tool.pipelines ?? []) present.add(p);
+
+  const ordered = ORDER.filter((t) => present.has(t));
+  // Anything the backend has that ORDER does not know about, appended rather
+  // than dropped. This is the branch that makes the page self-healing.
+  // Cast, not a lie: these came off the wire, so the backend has a
+  // PipelineType this build of the frontend predates. Rendering it under a
+  // title-cased heading beats dropping the tools that declare it.
+  const unknown = ([...present] as PipelineType[])
+    .filter((t) => !ORDER.includes(t))
+    .sort();
+
+  return [...ordered, ...unknown].map((type) => ({
+    type,
+    title: TITLES[type] ?? type.charAt(0).toUpperCase() + type.slice(1),
+  }));
+}
+
+const GROUP_TITLES: Record<string, string> = TITLES;
 
 /**
  * Every tool against every pipeline, as a grid.
@@ -79,12 +123,18 @@ function ToolMatrix({
   tools,
   filter,
   onFilter,
+  allTools,
 }: {
   tools: PipelineTool[];
   filter: PipelineType | null;
   onFilter: (type: PipelineType | null) => void;
+  // The unfiltered set, for the columns. `tools` is already narrowed by the
+  // active filter, and deriving columns from it would delete every other
+  // column the moment one was clicked -- taking the way back out with them.
+  allTools: PipelineTool[];
 }) {
   const [expanded, setExpanded] = useState(true);
+  const GROUPS = groupsFrom(allTools);
 
   if (tools.length === 0) return null;
 
@@ -371,7 +421,9 @@ export function HelpSoftware() {
   // with no entries at all. That reads samtools as a QC tool whose flagstat
   // is incidental, when it is a utility whose flagstat happens to serve QC.
   // The remaining pipelines become the cross-reference line.
-  const grouped = GROUPS.map(({ type, title }) => ({
+  // Sections from the unfiltered set, so the same headings exist whether or
+  // not a filter is on; `entries` below is what the filter narrows.
+  const grouped = groupsFrom(allTools).map(({ type, title }) => ({
     type,
     title,
     entries: tools.filter((t) => t.pipelines[0] === type),
@@ -403,7 +455,12 @@ export function HelpSoftware() {
         </p>
       )}
 
-      <ToolMatrix tools={matrixRows} filter={filter} onFilter={setFilter} />
+      <ToolMatrix
+        tools={matrixRows}
+        allTools={allTools}
+        filter={filter}
+        onFilter={setFilter}
+      />
 
       {/* Says why the page is short, and gives the way back. Without it a
           filtered page is indistinguishable from a page that only ever had two
