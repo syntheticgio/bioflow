@@ -474,14 +474,30 @@ database records and `owns_sidecar` were left untouched -- rather than the
   object model has no annotation concept yet, which is the larger part of that
   work. The yeast project already holds `GCF_..._genomic.gtf` files, so the
   input exists whenever someone wants it.
-- **No `JobResources` declaration. This entry asked for one and it was not
-  done.** `build_index` and `align_reads` still declare a flat
-  `mem_mb=8192` (`align_handlers.py:156` and `:290`). The registry's
-  `MemoryModel` (10 bytes/ref base, ~30 GB for human) feeds only the *dialog's*
-  estimate and warning band; the queue's admission control still believes a
-  STAR human-genome index needs 8 GB. Nothing surfaces this on a small genome,
-  which is exactly why it is written down here rather than left to be
-  rediscovered. This is the highest-value remaining piece.
+- **`JobResources` — asked for by this entry, missed by the STAR change, then
+  done the same day.** Both launch sites now size the reservation from the
+  registry's `MemoryModel` and the reference, via
+  `pipeline_service.declared_align_mem_mb`. Measured on a 3.1 Gb human
+  genome, against the flat 8.0 GB every one of these used to declare:
+
+      aligner     human align  human build
+      bwa-mem2          11.3G        13.0G
+      minimap2          10.8G         9.0G
+      bowtie2            7.9G         9.7G
+      hisat2             8.8G        16.0G
+      star              34.7G        36.4G
+
+  So a STAR index build was admitted believing it needed a quarter of what it
+  does. Small genomes were over-declared in the same breath: a yeast STAR
+  alignment reserves 6,038 MB, verified on a real launch. Two details that
+  are easy to get wrong -- the index build passes `sort_memory_mb=0` because
+  it runs no samtools sort, and the alignment recomputes with
+  `building_index=False` rather than reusing the launch estimate, which
+  answers the different question "does the whole operation fit" and would
+  otherwise charge every alignment against an unindexed reference for
+  HISAT2's 4x build multiplier. The handler-level `@handler(resources=...)`
+  values stay at 8192 and are now only a fallback for the development
+  enqueue route in `api/v1/jobs.py`.
 - **No suggestion rule, deliberately.** This entry (and CLAUDE.md) require
   `suggestion_service.py` to gain a rule that can pick a new tool. STAR
   intentionally has none: HISAT2's ~4 GB index beats STAR's ~30 GB resident on
