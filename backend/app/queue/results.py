@@ -584,7 +584,7 @@ async def _apply_sra_download(result: dict, *, owner: str) -> None:
 def _role_for_component(entry: dict) -> str | None:
     """The ObjectRole value a staged component becomes.
 
-    Re-derived from `assembly_components.COMPONENTS` rather than trusting the
+    Re-derived from `ncbi_assembly_components.COMPONENTS` rather than trusting the
     `role` the handler already attached to `entry`: the handler runs in a
     worker thread and returns a plain dict across a process boundary, and
     re-deriving from the one authoritative table costs nothing while removing
@@ -594,9 +594,9 @@ def _role_for_component(entry: dict) -> str | None:
     uncategorized in the explorer, while a wrongly-roled one is actively
     misleading -- a CDS FASTA offered as a reference genome.
     """
-    from app.metadata import assembly_components
+    from app.metadata import ncbi_assembly_components
 
-    spec = assembly_components.COMPONENTS.get(entry.get("component") or "")
+    spec = ncbi_assembly_components.COMPONENTS.get(entry.get("component") or "")
     return spec.role if spec else None
 
 
@@ -615,7 +615,7 @@ def _component_metadata(base: dict, accession: str, component: str) -> dict:
     keys shared with `SEQUENCE_SET_FIELDS` (`organism`, `source`,
     `assembly_accession` -- the last is added back unconditionally below
     anyway). `tax_id`, `assembly_date`, and `paired_accession` come from
-    `AssemblyMetadata.to_metadata()` in `app.metadata.assembly` just like
+    `AssemblyMetadata.to_metadata()` in `app.metadata.ncbi_assembly` just like
     `reference_build` and `assembly_level` do, and are exactly as
     genome-specific.
     """
@@ -638,9 +638,9 @@ def _component_metadata(base: dict, accession: str, component: str) -> dict:
     # From the component table rather than the filename: `_role_for_component`
     # already trusts that table for the far more consequential role decision,
     # and the two must not be able to disagree about the same file.
-    from app.metadata import assembly_components
+    from app.metadata import ncbi_assembly_components
 
-    spec = assembly_components.COMPONENTS.get(component)
+    spec = ncbi_assembly_components.COMPONENTS.get(component)
     if spec is not None and spec.sequence_type:
         out["sequence_type"] = spec.sequence_type
     return out

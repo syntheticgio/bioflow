@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.logging import get_logger
-from app.metadata import assembly, sra
+from app.metadata import ncbi_assembly, sra
 from app.models import FormatKind
 
 log = get_logger(__name__)
@@ -152,10 +152,10 @@ def resolve_assembly_accession(
     re-ingesting is the escape hatch when a name is missing or misparsed.
     """
     value = existing_metadata.get("assembly_accession")
-    if value and assembly.is_valid_accession(str(value)):
+    if value and ncbi_assembly.is_valid_accession(str(value)):
         return str(value).strip().upper(), "metadata"
 
-    from_name = assembly.parse_accession(filename)
+    from_name = ncbi_assembly.parse_accession(filename)
     if from_name:
         return from_name, "filename"
     return None, None
@@ -193,7 +193,7 @@ def enrich_from_assembly(
     result.source = source
 
     try:
-        meta = assembly.lookup(accession)
+        meta = ncbi_assembly.lookup(accession)
     except Exception as e:  # noqa: BLE001 - enrichment must never break ingest
         log.warning("assembly_lookup_failed", accession=accession, error=str(e))
         result.error = f"Assembly lookup failed: {e}"
@@ -209,7 +209,7 @@ def enrich_from_assembly(
     # than deriving "1136" from its accession. A second request, and a strictly
     # optional one: it must never cost the stats the lookup above already got.
     try:
-        labels = assembly.lookup_sequence_names(meta.accession or accession)
+        labels = ncbi_assembly.lookup_sequence_names(meta.accession or accession)
     except Exception as e:  # noqa: BLE001 - enrichment must never break ingest
         log.warning("sequence_names_failed", accession=accession, error=str(e))
         labels = None

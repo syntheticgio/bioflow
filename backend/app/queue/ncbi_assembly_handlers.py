@@ -18,7 +18,7 @@ from pathlib import Path
 from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
-from app.metadata import assembly_components
+from app.metadata import ncbi_assembly_components
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import tools
 from app.queue import download_failures
@@ -74,7 +74,7 @@ def download_assembly(ctx: JobContext) -> dict:
         raise PermanentError("download_assembly requires a 'project_id'")
 
     components = ctx.payload.get("components") or ["genome"]
-    include = assembly_components.include_argument(components)
+    include = ncbi_assembly_components.include_argument(components)
 
     work = _prepare_workdir(ctx, kind="assembly_download")
 
@@ -289,7 +289,7 @@ def _label_components(work: Path, accession: str) -> list[dict]:
         log.warning("assembly_no_data_dir", accession=accession)
         return []
 
-    by_type = {spec.file_type: spec for spec in assembly_components.COMPONENTS.values()}
+    by_type = {spec.file_type: spec for spec in ncbi_assembly_components.COMPONENTS.values()}
 
     staged: list[dict] = []
     catalog = data_dir / "dataset_catalog.json"
@@ -344,14 +344,14 @@ def _label_by_filename(data_dir: Path, accession: str) -> list[dict]:
             key = "genome"
         else:
             continue
-        staged.append(_entry(path, assembly_components.COMPONENTS[key]))
+        staged.append(_entry(path, ncbi_assembly_components.COMPONENTS[key]))
 
     if not staged:
         log.warning("assembly_nothing_labeled", accession=accession)
     return staged
 
 
-def _entry(path: Path, spec: assembly_components.ComponentSpec) -> dict:
+def _entry(path: Path, spec: ncbi_assembly_components.ComponentSpec) -> dict:
     return {
         "path": str(path.resolve()),
         "name": path.name,

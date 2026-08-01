@@ -9,7 +9,7 @@ from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
 
 from app.errors import JobCancelled, PermanentError
-from app.storage.assembly import assemble_and_hash
+from app.storage.chunk_assembly import assemble_and_hash
 
 
 def write_chunks(tmp_path, pieces: list[bytes]) -> list:
@@ -57,7 +57,7 @@ class TestAssembly:
         assert digest == hashlib.sha256(b"ABCD").hexdigest()
 
     def test_spans_multiple_read_buffers(self, tmp_path):
-        from app.storage.assembly import READ_BUFFER
+        from app.storage.chunk_assembly import READ_BUFFER
 
         pieces = [b"x" * (READ_BUFFER + 1234), b"y" * 4096]
         paths = write_chunks(tmp_path, pieces)
@@ -111,7 +111,7 @@ class TestFailureModes:
         assert not target.exists()
 
     def test_cancellation_is_honoured(self, tmp_path):
-        from app.storage.assembly import CANCEL_CHECK_BYTES
+        from app.storage.chunk_assembly import CANCEL_CHECK_BYTES
 
         paths = write_chunks(tmp_path, [b"z" * (CANCEL_CHECK_BYTES + 8192)])
         event = threading.Event()

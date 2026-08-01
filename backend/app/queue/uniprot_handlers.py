@@ -1,6 +1,6 @@
 """Downloading protein sequences from UniProt.
 
-Sibling to `assembly_handlers`, and deliberately much smaller. That module
+Sibling to `ncbi_assembly_handlers`, and deliberately much smaller. That module
 is built around shelling out to a binary and guarding a multi-gigabyte
 transfer; none of that applies here, so this has no subprocess mode, no
 lease extension, no disk pre-flight, no extraction factor, and no archive
@@ -87,7 +87,7 @@ def download_uniprot(ctx: JobContext) -> dict:
         # invalid accession -- and no number of retries changes that.
         # Measured: UniProt answers all three with 400 in about a second, so
         # retrying would spend up to three 300-second timeouts to rediscover
-        # what the first response already said. `assembly_handlers` draws the
+        # what the first response already said. `ncbi_assembly_handlers` draws the
         # same line via `download_failures.classify_failure`.
         detail = ""
         try:

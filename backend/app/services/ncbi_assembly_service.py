@@ -12,7 +12,7 @@ from beanie import PydanticObjectId
 
 from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
-from app.metadata import assembly, assembly_components
+from app.metadata import ncbi_assembly, ncbi_assembly_components
 from app.models import (
     DataObject,
     IoClass,
@@ -35,7 +35,7 @@ def validate_selection(accession: str, components: list[str]) -> list[str]:
     rather than intents, and failing a download over either would be a worse
     answer than quietly doing the sensible thing.
     """
-    if not assembly.is_valid_accession(accession or ""):
+    if not ncbi_assembly.is_valid_accession(accession or ""):
         raise ValidationError(
             f"{accession!r} is not an assembly accession. Expected a GenBank "
             "(GCA_000000000.0) or RefSeq (GCF_000000000.0) accession, "
@@ -44,7 +44,7 @@ def validate_selection(accession: str, components: list[str]) -> list[str]:
         )
 
     requested = {c.strip().lower() for c in components or []}
-    selected = [k for k in assembly_components.COMPONENT_ORDER if k in requested]
+    selected = [k for k in ncbi_assembly_components.COMPONENT_ORDER if k in requested]
     if "genome" not in selected:
         selected.insert(0, "genome")
     return selected
@@ -124,8 +124,8 @@ async def launch_download(
     # `lookup` is a blocking HTTP request and `component_availability` shells
     # out with up to a 60-second timeout -- so they run in a worker thread,
     # matching `sra_resolver.resolve_cached`.
-    meta = await asyncio.to_thread(assembly.lookup, accession)
-    availability = await asyncio.to_thread(assembly.component_availability, accession) or []
+    meta = await asyncio.to_thread(ncbi_assembly.lookup, accession)
+    availability = await asyncio.to_thread(ncbi_assembly.component_availability, accession) or []
     estimate = sum(
         c.size_bytes or 0
         for c in availability

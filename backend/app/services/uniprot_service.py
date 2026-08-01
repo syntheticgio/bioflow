@@ -1,12 +1,12 @@
 """Launching a UniProt download.
 
-The same shape as `assembly_service`: validate the request, build the
+The same shape as `ncbi_assembly_service`: validate the request, build the
 payload, and create the run that groups the resulting job. Kept out of the
 router so the launch rules are testable without HTTP.
 
 One job for both download shapes, because one UniProt endpoint serves both:
 a whole proteome and a hand-picked set differ only in the query string.
-Unlike `assembly_service` there is no `tools.require` here -- there is no
+Unlike `ncbi_assembly_service` there is no `tools.require` here -- there is no
 binary to find, only an HTTP GET.
 """
 
@@ -134,7 +134,7 @@ async def launch_download(
 ):
     """Queue the download and the run that groups it.
 
-    `owner` gates the project lookup, as in `assembly_service.launch_download`:
+    `owner` gates the project lookup, as in `ncbi_assembly_service.launch_download`:
     the FASTA lands in whichever project it was pointed at, and an unscoped
     lookup would let one profile deposit a proteome into another profile's
     library.

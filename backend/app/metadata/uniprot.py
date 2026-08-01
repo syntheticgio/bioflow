@@ -81,8 +81,8 @@ def is_valid_accession(value: str) -> bool:
 
     Public because `uniprot_service` validates a submitted request against the
     same pattern `classify` uses, and two copies of an accession regex is
-    exactly the kind of pair that drifts. Mirrors `assembly.is_valid_accession`,
-    which `assembly_service` calls for the same reason.
+    exactly the kind of pair that drifts. Mirrors `ncbi_assembly.is_valid_accession`,
+    which `ncbi_assembly_service` calls for the same reason.
     """
     return bool(_ACCESSION.match((value or "").strip().upper()))
 

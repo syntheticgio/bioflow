@@ -7,7 +7,7 @@ without guessing from the shape of the response.
 
 import pytest
 
-from app.metadata import assembly, assembly_components, sra_resolver
+from app.metadata import ncbi_assembly, ncbi_assembly_components, sra_resolver
 
 # `client` and `two_profiles` come from tests/api/conftest.py. This module used
 # to build its own header-less client, which stopped working when
@@ -44,16 +44,16 @@ class TestResolveDispatch:
         self, client, two_profiles, monkeypatch
     ):
         monkeypatch.setattr(
-            assembly,
+            ncbi_assembly,
             "lookup",
-            lambda a: assembly.AssemblyMetadata(
+            lambda a: ncbi_assembly.AssemblyMetadata(
                 accession="GCF_000002445.2", organism="Trypanosoma brucei"
             ),
         )
         monkeypatch.setattr(
-            assembly,
+            ncbi_assembly,
             "component_availability",
-            lambda a: list(assembly_components.from_report(
+            lambda a: list(ncbi_assembly_components.from_report(
                 {"annotation_info": {"name": "x"}}
             ).values()),
         )
@@ -75,8 +75,8 @@ class TestResolveDispatch:
     ):
         """A resolution that finds nothing is a result the dialog renders, not
         a failed request -- the same rule the SRA endpoint follows."""
-        monkeypatch.setattr(assembly, "lookup", lambda a: None)
-        monkeypatch.setattr(assembly, "component_availability", lambda a: None)
+        monkeypatch.setattr(ncbi_assembly, "lookup", lambda a: None)
+        monkeypatch.setattr(ncbi_assembly, "component_availability", lambda a: None)
         r = await client.post(
             "/api/v1/ncbi/resolve",
             json={"accession": "GCF_999999999.1"},
