@@ -550,7 +550,8 @@ worktree, because the stack bind-mounts it -- every result describes the wrong
 tree. And `conftest.py` hardcodes the database name `biopipe_test` and drops
 every collection at session start, so two concurrent runs against one Mongo
 wipe each other (measured on one unchanged tree: 7 failed, then 1872 passed,
-then 5 failed). `scripts/wt-pytest.sh` handles both.
+then 5 failed). `backend/run-worktree-tests.sh` handles both -- main added it for the
+first problem while this branch was in flight, and the two were merged.
 
 `backend/app/services/structure_lookup.py` already resolves a gene to a protein
 structure via UniProt, so the client and the ID-mapping path exist. This asks

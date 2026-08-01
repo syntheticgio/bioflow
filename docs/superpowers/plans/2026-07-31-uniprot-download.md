@@ -32,7 +32,7 @@ Three facts were measured against the live UniProt API on 2026-07-31. Each one c
    sizing, never as a post-download assertion.
 
 **Environment notes:**
-- **Run tests with `./scripts/wt-pytest.sh`, never `docker compose exec api
+- **Run tests with `./backend/run-worktree-tests.sh`, never `docker compose exec api
   python -m pytest`.** CLAUDE.md prescribes the latter, and it is right for
   the main repo and wrong here: the shared stack bind-mounts
   `/Users/syntheticgio/Programming/local-bio-pipeliner/backend`, so inside a
@@ -175,7 +175,7 @@ class TestParseAccessions:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/metadata/test_uniprot_classify.py -q
+./backend/run-worktree-tests.sh tests/metadata/test_uniprot_classify.py -q
 ```
 Expected: FAIL, `ModuleNotFoundError` or `ImportError: cannot import name 'uniprot'`.
 
@@ -279,7 +279,7 @@ def parse_accessions(raw: str) -> list[str]:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/metadata/test_uniprot_classify.py -q
+./backend/run-worktree-tests.sh tests/metadata/test_uniprot_classify.py -q
 ```
 Expected: PASS, 13 passed.
 
@@ -392,7 +392,7 @@ class TestStreamUrl:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/metadata/test_uniprot_queries.py -q
+./backend/run-worktree-tests.sh tests/metadata/test_uniprot_queries.py -q
 ```
 Expected: FAIL, `AttributeError: module 'app.metadata.uniprot' has no attribute 'reference_proteome_query'`.
 
@@ -470,7 +470,7 @@ def stream_url(query: str) -> str:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/metadata/test_uniprot_queries.py -q
+./backend/run-worktree-tests.sh tests/metadata/test_uniprot_queries.py -q
 ```
 Expected: PASS, 9 passed. (The test file above has 9 methods: 4 + 4 + 1.)
 
@@ -694,7 +694,7 @@ class TestFailureIsNotFatal:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/metadata/test_uniprot_resolve.py -q
+./backend/run-worktree-tests.sh tests/metadata/test_uniprot_resolve.py -q
 ```
 Expected: FAIL, `AttributeError: module 'app.metadata.uniprot' has no attribute '_get_json'`.
 
@@ -930,7 +930,7 @@ def search_proteins(query: str) -> list[ProteinHit]:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/metadata/test_uniprot_resolve.py -q
+./backend/run-worktree-tests.sh tests/metadata/test_uniprot_resolve.py -q
 ```
 Expected: PASS, 10 passed. (The test file above has 10 test methods.)
 
@@ -974,7 +974,7 @@ class RunKind(StrEnum):
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/ -q
+./backend/run-worktree-tests.sh tests/ -q
 ```
 Expected: PASS, same count as before this task.
 
@@ -1118,7 +1118,7 @@ class TestFilename:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/services/test_uniprot_service.py -q
+./backend/run-worktree-tests.sh tests/services/test_uniprot_service.py -q
 ```
 Expected: FAIL, `ImportError: cannot import name 'uniprot_service'`.
 
@@ -1330,7 +1330,7 @@ async def launch_download(
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/services/test_uniprot_service.py -q
+./backend/run-worktree-tests.sh tests/services/test_uniprot_service.py -q
 ```
 Expected: PASS, 14 passed.
 
@@ -1504,7 +1504,7 @@ class TestUncompressed:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/queue/test_uniprot_download.py -q
+./backend/run-worktree-tests.sh tests/queue/test_uniprot_download.py -q
 ```
 Expected: FAIL, `ImportError: cannot import name 'uniprot_handlers'`.
 
@@ -1687,7 +1687,7 @@ the placement is intentional.
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/queue/test_uniprot_download.py -q
+./backend/run-worktree-tests.sh tests/queue/test_uniprot_download.py -q
 ```
 Expected: PASS, 10 passed. (The test file above has 10 test methods.)
 
@@ -1835,7 +1835,7 @@ class TestRegistration:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/queue/test_uniprot_apply.py -q
+./backend/run-worktree-tests.sh tests/queue/test_uniprot_apply.py -q
 ```
 Expected: FAIL, `AttributeError: module 'app.queue.results' has no attribute '_apply_uniprot_download'`.
 
@@ -1943,7 +1943,7 @@ top of `results.py` -- no new imports are needed.
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/queue/test_uniprot_apply.py -q
+./backend/run-worktree-tests.sh tests/queue/test_uniprot_apply.py -q
 ```
 Expected: PASS, 5 passed.
 
@@ -2111,7 +2111,7 @@ class TestDispatch:
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/api/test_uniprot_resolve.py -q
+./backend/run-worktree-tests.sh tests/api/test_uniprot_resolve.py -q
 ```
 Expected: FAIL, `ImportError: cannot import name 'uniprot'`.
 
@@ -2378,7 +2378,7 @@ alphabetical, keep them that way.
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/api/test_uniprot_resolve.py -q
+./backend/run-worktree-tests.sh tests/api/test_uniprot_resolve.py -q
 ```
 Expected: PASS, 8 passed.
 
@@ -2410,7 +2410,7 @@ with the data.
 
 Run:
 ```bash
-./scripts/wt-pytest.sh --version >/dev/null 2>&1; python3 - <<'PY'
+./backend/run-worktree-tests.sh --version >/dev/null 2>&1; python3 - <<'PY'
 import urllib.request
 
 def get(u):
@@ -2502,7 +2502,7 @@ publishes a new database-issue paper roughly annually.
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/api/test_sources_api.py tests/pipelines -q -k source
+./backend/run-worktree-tests.sh tests/api/test_sources_api.py tests/pipelines -q -k source
 ```
 Expected: PASS. If a completeness test names a required field that is empty,
 fill it -- that is the test doing its job.
@@ -3116,7 +3116,7 @@ Expected: the list includes `download_uniprot`.
 
 Run:
 ```bash
-./scripts/wt-pytest.sh tests/ -q
+./backend/run-worktree-tests.sh tests/ -q
 ```
 Expected: PASS, with the ~59 new tests added by this plan.
 
