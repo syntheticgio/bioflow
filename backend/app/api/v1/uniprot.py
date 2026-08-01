@@ -201,32 +201,27 @@ async def resolve(body: ResolveRequest) -> ResolveResponse:
 async def _taxon_response(
     resolution: uniprot.TaxonResolution, raw: str
 ) -> ResolveResponse:
-    """A resolved organism, as a card or a picker."""
+    """A resolved organism, as a card.
+
+    There is no picker branch. `resolve_taxon` and `resolve_organism_name`
+    return a reference proteome or nothing, because a non-reference proteome
+    cannot be downloaded at all -- its entries are in UniParc rather than
+    UniProtKB's searchable index, so the download writes an empty file.
+    Offering one would be worse than offering nothing.
+    """
     if resolution.proteome is not None:
         return ResolveResponse(
             kind="proteome",
             proteome=await _with_counts(resolution.proteome),
-            candidates=[_proteome_out(c) for c in resolution.candidates],
             needs_picker=False,
         )
 
-    if resolution.candidates:
-        # No reference proteome, but proteomes exist. This is taxon 4932 --
-        # yeast at species level -- where UniProt attaches the reference to
-        # strain taxon 559292. Reporting "nothing found" here would be wrong
-        # for 360 proteomes.
-        return ResolveResponse(
-            kind="proteome",
-            candidates=[_proteome_out(c) for c in resolution.candidates],
-            needs_picker=True,
-            message=(
-                "No reference proteome for this organism — choose one of its "
-                f"{len(resolution.candidates)} proteomes."
-            ),
-        )
-
     return ResolveResponse(
-        kind="empty", message=f"UniProt has no proteome for {raw!r}."
+        kind="empty",
+        message=(
+            f"UniProt has no reference proteome for {raw!r}. Only reference "
+            "proteomes can be downloaded."
+        ),
     )
 
 

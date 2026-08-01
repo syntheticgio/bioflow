@@ -318,46 +318,62 @@ def resolve_proteome(proteome_id: str) -> ProteomeInfo | None:
 
 
 def resolve_taxon(taxon_id: int) -> TaxonResolution:
-    """The proteomes for one taxon, reference first.
+    """The proteome for one taxon.
 
-    Two queries, and the second is mandatory rather than defensive. Taxon
-    4932 -- *S. cerevisiae* at species level, the ID a user is most likely to
-    type for yeast -- has no reference proteome, because UniProt attaches it
-    to strain taxon 559292. Measured: `reference:true` returns 0 while the
-    unfiltered query returns 360. Skipping the fallback tells the user yeast
-    has no proteome.
+    A strain taxon (559292) has a reference proteome and resolves in one
+    query. A species taxon (4932, the ID a user is more likely to type for
+    yeast) does not, because UniProt attaches the reference proteome to the
+    strain -- so the second step re-asks by the organism's *name*, which does
+    find it.
+
+    An earlier version offered the species taxon's other proteomes as a
+    strain picker instead. That was wrong, and measurably so: those proteomes
+    exist in UniParc but not in UniProtKB's searchable index, which is what
+    both the count and the download query go through. Sampled across yeast,
+    *E. coli*, *M. tuberculosis*, and *S. aureus* on 2026-07-31, **0 of 100**
+    non-reference proteomes returned any results -- `proteome:UP000037662`
+    gives 0 rows and an empty FASTA although its own record claims 5,389
+    proteins. The picker could only ever offer dead ends, and it offered them
+    in place of the reference proteome the name query finds immediately.
+
+    So a taxon that names no reference proteome falls back to its name rather
+    than to a list. Measured: 4932 -> UP000002311, 562 -> UP000000625,
+    1280 -> UP000001939, all downloadable.
     """
     reference = _search_proteomes(reference_proteome_query(taxon_id))
     if reference:
-        # The alternatives still load, behind a disclosure: the reference is
-        # right for the common case, and strain matters in real work.
-        others = [p for p in _search_proteomes(all_proteomes_query(taxon_id))
-                  if p.id != reference[0].id]
-        return TaxonResolution(
-            proteome=reference[0], candidates=others, needs_picker=False
-        )
+        return TaxonResolution(proteome=reference[0], needs_picker=False)
 
-    candidates = _search_proteomes(all_proteomes_query(taxon_id))
-    return TaxonResolution(
-        proteome=None, candidates=candidates, needs_picker=bool(candidates)
-    )
+    # The unfiltered query is asked for its organism *name*, not its list: the
+    # entries carry `scientificName`, so this costs no extra request.
+    others = _search_proteomes(all_proteomes_query(taxon_id))
+    if not others:
+        return TaxonResolution()
+
+    # "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)" -> the species,
+    # which is what the name search wants.
+    name = others[0].name.split(" (")[0]
+    return resolve_organism_name(name)
 
 
 def resolve_organism_name(name: str) -> TaxonResolution:
-    """Proteomes for an organism named in words.
+    """The reference proteome for an organism named in words.
 
     Ranked by UniProt's own relevance, which puts the reference proteome
-    first for a plain species name. A reference hit at the top takes the card
-    path; anything else opens the picker.
+    first for a plain species name -- measured for yeast, *E. coli*, and
+    *S. aureus*.
+
+    Only a reference proteome is offered. A non-reference one is not a lesser
+    answer here but an unusable one: its entries are in UniParc rather than
+    UniProtKB's searchable index, so `proteome:<id>` returns no rows and the
+    download writes an empty file. Returning nothing is honest; returning a
+    strain the user cannot download is not.
     """
     candidates = _search_proteomes(organism_name_query(name))
-    if not candidates:
+    reference = next((c for c in candidates if c.is_reference), None)
+    if reference is None:
         return TaxonResolution()
-    if candidates[0].is_reference:
-        return TaxonResolution(
-            proteome=candidates[0], candidates=candidates[1:], needs_picker=False
-        )
-    return TaxonResolution(candidates=candidates, needs_picker=True)
+    return TaxonResolution(proteome=reference, needs_picker=False)
 
 
 def _protein_hit(entry: dict) -> ProteinHit | None:

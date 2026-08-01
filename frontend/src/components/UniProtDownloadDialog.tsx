@@ -39,37 +39,17 @@ export function UniProtDownloadDialog({
   const [chosenProteome, setChosenProteome] = useState<UniProtProteome | null>(
     null,
   );
-  const [showOthers, setShowOthers] = useState(false);
-
   const resolve = useMutation({
     mutationFn: () => api.uniprotResolve({ query: query.trim(), project_id: projectId }),
     onSuccess: (data) => {
       setResolved(data);
       setChosenProteome(data.proteome);
-      setShowOthers(data.needs_picker);
       // Everything found, pre-selected. The common case for a pasted set of
       // accessions is "give me these"; a free-text search is the case where
       // choosing matters, and there the count in the button shows the scale.
       setSelected(new Set(data.proteins.map((p) => p.accession)));
     },
     onError: (e: Error) => notify.error(e.message),
-  });
-
-  // Candidates arrive without counts -- the resolve endpoint only prices the
-  // primary proteome, since counting all 25 would be 50 extra UniProt
-  // requests for rows most users never pick. Re-resolving the chosen one by
-  // its own id takes the PROTEOME branch, which does return counts, so the
-  // reviewed/unreviewed choice appears for a picked strain exactly as it
-  // does for a reference proteome.
-  const priceCandidate = useMutation({
-    mutationFn: (id: string) => api.uniprotResolve({ query: id, project_id: projectId }),
-    onSuccess: (data) => {
-      if (data.proteome) setChosenProteome(data.proteome);
-    },
-    // Silent: the card still renders from the candidate row's own fields, it
-    // just cannot offer the reviewed choice. A toast for a background price
-    // lookup would be noise.
-    onError: () => {},
   });
 
   const download = useMutation({
@@ -169,64 +149,6 @@ export function UniProtDownloadDialog({
             reviewedOnly={reviewedOnly}
             onReviewedChange={setReviewedOnly}
           />
-        )}
-
-        {resolved && resolved.candidates.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            {!resolved.needs_picker && (
-              <button
-                type="button"
-                className="sra-group-toggle"
-                onClick={() => setShowOthers((s) => !s)}
-              >
-                {showOthers ? "▾" : "▸"} {resolved.candidates.length} other{" "}
-                {resolved.candidates.length === 1 ? "proteome" : "proteomes"} for
-                this organism
-              </button>
-            )}
-            {showOthers && (
-              <div className="sra-table-wrap">
-                <table className="sra-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 28 }} />
-                      <th>Proteome</th>
-                      <th>Strain</th>
-                      <th>Proteins</th>
-                      <th>BUSCO</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {resolved.candidates.map((c) => (
-                      <tr key={c.id}>
-                        <td>
-                          <input
-                            type="radio"
-                            name="proteome"
-                            checked={chosenProteome?.id === c.id}
-                            onChange={() => {
-                              setChosenProteome(c);
-                              priceCandidate.mutate(c.id);
-                            }}
-                          />
-                        </td>
-                        <td className="mono">{c.id}</td>
-                        <td className="sra-dim">{c.strain ?? "—"}</td>
-                        <td className="sra-num">
-                          {c.protein_count?.toLocaleString() ?? "—"}
-                        </td>
-                        {/* Completeness is what makes choosing between
-                            strains possible rather than arbitrary. */}
-                        <td className="sra-num">
-                          {c.busco_score != null ? `${c.busco_score}%` : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
         )}
 
         {resolved && resolved.proteins.length > 0 && (

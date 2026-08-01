@@ -57,22 +57,67 @@ class TestProteomeResolution:
         assert result.proteome.id == "UP000002311"
         assert result.needs_picker is False
 
-    def test_a_species_taxon_falls_back_to_all(self, stub_transport):
-        """Taxon 4932 returns nothing for `reference:true` and 360 for the
-        unfiltered query. Without this fallback the dialog says yeast has no
-        proteome, which is the single most likely way to ship this broken.
+    def test_a_species_taxon_falls_back_to_its_name(self, stub_transport):
+        """Taxon 4932 returns nothing for `reference:true`, because UniProt
+        attaches yeast's reference proteome to strain taxon 559292. The
+        fallback re-asks by organism name, which does find it.
+
+        Deliberately NOT a strain picker, which an earlier version offered:
+        those proteomes are in UniParc but not UniProtKB's searchable index,
+        so `proteome:<id>` returns 0 rows and the download writes an empty
+        file. Measured 0 of 100 downloadable across four organisms.
         """
         calls, responses = stub_transport
         responses["organism_id%3A4932+AND+reference"] = {"results": []}
         responses["organism_id%3A4932&"] = {
             "results": [_proteome("UP000037662", ref=False, count=5389, busco=98)]
         }
+        responses["organism_name"] = {"results": [_proteome("UP000002311")]}
 
         result = uniprot.resolve_taxon(4932)
 
-        assert result.needs_picker is True
-        assert len(result.candidates) == 1
-        assert result.candidates[0].id == "UP000037662"
+        assert result.proteome is not None
+        assert result.proteome.id == "UP000002311"
+        assert result.proteome.is_reference is True
+        assert result.needs_picker is False
+
+    def test_a_species_taxon_asks_by_the_species_not_the_strain(
+        self, stub_transport
+    ):
+        """The name on a strain record is "Saccharomyces cerevisiae (strain
+        ATCC 204508 / S288c)". Searching that verbatim finds nothing; the
+        parenthetical has to come off first."""
+        calls, responses = stub_transport
+        responses["organism_id%3A4932+AND+reference"] = {"results": []}
+        responses["organism_id%3A4932&"] = {
+            "results": [_proteome("UP000037662", ref=False)]
+        }
+        responses["organism_name"] = {"results": [_proteome("UP000002311")]}
+
+        uniprot.resolve_taxon(4932)
+
+        name_calls = [c for c in calls if "organism_name" in c]
+        assert name_calls, "expected a name query"
+        assert "S288c" not in name_calls[0]
+
+    def test_a_species_taxon_with_no_reference_anywhere_resolves_empty(
+        self, stub_transport
+    ):
+        """Nothing rather than an unusable strain. A proteome that cannot be
+        downloaded is not a lesser answer, it is a wrong one."""
+        calls, responses = stub_transport
+        responses["organism_id%3A4932+AND+reference"] = {"results": []}
+        responses["organism_id%3A4932&"] = {
+            "results": [_proteome("UP000037662", ref=False)]
+        }
+        responses["organism_name"] = {
+            "results": [_proteome("UP000051707", ref=False)]
+        }
+
+        result = uniprot.resolve_taxon(4932)
+
+        assert result.proteome is None
+        assert result.candidates == []
 
     def test_the_proteome_carries_its_genome_assembly(self, stub_transport):
         """The cross-link to the NCBI download. Present on the record, so it
@@ -84,18 +129,18 @@ class TestProteomeResolution:
 
         assert result.proteome.genome_assembly == "GCA_000146045.2"
 
-    def test_busco_is_carried_for_the_picker(self, stub_transport):
-        """The signal that makes choosing between strains possible rather
-        than arbitrary."""
+    def test_busco_is_carried(self, stub_transport):
+        """Completeness, shown on the card. Not a picker signal any more --
+        there is no picker -- but still the one number that says whether a
+        proteome is worth downloading."""
         calls, responses = stub_transport
-        responses["reference%3Atrue"] = {"results": []}
-        responses["organism_id%3A4932&"] = {
-            "results": [_proteome("UP000188490", ref=False, busco=93)]
+        responses["reference%3Atrue"] = {
+            "results": [_proteome("UP000002311", busco=93)]
         }
 
-        result = uniprot.resolve_taxon(4932)
+        result = uniprot.resolve_taxon(559292)
 
-        assert result.candidates[0].busco_score == 93
+        assert result.proteome.busco_score == 93
 
     def test_a_taxon_with_nothing_resolves_empty(self, stub_transport):
         calls, responses = stub_transport
