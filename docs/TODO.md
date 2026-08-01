@@ -875,6 +875,29 @@ defaults to unstranded and the dialog says so rather than guessing. Salmon and
 kallisto (alignment-free) are not wired up. Multi-factor designs are not
 supported -- the design is a single `condition` column and one contrast.
 
+**What the pre-merge review added (2026-08-01).** Merged onto main after STAR
+landed. The merge was textually clean and 2,315 tests were green, and one bug
+survived both -- found the same way STAR's was, by running the thing:
+
+- `QuantifyDialog` overrode the server's refusal to choose an annotation.
+  When a project holds annotations for more than one assembly the backend
+  correctly returns `annotation_id: null, needs_annotation: true`; the dialog
+  applied `?? annotations[0]`, which is alphabetical rather than correct.
+  Measured: a BAM aligned against GCF_000146045.2 came up pre-selected with
+  the GCA_000146045.2 annotation, whose contigs are named BK006935.2 against
+  the reference's NC_001133.9. featureCounts assigned **0 of 1,088,107
+  fragments across 0 of 6,425 genes, and the job succeeded.** The dialog now
+  refuses to guess and disables its launch button until a choice is made.
+  Nothing downstream was wrong -- `low_assignment_warning` already fires --
+  the choice was simply being made silently.
+- Verified working with the matching annotation: 733,174 of 1,088,107
+  fragments assigned (67.38%), 6,302 of 6,477 yeast genes detected.
+- pydeseq2 0.5.4 fits in this image, checked on synthetic counts with a
+  planted 4x change across 6 samples: all 40 changed genes recovered at
+  padj < 0.05, log2 fold change 2.05-2.25 against an expected 2.0. The
+  in-app DESeq2 path is *not* yet exercised end to end -- that needs two
+  conditions with replicates, and the test project has one RNA-seq sample.
+
 --- original entry ---
 
 Raised: 2026-07-31, requested. **Wants STAR (above) first.**
