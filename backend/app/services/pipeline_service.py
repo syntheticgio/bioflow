@@ -43,6 +43,7 @@ from app.pipelines import (
     de_runner,
     fastp_runner,
     pairing,
+    resource_estimator,
     tools,
     trimmomatic_runner,
     variant_runner,
@@ -901,6 +902,53 @@ async def launch_build_index(
     return job
 
 
+# The floor under a declared memory reservation. The estimator's coefficients
+# are heuristics, and a reference whose `size` is missing or absurdly small
+# would otherwise reserve almost nothing and let the governor admit the job
+# alongside everything else.
+MIN_DECLARED_MEM_MB = 2048
+
+# The threads `build_index` runs with. Declared here rather than only in the
+# handler's `@handler(resources=...)` because the memory estimate has to be
+# computed against the same number the job will actually use.
+INDEX_BUILD_THREADS = 4
+
+
+def declared_align_mem_mb(
+    *,
+    aligner: Aligner,
+    reference_bases: int,
+    threads: int,
+    sort_memory_mb: int,
+    building_index: bool,
+) -> int:
+    """What to reserve with the queue for an alignment or index build.
+
+    The same `resource_estimator` call the launch dialog already makes, used
+    for the reservation rather than only for the warning shown to the user.
+
+    Before this, both handlers declared a flat 8 GB whatever the aligner and
+    whatever the genome. That is roughly right for bwa-mem2 on a human genome
+    and wrong in both directions elsewhere: a STAR human index needs about
+    30 GB, so the governor would admit it believing there was room, and the
+    result is an OOM kill twenty minutes in with a log that says nothing --
+    exactly the failure `resource_estimator` exists to prevent, arriving
+    through the one door it was not watching.
+
+    Note this is a *reservation*, not a limit: nothing enforces it on the
+    process. Its job is to stop the governor from running two heavy jobs whose
+    combined footprint does not fit.
+    """
+    estimate = resource_estimator.estimate_mb(
+        aligner=aligner,
+        reference_bases=reference_bases,
+        threads=threads,
+        sort_memory_mb=sort_memory_mb,
+        building_index=building_index,
+    )
+    return max(estimate, MIN_DECLARED_MEM_MB)
+
+
 async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner: str):
     """Queue the index build, deduplicated on (reference blob, aligner).
 
@@ -933,12 +981,25 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner
     # each, which is the price of neither of them silently getting none.
     dedup_key = f"build_index:{digest or path}:{aligner.value}"
 
+    # `sort_memory_mb=0` because an index build runs no samtools sort -- the
+    # estimator's sort term would otherwise reserve memory for a step that is
+    # not in this job.
+    mem_mb = declared_align_mem_mb(
+        aligner=aligner,
+        reference_bases=reference.size or 0,
+        threads=INDEX_BUILD_THREADS,
+        sort_memory_mb=0,
+        building_index=True,
+    )
+
     return await queue.enqueue(
         "build_index",
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(
+            cpu=INDEX_BUILD_THREADS, mem_mb=mem_mb, io=IoClass.HEAVY
+        ),
         max_attempts=2,
         dedup_key=dedup_key,
         project_id=reference.project_id,
@@ -1183,9 +1244,27 @@ async def launch_alignment(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        # The user's thread count, exactly as trim_reads declares it.
+        # The user's thread count, exactly as trim_reads declares it, and a
+        # memory reservation from the estimator rather than a flat 8 GB that
+        # was right for one aligner on one genome size.
+        #
+        # Recomputed with `building_index=False` rather than reusing the
+        # `estimate` above, which is deliberately not the same number: that one
+        # answers "can this whole operation fit on the host" and so includes
+        # the index build, while this job only ever loads a finished index --
+        # the build is a separate job with its own reservation. Reusing it
+        # would reserve bowtie2's 3x and HISAT2's 4x build multiplier for
+        # every alignment against a not-yet-indexed reference.
         resources=JobResources(
-            cpu=align_params.threads, mem_mb=8192, io=IoClass.HEAVY
+            cpu=align_params.threads,
+            mem_mb=declared_align_mem_mb(
+                aligner=aligner,
+                reference_bases=reference.size or 0,
+                threads=align_params.threads,
+                sort_memory_mb=align_params.sort_memory_mb,
+                building_index=False,
+            ),
+            io=IoClass.HEAVY,
         ),
         max_attempts=2,
         dedup_key=dedup_key,

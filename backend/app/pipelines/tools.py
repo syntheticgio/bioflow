@@ -166,7 +166,15 @@ def _looks_like_version(value: str | None) -> bool:
     `_clean_version` returns its input verbatim when nothing parses, so a
     non-empty result is not by itself evidence that a version was found.
     """
-    return bool(value and re.fullmatch(r"\d+\.\d+(?:\.\d+)?", value))
+    return bool(value and re.fullmatch(_VERSION_PATTERN, value))
+
+
+# The trailing letter is STAR's: it releases 2.7.11a and 2.7.11b as distinct
+# versions, and truncating to 2.7.11 names a release that is not the one that
+# ran. Kept to a single letter so it cannot swallow a suffix that is not part
+# of the version -- minimap2's "2.28-r1209" still parses as 2.28, since the
+# separator is a dash rather than a letter.
+_VERSION_PATTERN = r"\d+\.\d+(?:\.\d+)?[a-z]?"
 
 
 def _clean_version(raw: str) -> str:
@@ -185,7 +193,7 @@ def _clean_version(raw: str) -> str:
     for line in (raw or "").splitlines():
         # Anchored to a digit-dot-digit so the `2` in "bwa-mem2.avx2" cannot
         # be mistaken for a version on the dispatch line.
-        match = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", line)
+        match = re.search(rf"v?({_VERSION_PATTERN})", line)
         if match:
             return match.group(1)
     return raw.splitlines()[0].strip() if raw else ""
@@ -274,6 +282,16 @@ def bowtie2() -> Tool:
 @lru_cache(maxsize=1)
 def hisat2() -> Tool:
     return _probe("hisat2", settings.hisat2_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def star() -> Tool:
+    # `--version` prints the bare version and exits 0. Note the Debian package
+    # installs /usr/bin/STAR as a dispatcher that execs STAR-avx2 or a plainer
+    # build depending on the CPU, so the fingerprint covers the dispatcher and
+    # not the binary that ultimately runs -- the same known gap the interpreter
+    # wrappers have, and accepted for the same reason.
+    return _probe("star", settings.star_path, ["--version"])
 
 
 @lru_cache(maxsize=1)
@@ -501,6 +519,7 @@ def all_tools() -> list[Tool]:
         minimap2(),
         bowtie2(),
         hisat2(),
+        star(),
         samtools(),
         bcftools(),
         clair3(),
@@ -843,7 +862,7 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1109/IPDPS.2019.00041",
         license="MIT",
         usage=(
-            "One of the four aligners an alignment job can select, and the "
+            "One of the five aligners an alignment job can select, and the "
             "default suggested for short reads. Builds its own index for a "
             "reference the first time one is needed, then aligns straight into "
             "a sorted BAM."
@@ -896,7 +915,7 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1038/nmeth.1923",
         license="GPL-3.0-or-later",
         usage=(
-            "One of the four aligners an alignment job can select. Its index is "
+            "One of the five aligners an alignment job can select. Its index is "
             "built by a separate bowtie2-build binary, which this application "
             "runs on demand rather than asking the user to prepare a reference "
             "beforehand."
@@ -924,9 +943,42 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1038/s41587-019-0201-4",
         license="GPL-3.0-or-later",
         usage=(
-            "One of the four aligners an alignment job can select, and the "
+            "One of the five aligners an alignment job can select, and the "
             "RNA-seq choice. Like bowtie2 its index comes from a separate "
             "hisat2-build binary this application runs on demand."
+        ),
+    ),
+    "star": ToolMeta(
+        pipelines=(PipelineType.ALIGN,),
+        one_liner="Splice-aware RNA-seq aligner, fastest but memory-hungry",
+        summary=(
+            "The reference RNA-seq aligner, and the one most published "
+            "pipelines use. It is substantially faster than HISAT2 and finds "
+            "novel junctions more sensitively, at the cost of an uncompressed "
+            "suffix-array index that must be resident in RAM: roughly 30 GB "
+            "for a human genome, against HISAT2's 4 GB. On a machine that "
+            "cannot spare that, HISAT2 is the alignment that finishes."
+        ),
+        strengths=(
+            "Splice-aware, with sensitive novel-junction discovery",
+            "Faster than other splice-aware aligners on the same hardware",
+            "Two-pass mode re-aligns against junctions found in the first pass",
+            "Reports per-junction counts and a detailed mapping summary",
+            "The conventional choice in published RNA-seq pipelines",
+        ),
+        homepage="https://github.com/alexdobin/STAR",
+        repository="https://github.com/alexdobin/STAR",
+        citation="Dobin et al., Bioinformatics 2013",
+        citation_url="https://doi.org/10.1093/bioinformatics/bts635",
+        license="GPL-3.0-or-later",
+        usage=(
+            "One of the five aligners an alignment job can select, and the "
+            "fast RNA-seq choice. Its index is a directory this application "
+            "builds on demand with STAR's own genomeGenerate mode, sizing the "
+            "suffix-array and chromosome-bin parameters from the reference "
+            "rather than leaving defaults that misbehave on small genomes. "
+            "Alignment runs without an annotation file, so junctions are "
+            "discovered from the reads rather than read from a GTF."
         ),
     ),
     "samtools": ToolMeta(
@@ -1204,6 +1256,7 @@ def reset_cache() -> None:
     minimap2.cache_clear()
     bowtie2.cache_clear()
     hisat2.cache_clear()
+    star.cache_clear()
     bowtie2_build.cache_clear()
     hisat2_build.cache_clear()
     samtools.cache_clear()

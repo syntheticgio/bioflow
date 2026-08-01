@@ -352,6 +352,84 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
             *_SHARED_FIELDS,
         ),
     ),
+    Aligner.STAR: AlignerSpec(
+        aligner=Aligner.STAR,
+        tool=tools.star,
+        index=aligners.layout_for(Aligner.STAR),
+        params_class=align_params.StarParams,
+        # ~10 bytes/base: about 30 GB for a 3.1 Gb human genome, which is the
+        # figure STAR's own manual gives for the RAM needed to align against
+        # human. The index is an uncompressed suffix array held resident, so
+        # unlike the FM-index aligners there is no compression to hide behind
+        # -- this is the number that decides whether STAR can run at all here.
+        #
+        # The build multiplier is the modest one: genomeGenerate's peak is the
+        # suffix-array sort, which is only somewhat above the finished index
+        # rather than the 3-4x that bowtie2 and HISAT2 pay.
+        memory_model=MemoryModel(
+            index_bytes_per_ref_base=10.0,
+            fixed_overhead_mb=1024,
+            # Threads share the resident genome; only the per-thread buffers
+            # scale, so this is small next to the index term.
+            bytes_per_thread_mb=200,
+            index_build_multiplier=1.2,
+        ),
+        fields=(
+            ParamField(
+                key="two_pass",
+                label="Two-pass mapping",
+                kind="bool",
+                default=False,
+                group="biology",
+                help=(
+                    "Re-aligns everything against the junctions found in a "
+                    "first pass, which recovers reads spanning novel "
+                    "junctions. Roughly doubles the runtime."
+                ),
+            ),
+            ParamField(
+                key="out_filter_multimap_nmax",
+                label="Maximum loci per read",
+                kind="int",
+                default=20,
+                min=1,
+                group="biology",
+                help=(
+                    "A read aligning to more places than this is written as "
+                    "unmapped rather than as a multi-mapper. Raise it for "
+                    "repeat-heavy work; lower it to keep only near-unique "
+                    "alignments."
+                ),
+            ),
+            ParamField(
+                key="align_intron_max",
+                label="Maximum intron length (0 = STAR's default)",
+                kind="int",
+                default=0,
+                min=0,
+                group="biology",
+                help=(
+                    "0 lets STAR derive its own ceiling of about 590 kb. Set "
+                    "it to 1 to forbid spliced alignment altogether, which is "
+                    "what genomic DNA input wants."
+                ),
+            ),
+            ParamField(
+                key="out_sam_unmapped",
+                label="Keep unmapped reads in the BAM",
+                kind="bool",
+                default=True,
+                group="biology",
+                help=(
+                    "On by default here, though STAR itself discards them. "
+                    "With them dropped, the mapped-percentage on the "
+                    "alignment report is computed over mapped reads only and "
+                    "always reads 100%."
+                ),
+            ),
+            *_SHARED_FIELDS,
+        ),
+    ),
 }
 
 

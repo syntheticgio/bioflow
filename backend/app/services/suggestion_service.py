@@ -304,6 +304,16 @@ def _align_tool_and_why(obj, chemistry) -> tuple[dict, str]:
         # `preset` is left as the delegate wrote it. It is a minimap2 concept,
         # but `Hisat2Params.from_dict` reads only the keys it knows and
         # ignores the rest, so a stray preset is inert rather than a bad flag.
+        # HISAT2 and not STAR, deliberately, even though STAR is the faster
+        # aligner and the one most published RNA-seq pipelines use. This is a
+        # single-user tool on one machine, and the two indexes are not
+        # comparable: ~4 GB for HISAT2 against ~30 GB resident for STAR on a
+        # human genome. Suggesting STAR would put a card on the Actions tab
+        # that the memory estimator blocks on most hardware -- advice that
+        # cannot be taken is worse than slightly slower advice that can.
+        #
+        # STAR stays a deliberate choice from the align dialog, where the
+        # estimator's warning is visible next to the thread and memory knobs.
         params = {**params, "aligner": "hisat2"}
         return params, "RNA-seq on a eukaryote: splice-aware alignment."
 

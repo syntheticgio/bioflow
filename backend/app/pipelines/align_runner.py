@@ -5,6 +5,7 @@ construction, progress parsing, flagstat extraction -- are pure functions over
 strings and dicts, with no queue or filesystem involved.
 """
 
+import math
 import re
 import shlex
 from dataclasses import dataclass
@@ -152,6 +153,23 @@ class ReadGroup:
             args += ["--rg", field_value]
         return args
 
+    def as_star_rg_fields(self) -> list[str]:
+        """The fields for STAR's `--outSAMattrRGline`, one argument each.
+
+        A third shape, because STAR accepts neither of the first two: it takes
+        every field as a separate argv element after a single flag, and reads
+        `as_sam_header()`'s tab-escaped string as one malformed ID. Verified
+        against STAR 2.7.11b, whose output carries the resulting `@RG` line
+        intact.
+        """
+        rg_id = self.identifier or self.sample
+        return [
+            f"ID:{rg_id}",
+            f"SM:{self.sample}",
+            f"LB:{self.library}",
+            f"PL:{self.platform}",
+        ]
+
     def as_dict(self) -> dict:
         return {
             "sample": self.sample,
@@ -182,6 +200,77 @@ def default_preset(aligner: Aligner) -> str:
     return "" if aligner is Aligner.BWA_MEM2 else Preset.SHORT_READ
 
 
+def star_index_sizing(*, genome_length: int, contigs: int) -> tuple[int, int]:
+    """`--genomeSAindexNbases` and `--genomeChrBinNbits` for one reference.
+
+    STAR's defaults are tuned for a mammalian genome and misbehave in both
+    directions on anything else, quietly rather than loudly:
+
+    - `genomeSAindexNbases` defaults to 14. On a small genome -- a virus, a
+      bacterium, a single plasmid -- that builds a suffix-array index far
+      larger than the genome and produces an index that maps almost nothing.
+      STAR prints a recommendation to stderr and carries on succeeding, which
+      is the worst combination: a green job and an empty BAM. The manual's
+      formula is min(14, log2(genomeLength)/2 - 1).
+    - `genomeChrBinNbits` defaults to 18, sized for a genome with tens of
+      chromosomes. A draft assembly with tens of thousands of scaffolds
+      allocates a bin per scaffold and exhausts memory during the build. The
+      manual's formula is min(18, log2(genomeLength/contigs)).
+
+    Both are computed from the `.fai` this application has already built for
+    the reference, so they are exact rather than estimated from the file size.
+    """
+    # A degenerate reference (empty, or a .fai that failed to parse) would send
+    # log2 to a negative or undefined value. Clamped rather than raised: STAR
+    # will produce its own honest error about an unusable genome, and that is
+    # a better message than anything invented here.
+    length = max(int(genome_length), 1)
+    n_contigs = max(int(contigs), 1)
+
+    sa_index_nbases = min(14, max(int(math.log2(length) / 2) - 1, 1))
+    chr_bin_nbits = min(18, max(int(math.log2(length / n_contigs)), 1))
+    return sa_index_nbases, chr_bin_nbits
+
+
+def build_star_index_command(
+    *,
+    tool_path: str,
+    reference: Path,
+    genome_dir: Path,
+    threads: int,
+    genome_length: int,
+    contigs: int,
+    scratch: Path,
+) -> list[str]:
+    """`STAR --runMode genomeGenerate`.
+
+    Separate from `build_index_command` rather than a fifth branch in it:
+    STAR's index build takes seven arguments the other four have no analogue
+    for, and folding it in would mean every caller passes a genome length and
+    a thread count that four of five aligners ignore.
+
+    `--outFileNamePrefix` is not cosmetic. STAR writes `Log.out` wherever it
+    is pointed, and pointed at nothing it writes into the process's working
+    directory -- which for a job here is not a directory anyone reaps.
+    """
+    sa_index_nbases, chr_bin_nbits = star_index_sizing(
+        genome_length=genome_length, contigs=contigs
+    )
+    return [
+        tool_path,
+        "--runMode", "genomeGenerate",
+        "--genomeDir", str(genome_dir),
+        "--genomeFastaFiles", str(reference),
+        "--runThreadN", str(threads),
+        "--genomeSAindexNbases", str(sa_index_nbases),
+        "--genomeChrBinNbits", str(chr_bin_nbits),
+        # Trailing separator: STAR concatenates this with its own filenames
+        # rather than treating it as a directory, so without the slash the
+        # logs land beside the directory as `star-buildLog.out`.
+        "--outFileNamePrefix", f"{scratch}/",
+    ]
+
+
 def build_index_command(
     *, aligner: Aligner, tool_path: str, reference: Path, output: Path | None = None
 ) -> list[str]:
@@ -193,7 +282,14 @@ def build_index_command(
     arguments. `tool_path` for the latter two is the *builder* binary
     (bowtie2-build, hisat2-build), not the aligner -- see
     `aligners.layout_for(...).builder`.
+
+    STAR is deliberately not here; see `build_star_index_command`.
     """
+    if aligner is Aligner.STAR:
+        raise ValidationError(
+            "STAR's index is built by build_star_index_command, not this"
+        )
+
     if aligner is Aligner.BWA_MEM2:
         return [tool_path, "index", str(reference)]
 
@@ -224,6 +320,7 @@ def build_align_command(
     read_group: ReadGroup,
     params: AlignParams,
     tmp_prefix: Path | None = None,
+    scratch: Path | None = None,
 ) -> list[str]:
     """Align and coordinate-sort in one pipeline, as a `/bin/sh` invocation.
 
@@ -248,6 +345,7 @@ def build_align_command(
         r2=r2,
         read_group=read_group,
         params=params,
+        scratch=scratch,
     )
 
     sort_argv = [
@@ -278,15 +376,28 @@ def _aligner_argv(
     r2: Path | None,
     read_group: ReadGroup,
     params,
+    scratch: Path | None = None,
 ) -> list[str]:
     """The aligner half of the pipeline, before samtools.
 
-    Four tools, three calling conventions. bwa-mem2 and minimap2 take reads
+    Five tools, four calling conventions. bwa-mem2 and minimap2 take reads
     positionally and the reference as a path; bowtie2 and HISAT2 take the
-    index basename via -x and the reads via -U or -1/-2. Getting that wrong
-    does not fail cleanly -- bowtie2 reads a stray positional argument as its
-    index basename and reports a missing index.
+    index basename via -x and the reads via -U or -1/-2; STAR takes a genome
+    *directory* via --genomeDir and has to be told to write SAM to stdout at
+    all. Getting that wrong does not fail cleanly -- bowtie2 reads a stray
+    positional argument as its index basename and reports a missing index.
     """
+    if aligner is Aligner.STAR:
+        return _star_argv(
+            aligner_path=aligner_path,
+            reference=reference,
+            r1=r1,
+            r2=r2,
+            read_group=read_group,
+            params=params,
+            scratch=scratch,
+        )
+
     if aligner is Aligner.BWA_MEM2:
         argv = [aligner_path, "mem", "-t", str(params.threads)]
         argv += ["-R", read_group.as_sam_header()]
@@ -312,6 +423,93 @@ def _aligner_argv(
         read_group=read_group,
         params=params,
     )
+
+
+def _star_argv(
+    *,
+    aligner_path: str,
+    reference: Path,
+    r1: Path,
+    r2: Path | None,
+    read_group: ReadGroup,
+    params,
+    scratch: Path | None,
+) -> list[str]:
+    """STAR, streaming SAM to stdout for samtools to sort.
+
+    `--outStd SAM --outSAMtype SAM` is what keeps STAR inside the same
+    align-and-sort pipe as the other four. STAR can write a sorted BAM itself
+    (`--outSAMtype BAM SortedByCoordinate`), but taking that path would mean a
+    second command shape, a second place sort memory is configured, and an
+    output file rather than a stream -- for no gain, since samtools is already
+    doing the sort for four other aligners.
+
+    Two things here fail silently rather than loudly if omitted, which is why
+    each is unconditional rather than a knob:
+
+    `--readFilesCommand zcat` for gzipped input. STAR does not sniff its
+    input and does not infer compression from the extension -- it reads a
+    gzipped FASTQ as text and reports that every read is too short, which
+    looks like bad data rather than a wrong flag. This is `aligners`' opening
+    warning about fastp exactly, one tool further along, except that STAR
+    cannot even be rescued by naming the file correctly.
+
+    `--outSAMattrRGline` rather than the `@RG` line the other aligners take:
+    STAR wants the fields as separate arguments and rejects the tab-escaped
+    single string, so this is the third read-group convention among five
+    tools.
+    """
+    argv = [
+        aligner_path,
+        "--genomeDir", aligners.layout_for(Aligner.STAR).reference_argument(reference),
+        "--runThreadN", str(params.threads),
+        "--outStd", "SAM",
+        "--outSAMtype", "SAM",
+    ]
+
+    argv += ["--readFilesIn", str(r1)]
+    if r2 is not None:
+        argv.append(str(r2))
+
+    if _is_gzipped(r1) or (r2 is not None and _is_gzipped(r2)):
+        argv += ["--readFilesCommand", "zcat"]
+
+    argv += ["--outSAMattrRGline", *read_group.as_star_rg_fields()]
+
+    if scratch is not None:
+        # Trailing slash: STAR concatenates rather than joins. Everything it
+        # writes that is not the SAM stream -- Log.final.out, SJ.out.tab, its
+        # own scratch directory -- lands under here, inside the job's workdir.
+        argv += ["--outFileNamePrefix", f"{scratch}/"]
+
+    if params.two_pass:
+        argv += ["--twopassMode", "Basic"]
+
+    argv += ["--outFilterMultimapNmax", str(params.out_filter_multimap_nmax)]
+
+    if params.align_intron_max > 0:
+        # 0 means "leave the flag off": STAR reads an explicit 0 as "derive
+        # the ceiling from the window parameters", which is the same thing,
+        # but passing the flag makes the recorded parameters claim a decision
+        # that was not made.
+        argv += ["--alignIntronMax", str(params.align_intron_max)]
+
+    if params.out_sam_unmapped:
+        argv += ["--outSAMunmapped", "Within"]
+
+    return argv
+
+
+def _is_gzipped(path: Path) -> bool:
+    """Whether a read file is gzipped, by name.
+
+    By name and not by magic bytes, deliberately: this is a pure command
+    builder with no filesystem access, and the handler has already linked each
+    read under its user-facing name for precisely this reason. A read file
+    that reaches here without its extension is a bug upstream in
+    `_named_read_link`, and one that would mislead every other aligner too.
+    """
+    return path.name.endswith(".gz")
 
 
 def _prefix_aligner_argv(

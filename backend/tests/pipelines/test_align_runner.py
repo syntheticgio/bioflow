@@ -488,8 +488,168 @@ class TestNewAlignersKeepPipefail:
     """The truncated-BAM failure applies to every aligner, not just the two
     that existed when the pipe was written."""
 
-    @pytest.mark.parametrize("aligner", [Aligner.BOWTIE2, Aligner.HISAT2])
+    @pytest.mark.parametrize(
+        "aligner", [Aligner.BOWTIE2, Aligner.HISAT2, Aligner.STAR]
+    )
     def test_pipefail_is_set(self, aligner):
         params = align_params.from_dict({"aligner": aligner.value})
         cmd = align_cmd(aligner=aligner, aligner_path=aligner.value, params=params)
         assert cmd[:3] == ["/bin/sh", "-o", "pipefail"]
+
+
+class TestStarCommand:
+    """STAR's calling convention shares nothing with the other four.
+
+    Two of these guard failures that are silent rather than loud, which is
+    why they are here rather than left to a manual run: without
+    `--readFilesCommand zcat` STAR reads a gzipped FASTQ as text and reports
+    every read as too short, and without `--outSAMunmapped Within` the
+    mapped-percentage on the alignment report is computed over mapped reads
+    only and always reads 100%.
+    """
+
+    def cmd(self, **kw):
+        overrides = {k: kw.pop(k) for k in ("r1", "r2", "scratch") if k in kw}
+        params = align_params.from_dict({"aligner": "star", **kw})
+        return align_cmd(
+            aligner=Aligner.STAR,
+            aligner_path="STAR",
+            params=params,
+            **overrides,
+        )
+
+    def test_the_index_is_passed_as_a_genome_directory(self):
+        joined = " ".join(self.cmd())
+        assert "--genomeDir /w/genome.fna.STARindex" in joined
+        # Not the reference itself, which STAR reads as a missing directory.
+        assert "--genomeDir /w/genome.fna " not in joined
+
+    def test_sam_is_written_to_stdout_for_samtools(self):
+        """The whole point of staying inside the shared align-and-sort pipe.
+        Without --outStd, STAR writes Aligned.out.sam to a file and samtools
+        sorts an empty stream."""
+        joined = " ".join(self.cmd())
+        assert "--outStd SAM" in joined
+        assert "--outSAMtype SAM" in joined
+
+    def test_gzipped_reads_get_the_decompression_command(self):
+        joined = " ".join(self.cmd(r1=Path("/w/r1.fq.gz")))
+        assert "--readFilesCommand zcat" in joined
+
+    def test_plain_reads_do_not(self):
+        """zcat on an uncompressed FASTQ fails outright, so this cannot just
+        be passed unconditionally."""
+        joined = " ".join(self.cmd(r1=Path("/w/r1.fq")))
+        assert "readFilesCommand" not in joined
+
+    def test_a_gzipped_mate_is_enough_to_decompress(self):
+        joined = " ".join(self.cmd(r1=Path("/w/r1.fq"), r2=Path("/w/r2.fq.gz")))
+        assert "--readFilesCommand zcat" in joined
+
+    def test_paired_reads_are_two_arguments_to_one_flag(self):
+        joined = " ".join(self.cmd(r1=Path("/w/r1.fq"), r2=Path("/w/r2.fq")))
+        assert "--readFilesIn /w/r1.fq /w/r2.fq" in joined
+
+    def test_the_read_group_uses_stars_own_flag(self):
+        """STAR takes the fields as separate arguments and rejects the
+        tab-escaped @RG line the other aligners want."""
+        joined = " ".join(self.cmd())
+        assert "--outSAMattrRGline ID:SAMP1 SM:SAMP1 LB:LIB1 PL:ILLUMINA" in joined
+        assert "\\t" not in joined
+
+    def test_unmapped_reads_are_kept_by_default(self):
+        assert "--outSAMunmapped Within" in " ".join(self.cmd())
+
+    def test_unmapped_reads_can_be_dropped(self):
+        assert "outSAMunmapped" not in " ".join(self.cmd(out_sam_unmapped=False))
+
+    def test_two_pass_is_off_unless_asked_for(self):
+        assert "twopassMode" not in " ".join(self.cmd())
+        assert "--twopassMode Basic" in " ".join(self.cmd(two_pass=True))
+
+    def test_intron_max_of_zero_leaves_the_flag_off(self):
+        """0 and STAR's derived ceiling are the same behaviour, but passing
+        the flag would make the recorded parameters claim a decision nobody
+        made."""
+        assert "alignIntronMax" not in " ".join(self.cmd())
+        assert "--alignIntronMax 1" in " ".join(self.cmd(align_intron_max=1))
+
+    def test_scratch_becomes_a_prefix_with_a_trailing_separator(self):
+        """STAR concatenates the prefix with its own filenames rather than
+        joining as a path. Without the slash, Log.final.out lands beside the
+        directory as `starLog.final.out`."""
+        joined = " ".join(self.cmd(scratch=Path("/w/star")))
+        assert "--outFileNamePrefix /w/star/" in joined
+
+    def test_threads_use_run_thread_n(self):
+        assert "--runThreadN 8" in " ".join(self.cmd(threads=8))
+
+
+class TestStarIndexSizing:
+    """STAR's defaults are sized for a mammalian genome and go wrong quietly
+    on anything else -- which is the reason these are computed at all."""
+
+    def test_a_human_sized_genome_keeps_the_defaults(self):
+        sa, chr_bin = align_runner.star_index_sizing(
+            genome_length=3_100_000_000, contigs=25
+        )
+        assert sa == 14
+        assert chr_bin == 18
+
+    def test_a_small_genome_shrinks_the_suffix_array_index(self):
+        """A 5 kb virus at the default 14 builds an index far larger than the
+        genome and maps almost nothing -- while exiting 0, so the job is
+        green and the BAM is empty."""
+        sa, _ = align_runner.star_index_sizing(genome_length=5_000, contigs=1)
+        assert sa < 14
+        assert sa >= 1
+
+    def test_a_fragmented_assembly_shrinks_the_chromosome_bins(self):
+        """A bin is allocated per contig at 2^chrBinNbits bytes, so a draft
+        assembly with tens of thousands of scaffolds exhausts memory during
+        the build at the default 18."""
+        _, chr_bin = align_runner.star_index_sizing(
+            genome_length=50_000_000, contigs=40_000
+        )
+        assert chr_bin < 18
+
+    def test_a_degenerate_reference_does_not_raise(self):
+        """log2(0) is undefined. STAR's own error about an unusable genome is
+        a better message than anything invented here, so this has to survive
+        long enough to reach it."""
+        sa, chr_bin = align_runner.star_index_sizing(genome_length=0, contigs=0)
+        assert sa >= 1
+        assert chr_bin >= 1
+
+
+class TestStarIndexCommand:
+    def cmd(self, **kw):
+        base = dict(
+            tool_path="STAR",
+            reference=Path("/w/genome.fna"),
+            genome_dir=Path("/w/genome.fna.STARindex"),
+            threads=4,
+            genome_length=3_100_000_000,
+            contigs=25,
+            scratch=Path("/w/index"),
+        )
+        return align_runner.build_star_index_command(**{**base, **kw})
+
+    def test_it_is_a_genome_generate_run(self):
+        joined = " ".join(self.cmd())
+        assert "--runMode genomeGenerate" in joined
+        assert "--genomeDir /w/genome.fna.STARindex" in joined
+        assert "--genomeFastaFiles /w/genome.fna" in joined
+
+    def test_sizing_reaches_the_command(self):
+        joined = " ".join(self.cmd(genome_length=5_000, contigs=1))
+        assert "--genomeSAindexNbases" in joined
+        assert "--genomeSAindexNbases 14" not in joined
+
+    def test_the_generic_builder_refuses_star(self):
+        """Rather than falling through to bowtie2's two-positional shape,
+        which would run STAR with a reference where a subcommand belongs."""
+        with pytest.raises(ValidationError):
+            align_runner.build_index_command(
+                aligner=Aligner.STAR, tool_path="STAR", reference=Path("/w/genome.fna")
+            )

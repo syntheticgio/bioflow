@@ -977,6 +977,19 @@ async def _apply_build_index(result: dict, *, owner: str) -> None:
         sidecars=len(created),
     )
 
+    if len(created) != len(outputs):
+        # Loud, because the alternative was measured: when every index file
+        # was dropped here, `build_index` still finished green and the failure
+        # only surfaced later as the *aligner* reporting a missing index --
+        # pointing at the index build, which had apparently succeeded.
+        log.error(
+            "index_outputs_partially_applied",
+            reference_id=reference_id,
+            aligner=result.get("aligner"),
+            produced=len(outputs),
+            stored=len(created),
+        )
+
     await _supply_sidecars_to_blocked_alignments(reference, result.get("aligner"))
 
 
@@ -1567,15 +1580,18 @@ async def _apply_annotate_variants(result: dict, *, owner: str) -> None:
             await run_service.record_outputs(run_id, [annotated.id], owner=annotated.owner)
 
 
-_SIDECAR_ROLES = {
-    "fai": SidecarRole.FAI,
-    "bai": SidecarRole.BAI,
-    "tbi": SidecarRole.TBI,
-    SidecarRole.BWA_MEM2_INDEX.value: SidecarRole.BWA_MEM2_INDEX,
-    SidecarRole.MINIMAP2_INDEX.value: SidecarRole.MINIMAP2_INDEX,
-    "bowtie2-index": SidecarRole.BOWTIE2_INDEX,
-    "hisat2-index": SidecarRole.HISAT2_INDEX,
-}
+# Derived from the enum rather than hand-listed, which is what this used to
+# be. A handler names a sidecar role as a string and this is what turns it
+# back into a `SidecarRole`; a role missing from the mapping is skipped with a
+# warning, so the index files were silently dropped while `build_index` still
+# reported success -- a green job, a reference with no index, and an alignment
+# that then failed with STAR complaining its genome directory did not exist.
+#
+# STAR was the first role added after this dict was written, and it went
+# wrong immediately. Deriving it means the next one cannot: every enum member
+# is accepted by construction, and the string keys here were always exactly
+# the enum values anyway.
+_SIDECAR_ROLES = {role.value: role for role in SidecarRole}
 
 
 _APPLIERS = {

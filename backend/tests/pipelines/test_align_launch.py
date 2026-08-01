@@ -11,6 +11,7 @@ from beanie import PydanticObjectId
 from app.errors import ValidationError
 from app.models import ACTIVE_STATES, FormatKind, ObjectStatus
 from app.pipelines.align_runner import Preset, ReadChemistry
+from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 
 
@@ -380,3 +381,84 @@ class TestAlignerToolResolution:
 
         for aligner in Aligner:
             assert _aligner_tool(aligner).name == aligner.value
+
+
+class TestDeclaredMemory:
+    """What the queue reserves for an alignment or an index build.
+
+    Both handlers used to declare a flat 8 GB whatever the aligner and
+    whatever the genome. That is roughly right for bwa-mem2 on a human genome
+    and wrong in both directions elsewhere -- and wrong in the dangerous
+    direction for STAR, whose human index needs about 30 GB. The governor
+    would admit the job believing there was room, and the result is an OOM
+    kill with a log that says nothing.
+    """
+
+    HUMAN_BASES = 3_100_000_000
+    YEAST_BASES = 12_000_000
+
+    def test_star_reserves_far_more_than_the_old_flat_8gb(self):
+        mem = pipeline_service.declared_align_mem_mb(
+            aligner=Aligner.STAR,
+            reference_bases=self.HUMAN_BASES,
+            threads=4,
+            sort_memory_mb=1024,
+            building_index=False,
+        )
+        # ~10 bytes/base is ~29.6 GB of index alone.
+        assert mem > 8192
+        assert mem > 25_000
+
+    def test_star_reserves_more_than_bwa_for_the_same_genome(self):
+        """The comparison the flat number could not express. Both were 8192
+        before, so the governor could not tell them apart."""
+        common = dict(
+            reference_bases=self.HUMAN_BASES,
+            threads=4,
+            sort_memory_mb=1024,
+            building_index=False,
+        )
+        star = pipeline_service.declared_align_mem_mb(aligner=Aligner.STAR, **common)
+        bwa = pipeline_service.declared_align_mem_mb(aligner=Aligner.BWA_MEM2, **common)
+        assert star > bwa * 3
+
+    def test_a_small_genome_reserves_less_than_the_old_flat_8gb(self):
+        """The other direction, which is what stops one yeast alignment from
+        occupying the budget for four."""
+        mem = pipeline_service.declared_align_mem_mb(
+            aligner=Aligner.BWA_MEM2,
+            reference_bases=self.YEAST_BASES,
+            threads=2,
+            sort_memory_mb=1024,
+            building_index=False,
+        )
+        assert mem < 8192
+
+    def test_a_floor_applies_when_the_reference_size_is_unknown(self):
+        """`reference.size` can be missing, and an estimate near zero would
+        let the governor admit the job alongside everything else."""
+        mem = pipeline_service.declared_align_mem_mb(
+            aligner=Aligner.BWA_MEM2,
+            reference_bases=0,
+            threads=1,
+            sort_memory_mb=0,
+            building_index=False,
+        )
+        assert mem == pipeline_service.MIN_DECLARED_MEM_MB
+
+    def test_building_an_index_reserves_more_than_loading_one(self):
+        """The multiplier is why the two jobs declare different numbers, and
+        is most of the reason bowtie2 and HISAT2 need their own figure."""
+        common = dict(
+            aligner=Aligner.HISAT2,
+            reference_bases=self.HUMAN_BASES,
+            threads=4,
+            sort_memory_mb=1024,
+        )
+        building = pipeline_service.declared_align_mem_mb(
+            building_index=True, **common
+        )
+        loading = pipeline_service.declared_align_mem_mb(
+            building_index=False, **common
+        )
+        assert building > loading

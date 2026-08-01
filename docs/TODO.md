@@ -450,7 +450,95 @@ the column layout must not depend on any of those being short.
 
 Touches: `frontend/src/components/HelpSoftware.tsx`, `frontend/src/styles.css`.
 
-## Aligners: STAR and DRAGMAP
+## Aligners: STAR and DRAGMAP — STAR FIXED, DRAGMAP still open
+
+STAR shipped 2026-08-01 (`Merge STAR aligner support with directory-shaped
+index layout`, plus a same-day follow-up fix). DRAGMAP was considered and
+deliberately deferred; the rest of this entry stands for it.
+
+**What shipped.** `Aligner.STAR`, `SidecarRole.STAR_INDEX`, `StarParams`, a
+registry spec with four biology fields, `rna-star` in the Dockerfile, and the
+directory-shaped `IndexLayout` this entry predicted would be needed. Members
+are stored *flat* as `<reference>.STARindex.<member>` and reassembled into a
+real `--genomeDir` in `aligners.materialize`, so the sidecar model, the
+database records and `owns_sidecar` were left untouched -- rather than the
+"directory-shaped branch" through the existence checks this entry imagined.
+
+**Where the implementation departed from this entry.**
+
+- **No GTF.** This entry says STAR "needs a GTF/GFF3 at index time for splice
+  junctions". It does not: STAR discovers junctions de novo, and the shipped
+  index is built without an annotation. Measured on real yeast data: 9,818
+  splices found with no GTF supplied. Annotation-aware indexing (`--sjdbGTFfile`,
+  `--sjdbOverhang`) remains genuinely useful and genuinely unbuilt -- and the
+  object model has no annotation concept yet, which is the larger part of that
+  work. The yeast project already holds `GCF_..._genomic.gtf` files, so the
+  input exists whenever someone wants it.
+- **`JobResources` — asked for by this entry, missed by the STAR change, then
+  done the same day.** Both launch sites now size the reservation from the
+  registry's `MemoryModel` and the reference, via
+  `pipeline_service.declared_align_mem_mb`. Measured on a 3.1 Gb human
+  genome, against the flat 8.0 GB every one of these used to declare:
+
+      aligner     human align  human build
+      bwa-mem2          11.3G        13.0G
+      minimap2          10.8G         9.0G
+      bowtie2            7.9G         9.7G
+      hisat2             8.8G        16.0G
+      star              34.7G        36.4G
+
+  So a STAR index build was admitted believing it needed a quarter of what it
+  does. Small genomes were over-declared in the same breath: a yeast STAR
+  alignment reserves 6,038 MB, verified on a real launch. Two details that
+  are easy to get wrong -- the index build passes `sort_memory_mb=0` because
+  it runs no samtools sort, and the alignment recomputes with
+  `building_index=False` rather than reusing the launch estimate, which
+  answers the different question "does the whole operation fit" and would
+  otherwise charge every alignment against an unindexed reference for
+  HISAT2's 4x build multiplier. The handler-level `@handler(resources=...)`
+  values stay at 8192 and are now only a fallback for the development
+  enqueue route in `api/v1/jobs.py`.
+- **No suggestion rule, deliberately.** This entry (and CLAUDE.md) require
+  `suggestion_service.py` to gain a rule that can pick a new tool. STAR
+  intentionally has none: HISAT2's ~4 GB index beats STAR's ~30 GB resident on
+  this hardware, so a STAR card would be blocked by the estimator on most
+  machines. The reasoning is recorded at the rule and asserted by
+  `test_rna_seq_stays_on_hisat2_even_with_star_installed`, since preferring
+  STAR is the natural next edit.
+- **Not built with or before differential expression**, which this entry
+  suggested. DE is in flight separately on
+  `claude/differential-expression-tool-75cbcf`.
+
+**A third hand-maintained mapping, not in this entry's list.** Registering the
+tool was not half the change but two thirds of it. `results._SIDECAR_ROLES`
+was a hand-listed role allowlist, and `star-index` was missing from it: the
+first real run stored *zero* of the eight index files while `build_index`
+still reported success, and the failure surfaced later as STAR complaining its
+genome directory did not exist. The full unit suite was green throughout,
+because every fixture fed the appliers roles already in the allowlist. It is
+now derived from `SidecarRole` so the next role cannot repeat it. CLAUDE.md
+names `suggestion_service` and `TOOL_META` as the mappings a new tool must
+reach; this was a third, and worth adding to that list.
+
+**Three defaults depart from STAR's own**, each because the alternative fails
+silently: `--outSAMunmapped Within` (STAR discards unmapped reads, which makes
+flagstat report 100% mapped whatever the truth is -- the real run read 95.67%,
+which is the evidence it works), `--readFilesCommand zcat` for gzipped input
+(STAR neither sniffs nor infers from the extension), and index sizing computed
+from the reference's `.fai` (STAR's defaults build an index that maps almost
+nothing on a small genome *while exiting 0*).
+
+**Verified** end to end in the running app, not only by unit test: 2,176,214
+Illumina reads against the yeast genome, 95.67% mapped, 86.64% properly
+paired, `Log.final.out` harvested into the job log. Two facts were corrected
+by running STAR 2.7.11b rather than recalling it -- genomeGenerate without an
+annotation writes eight files, not eleven (requiring the phantom three would
+have failed every index build), and the version probe truncated `2.7.11b` to
+`2.7.11`, naming a release that never ran.
+
+**Known rough edge, not fixed.** STAR reports MAPQ 255 for uniquely-mapped
+reads while every other aligner here uses the 0-60 scale, so the alignment
+report shows a mean MAPQ of ~247 against bwa-mem2's ~50 for the same reads.
 
 Raised: 2026-07-31, requested.
 

@@ -215,11 +215,62 @@ class Hisat2Params(BaseAlignParams):
         )
 
 
+@dataclass
+class StarParams(BaseAlignParams):
+    aligner: Aligner = Aligner.STAR
+    # Re-align against the junctions found in a first pass. Roughly doubles
+    # runtime and is the standard recommendation when novel junctions matter.
+    two_pass: bool = False
+    # Reads aligning to more loci than this are reported as unmapped rather
+    # than as multi-mappers. STAR's own default.
+    out_filter_multimap_nmax: int = 20
+    # 0 means "leave the flag off", which lets STAR derive its own ceiling
+    # (~590 kb) from the window parameters. Set it low -- 1 -- to forbid
+    # spliced alignment entirely, which is what DNA input wants.
+    align_intron_max: int = 0
+    # Keep unmapped reads in the output, which STAR does *not* do by default.
+    # Defaulted True to match the other four aligners: every downstream number
+    # this application shows comes from `samtools flagstat`, and flagstat over
+    # a BAM with the unmapped reads discarded reports 100% mapped whatever the
+    # truth was. A silently meaningless headline statistic is worse than a
+    # departure from STAR's default.
+    out_sam_unmapped: bool = True
+
+    def as_dict(self) -> dict:
+        return {
+            **super().as_dict(),
+            "two_pass": self.two_pass,
+            "out_filter_multimap_nmax": self.out_filter_multimap_nmax,
+            "align_intron_max": self.align_intron_max,
+            "out_sam_unmapped": self.out_sam_unmapped,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StarParams":
+        multimap = int(data.get("out_filter_multimap_nmax", 20))
+        if multimap < 1:
+            raise ValidationError("out_filter_multimap_nmax must be at least 1")
+
+        intron_max = int(data.get("align_intron_max", 0))
+        if intron_max < 0:
+            raise ValidationError("align_intron_max cannot be negative")
+
+        return cls(
+            aligner=Aligner.STAR,
+            two_pass=bool(data.get("two_pass", False)),
+            out_filter_multimap_nmax=multimap,
+            align_intron_max=intron_max,
+            out_sam_unmapped=bool(data.get("out_sam_unmapped", True)),
+            **cls._shared(data),
+        )
+
+
 PARAMS_CLASSES: dict[Aligner, type[BaseAlignParams]] = {
     Aligner.BWA_MEM2: Bwa2Params,
     Aligner.MINIMAP2: Minimap2Params,
     Aligner.BOWTIE2: Bowtie2Params,
     Aligner.HISAT2: Hisat2Params,
+    Aligner.STAR: StarParams,
 }
 
 

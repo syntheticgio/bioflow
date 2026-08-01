@@ -67,6 +67,14 @@ export type ObjectRole =
 export type SidecarRole =
   | "bwa-mem2-index"
   | "minimap2-index"
+  | "bowtie2-index"
+  | "hisat2-index"
+  /**
+   * One role for all eight files of STAR's genome directory. They are stored
+   * flat as `<reference>.STARindex.<member>` and only become a directory when
+   * a job materializes them for STAR.
+   */
+  | "star-index"
   | "fai"
   | "bai"
   /** The tabix index beside a bgzipped VCF -- to a VCF what bai is to a BAM. */
@@ -556,7 +564,12 @@ export interface RunDetail extends RunSummary {
   jobs: RunMemberJob[];
 }
 
-export type AlignerName = "bwa-mem2" | "minimap2" | "bowtie2" | "hisat2";
+export type AlignerName =
+  | "bwa-mem2"
+  | "minimap2"
+  | "bowtie2"
+  | "hisat2"
+  | "star";
 
 /** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */
 export type AlignPreset = "map-ont" | "map-pb" | "map-hifi" | "lr:hq" | "sr";
@@ -583,6 +596,10 @@ export interface AlignParams {
   max_intronlen?: number;
   no_spliced_alignment?: boolean;
   dta?: boolean;
+  two_pass?: boolean;
+  out_filter_multimap_nmax?: number;
+  align_intron_max?: number;
+  out_sam_unmapped?: boolean;
 }
 
 /** One input in the generated parameter form. Mirrors registry ParamField. */
