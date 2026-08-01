@@ -164,6 +164,18 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
             **merged_metadata,
             **assembly_enrichment["values"],
         }
+    # Guessed from the filename, and only ever offered for a key the user has
+    # not filled -- `detect_sequence_type` returns None if they have. Re-checked
+    # against the object here as well as against the payload there, because the
+    # payload was read before parsing and they could have set it since.
+    sequence_type = result.get("sequence_type")
+    if sequence_type and obj.metadata.get("sequence_type") in (None, ""):
+        merged_metadata = update.get(DataObject.metadata, obj.metadata)
+        update[DataObject.metadata] = {
+            **merged_metadata,
+            "sequence_type": sequence_type,
+        }
+
     if assembly_enrichment.get("facts"):
         merged_facts = update.get(DataObject.facts, obj.facts)
         update[DataObject.facts] = {
@@ -622,6 +634,15 @@ def _component_metadata(base: dict, accession: str, component: str) -> dict:
         if component == "genome" or k not in genome_only
     }
     out["assembly_accession"] = accession
+
+    # From the component table rather than the filename: `_role_for_component`
+    # already trusts that table for the far more consequential role decision,
+    # and the two must not be able to disagree about the same file.
+    from app.metadata import assembly_components
+
+    spec = assembly_components.COMPONENTS.get(component)
+    if spec is not None and spec.sequence_type:
+        out["sequence_type"] = spec.sequence_type
     return out
 
 

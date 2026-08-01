@@ -7,6 +7,7 @@ are already set are left alone and any disagreement is reported as a conflict,
 so the user can decide rather than being overruled.
 """
 
+import re
 from dataclasses import dataclass, field
 
 from app.logging import get_logger
@@ -235,3 +236,115 @@ def enrich_from_assembly(
             keys=[c["key"] for c in result.conflicts],
         )
     return result
+
+
+# --- Sequence type ----------------------------------------------------------
+
+# Only a FASTA name carries a sequence type by convention. The `sequence_type`
+# field itself is in COMMON_FIELDS and can be set by hand on anything -- it is
+# only the *guessing* that is scoped here, because a BAM or FASTQ name almost
+# never says, and a guess from one would be noise dressed as knowledge.
+SEQUENCE_TYPE_ELIGIBLE_FORMATS = {FormatKind.FASTA}
+
+# NCBI Datasets' compound forms, tested against the whole name before the
+# single-token table below. The order is load-bearing: `cds_from_genomic.fna`
+# and `rna_from_genomic.fna` both contain the token `genomic`, so matching the
+# bare token first would claim them both and label a CDS file a genome -- the
+# same confusion that once let a CDS FASTA be offered as an alignable
+# reference.
+_COMPOUND_SEQUENCE_TYPES: tuple[tuple[str, str], ...] = (
+    ("cds_from_genomic", "CDS"),
+    ("rna_from_genomic", "RNA"),
+)
+
+# Matched against whole `[._-]`-separated tokens, never as substrings.
+# Substring matching looks simpler and is wrong: "alternative" contains "rna",
+# so `alternative_contigs.fna` would come back as an RNA file.
+_TOKEN_SEQUENCE_TYPES: dict[str, str] = {
+    "genomic": "Genomic",
+    "genome": "Genomic",
+    "dna": "Genomic",
+    "cds": "CDS",
+    "protein": "Protein",
+    "proteins": "Protein",
+    "pep": "Protein",
+    "aa": "Protein",
+    "rna": "RNA",
+    "mrna": "RNA",
+    "rrna": "RNA",
+    "trna": "RNA",
+    "ncrna": "RNA",
+    "transcript": "RNA",
+    "transcripts": "RNA",
+}
+
+# Suffixes that say nothing about sequence type and would otherwise be read as
+# tokens. Stripped so the last *meaningful* token is reachable in a name like
+# `..._protein.faa.gz`.
+_UNINFORMATIVE_SUFFIXES = frozenset(
+    {"gz", "bgz", "bz2", "xz", "zip", "fa", "fna", "fasta", "faa", "frn",
+     "ffn", "fas"}
+)
+
+# Extension conventions: the weakest signal, so consulted last. `.faa` is amino
+# acid FASTA, `.ffn` nucleotide coding regions and `.frn` non-coding RNA by
+# long-standing convention, so a name that says nothing else still resolves.
+_EXTENSION_SEQUENCE_TYPES: dict[str, str] = {
+    "faa": "Protein",
+    "ffn": "CDS",
+    "frn": "RNA",
+}
+
+
+def detect_sequence_type(
+    *,
+    filename: str,
+    existing_metadata: dict | None = None,
+    format_kind: FormatKind | str | None = None,
+) -> str | None:
+    """Guess Genomic/CDS/Protein/RNA from a reference's filename.
+
+    Returns None rather than a guess whenever the name does not say. An absent
+    tag is a question the user can answer at leisure; a wrong one is a claim
+    they have to notice before they can correct it.
+
+    Obeys the same never-overwrite rule as the enrichers above: a value the
+    user has already set ends this before the name is even read.
+    """
+    if (existing_metadata or {}).get("sequence_type") not in (None, ""):
+        return None
+
+    if isinstance(format_kind, str):
+        try:
+            format_kind = FormatKind(format_kind)
+        except ValueError:
+            format_kind = None
+    if format_kind not in SEQUENCE_TYPE_ELIGIBLE_FORMATS:
+        return None
+
+    name = (filename or "").strip().lower()
+    if not name:
+        return None
+
+    for needle, value in _COMPOUND_SEQUENCE_TYPES:
+        if needle in name:
+            return value
+
+    parts = [p for p in re.split(r"[._\-\s]+", name) if p]
+
+    # Last token first: NCBI puts the component name at the end
+    # (`GCF_000002445.2_ASM244v1_genomic.fna`), so a directory or assembly name
+    # earlier in the string must not outrank it.
+    for token in reversed(parts):
+        if token in _UNINFORMATIVE_SUFFIXES:
+            continue
+        value = _TOKEN_SEQUENCE_TYPES.get(token)
+        if value:
+            return value
+
+    for token in reversed(parts):
+        value = _EXTENSION_SEQUENCE_TYPES.get(token)
+        if value:
+            return value
+
+    return None
