@@ -35,6 +35,11 @@ class RunKind(StrEnum):
     # only the query differs -- so splitting the enum would describe a
     # distinction the machine does not make. The run label carries it instead.
     UNIPROT_DOWNLOAD = "uniprot_download"
+    # De novo assembly. Distinct from ASSEMBLY_DOWNLOAD, which fetches a
+    # published one -- the two produce the same kind of file by completely
+    # different means, and a run list that conflated them would claim credit
+    # for a genome NCBI assembled.
+    ASSEMBLY = "assembly"
 
 
 class RunStatus(StrEnum):
@@ -109,6 +114,7 @@ class RunJobRole(StrEnum):
     DOWNLOAD = "download"
     QC = "qc"
     CALL_VARIANTS = "call_variants"
+    ASSEMBLE = "assemble"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

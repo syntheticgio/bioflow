@@ -43,6 +43,7 @@ EXTENSION_MAP: dict[str, FormatKind] = {
     "gff": FormatKind.GFF,
     "gff3": FormatKind.GFF,
     "gtf": FormatKind.GTF,
+    "gfa": FormatKind.GFA,
     "txt": FormatKind.TEXT,
     "tsv": FormatKind.TEXT,
 }
@@ -180,9 +181,66 @@ def _sniff_text(payload: bytes) -> FormatKind | None:
         return FormatKind.FASTQ
 
     data_lines = [ln for ln in lines if not ln.startswith("#")]
+
+    # Before the tabular heuristic: a GFA is tab-separated, and while its
+    # S-lines happen not to look like BED (columns 2 and 3 are a name and a
+    # sequence, not integers), relying on that coincidence would make the
+    # answer depend on which record type came first.
+    if _looks_like_gfa(data_lines):
+        return FormatKind.GFA
+
     if data_lines:
         return _sniff_tabular(data_lines)
     return None
+
+
+# The record types GFA 1.0 defines. Segments and links are the two that carry
+# the graph; a file of nothing but headers and comments is not evidence.
+_GFA_RECORD_TYPES = frozenset("HSLCPWJ")
+
+
+def _looks_like_gfa(lines: list[str]) -> bool:
+    """Every line a GFA record, with the segment and link fields validated.
+
+    Checking only the leading letter is not enough, and this is not
+    hypothetical -- `P\\t1\\t2` / `S\\t3\\t4`, an ordinary two-column table,
+    passed that version. Unlike BED-vs-GFF, where both answers are at least
+    intervals, calling a data table an assembly graph is a category error the
+    explorer shows to the user, so the fields get checked:
+
+    - `S` is `name`, then either `*` or an actual nucleotide sequence
+    - `L` is `from`, orientation, `to`, orientation, where orientation is +/-
+
+    A file of nothing but headers and comments is still not evidence, so at
+    least one validated segment or link is required.
+    """
+    sample = lines[: min(20, len(lines))]
+    if not sample:
+        return False
+    saw_graph_record = False
+    for line in sample:
+        cols = line.split("\t")
+        if len(cols) < 2 or cols[0] not in _GFA_RECORD_TYPES:
+            return False
+        if cols[0] == "S":
+            if len(cols) < 3 or not _is_sequence_field(cols[2]):
+                return False
+            saw_graph_record = True
+        elif cols[0] == "L":
+            if len(cols) < 5 or cols[2] not in ("+", "-") or cols[4] not in ("+", "-"):
+                return False
+            saw_graph_record = True
+    return saw_graph_record
+
+
+# IUPAC, because an assembler may emit ambiguity codes and a graph full of N
+# is still a graph.
+_SEQUENCE_RE = re.compile(r"^[ACGTURYKMSWBDHVNacgturykmswbdhvn]+$")
+
+
+def _is_sequence_field(value: str) -> bool:
+    """A GFA segment's sequence: literal bases, or `*` for 'not stored'."""
+    return value == "*" or bool(_SEQUENCE_RE.match(value))
 
 
 def _sniff_tabular(lines: list[str]) -> FormatKind | None:

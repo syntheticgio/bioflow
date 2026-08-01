@@ -378,6 +378,11 @@ FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
         ObjectRole.ALIGNMENT,
         ObjectRole.VARIANTS,
         ObjectRole.ANNOTATION,
+        # An assembly graph's questions are its format's. There is nothing to
+        # ask that the GFA does not already answer -- and pointedly no
+        # assembly accession, since a de novo graph is precisely the case
+        # where no published assembly exists to name.
+        ObjectRole.ASSEMBLY_GRAPH,
     }
 )
 

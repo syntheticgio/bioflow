@@ -25,6 +25,9 @@ import type { PipelineTool, PipelineType } from "../api/types";
 const GROUPS: { type: PipelineType; title: string }[] = [
   { type: "qc", title: "Quality control" },
   { type: "trim", title: "Trimming" },
+  // Before alignment: a de novo assembly is what you align *to* when there is
+  // no published reference, so this is the earlier step for that workflow.
+  { type: "assemble", title: "Assembly" },
   { type: "align", title: "Alignment" },
   { type: "variant", title: "Variant calling" },
   { type: "download", title: "Data retrieval" },

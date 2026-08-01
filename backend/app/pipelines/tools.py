@@ -444,6 +444,16 @@ def datasets() -> Tool:
     return _probe("datasets", settings.datasets_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def flye() -> Tool:
+    # A Python entry point like cutadapt, not like NanoPlot: its imports are
+    # its own modules rather than pandas/scipy/plotly, so the default timeout
+    # is right. If this ever starts failing the probe on a cold container,
+    # SLOW_IMPORT_TIMEOUT_SECONDS is the knob -- but measure before reaching
+    # for it, since that constant exists for an import graph Flye does not have.
+    return _probe("flye", settings.flye_path, ["--version"])
+
+
 def all_tools() -> list[Tool]:
     return [
         fastp(),
@@ -459,6 +469,7 @@ def all_tools() -> list[Tool]:
         bcftools(),
         clair3(),
         deepvariant(),
+        flye(),
         fasterq_dump(),
         prefetch(),
         datasets(),
@@ -482,6 +493,7 @@ class PipelineType(StrEnum):
     # misleading listed as utilities beside samtools.
     DOWNLOAD = "download"
     VARIANT = "variant"
+    ASSEMBLE = "assemble"
 
 
 @dataclass(frozen=True)
@@ -997,6 +1009,47 @@ TOOL_META: dict[str, ToolMeta] = {
             "instead. Neither image is multi-architecture."
         ),
         runnable=True,
+    ),
+    "flye": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLE,),
+        one_liner="De novo assembler for long reads",
+        summary=(
+            "Assembles long reads into contigs without a reference, using "
+            "repeat graphs to resolve repetitive regions rather than "
+            "collapsing them. Handles Nanopore and PacBio, from error-prone "
+            "CLR through HiFi, with an input mode per read accuracy."
+        ),
+        strengths=(
+            "Nanopore and PacBio, including HiFi",
+            "Repeat graphs resolve repeats instead of collapsing them",
+            "Reports per-contig coverage and circularity, so a finished "
+            "bacterial chromosome is visible as one circular contig",
+            "Bundles its own polishing, so a draft needs no second tool",
+        ),
+        homepage="https://github.com/fenderglass/Flye",
+        repository="https://github.com/fenderglass/Flye",
+        # The single-genome paper. metaFlye (Nat Methods 2020) is the one to
+        # cite for metagenomes, which BioFlow does not offer a mode for -- so
+        # naming it here would put the wrong reference in a methods section.
+        citation=(
+            "Kolmogorov M, Yuan J, Lin Y, Pevzner P. Assembly of long "
+            "error-prone reads using repeat graphs. Nat Biotechnol. 2019."
+        ),
+        citation_url="https://doi.org/10.1038/s41587-019-0072-8",
+        # Verified against the project's LICENSE file on 2026-08-01: BSD
+        # 3-clause, "Copyright (c) 2016, The Regents of the University of
+        # California". The README says only "a BSD license", which does not
+        # distinguish 2- from 3-clause.
+        license="BSD-3-Clause",
+        usage=(
+            "The assembler for long reads, and the only one installed. The "
+            "input mode follows the reads' inferred chemistry, which is what "
+            "tells Flye how accurate they are. Produces a contig FASTA that "
+            "becomes a reference you can align against, an assembly graph, "
+            "and a per-contig table whose coverage and circularity are stored "
+            "as facts on the assembly. Short reads are not offered: Flye "
+            "cannot assemble them."
+        ),
     ),
 }
 

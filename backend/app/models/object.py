@@ -35,6 +35,11 @@ class FormatKind(StrEnum):
     BED = "bed"
     GFF = "gff"
     GTF = "gtf"
+    # Graphical Fragment Assembly: the assembly graph a de novo assembler
+    # emits beside its contigs. Its own kind rather than TEXT because the
+    # explorer showing "Text" beside a FASTA and a BAM says nothing, and
+    # because a GFA has a viewer (Bandage) the way a .txt does not.
+    GFA = "gfa"
     TEXT = "text"
     UNKNOWN = "unknown"
 
@@ -86,6 +91,12 @@ class ObjectRole(StrEnum):
     # slightly worse: `cds_from_genomic.fna` is nucleotide FASTA that would
     # pass any "does this look like a genome" sniff test.
     TRANSCRIPT = "transcript"
+    # An assembly graph (GFA) from a de novo assembly. A role rather than a
+    # `SidecarRole`: sidecars are scaffolding for tools -- indexes beside the
+    # file they index, which no person opens -- and a graph is a result
+    # someone loads into Bandage to see how the contigs connect. Format alone
+    # cannot say it either, since GFA is also an alignment-graph format.
+    ASSEMBLY_GRAPH = "assembly_graph"
 
 
 class SidecarRole(StrEnum):

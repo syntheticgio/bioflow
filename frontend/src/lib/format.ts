@@ -72,6 +72,7 @@ const FORMAT_LABELS: Record<string, string> = {
   bed: "BED",
   gff: "GFF",
   gtf: "GTF",
+  gfa: "GFA",
   text: "Text",
   unknown: "Unknown",
 };

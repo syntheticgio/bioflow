@@ -252,6 +252,7 @@ class TestSerialization:
             "bcftools",
             "clair3",
             "deepvariant",
+            "flye",
             "fasterq-dump",
             "prefetch",
             "datasets",
