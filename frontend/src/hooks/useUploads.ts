@@ -58,9 +58,15 @@ export function useUploads(projectId: string | undefined) {
           loaded: file.size,
           phase: result.dedup ? "deduplicated" : "complete",
         });
+        // The dedup wording matches the tray's: the file is in the library,
+        // and it got there without a transfer because the content was already
+        // on disk. It may have been put there by another profile -- blobs are
+        // global by design -- so this says only that the file already existed
+        // locally, never whose it was. "no transfer needed" read as a step
+        // that got skipped; what actually happened is that the upload is done.
         notify.success(
           result.dedup
-            ? `${file.name} already stored — deduplicated, no transfer needed`
+            ? `${file.name} added to your library — already stored locally`
             : `Uploaded ${file.name}`,
         );
         refresh();

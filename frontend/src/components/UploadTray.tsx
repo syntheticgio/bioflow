@@ -59,7 +59,15 @@ export function UploadTray() {
                     ? item.error
                     : item.status === "done"
                       ? item.phase === "deduplicated"
-                        ? "Already stored (deduplicated)"
+                        ? // Blobs are stored once and shared across profiles,
+                          // so this can fire because content another profile
+                          // uploaded is already on disk -- which is why the
+                          // wording says nothing about who. The user learns
+                          // their file is ready; the partition keeps the rest.
+                          // Framed as a finished result rather than a skipped
+                          // transfer, because an upload that completes the
+                          // instant it starts otherwise reads as a bug.
+                          "Added to your library — already stored locally"
                         : "Complete"
                       : item.status === "cancelled"
                         ? "Cancelled"
