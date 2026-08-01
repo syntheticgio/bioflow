@@ -31,10 +31,21 @@ Three facts were measured against the live UniProt API on 2026-07-31. Each one c
    Human reviewed reported 20,416 and delivered 20,427. Use the header for
    sizing, never as a post-download assertion.
 
-**Environment notes (from CLAUDE.md):**
-- Run tests inside the container:
-  `docker compose exec api python -m pytest tests/ -q`
-  A bare host `.venv` hits Mongo replica-set errors.
+**Environment notes:**
+- **Run tests with `./scripts/wt-pytest.sh`, never `docker compose exec api
+  python -m pytest`.** CLAUDE.md prescribes the latter, and it is right for
+  the main repo and wrong here: the shared stack bind-mounts
+  `/Users/syntheticgio/Programming/local-bio-pipeliner/backend`, so inside a
+  worktree that command silently runs *main's* code. Every result would be
+  about the wrong tree. A bare host `.venv` is not an option either — it hits
+  Mongo replica-set connection errors.
+- The runner starts a throwaway Mongo of its own. `conftest.py` hardcodes the
+  database name `biopipe_test` and drops every collection at session start, so
+  sharing one Mongo with the running stack makes DB-touching tests
+  (`test_mate_link`, `test_read_pairing`, `test_variant_taxid`) fail in a
+  different combination on every run. Measured on one unchanged tree: 7
+  failed, then 1872 passed, then 5 failed. With the private Mongo: five
+  consecutive runs, 1872 passed each time.
 - `worker` does NOT hot-reload. After changing anything under
   `backend/app/queue/`, run `docker compose restart worker` before re-testing
   a job, or you will test the old in-memory code.
@@ -164,7 +175,7 @@ class TestParseAccessions:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/metadata/test_uniprot_classify.py -q
+./scripts/wt-pytest.sh tests/metadata/test_uniprot_classify.py -q
 ```
 Expected: FAIL, `ModuleNotFoundError` or `ImportError: cannot import name 'uniprot'`.
 
@@ -268,7 +279,7 @@ def parse_accessions(raw: str) -> list[str]:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/metadata/test_uniprot_classify.py -q
+./scripts/wt-pytest.sh tests/metadata/test_uniprot_classify.py -q
 ```
 Expected: PASS, 13 passed.
 
@@ -381,7 +392,7 @@ class TestStreamUrl:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/metadata/test_uniprot_queries.py -q
+./scripts/wt-pytest.sh tests/metadata/test_uniprot_queries.py -q
 ```
 Expected: FAIL, `AttributeError: module 'app.metadata.uniprot' has no attribute 'reference_proteome_query'`.
 
@@ -459,7 +470,7 @@ def stream_url(query: str) -> str:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/metadata/test_uniprot_queries.py -q
+./scripts/wt-pytest.sh tests/metadata/test_uniprot_queries.py -q
 ```
 Expected: PASS, 9 passed. (The test file above has 9 methods: 4 + 4 + 1.)
 
@@ -683,7 +694,7 @@ class TestFailureIsNotFatal:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/metadata/test_uniprot_resolve.py -q
+./scripts/wt-pytest.sh tests/metadata/test_uniprot_resolve.py -q
 ```
 Expected: FAIL, `AttributeError: module 'app.metadata.uniprot' has no attribute '_get_json'`.
 
@@ -919,7 +930,7 @@ def search_proteins(query: str) -> list[ProteinHit]:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/metadata/test_uniprot_resolve.py -q
+./scripts/wt-pytest.sh tests/metadata/test_uniprot_resolve.py -q
 ```
 Expected: PASS, 10 passed. (The test file above has 10 test methods.)
 
@@ -963,7 +974,7 @@ class RunKind(StrEnum):
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./scripts/wt-pytest.sh tests/ -q
 ```
 Expected: PASS, same count as before this task.
 
@@ -1107,7 +1118,7 @@ class TestFilename:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/services/test_uniprot_service.py -q
+./scripts/wt-pytest.sh tests/services/test_uniprot_service.py -q
 ```
 Expected: FAIL, `ImportError: cannot import name 'uniprot_service'`.
 
@@ -1319,7 +1330,7 @@ async def launch_download(
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/services/test_uniprot_service.py -q
+./scripts/wt-pytest.sh tests/services/test_uniprot_service.py -q
 ```
 Expected: PASS, 14 passed.
 
@@ -1493,7 +1504,7 @@ class TestUncompressed:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/queue/test_uniprot_download.py -q
+./scripts/wt-pytest.sh tests/queue/test_uniprot_download.py -q
 ```
 Expected: FAIL, `ImportError: cannot import name 'uniprot_handlers'`.
 
@@ -1676,7 +1687,7 @@ the placement is intentional.
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/queue/test_uniprot_download.py -q
+./scripts/wt-pytest.sh tests/queue/test_uniprot_download.py -q
 ```
 Expected: PASS, 10 passed. (The test file above has 10 test methods.)
 
@@ -1824,7 +1835,7 @@ class TestRegistration:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/queue/test_uniprot_apply.py -q
+./scripts/wt-pytest.sh tests/queue/test_uniprot_apply.py -q
 ```
 Expected: FAIL, `AttributeError: module 'app.queue.results' has no attribute '_apply_uniprot_download'`.
 
@@ -1932,7 +1943,7 @@ top of `results.py` -- no new imports are needed.
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/queue/test_uniprot_apply.py -q
+./scripts/wt-pytest.sh tests/queue/test_uniprot_apply.py -q
 ```
 Expected: PASS, 5 passed.
 
@@ -2100,7 +2111,7 @@ class TestDispatch:
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/api/test_uniprot_resolve.py -q
+./scripts/wt-pytest.sh tests/api/test_uniprot_resolve.py -q
 ```
 Expected: FAIL, `ImportError: cannot import name 'uniprot'`.
 
@@ -2367,7 +2378,7 @@ alphabetical, keep them that way.
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/api/test_uniprot_resolve.py -q
+./scripts/wt-pytest.sh tests/api/test_uniprot_resolve.py -q
 ```
 Expected: PASS, 8 passed.
 
@@ -2392,23 +2403,55 @@ is worse than a blank field.
 
 - [ ] **Step 1: Verify the licence and citation**
 
+`uniprot.org/help/license` is a JavaScript-rendered single-page app: fetching
+it returns the loader shell, not the licence text. Use the machine-readable
+sources instead, which are also more authoritative -- they are what ships
+with the data.
+
 Run:
 ```bash
-docker compose exec api python -c "
-import urllib.request, json
-u='https://rest.uniprot.org/uniprotkb/P0DTC2?format=json&fields=accession'
-with urllib.request.urlopen(u, timeout=20) as r:
-    print('release:', r.headers.get('X-UniProt-Release'))
-"
+./scripts/wt-pytest.sh --version >/dev/null 2>&1; python3 - <<'PY'
+import urllib.request
+
+def get(u):
+    req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read().decode("utf-8", "replace"), dict(r.headers)
+
+# 1. The licence, from the release README and from an entry record.
+readme, _ = get("https://ftp.uniprot.org/pub/databases/uniprot/current_release/"
+                "knowledgebase/complete/README")
+i = readme.lower().find("creative commons")
+print("README licence:", " ".join(readme[i-120:i+200].split()))
+
+entry, hdrs = get("https://rest.uniprot.org/uniprotkb/P0DTC2.txt")
+for line in entry.splitlines():
+    if "Creative Commons" in line or "Copyrighted by" in line:
+        print("entry:", line)
+
+# 2. The current release, for the per-download `facts` value.
+print("release:", hdrs.get("X-UniProt-Release"))
+PY
 ```
 
-Then open <https://www.uniprot.org/help/license> and
-<https://www.uniprot.org/help/publications> and read the current licence and
-the citation UniProt asks to be used. Do not fill these fields from memory.
+Verified on 2026-07-31, and reproduced from two independent sources:
 
-At the time of writing, UniProt distributes its data under CC BY 4.0 and asks
-for the current UniProt Consortium *Nucleic Acids Research* database issue
-paper. **Confirm both before writing them.**
+- **Licence: CC BY 4.0.** The release README states "We have chosen to apply
+  the Creative Commons Attribution 4.0 International (CC BY 4.0) License ...
+  to all copyrightable parts of our databases. (c) 2002-2024 UniProt
+  Consortium", and every entry record carries "Distributed under the Creative
+  Commons Attribution (CC BY 4.0) License".
+- **`terms` URL: `https://www.uniprot.org/terms`** -- the URL the entry
+  records themselves point at, rather than the help page.
+- **Citation: "UniProt: the Universal Protein Knowledgebase in 2025",
+  DOI `10.1093/nar/gkae1010`.** Confirmed via Europe PMC as the current
+  database-issue paper. (There is also a 2025 API-specific paper,
+  `10.1093/nar/gkaf394`; the database-issue paper is the right citation for
+  the resource itself.)
+
+If the command above reports something different from this, the command wins
+-- these values were true on 2026-07-31 and UniProt publishes a new database
+issue roughly annually.
 
 - [ ] **Step 2: Add the entry**
 
@@ -2443,20 +2486,23 @@ the NCBI entries:
         docs="https://www.uniprot.org/help/api",
         # Verified against uniprot.org/help/publications in Step 1 -- replace
         # with whatever that page currently asks for rather than this note.
-        citation="The UniProt Consortium, Nucleic Acids Research",
+        # Verified in Step 1 against the release README, an entry record, and
+        # Europe PMC -- not recalled. CC BY 4.0; `terms` is the URL UniProt's
+        # own records cite, rather than the JS-rendered help page.
+        citation="The UniProt Consortium, Nucleic Acids Research 2025",
         citation_url="https://doi.org/10.1093/nar/gkae1010",
-        terms="https://www.uniprot.org/help/license",
+        terms="https://www.uniprot.org/terms",
     ),
 ```
 
-**Replace `citation` and `citation_url` with what Step 1 found.** If UniProt's
-current citation differs from the line above, the current one wins.
+If Step 1's output disagrees with these values, Step 1 wins -- UniProt
+publishes a new database-issue paper roughly annually.
 
 - [ ] **Step 3: Run the completeness test**
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/api/test_sources_api.py tests/pipelines -q -k source
+./scripts/wt-pytest.sh tests/api/test_sources_api.py tests/pipelines -q -k source
 ```
 Expected: PASS. If a completeness test names a required field that is empty,
 fill it -- that is the test doing its job.
@@ -3015,25 +3061,48 @@ Manual testing in the browser is the actual verification step for anything
 UI-facing here -- there is no headless component-testing setup in this repo
 and none is expected.
 
-- [ ] **Step 1: Rebuild and restart from the main repo root**
+**Read this before running anything in this task.**
 
-Run:
+There is a contradiction to resolve first. The browser checks below need a
+running stack serving *this branch's* code — but this branch is a worktree,
+and CLAUDE.md is explicit that `docker compose up` must only ever run from the
+main repo root, because the bind mounts are relative paths and Compose would
+otherwise silently repoint the user's port-5173 instance at this branch with
+no warning. Rebuilding from the main root, meanwhile, serves main — which does
+not contain this feature at all, so every browser check would pass or fail for
+reasons unrelated to the work.
+
+So do **not** rebuild the shared stack. Choose one:
+
+**Option A — merge first, then verify (simplest).** Land the branch on main,
+then rebuild the shared stack from the main repo root exactly as CLAUDE.md
+says, and run the browser checks against port 5173 as normal.
+
+**Option B — a private stack on unpublished ports.** CLAUDE.md describes this
+for exactly this case: run with a separate project name so the shared instance
+keeps serving main.
+
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner && docker compose up -d --build api web worker
+cd /Users/syntheticgio/Programming/local-bio-pipeliner/.claude/worktrees/worktree-todos-plan-a8dfce
+docker compose -p biopipe-uniprot up -d --build api web worker
 ```
 
-**From the main repo root, not a worktree.** The bind mounts are relative
-paths and Compose resolves them against the invocation directory, so running
-this inside a worktree silently repoints the shared stack at that branch.
+Confirm it did not disturb the shared stack:
 
-- [ ] **Step 2: Confirm the stack is on the right tree**
-
-Run:
 ```bash
 docker inspect biopipe-worker-1 --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}'
 ```
-Expected: no path contains `.claude/worktrees/`. If one does, re-run Step 1
-from the main repo root.
+Expected: still the **main** repo paths, no `.claude/worktrees/`. If a worktree
+path appears, the shared stack was repointed — fix it with
+`cd /Users/syntheticgio/Programming/local-bio-pipeliner && docker compose up -d --build api web worker`.
+
+Then find the private stack's mapped web port with
+`docker compose -p biopipe-uniprot port web 5173` and use that URL below
+instead of `localhost:5173`. Tear it down afterwards with
+`docker compose -p biopipe-uniprot down`.
+
+**This choice is the user's to make, not the implementer's.** Ask before
+proceeding.
 
 - [ ] **Step 3: Confirm the handler loaded**
 
@@ -3047,7 +3116,7 @@ Expected: the list includes `download_uniprot`.
 
 Run:
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./scripts/wt-pytest.sh tests/ -q
 ```
 Expected: PASS, with the ~59 new tests added by this plan.
 
