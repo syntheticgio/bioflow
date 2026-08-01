@@ -33,7 +33,7 @@ actually returns.
 | --- | --- | --- |
 | `UP000002311` | `^UP\d{9}$` | proteome card |
 | `P0DTC2`, `P00533 P0DTC2` | UniProtKB accession pattern, one or more tokens | protein picker, all pre-selected |
-| `4932`, `Saccharomyces cerevisiae` | all digits, or a proteome search that hits | reference proteome card, plus an "N other proteomes" disclosure |
+| `4932`, `Saccharomyces cerevisiae` | all digits, or a proteome search that hits | reference proteome card (see the correction below -- no strain picker) |
 | `spike glycoprotein` | anything else | protein picker, search results, none pre-selected |
 
 The accession pattern is UniProt's own documented one:
@@ -61,9 +61,25 @@ only `reference:true` would report that yeast has no proteome while 360 sit
 behind it -- for the taxon ID a user is most likely to type.
 
 So the organism path is a chain: `reference:true` first, and when that is
-empty, the unfiltered organism query with the picker opened rather than the
-card. `559292` and `9606` both return exactly 1 for `reference:true` and take
-the short path.
+empty, a second step. `559292` and `9606` both return exactly 1 for
+`reference:true` and take the short path.
+
+> **Corrected during implementation, 2026-07-31.** The second step was
+> specified as "the unfiltered organism query with the picker opened rather
+> than the card" -- offering those 360 proteomes as a strain choice. That was
+> wrong. The proteomes exist as records, but their *entries* are in UniParc
+> rather than UniProtKB's searchable index, which is what both the count and
+> the download query go through: `proteome:UP000037662` returns 0 rows and an
+> empty FASTA although its own record claims 5,389 proteins. Sampled across
+> *S. cerevisiae*, *E. coli*, *M. tuberculosis*, and *S. aureus*, **0 of 100**
+> non-reference proteomes were downloadable.
+>
+> The picker could therefore only ever offer dead ends -- and it offered them
+> in place of the reference proteome, which the *organism-name* query finds
+> immediately. The second step is now that name query: 4932 → UP000002311,
+> 562 → UP000000625, 1280 → UP000001939, all downloadable. A taxon that
+> reaches no reference proteome resolves to nothing, which is honest, rather
+> than to a strain that would download an empty file.
 
 ### The filter is `reference:true`
 
@@ -223,8 +239,9 @@ Backend tests run in the container:
 - The resolver's classification, including the cases that motivated it:
   `EGFR` and `GCF_000002445.2` reaching the text branch rather than the
   accession one.
-- The taxon fallback: taxon 4932 must reach the picker and not report "no
-  proteome," which is the failure a `reference:true`-only query produces.
+- The taxon fallback: taxon 4932 must reach UP000002311 by way of the
+  organism-name query, and must not report "no proteome" -- the failure a
+  `reference:true`-only query produces -- nor offer an undownloadable strain.
 - Reviewed and unreviewed producing different queries and different counts.
 - One handler serving both query shapes.
 - `sources.py`'s existing completeness test, which the new entry must satisfy.
