@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"
 
+    # The *host* path that BIOINFO_HOME is mounted from, for starting sibling
+    # containers. Distinct from BIOINFO_HOME, which is already overloaded: the
+    # compose file uses it as the host path in the bind mount and sets it to
+    # /data inside the container. A sibling container gets its mounts from the
+    # host, so it needs this value and not the container's own view.
+    # Empty when unset, which host_path_for reports as a fixable error.
+    bioinfo_home_host: str = ""
+
+    deepvariant_image: str = "ghcr.io/antomicblitz/deepvariant-arm64:v1.9.0-arm64.6"
 
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own

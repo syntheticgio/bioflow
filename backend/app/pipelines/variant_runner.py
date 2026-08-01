@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from app.errors import ValidationError
+from app.config import settings
+from app.errors import PermanentError, ValidationError
 from app.logging import get_logger
 from app.pipelines.align_runner import ReadChemistry
 
@@ -147,6 +148,50 @@ def output_name(bam_name: str, caller: str) -> str:
     """
     stem = Path(bam_name).stem
     return f"{stem}.{caller}.vcf.gz"
+
+
+def host_path_for(
+    path: str | Path,
+    *,
+    container_root: str | None = None,
+    host_root: str | None = None,
+) -> str:
+    """Where `path` lives on the Docker host.
+
+    A sibling container started through the host's daemon mounts host paths, so
+    the worker's own view of storage is the wrong thing to hand it. Passing
+    `/data` to `docker run` mounts an empty directory that happens to exist,
+    and the tool then fails "file not found" on a file that is plainly there --
+    which is why anything outside the storage root raises here instead of being
+    passed through hopefully.
+    """
+    container_root = (
+        container_root if container_root is not None else str(settings.bioinfo_home)
+    )
+    host_root = host_root if host_root is not None else settings.bioinfo_home_host
+
+    if not host_root:
+        raise PermanentError(
+            "BIOINFO_HOME_HOST is not set, so the host path for "
+            f"{path} cannot be determined. Set it in docker-compose.override.yml "
+            "to the same host directory BIOINFO_HOME is mounted from.",
+            details={"path": str(path)},
+        )
+
+    # relative_to rather than a string prefix: `/database/x` starts with the
+    # characters of `/data` without being under it, and translating it would
+    # mount nothing.
+    try:
+        rel = Path(path).relative_to(Path(container_root))
+    except ValueError:
+        raise PermanentError(
+            f"{path} is outside {container_root}, so it is not visible to a "
+            "sibling container. Only files under the storage root can be "
+            "passed to DeepVariant.",
+            details={"path": str(path), "container_root": container_root},
+        ) from None
+
+    return str(Path(host_root) / rel) if str(rel) != "." else host_root
 
 
 def build_clair3_command(
