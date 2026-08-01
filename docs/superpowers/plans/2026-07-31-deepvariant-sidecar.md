@@ -527,6 +527,19 @@ class TestDeepVariantCommand:
         """Without --rm a 8.8GB-image container is left behind per run."""
         assert "--rm" in self._cmd()
 
+    def test_disables_bf16_fastmath(self):
+        """Not cosmetic: without these the run dies with SIGILL inside
+        TensorFlow. The image targets Graviton3 and defaults to BF16 fastmath,
+        and Docker on macOS advertises bf16 in /proc/cpuinfo while faulting on
+        the instruction. Measured 2026-08-01 -- a refactor that drops these
+        reintroduces a crash whose message names nothing about its cause."""
+        cmd = self._cmd()
+        assert "DNNL_DEFAULT_FPMATH_MODE=STRICT" in cmd
+        assert "TF_ENABLE_ONEDNN_OPTS=0" in cmd
+        # Passed as `-e VALUE` pairs, so each must follow an -e.
+        for var in ("DNNL_DEFAULT_FPMATH_MODE=STRICT", "TF_ENABLE_ONEDNN_OPTS=0"):
+            assert cmd[cmd.index(var) - 1] == "-e"
+
     def test_a_bam_outside_the_storage_root_raises(self):
         with pytest.raises(PermanentError):
             self._cmd(bam=Path("/tmp/elsewhere.bam"))
@@ -608,6 +621,14 @@ def build_deepvariant_command(
         "--rm",
         "-v",
         f"{host_root_path}:{mount_at}",
+        # Without these the run dies with SIGILL inside TensorFlow. The image
+        # targets Graviton3 and defaults to BF16 fastmath; Docker on macOS
+        # advertises `bf16` in /proc/cpuinfo but faults on the instruction.
+        # Measured 2026-08-01 -- see the validation section of the design doc.
+        "-e",
+        "DNNL_DEFAULT_FPMATH_MODE=STRICT",
+        "-e",
+        "TF_ENABLE_ONEDNN_OPTS=0",
         image,
         "run_deepvariant",
         f"--model_type={params.model_type}",

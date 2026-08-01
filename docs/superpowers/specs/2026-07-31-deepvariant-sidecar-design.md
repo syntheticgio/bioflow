@@ -187,6 +187,74 @@ Two things to watch during that run, both currently unknown:
   and this would be the first tool here whose resource limits are set outside
   our own `JobResources` accounting.
 
+## Validation results (2026-08-01)
+
+Run against `DRR1066343.bam` (*S. cerevisiae*, 1.37 GB, aligned with bwa-mem2
+to `GCF_000146045.2_R64`), compared with the bcftools VCF already in the
+library for the same BAM.
+
+### It crashes out of the box. Two environment variables fix it.
+
+The first run died with **`Fatal Python error: Illegal instruction`** (SIGILL,
+exit 252), inside TensorFlow eager execution at the moment `call_variants` ran
+inference. `make_examples` had already succeeded -- it read the BAM and found
+candidates across all 17 contigs -- so this is not an input, path or mount
+problem.
+
+The cause is BF16. The image sets `DNNL_DEFAULT_FPMATH_MODE=BF16` and
+`TF_ENABLE_ONEDNN_OPTS=1`, because the port targets Graviton3, where BF16 is
+real. Under Docker on macOS the guest *advertises* `bf16` and `i8mm` in
+`/proc/cpuinfo`, and the M3 Ultra host reports `hw.optional.arm.FEAT_BF16: 1`
+-- but the instruction faults when actually executed. A feature bit exposed
+through virtualisation without being fully implemented.
+
+**The fix, verified:**
+
+```
+DNNL_DEFAULT_FPMATH_MODE=STRICT
+TF_ENABLE_ONEDNN_OPTS=0
+```
+
+With both set, the same command exits 0 and produces a complete VCF (9,704
+records, with a `.tbi`). `build_deepvariant_command` **must** pass both with
+`-e`. Without them DeepVariant is unusable on this machine, and the failure is
+a SIGILL deep inside TensorFlow that names nothing about its own cause -- so
+this is not a detail that can be left to be rediscovered.
+
+### Concordance
+
+The raw record counts mislead, and it is worth writing down why, because the
+first reading of them nearly failed this feature. DeepVariant emitted 9,704
+records against bcftools' 6,641, and only 4,811 of bcftools' calls appeared in
+DeepVariant's output at all -- 72%, which looks like a broken caller.
+
+It is an artefact of comparing unfiltered outputs:
+
+- **4,275 of DeepVariant's 4,893 "unique" records are `RefCall`** -- it
+  explicitly asserting *this position is reference*. Only 618 were real PASS
+  calls. bcftools does not emit these at all.
+- **1,381 of bcftools' 1,830 unique calls are QUAL<20**, low-confidence calls
+  DeepVariant declined to make.
+
+Comparing what each caller actually asserts -- DeepVariant `PASS` against
+bcftools `QUAL>=20`:
+
+| | |
+|---|---|
+| DeepVariant PASS | 5,115 |
+| bcftools QUAL>=20 | 4,861 |
+| **Shared** | **4,318** |
+| bcftools only | 543 |
+| DeepVariant only | 797 |
+
+**88.8% of bcftools' high-confidence calls are confirmed by DeepVariant**, and
+DeepVariant finds 797 more. The disagreement is weighted toward indels (2,201
+called against bcftools' 484), which is the documented difference between a
+deep-learning caller and a pileup-based one rather than evidence of a bad port.
+
+Verdict: **usable**, with the BF16 fix mandatory. It stays an explicit user
+choice rather than an automatic default, as this design already says.
+
 ## Structure
 
 Following `variant_runner.py`'s existing split -- pure functions over strings
