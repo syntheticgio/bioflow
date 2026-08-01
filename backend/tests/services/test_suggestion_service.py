@@ -212,14 +212,38 @@ class TestReferenceResolution:
 
     def test_two_genuinely_different_assemblies_are_two_references(self):
         """The dedup must not collapse distinct genomes -- that would pick one
-        arbitrarily where the organism branch is the honest answer."""
+        arbitrarily where refusing is the honest answer."""
         refs = [
             _ref("aaa", "GCF_000002445.2_ASM244v1_genomic.fna"),
             _ref("bbb", "GCF_000001405.40_GRCh38.p14_genomic.fna"),
         ]
         choice = resolve_reference(refs, organism="Homo sapiens")
         assert choice.usable is False
+
+    def test_several_references_are_not_described_as_a_missing_download(self):
+        """The refusal must not claim a genome needs fetching when the project
+        holds two. That sentence describes an empty project, and it rendered
+        beside two usable references -- so the card read as broken rather than
+        as declining to choose. It names the count and the align dialog now."""
+        refs = [
+            _ref("aaa", "GCF_000002445.2_ASM244v1_genomic.fna"),
+            _ref("bbb", "GCF_000001405.40_GRCh38.p14_genomic.fna"),
+        ]
+        choice = resolve_reference(refs, organism="Homo sapiens")
+        assert choice.usable is False
+        assert "not wired up" not in choice.reason
+        assert "Homo sapiens" not in choice.reason
+        assert "2 references" in choice.reason
+        assert "Align" in choice.reason
+
+    def test_no_references_still_names_the_species_it_cannot_fetch(self):
+        """The other half of the split. With nothing in the project, fetching
+        genuinely is the missing capability, and naming the species is the
+        most useful thing the card can say."""
+        choice = resolve_reference([], organism="Homo sapiens")
+        assert choice.usable is False
         assert "Homo sapiens" in choice.reason
+        assert "not wired up" in choice.reason
 
     def test_unparseable_names_are_never_treated_as_duplicates(self):
         """Two files whose names carry no assembly cannot be shown to be the
@@ -235,11 +259,11 @@ class TestReferenceResolution:
         assert "Saccharomyces cerevisiae" in choice.reason
         assert "not wired up" in choice.reason
 
-    def test_many_references_with_known_organism_names_the_species(self):
+    def test_many_references_with_known_organism_refuses_by_count(self):
         refs = [_ref("bbb", "b.fna"), _ref("aaa", "a.fna")]
         choice = resolve_reference(refs, organism="Escherichia coli")
         assert choice.usable is False
-        assert "Escherichia coli" in choice.reason
+        assert "2 references" in choice.reason
 
     def test_many_references_without_organism_picks_deterministically(self):
         """Sorted by id, first. A random pick would name a different
