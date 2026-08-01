@@ -268,9 +268,55 @@ Other candidates worth considering under the same heading: explaining *why* a
 QC run failed a threshold, and suggesting the next pipeline step in prose
 alongside the Actions cards.
 
-## UniProt download
+## UniProt download — BUILT, one open question
 
-Raised: 2026-07-31, requested.
+Raised: 2026-07-31, requested. Built 2026-07-31 on
+`claude/uniprot-download-task-8f12a3`; see
+`docs/superpowers/specs/2026-07-31-uniprot-download-design.md` and
+`docs/superpowers/plans/2026-07-31-uniprot-download.md`.
+
+**Open before merge: non-reference proteomes cannot be downloaded, and the
+strain picker offers nothing but those.**
+
+Measured against the live API on 2026-07-31, sampling proteomes across yeast,
+*E. coli*, and human:
+
+| proteomeType | sampled | zero-count |
+| --- | --- | --- |
+| Reference proteome | 1 | 0 |
+| Non Reference proteome | 24 | **24** |
+| Excluded | 1 | 1 |
+
+`proteome:UP000037662` returns **0** from UniProtKB search and an **empty
+FASTA** from the stream endpoint, even though that proteome's own record
+reports 5,389 proteins. The proteins exist in UniParc but are not in
+UniProtKB's searchable index, which is what both the count and the download
+query go through. `upid:` and `proteome_id:` are not valid search fields
+(HTTP 400), and `organism_id:` is an organism-wide query, not that proteome.
+
+The consequence is specific and bad: taxon `4932` resolves to a picker of
+**25 candidates, 0 of them reference, all undownloadable** — while typing
+`Saccharomyces cerevisiae` finds the working reference proteome immediately.
+The picker leads the user away from the only thing that works.
+
+This does not affect the reference-proteome path, which is the common case and
+verified working end to end (yeast 6,067 proteins; human 20,416 reviewed vs
+147,506 total).
+
+Three ways out, not yet chosen:
+
+- **Mark undownloadable candidates in the picker** — price each on selection
+  (already implemented) and disable Download at a zero count, explaining why.
+  Honest, cheap, still shows 25 rows the user cannot use.
+- **Filter the picker to downloadable proteomes** — check counts server-side
+  and drop the zeroes. For taxon 4932 the picker would then be empty, which
+  should fall back to the organism-name search that does find UP000002311.
+- **Drop the picker for taxon input** — resolve a taxon through the organism
+  path instead, which finds the reference proteome. Simplest, and loses the
+  strain-choice feature the design asked for.
+
+Everything else in the entry below is done. The original diagnosis is kept
+because it explains why the code is shaped the way it is.
 
 `backend/app/services/structure_lookup.py` already resolves a gene to a protein
 structure via UniProt, so the client and the ID-mapping path exist. This asks
