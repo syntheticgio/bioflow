@@ -22,6 +22,7 @@ import type {
   OverdueSchedule,
   PipelineSuggestion,
   PipelineTools,
+  Profile,
   Project,
   ProjectDetail,
   ReferenceOption,
@@ -119,6 +120,55 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  /**
+   * The four profile routes, and the only ones callable before a profile is
+   * selected. They send the `X-BioFlow-Profile` header like everything else
+   * -- `request<T>` adds it unconditionally -- but the backend ignores it
+   * here, because requiring a profile to list the profiles would leave a
+   * fresh install with no way in.
+   */
+  listProfiles: () => request<Profile[]>("/profiles"),
+
+  /**
+   * `is_first_boot` is the flag that makes a new profile adopt the library
+   * that predates profiles rather than start empty.
+   *
+   * Every document written before this feature carries `owner: "local"`, and
+   * an adopted profile's `owner_id()` returns that same `"local"` string --
+   * so adoption moves nothing and touches nothing, it just makes one profile
+   * answer to the name the existing data already uses. Sending it when
+   * profiles already exist is a 422; the backend refuses a second adopter
+   * because two profiles answering to `"local"` would both claim the same
+   * library.
+   *
+   * Failing to send it on a populated install is the expensive mistake, and
+   * it is silent: the new profile gets its own id as owner, sees nothing, and
+   * the user's library reads as deleted. It is not -- it is still owned by
+   * `"local"` -- but no profile can adopt it afterwards, because
+   * `create_profile` only allows the flag while the collection is empty. So
+   * pass it exactly when `listProfiles()` came back empty, and never on
+   * assumption.
+   */
+  createProfile: (body: {
+    username: string;
+    password?: string;
+    email?: string;
+    is_first_boot?: boolean;
+  }) => request<Profile>("/profiles", { method: "POST", body: JSON.stringify(body) }),
+
+  /**
+   * Returns no token and sets no cookie; the client just starts sending the
+   * id. Calling it is still worth it for the password check and because the
+   * backend stamps `last_used_at` here and nowhere else.
+   */
+  selectProfile: (id: string, password?: string) =>
+    request<Profile>(`/profiles/${id}/select`, {
+      method: "POST",
+      body: JSON.stringify({ password: password ?? null }),
+    }),
+
+  deleteProfile: (id: string) => request<void>(`/profiles/${id}`, { method: "DELETE" }),
+
   listProjects: (parentId?: string) =>
     request<Project[]>(
       `/projects${parentId ? `?parent_id=${encodeURIComponent(parentId)}` : ""}`,

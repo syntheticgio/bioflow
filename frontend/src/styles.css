@@ -1041,6 +1041,180 @@ a.btn {
   border-top: 1px solid var(--border);
 }
 
+/* ---------- Profile picker ----------
+   Full-screen, because it renders instead of the shell rather than over it.
+   Every colour here is a custom property from :root, which the
+   prefers-color-scheme block redefines -- so light mode needs no rules of its
+   own. */
+
+.picker {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+}
+
+.picker-inner {
+  width: 100%;
+  max-width: 640px;
+  text-align: center;
+}
+
+.picker-inner h1 {
+  margin: 0 0 6px;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+}
+
+.picker-subtitle,
+.picker-loading {
+  color: var(--text-dim);
+  margin: 0 0 24px;
+  font-size: 13px;
+}
+
+.picker-welcome {
+  color: var(--text-dim);
+  margin: 0 auto;
+  max-width: 440px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 140px));
+  gap: 14px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.picker-tile-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.picker-tile {
+  position: relative;
+  aspect-ratio: 1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+
+.picker-tile:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--tile-accent, var(--accent));
+}
+
+.picker-tile.active {
+  border-color: var(--tile-accent, var(--accent));
+}
+
+.picker-tile:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.picker-emoji {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.picker-name {
+  font-size: 13px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+}
+
+.picker-lock {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.picker-add {
+  color: var(--text-dim);
+  border-style: dashed;
+}
+
+.picker-password {
+  display: flex;
+  gap: 6px;
+}
+
+.picker-password input {
+  min-width: 0;
+  flex: 1;
+}
+
+.picker-error {
+  margin: 0 auto 16px;
+  max-width: 440px;
+  text-align: left;
+}
+
+.picker-autologin {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+/* The add-profile form is taller than NewProjectModal's two fields, so it
+   uses the .modal-body pattern: the body scrolls and .modal-actions stays
+   pinned by its margin-top:auto, which only works if the modal is a
+   height-bounded flex column. */
+.profile-modal {
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+  overflow: hidden;
+}
+
+.profile-modal form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.profile-modal-note,
+.profile-modal-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.profile-modal-note {
+  margin: 0 0 14px;
+}
+
+.profile-modal-hint {
+  margin: -6px 0 14px;
+}
+
 /* --- Activity view --- */
 
 .activity {

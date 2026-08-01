@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import { api } from "./api/client";
 import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
@@ -8,10 +9,12 @@ import { Header } from "./components/Header";
 import { HelpCalculations } from "./components/HelpCalculations";
 import { HelpSoftware } from "./components/HelpSoftware";
 import { HelpSources } from "./components/HelpSources";
+import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
 import { UploadTray } from "./components/UploadTray";
 import { useEvents } from "./hooks/useEvents";
+import { useProfileStore } from "./stores/profileStore";
 import { useUiStore } from "./stores/uiStore";
 
 const queryClient = new QueryClient({
@@ -85,11 +88,97 @@ function Shell() {
   );
 }
 
+/**
+ * The two things that can make a persisted profile wrong, settled once before
+ * anything renders.
+ *
+ * 1. Auto-login is off. The store persists, so `current` is already populated
+ *    on reload and the gate would skip the picker on its own. "Show me the
+ *    picker every time" is therefore not the absence of an action -- it has
+ *    to actively clear what was restored.
+ * 2. The remembered profile was deleted. Its id then names nothing and every
+ *    request 404s, so it is validated against the profile list, which is the
+ *    one call that works without a profile.
+ *
+ * Module-scoped rather than a hook because the answer is a property of the
+ * page load, not of any component: memoising the promise means React can
+ * mount `Gate` as many times as it likes -- StrictMode mounts it twice in dev
+ * -- without a second round of clearing or a second list request.
+ */
+let startupPromise: Promise<void> | null = null;
+
+function startupCheck(): Promise<void> {
+  if (startupPromise) return startupPromise;
+
+  startupPromise = (async () => {
+    const store = useProfileStore.getState();
+    const remembered = store.current;
+    if (!remembered) return;
+
+    if (!store.autoLogin) {
+      store.logout();
+      return;
+    }
+
+    try {
+      const profiles = await api.listProfiles();
+      // Cleared, never substituted. Silently entering a different profile
+      // would put someone in the wrong library without a single screen saying
+      // so, which is the exact failure the partition exists to prevent.
+      if (!profiles.some((p) => p.id === remembered.id)) {
+        useProfileStore.getState().logout();
+      }
+    } catch {
+      // The API is unreachable, which says nothing about whether the
+      // remembered profile still exists. Keep it: dropping the user at the
+      // picker over a transient failure would look like their profile had
+      // been deleted, and the picker cannot load its list either.
+    }
+  })();
+
+  return startupPromise;
+}
+
+/**
+ * Decides between the picker and the shell, and waits for the startup checks
+ * above before rendering either.
+ *
+ * It sits inside `QueryClientProvider` -- the picker itself needs no query
+ * client, but this is also where `Shell` mounts, and hoisting the gate above
+ * the provider would only move the boundary without gaining anything. What
+ * matters is that it is *outside* `Shell`: `Shell`'s children fetch on mount
+ * and every user-data route 400s with no profile, so rendering it first would
+ * produce a burst of failed requests before the picker ever appeared.
+ */
+function Gate() {
+  const current = useProfileStore((s) => s.current);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    // Every mount awaits the same promise, so the work happens once per page
+    // load while each mount still gets its own `setReady`. A `useRef` guard
+    // cannot do this: StrictMode remounts on the same fiber, so the ref stays
+    // set while `ready` resets to false, and the second mount returns early
+    // without ever flipping it -- a blank screen with no error anywhere.
+    startupCheck().then(() => {
+      if (live) setReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (!ready) return null;
+  if (!current) return <ProfilePicker />;
+  return <Shell />;
+}
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Shell />
+        <Gate />
       </BrowserRouter>
     </QueryClientProvider>
   );

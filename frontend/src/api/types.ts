@@ -1121,3 +1121,12 @@ export interface VariantQuery {
   consequence?: string;
   skipCount?: boolean;
 }
+
+/**
+ * The profile shape is declared in `stores/profileStore.ts` and re-exported
+ * here so `api/client.ts` can name a response type without a second copy
+ * drifting from the first. The store is the home rather than this file
+ * because the store is what has to keep the value alive across a reload --
+ * everything else, including the API layer, only ever passes it through.
+ */
+export type { Profile } from "../stores/profileStore";
