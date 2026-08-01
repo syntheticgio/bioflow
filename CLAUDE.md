@@ -5,6 +5,16 @@ production deployment and no other users to protect. Optimize for "the person
 using it can see their change" over correctness-at-scale practices that make
 sense for a team or a hosted service.
 
+## Push to origin when a merge to main is the end of the task
+
+`origin` (`github.com:syntheticgio/bioflow`) is the remote this project
+actually uses. When a task's work lands on `main` and the task is otherwise
+done -- not a mid-task checkpoint, not a merge with more steps still to come --
+push `main` to `origin` as part of finishing, rather than leaving it local
+only. A merge that stays unpushed is a merge someone still has to remember to
+push later, and there is no other workflow here (no PR review gate, no CI)
+that does it instead.
+
 ## Running the app: one instance, not dev/prod
 
 Don't build or reason about a dev vs. production split for this repo. `docker
@@ -92,6 +102,32 @@ expected. Backend changes are covered by `pytest`; run it inside the `api`
 container (`docker compose exec api python -m pytest tests/ -q`) rather than
 a bare host `.venv`, since the host venv hits Mongo replica-set connection
 errors that the container's network doesn't have.
+
+**That `docker compose exec api` command is only correct from the main repo
+root.** Run it inside a worktree and it silently tests *main's* code, not the
+worktree's -- the `api` container bind-mounts the main repo's
+`backend/app` and `backend/tests`, so the worktree's changes never reach the
+process running the tests. Every result describes the wrong tree, and it
+gives no error to say so.
+
+From a worktree, use `backend/run-worktree-tests.sh` instead:
+
+```bash
+./backend/run-worktree-tests.sh tests/ -q
+```
+
+It starts a throwaway container that mounts the *worktree's* source on the
+running stack's network, plus a throwaway single-node Mongo replica set of
+its own. The private Mongo matters, not just the private source: `conftest.py`
+hardcodes the test database name `biopipe_test` and drops every collection in
+it at session start, so a worktree run sharing Mongo with the stack's own
+`api` container (or with another worktree's test run) wipes the other's data
+mid-test. That surfaces as a rotating handful of DB-touching tests failing --
+different ones each run, all passing in isolation -- which reads as flakiness
+in the code when it is actually two test runs fighting over one database.
+Measured on one unchanged tree: 7 failed, then 1872 passed, then 5 failed,
+sharing Mongo with the stack; five consecutive runs at an identical count with
+a private one.
 
 **Check a rule against the real database, not only its unit tests.** The
 Actions tab's suggestion rules passed a full green suite while getting two
