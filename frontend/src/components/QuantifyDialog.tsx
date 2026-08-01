@@ -51,9 +51,20 @@ export function QuantifyDialog({
     defaults != null && Object.keys(defaults.params ?? {}).length > 0;
 
   const annotations = defaults?.annotations ?? [];
-  const chosenAnnotationId =
-    annotationId ?? defaults?.annotation_id ?? annotations[0]?.id ?? null;
+  // No `?? annotations[0]` fallback, deliberately. `annotation_id: null` with
+  // `needs_annotation: true` is the server saying it *cannot* choose -- the
+  // project holds annotations for more than one assembly and picking wrongly
+  // is not a failure, it is a counts file with nothing in it. Defaulting to
+  // the first entry turned that "I cannot tell" into "I chose for you", and
+  // the first entry is alphabetical rather than correct: measured on a real
+  // project, a GCF-aligned BAM pre-selected the GCA annotation and counted
+  // 0 of 1,088,107 fragments across 0 of 6,425 genes -- while the job
+  // succeeded. Making the user pick costs one click and is the only thing
+  // standing between them and a silently empty result.
+  const chosenAnnotationId = annotationId ?? defaults?.annotation_id ?? null;
   const chosenAnnotation = annotations.find((a) => a.id === chosenAnnotationId);
+  const mustChooseAnnotation =
+    chosenAnnotationId == null && annotations.length > 0;
 
   const launch = useMutation({
     mutationFn: () =>
@@ -140,6 +151,15 @@ export function QuantifyDialog({
                   value={chosenAnnotationId ?? ""}
                   onChange={(e) => setAnnotationId(e.target.value)}
                 >
+                  {/* Only while nothing is chosen, and it disappears once
+                      something is: an empty option that stayed in the list
+                      would be selectable again and would re-arm the very
+                      state this exists to prevent. */}
+                  {mustChooseAnnotation && (
+                    <option value="" disabled>
+                      Choose an annotation…
+                    </option>
+                  )}
                   {annotations.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
@@ -147,7 +167,15 @@ export function QuantifyDialog({
                   ))}
                 </select>
                 <small>
-                  {chosenAnnotation?.kind === "gff" ? (
+                  {mustChooseAnnotation ? (
+                    <>
+                      This project has annotations for more than one assembly,
+                      so there is no safe default — pick the one matching the
+                      reference this BAM was aligned against. Choosing the
+                      other does not fail; it returns a counts file with
+                      nothing in it.
+                    </>
+                  ) : chosenAnnotation?.kind === "gff" ? (
                     <>
                       GFF3 files carry no <code>gene_id</code>, so genes are
                       grouped by <code>locus_tag</code> instead. If a GTF of the
