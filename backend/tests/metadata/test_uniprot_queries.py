@@ -43,6 +43,21 @@ class TestProteomeQueries:
             == 'organism_name:"Homo sapiens"'
         )
 
+    def test_an_internal_quote_is_removed_not_left_unbalanced(self):
+        """Measured: `organism_name:"Homo "sapiens"` is an HTTP 400 from
+        UniProt, and the resolver would swallow it as "found nothing" -- a
+        legitimate search failing silently."""
+        assert (
+            uniprot.organism_name_query('Homo "sapiens"')
+            == 'organism_name:"Homo sapiens"'
+        )
+
+    def test_a_single_stray_quote_is_removed(self):
+        assert (
+            uniprot.organism_name_query('Escherichia "coli')
+            == 'organism_name:"Escherichia coli"'
+        )
+
 
 class TestDownloadQueries:
     def test_a_whole_proteome_reviewed_only(self):

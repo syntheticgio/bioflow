@@ -117,8 +117,14 @@ def organism_name_query(name: str) -> str:
     No type filter, for the same measured reason as `all_proteomes_query`:
     adding one returns 0 where the unfiltered query returns 481 with the
     wanted proteome ranked first.
+
+    Every double-quote is removed, not just the surrounding pair. The name is
+    typed into a search box, and a stray internal quote leaves the phrase
+    unbalanced -- measured, `organism_name:"Homo "sapiens"` is a hard HTTP 400
+    rather than a poor match. A phrase search cannot contain a quote anyway,
+    so dropping them costs nothing.
     """
-    cleaned = (name or "").strip().strip('"')
+    cleaned = (name or "").replace('"', "").strip()
     return f'organism_name:"{cleaned}"'
 
 
