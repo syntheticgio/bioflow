@@ -119,6 +119,39 @@ class TestDownload:
         with pytest.raises(PermanentError, match="project_id"):
             uniprot_handlers.download_uniprot(ctx)
 
+    def test_a_client_error_is_permanent(self, ctx, monkeypatch):
+        """A 400 means the query is wrong. Measured: UniProt answers a
+        malformed query with 400 in about a second, so three retries would
+        spend up to fifteen minutes rediscovering it."""
+        import io
+        import urllib.error
+
+        def bad_request(url, *, timeout=0.0):
+            raise urllib.error.HTTPError(
+                url, 400, "Bad Request", {},
+                io.BytesIO(b"Error messages\nquery parameter has an invalid syntax"),
+            )
+
+        monkeypatch.setattr(uniprot_handlers, "_fetch", bad_request)
+
+        with pytest.raises(PermanentError, match="rejected"):
+            uniprot_handlers.download_uniprot(ctx)
+
+    def test_a_server_error_is_retryable(self, ctx, monkeypatch):
+        """503 is UniProt being busy, which the next attempt may not hit."""
+        import io
+        import urllib.error
+
+        def unavailable(url, *, timeout=0.0):
+            raise urllib.error.HTTPError(
+                url, 503, "Service Unavailable", {}, io.BytesIO(b"busy")
+            )
+
+        monkeypatch.setattr(uniprot_handlers, "_fetch", unavailable)
+
+        with pytest.raises(RetryableError):
+            uniprot_handlers.download_uniprot(ctx)
+
     def test_cancellation_is_observed(self, ctx, stub_fetch):
         from app.errors import JobCancelled
 

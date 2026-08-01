@@ -14,6 +14,7 @@ Imported by `handlers.py` for the `@handler` registration side effects.
 """
 
 import gzip
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -81,6 +82,26 @@ def download_uniprot(ctx: JobContext) -> dict:
     ctx.progress(phase="downloading", pct=0.1, message="fetching from UniProt")
     try:
         body, headers = _fetch(uniprot.stream_url(query))
+    except urllib.error.HTTPError as exc:
+        # 4xx means the request itself is wrong -- a malformed query, an
+        # invalid accession -- and no number of retries changes that.
+        # Measured: UniProt answers all three with 400 in about a second, so
+        # retrying would spend up to three 300-second timeouts to rediscover
+        # what the first response already said. `assembly_handlers` draws the
+        # same line via `download_failures.classify_failure`.
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", "replace").strip()[:200]
+        except Exception:  # noqa: BLE001 - the body is a bonus, not a promise
+            pass
+        if 400 <= exc.code < 500:
+            raise PermanentError(
+                f"UniProt rejected this request ({exc.code}): {detail or exc.reason}",
+                details={"status": exc.code, "query": query},
+            ) from exc
+        raise RetryableError(
+            f"UniProt returned {exc.code}: {detail or exc.reason}"
+        ) from exc
     except Exception as exc:
         # Network failures are the common case and retrying genuinely helps.
         raise RetryableError(f"UniProt request failed: {exc}") from exc
