@@ -26,6 +26,12 @@ class TestClassify:
     def test_several_accessions_separated_by_spaces_or_commas(self):
         assert uniprot.classify("P00533, P0DTC2") == uniprot.InputKind.ACCESSIONS
 
+    def test_a_list_with_one_bad_token_is_text(self):
+        """`all()`, not `any()`. A half-remembered paste where one token is a
+        gene symbol is a search, not a set of accessions -- and sending it as
+        accessions would silently drop the token that did not match."""
+        assert uniprot.classify("P00533, EGFR") == uniprot.InputKind.TEXT
+
     def test_a_bare_taxon_id(self):
         assert uniprot.classify("4932") == uniprot.InputKind.TAXON
 
