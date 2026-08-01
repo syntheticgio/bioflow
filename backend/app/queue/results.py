@@ -39,15 +39,24 @@ async def apply(job_type: str, result: dict, *, owner: str) -> None:
     both key on that relationship, so an inherited owner is the more specific
     fact and the one those appliers must use.
 
-    The two download appliers have no parent to inherit from: they create the
-    first object in a chain from nothing but a project_id, so the launching
-    profile is the only owner that exists. That is the whole reason this
-    parameter is here. It is passed to every applier uniformly rather than only
-    to those two, so that dispatch stays one line and a new applier that *does*
-    need it is not silently handed nothing. Those appliers name it
-    `launching_owner` and do not read it, which is the intended reading: the
-    value arrived, and inheriting from the parent was a decision rather than an
-    oversight.
+    The download appliers have no parent to inherit from: they create the first
+    object in a chain from nothing but a project_id, so the launching profile is
+    the only owner that exists. That is the whole reason this parameter is here.
+    It is passed to every applier uniformly rather than only to those, so that
+    dispatch stays one line and a new applier that *does* need it is not
+    silently handed nothing.
+
+    Every applier therefore takes `owner`, including the majority that inherit
+    from a parent and never read it. An earlier version had those name it
+    `launching_owner`, to mark inheriting as a decision rather than an
+    oversight -- but a parameter named differently from the keyword dispatch
+    uses is not a signal, it is a `TypeError` at the moment the job finishes.
+    `_apply_result` catches it and logs, so the job still reports *succeeded*
+    while its output goes unregistered: the tool ran, the file is on disk, and
+    nothing tells the user why it never reached the library. Eleven appliers
+    were in that state, and it took running a real job to notice. The
+    inherit-from-the-parent decision is documented in the appliers that make it
+    instead, where a reader is already looking.
 
     The two should never actually disagree. Every `queue.enqueue` call in the
     services derives its owner from the very object or project the job acts on
@@ -84,7 +93,7 @@ def should_assign_reference_role(
     return bool((enrichment or {}).get("accession"))
 
 
-async def _apply_ingest_headers(result: dict, *, launching_owner: str) -> None:
+async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
     object_id = result.get("object_id")
     if not object_id:
         return
@@ -307,7 +316,7 @@ async def _link_mate(obj: DataObject) -> None:
     )
 
 
-async def _apply_trim_reads(result: dict, *, launching_owner: str) -> None:
+async def _apply_trim_reads(result: dict, *, owner: str) -> None:
     """Turn a finished trim run into objects.
 
     The handler ran in a worker thread and could not touch the database, so
@@ -786,7 +795,7 @@ async def _apply_uniprot_download(result: dict, *, owner: str) -> None:
     )
 
 
-async def _apply_run_qc(result: dict, *, launching_owner: str) -> None:
+async def _apply_run_qc(result: dict, *, owner: str) -> None:
     """Record a QC run's numbers on the object it described.
 
     QC derives no files, so unlike trim or align there is nothing to ingest --
@@ -825,17 +834,17 @@ async def _apply_run_qc(result: dict, *, launching_owner: str) -> None:
     from app.services import pipeline_service
 
     try:
-        # `launching_owner`, not `obj.owner`: launch_summary now scopes its own
-        # lookup, and the QC job that got here was enqueued under the profile
-        # that owns this file, so the two agree. Passing the launching profile
-        # keeps the chained job in the same partition as the job that spawned
-        # it, which is what the activity view groups on.
-        await pipeline_service.launch_summary(object_id=obj.id, owner=launching_owner)
+        # The *launching* owner, not `obj.owner`: launch_summary now scopes its
+        # own lookup, and the QC job that got here was enqueued under the
+        # profile that owns this file, so the two agree. Passing the launching
+        # profile keeps the chained job in the same partition as the job that
+        # spawned it, which is what the activity view groups on.
+        await pipeline_service.launch_summary(object_id=obj.id, owner=owner)
     except Exception as e:  # noqa: BLE001 - an additive extra cannot fail QC
         log.warning("summary_launch_failed", object_id=object_id, error=str(e))
 
 
-async def _apply_summarize_object(result: dict, *, launching_owner: str) -> None:
+async def _apply_summarize_object(result: dict, *, owner: str) -> None:
     """Record a generated narrative summary on the object it describes.
 
     A no-op when the model server was down or the file had too little to say --
@@ -877,7 +886,7 @@ async def _apply_summarize_object(result: dict, *, launching_owner: str) -> None
     log.info("summary_applied", object_id=object_id, model=result.get("model"))
 
 
-async def _apply_build_index(result: dict, *, launching_owner: str) -> None:
+async def _apply_build_index(result: dict, *, owner: str) -> None:
     """Turn a finished index build into sidecar objects on the reference.
 
     Every produced file becomes an object in its own right -- verified,
@@ -1029,7 +1038,7 @@ def align_provenance(*, result: dict, reads_facts: dict | None) -> dict:
     return provenance
 
 
-async def _apply_align_reads(result: dict, *, launching_owner: str) -> None:
+async def _apply_align_reads(result: dict, *, owner: str) -> None:
     """Turn a finished alignment into a BAM object, and chain its indexing.
 
     The BAM descends from both the reads and the reference: all three are
@@ -1111,7 +1120,7 @@ async def _apply_align_reads(result: dict, *, launching_owner: str) -> None:
             await run_service.link_job(run_id, index_job.id, RunJobRole.INDEX_BAM)
 
 
-async def _apply_index_bam(result: dict, *, launching_owner: str) -> None:
+async def _apply_index_bam(result: dict, *, owner: str) -> None:
     """Attach a `.bai` to its BAM and record the flagstat numbers."""
     from app.services import object_service
 
@@ -1173,12 +1182,12 @@ async def _apply_index_bam(result: dict, *, launching_owner: str) -> None:
             # the launching profile, and launch_bam_stats now scopes its own
             # BAM lookup, so handing it that profile is what lets the chained
             # computation resolve the very BAM the index was just built for.
-            await pipeline_service.launch_bam_stats(object_id=bam.id, owner=launching_owner)
+            await pipeline_service.launch_bam_stats(object_id=bam.id, owner=owner)
         except AppError as e:
             log.warning("bam_stats_chain_failed", object_id=bam_id, error=str(e))
 
 
-async def _apply_run_bam_stats(result: dict, *, launching_owner: str) -> None:
+async def _apply_run_bam_stats(result: dict, *, owner: str) -> None:
     """Record a Results computation's numbers on the BAM it described.
 
     Read-only like QC: no files to ingest, just facts merged onto the object.
@@ -1207,7 +1216,7 @@ async def _apply_run_bam_stats(result: dict, *, launching_owner: str) -> None:
     )
 
 
-async def _apply_run_vcf_stats(result: dict, *, launching_owner: str) -> None:
+async def _apply_run_vcf_stats(result: dict, *, owner: str) -> None:
     """Record a Variant Results computation on the VCF it described.
 
     Read-only like QC and BAM stats: no files to ingest, just facts merged
@@ -1251,7 +1260,7 @@ def variant_provenance(result: dict) -> dict:
     }
 
 
-async def _apply_call_variants(result: dict, *, launching_owner: str) -> None:
+async def _apply_call_variants(result: dict, *, owner: str) -> None:
     """Turn a finished variant calling run into a VCF object and its index.
 
     The VCF descends from both the BAM and the reference: a variant call is a
@@ -1331,7 +1340,7 @@ def annotation_provenance(result: dict) -> dict:
     }
 
 
-async def _apply_annotate_variants(result: dict, *, launching_owner: str) -> None:
+async def _apply_annotate_variants(result: dict, *, owner: str) -> None:
     """Turn a finished annotation run into a new VCF object and its index.
 
     Mirrors `_apply_call_variants`: the annotated VCF descends from the

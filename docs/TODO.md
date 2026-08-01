@@ -333,7 +333,40 @@ Touches: `backend/app/pipelines/aligners.py`,
 `backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
-## `_APPLIERS` dispatch passes `owner=`; 11 appliers still take `launching_owner=`
+## `_APPLIERS` dispatch passed `owner=` while 11 appliers took `launching_owner=` — FIXED
+
+Fixed 2026-08-01, same day, after the user asked for it directly.
+
+All fourteen appliers now take `owner`. The two chained launches inside them
+(`launch_summary` off QC, `launch_bam_stats` off `index_bam`) still pass the
+launching profile deliberately, and say so where they do it.
+
+**The naming was not an accident, which is why this needed care rather than a
+blind rename.** `apply`'s docstring argued that appliers inheriting an owner
+from their parent should name the parameter `launching_owner` and not read it,
+to mark inheriting as a decision rather than an oversight. That intent was
+sound; the mechanism was not. A parameter named differently from the keyword
+dispatch uses is not a signal, it is a `TypeError` at the moment the job
+finishes. The docstring now records that, and the inherit-from-parent decision
+is documented in the appliers that make it, where a reader is already looking.
+
+**Why the existing tests were green.** `test_results_owner.py` covers exactly
+this area and passed throughout. Every test in it called an applier *directly*,
+supplying `launching_owner=` itself, so it proved the appliers worked while
+never touching the dispatch that could not reach them. The one test that does
+exercise the executor stubs `apply` out entirely. A green suite over both
+halves of a seam that could not connect.
+
+The new `test_every_applier_accepts_the_keyword_apply_dispatches_with`
+inspects every registered applier's signature against the keyword `apply`
+dispatches with. It fails loudly on the next one that drifts.
+
+Verified end to end after the fix: a DeepVariant run against `DRR1066343.bam`
+produced a registered VCF (`status: ready`, `owner: local` inherited from the
+parent BAM) with its `.tbi` sidecar and full provenance, and zero
+`result_apply_failed` in the worker log.
+
+Original entry follows.
 
 Raised: 2026-08-01, found by running a real variant-calling job end to end.
 

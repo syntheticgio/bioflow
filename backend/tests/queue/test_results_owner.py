@@ -75,7 +75,7 @@ async def _parent(owner: str, name: str, *, role: ObjectRole | None = None) -> D
 
 
 class TestSidecarsInheritTheirParentsOwner:
-    """`launching_owner` is deliberately a *different* string here.
+    """The `owner` passed in is deliberately a *different* string here.
 
     These appliers take their owner from the parent object they resolved, not
     from the job, and a matching value would make either source pass the
@@ -102,7 +102,7 @@ class TestSidecarsInheritTheirParentsOwner:
                 "output": {"tmp_path": str(output), "name": "sample.bam.bai"},
                 "facts": {},
             },
-            launching_owner="someone-else",
+            owner="someone-else",
         )
 
         sidecars = await object_service.list_sidecars(bam.id, owner=owner)
@@ -123,7 +123,7 @@ class TestSidecarsInheritTheirParentsOwner:
                 "output": {"tmp_path": str(output), "name": "flagged.bam.bai"},
                 "facts": {},
             },
-            launching_owner="someone-else",
+            owner="someone-else",
         )
 
         refreshed = await DataObject.get(bam.id)
@@ -143,7 +143,7 @@ class TestSidecarsInheritTheirParentsOwner:
                 "aligner": "minimap2",
                 "outputs": [{"tmp_path": str(output), "name": "genome.fna.fai", "role": "fai"}],
             },
-            launching_owner="someone-else",
+            owner="someone-else",
         )
 
         sidecars = await object_service.list_sidecars(reference.id, owner=owner)
@@ -168,7 +168,7 @@ class TestDerivedOutputsInheritTheirParentsOwner:
                 "output": {"tmp_path": str(output), "name": "calls.vcf.gz"},
                 "index": {"tmp_path": str(index), "name": "calls.vcf.gz.tbi"},
             },
-            launching_owner="someone-else",
+            owner="someone-else",
         )
 
         produced = await DataObject.find(
@@ -197,7 +197,7 @@ class TestDerivedOutputsInheritTheirParentsOwner:
                 "outputs": [{"tmp_path": str(output), "name": "reads.trimmed.fastq.gz"}],
                 "report": {},
             },
-            launching_owner="someone-else",
+            owner="someone-else",
         )
 
         produced = await DataObject.find(DataObject.derived_from == reads.id).to_list()
@@ -283,6 +283,31 @@ class TestTheExecutorSuppliesTheOwner:
     the `Job` as a plain argument, so it can be driven without a worker, a
     Redis connection, or a real dispatch.
     """
+
+    async def test_every_applier_accepts_the_keyword_apply_dispatches_with(self):
+        """`apply` calls every applier as `handler(result, owner=...)`, so one
+        declaring that parameter under another name raises TypeError the moment
+        its job finishes.
+
+        The failure is invisible exactly where it matters. `_apply_result`
+        catches it and logs `result_apply_failed`, so the *job* still reports
+        succeeded -- the tool ran, the output is on disk, and only registration
+        is lost. The user sees a pipeline that worked and produced nothing.
+
+        Found by running a real DeepVariant job end to end, with eleven of the
+        fourteen appliers still on the old keyword. Nothing caught it earlier
+        because every other test here calls an applier *directly* with its own
+        keyword, which is the seam this closes: they prove an applier works,
+        never that dispatch can reach it.
+        """
+        for job_type, handler in results._APPLIERS.items():
+            params = inspect.signature(handler).parameters
+            assert "owner" in params, (
+                f"{handler.__name__} (registered for {job_type!r}) does not take "
+                "`owner`, the keyword apply() dispatches with. Its job would "
+                "report succeeded while its output went unregistered."
+            )
+            assert params["owner"].kind is inspect.Parameter.KEYWORD_ONLY
 
     async def test_apply_result_forwards_the_jobs_owner(self, monkeypatch):
         """A literal here would write every profile's pipeline output into the
