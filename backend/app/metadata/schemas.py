@@ -378,6 +378,24 @@ FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
         ObjectRole.ALIGNMENT,
         ObjectRole.VARIANTS,
         ObjectRole.ANNOTATION,
+        # COUNTS gets no group of its own, which is worth explaining because
+        # the differential expression design *is* metadata and it would be
+        # reasonable to expect one here.
+        #
+        # It does not need one: `condition`, `sample_id` and `batch` are
+        # already COMMON_FIELDS, so the design can be recorded on the reads at
+        # upload time, and every applier copies metadata forward -- reads to
+        # trimmed reads to BAM to counts. Tagging six FASTQs as "treated" with
+        # the bulk edit bar therefore arrives at the DE dialog as a filled-in
+        # design without anyone touching a counts file. Adding a duplicate
+        # `condition` here would have shadowed the common one and split the
+        # same concept across two keys.
+        ObjectRole.COUNTS,
+        # DE_RESULTS has nothing worth asking. Everything that describes it --
+        # which samples, which contrast, which engine version -- is provenance
+        # the applier already records from the run that produced it, and a
+        # results table nobody produced here is not a thing that exists.
+        ObjectRole.DE_RESULTS,
     }
 )
 

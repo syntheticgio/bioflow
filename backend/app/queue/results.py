@@ -1366,6 +1366,135 @@ async def _apply_call_variants(result: dict, *, owner: str) -> None:
             await run_service.record_outputs(run_id, [vcf.id], owner=vcf.owner)
 
 
+def counts_provenance(result: dict) -> dict:
+    """The facts a quantification stamps onto the counts file it produced.
+
+    The annotation digest is carried rather than only its name: the merge in
+    `differential_expression` refuses inputs counted against different
+    annotations, and it can only do that if each counts file records which one
+    it used in a form that cannot be two different files with the same name.
+    """
+    provenance = {
+        "counted_by": "featurecounts",
+        "featurecounts_version": result.get("tool_version"),
+        "count_params": result.get("params") or {},
+        "annotation_name": result.get("annotation_name"),
+        "annotation_sha256": result.get("annotation_sha256"),
+    }
+    provenance.update(result.get("facts") or {})
+    return provenance
+
+
+async def _apply_quantify(result: dict, *, owner: str) -> None:
+    """Turn a finished quantification into a counts object.
+
+    The counts descend from both the BAM and the annotation, for the same
+    reason a VCF descends from both its BAM and its reference: a count is a
+    claim about a gene, and which gene depends entirely on which annotation
+    was used.
+
+    Metadata is copied from the BAM, which is what carries `condition` and
+    `sample` forward from the reads the user tagged -- so a project tagged
+    once at upload arrives at the DE dialog with its design already filled in.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    bam_id = result.get("object_id")
+    if not output or not bam_id:
+        return
+
+    bam = await DataObject.get(PydanticObjectId(bam_id))
+    if bam is None:
+        log.warning("quantify_parent_missing", object_id=bam_id)
+        return
+
+    parents = [bam.id]
+    annotation_id = result.get("annotation_object_id")
+    if annotation_id:
+        parents.append(PydanticObjectId(annotation_id))
+
+    job_id = result.get("job_id")
+    try:
+        counts = await object_service.ingest_local_file(
+            owner=bam.owner,
+            project_id=bam.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.COUNTS,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=counts_provenance(result),
+            metadata=dict(bam.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("counts_ingest_failed", object_id=bam_id, error=str(e))
+        return
+
+    log.info("quantify_applied", bam_id=bam_id, counts_id=str(counts.id))
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [counts.id], owner=counts.owner)
+
+
+async def _apply_differential_expression(result: dict, *, owner: str) -> None:
+    """Turn a finished DE run into a results object.
+
+    Unlike every other applier here, the parent is a list of N objects rather
+    than one or two, and there is no single "the input" to copy metadata from
+    -- the samples deliberately disagree about `condition`, which is the whole
+    point of the run. So metadata is left empty and the design is recorded in
+    facts instead, where it describes the run rather than claiming to describe
+    the file.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    project_id = result.get("project_id")
+    if not output or not project_id:
+        return
+
+    counts_ids = [
+        PydanticObjectId(cid) for cid in (result.get("counts_object_ids") or [])
+    ]
+
+    job_id = result.get("job_id")
+    facts = {
+        "tested_by": "pydeseq2",
+        "pydeseq2_version": result.get("tool_version"),
+        "de_params": result.get("params") or {},
+        **(result.get("facts") or {}),
+    }
+
+    try:
+        de = await object_service.ingest_local_file(
+            owner=owner,
+            project_id=PydanticObjectId(project_id),
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.DE_RESULTS,
+            derived_from=counts_ids,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=facts,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("de_results_ingest_failed", project_id=str(project_id), error=str(e))
+        return
+
+    log.info(
+        "differential_expression_applied",
+        de_id=str(de.id),
+        samples=len(counts_ids),
+    )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(run_id, [de.id], owner=de.owner)
+
+
 def annotation_provenance(result: dict) -> dict:
     """The facts an annotation run stamps onto the VCF it produced."""
     return {
@@ -1480,4 +1609,6 @@ _APPLIERS = {
     "run_bam_stats": _apply_run_bam_stats,
     "run_vcf_stats": _apply_run_vcf_stats,
     "annotate_variants": _apply_annotate_variants,
+    "quantify": _apply_quantify,
+    "differential_expression": _apply_differential_expression,
 }

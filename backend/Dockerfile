@@ -67,7 +67,11 @@ RUN apt-get update \
         bzip2 \
         bcftools \
         tabix \
+        subread \
     && rm -rf /var/lib/apt/lists/*
+# subread is the package; featureCounts is the binary inside it, and the only
+# part of it anything here calls. Named for the package rather than the tool
+# because that is what apt understands.
 # bcftools and tabix are separate packages from samtools -- installing samtools
 # does not bring htslib's command-line tools along. bcftools does the
 # short-read calling and writes every .tbi index; the tabix package is here for
@@ -225,6 +229,25 @@ RUN set -e \
 # reinstall it. Installed globally rather than in a venv because the worker
 # already runs in the system Python.
 RUN pip install --no-cache-dir NanoPlot==1.45.0
+
+# PyDESeq2 rather than Bioconductor's DESeq2, which is also packaged for
+# trixie (r-bioc-deseq2). Both implement the same negative-binomial GLM; the
+# difference is what they drag in. Measured on this image: `apt-get install -s
+# --no-install-recommends r-bioc-deseq2` is 110 packages plus a full R
+# runtime, in an image that already carries arm64 special-casing for
+# bwa-mem2. PyDESeq2 is 28 pip packages and stays inside the Python the worker
+# already runs, so results come back as a DataFrame instead of a TSV written
+# by another language.
+#
+# The honest cost, recorded so nobody rediscovers it as a bug: R DESeq2 is
+# what a reviewer expects to see cited, and PyDESeq2 implements a narrower
+# slice of `lfcShrink`.
+#
+# Its own layer for the same reason as NanoPlot: it pulls anndata, zarr, h5py,
+# scikit-learn and matplotlib, and an application source edit should not
+# reinstall them. Pinned, because a DE result is only comparable to another
+# one from the same version.
+RUN pip install --no-cache-dir pydeseq2==0.5.4
 
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \

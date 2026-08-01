@@ -506,8 +506,12 @@ database records and `owns_sidecar` were left untouched -- rather than the
   `test_rna_seq_stays_on_hisat2_even_with_star_installed`, since preferring
   STAR is the natural next edit.
 - **Not built with or before differential expression**, which this entry
-  suggested. DE is in flight separately on
-  `claude/differential-expression-tool-75cbcf`.
+  suggested. DE shipped separately on
+  `claude/differential-expression-tool-75cbcf` and is now closed out below --
+  it consumes STAR's BAMs without needing anything from this entry, which is
+  the evidence that splitting them was right. One gap the split left: STAR
+  records no `--rna-strandness` equivalent, so a STAR-aligned BAM reaches
+  counting with no strandedness to infer and falls back to unstranded.
 
 **A third hand-maintained mapping, not in this entry's list.** Registering the
 tool was not half the change but two thirds of it. `results._SIDECAR_ROLES`
@@ -787,7 +791,91 @@ something else and improve it.
 All three are chemistry- and context-dependent enough that
 `suggestion_service.py` will need real rules, not just availability checks.
 
-## RNA-seq differential expression
+## RNA-seq differential expression — FIXED
+
+Shipped 2026-08-01 on `claude/differential-expression-tool-75cbcf`.
+`pipelines/counts_runner.py`, `pipelines/de_runner.py`,
+`queue/expression_handlers.py` (`quantify`, `differential_expression`),
+appliers in `queue/results.py`, launch paths in `services/pipeline_service.py`,
+four routes plus a results-table route in `api/v1/pipelines.py`, and
+`QuantifyDialog` / `DifferentialExpressionDialog` / `ExpressionCharts` /
+`ExpressionResults` on the front end.
+
+**What the implementation did differently.**
+
+- **The sample sheet needed no home to be built.** This entry's central
+  question -- "where does a sample sheet live" -- turned out to be already
+  answered: `condition`, `sample_id` and `batch` are `COMMON_FIELDS` in
+  `metadata/schemas.py`, and every applier copies metadata forward from reads
+  to trimmed reads to BAM to counts. So bulk-tagging six FASTQs at upload
+  arrives at the DE dialog as a filled-in design. A `COUNTS_FIELDS` group was
+  written and then deleted: it would have shadowed the common `condition` and
+  split one concept across two keys. No new document, no new collection.
+- **The split is quantify / test, not align / count / test.** Counting is
+  per-sample and fits the existing one-object-in model exactly, so it is an
+  Actions-tab card like any other. Only the test fans in, and it is the only
+  thing that needed new shape.
+- **Differential expression got no suggestion card, deliberately** -- the one
+  place this departs from the "a new tool needs a rule" instruction in
+  CLAUDE.md. A card exists to pre-answer a question, and none of "which
+  samples", "which groups", "which way round" can be pre-answered. It is a
+  project-level button in `ProjectExplorer` instead, shown once the project
+  has counts. `quantify` does have a rule and a test.
+- **PyDESeq2, as this entry suggested, and `TOOL_META.usage` says so.**
+  Measured rather than assumed: `r-bioc-deseq2` is 110 apt packages plus an R
+  runtime; `pydeseq2` is 28 pip packages in the Python the worker already
+  runs.
+- **featureCounts over HTSeq**, because it consumes the BAM STAR/HISAT2
+  already produce and reuses annotations already in the library.
+
+**Three things only real data exposed**, none of which any fixture would have:
+
+- **Annotations carry no role.** All four GFF/GTF objects in the live library
+  have `role=None` -- ingest only assigns a role where format cannot answer.
+  A rule written against `ObjectRole.ANNOTATION` matches *nothing* in a real
+  project while passing any hand-built test. `_is_annotation` filters on
+  format. This is the same trap this file already records for the Actions-tab
+  rules, hit again in a new place.
+- **`-t exon -g gene_id` does not work on NCBI's GFF3.** Across the yeast
+  RefSeq annotation's 6852 exon lines: `locus_tag` 6852, `gene` 5790,
+  `gene_id` 0. featureCounts stops with "failed to find the gene identifier
+  attribute" -- loudly, which is the good outcome. The launch path prefers the
+  GTF NCBI ships alongside; the GFF3 fallback groups on `locus_tag`, not
+  `gene`, which would silently drop the ~15% of features never named.
+  Verified equivalent: the same BAM counted against the GTF with `gene_id`
+  and the GFF3 with `locus_tag` gave identical numbers, 733,174 assigned
+  fragments over 6,477 genes.
+- **`-p` alone silently doubles every count.** In featureCounts 2.x `-p` means
+  "the input is paired-end" and still counts *reads*; `--countReadPairs` is
+  what switches the unit to fragments. Confirmed on a real BAM: 2,176,214
+  reads counted 1,088,107 fragments, exactly half.
+
+**Measurements.** End-to-end on six samples with 200 genes given a known 4x
+effect: recall 200/200, precision 0.98, log2 fold changes of 2.0-2.2 against
+the injected log2(4) = 2, and PC1 separating the conditions cleanly.
+Quantifying one 2.2M-read BAM takes ~10s; the six-sample test ~15s.
+
+**Two bugs manual UI testing caught that the suite did not**, both of the
+"looks right, is wrong" kind this file keeps collecting:
+
+- Sorting the results table by fold change *descending* put the untested genes
+  first. A `(value is None, value)` sort key does the right thing ascending and
+  exactly the wrong thing descending, because `reverse` flips the whole tuple.
+  Now partitioned in `de_runner.sort_rows`, with the regression pinned.
+- The quantify dialog told the user "this alignment looks single-end" about a
+  BAM with 1.9M properly-paired reads, whenever the project held two
+  assemblies' annotations: the defaults endpoint skipped deriving parameters
+  when it could not resolve the annotation, and the dialog rendered its own
+  fallbacks as though they were facts about the file. The server counted it as
+  paired regardless, so the screen disagreed with the behaviour.
+
+**Still open, deliberately.** Strandedness is inferred from HISAT2's
+`--rna-strandness` only; STAR records no equivalent, so a STAR-aligned BAM
+defaults to unstranded and the dialog says so rather than guessing. Salmon and
+kallisto (alignment-free) are not wired up. Multi-factor designs are not
+supported -- the design is a single `condition` column and one contrast.
+
+--- original entry ---
 
 Raised: 2026-07-31, requested. **Wants STAR (above) first.**
 

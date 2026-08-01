@@ -10,17 +10,20 @@ from pydantic import BaseModel, Field
 from app.api.deps import OwnerDep
 from app.api.v1.jobs import JobOut
 from app.config import settings
-from app.errors import ConflictError, NotFoundError
-from app.models import ObjectStatus
+from app.errors import ConflictError, NotFoundError, ValidationError
+from app.models import BlobStorage, ObjectRole, ObjectStatus
 from app.pipelines import (
     align_runner,
     aligner_registry,
     bam_stats_runner,
+    counts_runner,
+    de_runner,
     tools,
     variant_db,
 )
 from app.pipelines.aligners import Aligner
 from app.services import object_service, pipeline_service, structure_lookup
+from app.storage.paths import blob_path
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
@@ -748,3 +751,202 @@ async def launch_variant_calling(body: VariantRequest, owner: OwnerDep) -> JobOu
         params=body.params,
     )
     return JobOut.of(job)
+
+
+class QuantifyRequest(BaseModel):
+    bam_id: PydanticObjectId
+    # Normally resolved from the project. Supplied when a project holds more
+    # than one assembly's annotation, which is the case resolve_annotation
+    # refuses to guess at.
+    annotation_id: PydanticObjectId | None = None
+    params: dict = Field(default_factory=dict)
+
+
+class DifferentialExpressionRequest(BaseModel):
+    project_id: PydanticObjectId
+    # counts object id -> condition name. A mapping rather than two parallel
+    # lists so a malformed request cannot silently pair the wrong sample with
+    # the wrong group.
+    design: dict[str, str]
+    # {"test": "treated", "reference": "control"}. Named rather than ordered
+    # because which way round a contrast runs decides the sign of every fold
+    # change in the output, and a positional pair gets reversed eventually.
+    contrast: dict
+    threads: int | None = None
+
+
+@router.get("/quantify/defaults/{bam_id}")
+async def quantify_defaults(bam_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Defaults for the quantification dialog.
+
+    Both derived values are reported with enough context for the dialog to
+    explain itself: `strandedness_source` says whether the value came off the
+    alignment or is just the default, because "we read this from your HISAT2
+    run" and "we guessed unstranded" deserve different confidence from the
+    user, and getting it wrong returns near-zero counts either way.
+    """
+    obj = await object_service.get_object(bam_id, owner=owner)
+
+    annotations = await pipeline_service.annotations_for_project(
+        obj.project_id, owner=owner
+    )
+
+    annotation = None
+    params: dict = {}
+    if annotations:
+        try:
+            annotation = await pipeline_service.resolve_annotation(
+                obj, None, owner=owner
+            )
+        except ValidationError:
+            # More than one distinct assembly's annotation, which is a choice
+            # for the dialog rather than an error to surface here. The list
+            # below is what lets it offer them.
+            annotation = None
+
+        # Params are computed either way, against the first candidate when the
+        # annotation itself is ambiguous. Returning `{}` in that case looked
+        # harmless and was not: the dialog rendered its own fallbacks as though
+        # they were derived facts, and told the user "this alignment looks
+        # single-end" about a BAM with 1.9M properly-paired reads. The server
+        # still counted it as paired at launch, so the screen disagreed with
+        # the behaviour.
+        #
+        # Safe to use a candidate the user has not chosen yet, because the two
+        # values that come from the *alignment* -- strandedness and pairing --
+        # do not depend on which annotation is picked. Only `feature_type` and
+        # `attribute` do, and the candidates are GTF-first, so the common pair
+        # is what the dialog shows; picking a GFF3 afterwards is re-resolved
+        # server-side at launch.
+        params = await pipeline_service.default_count_params(
+            obj, annotation or annotations[0]
+        )
+
+    align_params = (obj.facts or {}).get("align_params") or {}
+    inferred = counts_runner.strandedness_for_align_params(align_params)
+
+    return {
+        "params": params,
+        "annotation_id": str(annotation.id) if annotation else None,
+        "annotation_name": annotation.name if annotation else None,
+        "needs_annotation": annotation is None,
+        "annotations": [
+            {"id": str(a.id), "name": a.name, "kind": str(a.format.kind)}
+            for a in annotations
+        ],
+        "strandedness_source": "alignment" if inferred is not None else "default",
+        "paired_source": (
+            "flagstat"
+            if counts_runner.paired_from_facts(obj.facts) is not None
+            else "alignment"
+        ),
+        "available": tools.featurecounts().available,
+        "max_threads": settings.pipeline_default_threads,
+    }
+
+
+@router.post("/quantify", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_quantify(body: QuantifyRequest, owner: OwnerDep) -> JobOut:
+    """Queue a per-gene count over one aligned BAM."""
+    job = await pipeline_service.launch_quantify(
+        bam_id=body.bam_id,
+        owner=owner,
+        annotation_id=body.annotation_id,
+        params=body.params,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/differential-expression/defaults/{project_id}")
+async def differential_expression_defaults(
+    project_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    """The samples, conditions and contrast the DE dialog opens with.
+
+    Project-scoped rather than object-scoped, which makes it the only defaults
+    endpoint here that is. That is the shape of the operation: differential
+    expression is not an action on a file, which is also why it has no
+    suggestion card and is launched from the Computations section instead.
+    """
+    return await pipeline_service.differential_expression_defaults(
+        project_id, owner=owner
+    )
+
+
+@router.post(
+    "/differential-expression",
+    response_model=JobOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def launch_differential_expression(
+    body: DifferentialExpressionRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a differential expression test across a project's counts files."""
+    job = await pipeline_service.launch_differential_expression(
+        project_id=body.project_id,
+        owner=owner,
+        design=body.design,
+        contrast=body.contrast,
+        threads=body.threads,
+    )
+    return JobOut.of(job)
+
+
+@router.get("/de/results/{object_id}")
+async def get_de_results(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    offset: int = 0,
+    limit: int = 100,
+    sort: str = "padj",
+    direction: str = "asc",
+    search: str | None = None,
+    max_padj: float | None = None,
+) -> dict:
+    """A page of a differential expression results table.
+
+    Reads and slices the TSV rather than querying a database, unlike the
+    variant table next door. The two are not comparable in size: a VCF holds
+    millions of rows, where read-the-whole-file costs ~440 MB per request,
+    while a DE table holds one row per gene in the annotation -- 6k for yeast,
+    ~60k for human -- which is a few megabytes and a few milliseconds. Adding
+    a SQLite build step for that would be machinery in search of a problem.
+
+    The ownership check runs first, as in the report routes: it is the only
+    thing between one profile and another profile's results.
+    """
+    obj, blob = await object_service.object_with_blob(object_id, owner=owner)
+    if obj.role is not ObjectRole.DE_RESULTS:
+        raise NotFoundError("This file is not a differential expression result")
+    if blob is None or not obj.blob_sha256:
+        raise NotFoundError("Object has no stored content")
+
+    target = (
+        Path(blob.external_path)
+        if blob.storage is BlobStorage.EXTERNAL and blob.external_path
+        else blob_path(obj.blob_sha256)
+    )
+    if not target.is_file():
+        raise NotFoundError(f"Stored content is not available: {obj.name}")
+
+    rows = de_runner.read_results(target)
+
+    if search:
+        needle = search.strip().lower()
+        rows = [r for r in rows if needle in str(r.get("gene", "")).lower()]
+    if max_padj is not None:
+        # Genes with no padj are excluded by a threshold rather than kept:
+        # "show me significant genes" should not return the ones DESeq2
+        # declined to test.
+        rows = [
+            r for r in rows if r.get("padj") is not None and r["padj"] <= max_padj
+        ]
+
+    rows = de_runner.sort_rows(rows, sort, direction)
+
+    return {
+        "total": len(rows),
+        "rows": rows[offset : offset + limit],
+        "offset": offset,
+        "limit": limit,
+    }

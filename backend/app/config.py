@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     # variant calling besides Clair3 itself.
     bcftools_path: str = "bcftools"
     clair3_path: str = "run_clair3.sh"
+    # From the `subread` package. featureCounts is the only binary in it this
+    # application invokes.
+    featurecounts_path: str = "featureCounts"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

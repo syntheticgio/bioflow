@@ -14,6 +14,36 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The image to run the tests in.
+#
+# Mounting this worktree's source fixes half the problem; the other half is the
+# image, and it bites exactly when a change adds a dependency. `biopipe-api` is
+# built from *main's* Dockerfile, so a branch that installs a new tool runs its
+# tests in an image without that tool -- every probe reports it missing, every
+# availability path is untested, and nothing says why. That is a nastier
+# version of the source problem this script exists to solve, because the
+# failures look like real ones.
+#
+# Measured while adding featureCounts and PyDESeq2: against `biopipe-api` the
+# tool-cache test failed with both tools unfingerprintable, because neither was
+# installed in the image being tested.
+#
+# So: prefer this worktree's own stack image when it has been built (by
+# ops/worktree-up.sh), and fall back to main's otherwise -- a worktree that
+# changes no dependencies needs no stack of its own, and requiring one would
+# make the common case slower for a problem it does not have.
+BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || true)"
+[ -n "$BRANCH" ] || BRANCH="$(basename "$REPO_ROOT")"
+SLUG="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | sed 's/^-*//; s/-*$//')"
+WT_IMAGE="biopipe-wt-${SLUG}-api"
+
+if docker image inspect "$WT_IMAGE" >/dev/null 2>&1; then
+  IMAGE="$WT_IMAGE"
+else
+  IMAGE="biopipe-api"
+fi
+echo "Testing in image: $IMAGE" >&2
+
 # BIOINFO_HOME must be mounted the same way the real api container mounts it.
 # Without it, tests that touch /data (reap_report_dirs and friends) operate on
 # a tmpfs the assertions know nothing about and fail for the wrong reason.
@@ -62,4 +92,4 @@ docker run --rm \
   -w /srv \
   -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \
   -e REDIS_URL="redis://redis:6379/0" \
-  biopipe-api python -m pytest "${@:-tests/}" -q
+  "$IMAGE" python -m pytest "${@:-tests/}" -q
