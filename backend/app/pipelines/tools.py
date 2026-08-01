@@ -361,6 +361,63 @@ def clair3() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def deepvariant() -> Tool:
+    """Whether DeepVariant can be run, which is a question about Docker.
+
+    Unlike every other tool here there is no binary to find: DeepVariant runs
+    from its own image as a sibling container, because vendoring 2.3GB of
+    TensorFlow on a second Python runtime into this image to gain one caller is
+    a bad trade. So the probe asks whether we can reach a Docker daemon, and
+    reports the image reference as the version -- the tag is the provenance a
+    methods section would cite, and there is no `--version` to ask.
+
+    The `path` returned here is the *docker client's* path, not DeepVariant's
+    -- there is no DeepVariant binary. That path is real and fingerprints
+    successfully, which means the probe cache in `tool_cache.py` would
+    otherwise persist this result keyed to the docker client's identity, and
+    it would not change when the image is pulled or removed. `tool_cache.warm`
+    excludes this tool by name for exactly that reason; see the comment there.
+    """
+    client = shutil.which("docker")
+    if client is None:
+        return Tool(
+            name="deepvariant",
+            path=None,
+            version=None,
+            error=(
+                "No docker client in this container, so DeepVariant's image "
+                "cannot be run. It runs as a sibling container rather than "
+                "being installed here."
+            ),
+        )
+
+    try:
+        proc = subprocess.run(
+            [client, "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            timeout=VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return Tool(name="deepvariant", path=client, version=None, error=str(e))
+
+    if proc.returncode != 0:
+        detail = _decode(proc.stderr) or _decode(proc.stdout) or "unknown error"
+        return Tool(
+            name="deepvariant",
+            path=client,
+            version=None,
+            error=f"Docker daemon is not reachable: {detail.splitlines()[0]}",
+        )
+
+    return Tool(
+        name="deepvariant",
+        path=client,
+        version=settings.deepvariant_image.rsplit("/", 1)[-1],
+    )
+
+
+@lru_cache(maxsize=1)
 def nanoplot() -> Tool:
     # Slow timeout: see SLOW_IMPORT_TIMEOUT_SECONDS. NanoPlot spends its
     # startup importing pandas/scipy/plotly before it will print a version.
@@ -401,6 +458,7 @@ def all_tools() -> list[Tool]:
         samtools(),
         bcftools(),
         clair3(),
+        deepvariant(),
         fasterq_dump(),
         prefetch(),
         datasets(),
@@ -987,6 +1045,7 @@ def reset_cache() -> None:
     bcftools.cache_clear()
     bcftools_csq.cache_clear()
     clair3.cache_clear()
+    deepvariant.cache_clear()
     fasterq_dump.cache_clear()
     prefetch.cache_clear()
     datasets.cache_clear()

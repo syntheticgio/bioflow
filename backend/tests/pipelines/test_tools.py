@@ -251,6 +251,7 @@ class TestSerialization:
             "samtools",
             "bcftools",
             "clair3",
+            "deepvariant",
             "fasterq-dump",
             "prefetch",
             "datasets",
@@ -689,3 +690,46 @@ class TestSeeding:
 
         tool = tools._probe("nofptool", "nofptool", ["--version"])
         assert tool.version == "1.0.0"
+
+
+class TestDeepVariantProbe:
+    def test_unavailable_when_there_is_no_docker_client(self, monkeypatch):
+        """The direction that fails when the seam breaks. The image ships most
+        tools as installed, so asserting availability passes whether or not a
+        patch took effect -- assert the refusal instead."""
+        monkeypatch.setattr(tools.shutil, "which", lambda _: None)
+        tools.reset_cache()
+
+        tool = tools.deepvariant()
+        assert not tool.available
+        assert "docker" in (tool.error or "").lower()
+
+    def test_reports_the_image_reference_as_its_version(self, monkeypatch):
+        """There is no binary to ask for a version, and the image tag is the
+        provenance that matters -- it is what a methods section would cite."""
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
+        monkeypatch.setattr(
+            tools.subprocess,
+            "run",
+            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": b"27.3.1", "stderr": b""})(),
+        )
+        tools.reset_cache()
+
+        tool = tools.deepvariant()
+        assert tool.available
+        assert "deepvariant-arm64" in (tool.version or "")
+
+    def test_unavailable_when_the_daemon_is_unreachable(self, monkeypatch):
+        """A mounted socket that answers nothing is the compose-misconfigured
+        case, and must not read as installed."""
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
+        monkeypatch.setattr(
+            tools.subprocess,
+            "run",
+            lambda *a, **k: type("R", (), {"returncode": 1, "stdout": b"", "stderr": b"Cannot connect to the Docker daemon"})(),
+        )
+        tools.reset_cache()
+
+        tool = tools.deepvariant()
+        assert not tool.available
+        assert "daemon" in (tool.error or "").lower()

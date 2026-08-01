@@ -29,6 +29,16 @@ CACHE_KEY = "bp:tools:probes"
 # only bounds how long a fingerprint collision could persist.
 CACHE_TTL_SECONDS = 24 * 60 * 60
 
+# Tools whose availability is not a property of a binary, so persisting their
+# probe result by binary fingerprint would be wrong rather than merely
+# unnecessary. DeepVariant's Tool.path is the *docker client's* path -- there
+# is no DeepVariant binary -- and that path fingerprints successfully, so
+# without this exclusion its availability would get cached against the
+# identity of the docker client and would not change when the image is pulled
+# or removed. Excluded here instead of made unfingerprintable, since the
+# fingerprint is otherwise a correct, reusable idea for every other tool.
+NOT_FINGERPRINTABLE = {"deepvariant"}
+
 
 async def read(client: Any) -> dict[str, tuple[str, Tool]]:
     """Stored probe results, by tool name. Empty on any failure."""
@@ -102,6 +112,8 @@ async def warm(client: Any) -> None:
 
     entries: dict[str, tuple[str, Tool]] = {}
     for tool in probed:
+        if tool.name in NOT_FINGERPRINTABLE:
+            continue
         fingerprint = tools._fingerprint(tool.path)
         if fingerprint is not None:
             entries[tool.name] = (fingerprint, tool)

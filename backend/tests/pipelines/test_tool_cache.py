@@ -95,8 +95,21 @@ class TestWarm:
 
         stored = await tool_cache.read(redis)
         assert stored, "warm should have written probe results"
-        # Every tool all_tools() reports should be stored.
-        assert {t.name for t in tools.all_tools()} <= set(stored)
+        # Every tool all_tools() reports should be stored, except the ones
+        # NOT_FINGERPRINTABLE excludes on purpose (see TestDeepVariantIsNotCached).
+        expected = {t.name for t in tools.all_tools()} - tool_cache.NOT_FINGERPRINTABLE
+        assert expected <= set(stored)
+
+    async def test_deepvariant_is_not_written_to_the_cache(self, redis):
+        """DeepVariant's Tool.path is the docker client's path, not a
+        DeepVariant binary -- that path fingerprints successfully, so without
+        an explicit exclusion its availability would get cached against the
+        docker client's identity and would not change when the image is
+        pulled or removed."""
+        await tool_cache.warm(redis)
+
+        stored = await tool_cache.read(redis)
+        assert "deepvariant" not in stored
 
     async def test_warm_seeds_probes_so_they_do_not_shell_out(self, redis, tmp_path, monkeypatch):
         """The direction that fails when the seam breaks: seed a version the
