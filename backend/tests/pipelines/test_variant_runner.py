@@ -154,7 +154,16 @@ class TestIndexCommand:
     def test_builds_bcftools_index_tbi(self):
         assert build_index_command(
             bcftools_path="bcftools", vcf=Path("/w/out/calls.vcf.gz")
-        ) == ["bcftools", "index", "-t", "/w/out/calls.vcf.gz"]
+        ) == ["bcftools", "index", "-t", "-f", "/w/out/calls.vcf.gz"]
+
+    def test_overwrites_an_existing_index(self):
+        """Found by running a real DeepVariant job: it writes its own .tbi, and
+        without -f bcftools calls that an error and exits 1 -- failing a job
+        whose calling stage had already succeeded. Clair3 and bcftools leave no
+        index, so nothing caught this until a third caller existed."""
+        assert "-f" in build_index_command(
+            bcftools_path="bcftools", vcf=Path("/w/out/calls.vcf.gz")
+        )
 
 
 class TestOutputName:

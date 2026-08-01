@@ -8,8 +8,20 @@ services:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
       - ./backend/tests:/srv/tests:ro
+      # The api never *runs* a sibling container -- workers do -- but it still
+      # needs to answer "could this run?" at launch time. `tools.require()` in
+      # launch_variant_calling probes DeepVariant before enqueueing, so that an
+      # unavailable tool is a clear rejection in the dialog rather than a job
+      # that dies thirty seconds after the user walks away. Without the socket
+      # here that probe fails and DeepVariant can never be launched, however
+      # well the worker is set up.
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       LOG_LEVEL: DEBUG
+      # Read by the same probe. The api does not start containers, but keeping
+      # both services' view identical means a launch-time check and the run
+      # that follows it cannot disagree about what is available.
+      BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}
 
   worker:
     volumes:

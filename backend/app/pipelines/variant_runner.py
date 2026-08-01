@@ -378,8 +378,17 @@ def build_index_command(*, bcftools_path: str, vcf: Path) -> list[str]:
     `bcftools index -t` rather than `tabix -p vcf`: one fewer binary to probe
     and install, and no need to guess whether the file is BGZF or plain gzip --
     bcftools wrote it and knows.
+
+    `-f` because not every caller leaves this step something to do. Clair3 and
+    bcftools produce a bare VCF, but DeepVariant writes its own `.tbi` beside
+    the output -- and without `-f`, bcftools treats an existing index as an
+    error and exits 1, failing a job whose calling stage had already finished.
+    Overwriting beats skipping the step per caller: re-indexing takes seconds
+    against a run of minutes, and the alternative teaches this function which
+    tools happen to emit an index today, which is exactly the kind of fact that
+    goes stale silently.
     """
-    return [bcftools_path, "index", "-t", str(vcf)]
+    return [bcftools_path, "index", "-t", "-f", str(vcf)]
 
 
 def _quote(argv: list[str]) -> str:
