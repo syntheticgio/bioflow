@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import OwnerDep
 from app.logging import get_logger
-from app.metadata import assembly, assembly_components, sra_resolver
-from app.services import assembly_service, sra_service
+from app.metadata import ncbi_assembly, ncbi_assembly_components, sra_resolver
+from app.services import ncbi_assembly_service, sra_service
 
 log = get_logger(__name__)
 
@@ -246,7 +246,7 @@ async def _resolve_assembly(
     """
     accession = accession.strip().upper()
 
-    meta = await asyncio.to_thread(assembly.lookup, accession)
+    meta = await asyncio.to_thread(ncbi_assembly.lookup, accession)
     if meta is None:
         return AssemblyResolveResponse(
             accession=accession,
@@ -257,13 +257,13 @@ async def _resolve_assembly(
         )
 
     availability = await asyncio.to_thread(
-        assembly.component_availability, accession
+        ncbi_assembly.component_availability, accession
     )
     if availability is None:
         # The CLI could not answer, so fall back to what the API report says.
         # Coarser, but better than offering every component blindly.
         availability = list(
-            assembly_components.from_report(
+            ncbi_assembly_components.from_report(
                 {
                     "annotation_info": {"name": meta.assembly_name}
                     if meta.assembly_name
@@ -275,7 +275,7 @@ async def _resolve_assembly(
 
     present = False
     if project_id is not None:
-        present = await assembly_service.already_downloaded(
+        present = await ncbi_assembly_service.already_downloaded(
             project_id, accession, owner=owner
         )
 
@@ -312,7 +312,7 @@ async def download_assembly(
 
     202 rather than 201: this accepts the work and returns immediately.
     """
-    run, job_ids = await assembly_service.launch_download(
+    run, job_ids = await ncbi_assembly_service.launch_download(
         project_id=body.project_id,
         accession=body.accession,
         components=body.components,

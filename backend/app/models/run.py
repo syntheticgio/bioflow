@@ -44,6 +44,11 @@ class RunKind(StrEnum):
     # different shapes: every other member here describes a run with one or two
     # inputs, and this is the first with N.
     DIFFERENTIAL_EXPRESSION = "differential_expression"
+    # De novo assembly. Distinct from ASSEMBLY_DOWNLOAD, which fetches a
+    # published one -- the two produce the same kind of file by completely
+    # different means, and a run list that conflated them would claim credit
+    # for a genome NCBI assembled.
+    ASSEMBLY = "assembly"
 
 
 class RunStatus(StrEnum):
@@ -130,6 +135,9 @@ class RunJobRole(StrEnum):
     # it is the whole point of its run, and a run reporting anything but
     # failure when it fails would be claiming a results table exists.
     TEST = "test"
+    # Likewise not optional: an assembly run whose assembly failed produced
+    # nothing.
+    ASSEMBLE = "assemble"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

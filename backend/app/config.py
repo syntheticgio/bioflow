@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     # From the `subread` package. featureCounts is the only binary in it this
     # application invokes.
     featurecounts_path: str = "featureCounts"
+    # The de novo assembler, for long reads only. Debian ships it depending on
+    # minimap2 and samtools, both of which this image already carries, so it
+    # costs ~37MB rather than a toolchain.
+    flye_path: str = "flye"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

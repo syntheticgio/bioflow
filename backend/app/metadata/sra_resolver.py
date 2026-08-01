@@ -27,7 +27,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, field
 
 from app.logging import get_logger
-from app.metadata import assembly, sra
+from app.metadata import ncbi_assembly, sra
 
 log = get_logger(__name__)
 
@@ -154,7 +154,7 @@ def classify(accession: str) -> str | None:
     upper = accession.strip().upper()
     # Checked before the INSDC prefixes: an assembly lives in a different NCBI
     # service (Datasets, not E-utilities) and resolves down a different path.
-    if assembly.is_valid_accession(upper):
+    if ncbi_assembly.is_valid_accession(upper):
         return "assembly"
     if upper.startswith(_BIOPROJECT_PREFIXES):
         return "bioproject"
@@ -386,7 +386,7 @@ def resolve(accession: str, *, platform_filter: str | None = None) -> SraResolut
     if kind == "assembly":
         # This resolver answers "which runs can I download". An assembly has
         # none: it is a published genome, resolved through
-        # assembly_components and downloaded by a different handler. Returning
+        # ncbi_assembly_components and downloaded by a different handler. Returning
         # an explanatory error beats an esearch that truthfully reports no
         # sequencing runs and reads as "this accession is broken".
         return SraResolution(

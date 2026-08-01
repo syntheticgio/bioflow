@@ -334,7 +334,7 @@ def component_availability(accession: str) -> list | None:
     import subprocess
 
     from app.config import settings
-    from app.metadata import assembly_components
+    from app.metadata import ncbi_assembly_components
 
     if not is_valid_accession(accession):
         return None
@@ -364,7 +364,7 @@ def component_availability(accession: str) -> list | None:
         return None
 
     if completed.returncode == 0:
-        parsed = assembly_components.parse_preview(completed.stdout)
+        parsed = ncbi_assembly_components.parse_preview(completed.stdout)
         if parsed is not None:
             return parsed
 

@@ -243,6 +243,27 @@ def resolve_reference(
     # project with one reference and a known organism would refuse to align
     # against the file it actually has.
     if organism and organism.strip():
+        # Reached with either zero distinct assemblies or several, and those
+        # are not the same situation. They shared one message until 2026-08-01,
+        # so a project holding two perfectly good genomes was told that
+        # fetching one "is not wired up yet" -- a sentence about an empty
+        # project, rendered beside two references the user could see.
+        #
+        # The refusal is still right: the card picks on its own, so it declines
+        # rather than guess between distinct genomes (see
+        # `test_two_genuinely_different_assemblies_are_two_references`, and the
+        # `protein.faa` bug in `dd4fae2` that established the rule). What
+        # changed is only that it now declines for the true reason and names
+        # the way forward -- the align dialog, where a human does the picking
+        # this function deliberately will not do.
+        if distinct:
+            return ReferenceChoice(
+                usable=False,
+                reason=(
+                    f"This project has {len(distinct)} references. Open Align "
+                    "to choose one."
+                ),
+            )
         return ReferenceChoice(
             usable=False,
             reason=(
@@ -758,9 +779,11 @@ async def suggestions_for(obj) -> list[dict]:
         # `cds_from_genomic.fna` -- FASTA files that are emphatically not
         # genomes to align against. Counting those made a project with one
         # real reference look like it had four, which sent `resolve_reference`
-        # past its single-reference branch and into "fetching a genome for
-        # <organism> is not wired up yet" beside a reference sitting right
-        # there.
+        # past its single-reference branch into a refusal, beside a reference
+        # sitting right there. (That refusal read "fetching a genome for
+        # <organism> is not wired up yet" at the time; it now names the count
+        # instead, which would have made the same bug easier to see rather
+        # than fixing it -- the filter below is still what does that.)
         #
         # The align *dialog* can afford the looser filter because a human
         # picks from the list it shows. A card picks on its own, so it has to

@@ -7,7 +7,7 @@ download that succeeds and ingests nothing, which reads as a bug. The
 
 import json
 
-from app.metadata import assembly_components as ac
+from app.metadata import ncbi_assembly_components as ac
 
 
 # GCF_000002445.2 -- fully annotated RefSeq assembly.

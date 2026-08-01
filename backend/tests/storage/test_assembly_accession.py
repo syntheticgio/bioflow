@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.metadata import assembly, enrich
+from app.metadata import ncbi_assembly, enrich
 from app.models import FormatKind
 from app.queue.results import should_assign_reference_role
 
@@ -28,7 +28,7 @@ class TestParseAccession:
         ],
     )
     def test_finds_accessions(self, filename, expected):
-        assert assembly.parse_accession(filename) == expected
+        assert ncbi_assembly.parse_accession(filename) == expected
 
     @pytest.mark.parametrize(
         "filename",
@@ -42,22 +42,22 @@ class TestParseAccession:
         ],
     )
     def test_rejects_non_accessions(self, filename):
-        assert assembly.parse_accession(filename) is None
+        assert ncbi_assembly.parse_accession(filename) is None
 
     def test_uppercases_the_result(self):
         """Stored uppercase so a filename's casing does not fragment lookups."""
-        assert assembly.parse_accession("gca_000001405.29.fna") == "GCA_000001405.29"
+        assert ncbi_assembly.parse_accession("gca_000001405.29.fna") == "GCA_000001405.29"
 
 
 class TestIsValidAccession:
     def test_accepts_bare_accessions(self):
-        assert assembly.is_valid_accession("GCF_000002445.2")
-        assert assembly.is_valid_accession("gca_000001405.29")
+        assert ncbi_assembly.is_valid_accession("GCF_000002445.2")
+        assert ncbi_assembly.is_valid_accession("gca_000001405.29")
 
     def test_rejects_malformed(self):
-        assert not assembly.is_valid_accession("GCF_000002445")
-        assert not assembly.is_valid_accession("SRR11768093")
-        assert not assembly.is_valid_accession("")
+        assert not ncbi_assembly.is_valid_accession("GCF_000002445")
+        assert not ncbi_assembly.is_valid_accession("SRR11768093")
+        assert not ncbi_assembly.is_valid_accession("")
 
 
 class TestParseReport:
@@ -68,7 +68,7 @@ class TestParseReport:
         return json.loads(FIXTURE.read_text())
 
     def test_extracts_identity_fields(self, report):
-        meta = assembly.parse_report(report)
+        meta = ncbi_assembly.parse_report(report)
         assert meta is not None
         assert meta.accession == "GCF_000002445.2"
         assert meta.organism == "Trypanosoma brucei brucei TREU927"
@@ -82,7 +82,7 @@ class TestParseReport:
         assert meta.paired_accession == "GCA_000002445.1"
 
     def test_extracts_stats(self, report):
-        meta = assembly.parse_report(report)
+        meta = ncbi_assembly.parse_report(report)
         assert meta.contig_count == 50
         assert meta.gc_percent == pytest.approx(46.5)
         assert meta.total_length == 26075494
@@ -95,18 +95,18 @@ class TestParseReport:
         contigs. Comparing a correct file's 12 sequences against 50 would
         report a divergence that does not exist.
         """
-        meta = assembly.parse_report(json.loads(FIXTURE.read_text()))
+        meta = ncbi_assembly.parse_report(json.loads(FIXTURE.read_text()))
         assert meta.scaffold_count == 12
         assert meta.contig_count == 50
         assert meta.to_facts()["ncbi_sequence_count"] == 12
 
     def test_returns_none_for_an_empty_report(self):
-        assert assembly.parse_report({"reports": []}) is None
-        assert assembly.parse_report({}) is None
+        assert ncbi_assembly.parse_report({"reports": []}) is None
+        assert ncbi_assembly.parse_report({}) is None
 
     def test_survives_a_partial_record(self):
         """NCBI omits fields for some assemblies; absence must not raise."""
-        meta = assembly.parse_report({"reports": [{"accession": "GCA_000000001.1"}]})
+        meta = ncbi_assembly.parse_report({"reports": [{"accession": "GCA_000000001.1"}]})
         assert meta is not None
         assert meta.accession == "GCA_000000001.1"
         assert meta.organism is None
@@ -119,7 +119,7 @@ class TestParseReport:
         arriving as a dict would otherwise be written into a text field that
         nobody can correct by hand.
         """
-        meta = assembly.parse_report(
+        meta = ncbi_assembly.parse_report(
             {
                 "reports": [
                     {
@@ -141,7 +141,7 @@ class TestParseReport:
 
     def test_a_blank_string_is_treated_as_absent(self):
         """An empty submitter should read as missing, not as an empty field."""
-        meta = assembly.parse_report(
+        meta = ncbi_assembly.parse_report(
             {"reports": [{"accession": "GCA_000000001.1",
                           "assembly_info": {"submitter": "   "}}]}
         )
@@ -165,13 +165,13 @@ class TestParseReport:
         `x or {}` guards falsy values but not a truthy value of the wrong
         type, which is what a schema change or an error envelope looks like.
         """
-        assembly.parse_report(payload)  # must not raise
+        ncbi_assembly.parse_report(payload)  # must not raise
 
     def test_lookup_never_raises_on_an_unexpected_shape(self):
         """The never-raises promise must hold end to end, not just in parsing."""
         body = b'{"reports":[{"accession":"GCA_1","organism":"oops"}]}'
-        with patch.object(assembly, "_get", return_value=body):
-            meta = assembly.lookup("GCF_000002445.2")
+        with patch.object(ncbi_assembly, "_get", return_value=body):
+            meta = ncbi_assembly.lookup("GCF_000002445.2")
         # Degrades to a usable record rather than raising: the wrong-typed
         # organism is dropped, the accession survives.
         assert meta is None or meta.organism is None
@@ -179,7 +179,7 @@ class TestParseReport:
 
 class TestToMetadata:
     def test_maps_onto_schema_field_names(self):
-        meta = assembly.AssemblyMetadata(
+        meta = ncbi_assembly.AssemblyMetadata(
             accession="GCF_000002445.2",
             organism="Trypanosoma brucei brucei TREU927",
             strain="927/4 GUTat10.1",
@@ -205,12 +205,12 @@ class TestToMetadata:
 
     def test_omits_absent_fields(self):
         """A sparse record must not write empty strings into metadata."""
-        out = assembly.AssemblyMetadata(accession="GCA_000000001.1").to_metadata()
+        out = ncbi_assembly.AssemblyMetadata(accession="GCA_000000001.1").to_metadata()
         assert out == {"assembly_accession": "GCA_000000001.1"}
 
     def test_stats_go_to_facts_not_metadata(self):
         """Statistics are measurements, not user-editable metadata."""
-        meta = assembly.AssemblyMetadata(
+        meta = ncbi_assembly.AssemblyMetadata(
             accession="GCF_000002445.2", contig_count=50, gc_percent=46.5,
             total_length=26075494, assembly_name="ASM244v1",
         )
@@ -222,8 +222,8 @@ class TestToMetadata:
         assert facts["ncbi_assembly_name"] == "ASM244v1"
 
 
-def _fixture_metadata() -> assembly.AssemblyMetadata:
-    return assembly.parse_report(json.loads(FIXTURE.read_text()))
+def _fixture_metadata() -> ncbi_assembly.AssemblyMetadata:
+    return ncbi_assembly.parse_report(json.loads(FIXTURE.read_text()))
 
 
 class TestEnrichFromAssembly:
@@ -236,11 +236,11 @@ class TestEnrichFromAssembly:
         Without this they all hit NCBI live once enrichment started fetching
         names.
         """
-        with patch.object(assembly, "lookup_sequence_names", return_value=None):
+        with patch.object(ncbi_assembly, "lookup_sequence_names", return_value=None):
             yield
 
     def test_fills_empty_fields_from_the_filename(self):
-        with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
+        with patch.object(ncbi_assembly, "lookup", return_value=_fixture_metadata()):
             result = enrich.enrich_from_assembly(
                 filename="GCF_000002445.2_ASM244v1_genomic.fna",
                 existing_metadata={},
@@ -253,7 +253,7 @@ class TestEnrichFromAssembly:
 
     def test_never_overwrites_a_user_value(self):
         """A correction must survive re-ingest -- the whole point of the rule."""
-        with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
+        with patch.object(ncbi_assembly, "lookup", return_value=_fixture_metadata()):
             result = enrich.enrich_from_assembly(
                 filename="GCF_000002445.2_genomic.fna",
                 existing_metadata={"organism": "Trypanosoma brucei (my correction)"},
@@ -263,7 +263,7 @@ class TestEnrichFromAssembly:
         assert any(c["key"] == "organism" for c in result.conflicts)
 
     def test_explicit_metadata_accession_beats_the_filename(self):
-        with patch.object(assembly, "lookup", return_value=_fixture_metadata()) as m:
+        with patch.object(ncbi_assembly, "lookup", return_value=_fixture_metadata()) as m:
             result = enrich.enrich_from_assembly(
                 filename="GCA_000001405.29_something.fna",
                 existing_metadata={"assembly_accession": "GCF_000002445.2"},
@@ -278,7 +278,7 @@ class TestEnrichFromAssembly:
         Mirrors the SRA path's test_invalid_manual_accession_falls_back: a
         perfectly good accession in the filename should still be used.
         """
-        with patch.object(assembly, "lookup", return_value=_fixture_metadata()) as m:
+        with patch.object(ncbi_assembly, "lookup", return_value=_fixture_metadata()) as m:
             result = enrich.enrich_from_assembly(
                 filename="GCF_000002445.2_ASM244v1_genomic.fna",
                 existing_metadata={"assembly_accession": "GCF_123"},
@@ -308,7 +308,7 @@ class TestEnrichFromAssembly:
 
     def test_a_lookup_failure_never_raises(self):
         """Enrichment is a bonus; a network problem must not fail an ingest."""
-        with patch.object(assembly, "lookup", side_effect=OSError("network down")):
+        with patch.object(ncbi_assembly, "lookup", side_effect=OSError("network down")):
             result = enrich.enrich_from_assembly(
                 filename="GCF_000002445.2_genomic.fna",
                 existing_metadata={},
@@ -327,7 +327,7 @@ class TestEnrichFromAssembly:
         assert result.accession is None
 
     def test_stats_are_returned_as_facts(self):
-        with patch.object(assembly, "lookup", return_value=_fixture_metadata()):
+        with patch.object(ncbi_assembly, "lookup", return_value=_fixture_metadata()):
             result = enrich.enrich_from_assembly(
                 filename="GCF_000002445.2_genomic.fna",
                 existing_metadata={},

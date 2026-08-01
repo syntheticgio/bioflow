@@ -95,9 +95,20 @@ class TestWarm:
 
         stored = await tool_cache.read(redis)
         assert stored, "warm should have written probe results"
-        # Every tool all_tools() reports should be stored, except the ones
+        # Every *available* tool should be stored, except the ones
         # NOT_FINGERPRINTABLE excludes on purpose (see TestDeepVariantIsNotCached).
-        expected = {t.name for t in tools.all_tools()} - tool_cache.NOT_FINGERPRINTABLE
+        #
+        # Availability is part of the expectation, not incidental to it: `warm`
+        # only caches what it can fingerprint, and a tool with no binary has no
+        # path to fingerprint. Comparing against every *declared* tool instead
+        # quietly asserted that the image ships all of them, so this test broke
+        # the moment a tool was declared before its image rebuild -- reporting
+        # a cache bug where there was only a missing binary. The regression
+        # this is here for is still caught: an installed tool that fails to
+        # reach Redis is available and absent from `stored`.
+        expected = {
+            t.name for t in tools.all_tools() if t.available
+        } - tool_cache.NOT_FINGERPRINTABLE
         assert expected <= set(stored)
 
     async def test_deepvariant_is_not_written_to_the_cache(self, redis):

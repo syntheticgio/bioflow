@@ -1287,24 +1287,71 @@ per-tool budget.
 Touches: `backend/app/pipelines/tools.py`, `backend/app/main.py` (lifespan),
 `backend/app/api/v1/pipelines.py`.
 
-## Longest/shortest contig reporting never shipped
+## Longest/shortest contig reporting never shipped — THE ENTRY WAS WRONG
 
-Raised: 2026-07-31, by an audit of `docs/superpowers/plans/`.
+Raised: 2026-07-31, by an audit of `docs/superpowers/plans/`. Retracted
+2026-08-01: **it had already shipped two days before this entry was written.**
 
-`docs/superpowers/plans/2026-07-29-todo-batch.md` set out to fix three things.
-Two landed. The third -- reporting longest and shortest contig for an assembly
--- did not: nothing in `backend/app/` mentions `longest_contig`, `shortest_contig`
-or an equivalent, and the plan's checkboxes are all unticked (which proves
-nothing either way, since no plan in this repo has its boxes ticked).
+`19f6b62` ("feat: record per-sequence FASTA lengths and assembly extremes",
+2026-07-29) is the third item of `2026-07-29-todo-batch.md`, delivered on
+schedule. `_parse_fasta` in `backend/app/storage/parsers.py:440-503` tracks
+the extremes across *every* record rather than just the stored window, emits
+`sequence_longest` and `sequence_shortest`, and both are rendered by
+`FactsTable.tsx` and `AssemblyFacts.tsx`.
 
-Small on its own. Worth folding into the QUAST work above rather than building
-separately, since N50 and contig extremes come out of the same pass and QUAST
-reports all of them.
+The audit grepped for `longest_contig` and `shortest_contig`. The code calls
+them `sequence_longest` and `sequence_shortest` -- the comment at
+`parsers.py:496` even explains why they are "sequences" and not "contigs" (a
+FASTA's records are scaffolds, and the counts diverge sharply for a
+chromosome-level assembly). A grep for one plausible name and a conclusion of
+"never shipped" is what produced a backlog entry proposing to build a working
+feature a second time.
 
-Touches: wherever assembly facts are computed, alongside the existing
-`ContigTable.tsx` on the frontend.
+Kept rather than deleted for that reason alone. The lesson is not about
+contigs: **an absence-of-symbol grep proves nothing unless you have checked
+what the symbol is actually called**, and this repo's own guidance to verify a
+TODO against the code assumed the verification would be done right.
 
-## Assembly: designed, not built
+The two entries above (QUAST/BUSCO, and the assembly design below) should not
+count this as work they close -- there is nothing left to close. N50 across a
+FASTA is still genuinely missing and still belongs to QUAST.
+
+## Assembly: designed, not built — assembly half now SPECCED
+
+Design: `docs/superpowers/specs/2026-08-01-de-novo-assembly-design.md`
+(2026-08-01), covering the `### Assembly` section below. What the design
+settled that this entry left open:
+
+- **Flye first and alone.** It is packaged in Debian trixie (2.9.5, 37 MB,
+  depending on minimap2 and samtools the image already has) and covers ONT,
+  CLR and HiFi. **hifiasm is not packaged** and needs a source build with
+  probable arm64 SIMD work, so this entry's "hifiasm for HiFi, Flye for
+  ONT/CLR" split is deferred rather than dropped: HiFi routes to Flye until
+  hifiasm is built. SPAdes is packaged but out of scope by decision.
+- **This entry's `JobResources` claim is wrong.** It predicted assembly would
+  be "the first real exercise of the `mem_mb` side of the load governor's
+  admission checks." `app/queue/governor.py` does not read `mem_mb` at all --
+  every handler declares it and nothing enforces it. The guard is at launch
+  in the `resource_estimator` shape instead.
+- **Genome size is inferred, warned about, and overridable**, from a
+  same-organism reference's `reference_total_length` / `ncbi_total_length`
+  when the project has one. Never inferred from read volume.
+- **One job, several first-class outputs** -- FASTA, GFA (a new
+  `ObjectRole.ASSEMBLY_GRAPH`, not a `SidecarRole`), and `assembly_info.txt`
+  parsed into facts, which is where per-contig *coverage and circularity*
+  come from. Contig extremes already ship generically; see the retracted
+  entry above.
+- **A draft assembly disables the Align card as the code stands.** Verified
+  against `resolve_reference`: a project holding an NCBI reference *and* a
+  de novo draft, with a known organism, falls past the single-reference
+  branch into "Fetching a reference genome for X is not wired up yet" -- a
+  refusal that is false, beside two usable genomes. Fixing that is part of
+  the assembly work rather than a follow-up, or shipping assembly makes
+  alignment worse.
+- **Three unrelated things are already called "assembly"** in `backend/app/`
+  (upload-chunk reassembly, NCBI assembly metadata, NCBI assembly download).
+  They get renamed first, freeing `app/queue/assembly_handlers.py` for the
+  de novo one.
 
 > **Variant calling was built on 2026-07-29** and is no longer deferred. The
 > section below is kept for the assembly half, which is still unbuilt, and

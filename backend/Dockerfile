@@ -68,10 +68,18 @@ RUN apt-get update \
         bcftools \
         tabix \
         subread \
+        flye \
     && rm -rf /var/lib/apt/lists/*
 # subread is the package; featureCounts is the binary inside it, and the only
 # part of it anything here calls. Named for the package rather than the tool
 # because that is what apt understands.
+#
+# flye is the de novo assembler, and the cheapest of the three worth having:
+# Debian packages it (2.9.5, ~37MB) and its dependencies are minimap2 and
+# samtools, both already above. hifiasm is not packaged at all and would need
+# a source build with the same arm64 SIMD problem bwa-mem2 has, and SPAdes is
+# packaged but only assembles short reads, which is not a workflow here yet.
+# See docs/superpowers/specs/2026-08-01-de-novo-assembly-design.md.
 # bcftools and tabix are separate packages from samtools -- installing samtools
 # does not bring htslib's command-line tools along. bcftools does the
 # short-read calling and writes every .tbi index; the tabix package is here for

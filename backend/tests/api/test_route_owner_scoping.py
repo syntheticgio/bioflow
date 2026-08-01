@@ -952,20 +952,20 @@ class TestNcbiRouter:
         twin: pinning the project lookup to `"local"` leaves a refusal-only
         test green, since A's project is not `"local"`-owned either.
 
-        `assembly.lookup` and `component_availability` are stubbed -- the real
+        `ncbi_assembly.lookup` and `component_availability` are stubbed -- the real
         pair makes a blocking HTTP call and shells out to the `datasets` CLI,
         neither of which this test is about.
         """
-        from app.metadata import assembly
+        from app.metadata import ncbi_assembly
         from app.queue import queue
 
         project = await _project(two_profiles["a"].owner_id(), "a-assembly")
         monkeypatch.setattr(
-            assembly,
+            ncbi_assembly,
             "lookup",
-            lambda a: assembly.AssemblyMetadata(accession=a, organism="E. coli"),
+            lambda a: ncbi_assembly.AssemblyMetadata(accession=a, organism="E. coli"),
         )
-        monkeypatch.setattr(assembly, "component_availability", lambda a: [])
+        monkeypatch.setattr(ncbi_assembly, "component_availability", lambda a: [])
         enqueue = AsyncMock(return_value=Job(type="probe", owner="unused"))
         monkeypatch.setattr(queue, "enqueue", enqueue)
 
@@ -1036,7 +1036,7 @@ class TestNcbiRouter:
     ):
         """Same both-directions reasoning as the SRA dedup check above."""
         from app.models import ObjectRole
-        from app.services import assembly_service
+        from app.services import ncbi_assembly_service
 
         project = await _project(two_profiles["a"].owner_id(), "a-asm-dedup")
         obj = await _object(
@@ -1050,10 +1050,10 @@ class TestNcbiRouter:
         obj.metadata = {"assembly_accession": "GCF_000002445.2"}
         await obj.save()
 
-        mine = await assembly_service.already_downloaded(
+        mine = await ncbi_assembly_service.already_downloaded(
             project.id, "GCF_000002445.2", owner=two_profiles["a"].owner_id()
         )
-        theirs = await assembly_service.already_downloaded(
+        theirs = await ncbi_assembly_service.already_downloaded(
             project.id, "GCF_000002445.2", owner=two_profiles["b"].owner_id()
         )
 

@@ -66,6 +66,8 @@ def parse(
             return _parse_fasta(path, compression, cancel_event)
         if kind in (FormatKind.BED, FormatKind.GFF, FormatKind.GTF):
             return _parse_tabular(path, compression, cancel_event)
+        if kind is FormatKind.GFA:
+            return _parse_gfa(path, compression, cancel_event)
         return {}
     except JobCancelled:
         raise
@@ -507,6 +509,64 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
     facts.update(
         sequence_stats.fasta_stats(path, compression, cancel_event=cancel)
     )
+    return facts
+
+
+def _parse_gfa(path: Path, compression: Compression, cancel) -> dict:
+    """Segment and link counts for an assembly graph.
+
+    The two numbers that say what the graph is: how many pieces, and how
+    tangled. A graph with as many links as segments is a resolved assembly; one
+    with far more is where the contigs came from a repeat-riddled region.
+
+    Segment lengths come from the `LN:i:` tag when present and the sequence
+    field otherwise -- Flye writes both, but a GFA is allowed to carry `*` in
+    place of the sequence, and reading that as a zero-length contig would make
+    a valid graph look empty.
+    """
+    facts: dict = {}
+    segments = 0
+    links = 0
+    total_length = 0
+    read_bytes = 0
+    truncated = False
+    # Same budget and reasoning as the FASTA path: a graph for a fragmented
+    # draft is large, and the counts are worth more than exactness on a file
+    # nobody will read to the end.
+    limit = 256 * 1024 * 1024
+
+    with _open_text(path, compression) as fh:
+        for i, line in enumerate(fh):
+            read_bytes += len(line)
+            cols = line.rstrip("\n").split("\t")
+            if cols[0] == "S":
+                segments += 1
+                length = None
+                for col in cols[3:]:
+                    if col.startswith("LN:i:"):
+                        try:
+                            length = int(col[5:])
+                        except ValueError:
+                            length = None
+                        break
+                if length is None and len(cols) > 2 and cols[2] != "*":
+                    length = len(cols[2])
+                total_length += length or 0
+            elif cols[0] == "L":
+                links += 1
+            if i % 5000 == 0:
+                _check(cancel)
+            if compression is Compression.NONE and read_bytes > limit:
+                truncated = True
+                break
+
+    if segments:
+        facts["gfa_segment_count"] = segments
+        facts["gfa_link_count"] = links
+        if total_length:
+            facts["gfa_total_length"] = total_length
+        if truncated:
+            facts["gfa_counts_partial"] = True
     return facts
 
 

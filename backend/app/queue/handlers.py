@@ -134,7 +134,7 @@ async def assemble_upload(ctx: JobContext) -> dict:
 
     from app.models import BlobStorage, UploadSession, UploadState
     from app.services import blob_service, object_service, project_service, upload_service
-    from app.storage import assembly
+    from app.storage import chunk_assembly
 
     session_id = ctx.payload.get("session_id")
     object_id = ctx.payload.get("object_id")
@@ -169,7 +169,7 @@ async def assemble_upload(ctx: JobContext) -> dict:
         )
 
     digest, size = await asyncio.to_thread(
-        assembly.assemble_and_hash,
+        chunk_assembly.assemble_and_hash,
         chunk_paths,
         assembled,
         cancel_event=ctx.cancel_event,
@@ -764,6 +764,7 @@ from app.queue import (  # noqa: E402, F401
     align_handlers,
     assembly_handlers,
     expression_handlers,
+    ncbi_assembly_handlers,
     pipeline_handlers,
     sra_handlers,
     summary_handlers,

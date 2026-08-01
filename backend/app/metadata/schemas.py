@@ -396,6 +396,11 @@ FORMAT_DERIVED_ROLES: frozenset[ObjectRole] = frozenset(
         # the applier already records from the run that produced it, and a
         # results table nobody produced here is not a thing that exists.
         ObjectRole.DE_RESULTS,
+        # An assembly graph's questions are its format's. There is nothing to
+        # ask that the GFA does not already answer -- and pointedly no
+        # assembly accession, since a de novo graph is precisely the case
+        # where no published assembly exists to name.
+        ObjectRole.ASSEMBLY_GRAPH,
     }
 )
 
