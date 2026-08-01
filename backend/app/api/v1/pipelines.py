@@ -803,8 +803,24 @@ async def quantify_defaults(bam_id: PydanticObjectId, owner: OwnerDep) -> dict:
             # for the dialog rather than an error to surface here. The list
             # below is what lets it offer them.
             annotation = None
-        if annotation is not None:
-            params = await pipeline_service.default_count_params(obj, annotation)
+
+        # Params are computed either way, against the first candidate when the
+        # annotation itself is ambiguous. Returning `{}` in that case looked
+        # harmless and was not: the dialog rendered its own fallbacks as though
+        # they were derived facts, and told the user "this alignment looks
+        # single-end" about a BAM with 1.9M properly-paired reads. The server
+        # still counted it as paired at launch, so the screen disagreed with
+        # the behaviour.
+        #
+        # Safe to use a candidate the user has not chosen yet, because the two
+        # values that come from the *alignment* -- strandedness and pairing --
+        # do not depend on which annotation is picked. Only `feature_type` and
+        # `attribute` do, and the candidates are GTF-first, so the common pair
+        # is what the dialog shows; picking a GFF3 afterwards is re-resolved
+        # server-side at launch.
+        params = await pipeline_service.default_count_params(
+            obj, annotation or annotations[0]
+        )
 
     align_params = (obj.facts or {}).get("align_params") or {}
     inferred = counts_runner.strandedness_for_align_params(align_params)
@@ -926,17 +942,7 @@ async def get_de_results(
             r for r in rows if r.get("padj") is not None and r["padj"] <= max_padj
         ]
 
-    reverse = direction == "desc"
-    if sort in ("padj", "p_value", "log2_fold_change", "base_mean", "stat"):
-        rows.sort(
-            # None last in both directions: an untested gene is not a small
-            # value, and letting it sort as one would put the least
-            # informative rows at the top of a descending fold-change view.
-            key=lambda r: (r.get(sort) is None, r.get(sort) if r.get(sort) is not None else 0),
-            reverse=reverse,
-        )
-    elif sort == "gene":
-        rows.sort(key=lambda r: str(r.get("gene", "")), reverse=reverse)
+    rows = de_runner.sort_rows(rows, sort, direction)
 
     return {
         "total": len(rows),

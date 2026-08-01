@@ -51,39 +51,45 @@ export function DifferentialExpressionDialog({
 
   const conditionOf = (s: DeSample) => edits[s.object_id] ?? s.condition;
 
-  // Samples counted against a different annotation than the majority cannot
-  // be merged, and the server refuses the whole run rather than dropping them.
-  // Surfaced here so that refusal is visible before the click.
-  const annotationGroups = useMemo(() => {
+  // Only samples actually going into the run. A blank condition means "leave
+  // this one out", so everything below is computed over these rather than over
+  // every counts file in the project.
+  const assigned = samples.filter((s) => conditionOf(s).trim() !== "");
+
+  // Samples counted against a different annotation than the majority cannot be
+  // merged, and the server refuses the whole run rather than dropping them.
+  // Surfaced here so the refusal is visible before the click.
+  //
+  // Scoped to `assigned`, which is the whole point and was wrong first time
+  // round: computed over every sample in the project, one leftover counts file
+  // from an old annotation disabled the launch button on a design that did not
+  // include it and that the server accepted perfectly happily. A file the user
+  // has explicitly left out cannot make their run invalid.
+  const majorityAnnotation = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const s of samples) {
+    for (const s of assigned) {
       if (s.annotation_sha256) {
         counts.set(s.annotation_sha256, (counts.get(s.annotation_sha256) ?? 0) + 1);
       }
     }
-    return counts;
-  }, [samples]);
-
-  const majorityAnnotation = useMemo(() => {
     let best: string | null = null;
     let bestN = 0;
-    for (const [digest, n] of annotationGroups) {
+    for (const [digest, n] of counts) {
       if (n > bestN) {
         best = digest;
         bestN = n;
       }
     }
     return best;
-  }, [annotationGroups]);
+  }, [assigned]);
 
-  const mismatched = samples.filter(
-    (s) =>
-      s.annotation_sha256 != null &&
-      majorityAnnotation != null &&
-      s.annotation_sha256 !== majorityAnnotation
-  );
+  const isMismatchedFor = (s: DeSample) =>
+    s.annotation_sha256 != null &&
+    majorityAnnotation != null &&
+    s.annotation_sha256 !== majorityAnnotation;
 
-  const assigned = samples.filter((s) => conditionOf(s).trim() !== "");
+  // Blocks the launch: these are in the design and cannot be merged.
+  const mismatched = assigned.filter(isMismatchedFor);
 
   const byCondition = useMemo(() => {
     const groups = new Map<string, DeSample[]>();
@@ -189,7 +195,10 @@ export function DifferentialExpressionDialog({
                 </thead>
                 <tbody>
                   {samples.map((s) => {
-                    const isMismatched = mismatched.includes(s);
+                    // Dimmed whenever it would not merge, assigned or not --
+                    // seeing that a leftover file is unusable is useful, and
+                    // only the assigned ones block the launch.
+                    const isMismatched = isMismatchedFor(s);
                     return (
                       <tr
                         key={s.object_id}

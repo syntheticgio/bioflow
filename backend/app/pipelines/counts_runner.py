@@ -123,10 +123,16 @@ def attributes_for_format(kind: FormatKind | str | None) -> tuple[str, str]:
         GFF3 exon ... ID=exon-NM_001180043.1-1;Parent=rna-NM_001180043.1;
                       gene=PAU8;locus_tag=YAL068C;...
 
-    There is no `gene_id` anywhere on the GFF3 exon line. The quoted default
-    `-t exon -g gene_id` therefore fails outright on the GFF3 while working on
-    the GTF, which is why the launch path prefers the GTF when a project holds
-    both (see `pipeline_service.resolve_annotation`).
+    There is no `gene_id` anywhere on the GFF3 exon line. Run against it, the
+    quoted default stops with
+
+        ERROR: failed to find the gene identifier attribute in the 9th
+        column of the provided GTF file.
+
+    which is the good outcome: it fails loudly rather than counting nothing.
+    (The genuinely silent failure in this runner is strandedness -- see
+    `strandedness_for_align_params`.) The launch path still prefers the GTF
+    when a project holds both, since a working default beats a clear error.
 
     `locus_tag` rather than `gene` for GFF3, measured on that same file across
     its 6852 exon lines:
@@ -138,6 +144,11 @@ def attributes_for_format(kind: FormatKind | str | None) -> tuple[str, str]:
     `gene` is a symbol and is simply absent on the ~15% of features that have
     never been named, so grouping on it drops them without a word. `locus_tag`
     is present on all of them and is stable across annotation releases.
+
+    Verified equivalent rather than merely plausible: counting one STAR BAM
+    against the GTF with `gene_id` and against the GFF3 with `locus_tag` gave
+    identical numbers -- 733,174 assigned fragments over 6,477 genes, both
+    times.
     """
     kind_str = str(getattr(kind, "value", kind) or "").lower()
     if kind_str == "gff":

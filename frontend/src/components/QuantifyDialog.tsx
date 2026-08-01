@@ -45,6 +45,11 @@ export function QuantifyDialog({
     ...overrides,
   } as CountsParams;
 
+  // The server returns `{}` only when the project has no annotation at all,
+  // in which case there is nothing to count against and nothing was derived.
+  const hasDerivedParams =
+    defaults != null && Object.keys(defaults.params ?? {}).length > 0;
+
   const annotations = defaults?.annotations ?? [];
   const chosenAnnotationId =
     annotationId ?? defaults?.annotation_id ?? annotations[0]?.id ?? null;
@@ -87,13 +92,19 @@ export function QuantifyDialog({
 
           <div className="trim-inputs">
             <div className="trim-file">{object.name}</div>
+            {/* Rendered only when the server actually derived something.
+                These two lines read as statements of fact about the BAM, so
+                showing the component's own fallbacks here would assert
+                "single-end" about an alignment nobody had looked at -- which
+                is exactly what happened before the defaults endpoint learned
+                to answer even when the annotation is ambiguous. */}
             {isLoading ? (
               <div className="trim-mate-note">Reading alignment details…</div>
-            ) : (
+            ) : hasDerivedParams ? (
               <>
                 <div className="trim-mate-note">
                   Strandedness:{" "}
-                  <strong>{STRAND_LABELS[params?.strandedness ?? 0]}</strong>
+                  <strong>{STRAND_LABELS[params.strandedness ?? 0]}</strong>
                   {defaults?.strandedness_source === "alignment" ? (
                     <> — read from this BAM's aligner settings.</>
                   ) : (
@@ -105,14 +116,13 @@ export function QuantifyDialog({
                   )}
                 </div>
                 <div className="trim-mate-note">
-                  Counting{" "}
-                  <strong>{params?.paired ? "fragments" : "reads"}</strong>
-                  {params?.paired
+                  Counting <strong>{params.paired ? "fragments" : "reads"}</strong>
+                  {params.paired
                     ? " — this alignment is paired-end, so a mate pair counts once."
                     : " — this alignment looks single-end."}
                 </div>
               </>
-            )}
+            ) : null}
           </div>
 
           {defaults != null && annotations.length === 0 && (

@@ -506,6 +506,44 @@ def read_results(path: Path) -> list[dict]:
     return rows
 
 
+SORTABLE_COLUMNS = frozenset(
+    {"gene", "padj", "p_value", "log2_fold_change", "base_mean", "stat"}
+)
+
+
+def sort_rows(rows: list[dict], sort: str, direction: str) -> list[dict]:
+    """Results ordered for the table, with untested genes always last.
+
+    Lives here rather than in the route because it is the kind of thing that
+    looks right and is not. The obvious implementation -- a `(value is None,
+    value)` sort key -- puts them last ascending and *first* descending, since
+    `reverse` reverses the whole tuple. Sorting by fold change descending then
+    opens on a page of genes that have no fold change, which is the least
+    informative thing this table can show.
+
+    Partitioning first is what makes the promise hold in both directions: the
+    two groups are never compared to each other, so `reverse` cannot reorder
+    them relative to one another.
+
+    An unrecognised column leaves the order alone rather than raising. The
+    caller is a query parameter, and a typo in a URL should not be a 500.
+    """
+    if sort not in SORTABLE_COLUMNS:
+        return rows
+
+    reverse = direction == "desc"
+
+    if sort == "gene":
+        # Always present, so no partition is needed -- and a gene name is a
+        # string, which the numeric branch's key would not order sensibly.
+        return sorted(rows, key=lambda r: str(r.get("gene", "")), reverse=reverse)
+
+    present = [r for r in rows if r.get(sort) is not None]
+    missing = [r for r in rows if r.get(sort) is None]
+    present.sort(key=lambda r: r[sort], reverse=reverse)
+    return present + missing
+
+
 def counts_path_stem(name: str) -> str:
     """A readable sample name from a counts file name.
 
