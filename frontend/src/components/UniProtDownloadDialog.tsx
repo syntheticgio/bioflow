@@ -55,6 +55,23 @@ export function UniProtDownloadDialog({
     onError: (e: Error) => notify.error(e.message),
   });
 
+  // Candidates arrive without counts -- the resolve endpoint only prices the
+  // primary proteome, since counting all 25 would be 50 extra UniProt
+  // requests for rows most users never pick. Re-resolving the chosen one by
+  // its own id takes the PROTEOME branch, which does return counts, so the
+  // reviewed/unreviewed choice appears for a picked strain exactly as it
+  // does for a reference proteome.
+  const priceCandidate = useMutation({
+    mutationFn: (id: string) => api.uniprotResolve({ query: id, project_id: projectId }),
+    onSuccess: (data) => {
+      if (data.proteome) setChosenProteome(data.proteome);
+    },
+    // Silent: the card still renders from the candidate row's own fields, it
+    // just cannot offer the reviewed choice. A toast for a background price
+    // lookup would be noise.
+    onError: () => {},
+  });
+
   const download = useMutation({
     mutationFn: () =>
       api.uniprotDownload({
@@ -187,7 +204,10 @@ export function UniProtDownloadDialog({
                             type="radio"
                             name="proteome"
                             checked={chosenProteome?.id === c.id}
-                            onChange={() => setChosenProteome(c)}
+                            onChange={() => {
+                              setChosenProteome(c);
+                              priceCandidate.mutate(c.id);
+                            }}
                           />
                         </td>
                         <td className="mono">{c.id}</td>
