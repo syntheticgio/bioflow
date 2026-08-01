@@ -25,24 +25,24 @@ async def _noop_mongo(job_ids, epochs, ttls, now):
 
 class TestExtendLease:
     def test_defaults_to_no_override(self):
-        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0)
+        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0, owner="local")
         assert ctx.lease_override_seconds is None
 
     def test_records_the_requested_seconds(self):
-        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0)
+        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0, owner="local")
         ctx.extend_lease(3600)
         assert ctx.lease_override_seconds == 3600
 
     def test_keeps_the_longest_request(self):
         """A handler with several long phases must not shorten its own lease by
         asking for less on a later phase than it did on an earlier one."""
-        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0)
+        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0, owner="local")
         ctx.extend_lease(3600)
         ctx.extend_lease(60)
         assert ctx.lease_override_seconds == 3600
 
     def test_ignores_a_nonpositive_request(self):
-        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0)
+        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0, owner="local")
         ctx.extend_lease(0)
         ctx.extend_lease(-5)
         assert ctx.lease_override_seconds is None
@@ -51,7 +51,7 @@ class TestExtendLease:
         """The callback stays supported so the worker can react immediately
         rather than waiting for the next heartbeat tick."""
         seen = []
-        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0)
+        ctx = JobContext(job_id="j1", payload={}, epoch=0, attempts=0, owner="local")
         ctx._extend_cb = seen.append
         ctx.extend_lease(120)
         assert seen == [120]

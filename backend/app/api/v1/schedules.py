@@ -1,4 +1,31 @@
-"""Periodic schedule endpoints."""
+"""Periodic schedule endpoints.
+
+Deliberately *not* owner-scoped, unlike almost every other router here. The
+schedules are the installation's own maintenance -- garbage collection and file
+verification -- and `queue/scheduler.py` already says so in code: both `tick`
+and `run_now` enqueue with a hardcoded `owner="local"` under a comment reading
+that this work "runs against the whole installation, not any one profile's
+library. There is no owner to inherit here and there never will be."
+
+Scoping these five routes per profile would therefore produce one of two
+useless outcomes: every profile seeing an empty list, or five identical copies
+of a single cron table that any of them could edit for all the others.
+
+The line to hold is the one `search.py`'s `/metadata/schemas` docstring draws:
+does the route read user data? These do not -- a `Schedule` document describes
+when the machine sweeps its own storage. The search, facet, metadata-value and
+bulk-edit routes all do, and are scoped.
+
+A per-profile scheduled task, if one is ever wanted, is a different feature
+rather than a fix to this one. It would need its own `owner` field on
+`Schedule`, an owner threaded through `scheduler.tick`'s `enqueue`, and these
+routes filtering on it. That door is open; nothing here has quietly shut it.
+
+One consequence worth knowing when reading the UI: because maintenance jobs
+carry `owner: "local"`, they appear in the *adopted* profile's job list and its
+event stream, and in nobody else's. Recorded as a deferred finding in
+docs/TODO.md.
+"""
 
 from datetime import datetime
 

@@ -2,7 +2,9 @@
 
 `get_current_owner` is the seam every partitioned query goes through: it turns
 the client-supplied X-BioFlow-Profile header into the `owner` string that
-service functions take as an explicit parameter. See
+service functions take as an explicit parameter. The resolution itself lives in
+`resolve_owner`, which the SSE route calls directly with a query parameter --
+`EventSource` cannot send headers. See
 docs/superpowers/specs/2026-07-31-profiles-design.md, "Request scoping" -- the
 explicit-parameter choice there is why this dependency returns a plain `str`
 rather than stashing anything in request state.
@@ -24,11 +26,22 @@ from app.errors import ProfileUnresolvedError
 from app.models import Profile
 
 
-async def get_current_owner(
-    x_bioflow_profile: str | None = Header(default=None),
-) -> str:
-    if not x_bioflow_profile:
-        raise ProfileUnresolvedError("X-BioFlow-Profile header is required")
+async def resolve_owner(value: str | None) -> str:
+    """Turn a client-supplied profile id into an `owner` string.
+
+    Split out from `get_current_owner` because the SSE stream needs the same
+    resolution from a *query parameter*: `EventSource` cannot send custom
+    headers, which is a limitation of the browser API rather than a second
+    sanctioned way into the application. Every other route goes through the
+    header and the `OwnerDep` alias below.
+    """
+    if not value:
+        # Names both carriers rather than just the header: the SSE stream comes
+        # through here with a query parameter, and a message saying a header is
+        # missing would send someone looking for one that was never sent.
+        raise ProfileUnresolvedError(
+            "No profile supplied (X-BioFlow-Profile header, or ?profile= on /events)"
+        )
 
     # "local" is the one owner id that is not a real ObjectId: documents from
     # before this feature already carry the `owner: "local"` default from
@@ -36,13 +49,13 @@ async def get_current_owner(
     # "local" from `Profile.owner_id()` instead of its own id, so nothing has to
     # be migrated. That profile is identified by its `adopted_legacy_owner`
     # flag and not by its name -- the adopted profile can be called anything.
-    if x_bioflow_profile == "local":
+    if value == "local":
         if await Profile.find_one({"adopted_legacy_owner": True}) is None:
             raise ProfileUnresolvedError("No profile exists to own 'local'")
         return "local"
 
     try:
-        profile_id = PydanticObjectId(x_bioflow_profile)
+        profile_id = PydanticObjectId(value)
     except InvalidId as e:
         # bson raises InvalidId, which is a BSONError -- *not* a ValueError.
         # Catching the wrong type turns a typo'd header into an unhandled 500.
@@ -50,9 +63,15 @@ async def get_current_owner(
 
     profile = await Profile.get(profile_id)
     if profile is None:
-        raise ProfileUnresolvedError(f"Unknown profile: {x_bioflow_profile}")
+        raise ProfileUnresolvedError(f"Unknown profile: {value}")
 
     return profile.owner_id()
+
+
+async def get_current_owner(
+    x_bioflow_profile: str | None = Header(default=None),
+) -> str:
+    return await resolve_owner(x_bioflow_profile)
 
 
 # Routes take `owner: OwnerDep` rather than repeating the full `Depends(...)`

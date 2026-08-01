@@ -40,6 +40,7 @@ def ctx(tmp_path, monkeypatch):
         },
         epoch=1,
         attempts=1,
+        owner="local",
         cancel_event=threading.Event(),
     )
 

@@ -106,7 +106,7 @@ class TestReapReportDirs:
     def ctx(**payload):
         from app.queue.registry import JobContext
 
-        return JobContext(job_id="reap-1", payload=payload, epoch=1, attempts=1)
+        return JobContext(job_id="reap-1", payload=payload, epoch=1, attempts=1, owner="local")
 
     @staticmethod
     def age(path, hours=48):

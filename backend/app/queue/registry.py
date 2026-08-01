@@ -36,6 +36,14 @@ class JobContext:
     payload: dict
     epoch: int
     attempts: int
+    # The profile this job's events belong to, copied from `Job.owner`. It is
+    # here because the progress path had nowhere else to get one: progress is
+    # published from the executor's throttled writer, which knows a job id and
+    # an epoch and would otherwise have to re-read the job document several
+    # times a second to answer "whose stream is this?". No default, so a new
+    # construction site has to answer that question rather than silently
+    # inheriting someone else's channel.
+    owner: str
     # Set from the async side; thread handlers poll it, which is why it is a
     # threading.Event rather than an asyncio.Event.
     cancel_event: threading.Event = field(default_factory=threading.Event)

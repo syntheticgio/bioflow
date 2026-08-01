@@ -449,6 +449,7 @@ async def verify_files(ctx: JobContext) -> dict:
     from datetime import UTC, datetime, timedelta
 
     from app.models import Blob, BlobState, BlobStorage, DataObject, ObjectStatus
+    from app.queue import keys
     from app.queue import queue as queue_mod
     from app.storage.home import check_home
 
@@ -456,8 +457,14 @@ async def verify_files(ctx: JobContext) -> dict:
     home = check_home()
     if not home.ok:
         log.error("verify_aborted_storage_unavailable", detail=home.detail)
+        # The storage root is gone for everyone at once, so this belongs to the
+        # installation rather than to a profile. Every SSE client subscribes to
+        # the system channel alongside its own, which is what makes one publish
+        # reach all of them.
         await queue_mod.publish_event(
-            "storage.unavailable", {"detail": home.detail, "path": home.path}
+            "storage.unavailable",
+            {"detail": home.detail, "path": home.path},
+            owner=keys.SYSTEM_OWNER,
         )
         return {"skipped": True, "reason": home.detail, "checked": 0}
 
@@ -511,8 +518,15 @@ async def verify_files(ctx: JobContext) -> dict:
                         recorded_size=blob.observed_size,
                         actual_size=stat.st_size,
                     )
+                    # Blobs are global and shared between profiles by design
+                    # (see the profiles design doc), so there is no single
+                    # owner to attribute a drifted one to. Computing the set of
+                    # profiles whose objects reference it is not worth doing to
+                    # decorate what is only a refetch hint.
                     await queue_mod.publish_event(
-                        "blob.drifted", {"sha256": blob.id, "path": str(path)}
+                        "blob.drifted",
+                        {"sha256": blob.id, "path": str(path)},
+                        owner=keys.SYSTEM_OWNER,
                     )
             await blob.set(updates)
             continue
@@ -551,7 +565,11 @@ async def verify_files(ctx: JobContext) -> dict:
             {"$set": {"status": ObjectStatus.MISSING.value, "updated_at": now}}
         )
         log.error("blob_confirmed_missing", digest=blob.id, path=str(path))
-        await queue_mod.publish_event("blob.missing", {"sha256": blob.id})
+        # System-owned for the same reason as `blob.drifted` above: the content
+        # is global, and every profile referencing it wants to know.
+        await queue_mod.publish_event(
+            "blob.missing", {"sha256": blob.id}, owner=keys.SYSTEM_OWNER
+        )
 
     result = {
         "checked": checked,
