@@ -314,3 +314,41 @@ prefixing), `queue/results.py`.
 Frontend: `api/client.ts` (the header, one place), `api/types.ts`, new profile
 picker and add-profile modal, `components/Header.tsx`, `components/Menu.tsx`,
 `components/UploadTray.tsx` (the dedup message), `App.tsx` (the picker gate).
+
+## Two things found while this was mid-flight
+
+Both discovered 2026-08-01 by running a real pipeline job end to end while
+this feature was partway landed, and both worth knowing if `results.py` or
+`docker-compose.override.yml` gets touched again for profiles work.
+
+**`queue/results.py`'s `owner` migration had a silent gap.** `apply()`
+dispatches every job type as `handler(result, owner=owner)`, but partway
+through the appliers being converted, eleven of the fourteen still declared
+the parameter as `launching_owner`. Each raised `TypeError` the instant its
+job finished -- caught and logged by `_apply_result`, so **the job still
+reported `succeeded`** while its output was never registered. The tool ran,
+the file landed on disk, and the only symptom was the produced object simply
+not existing. Alignment, trimming, QC and variant calling were all affected.
+
+`test_results_owner.py` covered this exact area and stayed green throughout,
+because every test there calls an applier *directly* with its own keyword --
+proving the applier works without ever exercising the dispatch that could not
+reach it. Fixed in `9448728`, which also added
+`test_every_applier_accepts_the_keyword_apply_dispatches_with`: it inspects
+every registered applier's signature against the keyword `apply` actually
+dispatches with, so the next drift fails loudly instead of silently. If
+`results.py` grows a new applier, that test is the check that it was wired
+correctly -- a hand-run job succeeding is not enough evidence, as this was.
+
+**`docker-compose.override.yml` now mounts the Docker socket into *both* `api`
+and `worker`, plus `BIOINFO_HOME_HOST` on both.** Added for the DeepVariant
+sidecar (`docs/superpowers/specs/2026-07-31-deepvariant-sidecar-design.md`),
+which runs as a container the worker starts via the host's daemon rather than
+a binary in our image. The api needs the socket too -- not because it runs
+anything, but because `launch_variant_calling` calls `tools.require()` at
+launch time, before a job is even enqueued, so an unavailable tool is a clear
+rejection in the dialog instead of a job that dies after the user walks away.
+Worth knowing before this file is restructured for profiles: removing the
+socket from `api` alone would silently make DeepVariant impossible to launch
+while leaving the worker fully able to run it, which is confusing to debug
+from the symptom.

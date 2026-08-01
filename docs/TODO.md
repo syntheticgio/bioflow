@@ -335,7 +335,11 @@ Touches: `backend/app/pipelines/aligners.py`,
 
 ## `_APPLIERS` dispatch passed `owner=` while 11 appliers took `launching_owner=` — FIXED
 
-Fixed 2026-08-01, same day, after the user asked for it directly.
+Fixed 2026-08-01, same day, after the user asked for it directly. Also noted
+in `docs/superpowers/specs/2026-07-31-profiles-design.md`, "Two things found
+while this was mid-flight" -- that spec is the better read for whoever
+continues the profiles work, since it also covers a related
+`docker-compose.override.yml` change from the same day.
 
 All fourteen appliers now take `owner`. The two chained launches inside them
 (`launch_summary` off QC, `launch_bam_stats` off `index_bam`) still pass the
