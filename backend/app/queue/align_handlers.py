@@ -308,10 +308,16 @@ def align_reads(ctx: JobContext) -> dict:
 
     work = _prepare_workdir(ctx, "align")
     ref = _materialize(ctx, work, ctx.payload, aligner)
-    if ref.missing_index:
+    if ref.missing_index_for(aligners.layout_for(aligner), ref.reference.name):
         # The dependency gate should have made this impossible; if it happens,
         # the index job's sidecars did not reach the payload. Permanent because
         # a retry would materialize the same empty set.
+        #
+        # Asks for *this aligner's* files rather than "was anything linked".
+        # A reference carrying only a `.fai` satisfied the weaker check, so a
+        # reference whose index was never stored reached the aligner and
+        # failed there instead -- STAR reporting a missing genome directory,
+        # which reads as a corrupt index rather than an absent one.
         raise PermanentError(
             f"Reference has no {aligner.value} index available to this job"
         )
