@@ -2,11 +2,15 @@ interface Props {
   canPreprocess: boolean;
   canAlign: boolean;
   canCallVariants: boolean;
+  canQuantify: boolean;
   canQC: boolean;
   hasQc: boolean;
   /** Named reference for the Align button, when the project has one. */
   alignTarget: string | null;
   onStart: (pipeline: "trim" | "align" | "variant") => void;
+  /** Not part of `onStart`: counting has one tool, so it opens its dialog
+   * directly rather than going through the tool selector first. */
+  onQuantify: () => void;
   onRunQC: () => void;
   qcPending: boolean;
   onReingest: () => void;
@@ -29,10 +33,12 @@ export function Computations({
   canPreprocess,
   canAlign,
   canCallVariants,
+  canQuantify,
   canQC,
   hasQc,
   alignTarget,
   onStart,
+  onQuantify,
   onRunQC,
   qcPending,
   onReingest,
@@ -86,6 +92,16 @@ export function Computations({
             title="Call variants from this alignment"
           >
             Call variants
+          </button>
+        )}
+        {canQuantify && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onQuantify}
+            title="Count this alignment's reads against a gene annotation"
+          >
+            Count reads per gene
           </button>
         )}
         {canQC && (

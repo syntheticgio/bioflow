@@ -86,6 +86,17 @@ class ObjectRole(StrEnum):
     # slightly worse: `cds_from_genomic.fna` is nucleotide FASTA that would
     # pass any "does this look like a genome" sniff test.
     TRANSCRIPT = "transcript"
+    # Per-gene read counts for one sample. Anonymous TSV on disk, which is the
+    # criterion this enum exists for: nothing in the bytes distinguishes a
+    # counts table from any other tab-separated file, and only this keeps it
+    # out of pickers that want a genome or an annotation.
+    COUNTS = "counts"
+    # The output of a differential expression test -- per-gene fold changes and
+    # adjusted p-values. Also anonymous TSV, and deliberately a separate role
+    # from COUNTS rather than a flag on it: feeding a results table back into a
+    # DE run as if it were counts is exactly the silent error the split
+    # prevents.
+    DE_RESULTS = "de_results"
 
 
 class SidecarRole(StrEnum):

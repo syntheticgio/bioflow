@@ -36,11 +36,13 @@ import { DerivedFiles } from "./DerivedFiles";
 import { ActivePipelineJobs } from "./ActivePipelineJobs";
 import { AlignDialog } from "./AlignDialog";
 import { BamResults } from "./BamResults";
+import { ExpressionResults } from "./ExpressionResults";
 import { VariantResults } from "./VariantResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
 import { TrimDialog } from "./TrimDialog";
+import { QuantifyDialog } from "./QuantifyDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
@@ -282,10 +284,14 @@ function tabsFor(obj: DataObject): TabDef[] {
   // One tab id across all three formats rather than a push per format: `tab`
   // is persisted in the URL alongside ?sel=, so a link stays on Results when
   // the selection moves between a BAM and the VCF called from it.
+  // Keyed on role for DE results rather than on format, unlike the other
+  // three. A results table is anonymous TSV -- format cannot tell it from any
+  // other tab-separated file, which is exactly why the role exists.
   const hasResults =
     obj.format.kind === "bam" ||
     obj.format.kind === "vcf" ||
-    obj.format.kind === "bcf";
+    obj.format.kind === "bcf" ||
+    obj.role === "de_results";
   if (hasResults) {
     tabs.push({ id: "results", label: "Results" });
   }
@@ -341,6 +347,10 @@ function ObjectDetail({ id }: { id: string }) {
   // provisional choice a user can change their mind about without that
   // partial state leaking into what actually launches a dialog.
   const [pendingTool, setPendingTool] = useState<string | null>(null);
+  // Its own boolean rather than a fourth member of `flow`. `flow` exists for
+  // the two-step tool-selection dance, and counting has exactly one tool --
+  // routing it through a selector would mean a screen offering one card.
+  const [quantifyOpen, setQuantifyOpen] = useState(false);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
     setPendingTool(null);
@@ -540,6 +550,11 @@ function ObjectDetail({ id }: { id: string }) {
   // better than hiding the button and leaving the user to guess why.
   const canCallVariants = obj.status === "ready" && obj.format.kind === "bam";
 
+  // Same reasoning as canCallVariants: format only. Whether an alignment is
+  // RNA-seq is not knowable from the file, and the annotation it needs is
+  // checked server-side at launch, where the answer can say what is missing.
+  const canQuantify = obj.status === "ready" && obj.format.kind === "bam";
+
   return (
     <div className="panel">
       <div className="panel-body detail">
@@ -655,7 +670,9 @@ function ObjectDetail({ id }: { id: string }) {
 
         {tab === "results" && (
           <TabPanel id="results" idPrefix="obj">
-            {obj.format.kind === "bam" ? (
+            {obj.role === "de_results" ? (
+              <ExpressionResults obj={obj} />
+            ) : obj.format.kind === "bam" ? (
               <BamResults obj={obj} />
             ) : (
               <VariantResults obj={obj} />
@@ -685,6 +702,8 @@ function ObjectDetail({ id }: { id: string }) {
                   canPreprocess={canTrim}
                   canAlign={canAlign}
                   canCallVariants={canCallVariants}
+                  canQuantify={canQuantify}
+                  onQuantify={() => setQuantifyOpen(true)}
                   canQC={canQC}
                   hasQc={hasQc}
                   alignTarget={alignTarget}
@@ -752,6 +771,9 @@ function ObjectDetail({ id }: { id: string }) {
           }}
           onClose={() => setFlow(null)}
         />
+      )}
+      {quantifyOpen && (
+        <QuantifyDialog object={obj} onClose={() => setQuantifyOpen(false)} />
       )}
     </div>
   );

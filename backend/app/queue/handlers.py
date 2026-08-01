@@ -763,6 +763,7 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
 from app.queue import (  # noqa: E402, F401
     align_handlers,
     assembly_handlers,
+    expression_handlers,
     pipeline_handlers,
     sra_handlers,
     summary_handlers,

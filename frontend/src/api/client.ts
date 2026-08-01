@@ -9,7 +9,10 @@ import type {
   ContigsPage,
   DataObject,
   DataSources,
+  DeDefaults,
   DeletionPreview,
+  DeRequest,
+  DeResultsPage,
   FacetValue,
   Facets,
   JobLog,
@@ -25,6 +28,8 @@ import type {
   Profile,
   Project,
   ProjectDetail,
+  QuantifyDefaults,
+  QuantifyRequest,
   ReferenceOption,
   RegisterAccepted,
   RunDetail,
@@ -587,6 +592,54 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  /** Counting defaults for one BAM: the annotation it would use, and the
+   * strandedness read off its alignment. */
+  quantifyDefaults: (bamId: string) =>
+    request<QuantifyDefaults>(`/pipelines/quantify/defaults/${bamId}`),
+
+  launchQuantify: (body: QuantifyRequest) =>
+    request<JobSummary>("/pipelines/quantify", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** The samples, conditions and contrast the DE dialog opens with.
+   * Project-scoped, unlike every other defaults route here -- differential
+   * expression is an operation on a project, not on a file. */
+  deDefaults: (projectId: string) =>
+    request<DeDefaults>(`/pipelines/differential-expression/defaults/${projectId}`),
+
+  launchDifferentialExpression: (body: DeRequest) =>
+    request<JobSummary>("/pipelines/differential-expression", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** A page of a DE results table, sorted and filtered server-side. */
+  deResults: (
+    objectId: string,
+    q: {
+      offset: number;
+      limit: number;
+      sort?: string;
+      direction?: string;
+      search?: string;
+      max_padj?: number;
+    }
+  ) => {
+    const params = new URLSearchParams({
+      offset: String(q.offset),
+      limit: String(q.limit),
+    });
+    if (q.sort) params.set("sort", q.sort);
+    if (q.direction) params.set("direction", q.direction);
+    if (q.search) params.set("search", q.search);
+    if (q.max_padj != null) params.set("max_padj", String(q.max_padj));
+    return request<DeResultsPage>(
+      `/pipelines/de/results/${objectId}?${params.toString()}`
+    );
+  },
 
   /** Queue the Results computation for a BAM. Read-only: produces facts and
    * one TSV report, no derived objects. */

@@ -255,6 +255,12 @@ class TestSerialization:
             "fasterq-dump",
             "prefetch",
             "datasets",
+            "featurecounts",
+            # Not a binary at all -- a Python library, probed by import rather
+            # than by shutil.which. It is in `all_tools` deliberately: the
+            # version that ran a differential expression test is half that
+            # result's provenance, and the panel is where a user reads it.
+            "pydeseq2",
         }
 
 
