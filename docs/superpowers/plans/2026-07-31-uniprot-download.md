@@ -461,7 +461,7 @@ Run:
 ```bash
 docker compose exec api python -m pytest tests/metadata/test_uniprot_queries.py -q
 ```
-Expected: PASS, 10 passed.
+Expected: PASS, 9 passed. (The test file above has 9 methods: 4 + 4 + 1.)
 
 - [ ] **Step 5: Commit**
 
@@ -921,7 +921,7 @@ Run:
 ```bash
 docker compose exec api python -m pytest tests/metadata/test_uniprot_resolve.py -q
 ```
-Expected: PASS, 11 passed.
+Expected: PASS, 10 passed. (The test file above has 10 test methods.)
 
 - [ ] **Step 5: Commit**
 
@@ -1678,7 +1678,7 @@ Run:
 ```bash
 docker compose exec api python -m pytest tests/queue/test_uniprot_download.py -q
 ```
-Expected: PASS, 11 passed.
+Expected: PASS, 10 passed. (The test file above has 10 test methods.)
 
 - [ ] **Step 6: Verify the handler registered**
 
