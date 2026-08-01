@@ -272,7 +272,7 @@ class TestDeleteProjectTree:
         assert await UploadSession.get(session.id) is not None
 
         # Cleanup, so this test does not leave the staging dir behind.
-        await upload_service.abort_session(session.id)
+        await upload_service.abort_session(session.id, owner=TEST_OWNER)
 
     async def test_refuses_while_a_job_is_active(self):
         from app.errors import ConflictError

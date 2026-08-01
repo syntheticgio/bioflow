@@ -95,6 +95,7 @@ def _parse_states(raw: str) -> list[str]:
 
 @router.get("", response_model=list[JobOut])
 async def list_jobs(
+    owner: OwnerDep,
     state: JobState | None = None,
     states: str | None = Query(
         None,
@@ -117,7 +118,11 @@ async def list_jobs(
     ),
     limit: int = Query(100, le=500),
 ) -> list[JobOut]:
-    query: dict = {}
+    # The owner filter is unconditional, unlike every other clause here: the
+    # rest narrow a listing the caller asked to narrow, but this one decides
+    # whose queue is being listed at all. Building the dict with it already in
+    # place is why no later `if` can accidentally produce an unpartitioned find.
+    query: dict = {"owner": owner}
     if states:
         query["state"] = {"$in": _parse_states(states)}
     elif state:
@@ -186,12 +191,25 @@ async def list_job_types() -> dict:
     }
 
 
-@router.get("/{job_id}")
-async def get_job(job_id: PydanticObjectId) -> dict:
-    """Job detail, plus a duration estimate when enough history exists."""
+async def _owned_job(job_id: PydanticObjectId, owner: str) -> Job:
+    """Fetch a job, treating another profile's job as one that does not exist.
+
+    Every by-id route in this file goes through here rather than calling
+    `Job.get` directly. A wrong-owner job raises the same NotFoundError as a
+    missing one, matching `get_project`/`get_object`: answering 403 would
+    confirm the id is real, which hands a caller the one bit they could not
+    otherwise guess.
+    """
     job = await Job.get(job_id)
-    if job is None:
+    if job is None or job.owner != owner:
         raise NotFoundError(f"Job not found: {job_id}")
+    return job
+
+
+@router.get("/{job_id}")
+async def get_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Job detail, plus a duration estimate when enough history exists."""
+    job = await _owned_job(job_id, owner)
 
     out = JobOut.of(job).model_dump(mode="json")
 
@@ -204,20 +222,32 @@ async def get_job(job_id: PydanticObjectId) -> dict:
         if not size and job.object_id:
             from app.models import DataObject
 
+            # Scoped too. The job is already known to be the caller's, so this
+            # only ever narrows to the same row -- but an unscoped read here
+            # would become a leak the moment a job could reference an object
+            # it does not share an owner with.
             obj = await DataObject.get(job.object_id)
-            size = obj.size if obj else 0
+            size = obj.size if obj and obj.owner == owner else 0
         if size:
             out["timing_estimate"] = await timing_service.estimate(job.type, size)
     return out
 
 
 @router.post("/{job_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
-async def cancel_job(job_id: PydanticObjectId) -> dict:
+async def cancel_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Request cancellation.
 
     Cancellation of a running job is cooperative, so this returns the
     disposition rather than pretending the job stopped instantly.
+
+    The ownership check happens here rather than inside `queue.request_cancel`,
+    which takes no owner and is also called by the worker and by run
+    cancellation -- neither of which has a requesting profile to check against.
+    Scoping the route is what keeps a guessed id from killing another
+    profile's work; this is the same leak `cancel_run` had.
     """
+    await _owned_job(job_id, owner)
+
     outcome = await queue.request_cancel(str(job_id))
     if outcome == "not_found":
         raise NotFoundError(f"Job not found: {job_id}")
@@ -225,11 +255,15 @@ async def cancel_job(job_id: PydanticObjectId) -> dict:
 
 
 @router.post("/{job_id}/retry", response_model=JobOut)
-async def retry_job(job_id: PydanticObjectId) -> JobOut:
-    """Resurrect a failed or dead job with a fresh attempt budget."""
-    job = await Job.get(job_id)
-    if job is None:
-        raise NotFoundError(f"Job not found: {job_id}")
+async def retry_job(job_id: PydanticObjectId, owner: OwnerDep) -> JobOut:
+    """Resurrect a failed or dead job with a fresh attempt budget.
+
+    Scoped before the state check: an unscoped retry does not just disclose a
+    job, it puts another profile's work back on the worker, so the ownership
+    test has to come first or a wrong-owner caller learns the job's state from
+    the validation error.
+    """
+    job = await _owned_job(job_id, owner)
     if job.state not in (JobState.FAILED, JobState.DEAD, JobState.CANCELLED):
         raise ValidationError(
             f"Only failed, dead or cancelled jobs can be retried (state={job.state.value})"
@@ -259,6 +293,7 @@ LOG_READ_BYTES = 256 * 1024
 @router.get("/{job_id}/log")
 async def get_job_log(
     job_id: PydanticObjectId,
+    owner: OwnerDep,
     tail: int = Query(200, ge=1, le=MAX_LOG_TAIL_LINES),
 ) -> dict:
     """The tail of a job's captured output.
@@ -270,9 +305,10 @@ async def get_job_log(
 
     from app.config import settings
 
-    job = await Job.get(job_id)
-    if job is None:
-        raise NotFoundError(f"Job not found: {job_id}")
+    # The log path is derived from the job id, so an unscoped fetch here would
+    # serve another profile's captured tool output -- filenames, sample names
+    # and paths -- from a guessed id.
+    await _owned_job(job_id, owner)
 
     path = settings.logs_dir / f"{job_id}.log"
     if not await asyncio.to_thread(path.exists):

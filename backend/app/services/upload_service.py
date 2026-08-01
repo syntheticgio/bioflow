@@ -185,9 +185,17 @@ def _write_manifest(staging: Path, session: UploadSession) -> None:
         log.warning("manifest_write_failed", error=str(e))
 
 
-async def get_session(session_id: PydanticObjectId) -> UploadSession:
+async def get_session(session_id: PydanticObjectId, *, owner: str) -> UploadSession:
+    """Fetch a session, treating another owner's session as missing.
+
+    `owner` is required rather than optional because every caller below reaches
+    a session through this one function -- resume, chunk write, complete and
+    abort all start here. Making it a keyword with no default means a new call
+    site cannot silently inherit an unpartitioned lookup: it fails to run until
+    it says whose session it means.
+    """
     session = await UploadSession.get(session_id)
-    if session is None:
+    if session is None or session.owner != owner:
         raise NotFoundError(f"Upload session not found: {session_id}")
     return session
 
@@ -202,10 +210,11 @@ async def write_chunk(
     index: int,
     data: bytes,
     *,
+    owner: str,
     expected_sha256: str | None = None,
 ) -> UploadSession:
     """Store one chunk. Idempotent -- re-sending a chunk is always safe."""
-    session = await get_session(session_id)
+    session = await get_session(session_id, owner=owner)
 
     if session.state is not UploadState.OPEN:
         raise ConflictError(
@@ -246,7 +255,7 @@ async def write_chunk(
             **({"$inc": {"received_bytes": len(data)}} if not already else {}),
         },
     )
-    return await get_session(session_id)
+    return await get_session(session_id, owner=owner)
 
 
 def _write_chunk_atomic(target: Path, data: bytes) -> None:
@@ -267,7 +276,9 @@ def _write_chunk_atomic(target: Path, data: bytes) -> None:
     os.replace(tmp, target)
 
 
-async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession, DataObject, str]:
+async def complete_session(
+    session_id: PydanticObjectId, *, owner: str
+) -> tuple[UploadSession, DataObject, str]:
     """Close the session and enqueue assembly.
 
     Returns (session, object, job_id).
@@ -275,7 +286,7 @@ async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession,
     from app.db.client import get_db
     from app.queue import queue
 
-    session = await get_session(session_id)
+    session = await get_session(session_id, owner=owner)
 
     if session.state is UploadState.COMPLETED and session.resulting_object_id:
         obj = await DataObject.get(session.resulting_object_id)
@@ -298,7 +309,7 @@ async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession,
     if res is None:
         raise ConflictError(
             "Upload session is already being completed",
-            details={"state": (await get_session(session_id)).state.value},
+            details={"state": (await get_session(session_id, owner=owner)).state.value},
         )
 
     obj = DataObject(
@@ -331,11 +342,11 @@ async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession,
         object_id=obj.id,
     )
 
-    return await get_session(session_id), obj, str(job.id) if job else ""
+    return await get_session(session_id, owner=owner), obj, str(job.id) if job else ""
 
 
-async def abort_session(session_id: PydanticObjectId) -> None:
-    session = await get_session(session_id)
+async def abort_session(session_id: PydanticObjectId, *, owner: str) -> None:
+    session = await get_session(session_id, owner=owner)
     await session.set(
         {UploadSession.state: UploadState.ABORTED, UploadSession.updated_at: datetime.now(UTC)}
     )
@@ -356,9 +367,12 @@ def cleanup_staging(staging_dir: str) -> None:
 
 
 async def list_active_sessions(
-    project_id: PydanticObjectId | None = None, limit: int = 50
+    project_id: PydanticObjectId | None = None, *, owner: str, limit: int = 50
 ) -> list[UploadSession]:
-    query: dict = {"state": {"$in": [UploadState.OPEN.value, UploadState.ASSEMBLING.value]}}
+    query: dict = {
+        "owner": owner,
+        "state": {"$in": [UploadState.OPEN.value, UploadState.ASSEMBLING.value]},
+    }
     if project_id:
         query["project_id"] = project_id
     return await UploadSession.find(query).sort("-created_at").limit(limit).to_list()

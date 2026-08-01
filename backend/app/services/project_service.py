@@ -300,7 +300,7 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
         for session in await UploadSession.find(
             UploadSession.project_id == pid, UploadSession.owner == owner
         ).to_list():
-            await upload_service.abort_session(session.id)
+            await upload_service.abort_session(session.id, owner=owner)
             await session.delete()
 
         for run in await PipelineRun.find(

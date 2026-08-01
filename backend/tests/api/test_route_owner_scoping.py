@@ -16,8 +16,18 @@ CLAUDE.md on asserting the direction that fails when the seam breaks.
 import pytest
 from beanie import PydanticObjectId
 
-from app.models import DataObject, FormatInfo, FormatKind, ObjectStatus, RunKind
-from app.services import object_service, project_service, run_service
+from app.models import (
+    DataObject,
+    FormatInfo,
+    FormatKind,
+    Job,
+    JobState,
+    ObjectStatus,
+    RunKind,
+    UploadSession,
+    UploadState,
+)
+from app.services import object_service, project_service, run_service, upload_service
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -258,6 +268,109 @@ class TestPipelinesRouter:
         assert theirs.json()["references"] == []
 
 
+async def _job(owner: str, job_type: str, *, state: JobState = JobState.FAILED) -> Job:
+    """A bare job row.
+
+    Inserted rather than enqueued: `queue.enqueue` needs Redis, and what is
+    under test is the route's owner filter, not dispatch. `state` defaults to
+    FAILED because the retry route rejects anything non-terminal before the
+    owner check would otherwise become observable.
+    """
+    job = Job(type=job_type, owner=owner, state=state)
+    await job.insert()
+    return job
+
+
+class TestJobsRouter:
+    async def test_another_profiles_job_is_absent_from_the_listing(
+        self, client, two_profiles
+    ):
+        """Both directions, for the reason the pipelines test spells out.
+
+        `list_jobs` answers 200 with a list, so "B sees nothing" is equally what
+        a route hardcoded to `"local"` produces -- A's jobs are not under
+        `"local"` either. Only A's own request coming back *containing its job*
+        separates a scoped route from a broken one.
+        """
+        mine_job = await _job(two_profiles["a"].owner_id(), "a_listed_job")
+
+        mine = await client.get("/api/v1/jobs", headers=two_profiles["a_headers"])
+        theirs = await client.get("/api/v1/jobs", headers=two_profiles["b_headers"])
+
+        assert str(mine_job.id) in [j["id"] for j in mine.json()]
+        assert str(mine_job.id) not in [j["id"] for j in theirs.json()]
+
+    async def test_another_profile_cannot_fetch_a_job_by_id(self, client, two_profiles):
+        job = await _job(two_profiles["a"].owner_id(), "a_detail_job")
+
+        mine = await client.get(f"/api/v1/jobs/{job.id}", headers=two_profiles["a_headers"])
+        theirs = await client.get(
+            f"/api/v1/jobs/{job.id}", headers=two_profiles["b_headers"]
+        )
+
+        assert mine.status_code == 200
+        assert theirs.status_code == 404
+
+    async def test_another_profile_cannot_cancel_a_job(self, client, two_profiles):
+        """A write, and the worst of the job leaks: an unscoped cancel let one
+        profile kill another's in-flight work from a guessed id."""
+        job = await _job(
+            two_profiles["a"].owner_id(), "a_cancellable", state=JobState.PENDING
+        )
+
+        r = await client.post(
+            f"/api/v1/jobs/{job.id}/cancel", headers=two_profiles["b_headers"]
+        )
+
+        assert r.status_code == 404
+        # The refusal has to be a no-op, not merely a 404 over a completed write.
+        assert (await Job.get(job.id)).cancel_requested is False
+
+    async def test_another_profile_cannot_retry_a_job(self, client, two_profiles):
+        """Retry re-enqueues, so a leak here spends another profile's compute."""
+        job = await _job(two_profiles["a"].owner_id(), "a_retryable")
+
+        r = await client.post(
+            f"/api/v1/jobs/{job.id}/retry", headers=two_profiles["b_headers"]
+        )
+
+        assert r.status_code == 404
+        assert (await Job.get(job.id)).state is JobState.FAILED
+
+    async def test_another_profile_cannot_read_a_jobs_log(self, client, two_profiles):
+        """The log carries filenames and sample names from the tool's output."""
+        job = await _job(two_profiles["a"].owner_id(), "a_logged_job")
+
+        r = await client.get(
+            f"/api/v1/jobs/{job.id}/log", headers=two_profiles["b_headers"]
+        )
+
+        assert r.status_code == 404
+
+    async def test_jobs_require_a_profile_header(self, client, two_profiles):
+        """The leak as measured against the running app: this returned 200 and a
+        full page of every profile's jobs with no header at all."""
+        r = await client.get("/api/v1/jobs")
+
+        assert r.status_code == 400
+        assert r.json()["code"] == "profile_unresolved"
+
+
+async def _session(owner: str, project_name: str):
+    """An open upload session, created through the service so its staging
+    directory really exists -- the chunk and abort routes touch the filesystem,
+    and a hand-built row would fail for a reason unrelated to the owner filter.
+    """
+    project = await _project(owner, project_name)
+    session, _ = await upload_service.create_session(
+        project_id=project.id,
+        owner=owner,
+        filename="reads.fastq",
+        total_size=1024,
+    )
+    return session
+
+
 class TestUploadsRouter:
     async def test_an_upload_is_filed_under_the_headers_owner(self, client, two_profiles):
         """The writer half of the partition for uploads.
@@ -286,6 +399,113 @@ class TestUploadsRouter:
         session = await UploadSession.get(PydanticObjectId(session_id))
         assert session.owner == two_profiles["b"].owner_id()
         assert session.owner != "local"
+
+    async def test_another_profile_cannot_read_an_upload_session(
+        self, client, two_profiles
+    ):
+        session = await _session(two_profiles["a"].owner_id(), "a-session-read")
+
+        mine = await client.get(
+            f"/api/v1/uploads/{session.id}", headers=two_profiles["a_headers"]
+        )
+        theirs = await client.get(
+            f"/api/v1/uploads/{session.id}", headers=two_profiles["b_headers"]
+        )
+
+        assert mine.status_code == 200
+        assert theirs.status_code == 404
+
+    async def test_another_profiles_session_is_absent_from_the_listing(
+        self, client, two_profiles
+    ):
+        """Both directions again -- this route answers 200 with a list."""
+        session = await _session(two_profiles["a"].owner_id(), "a-session-listed")
+
+        mine = await client.get("/api/v1/uploads", headers=two_profiles["a_headers"])
+        theirs = await client.get("/api/v1/uploads", headers=two_profiles["b_headers"])
+
+        assert str(session.id) in [s["id"] for s in mine.json()]
+        assert str(session.id) not in [s["id"] for s in theirs.json()]
+
+    async def test_another_profile_cannot_write_a_chunk(self, client, two_profiles):
+        """The sharpest write in the file: an unscoped chunk PUT does not read
+        someone else's upload, it writes bytes into the file they are
+        assembling, surfacing later as a digest mismatch on their object.
+
+        Both directions are asserted, and here that is load-bearing rather than
+        belt-and-braces: B's 404 is also what a route hardcoded to `"local"`
+        returns, because A's session is not under `"local"` either. Only A's own
+        chunk write *succeeding* separates a scoped route from a broken one.
+        Checked by mutation -- pinning this call to `"local"` leaves the B
+        assertion green and fails the A assertion.
+        """
+        session = await _session(two_profiles["a"].owner_id(), "a-session-chunk")
+
+        theirs = await client.put(
+            f"/api/v1/uploads/{session.id}/chunks/0",
+            content=b"bytes from another profile",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert theirs.status_code == 404
+        assert (await UploadSession.get(session.id)).received_chunks == []
+
+        mine = await client.put(
+            f"/api/v1/uploads/{session.id}/chunks/0",
+            content=b"bytes from the owner",
+            headers=two_profiles["a_headers"],
+        )
+
+        assert mine.status_code == 200
+        assert (await UploadSession.get(session.id)).received_chunks == [0]
+
+    async def test_another_profile_cannot_abort_a_session(self, client, two_profiles):
+        """Abort purges the staging directory, destroying transferred chunks.
+
+        A's own abort is asserted too, for the same reason as the chunk test: a
+        404 for B is what a `"local"` hardcode produces as well.
+        """
+        session = await _session(two_profiles["a"].owner_id(), "a-session-abort")
+
+        theirs = await client.delete(
+            f"/api/v1/uploads/{session.id}", headers=two_profiles["b_headers"]
+        )
+
+        assert theirs.status_code == 404
+        assert (await UploadSession.get(session.id)).state is UploadState.OPEN
+
+        mine = await client.delete(
+            f"/api/v1/uploads/{session.id}", headers=two_profiles["a_headers"]
+        )
+
+        assert mine.status_code == 204
+        assert (await UploadSession.get(session.id)).state is UploadState.ABORTED
+
+    async def test_another_profile_cannot_complete_a_session(self, client, two_profiles):
+        """Completing mints a DataObject under the *session's* owner, so an
+        unscoped complete lets B force a half-transferred file into A's
+        library.
+
+        A's own attempt is asserted as *not* a 404 rather than as a success: the
+        session has no chunks, so completing it legitimately fails -- but it
+        fails as a 409 for missing chunks, having gotten past the owner lookup.
+        A route hardcoded to `"local"` would 404 A as well, so the two status
+        codes are what tells the wired route from the broken one.
+        """
+        session = await _session(two_profiles["a"].owner_id(), "a-session-complete")
+
+        theirs = await client.post(
+            f"/api/v1/uploads/{session.id}/complete", headers=two_profiles["b_headers"]
+        )
+
+        assert theirs.status_code == 404
+        assert (await UploadSession.get(session.id)).state is UploadState.OPEN
+
+        mine = await client.post(
+            f"/api/v1/uploads/{session.id}/complete", headers=two_profiles["a_headers"]
+        )
+
+        assert mine.status_code == 409
 
 
 class TestObjectServiceStillFiltersUnderneath:
