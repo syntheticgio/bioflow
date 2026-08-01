@@ -70,6 +70,25 @@ class BcftoolsParams:
 
 
 @dataclass
+class DeepVariantParams:
+    """DeepVariant invocation knobs."""
+
+    threads: int = 4
+    model_type: str = "WGS"  # {WGS, WES, PACBIO, ONT_R104, HYBRID_PACBIO_ILLUMINA, MASSEQ}
+
+    def as_dict(self) -> dict:
+        return {"threads": self.threads, "model_type": self.model_type}
+
+    @classmethod
+    def from_dict(cls, raw: dict | None) -> "DeepVariantParams":
+        raw = raw or {}
+        return cls(
+            threads=int(raw.get("threads", 4)),
+            model_type=str(raw.get("model_type", "WGS")),
+        )
+
+
+@dataclass
 class VariantParams:
     """User-facing knobs for a variant calling run."""
 
@@ -296,6 +315,61 @@ def build_bcftools_command(
     ]
     pipeline = f"{_quote(mpileup)} | {_quote(call)} | {_quote(view)}"
     return ["/bin/sh", "-o", "pipefail", "-c", pipeline]
+
+
+def build_deepvariant_command(
+    *,
+    image: str,
+    bam: Path,
+    reference: Path,
+    output_vcf: Path,
+    params: DeepVariantParams,
+    container_root: str | None = None,
+    host_root: str | None = None,
+) -> list[str]:
+    """Assemble the `docker run` invocation for DeepVariant.
+
+    Two path spaces are in play and mixing them is the failure this function
+    exists to prevent. The *mount* uses the host path, because the daemon
+    starting the container reads it from the host filesystem. The tool's own
+    arguments stay container paths, because inside the sibling container the
+    mount lands at the same place the worker sees it. So exactly one value is
+    translated -- the left half of `-v` -- and everything else is passed
+    through unchanged.
+    """
+    host_root_path = host_path_for(
+        container_root if container_root is not None else str(settings.bioinfo_home),
+        container_root=container_root,
+        host_root=host_root,
+    )
+    # Validated, not used: raises for anything outside the storage root, which
+    # would mount nothing and fail confusingly deep inside the tool.
+    for p in (bam, reference, output_vcf):
+        host_path_for(p, container_root=container_root, host_root=host_root)
+
+    mount_at = container_root if container_root is not None else str(settings.bioinfo_home)
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{host_root_path}:{mount_at}",
+        # Without these the run dies with SIGILL inside TensorFlow. The image
+        # targets Graviton3 and defaults to BF16 fastmath; Docker on macOS
+        # advertises `bf16` in /proc/cpuinfo but faults on the instruction.
+        # Measured 2026-08-01 -- see the validation section of the design doc.
+        "-e",
+        "DNNL_DEFAULT_FPMATH_MODE=STRICT",
+        "-e",
+        "TF_ENABLE_ONEDNN_OPTS=0",
+        image,
+        "run_deepvariant",
+        f"--model_type={params.model_type}",
+        f"--ref={reference}",
+        f"--reads={bam}",
+        f"--output_vcf={output_vcf}",
+        f"--num_shards={params.threads}",
+    ]
 
 
 def build_index_command(*, bcftools_path: str, vcf: Path) -> list[str]:
