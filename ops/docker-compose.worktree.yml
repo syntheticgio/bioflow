@@ -1,0 +1,15 @@
+# Port overrides for a worktree stack. Applied by ops/worktree-up.sh on top of
+# docker-compose.yml and docker-compose.override.yml, never on its own.
+#
+# `!override` matters here: Compose *appends* to a `ports` list when merging
+# files rather than replacing it, so without the tag a worktree stack would
+# publish 5173 and 8000 in addition to its own ports -- colliding with the
+# main stack, which is the one thing this file exists to avoid.
+services:
+  api:
+    ports: !override
+      - "${WT_API_PORT:-8100}:8000"
+
+  web:
+    ports: !override
+      - "${WT_WEB_PORT:-5273}:80"

@@ -83,15 +83,43 @@ docker inspect biopipe-worker-1 --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{
 ```
 
 If any source path contains `.claude/worktrees/`, the stack is on the wrong
-tree; fix it by re-running the rebuild from the main repo root:
+tree; fix it by re-running the rebuild from the main repo root (wherever this
+repo is checked out on this machine -- `git rev-parse --show-toplevel` from
+the main checkout, not from the worktree):
 
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner && docker compose up -d --build api web worker
+docker compose up -d --build api web worker
 ```
 
-To exercise a worktree's code before it merges, don't repoint the shared
-stack -- use a separate project name and unpublished ports (`docker compose
--p biopipe-<branch> ...`) so the main instance keeps serving main.
+**To exercise a worktree's code before it merges, use
+`./ops/worktree-up.sh`.** It brings up a second, fully separate stack for
+whatever worktree it is run from:
+
+```bash
+./ops/worktree-up.sh             # UI on 5273, API on 8100
+./ops/worktree-up.sh --down      # stop it, delete its volumes
+```
+
+It works by setting `COMPOSE_PROJECT_NAME`, which outranks the `name: biopipe`
+pinned in `docker-compose.yml`, so the worktree stack gets its own containers,
+network, and mongo/redis volumes; `ops/docker-compose.worktree.yml` moves the
+published ports. The main instance on 5173 keeps serving main throughout.
+
+Two things it does that are easy to get wrong by hand. It passes
+`--env-file <main checkout>/.env`, because `.env` is gitignored and a worktree
+has none -- without it `BIOINFO_HOME` falls back to the compose-file default
+and Docker silently creates that path as an empty directory. And on first
+launch it copies the main stack's `biopipe` database in with
+`mongodump | mongorestore`, since a new project name means an empty database,
+which would defeat the purpose of testing against real projects. That copy is
+a snapshot, not a live mirror; `--reseed` refreshes it. `/data` *is* shared
+with the main stack, deliberately -- fine for a UI or read-path check, worth a
+thought before running a pipeline that rewrites an existing artifact.
+
+A `PreToolUse` hook (`ops/hooks/block-compose-in-worktree.sh`, registered in
+`.claude/settings.json`) blocks bare `docker compose` from a worktree and
+points at the two scripts, since the failure it prevents is silent. Naming a
+project explicitly (`-p`, `COMPOSE_PROJECT_NAME=`) passes through.
 
 ## Verifying changes
 
