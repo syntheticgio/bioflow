@@ -14,6 +14,7 @@ from app.api.v1 import (
     search,
     sra,
     system,
+    uniprot,
     uploads,
 )
 
@@ -29,6 +30,7 @@ api_router.include_router(pipelines.router)
 api_router.include_router(runs.router)
 api_router.include_router(sra.router)
 api_router.include_router(ncbi.router)
+api_router.include_router(uniprot.router)
 api_router.include_router(schedules.router)
 api_router.include_router(system.router)
 api_router.include_router(events.router)
