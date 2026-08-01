@@ -13,6 +13,8 @@ entirely, which is precisely the bug this module exists to catch -- see
 CLAUDE.md on asserting the direction that fails when the seam breaks.
 """
 
+from unittest.mock import AsyncMock
+
 import pytest
 from beanie import PydanticObjectId
 
@@ -27,7 +29,13 @@ from app.models import (
     UploadSession,
     UploadState,
 )
-from app.services import object_service, project_service, run_service, upload_service
+from app.services import (
+    object_service,
+    project_service,
+    run_service,
+    search_service,
+    upload_service,
+)
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -523,3 +531,394 @@ class TestObjectServiceStillFiltersUnderneath:
         )
 
         assert theirs == []
+
+
+class TestSearchRouter:
+    """The widest read surface in the API, and the one write that could be
+    applied to rows the caller never sees.
+
+    Every read assertion here checks *both* directions, and that is
+    load-bearing rather than thorough: these routes answer 200 with a list, so
+    "B sees nothing" is also exactly what a route hardcoded to `"local"`
+    produces -- A's objects are not filed under `"local"` either. Only A's own
+    request coming back non-empty separates a scoped route from a broken one.
+    Verified by mutation; see the module docstring.
+    """
+
+    async def test_search_does_not_cross_profiles(self, client, two_profiles):
+        project = await _project(two_profiles["a"].owner_id(), "a-search")
+        await _object(two_profiles["a"].owner_id(), project.id, "a-secret-sample.fastq")
+
+        mine = await client.get(
+            "/api/v1/search/objects?q=a-secret-sample",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            "/api/v1/search/objects?q=a-secret-sample",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert [o["name"] for o in mine.json()["objects"]] == ["a-secret-sample.fastq"]
+        assert theirs.json()["objects"] == []
+
+    async def test_the_total_is_scoped_too(self, client, two_profiles):
+        """`total` is computed from a second, separately built filter.
+
+        It is the count the UI renders as "N results", so an unscoped total
+        discloses how many files another profile holds even when the page of
+        objects itself comes back correctly filtered.
+        """
+        project = await _project(two_profiles["a"].owner_id(), "a-total")
+        await _object(two_profiles["a"].owner_id(), project.id, "a-counted.fastq")
+
+        mine = await client.get(
+            "/api/v1/search/objects?q=a-counted", headers=two_profiles["a_headers"]
+        )
+        theirs = await client.get(
+            "/api/v1/search/objects?q=a-counted", headers=two_profiles["b_headers"]
+        )
+
+        assert mine.json()["total"] == 1
+        assert theirs.json()["total"] == 0
+
+    async def test_facets_do_not_expose_another_profiles_tags(
+        self, client, two_profiles
+    ):
+        """Facets leak by counting: no document is returned, but a tag list
+        naming another profile's cohorts describes a library the caller cannot
+        open."""
+        project = await _project(two_profiles["a"].owner_id(), "a-facets")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "tagged.fastq")
+        await obj.set({"tags": ["a-private-cohort"]})
+
+        mine = await client.get("/api/v1/search/facets", headers=two_profiles["a_headers"])
+        theirs = await client.get(
+            "/api/v1/search/facets", headers=two_profiles["b_headers"]
+        )
+
+        assert "a-private-cohort" in [t["value"] for t in mine.json()["tags"]]
+        assert "a-private-cohort" not in [t["value"] for t in theirs.json()["tags"]]
+
+    async def test_facets_do_not_expose_another_profiles_metadata_keys(
+        self, client, two_profiles
+    ):
+        project = await _project(two_profiles["a"].owner_id(), "a-facet-keys")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "keyed.fastq")
+        await obj.set({"metadata": {"a_private_key": "x"}})
+
+        mine = await client.get("/api/v1/search/facets", headers=two_profiles["a_headers"])
+        theirs = await client.get(
+            "/api/v1/search/facets", headers=two_profiles["b_headers"]
+        )
+
+        assert "a_private_key" in [k["key"] for k in mine.json()["metadata_keys"]]
+        assert "a_private_key" not in [k["key"] for k in theirs.json()["metadata_keys"]]
+
+    async def test_metadata_values_do_not_cross_profiles(self, client, two_profiles):
+        """The most directly disclosing read of the three: the values are the
+        data. An unscoped `sample_id` picker hands over every patient
+        identifier in the database."""
+        project = await _project(two_profiles["a"].owner_id(), "a-values")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "patient.fastq")
+        await obj.set({"metadata": {"sample_id": "P-041-PRIVATE"}})
+
+        mine = await client.get(
+            "/api/v1/search/metadata-values/sample_id",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            "/api/v1/search/metadata-values/sample_id",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert "P-041-PRIVATE" in [v["value"] for v in mine.json()["values"]]
+        assert "P-041-PRIVATE" not in [v["value"] for v in theirs.json()["values"]]
+
+    async def test_search_requires_a_profile_header(self, client, two_profiles):
+        """The leak as measured against the running app: this answered 200 with
+        every profile's filenames and no header at all."""
+        r = await client.get("/api/v1/search/objects?q=")
+
+        assert r.status_code == 400
+        assert r.json()["code"] == "profile_unresolved"
+
+    async def test_metadata_schemas_stay_open(self, client, two_profiles):
+        """The two routes in this file that are deliberately *not* scoped.
+
+        They render the FormatKind/ObjectRole enums and read no collection, so
+        the answer is a property of the code and identical for every profile.
+        Asserted so that a later sweep adding `OwnerDep` everywhere has to
+        justify breaking the field pickers rather than doing it by reflex.
+        """
+        r = await client.get("/api/v1/metadata/schemas")
+
+        assert r.status_code == 200
+        assert "common" in r.json()
+
+
+class TestSearchBulkWrites:
+    """The worst of the search leaks, and worse in kind than the reads above.
+
+    An unscoped search discloses; an unscoped bulk write *modifies*. These two
+    routes take raw object ids and previously applied `$set`/`$addToSet`/`$pull`
+    to whatever they matched, so one profile could rewrite another's metadata
+    and tags from guessed ids -- and unlike a disclosure, the owner has no way
+    to notice or undo it.
+
+    A batch mixing the caller's ids with someone else's is refused whole rather
+    than partially applied, so each test below asserts the refusal *and*
+    re-reads A's row to prove the write was a no-op rather than a 404 over a
+    completed update.
+    """
+
+    async def test_another_profile_cannot_tag_a_row(self, client, two_profiles):
+        project = await _project(two_profiles["a"].owner_id(), "a-bulk-tags")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "reads.fastq")
+
+        r = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={"object_ids": [str(obj.id)], "add": ["b-was-here"]},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert r.status_code == 404
+        assert (await DataObject.get(obj.id)).tags == []
+
+    async def test_another_profile_cannot_untag_a_row(self, client, two_profiles):
+        """The `$pull` half, which the `$addToSet` test does not reach: tag
+        removal is a second update_many with its own filter."""
+        project = await _project(two_profiles["a"].owner_id(), "a-bulk-untag")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "reads.fastq")
+        await obj.set({"tags": ["keep-me"]})
+
+        r = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={"object_ids": [str(obj.id)], "remove": ["keep-me"]},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert r.status_code == 404
+        assert (await DataObject.get(obj.id)).tags == ["keep-me"]
+
+    async def test_another_profile_cannot_set_metadata(self, client, two_profiles):
+        project = await _project(two_profiles["a"].owner_id(), "a-bulk-meta")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "reads.fastq")
+        await obj.set({"metadata": {"sample_id": "P-041"}})
+
+        r = await client.post(
+            "/api/v1/objects/bulk-metadata",
+            json={"object_ids": [str(obj.id)], "set": {"sample_id": "OVERWRITTEN"}},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert r.status_code == 404
+        assert (await DataObject.get(obj.id)).metadata["sample_id"] == "P-041"
+
+    async def test_another_profile_cannot_unset_metadata(self, client, two_profiles):
+        """`$unset` deletes rather than overwrites, so a leak here destroys
+        data outright instead of replacing it with something recoverable."""
+        project = await _project(two_profiles["a"].owner_id(), "a-bulk-unset")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "reads.fastq")
+        await obj.set({"metadata": {"sample_id": "P-041"}})
+
+        r = await client.post(
+            "/api/v1/objects/bulk-metadata",
+            json={"object_ids": [str(obj.id)], "unset": ["sample_id"]},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert r.status_code == 404
+        assert (await DataObject.get(obj.id)).metadata["sample_id"] == "P-041"
+
+    async def test_a_mixed_batch_is_refused_whole(self, client, two_profiles):
+        """The case the all-or-nothing choice exists for.
+
+        B sends one of its own ids and one of A's. The alternative design --
+        filter the update and report a short count -- would apply the edit to
+        B's row and answer `matched: 1`, which B cannot distinguish from "the
+        other id was deleted". Neither row is touched here.
+        """
+        a_project = await _project(two_profiles["a"].owner_id(), "a-mixed")
+        a_obj = await _object(two_profiles["a"].owner_id(), a_project.id, "a.fastq")
+        b_project = await _project(two_profiles["b"].owner_id(), "b-mixed")
+        b_obj = await _object(two_profiles["b"].owner_id(), b_project.id, "b.fastq")
+
+        r = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={
+                "object_ids": [str(b_obj.id), str(a_obj.id)],
+                "add": ["batch-tag"],
+            },
+            headers=two_profiles["b_headers"],
+        )
+
+        assert r.status_code == 404
+        assert (await DataObject.get(a_obj.id)).tags == []
+        # B's own row is not a consolation prize: the batch was refused, so its
+        # own id must be untouched too, or the refusal was really a partial
+        # write with an error code on top.
+        assert (await DataObject.get(b_obj.id)).tags == []
+
+    async def test_the_refusal_does_not_confirm_the_row_exists(
+        self, client, two_profiles
+    ):
+        """A wrong-owner id and a nonexistent id must answer identically.
+
+        Otherwise the error itself becomes the oracle the partition was meant
+        to remove: B could probe ids and learn which ones are real.
+        """
+        a_project = await _project(two_profiles["a"].owner_id(), "a-probe")
+        a_obj = await _object(two_profiles["a"].owner_id(), a_project.id, "a.fastq")
+
+        real_but_theirs = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={"object_ids": [str(a_obj.id)], "add": ["x"]},
+            headers=two_profiles["b_headers"],
+        )
+        never_existed = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={"object_ids": [str(PydanticObjectId())], "add": ["x"]},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert real_but_theirs.status_code == never_existed.status_code == 404
+        assert real_but_theirs.json()["code"] == never_existed.json()["code"]
+        assert real_but_theirs.json()["message"] == never_existed.json()["message"]
+
+    async def test_a_profile_can_still_bulk_edit_its_own_rows(
+        self, client, two_profiles
+    ):
+        """The direction that proves the refusals above are not just a route
+        that rejects everything."""
+        project = await _project(two_profiles["b"].owner_id(), "b-own-bulk")
+        obj = await _object(two_profiles["b"].owner_id(), project.id, "mine.fastq")
+
+        r = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={"object_ids": [str(obj.id)], "add": ["mine"]},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert r.status_code == 200
+        assert r.json()["modified"] == 1
+        assert (await DataObject.get(obj.id)).tags == ["mine"]
+
+    async def test_bulk_writes_require_a_profile_header(self, client, two_profiles):
+        project = await _project(two_profiles["a"].owner_id(), "a-headerless-bulk")
+        obj = await _object(two_profiles["a"].owner_id(), project.id, "reads.fastq")
+
+        r = await client.post(
+            "/api/v1/objects/bulk-tags",
+            json={"object_ids": [str(obj.id)], "add": ["x"]},
+        )
+
+        assert r.status_code == 400
+        assert r.json()["code"] == "profile_unresolved"
+        assert (await DataObject.get(obj.id)).tags == []
+
+
+class TestBulkWriteFilterIsIndependentlyLoadBearing:
+    """The write filters, proven without the pre-check standing in front of them.
+
+    Every test in `TestSearchBulkWrites` goes through `_assert_all_owned`, which
+    refuses a foreign id before the `update_many` is ever issued. That makes
+    those tests blind to the owner clause *on the update itself*: stripping
+    `"owner": owner` from both `update_many` filters leaves all eight of them
+    green, because the refusal happens first. Confirmed by mutation -- that is
+    why this class exists, and it must not be folded into the one above.
+
+    The two are not redundant. The pre-check and the write are separate round
+    trips, so the filter is what actually holds at the moment of writing; the
+    pre-check only converts a partial write into a clean refusal. Each test
+    here calls the service directly with the check satisfied -- an id the
+    caller *does* own -- alongside a foreign id smuggled past it, which is the
+    only way to observe the filter alone.
+    """
+
+    async def _pair(self, two_profiles, label):
+        """One row owned by A, one by B, ready to be named in the same call."""
+        a_project = await _project(two_profiles["a"].owner_id(), f"a-{label}")
+        a_obj = await _object(two_profiles["a"].owner_id(), a_project.id, "a.fastq")
+        b_project = await _project(two_profiles["b"].owner_id(), f"b-{label}")
+        b_obj = await _object(two_profiles["b"].owner_id(), b_project.id, "b.fastq")
+        return a_obj, b_obj
+
+    async def test_the_tag_update_filter_spares_a_foreign_row(
+        self, monkeypatch, two_profiles
+    ):
+        """`_assert_all_owned` is patched out, so only the `update_many` filter
+        stands between B and A's tags. Removing it fails this assertion."""
+        a_obj, b_obj = await self._pair(two_profiles, "tag-filter")
+        monkeypatch.setattr(
+            search_service, "_assert_all_owned", AsyncMock(return_value=None)
+        )
+
+        result = await search_service.bulk_update_tags(
+            [b_obj.id, a_obj.id], owner=two_profiles["b"].owner_id(), add=["b-reached"]
+        )
+
+        assert (await DataObject.get(a_obj.id)).tags == []
+        # B's own row still updates, so the filter is narrowing rather than
+        # rejecting everything -- the direction that fails if it over-matched.
+        assert (await DataObject.get(b_obj.id)).tags == ["b-reached"]
+        assert result["modified"] == 1
+
+    async def test_the_tag_pull_filter_spares_a_foreign_row(
+        self, monkeypatch, two_profiles
+    ):
+        """`$pull` is a second update_many with its own filter, so it needs its
+        own assertion -- the `$addToSet` test above never touches it."""
+        a_obj, b_obj = await self._pair(two_profiles, "pull-filter")
+        await a_obj.set({"tags": ["keep-me"]})
+        await b_obj.set({"tags": ["keep-me"]})
+        monkeypatch.setattr(
+            search_service, "_assert_all_owned", AsyncMock(return_value=None)
+        )
+
+        await search_service.bulk_update_tags(
+            [b_obj.id, a_obj.id],
+            owner=two_profiles["b"].owner_id(),
+            remove=["keep-me"],
+        )
+
+        assert (await DataObject.get(a_obj.id)).tags == ["keep-me"]
+        assert (await DataObject.get(b_obj.id)).tags == []
+
+    async def test_the_metadata_update_filter_spares_a_foreign_row(
+        self, monkeypatch, two_profiles
+    ):
+        a_obj, b_obj = await self._pair(two_profiles, "meta-filter")
+        await a_obj.set({"metadata": {"sample_id": "P-041"}})
+        monkeypatch.setattr(
+            search_service, "_assert_all_owned", AsyncMock(return_value=None)
+        )
+
+        await search_service.bulk_update_metadata(
+            [b_obj.id, a_obj.id],
+            owner=two_profiles["b"].owner_id(),
+            set_values={"sample_id": "OVERWRITTEN"},
+        )
+
+        assert (await DataObject.get(a_obj.id)).metadata["sample_id"] == "P-041"
+        assert (await DataObject.get(b_obj.id)).metadata["sample_id"] == "OVERWRITTEN"
+
+    async def test_the_metadata_unset_filter_spares_a_foreign_row(
+        self, monkeypatch, two_profiles
+    ):
+        """`$unset` destroys rather than overwrites, so an unfiltered one takes
+        a field away with nothing to restore it from."""
+        a_obj, b_obj = await self._pair(two_profiles, "unset-filter")
+        await a_obj.set({"metadata": {"sample_id": "P-041"}})
+        await b_obj.set({"metadata": {"sample_id": "P-999"}})
+        monkeypatch.setattr(
+            search_service, "_assert_all_owned", AsyncMock(return_value=None)
+        )
+
+        await search_service.bulk_update_metadata(
+            [b_obj.id, a_obj.id],
+            owner=two_profiles["b"].owner_id(),
+            unset_keys=["sample_id"],
+        )
+
+        assert (await DataObject.get(a_obj.id)).metadata["sample_id"] == "P-041"
+        assert "sample_id" not in (await DataObject.get(b_obj.id)).metadata

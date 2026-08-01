@@ -9,6 +9,13 @@ index: filenames are the thing people actually search, they are short, and
 partial matching (`SampleA_R1` from `sample`) matters more here than stemming.
 At single-user scale that is a good trade; a text index becomes worthwhile only
 if this ever holds millions of objects.
+
+Every public function here takes a required keyword-only `owner`. Search is the
+widest read surface in the application -- it is the one place that queries
+across projects by default -- so an unscoped filter here discloses more than any
+single-row leak could. `build_filter` is the choke point all three read paths go
+through, and it seeds its filter with the owner clause before looking at
+anything the user asked for.
 """
 
 import re
@@ -18,6 +25,7 @@ from typing import Any
 from beanie import PydanticObjectId
 
 from app.db.client import get_db
+from app.errors import NotFoundError
 from app.logging import get_logger
 from app.models import DataObject, FormatKind, ObjectStatus
 
@@ -43,9 +51,25 @@ class SearchQuery:
     cursor: str | None = None
 
 
-def build_filter(q: SearchQuery) -> dict:
-    """Translate a SearchQuery into a MongoDB filter document."""
-    f: dict[str, Any] = {}
+def build_filter(q: SearchQuery, *, owner: str) -> dict:
+    """Translate a SearchQuery into a MongoDB filter document.
+
+    `owner` is a separate required keyword argument rather than a field on
+    `SearchQuery`, and the distinction matters. A `SearchQuery` is assembled
+    straight from user-supplied query parameters in the route -- text, kinds,
+    tags, metadata are all things the caller chose. Filing the owner in that
+    same bag would make the partition boundary look like one more user-tunable
+    filter, one `SearchQuery(**params)` away from being set by the client.
+    Keeping it out of the dataclass means the only thing that can supply it is
+    the caller, and the only caller is a route holding an `OwnerDep`.
+
+    It also has no default, on purpose. Every search, facet and metadata-value
+    query in this module funnels through here, so a default -- even `"local"`
+    -- would make an unscoped filter constructible by omission, which is
+    exactly the leak this closes. Without one, forgetting it is a TypeError at
+    the call site rather than a silent cross-profile read.
+    """
+    f: dict[str, Any] = {"owner": owner}
 
     if q.text:
         # Escaped: a user typing "sample(1)" should search for that literal,
@@ -96,10 +120,10 @@ def build_filter(q: SearchQuery) -> dict:
 _RANGE_OPS = {"gte": "$gte", "gt": "$gt", "lte": "$lte", "lt": "$lt", "ne": "$ne"}
 
 
-async def search_objects(q: SearchQuery) -> dict:
+async def search_objects(q: SearchQuery, *, owner: str) -> dict:
     """Run a search. Returns results plus a cursor for the next page."""
     limit = max(1, min(q.limit, MAX_LIMIT))
-    filt = build_filter(q)
+    filt = build_filter(q, owner=owner)
 
     # Keyset pagination: an _id boundary rather than skip(), which degrades
     # linearly as the offset grows.
@@ -128,23 +152,33 @@ async def search_objects(q: SearchQuery) -> dict:
         "objects": docs,
         "has_more": has_more,
         "next_cursor": str(docs[-1].id) if has_more and docs else None,
-        "total": await DataObject.find(build_filter(q)).count(),
+        # Rebuilt rather than reusing `filt`: the cursor clause was added to
+        # that one in place, and the total is a count of the whole result set,
+        # not of the page after the boundary.
+        "total": await DataObject.find(build_filter(q, owner=owner)).count(),
     }
 
 
-async def facets(project_id: PydanticObjectId | None = None) -> dict:
+async def facets(project_id: PydanticObjectId | None = None, *, owner: str) -> dict:
     """Distinct values and counts for building the filter UI.
 
     Everything is aggregated server-side; pulling documents back to count them
     in Python would scale with the library, on an endpoint the UI polls.
+
+    Facets leak by counting. Even though no document is returned, a tag list
+    naming another profile's cohorts, or a metadata key list naming their
+    fields, discloses the shape of a library the caller cannot open -- so the
+    owner match leads every pipeline below, unconditionally. It used to be
+    `if match`, applied only when a project was named; the match is now never
+    empty, which is the point.
     """
     db = get_db()
-    match: dict = {"project_id": project_id} if project_id else {}
+    match: dict = {"owner": owner}
+    if project_id:
+        match["project_id"] = project_id
 
     async def group_by(field_name: str, limit: int = MAX_FACET_VALUES) -> list[dict]:
-        pipeline: list[dict] = []
-        if match:
-            pipeline.append({"$match": match})
+        pipeline: list[dict] = [{"$match": match}]
         pipeline += [
             {"$group": {"_id": f"${field_name}", "count": {"$sum": 1}}},
             {"$match": {"_id": {"$ne": None}}},
@@ -157,9 +191,7 @@ async def facets(project_id: PydanticObjectId | None = None) -> dict:
         ]
 
     async def unwound(field_name: str, limit: int = MAX_FACET_VALUES) -> list[dict]:
-        pipeline: list[dict] = []
-        if match:
-            pipeline.append({"$match": match})
+        pipeline: list[dict] = [{"$match": match}]
         pipeline += [
             {"$unwind": f"${field_name}"},
             {"$group": {"_id": f"${field_name}", "count": {"$sum": 1}}},
@@ -173,9 +205,7 @@ async def facets(project_id: PydanticObjectId | None = None) -> dict:
 
     # Which metadata keys exist at all, and how often -- this is what makes an
     # open-ended schema browsable instead of guesswork.
-    key_pipeline: list[dict] = []
-    if match:
-        key_pipeline.append({"$match": match})
+    key_pipeline: list[dict] = [{"$match": match}]
     key_pipeline += [
         {"$project": {"kv": {"$objectToArray": {"$ifNull": ["$metadata", {}]}}}},
         {"$unwind": "$kv"},
@@ -196,12 +226,20 @@ async def facets(project_id: PydanticObjectId | None = None) -> dict:
     }
 
 
-async def metadata_values(key: str, project_id: PydanticObjectId | None = None) -> list[dict]:
-    """Distinct values for one metadata key, for a value picker."""
+async def metadata_values(
+    key: str, project_id: PydanticObjectId | None = None, *, owner: str
+) -> list[dict]:
+    """Distinct values for one metadata key, for a value picker.
+
+    The most directly disclosing of the three read paths: the values *are* the
+    data. An unscoped `sample_id` picker hands over every patient identifier in
+    the database.
+    """
     db = get_db()
-    pipeline: list[dict] = []
+    match: dict = {"owner": owner}
     if project_id:
-        pipeline.append({"$match": {"project_id": project_id}})
+        match["project_id"] = project_id
+    pipeline: list[dict] = [{"$match": match}]
     pipeline += [
         {"$match": {f"metadata.{key}": {"$exists": True, "$ne": None}}},
         {"$group": {"_id": f"$metadata.{key}", "count": {"$sum": 1}}},
@@ -214,9 +252,50 @@ async def metadata_values(key: str, project_id: PydanticObjectId | None = None) 
     ]
 
 
+async def _assert_all_owned(object_ids: list[PydanticObjectId], *, owner: str) -> None:
+    """Refuse the whole batch unless every id belongs to `owner`.
+
+    The alternative -- narrow the update to `{"_id": {"$in": ids}, "owner":
+    owner}` and let the counts come back short -- is safe, and it was the
+    tempting one, because the filter alone already makes another profile's row
+    unreachable. It is rejected here for what the caller is then told.
+
+    These two functions return `{"matched", "modified"}` and nothing else.
+    Silently dropping the ids that were not the caller's would answer a
+    50-object edit with `matched: 30` and no way to distinguish "20 of those
+    ids belong to someone else" from "20 of them no longer exist" -- the same
+    number for a typo, a stale tab, and a genuine cross-profile reach. The
+    caller sees a partial success it did not ask for and cannot diagnose.
+    Widening the return shape to report which ids were skipped would leak the
+    one fact the partition exists to hide: that those ids are real and belong
+    to somebody.
+
+    So the batch is all-or-nothing, and the refusal is a NotFoundError naming
+    only a count. That is the same answer `object_service.get_object` gives for
+    a wrong-owner id -- unreachable and absent are one response, so no error
+    tells a caller that an id they cannot touch exists.
+    """
+    if not object_ids:
+        return
+
+    # A count, not a fetch: the check needs to know how many of these ids are
+    # the caller's, and pulling the documents to compare owners in Python would
+    # read rows this profile has no business holding, even transiently.
+    owned = await get_db().objects.count_documents(
+        {"_id": {"$in": list(set(object_ids))}, "owner": owner}
+    )
+    missing = len(set(object_ids)) - owned
+    if missing:
+        raise NotFoundError(
+            f"{missing} of {len(set(object_ids))} objects were not found",
+            details={"requested": len(set(object_ids)), "found": owned},
+        )
+
+
 async def bulk_update_metadata(
     object_ids: list[PydanticObjectId],
     *,
+    owner: str,
     set_values: dict | None = None,
     unset_keys: list[str] | None = None,
 ) -> dict:
@@ -228,6 +307,8 @@ async def bulk_update_metadata(
     """
     if not object_ids:
         return {"matched": 0, "modified": 0, "warnings": []}
+
+    await _assert_all_owned(object_ids, owner=owner)
 
     from datetime import UTC, datetime
 
@@ -245,7 +326,14 @@ async def bulk_update_metadata(
     if unset_keys:
         update["$unset"] = {f"metadata.{k}": "" for k in unset_keys}
 
-    result = await get_db().objects.update_many({"_id": {"$in": object_ids}}, update)
+    # The owner clause is repeated on the update even though `_assert_all_owned`
+    # just passed. The check and the write are two round trips, so the filter is
+    # what actually guarantees the invariant at the moment of writing; the check
+    # exists to turn a partial write into a clean refusal, not to authorise this
+    # one. If the two ever disagree, the filter is the half that must hold.
+    result = await get_db().objects.update_many(
+        {"_id": {"$in": object_ids}, "owner": owner}, update
+    )
     log.info(
         "bulk_metadata_updated",
         matched=result.matched_count,
@@ -261,6 +349,7 @@ async def bulk_update_metadata(
 async def bulk_update_tags(
     object_ids: list[PydanticObjectId],
     *,
+    owner: str,
     add: list[str] | None = None,
     remove: list[str] | None = None,
 ) -> dict:
@@ -268,16 +357,22 @@ async def bulk_update_tags(
     if not object_ids:
         return {"matched": 0, "modified": 0}
 
+    await _assert_all_owned(object_ids, owner=owner)
+
     from datetime import UTC, datetime
 
     db = get_db()
     matched = modified = 0
+    # Both passes below filter on owner as well as id, for the reason spelled
+    # out in bulk_update_metadata: the pre-check and the write are separate
+    # round trips, and this clause is the one that holds at write time.
+    scope = {"_id": {"$in": object_ids}, "owner": owner}
 
     # $addToSet and $pull touch the same field, so Mongo cannot take both in a
     # single update document; two passes keep each one atomic.
     if add:
         r = await db.objects.update_many(
-            {"_id": {"$in": object_ids}},
+            scope,
             {
                 "$addToSet": {"tags": {"$each": [t.strip() for t in add if t.strip()]}},
                 "$set": {"updated_at": datetime.now(UTC)},
@@ -287,7 +382,7 @@ async def bulk_update_tags(
 
     if remove:
         r = await db.objects.update_many(
-            {"_id": {"$in": object_ids}},
+            scope,
             {
                 "$pull": {"tags": {"$in": [t.strip() for t in remove if t.strip()]}},
                 "$set": {"updated_at": datetime.now(UTC)},

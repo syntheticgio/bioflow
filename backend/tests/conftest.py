@@ -72,6 +72,14 @@ async def beanie_models():
             "app.services.blob_service",
             "app.services.project_service",
             "app.services.upload_service",
+            # search_service joined this list when its facet, metadata-value
+            # and bulk-write paths first got tests that hit a real database.
+            # It aggregates and updates through raw Motor rather than Beanie,
+            # so without the patch those queries ran against the *real*
+            # `mongo_db` while the fixtures wrote to `biopipe_test`. That does
+            # not look like a missing patch from the test: it reads as an empty
+            # facet list and a bulk edit that 404s on the caller's own rows.
+            "app.services.search_service",
         ):
             module = importlib.import_module(module_name)
             if hasattr(module, "get_db"):
