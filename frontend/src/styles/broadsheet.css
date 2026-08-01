@@ -1139,6 +1139,422 @@
   margin-left: var(--space-2);
 }
 
+/* ── Activity page ──────────────────────────────────────────────────────── */
+
+/* A front page: the running job as the lead story, finished runs as a ledger
+   beside it, and a standing rail of library figures. /activity is the one
+   route with no detail panel (`singleColumn` in App.tsx), so it gets the whole
+   sheet to lay this out in. */
+.theme-broadsheet .activity {
+  overflow: visible;
+}
+
+.theme-broadsheet .activity-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.15fr) 250px;
+  gap: 0 var(--space-8);
+  align-items: start;
+  padding: 0;
+  margin-top: var(--space-4);
+}
+
+/* Grid children default to min-width:auto and refuse to shrink below their
+   longest word -- a run label is one unbroken filename, so without this the
+   columns push the page wider instead of narrowing. */
+.theme-broadsheet .activity-lead,
+.theme-broadsheet .activity-ledger,
+.theme-broadsheet .activity-desk {
+  min-width: 0;
+}
+
+/* The narrow-window rules live at the end of this section, after every
+   `display` they have to override. */
+
+/* ── Activity: column headings ──────────────────────────────────────────── */
+
+.theme-broadsheet .activity-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.theme-broadsheet .activity-head-title {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.theme-broadsheet .activity-head-note {
+  font-size: 11.5px;
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .activity-rule {
+  height: 2px;
+  background: var(--color-text);
+  margin: var(--space-1) 0 var(--space-3);
+}
+
+.theme-broadsheet .activity-empty,
+.theme-broadsheet .activity-hint {
+  font-size: 12.5px;
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .activity-hint {
+  margin-top: var(--space-2);
+}
+
+/* ── Activity: fact grids ───────────────────────────────────────────────── */
+
+/* Shared by the lead story and an expanded ledger line: a label set small and
+   quiet at a fixed width, then the value. Fixed rather than max-content so the
+   values align down the column even though "Reads" and "Min quality" don't. */
+.theme-broadsheet .activity-fact {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  padding: 3px 0;
+  break-inside: avoid;
+}
+
+.theme-broadsheet .activity-fact-k {
+  width: 80px;
+  flex: none;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .activity-fact-v {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Activity: lead story ───────────────────────────────────────────────── */
+
+.theme-broadsheet .lead-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-accent-2);
+}
+
+.theme-broadsheet .lead-headline {
+  font-family: var(--font-heading);
+  font-size: 31px;
+  font-weight: 600;
+  line-height: 1.05;
+  margin: 6px 0 var(--space-2);
+  max-width: 20ch;
+  overflow-wrap: anywhere;
+}
+
+.theme-broadsheet .lead-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.theme-broadsheet .lead-track {
+  flex: 1;
+  height: 6px;
+  background: color-mix(in srgb, var(--color-text) 12%, transparent);
+  position: relative;
+}
+
+.theme-broadsheet .lead-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+  transition: width 0.15s;
+}
+
+.theme-broadsheet .lead-count {
+  flex: none;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .lead-facts {
+  columns: 2;
+  column-gap: var(--space-8);
+  font-size: 14px;
+}
+
+.theme-broadsheet .lead-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.theme-broadsheet .lead-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: var(--space-4);
+  font-size: 13.5px;
+}
+
+.theme-broadsheet .lead-step {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: 4px 0;
+}
+
+.theme-broadsheet .lead-step-state {
+  width: 88px;
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* In-flight steps take the accent; settled ones stay in text colour so the one
+   thing still happening is the one thing that stands out. */
+.theme-broadsheet .lead-step-state.running,
+.theme-broadsheet .lead-step-state.pending,
+.theme-broadsheet .lead-step-state.queued,
+.theme-broadsheet .lead-step-state.delayed {
+  color: var(--color-accent-2);
+}
+
+.theme-broadsheet .lead-step-state.failed,
+.theme-broadsheet .lead-step-state.dead,
+.theme-broadsheet .lead-step-state.cancelled {
+  color: var(--error);
+}
+
+.theme-broadsheet .lead-step-state.expired {
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .lead-step-label {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.theme-broadsheet .lead-step-shared {
+  margin-left: var(--space-2);
+  font-weight: 400;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .lead-step-error {
+  font-weight: 400;
+  color: var(--error);
+}
+
+.theme-broadsheet .lead-step-time {
+  margin-left: auto;
+  flex: none;
+  color: var(--ink-55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Activity: run ledger ───────────────────────────────────────────────── */
+
+.theme-broadsheet .ledger-row {
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.theme-broadsheet .ledger-line {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: 9px 4px 9px 0;
+  cursor: pointer;
+}
+
+.theme-broadsheet .ledger-line:hover {
+  background: color-mix(in srgb, var(--color-text) 4%, transparent);
+}
+
+.theme-broadsheet .ledger-num {
+  width: 14px;
+  flex: none;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 40%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.theme-broadsheet .ledger-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.theme-broadsheet .ledger-meta {
+  flex: none;
+  max-width: 45%;
+  text-align: right;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A failed run earns colour in the one place the eye is already scanning. */
+.theme-broadsheet .ledger-row.failed .ledger-meta,
+.theme-broadsheet .ledger-row.partial .ledger-meta {
+  color: var(--error);
+}
+
+.theme-broadsheet .ledger-detail {
+  margin: var(--space-1) 0 var(--space-2) 26px;
+}
+
+.theme-broadsheet .ledger-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0 26px;
+  font-size: 13.5px;
+}
+
+.theme-broadsheet .ledger-detail .activity-fact-k {
+  width: 76px;
+}
+
+.theme-broadsheet .ledger-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* ── Activity: desk rail ────────────────────────────────────────────────── */
+
+.theme-broadsheet .activity-desk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.theme-broadsheet .desk-readouts {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.theme-broadsheet .desk-readout {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.theme-broadsheet .desk-readout-k {
+  flex: 1;
+  font-size: 11px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .desk-readout-v {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}
+
+.theme-broadsheet .desk-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.theme-broadsheet .desk-file {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.theme-broadsheet .desk-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--color-accent);
+}
+
+.theme-broadsheet .desk-file-size {
+  flex: none;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--ink-55);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Activity: loose jobs ───────────────────────────────────────────────── */
+
+/* Below the columns and across the sheet. Ruled off at the top because it is a
+   change of register: the grid is what the user did, this is what the machine
+   is doing on its own account. */
+.theme-broadsheet .activity-loose {
+  padding: 0;
+  margin-top: var(--space-8);
+  border-top: 1px solid var(--color-divider);
+  padding-top: var(--space-4);
+}
+
+.theme-broadsheet .activity-loose .section {
+  margin-bottom: var(--space-6);
+}
+
+/* ── Activity: narrow windows ───────────────────────────────────────────── */
+
+/* Deliberately last in this section. `display: none` on the rail has to beat
+   `.activity-desk { display: flex }` above, and media queries add no
+   specificity -- placed any earlier the rail stays visible and wraps onto a
+   second grid row, which is exactly what it did the first time. */
+
+/* Below 1240px the rail goes rather than being squeezed: its figures are all
+   repeated in the masthead and footer, so it is the column that costs least to
+   lose. */
+@media (max-width: 1240px) {
+  .theme-broadsheet .activity-desk {
+    display: none;
+  }
+  .theme-broadsheet .activity-grid {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.15fr);
+  }
+}
+
+/* Below 940px the ledger stacks under the lead instead of disappearing --
+   finished runs are the page's content, not furniture. The lead's two-column
+   fact list folds at the same point: two 40ch filenames side by side read
+   worse than one list. */
+@media (max-width: 940px) {
+  .theme-broadsheet .activity-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-6);
+  }
+  .theme-broadsheet .lead-facts {
+    columns: 1;
+  }
+}
+
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 
 .theme-broadsheet .footer {

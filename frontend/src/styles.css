@@ -1225,6 +1225,27 @@ a.btn {
   padding: 0 12px 16px;
 }
 
+/* Classic gets a plain stack. The three-column broadsheet layout that these
+   classes were designed for lives in broadsheet.css; without it the columns
+   simply follow one another, which is what Classic's narrow panel wants
+   anyway. */
+.activity-grid,
+.activity-loose {
+  padding: 0 12px 16px;
+}
+
+.activity-rule {
+  height: 2px;
+  background: var(--text);
+  margin: 5px 0 12px;
+}
+
+.activity-empty,
+.activity-hint {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
 .activity-row {
   padding: 8px 0;
   border-bottom: 1px solid var(--border);

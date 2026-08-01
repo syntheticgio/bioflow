@@ -4,12 +4,18 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { formatDate, formatDuration } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import type { JobSummary, RunSummary, SystemLoad } from "../api/types";
+import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types";
 import { JobLogView } from "./JobLogView";
-import { RunRow } from "./RunRow";
+import { ActivityDesk } from "./activity/ActivityDesk";
+import { ActivityLead } from "./activity/ActivityLead";
+import { RunLedger } from "./activity/RunLedger";
 
 const RUNNING = new Set(["running"]);
 const WAITING = new Set(["pending", "queued", "delayed"]);
+
+/** How many finished runs the ledger column carries. Five is what fits beside
+ *  the lead story before the page starts scrolling on a normal window. */
+const LEDGER_LIMIT = 5;
 
 /**
  * Everything the system is doing, and why it is not doing the rest.
@@ -18,6 +24,11 @@ const WAITING = new Set(["pending", "queued", "delayed"]);
  * indistinguishable from a stuck one, and the load governor deliberately
  * defers work -- so the honest answer is usually "the machine is busy", not
  * "something is wrong".
+ *
+ * Laid out as three columns -- the run in progress, the ledger of recent ones,
+ * and a standing rail of library figures -- over a full-width strip of the work
+ * that belongs to no run. The strip is the part that answers the "why": the
+ * governor note and each job's waiting reason live there.
  */
 export function ActivityView() {
   const qc = useQueryClient();
@@ -49,7 +60,8 @@ export function ActivityView() {
 
   // Membership, so a job shown inside its run is not also listed loose. Every
   // run is fetched rather than only the expanded ones -- the collapsed rows
-  // still need to know which jobs they own.
+  // still need to know which jobs they own, and the columns show a job count
+  // before anything is expanded.
   const runDetails = useQueries({
     queries: runs.map((run) => ({
       queryKey: ["runs", run.id],
@@ -58,6 +70,9 @@ export function ActivityView() {
         run.status === "running" || run.status === "waiting" ? 2000 : false,
     })),
   }).map((q) => q.data);
+
+  const details = new Map<string, RunDetail>();
+  for (const detail of runDetails) if (detail) details.set(detail.id, detail);
 
   const { data: load } = useQuery({
     queryKey: ["system", "load"],
@@ -127,31 +142,33 @@ export function ActivityView() {
         {load && <GovernorNote load={load} waiting={waiting.length} />}
       </div>
 
-      <div className="activity-body">
-        {/* Runs first: one row per action the user took, rather than the seven
-            jobs an alignment decomposes into. */}
-        {activeRuns.length > 0 && (
-          <Section title="Runs in progress" count={activeRuns.length} empty="">
-            {activeRuns.map((run) => (
-              <RunRow key={run.id} run={run} onSelect={selectObject} />
-            ))}
-          </Section>
-        )}
+      {/* Runs first: one column per action the user took, rather than the seven
+          jobs an alignment decomposes into. */}
+      <div className="activity-grid">
+        <ActivityLead
+          runs={activeRuns}
+          details={details}
+          onSelect={selectObject}
+        />
 
-        {finishedRuns.length > 0 && (
-          <Section
-            title="Recent runs"
-            count={finishedRuns.length}
-            empty="No finished runs."
-          >
-            {finishedRuns.slice(0, 20).map((run) => (
-              <RunRow key={run.id} run={run} onSelect={selectObject} />
-            ))}
-          </Section>
-        )}
+        <RunLedger
+          runs={finishedRuns.slice(0, LEDGER_LIMIT)}
+          jobCounts={
+            new Map(
+              finishedRuns.map((r) => [r.id, details.get(r.id)?.jobs.length ?? 0]),
+            )
+          }
+          onSelect={selectObject}
+        />
 
-        {/* Everything below is work that belongs to no run: verification
-            sweeps, reaping, a manual re-ingest. */}
+        <ActivityDesk />
+      </div>
+
+      {/* Everything below is work that belongs to no run: verification
+          sweeps, reaping, a manual re-ingest. Full width under the columns --
+          it is diagnostic rather than a headline, but it is the only place a
+          dead job can be retried or a trim's log read. */}
+      <div className="activity-loose">
         <Section title="Other running" count={running.length} empty="Nothing running.">
           {running.map((job) => (
             <JobRow
