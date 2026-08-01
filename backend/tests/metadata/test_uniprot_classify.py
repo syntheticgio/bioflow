@@ -68,3 +68,18 @@ class TestParseAccessions:
             "P00533",
             "P0DTC2",
         ]
+
+
+class TestIsValidAccession:
+    def test_a_real_accession(self):
+        assert uniprot.is_valid_accession("P0DTC2") is True
+
+    def test_the_long_form(self):
+        assert uniprot.is_valid_accession("A0A0B7P3V8") is True
+
+    def test_a_gene_symbol_is_not_one(self):
+        assert uniprot.is_valid_accession("EGFR") is False
+
+    def test_it_is_case_and_whitespace_tolerant(self):
+        """`validate_request` receives whatever the API client sent."""
+        assert uniprot.is_valid_accession("  p0dtc2 ") is True

@@ -67,13 +67,24 @@ def classify(raw: str) -> InputKind:
         return InputKind.PROTEOME
 
     tokens = [t for t in _SPLIT.split(value.upper()) if t]
-    if tokens and all(_ACCESSION.match(t) for t in tokens):
+    if tokens and all(is_valid_accession(t) for t in tokens):
         return InputKind.ACCESSIONS
 
     if value.isdigit():
         return InputKind.TAXON
 
     return InputKind.TEXT
+
+
+def is_valid_accession(value: str) -> bool:
+    """Whether one token is a UniProtKB accession.
+
+    Public because `uniprot_service` validates a submitted request against the
+    same pattern `classify` uses, and two copies of an accession regex is
+    exactly the kind of pair that drifts. Mirrors `assembly.is_valid_accession`,
+    which `assembly_service` calls for the same reason.
+    """
+    return bool(_ACCESSION.match((value or "").strip().upper()))
 
 
 def parse_accessions(raw: str) -> list[str]:

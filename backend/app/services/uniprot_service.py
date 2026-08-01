@@ -43,6 +43,19 @@ def validate_request(*, proteome_id: str | None, accessions: list[str]) -> None:
             "A download needs a proteome or at least one accession.",
         )
 
+    if proteome_id and accessions:
+        # Not merely redundant -- the two disagree downstream. `download_query`
+        # gives accessions precedence while `download_label` and
+        # `output_filename` give the proteome precedence, so a request naming
+        # both produces a file named for a whole proteome that holds only the
+        # picked entries. Nothing later can detect that, which is why it is
+        # refused here rather than resolved by a precedence rule.
+        raise ValidationError(
+            "A download names either a proteome or a set of accessions, "
+            "not both.",
+            details={"proteome_id": proteome_id, "accessions": accessions},
+        )
+
     if proteome_id and not _PROTEOME_ID.match(proteome_id):
         raise ValidationError(
             f"{proteome_id!r} is not a proteome identifier. Expected the "
@@ -58,7 +71,7 @@ def validate_request(*, proteome_id: str | None, accessions: list[str]) -> None:
         )
 
     for accession in accessions:
-        if not uniprot._ACCESSION.match(accession):
+        if not uniprot.is_valid_accession(accession):
             raise ValidationError(
                 f"{accession!r} is not a UniProt accession.",
                 details={"accession": accession},

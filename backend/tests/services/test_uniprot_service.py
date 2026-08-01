@@ -33,6 +33,15 @@ class TestValidation:
             proteome_id=None, accessions=["P0DTC2", "P00533"]
         )
 
+    def test_a_request_naming_both_a_proteome_and_accessions_is_rejected(self):
+        """The two disagree downstream: the query would fetch the accessions
+        while the label and filename describe the proteome, producing a file
+        named for 6,067 proteins that holds one."""
+        with pytest.raises(ValidationError, match="not both"):
+            uniprot_service.validate_request(
+                proteome_id="UP000002311", accessions=["P0DTC2"]
+            )
+
     def test_too_many_accessions_are_rejected(self):
         """The URL is a GET query string; a thousand OR clauses exceeds what
         UniProt accepts and fails opaquely."""
