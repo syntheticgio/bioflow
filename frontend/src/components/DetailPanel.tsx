@@ -265,23 +265,20 @@ function ProjectDetail({ id }: { id: string }) {
   );
 }
 
-/** Ordered so the panel opens on the question people ask most: is this file
- * good? Results sits next to QC -- they answer adjacent questions -- and
- * appears for BAMs and for called variants (VCF/BCF). */
+/** Ordered so the panel opens on what the file *is* before how good it is.
+ *
+ * Results leads wherever it exists -- a BAM or a called VCF/BCF is something
+ * the user asked the app to produce, and the first question about a produced
+ * file is what came out, not whether the input passed QC. Quality follows
+ * immediately: the two answer adjacent questions and reordering them is not a
+ * reason to separate them.
+ *
+ * Objects with no Results tab (reads, references, everything else) still open
+ * on Quality, which for them is the first real question. */
 function tabsFor(obj: DataObject): TabDef[] {
   const factCount = countVisibleFacts(obj.facts);
+  const tabs: TabDef[] = [];
 
-  // Hints only where there is something true to say. The mockup shows one on
-  // every tab, but Actions holds tags and delete rather than a list of
-  // pipelines, and inventing a count for it would be worse than leaving it
-  // bare.
-  const tabs: TabDef[] = [
-    {
-      id: "qc",
-      label: "Quality",
-      hint: factCount > 0 ? `${factCount} facts` : undefined,
-    },
-  ];
   // One tab id across all three formats rather than a push per format: `tab`
   // is persisted in the URL alongside ?sel=, so a link stays on Results when
   // the selection moves between a BAM and the VCF called from it.
@@ -292,7 +289,17 @@ function tabsFor(obj: DataObject): TabDef[] {
   if (hasResults) {
     tabs.push({ id: "results", label: "Results" });
   }
+
+  // Hints only where there is something true to say. The mockup shows one on
+  // every tab, but Actions holds tags and delete rather than a list of
+  // pipelines, and inventing a count for it would be worse than leaving it
+  // bare.
   tabs.push(
+    {
+      id: "qc",
+      label: "Quality",
+      hint: factCount > 0 ? `${factCount} facts` : undefined,
+    },
     {
       id: "metadata",
       label: "Metadata",
@@ -452,7 +459,10 @@ function ObjectDetail({ id }: { id: string }) {
 
   const tabs = tabsFor(obj);
   const raw = params.get("tab");
-  const tab = tabs.some((t) => t.id === raw) ? raw! : "qc";
+  // Falls back to whichever tab `tabsFor` put first, not a hardcoded id: the
+  // order encodes which question to open on, and naming one here would mean
+  // reordering the tabs silently failed to change what the panel shows.
+  const tab = tabs.some((t) => t.id === raw) ? raw! : tabs[0].id;
 
   const compression = compressionLabel(obj.format.compression);
   // A .bam that isn't a BAM is worth telling the user about rather than

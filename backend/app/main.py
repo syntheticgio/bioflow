@@ -1,5 +1,6 @@
 """FastAPI application factory and lifespan."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -8,13 +9,29 @@ from app.api.v1 import api_router
 from app.api.v1.health import router as health_router
 from app.config import settings
 from app.db.client import close_mongo, connect_to_mongo
-from app.db.redis_client import close_redis, connect_to_redis
+from app.db.redis_client import close_redis, connect_to_redis, get_redis
 from app.errors import StorageUnavailableError, register_exception_handlers
 from app.logging import configure_logging, get_logger
+from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
 from app.storage.home import initialize_home
 
 log = get_logger(__name__)
+
+
+async def _warm_tools() -> None:
+    """Probe every tool in the background, so a user does not pay for it.
+
+    Never awaited by `lifespan` and deliberately not gating `/readyz`: a
+    container that reports unready while probing is a worse experience than the
+    stall this removes, and a probe that fails should not keep the app from
+    serving. Exceptions are caught here rather than left to surface at
+    garbage-collection time as "task exception was never retrieved".
+    """
+    try:
+        await tool_cache.warm(get_redis())
+    except Exception as e:  # noqa: BLE001 - a warm failure is never fatal
+        log.warning("tool_warm_failed", error=str(e))
 
 
 @asynccontextmanager
@@ -38,10 +55,16 @@ async def lifespan(app: FastAPI):
     # The API never executes jobs; workers do.
     load_handlers()
 
+    # Fire-and-forget: fifteen `<tool> --version` spawns, ~15s cold, of which
+    # NanoPlot is 12s. Held in a local so the task is not garbage-collected
+    # mid-flight, which would cancel it silently.
+    warm_task = asyncio.create_task(_warm_tools())
+
     log.info("started")
     try:
         yield
     finally:
+        warm_task.cancel()
         await close_redis()
         await close_mongo()
         log.info("stopped")

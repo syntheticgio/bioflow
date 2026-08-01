@@ -108,6 +108,42 @@ docker compose exec api python -c "..."
 
 against real objects is worth more than another fixture here.
 
+## Closing out a TODO entry
+
+`docs/TODO.md` is the backlog. **Finishing the work is not finishing the
+entry** -- and this has already gone wrong three times.
+
+On 2026-07-31 an audit found that three of its seven entries described work
+that had shipped days earlier. All three were fixed by one plan
+(`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`)
+that ran to completion without anyone touching the backlog afterwards. The
+cost is not tidiness: one stale entry advised deleting `JobContext.extend_lease`
+as dead code, and by then four handlers were calling it. Acting on the TODO
+would have broken working code.
+
+So, when work lands that resolves an entry, in the same commit or the one
+right after:
+
+- **Append ` — FIXED` to its heading** and write a short note under it saying
+  what shipped, when, and where the code lives. Keep the original body: the
+  diagnosis explains why the code looks the way it does, and the next person
+  hitting something similar needs it.
+- **Say what the implementation did differently.** Every entry closed so far
+  departed from its own plan somewhere. That delta is the most valuable
+  sentence in the entry.
+- **Record measurements if the entry claimed a number.** "6-15s" becoming
+  "0.025s" is what makes the fix checkable later.
+
+Delete an entry outright only when it was wrong to begin with -- not merely
+done. A `— FIXED` entry is a record; a deleted one is a question someone will
+ask again.
+
+**Do not trust a plan's checkboxes as a signal of completion.** Nothing ticks
+them. Both surviving plans in `docs/superpowers/plans/` show zero of their 66
+and 49 boxes checked while their code is demonstrably merged. Verify against
+the code -- `grep` for the symbol the entry names -- before believing either a
+plan or the backlog.
+
 ## Adding a pipeline tool
 
 Registering a tool in `backend/app/pipelines/tools.py` is only half the

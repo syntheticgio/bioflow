@@ -146,7 +146,364 @@ tool is still listed for the job it would do.
 
 # Deferred findings
 
-## The first `/pipelines/tools` request stalls 6-15s on NanoPlot
+See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
+lands. Short version: mark it `— FIXED` with a note, keep the body, and never
+trust a plan's checkboxes as evidence it shipped.
+
+## Results should be the first tab
+
+Raised: 2026-07-31, requested.
+
+`tabsFor` in `frontend/src/components/DetailPanel.tsx` (~line 271) builds the
+tab list Quality, Results, Metadata, Actions, and Results is only pushed when
+`obj.format.kind` is `bam`, `vcf` or `bcf`. Put Results first for the objects
+that have it.
+
+Two things not to break. The tab id is persisted in the URL alongside `?sel=`,
+deliberately: one `results` id across all three formats means a link stays on
+Results when the selection moves from a BAM to the VCF called from it. And the
+existing order is not accidental -- the docstring above `tabsFor` argues the
+panel should open on "is this file good?". Reordering is a decision to
+overrule that, so update the docstring to say what the new order is for rather
+than leaving the old rationale sitting above contradicting code.
+
+Objects with no Results tab keep opening on Quality, so this changes the
+first-open tab only where results exist.
+
+Touches: `frontend/src/components/DetailPanel.tsx`.
+
+## Help → Software: two columns, one section per page
+
+Raised: 2026-07-31, requested.
+
+`frontend/src/components/HelpSoftware.tsx` renders `TOOL_META` as a single
+column. Two columns for the descriptions, with each section starting on its own
+page break.
+
+"Page break" cuts two ways here and the answer changes the CSS: for *print*
+it is `break-before: page` inside an `@media print` block; for *screen* it is
+a section that starts at the top of the viewport rather than flowing on. This
+page is a reference people read on screen and occasionally print for a methods
+appendix, so most likely both -- `break-inside: avoid` on each tool entry so a
+tool is never split across a column or page boundary, which is the failure the
+two-column layout otherwise introduces.
+
+Note `TOOL_META` is rendered directly and `test_every_tool_is_documented`
+requires every entry to carry `homepage`, `citation`, `license` and `usage`, so
+the column layout must not depend on any of those being short.
+
+Touches: `frontend/src/components/HelpSoftware.tsx`, `frontend/src/styles.css`.
+
+## Aligners: STAR and DRAGMAP
+
+Raised: 2026-07-31, requested.
+
+Two additions to `Aligner` in `backend/app/pipelines/aligners.py`, which today
+holds `BWA_MEM2`, `MINIMAP2`, `BOWTIE2`, `HISAT2`.
+
+**STAR** is the splice-aware aligner RNA-seq wants, and is the dependency for
+the differential-expression pipeline below -- build that first or together.
+Its index is a *directory* of files with fixed names (`SA`, `SAindex`,
+`Genome`, ...), not a set of suffixes appended to the reference path. Every
+existing aligner follows the suffix pattern, and `aligners.py`'s module
+docstring is explicit that index naming is a first-class concern with its own
+tests. STAR breaks that assumption, so `build_index_command` and the index
+existence checks need a directory-shaped branch rather than another suffix
+tuple. STAR also needs a GTF/GFF3 at index time for splice junctions, and wants
+~30GB RAM for a human genome -- this is the case that should carry a real
+`JobResources` declaration.
+
+**DRAGMAP** is a short-read aligner whose draw is Illumina DRAGEN
+compatibility. Check the arm64 story before committing to it: it is the same
+class of problem as DeepVariant below, and bwa-mem2 already needed a
+from-source sse2neon build (`backend/scripts/build-bwa-mem2-arm64.sh`) to work
+on Apple Silicon at all.
+
+Per CLAUDE.md, registering either tool is only half the change --
+`suggestion_service.py` must gain a rule that can pick it, and `TOOL_META`
+needs `homepage`/`citation`/`license`/`usage` filled in or
+`test_every_tool_is_documented` fails.
+
+Touches: `backend/app/pipelines/aligners.py`,
+`backend/app/pipelines/aligner_registry.py`,
+`backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
+`backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
+
+## DeepVariant: refused for a reason that is no longer true
+
+Raised: 2026-07-31, requested. **Unblocked 2026-07-31** -- a native Linux
+arm64 build now exists.
+
+`VariantCaller.DEEPVARIANT` already exists in
+`backend/app/pipelines/variant_runner.py`, and two paths refuse it with the
+same message -- `backend/app/queue/variant_handlers.py` (~line 52) and
+`backend/app/services/pipeline_service.py` (~line 1533). Both say it "has no
+arm64 Linux build". **That claim is now false and the messages are wrong.**
+
+A community port ships a prebuilt multi-arch image, verified pullable from this
+machine on 2026-07-31:
+
+```
+ghcr.io/antomicblitz/deepvariant-arm64:v1.9.0-arm64.6
+```
+
+`docker manifest inspect` reports `"architecture": "arm64", "os": "linux"`,
+~3 GB compressed. Source: https://github.com/antomicblitz/deepvariant-linux-arm64
+
+**Do not reach for the Homebrew tap.** The same author also publishes
+`brew tap antomicblitz/deepvariant`, which is a native *macOS* build using
+Apple Clang and Metal GPU acceleration. It is the more famous of the two and
+the easy thing to find, but it is useless here: this app runs entirely inside a
+Linux container, where `brew` has nowhere to run and Metal does not exist. The
+Linux arm64 image is the artifact this project needs.
+
+Note also that bwa-mem2's arm64 support is *not* a brew install and is not a
+precedent for one -- `backend/Dockerfile` (~line 80) builds it from source with
+sse2neon inside the image, having only borrowed the *technique* the Homebrew
+formula uses. Nothing in this repo's build touches Homebrew.
+
+The open question is how to invoke it, since it is a separate image rather than
+a binary in ours:
+
+1. **Pull the tool into our image.** Copy the built artifacts out of that image
+   in a Dockerfile stage. Keeps the "one image, tools on PATH" model every
+   other tool follows, so `tools.py` probing and `require()` work unchanged.
+   Cost: ~3 GB, and it inherits their build rather than ours.
+2. **Invoke the container per job.** The handler shells out to `docker run`.
+   Avoids the image bloat but means the API container needs the Docker socket,
+   which is a real privilege and architecture change this app has so far
+   avoided entirely.
+
+Option 1 is much more in keeping with how everything else here works, and the
+3 GB is a one-time image cost on a machine that already stores sequencing data.
+Worth checking whether the model files can be fetched separately, since a good
+chunk of that size is likely weights.
+
+Whichever route, per CLAUDE.md: `TOOL_META` needs
+`homepage`/`citation`/`license`/`usage` filled in (cite Google's DeepVariant
+paper, but be accurate that this is a community arm64 port, and check the
+port's own license), and `suggestion_service.py` needs a rule that can pick it
+or its card will never light up. The two refusal messages must be removed or
+made conditional on `TARGETARCH` rather than absolute.
+
+Touches: `backend/app/queue/variant_handlers.py`,
+`backend/app/services/pipeline_service.py`, `backend/app/pipelines/tools.py`,
+`backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
+
+## Post-assembly QC: BUSCO and QUAST
+
+Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
+
+Once assembly produces a FASTA, the immediate question is whether it is any
+good, and neither existing QC path answers it -- `qc_stats` is about reads, and
+alignment QC needs something to align to.
+
+- **QUAST** is reference-free structural stats: N50, contig count, total
+  length, misassemblies when a reference is supplied.
+- **BUSCO** scores biological completeness against a lineage-specific ortholog
+  set, and reports the numbers a paper quotes (complete / duplicated /
+  fragmented / missing). It needs lineage datasets downloaded, which is a real
+  storage and provenance concern -- closer to the reference-download machinery
+  than to a tool probe.
+
+Both produce facts that belong on the assembly object, so they should land as
+facts in the same shape `qc_read_chemistry` and friends use, not as a separate
+report format.
+
+The contig-length gap recorded below (longest/shortest contig, never shipped
+from the 2026-07-29 todo-batch plan) is the small end of this same question and
+could fold into QUAST rather than being built separately.
+
+## Reference-guided assembly: Pilon, RagTag, iVar
+
+Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
+
+De-novo assembly first; these three all take an existing assembly plus
+something else and improve it.
+
+- **Pilon** polishes an assembly using aligned reads -- so it consumes a BAM
+  against the assembly, meaning it needs the *assembly* indexed and the reads
+  realigned to it. That makes it the first pipeline whose input is an alignment
+  to a previous pipeline's output, which the run-provenance model should be
+  checked against before building.
+- **RagTag** scaffolds contigs against a reference assembly, giving
+  chromosome-scale ordering.
+- **iVar** is the amplicon/viral path -- primer trimming and consensus calling
+  from an alignment, which is a different enough workflow from the other two
+  that it may deserve its own card rather than sharing theirs.
+
+All three are chemistry- and context-dependent enough that
+`suggestion_service.py` will need real rules, not just availability checks.
+
+## RNA-seq differential expression
+
+Raised: 2026-07-31, requested. **Wants STAR (above) first.**
+
+The full path is align (STAR, splice-aware) → count (featureCounts or HTSeq) →
+test (DESeq2 or edgeR), and the last step is the one that does not fit the
+current model.
+
+Everything the app runs today is one-object-in, one-object-out. Differential
+expression is inherently *multi-sample and grouped*: it needs a design -- which
+samples are treatment, which are control -- and that is user-supplied
+experimental metadata with nowhere to live right now. Neither `DataObject` nor
+`Run` carries a sample-grouping concept.
+
+So the interesting design work is not the tools, it is: where does a sample
+sheet live, how does a user express "these six BAMs are two conditions", and
+what object does a results table become. Worth brainstorming before planning.
+
+DESeq2 and edgeR are also R, which this image has no runtime for -- either add
+R, or use a Python reimplementation (`pydeseq2`) and say so plainly in
+`TOOL_META.usage`, since the choice affects whether results match what a
+reviewer expects.
+
+## Generic pipeline workflows (DAG)
+
+Raised: 2026-07-31, requested.
+
+Today each pipeline is a hand-written handler and `Job.depends_on` gates one
+job behind another. That gate is real and exercised (`align_reads` waiting on
+`build_index`), but it is a per-launch decision made in
+`pipeline_service.launch_*`, not a reusable graph.
+
+What this asks for is a user-definable DAG: run QC, then trim, then align, then
+call, as one declared unit that survives a restart and reports progress as a
+whole.
+
+Two things to settle early, because they shape everything after:
+
+- **Does a workflow instance become an object?** The activity view groups by
+  `Run`, and a DAG is naturally a run-of-runs. Extending `Run` beats inventing
+  a parallel concept if it can carry the nesting.
+- **Failure semantics.** If step three of five fails, does the DAG halt, retry,
+  or continue what does not depend on it? The current queue has retries and a
+  reaper but no notion of partial workflow failure.
+
+This is the largest item in this file and probably wants decomposing into its
+own spec before any plan.
+
+## More LLM usage: pipeline provenance narratives
+
+Raised: 2026-07-31, requested.
+
+The valuable version: given a VCF, generate a plain-language account of
+everything that produced it -- which reads, which QC, which trim parameters,
+which aligner and version, which caller -- walking the provenance chain back to
+the original reads. That is a methods paragraph, generated from facts the
+system already recorded rather than from the user's memory.
+
+The chain largely exists. `align_provenance` in `backend/app/queue/results.py`
+already copies facts forward so a BAM knows its reads' chemistry, and tool
+versions are captured at probe time precisely because "a trimming parameter set
+means nothing without the version of the tool that applied it" (the module
+docstring in `tools.py`). What is missing is a walker that assembles the chain
+and a prompt that renders it.
+
+`backend/app/services/summary_prompt.py` is the existing pattern to follow, and
+the summary model runs on the *host* -- containers reach it via
+`host.docker.internal`, not `localhost`.
+
+The hard constraint: this output will be pasted into papers. It must never
+invent a step or a version. Prefer a narrative assembled from facts with the
+model only doing the prose, over asking the model to infer what happened.
+
+Other candidates worth considering under the same heading: explaining *why* a
+QC run failed a threshold, and suggesting the next pipeline step in prose
+alongside the Actions cards.
+
+## UniProt download
+
+Raised: 2026-07-31, requested.
+
+`backend/app/services/structure_lookup.py` already resolves a gene to a protein
+structure via UniProt, so the client and the ID-mapping path exist. This asks
+for downloading UniProt data as a stored object -- proteomes or per-protein
+FASTA -- the way assemblies download from NCBI today.
+
+`assembly_handlers.py` is the model to copy: it exists as a sibling to
+`sra_handlers` rather than a branch inside it, because one accession yielding
+files with no QC chained is a different operational shape from a run yielding
+FASTQ pairs. A UniProt download is the same shape as the assembly one, so it
+likely belongs beside it -- and `RunKind` would gain a member for it, since
+that enum is a display and grouping vocabulary and "downloaded a proteome"
+reads differently from "downloaded a genome".
+
+Touches: `backend/app/queue/` (new handler module),
+`backend/app/models/run.py`, `backend/app/pipelines/sources.py` (which has its
+own completeness test).
+
+## Build and run on Linux
+
+Raised: 2026-07-31, requested.
+
+Nothing here is macOS-specific by design, but the setup has only ever run on
+Apple Silicon under Docker Desktop, and several accommodations exist *because*
+of that. Going to Linux means checking each one:
+
+- **arm64 workarounds may be unnecessary or wrong on x86-64.** `Dockerfile`
+  already branches on `TARGETARCH` and builds bwa-mem2 from source with
+  sse2neon for arm64 (`backend/scripts/build-bwa-mem2-arm64.sh`). On x86-64 the
+  upstream binaries work, so that branch should not fire -- verify it does not.
+- **DeepVariant is no longer arch-blocked at all.** See its entry above: a
+  native Linux arm64 image now exists, so it should work on both architectures
+  and is not a reason to wait for Linux.
+- **The governor's disk problem may disappear.** The entry below is a
+  Docker-Desktop-on-macOS VirtioFS artifact. On Linux, `shutil.disk_usage`
+  through a bind mount reports the real filesystem, so the host-side reporter
+  that entry sketches may be unnecessary there -- which argues for keeping the
+  plain `shutil.disk_usage` path and treating the reporter as the macOS
+  special case, not the general one.
+- **`host.docker.internal` is not automatic on Linux.** The summary model runs
+  on the host and containers reach it via that name; on Linux it needs
+  `extra_hosts: host-gateway` in Compose or it silently fails to connect.
+- **Bind-mount UID/GID.** Docker Desktop papers over ownership; on Linux a
+  container writing to a bind-mounted `BIOINFO_HOME` writes as the container's
+  user, and files can land root-owned on the host.
+
+Worth doing as an actual attempt on a Linux box rather than an audit -- the
+list above is what to expect, not what will happen.
+
+## The first `/pipelines/tools` request stalls 6-15s on NanoPlot — FIXED
+
+Fixed 2026-07-31. `lifespan` now starts a fire-and-forget task (`_warm_tools`
+in `backend/app/main.py`) that probes every tool in a thread before a user asks
+for one, and `backend/app/pipelines/tool_cache.py` persists the results in
+Redis so a restart re-seeds the `lru_cache`s instead of re-probing -- which is
+what makes `uvicorn --reload`, the only way this app runs, stop re-paying the
+cost on every backend edit.
+
+Measured on the running stack after the change:
+
+| | |
+|---|---|
+| Endpoint, cold container | **0.025s** (was 6-15s) |
+| Warm task completes after startup | 33ms, not gating `/readyz` |
+| Second start, reading Redis | `seeded=15 tools=15` |
+| First start, empty cache | `seeded=0 tools=15` |
+
+Options 2 (skip NanoPlot's `--version`) and 3's file-based variant were not
+taken. The measurement table and the "parallelism is the wrong fix" reasoning
+below still describe the shape of the problem, and are kept for whenever
+another heavy-import tool is registered.
+
+Two things the design got wrong, both found during implementation and worth
+knowing if this code is touched again:
+
+- **The planned `path:mtime_ns:size` fingerprint was not viable.** Two writes
+  to one path can land in a single `mtime_ns` tick, so an upgraded binary
+  fingerprinted identically. It now also hashes contents.
+- **Four tools are wrapper scripts, not binaries** -- `fastqc`, `bowtie2`,
+  `hisat2` and `cutadapt` are Perl or Python entry points that dispatch to a
+  separate payload. The fingerprint covers the wrapper, so a payload-only
+  upgrade leaving the wrapper byte- and mtime-identical goes undetected. That
+  gap is documented on `_fingerprint`; the 24h TTL is the backstop.
+
+Verified against the real stack, not only the suite: a deliberately poisoned
+cache entry claiming version `0.0.0-WRONG` for fastp was rejected on
+fingerprint mismatch and re-probed to the true `0.24.0`. That is the property
+that matters here -- a cached version string is half of what a methods section
+reports.
 
 Raised: 2026-07-31, while fixing NanoPlot being reported unavailable
 (`SLOW_IMPORT_TIMEOUT_SECONDS` in `backend/app/pipelines/tools.py`).
@@ -211,6 +568,23 @@ per-tool budget.
 
 Touches: `backend/app/pipelines/tools.py`, `backend/app/main.py` (lifespan),
 `backend/app/api/v1/pipelines.py`.
+
+## Longest/shortest contig reporting never shipped
+
+Raised: 2026-07-31, by an audit of `docs/superpowers/plans/`.
+
+`docs/superpowers/plans/2026-07-29-todo-batch.md` set out to fix three things.
+Two landed. The third -- reporting longest and shortest contig for an assembly
+-- did not: nothing in `backend/app/` mentions `longest_contig`, `shortest_contig`
+or an equivalent, and the plan's checkboxes are all unticked (which proves
+nothing either way, since no plan in this repo has its boxes ticked).
+
+Small on its own. Worth folding into the QUAST work above rather than building
+separately, since N50 and contig extremes come out of the same pass and QUAST
+reports all of them.
+
+Touches: wherever assembly facts are computed, alongside the existing
+`ContigTable.tsx` on the frontend.
 
 ## Assembly: designed, not built
 
@@ -430,7 +804,24 @@ to genuinely fill the drive.
 Touches: `backend/app/queue/governor.py`, `backend/app/storage/home.py`,
 `backend/app/api/v1/system.py`, `Makefile`, `ops/`.
 
-## `JobContext.extend_lease` is inert
+## `JobContext.extend_lease` is inert — FIXED
+
+Fixed 2026-07-29 by
+`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`,
+found stale by an audit on 2026-07-31.
+
+**It was wired, not deleted -- and this entry's advice had gone dangerous.**
+`_extend_cb` is now assigned in both `executor.py` (~line 54) and
+`worker.py` (~line 304). Four handlers call `ctx.extend_lease` today:
+`summary_handlers`, `assembly_handlers`, `sra_handlers` and
+`pipeline_handlers`. Deleting the method, as suggested below, would now break
+working code.
+
+The docstring was also rewritten to draw the distinction the original muddled:
+the heartbeat covers a merely *slow* job, while `extend_lease` covers lease
+*length* -- a paused VM or stalled event loop stops the heartbeat entirely, and
+then only the recorded TTL stands between a live job and the reaper. Covered by
+`backend/tests/queue/test_lease_extension.py`.
 
 Raised: 2026-07-27, during read preparation.
 
@@ -456,7 +847,21 @@ did not otherwise touch.
 Touches: `backend/app/queue/registry.py`, `backend/app/queue/executor.py`,
 `backend/app/queue/worker.py`.
 
-## `bp:cancel` grows without bound
+## `bp:cancel` grows without bound — FIXED
+
+Fixed 2026-07-29 by
+`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`,
+found stale by an audit on 2026-07-31.
+
+**This entry's premise was wrong.** The main drop path already cleared the
+flag: `SREM bp:cancel` has been in `backend/app/queue/scripts/release.lua`
+(line ~42) since the initial commit. What actually leaked were the routes that
+bypass that script, fixed across three commits -- `0ce1d28` (the reaper marking
+a job dead), `f665812` (a blocked job failing on its dependency) and `5122c39`
+(covering `_fail_blocked_job`'s own clear rather than just the helper).
+
+`backend/tests/queue/test_cancel_cleanup.py` exists specifically for those
+bypassing routes, and its module docstring names the distinction.
 
 Raised: 2026-07-27, during read preparation.
 
@@ -499,3 +904,40 @@ overwritten once set, so a wrong guess is visible and correctable rather than
 silent.
 
 Touches: `backend/app/pipelines/pairing.py`, `backend/app/queue/results.py`.
+
+## Re-ingest re-asserts a reference role the user cleared — FIXED
+
+Fixed 2026-07-29 by
+`docs/superpowers/plans/2026-07-29-queue-and-role-provenance-cleanups.md`,
+found stale by an audit on 2026-07-31.
+
+The `user_touched: list[str]` shape this entry preferred is what shipped
+(`backend/app/models/object.py`, ~line 172), and the comment there records why
+a list beat a per-field `role_set_by`.
+
+**The implementation went further than this entry asked.** Checking
+`user_touched` at the decision point still leaves a window: a conversion
+landing between the decision and the write would be overruled by it. So
+`backend/app/queue/results.py` (~line 170) re-checks `{"user_touched": {"$ne":
+"role"}}` inside the update filter itself, making the write conditional rather
+than the decision. That race is not mentioned below.
+
+Raised: 2026-07-26, during assembly-accession enrichment.
+
+`should_assign_reference_role` in `backend/app/queue/results.py` assigns the
+reference role when an assembly accession is found and `role is None`. A role
+the user *cleared* is indistinguishable from one never set, so converting a
+reference back to reads and then re-ingesting will silently re-assign it.
+
+Rare in practice — it needs a deliberate conversion plus a re-ingest of a file
+whose name carries a GCA/GCF accession — but it quietly contradicts the promise
+that an explicit choice is never overruled.
+
+The fix needs a way to record that a user has touched the role: either a
+nullable `role_set_by` field (`"user"` vs `"ingest"`), or a general
+`user_touched: list[str]` on the object. The second generalizes to the same
+problem for metadata fields, so it is probably the better shape. Deferred
+because it is a schema change that this feature does not otherwise need.
+
+Touches: `backend/app/models/object.py`, `backend/app/queue/results.py`,
+`backend/app/services/object_service.py`.

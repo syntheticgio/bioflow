@@ -1083,6 +1083,25 @@ export interface VariantRow {
   aa_pos: number | null;
 }
 
+/** What one gene resolved to at UniProt.
+ *
+ *  A null `accession` is an ordinary answer, not an error: the symbol matched
+ *  no reviewed protein, every candidate was too short to hold the variant's
+ *  residue, or UniProt was unreachable. All three mean the same thing to the
+ *  reader, so the server does not distinguish them and neither does the UI.
+ *
+ *  An empty `pdb_ids` on a non-null accession is different and more common --
+ *  the protein is identified and simply has no solved structure, which is the
+ *  case for roughly two thirds of resolved genes. */
+export interface VariantStructure {
+  gene: string;
+  accession: string | null;
+  pdb_ids: string[];
+  /** The resolved protein's length. Shown so a reader can sanity-check that
+   *  the residue they came for is actually inside this protein. */
+  length: number | null;
+}
+
 export interface VariantsPage {
   /** Null when the request set skip_count -- the caller keeps its previous
    *  total, because only the page number changed. */

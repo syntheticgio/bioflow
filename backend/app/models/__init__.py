@@ -45,6 +45,7 @@ from app.models.run import (
     RunStatus,
 )
 from app.models.schedule import Schedule
+from app.models.structure import StructureLookup
 from app.models.timing import JobRunTiming
 from app.models.upload_session import UploadSession, UploadState
 
@@ -60,6 +61,7 @@ ALL_MODELS = [
     RunJob,
     OrganismBlurb,
     Profile,
+    StructureLookup,
 ]
 
 __all__ = [
@@ -104,6 +106,7 @@ __all__ = [
     "SidecarRole",
     "SourceInfo",
     "SourceMode",
+    "StructureLookup",
     "UploadSession",
     "UploadState",
     "normalize_organism",
