@@ -87,3 +87,68 @@ def parse_accessions(raw: str) -> list[str]:
         if token and token not in seen:
             seen.append(token)
     return seen
+
+
+def reference_proteome_query(taxon_id: int) -> str:
+    """The reference proteome for one taxon.
+
+    `reference:true`, not `proteome_type:1`. The latter is the form that
+    looks right and appears in older examples; measured against the live API
+    it returns zero rows for every organism tried, including taxon 559292,
+    which does have a reference proteome.
+    """
+    return f"organism_id:{taxon_id} AND reference:true"
+
+
+def all_proteomes_query(taxon_id: int) -> str:
+    """Every proteome for one taxon, reference or not.
+
+    The fallback when the reference query is empty, which is not an edge
+    case: taxon 4932 (*S. cerevisiae* at species level, the ID a user is
+    most likely to type) has no reference proteome because UniProt attaches
+    it to strain taxon 559292. Measured 0 against 360.
+    """
+    return f"organism_id:{taxon_id}"
+
+
+def organism_name_query(name: str) -> str:
+    """Proteomes for an organism named in words.
+
+    No type filter, for the same measured reason as `all_proteomes_query`:
+    adding one returns 0 where the unfiltered query returns 481 with the
+    wanted proteome ranked first.
+    """
+    cleaned = (name or "").strip().strip('"')
+    return f'organism_name:"{cleaned}"'
+
+
+def download_query(
+    *, proteome_id: str | None, accessions: list[str], reviewed_only: bool
+) -> str:
+    """The query the FASTA stream is fetched with.
+
+    One function for both download shapes, because one endpoint serves both:
+    a whole proteome and a hand-picked set differ only here.
+
+    `reviewed_only` is deliberately ignored for picked accessions. The user
+    named those entries; filtering an unreviewed one back out would hand
+    them fewer proteins than they selected, with nothing to explain why.
+    """
+    if accessions:
+        return " OR ".join(f"accession:{a}" for a in accessions)
+    query = f"proteome:{proteome_id}"
+    if reviewed_only:
+        query += " AND reviewed:true"
+    return query
+
+
+def stream_url(query: str) -> str:
+    """The FASTA stream endpoint for a query.
+
+    Compressed: a proteome is mostly sequence text and gzip roughly halves
+    it (measured 3.9 MB to 1.9 MB for yeast).
+    """
+    params = urllib.parse.urlencode(
+        {"query": query, "format": "fasta", "compressed": "true"}
+    )
+    return f"{_STREAM_URL}?{params}"
