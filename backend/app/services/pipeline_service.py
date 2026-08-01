@@ -1583,17 +1583,12 @@ async def launch_variant_calling(
             **(params or {}),
         }
     )
-    if merged.caller is variant_runner.VariantCaller.DEEPVARIANT:
-        raise ValidationError(
-            "DeepVariant is not available in this installation: it has no "
-            "arm64 Linux build. Use Clair3 for long reads, or bcftools for "
-            "short reads."
-        )
-    tools.require(
-        tools.clair3()
-        if merged.caller is variant_runner.VariantCaller.CLAIR3
-        else tools.bcftools()
-    )
+    if merged.caller is variant_runner.VariantCaller.CLAIR3:
+        tools.require(tools.clair3())
+    elif merged.caller is variant_runner.VariantCaller.DEEPVARIANT:
+        tools.require(tools.deepvariant())
+    else:
+        tools.require(tools.bcftools())
     tools.require(tools.bcftools())  # always: it writes the .tbi
 
     payload = await _variant_payload(

@@ -39,15 +39,15 @@ class TestCallerResolution:
         with pytest.raises(PermanentError, match="Unknown variant caller"):
             variant_handlers._resolve_caller({"caller": "gatk"})
 
-    def test_deepvariant_is_refused_with_an_explanation(self):
-        """Recognized but not installed. The error has to say why and what to
-        use instead, because the alternative is an obscure failure from a
-        missing binary."""
-        with pytest.raises(PermanentError) as exc:
+    def test_deepvariant_is_resolved_not_refused(self):
+        """DeepVariant now runs as a sidecar container: the handler's own
+        refusal is gone, and resolving the caller no longer raises. Whether
+        it can actually run is a Docker-availability question, checked later
+        by tools.require(tools.deepvariant()) -- not here."""
+        assert (
             variant_handlers._resolve_caller({"caller": "deepvariant"})
-        message = str(exc.value)
-        assert "arm64" in message
-        assert "Clair3" in message or "bcftools" in message
+            is VariantCaller.DEEPVARIANT
+        )
 
 
 class TestChemistryGuard:

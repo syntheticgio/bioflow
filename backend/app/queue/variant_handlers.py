@@ -49,12 +49,6 @@ def _resolve_caller(payload: dict) -> VariantCaller:
             details={"valid": [c.value for c in VariantCaller]},
         ) from None
 
-    if caller is VariantCaller.DEEPVARIANT:
-        raise PermanentError(
-            "DeepVariant is not available in this installation: it has no "
-            "arm64 Linux build. Use Clair3 for long reads, or bcftools for "
-            "short reads."
-        )
     return caller
 
 
@@ -181,6 +175,8 @@ def call_variants(ctx: JobContext) -> dict:
 
     if caller is VariantCaller.CLAIR3:
         vcf = _run_clair3(ctx, bam, materialized.reference, out_dir, log_path)
+    elif caller is VariantCaller.DEEPVARIANT:
+        vcf = _run_deepvariant(ctx, bam, materialized.reference, out_dir, log_path)
     else:
         vcf = _run_bcftools(ctx, bam, materialized.reference, out_dir, log_path)
 
@@ -209,7 +205,12 @@ def call_variants(ctx: JobContext) -> dict:
 
 
 def _caller_version(caller: VariantCaller) -> str | None:
-    tool = tools.clair3() if caller is VariantCaller.CLAIR3 else tools.bcftools()
+    if caller is VariantCaller.CLAIR3:
+        tool = tools.clair3()
+    elif caller is VariantCaller.DEEPVARIANT:
+        tool = tools.deepvariant()
+    else:
+        tool = tools.bcftools()
     return tool.version
 
 
@@ -292,6 +293,66 @@ def _run_bcftools(
     if not vcf.exists() or vcf.stat().st_size == 0:
         raise RetryableError("bcftools exited 0 but produced no VCF")
     return vcf
+
+
+def _run_deepvariant(
+    ctx: JobContext, bam: Path, reference: Path, out_dir: Path, log_path: Path
+) -> Path:
+    tool = tools.require(tools.deepvariant())
+
+    params = variant_runner.DeepVariantParams.from_dict(
+        ctx.payload.get("deepvariant_params")
+    )
+    vcf = out_dir / variant_runner.output_name(bam.name, "deepvariant")
+
+    # Checked before the run, in the spirit of _model_path: a missing image is
+    # a 3GB download, and discovering that from a docker error mid-job is worse
+    # than being told before anything starts.
+    _require_image(ctx, tool.path, settings.deepvariant_image)
+
+    ctx.progress(phase="starting", pct=None, message="starting DeepVariant")
+    cmd = variant_runner.build_deepvariant_command(
+        image=settings.deepvariant_image,
+        bam=bam,
+        reference=reference,
+        output_vcf=vcf,
+        params=params,
+    )
+    log.info("deepvariant_started", job_id=ctx.job_id, model=params.model_type)
+
+    code = run_subprocess(
+        ctx, cmd, log_path=str(log_path), on_line=_progress_reporter(ctx)
+    )
+    if code != 0:
+        raise _failure(code, log_path, "deepvariant")
+
+    if not vcf.exists():
+        raise RetryableError("DeepVariant exited 0 but produced no VCF")
+
+    return vcf
+
+
+def _require_image(ctx: JobContext, docker_path: str, image: str) -> None:
+    """Fail early and actionably when the image is absent.
+
+    Pulled on demand rather than baked in -- the image is 8.83GB, larger than
+    the rest of this stack -- so absence is expected on a first run and must
+    read as an instruction rather than a crash. When `pull_image` exists as its
+    own job this becomes a dependency instead of a message.
+    """
+    import subprocess as _sp
+
+    probe = _sp.run(
+        [docker_path, "image", "inspect", image],
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        raise PermanentError(
+            f"The DeepVariant image {image} is not present. Pull it once with "
+            f"`docker pull {image}` (about 3 GB), then run this again.",
+            details={"image": image},
+        )
 
 
 def _rename_output(ctx: JobContext, produced: Path, bam: Path, caller: str) -> Path:
