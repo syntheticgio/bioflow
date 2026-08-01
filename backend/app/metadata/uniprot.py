@@ -158,3 +158,226 @@ def stream_url(query: str) -> str:
         {"query": query, "format": "fasta", "compressed": "true"}
     )
     return f"{_STREAM_URL}?{params}"
+
+
+@dataclass(frozen=True)
+class ProteomeInfo:
+    id: str
+    name: str
+    taxon_id: int | None
+    strain: str | None
+    protein_count: int | None
+    is_reference: bool
+    busco_score: int | None
+    # The NCBI assembly this proteome's genome came from, when UniProt names
+    # one. Surfaced as a link rather than a combined download: the proteome
+    # and the assembly are the same organism's two halves, but merging the
+    # two providers' dialogs was considered and rejected.
+    genome_assembly: str | None
+
+
+@dataclass(frozen=True)
+class ProteinHit:
+    accession: str
+    entry_id: str | None
+    name: str | None
+    organism: str | None
+    length: int | None
+    reviewed: bool
+
+
+@dataclass
+class TaxonResolution:
+    """What an organism input produced.
+
+    `needs_picker` is the reference-proteome question answered: False means
+    one card is enough, True means the user must choose. It is not derivable
+    from `candidates` being non-empty, because the reference case also lists
+    the alternatives behind a disclosure.
+    """
+
+    proteome: ProteomeInfo | None = None
+    candidates: list[ProteomeInfo] = field(default_factory=list)
+    needs_picker: bool = False
+
+
+def _get(url: str, *, timeout: float = _TIMEOUT_SECONDS) -> bytes:
+    """The transport, isolated so tests can replace it without a network."""
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return response.read()
+
+
+def _get_json(url: str, *, timeout: float = _TIMEOUT_SECONDS) -> dict:
+    payload = json.loads(_get(url, timeout=timeout))
+    return payload if isinstance(payload, dict) else {}
+
+
+def count_results(query: str, *, timeout: float = _TIMEOUT_SECONDS) -> int | None:
+    """How many entries a query matches, from `X-Total-Results`.
+
+    Exact, which is what lets the dialog show the reviewed/unreviewed split
+    (roughly sevenfold for human) and guard a large download on a real
+    number rather than a byte estimate.
+
+    Not an assertion about the download: the header and the streamed record
+    count differ slightly -- human reviewed reported 20,416 and delivered
+    20,427 -- so a handler that failed on a mismatch would fail on correct
+    downloads.
+    """
+    params = urllib.parse.urlencode(
+        {"query": query, "format": "json", "size": "1", "fields": "accession"}
+    )
+    try:
+        with urllib.request.urlopen(
+            f"{_UNIPROTKB_URL}?{params}", timeout=timeout
+        ) as response:
+            total = response.headers.get("X-Total-Results")
+    except Exception as exc:
+        log.info("uniprot_count_failed", query=query, error=str(exc))
+        return None
+    try:
+        return int(total)
+    except (TypeError, ValueError):
+        return None
+
+
+def _proteome_info(entry: dict) -> ProteomeInfo | None:
+    pid = entry.get("id")
+    if not isinstance(pid, str):
+        return None
+    taxonomy = entry.get("taxonomy") or {}
+    busco = (entry.get("proteomeCompletenessReport") or {}).get("buscoReport") or {}
+    assembly = entry.get("genomeAssembly") or {}
+    return ProteomeInfo(
+        id=pid,
+        name=taxonomy.get("scientificName") or pid,
+        taxon_id=taxonomy.get("taxonId"),
+        strain=entry.get("strain"),
+        protein_count=entry.get("proteinCount"),
+        is_reference=entry.get("proteomeType") == "Reference proteome",
+        busco_score=busco.get("score"),
+        genome_assembly=assembly.get("assemblyId"),
+    )
+
+
+def _search_proteomes(query: str) -> list[ProteomeInfo]:
+    params = urllib.parse.urlencode(
+        {"query": query, "format": "json", "size": str(_MAX_RESULTS)}
+    )
+    try:
+        payload = _get_json(f"{_PROTEOMES_URL}?{params}")
+    except Exception as exc:
+        # Matches structure_lookup: an outage means "found nothing", never an
+        # error the caller has to handle. The dialog says the same thing for
+        # a timeout and a genuinely empty result.
+        log.info("uniprot_proteome_search_failed", query=query, error=str(exc))
+        return []
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+    out = []
+    for entry in results:
+        if isinstance(entry, dict):
+            info = _proteome_info(entry)
+            if info is not None:
+                out.append(info)
+    return out
+
+
+def resolve_proteome(proteome_id: str) -> ProteomeInfo | None:
+    """One proteome by its own ID."""
+    try:
+        payload = _get_json(f"{_PROTEOME_ENTRY_URL}/{proteome_id}?format=json")
+    except Exception as exc:
+        log.info("uniprot_proteome_lookup_failed", proteome=proteome_id, error=str(exc))
+        return None
+    return _proteome_info(payload)
+
+
+def resolve_taxon(taxon_id: int) -> TaxonResolution:
+    """The proteomes for one taxon, reference first.
+
+    Two queries, and the second is mandatory rather than defensive. Taxon
+    4932 -- *S. cerevisiae* at species level, the ID a user is most likely to
+    type for yeast -- has no reference proteome, because UniProt attaches it
+    to strain taxon 559292. Measured: `reference:true` returns 0 while the
+    unfiltered query returns 360. Skipping the fallback tells the user yeast
+    has no proteome.
+    """
+    reference = _search_proteomes(reference_proteome_query(taxon_id))
+    if reference:
+        # The alternatives still load, behind a disclosure: the reference is
+        # right for the common case, and strain matters in real work.
+        others = [p for p in _search_proteomes(all_proteomes_query(taxon_id))
+                  if p.id != reference[0].id]
+        return TaxonResolution(
+            proteome=reference[0], candidates=others, needs_picker=False
+        )
+
+    candidates = _search_proteomes(all_proteomes_query(taxon_id))
+    return TaxonResolution(
+        proteome=None, candidates=candidates, needs_picker=bool(candidates)
+    )
+
+
+def resolve_organism_name(name: str) -> TaxonResolution:
+    """Proteomes for an organism named in words.
+
+    Ranked by UniProt's own relevance, which puts the reference proteome
+    first for a plain species name. A reference hit at the top takes the card
+    path; anything else opens the picker.
+    """
+    candidates = _search_proteomes(organism_name_query(name))
+    if not candidates:
+        return TaxonResolution()
+    if candidates[0].is_reference:
+        return TaxonResolution(
+            proteome=candidates[0], candidates=candidates[1:], needs_picker=False
+        )
+    return TaxonResolution(candidates=candidates, needs_picker=True)
+
+
+def _protein_hit(entry: dict) -> ProteinHit | None:
+    accession = entry.get("primaryAccession")
+    if not isinstance(accession, str):
+        return None
+    description = entry.get("proteinDescription") or {}
+    recommended = description.get("recommendedName") or {}
+    full_name = (recommended.get("fullName") or {}).get("value")
+    return ProteinHit(
+        accession=accession,
+        entry_id=entry.get("uniProtkbId"),
+        # Unreviewed entries frequently carry no recommendedName at all.
+        name=full_name if isinstance(full_name, str) else None,
+        organism=(entry.get("organism") or {}).get("scientificName"),
+        length=(entry.get("sequence") or {}).get("length"),
+        reviewed="reviewed" in (entry.get("entryType") or "").lower()
+        and "unreviewed" not in (entry.get("entryType") or "").lower(),
+    )
+
+
+def search_proteins(query: str) -> list[ProteinHit]:
+    """Proteins matching free text, or a set of named accessions."""
+    params = urllib.parse.urlencode(
+        {
+            "query": query,
+            "format": "json",
+            "size": str(_MAX_RESULTS),
+            "fields": "accession,id,protein_name,organism_name,length,reviewed",
+        }
+    )
+    try:
+        payload = _get_json(f"{_UNIPROTKB_URL}?{params}")
+    except Exception as exc:
+        log.info("uniprot_protein_search_failed", query=query, error=str(exc))
+        return []
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+    out = []
+    for entry in results:
+        if isinstance(entry, dict):
+            hit = _protein_hit(entry)
+            if hit is not None:
+                out.append(hit)
+    return out
