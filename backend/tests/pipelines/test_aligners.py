@@ -196,6 +196,50 @@ class TestDirectoryLayout:
         assert plan == {"genome.fna.STARindex/SA": "/objects/ab/cd/x"}
         assert not any(part == ".." for part in Path(*plan).parts)
 
+    def test_a_reference_with_only_a_fai_counts_as_having_no_star_index(self):
+        """The gate `align_reads` uses. `missing_index` alone is True only
+        when *nothing* linked, so a reference carrying just its `.fai` passed
+        it and the run proceeded into STAR, which failed with a missing
+        genome directory -- an error that reads as a corrupt index rather
+        than an absent one."""
+        ref = aligners.MaterializedRef(
+            directory=Path("/w/ref"),
+            reference=Path("/w/ref/genome.fna"),
+            linked=("genome.fna.fai",),
+        )
+        assert ref.missing_index is False  # something was linked
+        assert ref.missing_index_for(
+            aligners.layout_for(Aligner.STAR), "genome.fna"
+        ) is True
+
+    def test_a_complete_star_index_satisfies_the_gate(self):
+        layout = aligners.layout_for(Aligner.STAR)
+        linked = tuple(
+            layout.workdir_path("genome.fna", name)
+            for name in layout.filenames("genome.fna")
+        )
+        ref = aligners.MaterializedRef(
+            directory=Path("/w/ref"),
+            reference=Path("/w/ref/genome.fna"),
+            linked=(*linked, "genome.fna.fai"),
+        )
+        assert ref.missing_index_for(layout, "genome.fna") is False
+
+    def test_a_partial_star_index_does_not(self):
+        """STAR refuses to load an incomplete genome directory, so a missing
+        member is an absent index rather than a degraded one."""
+        layout = aligners.layout_for(Aligner.STAR)
+        linked = tuple(
+            layout.workdir_path("genome.fna", name)
+            for name in layout.filenames("genome.fna")
+        )[:-1]
+        ref = aligners.MaterializedRef(
+            directory=Path("/w/ref"),
+            reference=Path("/w/ref/genome.fna"),
+            linked=linked,
+        )
+        assert ref.missing_index_for(layout, "genome.fna") is True
+
     def test_materialize_builds_a_real_directory_of_links(self, tmp_path):
         blob = tmp_path / "blob"
         blob.write_text("index bytes")

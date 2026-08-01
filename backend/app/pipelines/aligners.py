@@ -266,7 +266,28 @@ class MaterializedRef:
 
     @property
     def missing_index(self) -> bool:
+        """True when no sidecar at all was linked.
+
+        Deliberately weaker than `missing_index_for`: a caller that does not
+        name an aligner (variant calling, which needs only the `.fai`) still
+        gets a useful answer.
+        """
         return not self.linked
+
+    def missing_index_for(self, layout: "IndexLayout", reference_name: str) -> bool:
+        """True when this aligner's own index files are not all present.
+
+        `missing_index` alone is not enough to gate an alignment, and the gap
+        is not theoretical: a reference carrying only a `.fai` has *something*
+        linked, so the weaker check passed and the run proceeded to fail
+        inside the aligner -- STAR reporting that its genome directory did not
+        exist, which reads as a broken index rather than an absent one.
+        """
+        expected = {
+            layout.workdir_path(reference_name, name)
+            for name in layout.filenames(reference_name)
+        }
+        return not expected.issubset(set(self.linked))
 
 
 def plan_links(
