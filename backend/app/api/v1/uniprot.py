@@ -154,7 +154,12 @@ async def resolve(body: ResolveRequest) -> ResolveResponse:
 
     if kind is uniprot.InputKind.ACCESSIONS:
         accessions = uniprot.parse_accessions(raw)
-        query = " OR ".join(f"accession:{a}" for a in accessions)
+        # The same string `download_query` builds, so the resolve preview and
+        # the download it leads to cannot drift apart. `reviewed_only` is
+        # irrelevant here -- `download_query` ignores it for picked accessions.
+        query = uniprot.download_query(
+            proteome_id=None, accessions=accessions, reviewed_only=True
+        )
         hits = await asyncio.to_thread(uniprot.search_proteins, query)
         if not hits:
             return ResolveResponse(
@@ -165,7 +170,17 @@ async def resolve(body: ResolveRequest) -> ResolveResponse:
         )
 
     if kind is uniprot.InputKind.TAXON:
-        resolution = await asyncio.to_thread(uniprot.resolve_taxon, int(raw))
+        try:
+            taxon_id = int(raw)
+        except ValueError:
+            # Python caps integer parsing at 4,300 digits, and `classify`
+            # routes any all-digit string here -- so a long accidental paste
+            # reaches this line. Everything else malformed in this module
+            # degrades to "found nothing"; a crash would be the odd one out.
+            return ResolveResponse(
+                kind="empty", message=f"{raw[:20]}… is not a taxon identifier."
+            )
+        resolution = await asyncio.to_thread(uniprot.resolve_taxon, taxon_id)
         return await _taxon_response(resolution, raw)
 
     # TEXT: an organism name and a protein name are indistinguishable by

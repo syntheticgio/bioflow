@@ -135,3 +135,23 @@ class TestDispatch:
     def test_an_empty_query_is_rejected(self, client, stub):
         resp = client.post("/uniprot/resolve", json={"query": "   "})
         assert resp.status_code == 422
+
+    def test_an_absurdly_long_number_does_not_crash(self, client, stub):
+        """`classify` routes any all-digit string to TAXON, and Python caps
+        integer parsing at 4,300 digits. Measured: this was a 500 before the
+        guard, where every other malformed input returns kind="empty"."""
+        resp = client.post("/uniprot/resolve", json={"query": "9" * 5000})
+        assert resp.status_code == 200
+        assert resp.json()["kind"] == "empty"
+
+    def test_the_accession_query_matches_the_download_query(self, client, stub):
+        """One format string, not two. A resolve preview that queried
+        differently from the download it leads to would be a silent
+        mismatch."""
+        from app.metadata import uniprot as meta
+
+        client.post("/uniprot/resolve", json={"query": "P0DTC2 P00533"})
+
+        assert stub["proteins"][0] == meta.download_query(
+            proteome_id=None, accessions=["P0DTC2", "P00533"], reviewed_only=True
+        )
