@@ -53,7 +53,59 @@ Two traps found in the code, both silent:
   every job would be attributed to the first profile unless `enqueue` takes an
   owner and the handlers propagate it.
 
-## Profiles: events and schedules are the last unscoped routes
+## Profiles: events and schedules are the last unscoped routes — FIXED
+
+Fixed 2026-08-01, plan
+`docs/superpowers/plans/2026-08-01-profiles-events-and-schedules.md`.
+`publish_event` now takes a required keyword-only `owner` and publishes to
+`keys.events_channel(owner)` (`bp:events:{owner}`); `/events` resolves the
+`?profile=` query parameter through a new `deps.resolve_owner` -- shared with
+the header dependency -- and subscribes to two channels, the caller's own and
+`bp:events:system`. `schedules.py` is documented as deliberately global.
+Tests: `backend/tests/queue/test_event_channels.py` and
+`backend/tests/api/test_events_scoping.py`, both directions asserted, both
+mutation-checked (hardcoding the channel to `"local"` fails eleven of them;
+dropping just the system channel fails two).
+
+**What the implementation did differently from this entry:**
+
+- **A system channel, which this entry does not mention at all** -- and it is
+  what makes per-owner channels workable. Four of the twelve publishers are
+  installation-wide (`system.starvation_override`, `storage.unavailable`,
+  `blob.drifted`, `blob.missing`); blobs are global by the spec, so there is no
+  owner to attribute them to. They publish to `bp:events:system` and every
+  client subscribes to it alongside its own.
+- **`queue/results.py` is not a `publish_event` call site.** This entry names
+  it; `grep -rn publish_event backend/app` finds only `queue.py`, `worker.py`,
+  `executor.py` and `handlers.py`. Twelve call sites, not the audit this
+  entry implies.
+- **Schedules were closed as global rather than left open.** The decision was
+  already made in code: `scheduler.py` enqueues maintenance with a hardcoded
+  `owner="local"`. Scoping the routes would give every profile an empty list
+  or five copies of one cron table.
+- **`JobContext` grew an `owner` field.** The progress publisher had nothing to
+  work with -- `_write_progress` knows a job id and an epoch, and re-reading the
+  job document would add a Mongo read to every progress tick at up to 2 Hz per
+  running job.
+- **`complete` falls back to the system channel, not `"local"`,** when its job
+  re-read comes back None. `"local"` is a real profile's owner, so that
+  fallback would have delivered a stranger's job event into the adopted
+  profile's stream -- the exact leak per-owner channels exist to prevent.
+- **The frontend needed a guard, not just a rewrite.** `useEvents` already sent
+  `?profile=`, but sent it empty when no profile was selected; that is now a
+  400, and `EventSource` reconnects on error, so it would have been a reconnect
+  loop rather than one failed request.
+
+Two traps for anyone writing pub/sub tests here, both of which produce a green
+"nothing leaked" result for reasons unrelated to the code:
+`get_message(ignore_subscribe_messages=True)` returns `None` for each subscribe
+confirmation rather than skipping past it, so an undrained subscription reports
+an empty channel forever; and driving the stream over httpx's `ASGITransport`
+hangs, because closing the stream never makes `request.is_disconnected()` true
+and the generator loops until the suite is killed.
+
+Original diagnosis follows, kept because it is the reasoning behind the channel
+layout.
 
 Raised: 2026-08-01. The rest of this entry's original subject -- `jobs`,
 `uploads`, `search`, `pipelines`, `ncbi` -- was closed on 2026-08-01 in
@@ -325,6 +377,34 @@ Touches: `backend/app/models/job.py`, `backend/app/queue/governor.py`,
 See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
+
+## Maintenance jobs belong to whichever profile adopted "local"
+
+Raised: 2026-08-01, while scoping the SSE stream. Pre-existing; nothing in that
+change caused it, and nothing in that change is the right place to fix it.
+
+`scheduler.tick` and `scheduler.run_now` enqueue GC and file verification with
+a hardcoded `owner="local"` (`backend/app/queue/scheduler.py:123`, `:161`),
+which is correct in that this work belongs to the installation. But `"local"`
+is not a neutral value: it is the owner string of whichever profile adopted the
+pre-profiles library, so those jobs land in exactly one real person's library.
+
+Two visible consequences, both mild until someone is confused by them.
+`/api/v1/jobs` is owner-scoped, so GC and verify jobs appear in the adopted
+profile's job list and in nobody else's -- a second profile pressing "Run now"
+on a schedule watches the job vanish. And since the job events now route by
+`Job.owner`, that profile's event stream is the only one that sees them live.
+
+Not obviously wrong to fix and not obviously worth fixing. The candidates: give
+maintenance jobs `owner="system"` and let `/api/v1/jobs` union the system owner
+in (honest, but the jobs list becomes two queries); or leave the jobs alone and
+filter maintenance job *types* out of the jobs list entirely (cheaper, hides
+them from everyone including the person who asked). The second is probably
+right, since a maintenance job is not something a user chose to run -- except
+via `run-now`, which is precisely when they want to see it.
+
+Touches: `backend/app/queue/scheduler.py`, `backend/app/api/v1/jobs.py`,
+`backend/app/api/v1/schedules.py` (whose module docstring records this).
 
 ## Results should be the first tab
 

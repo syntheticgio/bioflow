@@ -49,8 +49,11 @@ class JobExecutor:
                 payload=job.payload,
                 epoch=epoch,
                 attempts=job.attempts,
+                owner=job.owner,
             )
-            ctx._progress_cb = lambda upd: self._schedule_progress(job_id, epoch, upd)
+            ctx._progress_cb = lambda upd: self._schedule_progress(
+                job_id, epoch, upd, owner=job.owner
+            )
             ctx._extend_cb = lambda seconds: self._schedule_lease_extension(
                 job_id, epoch, seconds
             )
@@ -206,7 +209,9 @@ class JobExecutor:
         except Exception as e:  # noqa: BLE001 - the periodic heartbeat still covers us
             log.warning("lease_extension_failed", job_id=job_id, error=str(e))
 
-    def _schedule_progress(self, job_id: str, epoch: int, update: dict) -> None:
+    def _schedule_progress(
+        self, job_id: str, epoch: int, update: dict, *, owner: str
+    ) -> None:
         """Throttle and persist a progress update from any thread."""
         now = datetime.now(UTC).timestamp()
         last = self._last_progress.get(job_id, 0.0)
@@ -222,20 +227,25 @@ class JobExecutor:
             if loop is None:
                 return
             asyncio.run_coroutine_threadsafe(
-                self._write_progress(job_id, epoch, update), loop
+                self._write_progress(job_id, epoch, update, owner=owner), loop
             )
             return
 
-        loop.create_task(self._write_progress(job_id, epoch, update))
+        loop.create_task(self._write_progress(job_id, epoch, update, owner=owner))
 
-    async def _write_progress(self, job_id: str, epoch: int, update: dict) -> None:
+    async def _write_progress(
+        self, job_id: str, epoch: int, update: dict, *, owner: str
+    ) -> None:
         try:
             await get_db().jobs.update_one(
                 {"_id": PydanticObjectId(job_id), "lease.epoch": epoch},
                 {"$set": {f"progress.{k}": v for k, v in update.items()}},
             )
+            # The owner is passed down from the caller rather than read back off
+            # the job document: this runs up to twice a second per running job,
+            # and a lookup here would add a Mongo read to every progress tick.
             await queue.publish_event(
-                "job.progress", {"job_id": job_id, **update}
+                "job.progress", {"job_id": job_id, **update}, owner=owner
             )
         except Exception as e:  # noqa: BLE001 - progress is advisory
             log.debug("progress_write_failed", job_id=job_id, error=str(e))

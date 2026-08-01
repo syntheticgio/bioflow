@@ -209,9 +209,14 @@ class Worker:
         self._starvation_cached = oldest is not None
         if self._starvation_cached:
             log.warning("starvation_override", job_id=str(oldest.id), type=oldest.type)
+            # System-owned, not the starving job's owner: there is one queue for
+            # the installation, and the fact that it is admitting maintenance
+            # ahead of interactive work is a property of the machine rather
+            # than news about anybody's library.
             await queue.publish_event(
                 "system.starvation_override",
                 {"job_id": str(oldest.id), "type": oldest.type},
+                owner=keys.SYSTEM_OWNER,
             )
         return self._starvation_cached
 
@@ -294,9 +299,10 @@ class Worker:
             payload=job.payload,
             epoch=claimed.epoch,
             attempts=job.attempts,
+            owner=job.owner,
         )
         ctx._progress_cb = lambda upd: self.executor._schedule_progress(
-            claimed.job_id, claimed.epoch, upd
+            claimed.job_id, claimed.epoch, upd, owner=job.owner
         )
         # Renew immediately rather than waiting up to a full heartbeat interval:
         # a handler calls extend_lease *because* it is about to go quiet, and the

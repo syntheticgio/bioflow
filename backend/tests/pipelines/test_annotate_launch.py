@@ -13,7 +13,7 @@ from app.queue.registry import JobContext
 
 
 def _ctx(payload: dict) -> JobContext:
-    return JobContext(job_id="job-1", payload=payload, epoch=1, attempts=1)
+    return JobContext(job_id="job-1", payload=payload, epoch=1, attempts=1, owner="local")
 
 
 class TestAnnotateVariantsRegistered:

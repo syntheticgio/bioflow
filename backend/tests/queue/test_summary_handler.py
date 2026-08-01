@@ -15,7 +15,7 @@ from app.services import llm_client, summary_prompt
 
 
 def _ctx(payload: dict) -> JobContext:
-    return JobContext(job_id="job-1", payload=payload, epoch=1, attempts=1)
+    return JobContext(job_id="job-1", payload=payload, epoch=1, attempts=1, owner="local")
 
 
 def _payload(**overrides) -> dict:

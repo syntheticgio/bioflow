@@ -21,7 +21,9 @@ from app.queue.registry import JobContext
 
 
 def make_ctx(**kw) -> JobContext:
-    return JobContext(job_id=kw.pop("job_id", "job-1"), payload={}, epoch=1, attempts=0, **kw)
+    return JobContext(
+        job_id=kw.pop("job_id", "job-1"), payload={}, epoch=1, attempts=0, owner="local", **kw
+    )
 
 
 def py(script: str) -> list[str]:

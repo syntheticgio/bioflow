@@ -18,7 +18,22 @@ JOB = f"{PREFIX}:job"  # bp:job:{job_id}
 # --- Control ---
 CANCEL = f"{PREFIX}:cancel"  # set of job_ids with cancellation requested
 WORKERS = f"{PREFIX}:workers"  # hash worker_id -> json
-EVENTS = f"{PREFIX}:events"  # pub/sub channel
+EVENTS = f"{PREFIX}:events"  # pub/sub channel *prefix*, never published to
+
+# Events are partitioned per profile: `events_channel(owner)` below. Nothing
+# publishes to or subscribes to the bare `EVENTS` string any more -- a leftover
+# subscriber on it would receive nothing at all and read as a broken stream
+# rather than as a missing filter, so the prefix is deliberately not a valid
+# channel on its own.
+SYSTEM_OWNER = "system"
+"""Owner sentinel for events that belong to the installation, not a profile.
+
+Storage faults and queue-wide conditions describe the machine; blobs are global
+by design (see the profiles design doc), so there is no one profile to
+attribute them to. Every SSE client subscribes to this channel alongside its
+own. It cannot collide with a real owner: those are either the literal "local"
+or a 24-character hex ObjectId.
+"""
 
 # --- Concurrency counters ---
 CONC = f"{PREFIX}:conc"  # bp:conc:{resource}
@@ -28,6 +43,19 @@ SCHED_NEXT = f"{PREFIX}:sched:next"  # bp:sched:next:{name}
 
 # --- Leader election (reaper, promotion sweep, scheduler ticks) ---
 LEADER = f"{PREFIX}:leader"
+
+
+def events_channel(owner: str) -> str:
+    """The pub/sub channel carrying one owner's events.
+
+    Per-owner channels rather than one channel with an `owner` field on the
+    payload, because the two fail differently: a publisher that forgets to
+    stamp an owner would leak to every profile, while a publisher that picks
+    the wrong channel merely emits where nobody listens. Events are advisory --
+    the UI refetches on receipt -- so a missed one costs a delay, and a leaked
+    one costs another profile's filenames.
+    """
+    return f"{EVENTS}:{owner}"
 
 
 def job_key(job_id: str) -> str:

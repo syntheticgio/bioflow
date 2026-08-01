@@ -160,11 +160,15 @@ async def enqueue(
                 type=job_type,
                 waiting_on=[str(d) for d in outstanding],
             )
-            await publish_event("job.enqueued", {"job_id": str(job.id), "type": job_type})
+            await publish_event(
+                "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
+            )
             return job
 
     await _push_to_redis(job, delay_seconds=delay_seconds)
-    await publish_event("job.enqueued", {"job_id": str(job.id), "type": job_type})
+    await publish_event(
+        "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
+    )
     return job
 
 
@@ -256,7 +260,7 @@ async def _fail_blocked_job(job: Job, failed: list[Job]) -> None:
         dependency_id=str(culprit.id),
         dependency_type=culprit.type,
     )
-    await publish_event("job.failed", {"job_id": str(job.id)})
+    await publish_event("job.failed", {"job_id": str(job.id)}, owner=job.owner)
     await _clear_cancel_flag(str(job.id))
 
     # Cascade: anything waiting on *this* job now cannot run either.
@@ -505,7 +509,22 @@ async def complete(
         return False
 
     await release(job_id, requeue=False)
-    await publish_event(f"job.{state.value}", {"job_id": job_id})
+
+    # The job document is looked up above for its start time and may be None --
+    # the update_one above works off `job_id` alone, so a completion can land
+    # for a document that has since been deleted. Do *not* fall back to "local"
+    # for the event's owner in that case: "local" belongs to the profile that
+    # adopted the pre-profiles library, and attributing a stranger's job to it
+    # is exactly the leak per-owner channels exist to prevent. It goes to the
+    # system channel instead, and gets logged, because a job completing with no
+    # document behind it is a bug worth seeing rather than a routine case.
+    if job is None:
+        log.warning("completed_job_document_missing", job_id=job_id, state=state.value)
+    await publish_event(
+        f"job.{state.value}",
+        {"job_id": job_id},
+        owner=job.owner if job else keys.SYSTEM_OWNER,
+    )
 
     # After the terminal write lands, so a dependent that dispatches
     # immediately cannot observe its dependency as still running.
@@ -580,13 +599,13 @@ async def request_cancel(job_id: str) -> str:
                 Job.expires_at: now + timedelta(days=30),
             }
         )
-        await publish_event("job.cancelled", {"job_id": job_id})
+        await publish_event("job.cancelled", {"job_id": job_id}, owner=job.owner)
         # Cancelling an index build must not leave the alignment behind it
         # queued forever waiting for a file nobody is going to write.
         await _release_dependents(job_id, succeeded=False)
         return "cancelled"
 
-    await publish_event("job.cancel_requested", {"job_id": job_id})
+    await publish_event("job.cancel_requested", {"job_id": job_id}, owner=job.owner)
     return "cancelling"
 
 
@@ -786,15 +805,24 @@ async def reconcile() -> int:
     return restored
 
 
-async def publish_event(event_type: str, data: dict) -> None:
-    """Fan out to SSE subscribers via Redis pub/sub.
+async def publish_event(event_type: str, data: dict, *, owner: str) -> None:
+    """Fan out to one owner's SSE subscribers via Redis pub/sub.
 
     Events are advisory: the UI refetches on receipt rather than treating the
     payload as authoritative, so a dropped message costs a delay, not accuracy.
+    That is also what makes per-owner channels the safe design -- see
+    `keys.events_channel`.
+
+    `owner` is keyword-only and has no default on purpose. It is the whole
+    enforcement mechanism: a new publisher that has not thought about which
+    profile its event belongs to fails to call this at all, rather than
+    defaulting into someone's stream. Installation-wide events pass
+    `keys.SYSTEM_OWNER` explicitly, which is a decision the author had to make;
+    omitting an argument is not.
     """
     try:
         await get_redis().publish(
-            keys.EVENTS, json.dumps({"type": event_type, "data": data})
+            keys.events_channel(owner), json.dumps({"type": event_type, "data": data})
         )
     except Exception as e:  # noqa: BLE001 - never fail a job over telemetry
         log.debug("event_publish_failed", error=str(e))

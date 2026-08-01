@@ -22,18 +22,27 @@ export function useEvents() {
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
+    // No profile, no stream. `Shell` only mounts once one is selected, so this
+    // guards a state that should not occur -- which is exactly when it matters:
+    // an empty `profile=` is a 400 from the backend, and `EventSource`
+    // reconnects on error automatically, so the visible symptom would be a
+    // reconnect loop rather than one failed request.
+    if (!profileId) {
+      setConnected(false);
+      return;
+    }
+
     // The profile travels as a query parameter, not a header, because
     // `EventSource` has no way to send custom headers -- that is a limitation of
     // the browser API, not an oversight here, and it is why this one path
     // differs from the other two.
     //
-    // The backend ignores the parameter today: `/events` subscribes to a single
-    // global channel and forwards everything to everyone (tracked in
-    // `docs/TODO.md`). Sending it anyway means the server can start scoping the
-    // stream without a matching frontend change, and it makes the intent
-    // visible here rather than only in the TODO.
+    // The backend resolves it the same way it resolves the header, then
+    // subscribes this stream to two Redis channels: this profile's, and the
+    // system channel for events that belong to the installation rather than to
+    // any one library (storage faults, missing blobs).
     const source = new EventSource(
-      `/api/v1/events?profile=${encodeURIComponent(profileId ?? "")}`,
+      `/api/v1/events?profile=${encodeURIComponent(profileId)}`,
     );
 
     const flush = () => {
