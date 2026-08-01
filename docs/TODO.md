@@ -246,6 +246,78 @@ their roles — a QC filter that hid samtools would be lying about the toolchain
 And availability is deliberately absent from the predicate, so an uninstalled
 tool is still listed for the job it would do.
 
+## Post-install tool downloads
+
+Raised: 2026-08-01, requested.
+
+Instead of baking all tools into the container image, allow users to install
+some tools after deployment (similar to the DeepVariant model). This could mean
+either installing into a sidecar container or pulling a separate tool-specific
+container depending on the tool.
+
+This trades smaller initial image size and faster startup against network
+bandwidth at first use, which is the right tradeoff for tools that are large
+(DeepVariant's ~3 GB is already a precedent) or rarely used. The installer
+already has a "full install" option to pre-pull optional images; this extends
+that model to a live install flow in the running application.
+
+Scope this against which tools are candidates (size, frequency of use, stability
+of external source) and whether the sidecar or separate-container approach works
+better for each. Per CLAUDE.md: `suggestion_service.py` must recognize any new
+dispatch path.
+
+## Observability in tools: progress reporting and resource transparency
+
+Raised: 2026-08-01, requested.
+
+When a long-running job executes, the user sees "running" but not progress
+within it. For some tools we can parse output (`minimap2`, `bwa-mem2` write
+progress to stderr); others we would need to instrument the source or intercept
+signals. The goal is to answer questions like "% complete" or "N of M chunks
+processed" and surface that in the UI during job execution.
+
+**Architecture sketch:** A central observability server (in a container), running
+a pub/sub broker, where tools report their progress and the API queries it on
+demand. Tools could push to it either natively (if instrumented) or via wrapper
+scripts that parse output and emit metrics. This is a needs-brainstorming-and-spec
+decision; the pub/sub model is one option but may not be the right one.
+
+Consider what metadata each tool can realistically report (some have seconds-left
+estimates, others only have bytes processed), and whether the server should be
+persistent (survives container restart) or ephemeral.
+
+## Resource limits and intelligent enforcement
+
+Raised: 2026-08-01, requested.
+
+Allow users to set global resource constraints (max memory, max CPU %, max CPU
+threads) via settings, and intelligently enforce them on running jobs. The open
+question is how much is within this application's control.
+
+Today `JobResources` on a job declares `cpu` and `mem_mb` requested, and the load
+governor's admission checks gate work based on container availability. Enforce
+means either:
+
+1. **Container-level cgroups.** Tell Docker how much memory and CPU the `api` and
+   `worker` containers may consume, and let the kernel enforce it. This is how
+   Docker already isolates containers; setting limits here is configuration, not
+   new code.
+2. **Per-job subprocess limits.** Some handlers shell out to tools; those could
+   be wrapped with `ulimit` or similar to cap their consumption. Finer-grained
+   but does not help with tools invoked via containers or as native binaries.
+3. **Load governor thresholds.** The admission checks already refuse work when
+   system load or free memory crosses a threshold. Tighten these based on user
+   settings.
+
+Options 1 and 3 are complementary and doable. Option 2 is tool-specific and
+fragile. Start by clarifying which resources matter most (memory is usually the
+constraint; CPU % is a softer signal) and whether the user is asking for "never
+use more than N GB" (admission) or "gracefully degrade when close to N GB"
+(monitoring).
+
+Touches: `backend/app/models/job.py`, `backend/app/queue/governor.py`,
+`docker-compose.yml`, `docker-compose.override.yml`.
+
 ---
 
 # Deferred findings
