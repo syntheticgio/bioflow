@@ -53,69 +53,58 @@ Two traps found in the code, both silent:
   every job would be attributed to the first profile unless `enqueue` takes an
   owner and the handlers propagate it.
 
-## Profiles: the routes still outside the partition
+## Profiles: events and schedules are the last unscoped routes
 
-Raised: 2026-08-01, probing the running app after wiring `OwnerDep` into every
-route that carried a `TODO(profiles)` marker.
+Raised: 2026-08-01. The rest of this entry's original subject -- `jobs`,
+`uploads`, `search`, `pipelines`, `ncbi` -- was closed on 2026-08-01 in
+`414f146`, `67931f4` and `a99e044`. What follows is what is left.
 
-**The marker count was never the real measure.** A marker was only left where a
-service call *already* took an `owner` and the route had nothing to give it.
-Routes whose service never took an owner in the first place carried no marker,
-so "0 markers left" reads as done while whole routers are still unscoped.
+**`events.py` (1 route, 0 scoped).** The SSE stream subscribes to a single
+global Redis channel (`keys.EVENTS`, `events.py:30`) and forwards every
+payload to every client. The word `owner` does not appear in the file. Once
+two profiles are in use, profile B's browser receives job-progress and
+object-created events for profile A's files, filenames included.
 
-Measured against the running app, with no `X-BioFlow-Profile` header at all:
+Two shapes, and the difference matters: stamping an `owner` on the payload and
+filtering server-side means a publisher that forgets leaks silently, which is
+the same failure the dedup-key trap had. Per-owner channels
+(`keys.EVENTS + ":" + owner`) mean a publisher that forgets emits into a
+channel nobody reads -- a missing event rather than a leaked one. Failing
+closed is worth the extra channel. `publish_event` has call sites in
+`queue/queue.py`, `queue/results.py` and the executor; audit all of them.
 
-```
-GET /api/v1/jobs      -> 200, 100 jobs      <-- every profile's jobs
-GET /api/v1/uploads   -> 200                 <-- 0 only because none in flight
-GET /api/v1/projects  -> 400 profile_unresolved   (correctly scoped)
-GET /api/v1/runs      -> 400 profile_unresolved   (correctly scoped)
-```
+**`schedules.py` (5 routes, 0 scoped).** Probably correct as-is -- these read
+like system-level cron entries (GC, file verification) rather than user data --
+but nobody has said so. Either scope it or document it as deliberately global
+in the route docstrings, the way `search.py`'s `/metadata/schemas` does.
 
-`OwnerDep` coverage by router, as routes-to-references:
+Neither is reachable today: nothing in the frontend sends
+`X-BioFlow-Profile`, so no request resolves a profile at all. Both become
+reachable the moment the picker ships, which is why they should close first.
 
-| Router | Routes | Wired | Note |
-|---|---|---|---|
-| `projects.py` | 9 | 10 | done |
-| `objects.py` | 7 | 8 | done |
-| `runs.py` | 4 | 5 | done |
-| `pipelines.py` | 25 | 2 | **the big gap** |
-| `jobs.py` | 8 | 2 | `list_jobs` leaks |
-| `uploads.py` | 6 | 2 | |
-| `search.py` | 7 | 0 | **service has no owner at all** |
-| `ncbi.py` | 2 | 0 | |
-| `system.py`, `schedules.py`, `events.py`, `health.py` | | 0 | correct -- system-wide |
-| `profiles.py` | 4 | 1 | correct -- called before you have a profile |
+### What the rest of the sweep found, worth remembering
 
-Three different kinds of work, worth separating:
+The `TODO(profiles)` marker count was a **bad measure of completeness**. A
+marker was only left where a service call already took an `owner` and the
+route had nothing to give it, so routers whose service never took one carried
+no marker. "0 markers" read as done while `/api/v1/jobs` still answered with
+100 jobs and no header.
 
-1. **Route-only.** `jobs.py`'s `list_jobs` builds its own `Job.find(query)`;
-   add `"owner": owner` to the query dict. Same shape for the rest of
-   `jobs.py` and `uploads.py`, whose services already take an owner.
+Seven unscoped **writes** were found, none of them marked, each reachable by
+guessing an id: `cancel_run`, `cancel_job`, `retry_job`,
+`PUT /uploads/{id}/chunks/{i}` (writes bytes into another profile's
+in-flight file, surfacing much later as a digest mismatch), `abort_upload`,
+and both `bulk_update_metadata` / `bulk_update_tags`.
 
-2. **`search.py` needs service work first.** `search_service.py` contains
-   **zero occurrences of `owner`** -- verified. `build_filter` builds an
-   unscoped Mongo filter, so global search, facets and metadata values span
-   every profile. Worse, `bulk_update_metadata` and `bulk_update_tags` take
-   raw `object_ids` with no owner filter: those are **writes**, so one profile
-   can currently modify another's metadata and tags by id. Adding `OwnerDep`
-   to the routes does nothing until `build_filter` and both bulk paths take an
-   owner. This is the most user-visible leak of the three -- search returns
-   other profiles' filenames and metadata.
+And a warning for anyone adding isolation tests here: **a test asserting only
+"profile B sees nothing" also passes against a route hardcoded to `"local"`,**
+because A's rows are not under `"local"` either. Ten such tests were written
+and shipped green across three passes; every one was caught only by mutating
+the route and noticing the test survived. Assert both directions -- A sees its
+own rows, and B does not.
 
-3. **`pipelines.py` is 25 routes and mostly launch paths.** Its services take
-   owners already (Tasks 3-8), so this is threading rather than design, but it
-   is the largest single file and deserves its own pass rather than being
-   tacked onto another.
-
-Nothing here is reachable today: no client sends the header, so every request
-resolves nothing and the app behaves exactly as it did before profiles. It
-becomes reachable the moment the frontend picker lands, which is why this
-should close before that does.
-
-Touches: `backend/app/api/v1/{jobs,uploads,search,ncbi,pipelines}.py`,
-`backend/app/services/search_service.py`,
-`backend/app/services/{sra,assembly}_service.py`.
+Touches: `backend/app/api/v1/events.py`, `backend/app/api/v1/schedules.py`,
+`backend/app/queue/queue.py` (`publish_event` call sites).
 
 ## Sharing between profiles
 
