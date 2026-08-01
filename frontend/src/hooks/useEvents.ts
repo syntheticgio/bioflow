@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
+import { useProfileStore } from "../stores/profileStore";
+
 /**
  * Subscribes to the server's SSE stream and invalidates affected queries.
  *
@@ -10,6 +12,9 @@ import { useEffect, useRef, useState } from "react";
  */
 export function useEvents() {
   const qc = useQueryClient();
+  // Subscribed via the hook rather than `getState()` so that switching profiles
+  // re-renders and tears the stream down; see the effect below.
+  const profileId = useProfileStore((s) => s.current?.id);
   const [connected, setConnected] = useState(false);
   // Progress events can arrive several times a second per job. Coalescing them
   // stops a busy queue from triggering a refetch storm.
@@ -17,7 +22,19 @@ export function useEvents() {
   const timer = useRef<number | null>(null);
 
   useEffect(() => {
-    const source = new EventSource("/api/v1/events");
+    // The profile travels as a query parameter, not a header, because
+    // `EventSource` has no way to send custom headers -- that is a limitation of
+    // the browser API, not an oversight here, and it is why this one path
+    // differs from the other two.
+    //
+    // The backend ignores the parameter today: `/events` subscribes to a single
+    // global channel and forwards everything to everyone (tracked in
+    // `docs/TODO.md`). Sending it anyway means the server can start scoping the
+    // stream without a matching frontend change, and it makes the intent
+    // visible here rather than only in the TODO.
+    const source = new EventSource(
+      `/api/v1/events?profile=${encodeURIComponent(profileId ?? "")}`,
+    );
 
     const flush = () => {
       timer.current = null;
@@ -67,9 +84,18 @@ export function useEvents() {
 
     return () => {
       if (timer.current !== null) window.clearTimeout(timer.current);
+      // Drop whatever the old stream had queued but not yet flushed. The refs
+      // outlive the effect, so without this a switch could carry the previous
+      // profile's pending invalidations into the new subscription -- harmless
+      // today, since invalidation only forces a refetch, but it would mean the
+      // new profile's first refetch was triggered by the old one's events.
+      pending.current.clear();
+      timer.current = null;
       source.close();
     };
-  }, [qc]);
+    // Re-subscribing on `profileId` is the point: without it, switching profiles
+    // would leave the stream open as the previous one.
+  }, [qc, profileId]);
 
   return { connected };
 }

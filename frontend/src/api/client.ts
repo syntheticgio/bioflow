@@ -48,7 +48,27 @@ import type {
   VariantStructure,
 } from "./types";
 
+import { useProfileStore } from "../stores/profileStore";
+
 const BASE = "/api/v1";
+
+/**
+ * The header every user-data route needs to know whose library to answer with.
+ *
+ * Read through `getState()` rather than the hook because these are plain
+ * functions, not components -- there is nothing to re-render, and the value
+ * only has to be correct at the moment the request is built.
+ *
+ * Returns an empty object when no profile is selected, so the header is absent
+ * rather than empty. The backend rejects both, but an absent header means
+ * `profile_unresolved`, which is the honest description of the state; sending
+ * `X-BioFlow-Profile: ` would instead claim a profile was chosen and read as a
+ * malformed id.
+ */
+function profileHeaders(): Record<string, string> {
+  const id = useProfileStore.getState().current?.id;
+  return id ? { "X-BioFlow-Profile": id } : {};
+}
 
 export class ApiRequestError extends Error {
   code: string;
@@ -71,6 +91,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.body && !(init.body instanceof Blob) && !(init.body instanceof ArrayBuffer)
         ? { "Content-Type": "application/json" }
         : {}),
+      ...profileHeaders(),
+      // Last, so an explicit per-call header can still override the profile --
+      // which is how a call made on behalf of a profile other than the selected
+      // one would have to work.
       ...init?.headers,
     },
   });
@@ -556,6 +580,11 @@ export const api = {
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,
    * and progress is the whole point of the tray for large files.
+   *
+   * Because it does not go through `request<T>`, it has to set the profile
+   * header itself -- an upload scoped to nobody would 400, and worse, a change
+   * that only touched `request<T>` would look complete while leaving exactly
+   * this path unscoped.
    */
   uploadObject: (
     projectId: string,
@@ -568,6 +597,9 @@ export const api = {
       xhr.open("POST", `${BASE}/projects/${projectId}/objects/upload`);
       xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
       xhr.setRequestHeader("Content-Type", "application/octet-stream");
+      for (const [name, value] of Object.entries(profileHeaders())) {
+        xhr.setRequestHeader(name, value);
+      }
 
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) onProgress?.(e.loaded, e.total);
