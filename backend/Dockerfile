@@ -178,6 +178,33 @@ RUN set -e \
     && chmod +x /usr/local/bin/datasets \
     && datasets --version
 
+# --- Docker client ----------------------------------------------------------
+#
+# For starting *sibling* containers, not for running a daemon here. DeepVariant
+# is distributed as an 8.83GB image -- 2.3GB of TensorFlow on a Python 3.10 this
+# image does not otherwise ship -- so vendoring it in would roughly double this
+# image to gain one variant caller. It runs from its own image instead, started
+# through the host's daemon via a socket mounted in docker-compose.override.yml.
+#
+# The static client tarball rather than the `docker.io` package: that package
+# pulls in the daemon, containerd and runc (~400MB) to obtain a binary we use
+# only as a client. This is ~50MB, and this image is already large.
+ARG DOCKER_CLI_VERSION=27.3.1
+RUN set -e \
+    && case "$TARGETARCH" in \
+         arm64) DOCKER_ARCH=aarch64 ;; \
+         *)     DOCKER_ARCH=x86_64 ;; \
+       esac \
+    && curl -fsSL \
+         "https://download.docker.com/linux/static/stable/${DOCKER_ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+         -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp \
+    && mv /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz \
+    # --version only: `docker version` would try to reach a daemon, which does
+    # not exist at build time and would fail the build for the wrong reason.
+    && docker --version
+
 # Dependencies first so the layer caches across source edits.
 # Installed from pyproject.toml rather than a duplicated list: two copies of the
 # dependency set drift, and the version that matters is the one in the image.

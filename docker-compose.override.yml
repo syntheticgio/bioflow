@@ -15,8 +15,21 @@ services:
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
+      # The host's Docker socket, so the worker can start sibling containers
+      # for tools too large to vendor into this image. DeepVariant is 8.83GB,
+      # mostly TensorFlow on a Python 3.10 we do not otherwise ship. A real
+      # privilege increase -- a container that can reach the daemon can start
+      # any container -- accepted because this app is single-user and local.
+      # See docs/superpowers/specs/2026-07-31-deepvariant-sidecar-design.md.
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       LOG_LEVEL: DEBUG
+      # The *host* path behind /data. BIOINFO_HOME is already overloaded: it is
+      # the host path in the bind mount above, and docker-compose.yml sets it to
+      # /data inside the container. A sibling container gets its mounts from the
+      # host, so it needs the host value under a name that cannot be confused
+      # with the container path the process already has.
+      BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}
 
   web:
     build:
