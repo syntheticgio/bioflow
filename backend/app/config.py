@@ -1,9 +1,39 @@
 """Application settings, loaded from the environment."""
 
+import platform
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# DeepVariant ships as a sibling container rather than a binary in our image,
+# and no single tag covers both architectures. Google publishes amd64 only; the
+# arm64 build is a community port. Neither manifest is multi-arch -- both are
+# single-platform, verified 2026-08-01 with `docker manifest inspect -v`:
+# google/deepvariant:1.9.0 reports architecture "amd64", and the port reports
+# "arm64". So picking the wrong one does not fail at pull time with anything
+# that names the cause; it pulls with a platform-mismatch warning and then dies
+# at `docker run` with "exec format error" deep inside a job.
+_DEEPVARIANT_IMAGE_AMD64 = "google/deepvariant:1.9.0"
+_DEEPVARIANT_IMAGE_ARM64 = "ghcr.io/antomicblitz/deepvariant-arm64:v1.9.0-arm64.6"
+
+
+def is_arm64() -> bool:
+    """Whether this machine runs the arm64 DeepVariant port.
+
+    Read at import time for the image default and again when building the
+    `docker run` invocation, which needs to know whether the Graviton fastmath
+    workaround applies. `platform.machine()` reports the *container's*
+    architecture, which is the one that matters: the sibling container the
+    daemon starts inherits the host's platform, and the worker container is
+    already running on it.
+    """
+    return platform.machine().lower() in {"aarch64", "arm64"}
+
+
+def default_deepvariant_image() -> str:
+    return _DEEPVARIANT_IMAGE_ARM64 if is_arm64() else _DEEPVARIANT_IMAGE_AMD64
 
 
 class Settings(BaseSettings):
@@ -90,7 +120,9 @@ class Settings(BaseSettings):
     # Empty when unset, which host_path_for reports as a fixable error.
     bioinfo_home_host: str = ""
 
-    deepvariant_image: str = "ghcr.io/antomicblitz/deepvariant-arm64:v1.9.0-arm64.6"
+    # Architecture-dependent; see default_deepvariant_image above. Override with
+    # DEEPVARIANT_IMAGE to pin a different build.
+    deepvariant_image: str = Field(default_factory=default_deepvariant_image)
 
     # Threads a single trim run may use. Deliberately well below the core count:
     # the queue admits more than one compute job at a time, and fastp's own

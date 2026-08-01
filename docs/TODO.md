@@ -407,7 +407,41 @@ object, not merely that the handler returns.
 
 Touches: `backend/app/queue/results.py`.
 
-## DeepVariant: refused for a reason that is no longer true
+## DeepVariant: refused for a reason that is no longer true — FIXED
+
+Shipped before 2026-08-01; **found stale by the Linux verification pass on
+2026-08-01**, which is when this note was added. Both refusal messages are
+gone -- `grep` for "no arm64" / "arm64 Linux build" across `backend/app/`
+returns nothing -- and `VariantCaller.DEEPVARIANT` dispatches unconditionally
+in `variant_handlers.py` (`_run_deepvariant`) and `pipeline_service.py`.
+`TOOL_META` carries the required fields and `tools.deepvariant()` probes the
+Docker client rather than a binary.
+
+**The implementation took option 2, not option 1.** This entry recommended
+pulling DeepVariant's artifacts into the BioFlow image ("much more in keeping
+with how everything else here works") and warned that option 2 would need the
+Docker socket, "a real privilege and architecture change this app has so far
+avoided entirely". Option 2 is what shipped: `build_deepvariant_command`
+assembles a `docker run`, and both `api` and `worker` bind-mount
+`/var/run/docker.sock` in `docker-compose.override.yml`, whose comments accept
+the privilege increase explicitly on single-user/local grounds. That also made
+`host_path_for` necessary -- a sibling container gets its mounts from the
+host, so `BIOINFO_HOME_HOST` had to be introduced to translate exactly the
+left half of `-v`. None of that machinery would exist under option 1.
+
+**The image is not one image, which this entry assumed it was.** It named the
+arm64 community port as "the artifact this project needs", and the code
+hardcoded that tag as the default on every platform. On x86-64 that is the
+wrong image and fails at `docker run` with "exec format error", inside a job.
+Fixed 2026-08-01 alongside the Linux verification: `default_deepvariant_image`
+in `backend/app/config.py` now picks `google/deepvariant:1.9.0` on x86-64 and
+the port on arm64, and the BF16 fastmath workaround is applied only on arm64
+(on x86-64 `TF_ENABLE_ONEDNN_OPTS=0` is a silent slowdown, not a fix). Both
+manifests verified single-platform with `docker manifest inspect -v` on
+2026-08-01; both repositories verified BSD-3-Clause with
+`gh api repos/.../license`.
+
+Original entry follows.
 
 Raised: 2026-07-31, requested. **Unblocked 2026-07-31** -- a native Linux
 arm64 build now exists.
@@ -695,36 +729,107 @@ Touches: `backend/app/queue/` (new handler module),
 `backend/app/models/run.py`, `backend/app/pipelines/sources.py` (which has its
 own completeness test).
 
-## Build and run on Linux
+## Build and run on Linux — VERIFIED (mostly), one real bug found
 
-Raised: 2026-07-31, requested.
+Verified 2026-08-01 against this repo's actual running Linux stack (x86_64,
+`biopipe-api-1`), not just an audit of the code. The user had already driven
+the UI end to end -- profile setup, project creation, uploads, NCBI downloads,
+Clair3, bwa-mem2 -- and reported all of it working. This pass checked the five
+specific accommodations the entry called out, since "the UI works" doesn't
+prove any of them.
 
-Nothing here is macOS-specific by design, but the setup has only ever run on
-Apple Silicon under Docker Desktop, and several accommodations exist *because*
-of that. Going to Linux means checking each one:
+- **arm64 workarounds correctly do not fire on x86-64 -- confirmed.** The
+  running container resolves `bwa-mem2` to
+  `/opt/bwa-mem2-2.3_x64-linux/bwa-mem2.avx2` (log line: `Launching
+  executable ".../bwa-mem2.avx2"`), the upstream binary path, not a
+  source-built one. `TARGETARCH` correctly took the non-arm64 branch.
+- **DeepVariant was not arch-blocked -- but it was pinned to the wrong image,
+  which is the one real code bug this pass found.** Dispatch is unconditional
+  (`variant_handlers.py`, `pipeline_service.py`), so the entry above is stale
+  and has been marked `— FIXED`. What was actually broken: `deepvariant_image`
+  hardcoded `ghcr.io/antomicblitz/deepvariant-arm64:v1.9.0-arm64.6` on *every*
+  platform. `docker manifest inspect -v` on 2026-08-01 shows that tag is
+  `"architecture": "arm64"` and single-platform, with no amd64 variant, while
+  `google/deepvariant:1.9.0` is `"architecture": "amd64"`. On this machine
+  DeepVariant would have pulled with a platform-mismatch warning and then died
+  at `docker run` with "exec format error" -- inside a job, past the
+  launch-time `tools.require()` check meant to catch exactly this class of
+  "the tool cannot run here". Not caught by the user's testing because Clair3,
+  not DeepVariant, was the caller exercised. Fixed by
+  `default_deepvariant_image` in `backend/app/config.py`, plus gating the BF16
+  fastmath env vars to arm64 -- on x86-64 `TF_ENABLE_ONEDNN_OPTS=0` disables
+  the oneDNN kernels and is a silent slowdown rather than a crash, so carrying
+  the workaround across would have been a performance bug with nothing to
+  point at it.
+- **The governor's disk problem does disappear on Linux -- confirmed by
+  measurement, not just plausible.** `BIOINFO_HOME` is
+  `/mnt/897006ef-.../BioFlow`, a real mounted filesystem (`/dev/nvme0n1`,
+  938G total / 736G free per `df -h`). The container's `shutil.disk_usage`
+  read against `/data` inside `biopipe-api-1` reports 1007.0GB total / 789.3GB
+  free -- the same filesystem, not the VirtioFS host-boot-disk substitution
+  macOS produced. No host-side capacity reporter is needed here; the plain
+  `shutil.disk_usage` path the governor already uses is correct as-is on this
+  machine.
+- **`host.docker.internal` is confirmed NOT automatic on Linux, as
+  predicted -- and fixing DNS is only half of it.** `getent hosts
+  host.docker.internal` inside `biopipe-api-1` failed to resolve, and neither
+  compose file carried `extra_hosts`. **Fixed 2026-08-01**: `extra_hosts:
+  ["host.docker.internal:host-gateway"]` added to `api` and `worker` in
+  `docker-compose.yml` (base, so the override and `worktree-up.sh` both
+  inherit it). Verified with `docker compose config` and by running a
+  throwaway container with the same `--add-host`, which then resolved the name
+  to the bridge gateway `172.17.0.1`.
 
-- **arm64 workarounds may be unnecessary or wrong on x86-64.** `Dockerfile`
-  already branches on `TARGETARCH` and builds bwa-mem2 from source with
-  sse2neon for arm64 (`backend/scripts/build-bwa-mem2-arm64.sh`). On x86-64 the
-  upstream binaries work, so that branch should not fire -- verify it does not.
-- **DeepVariant is no longer arch-blocked at all.** See its entry above: a
-  native Linux arm64 image now exists, so it should work on both architectures
-  and is not a reason to wait for Linux.
-- **The governor's disk problem may disappear.** The entry below is a
-  Docker-Desktop-on-macOS VirtioFS artifact. On Linux, `shutil.disk_usage`
-  through a bind mount reports the real filesystem, so the host-side reporter
-  that entry sketches may be unnecessary there -- which argues for keeping the
-  plain `shutil.disk_usage` path and treating the reporter as the macOS
-  special case, not the general one.
-- **`host.docker.internal` is not automatic on Linux.** The summary model runs
-  on the host and containers reach it via that name; on Linux it needs
-  `extra_hosts: host-gateway` in Compose or it silently fails to connect.
-- **Bind-mount UID/GID.** Docker Desktop papers over ownership; on Linux a
-  container writing to a bind-mounted `BIOINFO_HOME` writes as the container's
-  user, and files can land root-owned on the host.
+  **The second half is host-side and the repo cannot fix it.** With DNS
+  working, a connection to the host model was *still* refused, because the
+  model server on this machine (Ollama) binds `127.0.0.1` only -- and the
+  gateway address is not loopback, so a container reaching `172.17.0.1`
+  never arrives. On Docker Desktop this does not come up. Making the LLM
+  features work on Linux therefore also needs the server bound to all
+  interfaces (`OLLAMA_HOST=0.0.0.0` for Ollama).
 
-Worth doing as an actual attempt on a Linux box rather than an audit -- the
-list above is what to expect, not what will happen.
+  **Also note a port mismatch on this machine, left alone deliberately.**
+  `llm_base_url` defaults to port `11234` (`backend/app/config.py`), while the
+  Ollama here listens on its own default `11434`. Not changed, because `11234`
+  may be deliberate for a different server (LM Studio) on the machine this was
+  written for, and guessing wrong would break that. Set `LLM_BASE_URL`
+  explicitly rather than relying on the default on any given host.
+
+  None of this has surfaced as a bug yet because nothing in the verified
+  feature list above (uploads, NCBI, Clair3, bwa-mem2) calls the summary/LLM
+  path, and that path is designed to no-op when the server is absent.
+- **Bind-mount UID/GID mismatch is confirmed, exactly as predicted.** Files
+  written by the container show as `uid=0 gid=0` (root) both inside the
+  container and on the host (`ls -ln` agrees on both sides), while the host
+  user is `uid=1000`. Nothing has broken yet because nothing outside Docker
+  needs to touch `BIOINFO_HOME`'s contents, but a host-side tool or a
+  non-root host user trying to clean up/inspect the directory tree directly
+  would hit permission friction.
+
+Net: the entry's own five-item list was mostly reassuring -- arm64 and the
+governor's disk are genuine non-issues here. The two things that actually
+needed changing were **one the entry predicted** (`host.docker.internal`) and
+**one it did not** (the arm64-pinned DeepVariant image), and the second was
+the more serious: a wrong-architecture container image that fails inside a job
+rather than at launch.
+
+**The general lesson, since it cost the miss:** the entry framed Linux as a
+list of *macOS accommodations to undo*. The DeepVariant bug was the opposite
+shape -- an arm64 assumption baked in as a universal default, on a machine
+that had never run anything else. Worth checking the same way for any future
+"works on my machine" artifact: not "which workarounds should stop firing"
+but "which single-platform thing is being treated as the only platform".
+
+Still open, both host-side rather than repo bugs: the model server must bind
+`0.0.0.0` for a container to reach it, and `LLM_BASE_URL` should be set
+explicitly rather than trusting the `11234` default. Neither is fixable from
+this repo.
+
+Touched: `docker-compose.yml` (`extra_hosts` on `api`/`worker`),
+`backend/app/config.py` (`default_deepvariant_image`, `is_arm64`),
+`backend/app/pipelines/variant_runner.py` (arm64-gated fastmath env),
+`backend/app/pipelines/tools.py` (`TOOL_META` prose and `repository`, which
+claimed the arm64 port unconditionally). Suite green: 2131 passed.
 
 ## The first `/pipelines/tools` request stalls 6-15s on NanoPlot — FIXED
 
