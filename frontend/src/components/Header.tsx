@@ -3,6 +3,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
+import { useProfileStore } from "../stores/profileStore";
 import { LoadIndicator } from "./LoadIndicator";
 import { Menu } from "./Menu";
 
@@ -30,6 +31,9 @@ export function Header() {
   });
 
   const navigate = useNavigate();
+
+  const profile = useProfileStore((s) => s.current);
+  const logout = useProfileStore((s) => s.logout);
 
   const cleanUp = useMutation({
     mutationFn: () => api.runScheduleNow("gc_blobs"),
@@ -79,6 +83,27 @@ export function Header() {
             onSelect: () => navigate(item.to),
           }))}
         />
+        {/* The label is the profile itself, not a generic "Profile", because
+            the whole point of putting this in the header is that you can see
+            which library you are working in without opening anything. Someone
+            who switched an hour ago should not have to click to find out.
+
+            One item, not two: "Switch profile" and "Logout" would both call
+            logout() and both land on the picker, so offering both would be two
+            names for one action. Selecting a profile issues no token and sets
+            no cookie, so there is no session to end -- returning to the picker
+            is the entirety of what either would do, and "Switch profile" is
+            the honest name for it.
+
+            There is deliberately no "Edit details": the backend exposes only
+            GET/POST/select/DELETE on /profiles, so an edit control would be
+            dead on arrival. */}
+        {profile && (
+          <Menu
+            label={`${profile.display.emoji} ${profile.username}`}
+            items={[{ label: "Switch profile", onSelect: logout }]}
+          />
+        )}
       </nav>
 
       <div className="header-right">
