@@ -106,6 +106,38 @@ own rows, and B does not.
 Touches: `backend/app/api/v1/events.py`, `backend/app/api/v1/schedules.py`,
 `backend/app/queue/queue.py` (`publish_event` call sites).
 
+## Upload dedup never fires: the client never hashes
+
+Raised: 2026-08-01, while wiring the profiles frontend.
+
+`upload_service.create_session` short-circuits and returns `dedup_hit: true`
+when the client's digest already names a blob in the store
+(`upload_service.py:99`). `api/client.ts:229` accepts a `client_sha256`
+parameter for exactly that. But `frontend/src/lib/upload.ts` calls
+`createUpload({project_id, filename, total_size})` and **never sends it**, so
+the branch is real, wired end to end, and unreachable from the UI.
+
+Confirmed by trying it: re-uploading the exact bytes of a blob already in
+`/data/objects/` chunked and transferred normally rather than deduplicating.
+
+Two things follow. The user pays a full transfer for content the machine
+already has -- which is the whole point of content-addressed storage, and the
+larger the file the more it costs. And the "already stored" message in the
+upload tray and in `hooks/useUploads.ts` can never appear, so the strings are
+untestable by any means other than driving the store directly.
+
+The fix is to hash the file client-side before opening the session and pass
+`client_sha256`. Worth checking what that costs for a multi-gigabyte FASTQ on
+the main thread -- a Web Worker or a streamed `crypto.subtle.digest` may be
+needed, and if hashing turns out to cost more than the transfer saves for
+local files, the honest conclusion may be to delete the dead branch instead.
+Either way the current state is the worst of both: the code implies a feature
+that does not run.
+
+Touches: `frontend/src/lib/upload.ts`, `frontend/src/api/client.ts`,
+`backend/app/services/upload_service.py` (no change expected, but it is the
+other half of the contract).
+
 ## Sharing between profiles
 
 Depends on profiles. Share a file with another profile without copying the
