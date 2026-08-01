@@ -8,6 +8,7 @@ import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
+import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
 import { groupPairs, orderWithPairs, type OrderedFile } from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
@@ -232,6 +233,7 @@ function ProjectView({ projectId }: { projectId: string }) {
   const [dragging, setDragging] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [ncbiOpen, setNcbiOpen] = useState(false);
+  const [uniprotOpen, setUniprotOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<FileCategory>>(
     new Set(["reads", "references", "alignments"])
   );
@@ -353,6 +355,16 @@ function ProjectView({ projectId }: { projectId: string }) {
                     >
                       Download from NCBI…
                     </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setAddMenuOpen(false);
+                        setUniprotOpen(true);
+                      }}
+                    >
+                      Download from UniProt…
+                    </button>
                   </div>
                 </>
               )}
@@ -363,6 +375,13 @@ function ProjectView({ projectId }: { projectId: string }) {
 
       {ncbiOpen && (
         <NcbiDownloadDialog projectId={projectId} onClose={() => setNcbiOpen(false)} />
+      )}
+
+      {uniprotOpen && (
+        <UniProtDownloadDialog
+          projectId={projectId}
+          onClose={() => setUniprotOpen(false)}
+        />
       )}
 
       <div className="panel-filter">

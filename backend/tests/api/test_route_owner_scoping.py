@@ -1307,6 +1307,57 @@ class TestUploadsRouter:
         assert mine.status_code == 409
 
 
+class TestUniProtRouter:
+    async def test_the_uniprot_download_is_scoped(
+        self, client, two_profiles, monkeypatch
+    ):
+        """B cannot fetch a proteome into A's project, and A still can.
+
+        Both directions, for the reason the assembly twin establishes: pinning
+        the project lookup to `"local"` leaves a refusal-only test green, since
+        A's project is not `"local"`-owned either.
+
+        Nothing here touches UniProt. The route's own work before the enqueue
+        is a project lookup and some string building; the network calls live in
+        the resolve endpoint rather than this one.
+        """
+        from app.queue import queue
+
+        project = await _project(two_profiles["a"].owner_id(), "a-uniprot")
+        enqueue = AsyncMock(return_value=Job(type="probe", owner="unused"))
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        body = {
+            "project_id": str(project.id),
+            "proteome_id": "UP000002311",
+            "accessions": [],
+            "reviewed_only": True,
+        }
+
+        refused = await client.post(
+            "/api/v1/uniprot/download",
+            json=body,
+            headers=two_profiles["b_headers"],
+        )
+        assert refused.status_code == 404
+        # The body, not just the status: an unrouted path answers 404 too, and
+        # a test that accepted that would pass without reaching the check.
+        assert refused.json()["code"] == "not_found"
+        enqueue.assert_not_awaited()
+
+        allowed = await client.post(
+            "/api/v1/uniprot/download",
+            json=body,
+            headers=two_profiles["a_headers"],
+        )
+        assert allowed.status_code < 400, allowed.text
+        assert enqueue.await_count >= 1
+        assert (
+            enqueue.await_args_list[0].kwargs["owner"]
+            == two_profiles["a"].owner_id()
+        )
+
+
 class TestObjectServiceStillFiltersUnderneath:
     async def test_list_objects_is_scoped(self, two_profiles):
         """A guard on the layer the routes lean on.

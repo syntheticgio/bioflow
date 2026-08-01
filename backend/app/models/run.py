@@ -30,6 +30,11 @@ class RunKind(StrEnum):
     # vocabulary, and "downloaded a genome" reads differently from "downloaded
     # sequencing runs" in the activity view.
     ASSEMBLY_DOWNLOAD = "assembly_download"
+    # One member for both UniProt download shapes. A whole proteome and a
+    # hand-picked set of proteins are the same request to the same endpoint --
+    # only the query differs -- so splitting the enum would describe a
+    # distinction the machine does not make. The run label carries it instead.
+    UNIPROT_DOWNLOAD = "uniprot_download"
 
 
 class RunStatus(StrEnum):

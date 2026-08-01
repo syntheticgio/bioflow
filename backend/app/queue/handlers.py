@@ -735,5 +735,6 @@ from app.queue import (  # noqa: E402, F401
     pipeline_handlers,
     sra_handlers,
     summary_handlers,
+    uniprot_handlers,
     variant_handlers,
 )

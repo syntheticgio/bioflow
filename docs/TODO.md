@@ -497,9 +497,93 @@ Other candidates worth considering under the same heading: explaining *why* a
 QC run failed a threshold, and suggesting the next pipeline step in prose
 alongside the Actions cards.
 
-## UniProt download
+## UniProt download — FIXED
 
-Raised: 2026-07-31, requested.
+Raised: 2026-07-31, requested. **Fixed 2026-07-31.**
+
+Shipped: `backend/app/metadata/uniprot.py` (classify, queries, resolvers),
+`backend/app/services/uniprot_service.py` (launch),
+`backend/app/queue/uniprot_handlers.py` (`download_uniprot`),
+`_apply_uniprot_download` in `backend/app/queue/results.py`,
+`backend/app/api/v1/uniprot.py`, and
+`frontend/src/components/UniProtDownloadDialog.tsx`. Design and plan in
+`docs/superpowers/specs/2026-07-31-uniprot-download-design.md` and
+`docs/superpowers/plans/2026-07-31-uniprot-download.md`.
+
+What the implementation did differently from this entry:
+
+- **A separate dialog, not a branch in the NCBI one.** The entry did not say
+  which; merging was possible since the namespaces do not collide. Rejected:
+  `NcbiDownloadDialog` is already 762 lines carrying two result shapes, and one
+  field accepting six identifier kinds plus free text is an overloaded door.
+  The proteome/assembly cross-link that merging would have bought is a link on
+  the proteome card instead.
+- **One `RunKind` and one handler for both download shapes.** The entry
+  anticipated proteomes *or* per-protein FASTA. Both turned out to be the same
+  `uniprotkb/stream` request differing only in the query string, so the dialog
+  branches and the job does not.
+- **Almost none of `assembly_handlers.py` was copied.** The entry called this
+  "the same shape as the assembly one", which is true structurally and false
+  mechanically: no binary, so no `SUBPROCESS` mode, no `run_subprocess`, no
+  `tools.require`, no `extend_lease`, no disk pre-flight, no
+  `EXTRACTION_FACTOR`, and no zip/checksum/path-traversal handling. The closest
+  model for the transport is `structure_lookup.py`.
+- **`sources.py` needed the entry but not a version field.** UniProt returns
+  `X-UniProt-Release`, a real build number, which that module's docstring says
+  data sources do not have. The release is recorded per-download in the
+  object's `facts`; `DataSource` is unchanged.
+- **`suggestion_service.py` needed nothing**, checked rather than assumed: its
+  align rule already filters on `role is ObjectRole.REFERENCE`, so a `PROTEIN`
+  object is excluded by a guard that exists because a downloaded assembly's
+  `protein.faa` once broke it.
+- **The strain picker was designed, built, and then removed.** This is the
+  biggest departure and is worth reading before designing anything similar.
+  Brainstorming chose "reference proteome by default, expandable to a picker of
+  the organism's other proteomes", and the taxon-4932 fallback was called
+  mandatory. It was half right. Taxon 4932 does have no reference proteome --
+  but the 360 proteomes behind it cannot be downloaded at all: their entries
+  are in UniParc, not UniProtKB's searchable index, which is what both the
+  count and the download query go through. `proteome:UP000037662` returns 0
+  rows and an empty FASTA although its own record claims 5,389 proteins.
+  Sampled across *S. cerevisiae*, *E. coli*, *M. tuberculosis*, and
+  *S. aureus*: **0 of 100** non-reference proteomes were downloadable. The
+  picker could only ever offer dead ends, and it offered them instead of the
+  reference proteome that the organism-*name* query finds immediately. A taxon
+  with no reference proteome now falls back to its name, not to a list.
+
+Measurements, all against the live API on 2026-07-31, since four
+plausible-looking choices were wrong:
+
+- `proteome_type:1` returns **0** for every organism tried. The working
+  reference filter is `reference:true`.
+- `organism_id:4932 AND reference:true` returns **0** while `organism_id:4932`
+  returns **360** -- UniProt attaches yeast's reference proteome to strain
+  taxon 559292.
+- Non-reference proteomes: **0 of 100** downloadable (see above).
+- Human is **20,416 reviewed** against **147,506** including TrEMBL, which is
+  why the reviewed choice is shown rather than defaulted silently.
+- Sizes: yeast 6,067 proteins / 3.9 MB; human reviewed 20,427 / 13.7 MB.
+- `X-Total-Results` and the delivered record count differ slightly (20,416
+  reported, 20,427 delivered), so the header sizes the download and never
+  asserts it.
+
+Six bugs were found by review after the code was written and passing its own
+tests, each verified against the live API before and after the fix: an HTTP 400
+on internally-quoted organism names that the resolver swallowed as "found
+nothing"; malformed UniProt JSON escaping every try/except; a request naming
+both a proteome and accessions producing a file labelled for 6,067 proteins
+holding one; HTTP 4xx retried three times at up to 300s each; a private
+`_ACCESSION` coupling; and a 5,000-digit query returning HTTP 500 because
+Python caps integer parsing at 4,300 digits.
+
+Two things about this repo's test setup cost real time and are worth knowing:
+`docker compose exec api python -m pytest` runs the **main** repo from inside a
+worktree, because the stack bind-mounts it -- every result describes the wrong
+tree. And `conftest.py` hardcodes the database name `biopipe_test` and drops
+every collection at session start, so two concurrent runs against one Mongo
+wipe each other (measured on one unchanged tree: 7 failed, then 1872 passed,
+then 5 failed). `backend/run-worktree-tests.sh` handles both -- main added it for the
+first problem while this branch was in flight, and the two were merged.
 
 `backend/app/services/structure_lookup.py` already resolves a gene to a protein
 structure via UniProt, so the client and the ID-mapping path exist. This asks
