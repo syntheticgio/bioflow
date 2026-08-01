@@ -8,6 +8,7 @@ provide. `aligners.materialize` is the shared answer, and these are its callers.
 Imported by `handlers.py` for the `@handler` registration side effects.
 """
 
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -88,14 +89,64 @@ def _resolve_blob(payload: dict, key: str) -> Path:
     return path
 
 
-def _materialize(ctx: JobContext, work: Path, payload: dict) -> aligners.MaterializedRef:
-    """Lay out the reference and its sidecars under the names tools expect."""
+def _materialize(
+    ctx: JobContext, work: Path, payload: dict, aligner: Aligner | None = None
+) -> aligners.MaterializedRef:
+    """Lay out the reference and its sidecars under the names tools expect.
+
+    `aligner` selects the index layout, which only matters for the directory
+    shape: STAR's members are stored flat and have to be reassembled into a
+    `--genomeDir` before STAR can load them.
+    """
+    layout = aligners.layout_for(aligner) if aligner is not None else None
     return aligners.materialize(
         workdir=work / "ref",
         reference_name=payload.get("reference_name") or "reference.fa",
         reference_blob=_resolve_blob(payload, "reference"),
         sidecars=payload.get("sidecars") or {},
+        layout=layout,
     )
+
+
+def _star_scratch(work: Path, name: str) -> Path:
+    """An empty directory for STAR's `--outFileNamePrefix`, recreated.
+
+    Emptied rather than merely created, because of how a retry interacts with
+    STAR's own temp directory. STAR refuses to start when the directory it
+    wants for scratch (`<prefix>_STARtmp` by default) already exists, and it
+    leaves that directory behind when it is killed rather than exiting. A job
+    reuses its workdir across attempts, so attempt 2 after an OOM kill would
+    fail instantly with "exiting because of fatal ERROR: could not make
+    temporary directory" -- an error about the previous failure, reported as
+    though it were this one's.
+    """
+    scratch = work / name
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True, exist_ok=True)
+    return scratch
+
+
+def _fai_geometry(fai: Path) -> tuple[int, int]:
+    """Total genome length and contig count, from a `.fai`.
+
+    STAR's index parameters are derived from these two numbers, and the `.fai`
+    is exact where the FASTA's file size is not -- it excludes headers and
+    line breaks, which on a 60-column FASTA are about 1.7% of the bytes.
+    Column 2 of each line is that sequence's length.
+    """
+    total = 0
+    contigs = 0
+    with open(fai) as handle:
+        for line in handle:
+            fields = line.split("\t")
+            if len(fields) < 2:
+                continue
+            try:
+                total += int(fields[1])
+            except ValueError:
+                continue
+            contigs += 1
+    return total, contigs
 
 
 @handler(
@@ -150,7 +201,37 @@ def build_index(ctx: JobContext) -> dict:
     ctx.progress(phase="indexing", pct=0.1, message=f"building {aligner.value} index")
 
     index_tool = _index_tool(aligner, tool)
-    if aligner is Aligner.MINIMAP2:
+    if aligner is Aligner.STAR:
+        if not fai.exists():
+            # Unreachable in practice -- faidx above either produced it or the
+            # job already failed -- but STAR's sizing is derived from it, and
+            # falling back to STAR's defaults here would build a mammalian-
+            # sized index for a virus and map almost nothing, succeeding.
+            raise RetryableError("STAR index needs the .fai that faidx produces")
+
+        genome_dir = ref.reference.parent / aligners.layout_for(
+            Aligner.STAR
+        ).directory_name(ref.reference.name)
+        genome_length, contigs = _fai_geometry(fai)
+        cmd = align_runner.build_star_index_command(
+            tool_path=index_tool.path,
+            reference=ref.reference,
+            genome_dir=genome_dir,
+            threads=ctx.payload.get("threads") or 4,
+            genome_length=genome_length,
+            contigs=contigs,
+            scratch=_star_scratch(work, "index"),
+        )
+        # STAR requires the directory to exist before it will write into it,
+        # unlike every other builder here, which creates its own output.
+        genome_dir.mkdir(parents=True, exist_ok=True)
+        log.info(
+            "star_index_sizing",
+            job_id=ctx.job_id,
+            genome_length=genome_length,
+            contigs=contigs,
+        )
+    elif aligner is Aligner.MINIMAP2:
         cmd = align_runner.build_index_command(
             aligner=aligner,
             tool_path=index_tool.path,
@@ -171,8 +252,13 @@ def build_index(ctx: JobContext) -> dict:
         raise _failure(code, log_path, aligner.value)
 
     index_role = aligners.INDEX_ROLE[aligner].value
+    layout = aligners.layout_for(aligner)
     for name in aligners.index_filenames(ref.reference.name, aligner):
-        path = ref.reference.parent / name
+        # `name` is the *stored* name and is what the sidecar record carries;
+        # for the directory shape the file is one level down under a different
+        # name, which is what `workdir_path` undoes. Identity for the other
+        # four aligners, so there is one loop rather than two.
+        path = ref.reference.parent / layout.workdir_path(ref.reference.name, name)
         if not path.exists():
             # A missing member is not a degraded index: the tool refuses to
             # load the set. Better to fail here than at the first alignment.
@@ -221,7 +307,7 @@ def align_reads(ctx: JobContext) -> dict:
     read_group = align_runner.ReadGroup.from_dict(ctx.payload.get("read_group"))
 
     work = _prepare_workdir(ctx, "align")
-    ref = _materialize(ctx, work, ctx.payload)
+    ref = _materialize(ctx, work, ctx.payload, aligner)
     if ref.missing_index:
         # The dependency gate should have made this impossible; if it happens,
         # the index job's sidecars did not reach the payload. Permanent because
@@ -244,6 +330,8 @@ def align_reads(ctx: JobContext) -> dict:
     bam_name = ctx.payload.get("output_name") or "aligned.bam"
     bam_out = out_dir / bam_name
 
+    star_scratch = _star_scratch(work, "star") if aligner is Aligner.STAR else None
+
     cmd = align_runner.build_align_command(
         aligner=aligner,
         aligner_path=tool.path,
@@ -255,6 +343,7 @@ def align_reads(ctx: JobContext) -> dict:
         read_group=read_group,
         params=params,
         tmp_prefix=work / "sort",
+        scratch=star_scratch,
     )
 
     progress = align_runner.AlignProgress(expected_reads=ctx.payload.get("expected_reads"))
@@ -281,6 +370,9 @@ def align_reads(ctx: JobContext) -> dict:
         # exit status of a pipe is otherwise samtools', which would report
         # success over a truncated BAM.
         raise _failure(code, log_path, f"{aligner.value} | samtools sort")
+
+    if star_scratch is not None:
+        _append_star_summary(star_scratch, log_path)
 
     if not bam_out.exists() or bam_out.stat().st_size == 0:
         raise RetryableError("alignment exited 0 but produced no BAM")
@@ -321,6 +413,38 @@ def align_reads(ctx: JobContext) -> dict:
         "samtools_version": samtools.version,
         "workdir": str(work),
     }
+
+
+def _append_star_summary(scratch: Path, log_path: Path) -> None:
+    """Copy STAR's `Log.final.out` into the job log.
+
+    Worth rescuing because it is strictly better than the `samtools flagstat`
+    numbers this application shows for every alignment: it separates uniquely
+    mapped from multi-mapping reads, splits the unmapped into too-short versus
+    too-many-mismatches, and counts splice junctions by motif. None of that is
+    recoverable from a BAM afterwards.
+
+    Appended to the job log rather than parsed into facts because the
+    alignment report has no place to put per-aligner statistics yet. That is
+    the obvious follow-on; until then the numbers are at least visible instead
+    of deleted with the workdir.
+
+    Best-effort: a missing or unreadable log is not a reason to fail a run
+    whose BAM is already written.
+    """
+    summary = scratch / "Log.final.out"
+    try:
+        text = summary.read_text()
+    except OSError as e:
+        log.warning("star_summary_unavailable", path=str(summary), error=str(e))
+        return
+
+    try:
+        with open(log_path, "a") as handle:
+            handle.write("\n--- STAR Log.final.out ---\n")
+            handle.write(text)
+    except OSError as e:
+        log.warning("star_summary_not_logged", error=str(e))
 
 
 def _named_read_link(work: Path, target: Path, name: str | None) -> Path:

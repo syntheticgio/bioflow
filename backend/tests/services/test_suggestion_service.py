@@ -288,6 +288,7 @@ def installed_tools(**overrides):
     available = {
         "bwa_mem2": True, "minimap2": True, "hisat2": True,
         "hisat2_build": True, "bowtie2": True, "bowtie2_build": True,
+        "star": True,
     }
     unknown = set(overrides) - set(available)
     assert not unknown, f"unknown tool(s): {sorted(unknown)}"
@@ -343,6 +344,22 @@ class TestAlignCard:
         card = build_align_card(obj, [_ref("aaa", "ref.fna")])
         assert card.launch["body"]["params"]["aligner"] == "hisat2"
         assert "splice" in card.why.lower()
+
+    def test_rna_seq_stays_on_hisat2_even_with_star_installed(self):
+        """STAR is the faster RNA-seq aligner and the conventional one, so
+        this is a decision rather than an oversight: its index needs ~30 GB
+        resident against HISAT2's ~4 GB, and a suggestion the memory
+        estimator then blocks is advice that cannot be taken. STAR stays a
+        deliberate pick from the align dialog.
+
+        Asserted rather than left implicit because the natural next edit to
+        this rule is to prefer STAR when it is installed."""
+        obj = _fake_obj(
+            facts={"qc_read_chemistry": "short"},
+            metadata={"assay": "RNA-seq", "organism": "Saccharomyces cerevisiae"},
+        )
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.launch["body"]["params"]["aligner"] != "star"
 
     def test_rna_seq_on_a_bacterium_does_not_pick_hisat2(self):
         """Bacteria have no introns, so splice-awareness is wrong there."""
