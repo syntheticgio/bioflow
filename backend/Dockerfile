@@ -40,6 +40,12 @@ WORKDIR /srv
 # collaborator -- the before/after numbers the UI shows come from fastp's JSON
 # in a single pass, so nothing on the default path depends on it.
 #
+# STAR is `rna-star` here -- the package name and the binary name disagree,
+# and `apt-get install star` installs an unrelated package. Debian's build
+# also installs /usr/bin/STAR as a dispatcher that execs a CPU-specific
+# binary (STAR-avx2 or a plainer one), the same trick bwa-mem2's upstream
+# release uses.
+#
 # Versions are recorded at build time and surfaced through the API: a set of
 # trimming parameters means nothing without the version of the tool that ran
 # them, and that ends up in a methods section.
@@ -53,6 +59,7 @@ RUN apt-get update \
         minimap2 \
         bowtie2 \
         hisat2 \
+        rna-star \
         samtools \
         cutadapt \
         trimmomatic \

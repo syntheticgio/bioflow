@@ -105,6 +105,127 @@ class TestPlanLinks:
         assert aligners.plan_links(reference_name="genome.fna", sidecars={}) == {}
 
 
+class TestDirectoryLayout:
+    """STAR's index is a directory, stored flat and reassembled on use.
+
+    The pair of translations is what these cover: a stored
+    `genome.fna.STARindex.SA` has to become `genome.fna.STARindex/SA` on disk
+    and nothing else, and `--genomeDir` has to name the directory rather than
+    the reference inside it. Getting either wrong produces "genome directory
+    does not exist" at run time -- loud, but only after the index has been
+    built and the job has been queued.
+    """
+
+    def test_members_are_stored_flat_under_the_reference_name(self):
+        """So `owns_sidecar` and every database record keep working without
+        knowing a directory is involved."""
+        names = aligners.index_filenames("genome.fna", Aligner.STAR)
+        assert "genome.fna.STARindex.SA" in names
+        assert "genome.fna.STARindex.Genome" in names
+        assert all(name.startswith("genome.fna") for name in names)
+        assert all("/" not in name for name in names)
+
+    def test_the_members_are_the_eight_star_actually_writes(self):
+        """Verified by running STAR 2.7.11b genomeGenerate without an
+        annotation, not recalled. Requiring a file STAR does not write (the
+        exonInfo/geneInfo/transcriptInfo trio, which needs --sjdbGTFfile)
+        would fail every index build after a successful one."""
+        assert set(aligners.STAR_MEMBERS) == {
+            "Genome",
+            "SA",
+            "SAindex",
+            "chrLength.txt",
+            "chrName.txt",
+            "chrNameLength.txt",
+            "chrStart.txt",
+            "genomeParameters.txt",
+        }
+
+    def test_log_out_is_not_an_index_member(self):
+        """STAR writes Log.out into the directory too. It is a build
+        transcript that STAR never reads back, so carrying it would store a
+        log file forever as though it were part of the index."""
+        assert "Log.out" not in aligners.STAR_MEMBERS
+
+    def test_workdir_path_puts_a_member_inside_the_directory(self):
+        layout = aligners.layout_for(Aligner.STAR)
+        assert (
+            layout.workdir_path("genome.fna", "genome.fna.STARindex.SA")
+            == "genome.fna.STARindex/SA"
+        )
+
+    def test_workdir_path_leaves_a_non_member_alone(self):
+        """`fai` travels in the same sidecar dict and belongs beside the
+        reference. Forcing it into the index directory would hide it from
+        samtools, which looks for it next to the FASTA."""
+        layout = aligners.layout_for(Aligner.STAR)
+        assert layout.workdir_path("genome.fna", "genome.fna.fai") == "genome.fna.fai"
+
+    def test_workdir_path_is_identity_for_the_other_layouts(self):
+        for aligner in (Aligner.BWA_MEM2, Aligner.MINIMAP2, Aligner.BOWTIE2):
+            layout = aligners.layout_for(aligner)
+            for name in aligners.index_filenames("genome.fna", aligner):
+                assert layout.workdir_path("genome.fna", name) == name
+
+    def test_reference_argument_is_the_directory_not_the_reference(self):
+        """STAR takes --genomeDir. Handed the reference path, it reports a
+        missing genome directory."""
+        layout = aligners.layout_for(Aligner.STAR)
+        arg = layout.reference_argument(Path("/w/ref/genome.fna"))
+        assert arg == "/w/ref/genome.fna.STARindex"
+
+    def test_plan_links_without_a_layout_leaves_members_flat(self):
+        """The default matters because `variant_handlers` materializes a
+        reference without naming an aligner. Flat members are what STAR sees
+        as a missing directory -- an error rather than a wrong answer, which
+        is the right way for the omission to fail."""
+        plan = aligners.plan_links(
+            reference_name="genome.fna",
+            sidecars={"genome.fna.STARindex.SA": "/objects/ab/cd/x"},
+        )
+        assert plan == {"genome.fna.STARindex.SA": "/objects/ab/cd/x"}
+
+    def test_plan_links_sanitizes_before_translating(self):
+        """The traversal is neutralized on the *stored* name, so a crafted
+        name cannot use the directory translation to escape the workdir."""
+        plan = aligners.plan_links(
+            reference_name="genome.fna",
+            sidecars={"../../etc/genome.fna.STARindex.SA": "/objects/ab/cd/x"},
+            layout=aligners.layout_for(Aligner.STAR),
+        )
+        assert plan == {"genome.fna.STARindex/SA": "/objects/ab/cd/x"}
+        assert not any(part == ".." for part in Path(*plan).parts)
+
+    def test_materialize_builds_a_real_directory_of_links(self, tmp_path):
+        blob = tmp_path / "blob"
+        blob.write_text("index bytes")
+        fai = tmp_path / "faiblob"
+        fai.write_text("chr1\t100\t6\t60\t61\n")
+
+        ref_blob = tmp_path / "refblob"
+        ref_blob.write_text(">chr1\n")
+
+        materialized = aligners.materialize(
+            workdir=tmp_path / "work",
+            reference_name="genome.fna",
+            reference_blob=ref_blob,
+            sidecars={
+                "genome.fna.STARindex.SA": str(blob),
+                "genome.fna.STARindex.Genome": str(blob),
+                "genome.fna.fai": str(fai),
+            },
+            layout=aligners.layout_for(Aligner.STAR),
+        )
+
+        genome_dir = materialized.directory / "genome.fna.STARindex"
+        assert genome_dir.is_dir()
+        assert (genome_dir / "SA").read_text() == "index bytes"
+        assert (genome_dir / "Genome").read_text() == "index bytes"
+        # The .fai stays beside the reference, where samtools looks for it.
+        assert (materialized.directory / "genome.fna.fai").exists()
+        assert not (genome_dir / "genome.fna.fai").exists()
+
+
 class TestMaterialize:
     @pytest.fixture
     def blobs(self, tmp_path):

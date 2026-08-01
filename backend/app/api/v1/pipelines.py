@@ -585,12 +585,17 @@ async def align_defaults(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
     return {
         "params": pipeline_service.default_align_params(obj),
         "read_group": pipeline_service.default_read_group(obj),
+        # Availability comes from the registry, which is the one place an
+        # aligner is declared. The ternary this replaced answered "is minimap2
+        # installed" for every aligner that was not bwa-mem2 -- so bowtie2,
+        # HISAT2 and STAR were all reported available whenever minimap2 was,
+        # and the dialog offered a tool the launch then failed on. The same
+        # bug `align_handlers._aligner_tool` was already fixed for; this call
+        # site was missed.
         "aligners": [
             {
                 "name": a.value,
-                "available": (
-                    tools.bwa_mem2() if a.value == "bwa-mem2" else tools.minimap2()
-                ).available,
+                "available": aligner_registry.spec_for(a).tool().available,
             }
             for a in Aligner
         ],

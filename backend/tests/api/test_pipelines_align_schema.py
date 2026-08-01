@@ -26,7 +26,7 @@ def client():
 
 class TestSchemaEndpoint:
     @pytest.mark.parametrize(
-        "aligner", ["bwa-mem2", "minimap2", "bowtie2", "hisat2"]
+        "aligner", ["bwa-mem2", "minimap2", "bowtie2", "hisat2", "star"]
     )
     def test_every_aligner_has_a_schema(self, client, aligner):
         resp = client.get(f"/pipelines/aligners/{aligner}/schema")

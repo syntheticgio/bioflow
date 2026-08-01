@@ -100,6 +100,10 @@ class SidecarRole(StrEnum):
     MINIMAP2_INDEX = "minimap2-index"
     BOWTIE2_INDEX = "bowtie2-index"
     HISAT2_INDEX = "hisat2-index"
+    # One role for all eight files of STAR's genome directory. They are stored
+    # flat, named `<reference>.STARindex.<member>`, and reassembled into a
+    # directory at materialize time -- see aligners.IndexLayout.
+    STAR_INDEX = "star-index"
     FAI = "fai"
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.

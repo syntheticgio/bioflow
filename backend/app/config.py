@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     bowtie2_build_path: str = "bowtie2-build"
     hisat2_path: str = "hisat2"
     hisat2_build_path: str = "hisat2-build"
+    # STAR builds its own index through --runMode genomeGenerate, so unlike
+    # bowtie2 and hisat2 it needs no second path here.
+    star_path: str = "STAR"
     samtools_path: str = "samtools"
     fasterq_dump_path: str = "fasterq-dump"
     prefetch_path: str = "prefetch"
