@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from app.config import settings
+from app.config import is_arm64, settings
 from app.errors import PermanentError, ValidationError
 from app.logging import get_logger
 from app.pipelines.align_runner import ReadChemistry
@@ -326,6 +326,7 @@ def build_deepvariant_command(
     params: DeepVariantParams,
     container_root: str | None = None,
     host_root: str | None = None,
+    arm64: bool | None = None,
 ) -> list[str]:
     """Assemble the `docker run` invocation for DeepVariant.
 
@@ -336,6 +337,10 @@ def build_deepvariant_command(
     mount lands at the same place the worker sees it. So exactly one value is
     translated -- the left half of `-v` -- and everything else is passed
     through unchanged.
+
+    `arm64` selects the fastmath workaround below; it defaults to this
+    machine's architecture and is a parameter so the tests can assert both
+    branches without patching the interpreter.
     """
     host_root_path = host_path_for(
         container_root if container_root is not None else str(settings.bioinfo_home),
@@ -348,20 +353,30 @@ def build_deepvariant_command(
         host_path_for(p, container_root=container_root, host_root=host_root)
 
     mount_at = container_root if container_root is not None else str(settings.bioinfo_home)
+
+    # arm64 only, and deliberately not passed on x86-64. Without these the
+    # arm64 port dies with SIGILL inside TensorFlow: it targets Graviton3 and
+    # defaults to BF16 fastmath, while Docker on macOS advertises `bf16` in
+    # /proc/cpuinfo but faults on the instruction. Measured 2026-08-01 -- see
+    # the validation section of the design doc.
+    #
+    # On x86-64 there is no such fault, and passing them anyway is not
+    # harmless: TF_ENABLE_ONEDNN_OPTS=0 turns off the oneDNN kernels that make
+    # DeepVariant tolerable on a CPU, so it would be a silent, large slowdown
+    # rather than a visible error.
+    fastmath_env = (
+        ["-e", "DNNL_DEFAULT_FPMATH_MODE=STRICT", "-e", "TF_ENABLE_ONEDNN_OPTS=0"]
+        if (is_arm64() if arm64 is None else arm64)
+        else []
+    )
+
     return [
         "docker",
         "run",
         "--rm",
         "-v",
         f"{host_root_path}:{mount_at}",
-        # Without these the run dies with SIGILL inside TensorFlow. The image
-        # targets Graviton3 and defaults to BF16 fastmath; Docker on macOS
-        # advertises `bf16` in /proc/cpuinfo but faults on the instruction.
-        # Measured 2026-08-01 -- see the validation section of the design doc.
-        "-e",
-        "DNNL_DEFAULT_FPMATH_MODE=STRICT",
-        "-e",
-        "TF_ENABLE_ONEDNN_OPTS=0",
+        *fastmath_env,
         image,
         "run_deepvariant",
         f"--model_type={params.model_type}",

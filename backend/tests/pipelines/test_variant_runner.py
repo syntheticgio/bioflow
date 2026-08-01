@@ -255,6 +255,12 @@ class TestDeepVariantCommand:
             container_root="/data",
             host_root="/HOST/bio",
             params=variant_runner.DeepVariantParams(threads=4, model_type="WGS"),
+            # Always explicit. Left to its default this reads the *host*
+            # architecture, so every assertion below would quietly mean
+            # something different on an arm64 machine than on an x86-64 one --
+            # and the fastmath tests would pass or fail by accident of where
+            # they ran rather than by what the code does.
+            arm64=False,
         )
         kwargs.update(over)
         return variant_runner.build_deepvariant_command(**kwargs)
@@ -290,18 +296,29 @@ class TestDeepVariantCommand:
         """Without --rm a 8.8GB-image container is left behind per run."""
         assert "--rm" in self._cmd()
 
-    def test_disables_bf16_fastmath(self):
-        """Not cosmetic: without these the run dies with SIGILL inside
-        TensorFlow. The image targets Graviton3 and defaults to BF16 fastmath,
+    def test_disables_bf16_fastmath_on_arm64(self):
+        """Not cosmetic: without these the arm64 port dies with SIGILL inside
+        TensorFlow. That image targets Graviton3 and defaults to BF16 fastmath,
         and Docker on macOS advertises bf16 in /proc/cpuinfo while faulting on
         the instruction. Measured 2026-08-01 -- a refactor that drops these
         reintroduces a crash whose message names nothing about its cause."""
-        cmd = self._cmd()
+        cmd = self._cmd(arm64=True)
         assert "DNNL_DEFAULT_FPMATH_MODE=STRICT" in cmd
         assert "TF_ENABLE_ONEDNN_OPTS=0" in cmd
         # Passed as `-e VALUE` pairs, so each must follow an -e.
         for var in ("DNNL_DEFAULT_FPMATH_MODE=STRICT", "TF_ENABLE_ONEDNN_OPTS=0"):
             assert cmd[cmd.index(var) - 1] == "-e"
+
+    def test_does_not_disable_fastmath_on_x86_64(self):
+        """The mirror of the test above, and the direction that actually
+        regresses. There is no SIGILL to avoid on x86-64, and
+        TF_ENABLE_ONEDNN_OPTS=0 switches off the oneDNN kernels DeepVariant
+        leans on -- so carrying the arm64 workaround across would not fail
+        anything, it would just make every run much slower with nothing to
+        show why."""
+        cmd = self._cmd(arm64=False)
+        assert "DNNL_DEFAULT_FPMATH_MODE=STRICT" not in cmd
+        assert "TF_ENABLE_ONEDNN_OPTS=0" not in cmd
 
     def test_a_bam_outside_the_storage_root_raises(self):
         with pytest.raises(PermanentError):

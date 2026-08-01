@@ -974,13 +974,14 @@ TOOL_META: dict[str, ToolMeta] = {
             "Models trained per sequencing chemistry",
         ),
         homepage="https://github.com/google/deepvariant",
-        # The canonical location. The antomicblitz/ URL the port was announced
-        # under now redirects here, and a citation should not rest on a
-        # redirect that may not outlive the page citing it. Verified with
-        # `gh api repos/.../license` on 2026-08-01, which is also where the
-        # BSD-3-Clause below comes from rather than from assuming it inherits
-        # upstream's.
-        repository="https://github.com/Lambda-Biolab/deepvariant-linux-arm64",
+        # Upstream, because that is what BioFlow runs on x86-64 -- which is now
+        # the common case, and was not when this pointed at the arm64 port. The
+        # port is named in `usage` instead, where the architecture it applies to
+        # can be stated alongside it. Both repositories were checked with
+        # `gh api repos/.../license` on 2026-08-01 and both report
+        # BSD-3-Clause, so the field below is correct on either architecture
+        # rather than assuming the port inherits upstream's.
+        repository="https://github.com/google/deepvariant",
         citation=(
             "Poplin R, et al. A universal SNP and small-indel variant caller "
             "using deep neural networks. Nat Biotechnol. 2018."
@@ -991,8 +992,9 @@ TOOL_META: dict[str, ToolMeta] = {
             "Runs as a separate container image rather than being installed "
             "in the BioFlow image, and is downloaded the first time it is "
             "used. BioFlow picks the model from the reads' inferred "
-            "chemistry. This is a community port built for arm64; the "
-            "upstream project publishes x86-64 only."
+            "chemistry. Which image is used depends on the machine: upstream "
+            "publishes x86-64 only, so on arm64 BioFlow uses a community port "
+            "instead. Neither image is multi-architecture."
         ),
         runnable=True,
     ),

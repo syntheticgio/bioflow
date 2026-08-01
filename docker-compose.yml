@@ -53,6 +53,14 @@ services:
       <<: *backend-env
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+    # The summary/LLM model runs on the *host*, and llm_base_url reaches it at
+    # host.docker.internal (app/config.py). Docker Desktop provides that name
+    # for free; Linux does not resolve it at all without this mapping, so the
+    # connection fails with a DNS error rather than anything that names the
+    # cause. host-gateway is a no-op where the name already works, so this is
+    # unconditional rather than platform-branched.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "8000:8000"
     depends_on:
@@ -77,6 +85,10 @@ services:
       WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+    # Same as api: summary_handlers runs in the worker and reaches the host
+    # model by this name. See the note on the api service.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       api:
         condition: service_healthy

@@ -706,18 +706,28 @@ class TestDeepVariantProbe:
 
     def test_reports_the_image_reference_as_its_version(self, monkeypatch):
         """There is no binary to ask for a version, and the image tag is the
-        provenance that matters -- it is what a methods section would cite."""
+        provenance that matters -- it is what a methods section would cite.
+
+        Asserted against the *configured* image rather than a literal, because
+        the default is now architecture-dependent: this previously hardcoded
+        the arm64 port's name and so described the host it ran on rather than
+        the code. Pinning an image here also proves the version tracks the
+        setting instead of a constant that happens to match it.
+        """
         monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
         monkeypatch.setattr(
             tools.subprocess,
             "run",
             lambda *a, **k: type("R", (), {"returncode": 0, "stdout": b"27.3.1", "stderr": b""})(),
         )
+        monkeypatch.setattr(
+            tools.settings, "deepvariant_image", "example.invalid/dv:v9.9.9-test"
+        )
         tools.reset_cache()
 
         tool = tools.deepvariant()
         assert tool.available
-        assert "deepvariant-arm64" in (tool.version or "")
+        assert tool.version == "dv:v9.9.9-test"
 
     def test_unavailable_when_the_daemon_is_unreachable(self, monkeypatch):
         """A mounted socket that answers nothing is the compose-misconfigured
