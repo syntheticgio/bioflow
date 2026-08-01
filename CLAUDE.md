@@ -1,9 +1,38 @@
 # Working on this repo
 
-Single-user, local-only tool for non-critical, non-essential work. There is no
-production deployment and no other users to protect. Optimize for "the person
-using it can see their change" over correctness-at-scale practices that make
-sense for a team or a hosted service.
+Single-user, local-only tool for non-critical, non-essential work. Optimize for
+"the person using it can see their change" over correctness-at-scale practices
+that make sense for a team or a hosted service.
+
+**`main` is this project's dev branch, not its production branch.** A separate
+downstream process does the final testing before anything reaches prod, so
+landing on `main` is not shipping to users -- it is the equivalent of pushing
+to a shared dev trunk.
+
+## Commit and merge once the tests are green, without asking
+
+The consequence of the above: **do not hesitate over committing, merging to
+`main`, or pushing.** Once the suite is green, commit. If the work is done and
+`main` is clean, merge and push. Stopping to ask permission for each of those
+is friction with nothing on the other side of it -- there is no review gate to
+respect and no user-facing release to gate, and the downstream process is what
+actually protects prod.
+
+What still earns a pause:
+
+- **A red or unrun suite.** "Green" is the precondition, and it means read the
+  count, not the exit code of whatever was last in the pipeline.
+- **`main` not being clean.** Merge into a dirty or diverged `main` and the
+  conflict becomes someone else's. Multiple agents merging to `main`
+  concurrently is a known rough edge being worked on separately; if `main` has
+  moved under you, re-run the suite after merging rather than assuming your
+  green still holds.
+- **Anything genuinely destructive** -- history rewrites, force pushes,
+  deleting branches that hold unmerged work. Committing is cheap and
+  reversible; those are not.
+
+Keep commits separable: a mechanical rename and a behaviour change in one
+commit is a commit nobody can review or revert, whatever the test count says.
 
 ## Push to origin when a merge to main is the end of the task
 
@@ -110,6 +139,24 @@ It works by setting `COMPOSE_PROJECT_NAME`, which outranks the `name: biopipe`
 pinned in `docker-compose.yml`, so the worktree stack gets its own containers,
 network, and mongo/redis volumes; `ops/docker-compose.worktree.yml` moves the
 published ports. The main instance on 5173 keeps serving main throughout.
+
+**If the running instance ever does get pointed at a worktree, point it back
+when you are done.** This is the one piece of state in this workflow that
+outlives the task that changed it. `worktree-up.sh` avoids the problem by
+construction, but any route that repoints the 5173 stack -- a deliberate
+`COMPOSE_PROJECT_NAME=biopipe` from a worktree, a hook that got bypassed --
+leaves 5173 serving a branch after the branch is finished with. Nothing
+notices: the app works, it is simply not running the code anyone thinks it is,
+and the next "my merged change isn't in the app" is the symptom. Restore it
+from the main checkout root with
+
+```bash
+docker compose up -d --build api web worker
+```
+
+and confirm with the `docker inspect biopipe-worker-1` mount check above --
+the source path should be the main checkout, not a path under
+`.claude/worktrees/`.
 
 Two things it does that are easy to get wrong by hand. It passes
 `--env-file <main checkout>/.env`, because `.env` is gitignored and a worktree
