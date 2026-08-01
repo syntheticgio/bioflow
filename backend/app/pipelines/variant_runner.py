@@ -139,6 +139,29 @@ def clair3_platform_for_chemistry(chemistry: ReadChemistry | None) -> str:
     return "ont"
 
 
+def model_type_for_chemistry(chemistry: ReadChemistry | None) -> str:
+    """DeepVariant's --model_type for a chemistry.
+
+    Mirrors `clair3_platform_for_chemistry`. The image carries six models; only
+    three are reachable from a chemistry we infer. WES is a real model but
+    cannot be guessed from reads -- exome capture is a property of the library
+    prep, not of the signal -- so it is left to an explicit user choice rather
+    than inferred wrongly.
+    """
+    if chemistry is ReadChemistry.CLR:
+        raise ValidationError(
+            "PacBio CLR reads are not suitable for variant calling: their "
+            "error rate is too high for DeepVariant's models to produce "
+            "reliable calls. Use HiFi/CCS reads instead.",
+            details={"chemistry": chemistry.value},
+        )
+    if chemistry in (ReadChemistry.ONT_SIMPLEX, ReadChemistry.ONT_DUPLEX):
+        return "ONT_R104"
+    if chemistry is ReadChemistry.HIFI:
+        return "PACBIO"
+    return "WGS"
+
+
 def output_name(bam_name: str, caller: str) -> str:
     """The VCF name for an alignment.
 
