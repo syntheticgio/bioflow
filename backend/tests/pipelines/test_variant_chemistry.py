@@ -6,7 +6,11 @@ next -- reads that one fact rather than re-inferring it. This module covers the
 step that makes it reachable from a BAM.
 """
 
+import pytest
+
+from app.errors import ValidationError
 from app.models import SidecarRole
+from app.pipelines import variant_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.queue.results import _APPLIERS, _SIDECAR_ROLES, align_provenance, variant_provenance
 
@@ -94,3 +98,33 @@ class TestApplierWiring:
         """The handler reports role='tbi' as a plain string; without this entry
         the .tbi would be ingested with no role at all."""
         assert _SIDECAR_ROLES["tbi"] is SidecarRole.TBI
+
+
+class TestDeepVariantModelType:
+    def test_short_reads_use_the_wgs_model(self):
+        assert (
+            variant_runner.model_type_for_chemistry(ReadChemistry.SHORT) == "WGS"
+        )
+
+    def test_ont_uses_the_r104_model(self):
+        for chem in (ReadChemistry.ONT_SIMPLEX, ReadChemistry.ONT_DUPLEX):
+            assert variant_runner.model_type_for_chemistry(chem) == "ONT_R104"
+
+    def test_hifi_uses_the_pacbio_model(self):
+        assert (
+            variant_runner.model_type_for_chemistry(ReadChemistry.HIFI) == "PACBIO"
+        )
+
+    def test_unknown_falls_back_to_wgs(self):
+        """Same reasoning as caller_for_chemistry: unknown means QC has not
+        run, and short-read is both the common case and the safe guess."""
+        assert (
+            variant_runner.model_type_for_chemistry(ReadChemistry.UNKNOWN) == "WGS"
+        )
+
+    def test_clr_is_refused(self):
+        """CLR's error rate defeats these models exactly as it defeats Clair3;
+        a caller that returns ordinary-looking wrong calls is worse than one
+        that refuses."""
+        with pytest.raises(ValidationError):
+            variant_runner.model_type_for_chemistry(ReadChemistry.CLR)

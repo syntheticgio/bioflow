@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from app.errors import ValidationError
+from app.config import settings
+from app.errors import PermanentError, ValidationError
 from app.logging import get_logger
 from app.pipelines.align_runner import ReadChemistry
 
@@ -65,6 +66,25 @@ class BcftoolsParams:
         return cls(
             threads=int(raw.get("threads", 4)),
             max_depth=int(raw.get("max_depth", 250)),
+        )
+
+
+@dataclass
+class DeepVariantParams:
+    """DeepVariant invocation knobs."""
+
+    threads: int = 4
+    model_type: str = "WGS"  # {WGS, WES, PACBIO, ONT_R104, HYBRID_PACBIO_ILLUMINA, MASSEQ}
+
+    def as_dict(self) -> dict:
+        return {"threads": self.threads, "model_type": self.model_type}
+
+    @classmethod
+    def from_dict(cls, raw: dict | None) -> "DeepVariantParams":
+        raw = raw or {}
+        return cls(
+            threads=int(raw.get("threads", 4)),
+            model_type=str(raw.get("model_type", "WGS")),
         )
 
 
@@ -138,6 +158,29 @@ def clair3_platform_for_chemistry(chemistry: ReadChemistry | None) -> str:
     return "ont"
 
 
+def model_type_for_chemistry(chemistry: ReadChemistry | None) -> str:
+    """DeepVariant's --model_type for a chemistry.
+
+    Mirrors `clair3_platform_for_chemistry`. The image carries six models; only
+    three are reachable from a chemistry we infer. WES is a real model but
+    cannot be guessed from reads -- exome capture is a property of the library
+    prep, not of the signal -- so it is left to an explicit user choice rather
+    than inferred wrongly.
+    """
+    if chemistry is ReadChemistry.CLR:
+        raise ValidationError(
+            "PacBio CLR reads are not suitable for variant calling: their "
+            "error rate is too high for DeepVariant's models to produce "
+            "reliable calls. Use HiFi/CCS reads instead.",
+            details={"chemistry": chemistry.value},
+        )
+    if chemistry in (ReadChemistry.ONT_SIMPLEX, ReadChemistry.ONT_DUPLEX):
+        return "ONT_R104"
+    if chemistry is ReadChemistry.HIFI:
+        return "PACBIO"
+    return "WGS"
+
+
 def output_name(bam_name: str, caller: str) -> str:
     """The VCF name for an alignment.
 
@@ -147,6 +190,50 @@ def output_name(bam_name: str, caller: str) -> str:
     """
     stem = Path(bam_name).stem
     return f"{stem}.{caller}.vcf.gz"
+
+
+def host_path_for(
+    path: str | Path,
+    *,
+    container_root: str | None = None,
+    host_root: str | None = None,
+) -> str:
+    """Where `path` lives on the Docker host.
+
+    A sibling container started through the host's daemon mounts host paths, so
+    the worker's own view of storage is the wrong thing to hand it. Passing
+    `/data` to `docker run` mounts an empty directory that happens to exist,
+    and the tool then fails "file not found" on a file that is plainly there --
+    which is why anything outside the storage root raises here instead of being
+    passed through hopefully.
+    """
+    container_root = (
+        container_root if container_root is not None else str(settings.bioinfo_home)
+    )
+    host_root = host_root if host_root is not None else settings.bioinfo_home_host
+
+    if not host_root:
+        raise PermanentError(
+            "BIOINFO_HOME_HOST is not set, so the host path for "
+            f"{path} cannot be determined. Set it in docker-compose.override.yml "
+            "to the same host directory BIOINFO_HOME is mounted from.",
+            details={"path": str(path)},
+        )
+
+    # relative_to rather than a string prefix: `/database/x` starts with the
+    # characters of `/data` without being under it, and translating it would
+    # mount nothing.
+    try:
+        rel = Path(path).relative_to(Path(container_root))
+    except ValueError:
+        raise PermanentError(
+            f"{path} is outside {container_root}, so it is not visible to a "
+            "sibling container. Only files under the storage root can be "
+            "passed to DeepVariant.",
+            details={"path": str(path), "container_root": container_root},
+        ) from None
+
+    return str(Path(host_root) / rel) if str(rel) != "." else host_root
 
 
 def build_clair3_command(
@@ -228,6 +315,61 @@ def build_bcftools_command(
     ]
     pipeline = f"{_quote(mpileup)} | {_quote(call)} | {_quote(view)}"
     return ["/bin/sh", "-o", "pipefail", "-c", pipeline]
+
+
+def build_deepvariant_command(
+    *,
+    image: str,
+    bam: Path,
+    reference: Path,
+    output_vcf: Path,
+    params: DeepVariantParams,
+    container_root: str | None = None,
+    host_root: str | None = None,
+) -> list[str]:
+    """Assemble the `docker run` invocation for DeepVariant.
+
+    Two path spaces are in play and mixing them is the failure this function
+    exists to prevent. The *mount* uses the host path, because the daemon
+    starting the container reads it from the host filesystem. The tool's own
+    arguments stay container paths, because inside the sibling container the
+    mount lands at the same place the worker sees it. So exactly one value is
+    translated -- the left half of `-v` -- and everything else is passed
+    through unchanged.
+    """
+    host_root_path = host_path_for(
+        container_root if container_root is not None else str(settings.bioinfo_home),
+        container_root=container_root,
+        host_root=host_root,
+    )
+    # Validated, not used: raises for anything outside the storage root, which
+    # would mount nothing and fail confusingly deep inside the tool.
+    for p in (bam, reference, output_vcf):
+        host_path_for(p, container_root=container_root, host_root=host_root)
+
+    mount_at = container_root if container_root is not None else str(settings.bioinfo_home)
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        f"{host_root_path}:{mount_at}",
+        # Without these the run dies with SIGILL inside TensorFlow. The image
+        # targets Graviton3 and defaults to BF16 fastmath; Docker on macOS
+        # advertises `bf16` in /proc/cpuinfo but faults on the instruction.
+        # Measured 2026-08-01 -- see the validation section of the design doc.
+        "-e",
+        "DNNL_DEFAULT_FPMATH_MODE=STRICT",
+        "-e",
+        "TF_ENABLE_ONEDNN_OPTS=0",
+        image,
+        "run_deepvariant",
+        f"--model_type={params.model_type}",
+        f"--ref={reference}",
+        f"--reads={bam}",
+        f"--output_vcf={output_vcf}",
+        f"--num_shards={params.threads}",
+    ]
 
 
 def build_index_command(*, bcftools_path: str, vcf: Path) -> list[str]:

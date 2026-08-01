@@ -208,6 +208,25 @@ So the installer collects only what the compose file needs: storage location,
 install directory, and port. That leaves it with no dependency on the profiles
 feature at all, and the two can be built in either order.
 
+**Offer a "full install" option that pre-pulls optional tool images.** Added
+2026-07-31, while designing DeepVariant. Some tools are too large to bake into
+the backend image -- DeepVariant's is 8.83 GB on disk, larger than the whole
+rest of the stack -- so they are pulled on demand the first time a user launches
+one. That trades disk for a network dependency at first use, which is wrong for
+someone about to work offline.
+
+The installer is the natural place to resolve it, because it is the one moment
+the user is already online, already waiting, and already answering questions
+about disk. A checkbox ("download optional tools now -- adds ~9 GB, lets
+DeepVariant run offline") makes the trade explicit and one-time instead of
+surfacing it mid-analysis.
+
+Note this means the installer needs a list of optional images and their sizes,
+which should come from the backend rather than being duplicated in the
+installer -- otherwise adding a future optional tool means shipping a new
+installer. An endpoint returning the optional-image manifest is the cheap
+version.
+
 Also note this is a different *kind* of artifact from everything else here: a
 native desktop app, outside this repo's Python/React/Docker toolchain, needing
 its own repo and build/signing story.

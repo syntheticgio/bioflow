@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.errors import ValidationError
+from app.errors import PermanentError, ValidationError
 from app.pipelines import variant_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import (
@@ -234,3 +234,66 @@ class TestVariantProgress:
         assert p.message() == "calling variants"
         p.feed("merging outputs now")
         assert p.message() == "merging outputs"
+
+
+class TestDeepVariantCommand:
+    def _cmd(self, **over):
+        kwargs = dict(
+            image="dv:test",
+            bam=Path("/data/objects/aa/reads.bam"),
+            reference=Path("/data/objects/bb/ref.fa"),
+            output_vcf=Path("/data/tmp/out.vcf.gz"),
+            container_root="/data",
+            host_root="/HOST/bio",
+            params=variant_runner.DeepVariantParams(threads=4, model_type="WGS"),
+        )
+        kwargs.update(over)
+        return variant_runner.build_deepvariant_command(**kwargs)
+
+    def test_mounts_the_host_root_not_the_container_root(self):
+        """The whole point. Mounting /data would mount an empty directory on
+        the host and fail on a file that exists."""
+        cmd = self._cmd()
+        assert "-v" in cmd
+        assert "/HOST/bio:/data" in cmd
+        assert "/data:/data" not in cmd
+
+    def test_paths_are_passed_as_container_paths(self):
+        """Inside the sibling container the mount is still at /data, so the
+        tool's own arguments use container paths -- only the *mount* is
+        translated."""
+        cmd = self._cmd()
+        joined = " ".join(cmd)
+        assert "--reads=/data/objects/aa/reads.bam" in joined
+        assert "--ref=/data/objects/bb/ref.fa" in joined
+        assert "--output_vcf=/data/tmp/out.vcf.gz" in joined
+
+    def test_passes_the_model_type_and_shards(self):
+        cmd = self._cmd()
+        joined = " ".join(cmd)
+        assert "--model_type=WGS" in joined
+        assert "--num_shards=4" in joined
+
+    def test_runs_the_named_image(self):
+        assert "dv:test" in self._cmd()
+
+    def test_removes_the_container_when_done(self):
+        """Without --rm a 8.8GB-image container is left behind per run."""
+        assert "--rm" in self._cmd()
+
+    def test_disables_bf16_fastmath(self):
+        """Not cosmetic: without these the run dies with SIGILL inside
+        TensorFlow. The image targets Graviton3 and defaults to BF16 fastmath,
+        and Docker on macOS advertises bf16 in /proc/cpuinfo while faulting on
+        the instruction. Measured 2026-08-01 -- a refactor that drops these
+        reintroduces a crash whose message names nothing about its cause."""
+        cmd = self._cmd()
+        assert "DNNL_DEFAULT_FPMATH_MODE=STRICT" in cmd
+        assert "TF_ENABLE_ONEDNN_OPTS=0" in cmd
+        # Passed as `-e VALUE` pairs, so each must follow an -e.
+        for var in ("DNNL_DEFAULT_FPMATH_MODE=STRICT", "TF_ENABLE_ONEDNN_OPTS=0"):
+            assert cmd[cmd.index(var) - 1] == "-e"
+
+    def test_a_bam_outside_the_storage_root_raises(self):
+        with pytest.raises(PermanentError):
+            self._cmd(bam=Path("/tmp/elsewhere.bam"))
