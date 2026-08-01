@@ -81,6 +81,36 @@ class TestHisat2:
             align_params.from_dict({"aligner": "hisat2", "rna_strandness": "XY"})
 
 
+class TestStar:
+    def test_unmapped_reads_are_kept_by_default(self):
+        """A departure from STAR's own default, and deliberate: every number
+        the alignment report shows comes from `samtools flagstat`, and
+        flagstat over a BAM with the unmapped reads discarded reports 100%
+        mapped whatever the truth was."""
+        p = align_params.from_dict({"aligner": "star"})
+        assert p.out_sam_unmapped is True
+
+    def test_multimap_limit_defaults_to_stars_own(self):
+        p = align_params.from_dict({"aligner": "star"})
+        assert p.out_filter_multimap_nmax == 20
+
+    def test_a_multimap_limit_below_one_is_rejected(self):
+        """0 would make STAR discard every read, producing an empty BAM from
+        a job that exited cleanly."""
+        with pytest.raises(ValidationError):
+            align_params.from_dict(
+                {"aligner": "star", "out_filter_multimap_nmax": 0}
+            )
+
+    def test_a_negative_intron_max_is_rejected(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "star", "align_intron_max": -1})
+
+    def test_intron_max_defaults_to_stars_derived_ceiling(self):
+        p = align_params.from_dict({"aligner": "star"})
+        assert p.align_intron_max == 0
+
+
 class TestRoundTrip:
     def test_as_dict_round_trips_through_from_dict(self):
         """Params are persisted on the run record and read back when a run is
@@ -90,3 +120,19 @@ class TestRoundTrip:
         )
         restored = align_params.from_dict(original.as_dict())
         assert restored == original
+
+    def test_star_round_trips_too(self):
+        """Including `out_sam_unmapped=False`, which is the one field whose
+        default is True -- a round trip that dropped it would silently turn
+        the setting back on."""
+        original = align_params.from_dict(
+            {
+                "aligner": "star",
+                "two_pass": True,
+                "align_intron_max": 1,
+                "out_sam_unmapped": False,
+            }
+        )
+        restored = align_params.from_dict(original.as_dict())
+        assert restored == original
+        assert restored.out_sam_unmapped is False

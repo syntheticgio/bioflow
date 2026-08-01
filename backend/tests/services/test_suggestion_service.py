@@ -21,6 +21,7 @@ from app.services.suggestion_service import (
     build_annotate_card,
     build_assemble_card,
     build_preprocess_card,
+    build_quantify_card,
     build_variants_card,
     is_eukaryotic,
     resolve_reference,
@@ -312,6 +313,7 @@ def installed_tools(**overrides):
     available = {
         "bwa_mem2": True, "minimap2": True, "hisat2": True,
         "hisat2_build": True, "bowtie2": True, "bowtie2_build": True,
+        "star": True,
     }
     unknown = set(overrides) - set(available)
     assert not unknown, f"unknown tool(s): {sorted(unknown)}"
@@ -367,6 +369,22 @@ class TestAlignCard:
         card = build_align_card(obj, [_ref("aaa", "ref.fna")])
         assert card.launch["body"]["params"]["aligner"] == "hisat2"
         assert "splice" in card.why.lower()
+
+    def test_rna_seq_stays_on_hisat2_even_with_star_installed(self):
+        """STAR is the faster RNA-seq aligner and the conventional one, so
+        this is a decision rather than an oversight: its index needs ~30 GB
+        resident against HISAT2's ~4 GB, and a suggestion the memory
+        estimator then blocks is advice that cannot be taken. STAR stays a
+        deliberate pick from the align dialog.
+
+        Asserted rather than left implicit because the natural next edit to
+        this rule is to prefer STAR when it is installed."""
+        obj = _fake_obj(
+            facts={"qc_read_chemistry": "short"},
+            metadata={"assay": "RNA-seq", "organism": "Saccharomyces cerevisiae"},
+        )
+        card = build_align_card(obj, [_ref("aaa", "ref.fna")])
+        assert card.launch["body"]["params"]["aligner"] != "star"
 
     def test_rna_seq_on_a_bacterium_does_not_pick_hisat2(self):
         """Bacteria have no introns, so splice-awareness is wrong there."""
@@ -894,10 +912,10 @@ class TestSuggestionsFor:
             cards = await suggestions_for(_fake_obj())
         assert "variants" not in [c["kind"] for c in cards]
 
-    async def test_a_bam_gets_only_the_variants_card(self):
+    async def test_a_bam_gets_the_variants_and_quantify_cards(self):
         with stub_db(chemistry=align_runner.ReadChemistry.SHORT):
             cards = await suggestions_for(_bam())
-        assert [c["kind"] for c in cards] == ["variants"]
+        assert [c["kind"] for c in cards] == ["variants", "quantify"]
 
     async def test_a_vcf_gets_only_the_annotate_card(self):
         inputs = pipeline_service.AnnotationInputs(
@@ -989,17 +1007,39 @@ class TestSuggestionsFor:
             assert type(card) is dict
             assert set(card) == CARD_KEYS
 
-    async def test_references_are_not_fetched_for_a_bam(self):
-        """The align card is the only consumer, and it is FASTQ-only. Listing
-        a project's objects to build a card that will not be built is a query
-        per BAM click for nothing."""
-        with patch("app.services.object_service.list_objects") as listing:
+    async def test_a_bam_costs_exactly_one_project_listing(self):
+        """A BAM click costs exactly one project listing, not two.
+
+        This test used to assert *zero*: the align card was the only consumer
+        of a listing and it is FASTQ-only. The quantify card changed that --
+        it needs the project's annotations, and there is no way to offer it
+        without looking. So the guard becomes "once", which is the property
+        that actually matters: the two consumers must not each run their own
+        query, and the align card's reference filter must still not run here.
+        """
+        with patch(
+            "app.services.object_service.list_objects", return_value=[]
+        ) as listing:
             with patch(
                 "app.services.pipeline_service.read_chemistry_for_alignment",
                 return_value=align_runner.ReadChemistry.SHORT,
             ):
                 await suggestions_for(_bam())
-        listing.assert_not_called()
+        assert listing.call_count == 1
+
+    async def test_annotations_are_not_fetched_for_a_fastq(self):
+        """The mirror of the guard above. The quantify card is BAM-only, so
+        listing a project's annotations on a FASTQ click is a query per click
+        for a card that will not be built."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)):
+            with patch(
+                "app.services.pipeline_service.annotations_for_project"
+            ) as annotations:
+                with patch("app.services.object_service.list_objects",
+                           return_value=[]):
+                    await suggestions_for(_fake_obj())
+        annotations.assert_not_called()
 
     async def test_chemistry_is_not_resolved_for_a_fastq(self):
         """`read_chemistry_for_alignment` walks a BAM's provenance to find the
@@ -1028,7 +1068,13 @@ class TestSuggestionsFor:
                 "app.services.pipeline_service.read_chemistry_for_alignment",
                 return_value=align_runner.ReadChemistry.SHORT,
             ):
-                await suggestions_for(_bam())
+                # Patched because the quantify card lists a BAM's project for
+                # annotations; without it this reaches a database the test has
+                # not set up, and fails for a reason unrelated to what it is
+                # asserting.
+                with patch("app.services.object_service.list_objects",
+                           return_value=[]):
+                    await suggestions_for(_bam())
         resolve.assert_not_called()
 
     async def test_the_ready_filter_is_pushed_into_the_listing_query(self):
@@ -1092,4 +1138,89 @@ class TestSuggestionsEndpoint:
                 "/pipelines/suggestions/000000000000000000000001"
             )
         assert resp.status_code == 200
-        assert [c["kind"] for c in resp.json()["suggestions"]] == ["variants"]
+        assert [c["kind"] for c in resp.json()["suggestions"]] == [
+            "variants",
+            "quantify",
+        ]
+
+
+@contextmanager
+def installed_featurecounts(available=True):
+    """Pin the featureCounts probe the quantify card reads.
+
+    A plain module-attribute lookup, like the variant callers' -- not a
+    frozen-spec seam like the aligners', so patching the name
+    `suggestion_service` imported does reach the call.
+    """
+    with patch(
+        "app.services.suggestion_service.tools.featurecounts",
+        return_value=_FakeTool(available, name="featurecounts"),
+    ) as probe:
+        yield probe
+
+
+def _annotation(obj_id="gtf1", kind=FormatKind.GTF):
+    """A stand-in annotation.
+
+    Carries no name: the card reads only whether the list is non-empty, and
+    leaving the field off keeps that honest -- if the card ever starts naming
+    its annotation, these tests should fail rather than quietly pass on a
+    value invented here.
+    """
+    return _fake_obj(kind=kind, obj_id=obj_id)
+
+
+class TestQuantifyCard:
+    def test_the_probe_patch_actually_takes_effect(self):
+        """Guards every test below it, for the reason CLAUDE.md spells out:
+        the image ships featureCounts *installed*, so an available-card
+        assertion passes whether or not the patch worked. Only the
+        unavailable direction can tell a working seam from an escaped one.
+        """
+        with installed_featurecounts(False):
+            card = build_quantify_card(_bam(), [_annotation()])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_a_bam_with_an_annotation_is_runnable(self):
+        with installed_featurecounts(True):
+            card = build_quantify_card(_bam(), [_annotation()])
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/quantify"
+
+    def test_the_launch_body_keys_on_bam_id(self):
+        """The same trap the variants card carries: this endpoint takes
+        `bam_id`, not `object_id`, and sending the wrong one 422s."""
+        with installed_featurecounts(True):
+            card = build_quantify_card(_bam(obj_id="xyz"), [_annotation()])
+        assert card.launch["body"]["bam_id"] == "xyz"
+        assert "object_id" not in card.launch["body"]
+
+    def test_the_annotation_is_left_for_the_server_to_resolve(self):
+        """Omitted rather than picked here, so the server can prefer the GTF
+        over the GFF3 of the same assembly -- featureCounts' conventional
+        grouping attribute is absent from NCBI's GFF3 entirely."""
+        with installed_featurecounts(True):
+            card = build_quantify_card(_bam(), [_annotation()])
+        assert "annotation_id" not in card.launch["body"]
+
+    def test_no_annotation_gates_the_card_with_an_actionable_reason(self):
+        with installed_featurecounts(True):
+            card = build_quantify_card(_bam(), [])
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "no gene annotation" in card.reason
+
+    def test_a_missing_tool_is_reported_before_a_missing_annotation(self):
+        """Both are true when neither is present. The tool is the one the user
+        cannot fix by downloading a genome, so it is the one worth saying."""
+        with installed_featurecounts(False):
+            card = build_quantify_card(_bam(), [])
+        assert "not installed" in card.reason
+
+    def test_a_fastq_gets_no_card_at_all(self):
+        with installed_featurecounts(True):
+            assert build_quantify_card(_fake_obj(), [_annotation()]) is None
+
+    def test_a_vcf_gets_no_card_at_all(self):
+        with installed_featurecounts(True):
+            assert build_quantify_card(_vcf(), [_annotation()]) is None

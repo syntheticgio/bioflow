@@ -40,6 +40,12 @@ WORKDIR /srv
 # collaborator -- the before/after numbers the UI shows come from fastp's JSON
 # in a single pass, so nothing on the default path depends on it.
 #
+# STAR is `rna-star` here -- the package name and the binary name disagree,
+# and `apt-get install star` installs an unrelated package. Debian's build
+# also installs /usr/bin/STAR as a dispatcher that execs a CPU-specific
+# binary (STAR-avx2 or a plainer one), the same trick bwa-mem2's upstream
+# release uses.
+#
 # Versions are recorded at build time and surfaced through the API: a set of
 # trimming parameters means nothing without the version of the tool that ran
 # them, and that ends up in a methods section.
@@ -53,6 +59,7 @@ RUN apt-get update \
         minimap2 \
         bowtie2 \
         hisat2 \
+        rna-star \
         samtools \
         cutadapt \
         trimmomatic \
@@ -60,8 +67,13 @@ RUN apt-get update \
         bzip2 \
         bcftools \
         tabix \
+        subread \
         flye \
     && rm -rf /var/lib/apt/lists/*
+# subread is the package; featureCounts is the binary inside it, and the only
+# part of it anything here calls. Named for the package rather than the tool
+# because that is what apt understands.
+#
 # flye is the de novo assembler, and the cheapest of the three worth having:
 # Debian packages it (2.9.5, ~37MB) and its dependencies are minimap2 and
 # samtools, both already above. hifiasm is not packaged at all and would need
@@ -225,6 +237,25 @@ RUN set -e \
 # reinstall it. Installed globally rather than in a venv because the worker
 # already runs in the system Python.
 RUN pip install --no-cache-dir NanoPlot==1.45.0
+
+# PyDESeq2 rather than Bioconductor's DESeq2, which is also packaged for
+# trixie (r-bioc-deseq2). Both implement the same negative-binomial GLM; the
+# difference is what they drag in. Measured on this image: `apt-get install -s
+# --no-install-recommends r-bioc-deseq2` is 110 packages plus a full R
+# runtime, in an image that already carries arm64 special-casing for
+# bwa-mem2. PyDESeq2 is 28 pip packages and stays inside the Python the worker
+# already runs, so results come back as a DataFrame instead of a TSV written
+# by another language.
+#
+# The honest cost, recorded so nobody rediscovers it as a bug: R DESeq2 is
+# what a reviewer expects to see cited, and PyDESeq2 implements a narrower
+# slice of `lfcShrink`.
+#
+# Its own layer for the same reason as NanoPlot: it pulls anndata, zarr, h5py,
+# scikit-learn and matplotlib, and an application source edit should not
+# reinstall them. Pinned, because a DE result is only comparable to another
+# one from the same version.
+RUN pip install --no-cache-dir pydeseq2==0.5.4
 
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \

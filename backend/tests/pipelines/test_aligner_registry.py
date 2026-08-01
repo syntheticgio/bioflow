@@ -25,6 +25,19 @@ class TestCompleteness:
             assert model.fixed_overhead_mb > 0
             assert model.index_bytes_per_ref_base > 0
 
+    def test_every_spec_probes_its_own_binary(self):
+        """`spec.tool` is what both `align_handlers._aligner_tool` and the
+        align-defaults endpoint use to answer "can this aligner run here".
+
+        This is not hypothetical: the defaults endpoint used to answer with a
+        ternary -- bwa-mem2's probe for bwa-mem2, minimap2's for everything
+        else -- so bowtie2, HISAT2 and STAR were all reported available
+        whenever minimap2 was, and the dialog offered a tool whose launch then
+        failed. A spec wired to the wrong probe fails here instead.
+        """
+        for aligner in Aligner:
+            assert aligner_registry.spec_for(aligner).tool().name == aligner.value
+
     def test_builder_tool_matches_which_aligners_have_a_separate_builder(self):
         """bowtie2 and HISAT2 index through a separate binary (bowtie2-build,
         hisat2-build); bwa-mem2 and minimap2 do not. `align_handlers.build_index`

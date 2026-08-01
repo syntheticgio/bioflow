@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     bowtie2_build_path: str = "bowtie2-build"
     hisat2_path: str = "hisat2"
     hisat2_build_path: str = "hisat2-build"
+    # STAR builds its own index through --runMode genomeGenerate, so unlike
+    # bowtie2 and hisat2 it needs no second path here.
+    star_path: str = "STAR"
     samtools_path: str = "samtools"
     fasterq_dump_path: str = "fasterq-dump"
     prefetch_path: str = "prefetch"
@@ -108,6 +111,9 @@ class Settings(BaseSettings):
     # variant calling besides Clair3 itself.
     bcftools_path: str = "bcftools"
     clair3_path: str = "run_clair3.sh"
+    # From the `subread` package. featureCounts is the only binary in it this
+    # application invokes.
+    featurecounts_path: str = "featureCounts"
     # The de novo assembler, for long reads only. Debian ships it depending on
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.

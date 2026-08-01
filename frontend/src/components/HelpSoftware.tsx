@@ -29,6 +29,12 @@ const GROUPS: { type: PipelineType; title: string }[] = [
   // no published reference, so this is the earlier step for that workflow.
   { type: "assemble", title: "Assembly" },
   { type: "align", title: "Alignment" },
+  // Added while merging the assembly work: `PipelineType.EXPRESSION` reached
+  // the backend with featureCounts and pydeseq2 documented against it, but not
+  // this list, so both tools were absent from /help/software with nothing
+  // failing. That is the same silent omission `suggestion_service`'s
+  // hand-maintained mapping is warned about in CLAUDE.md, in a second place.
+  { type: "expression", title: "Expression" },
   { type: "variant", title: "Variant calling" },
   { type: "download", title: "Data retrieval" },
   { type: "utility", title: "Utilities" },

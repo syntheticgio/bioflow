@@ -38,9 +38,12 @@ from app.pipelines import (
     align_runner,
     aligner_registry,
     aligners,
+    counts_runner,
     cutadapt_runner,
+    de_runner,
     fastp_runner,
     pairing,
+    resource_estimator,
     tools,
     trimmomatic_runner,
     variant_runner,
@@ -899,6 +902,53 @@ async def launch_build_index(
     return job
 
 
+# The floor under a declared memory reservation. The estimator's coefficients
+# are heuristics, and a reference whose `size` is missing or absurdly small
+# would otherwise reserve almost nothing and let the governor admit the job
+# alongside everything else.
+MIN_DECLARED_MEM_MB = 2048
+
+# The threads `build_index` runs with. Declared here rather than only in the
+# handler's `@handler(resources=...)` because the memory estimate has to be
+# computed against the same number the job will actually use.
+INDEX_BUILD_THREADS = 4
+
+
+def declared_align_mem_mb(
+    *,
+    aligner: Aligner,
+    reference_bases: int,
+    threads: int,
+    sort_memory_mb: int,
+    building_index: bool,
+) -> int:
+    """What to reserve with the queue for an alignment or index build.
+
+    The same `resource_estimator` call the launch dialog already makes, used
+    for the reservation rather than only for the warning shown to the user.
+
+    Before this, both handlers declared a flat 8 GB whatever the aligner and
+    whatever the genome. That is roughly right for bwa-mem2 on a human genome
+    and wrong in both directions elsewhere: a STAR human index needs about
+    30 GB, so the governor would admit it believing there was room, and the
+    result is an OOM kill twenty minutes in with a log that says nothing --
+    exactly the failure `resource_estimator` exists to prevent, arriving
+    through the one door it was not watching.
+
+    Note this is a *reservation*, not a limit: nothing enforces it on the
+    process. Its job is to stop the governor from running two heavy jobs whose
+    combined footprint does not fit.
+    """
+    estimate = resource_estimator.estimate_mb(
+        aligner=aligner,
+        reference_bases=reference_bases,
+        threads=threads,
+        sort_memory_mb=sort_memory_mb,
+        building_index=building_index,
+    )
+    return max(estimate, MIN_DECLARED_MEM_MB)
+
+
 async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner: str):
     """Queue the index build, deduplicated on (reference blob, aligner).
 
@@ -931,12 +981,25 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner
     # each, which is the price of neither of them silently getting none.
     dedup_key = f"build_index:{digest or path}:{aligner.value}"
 
+    # `sort_memory_mb=0` because an index build runs no samtools sort -- the
+    # estimator's sort term would otherwise reserve memory for a step that is
+    # not in this job.
+    mem_mb = declared_align_mem_mb(
+        aligner=aligner,
+        reference_bases=reference.size or 0,
+        threads=INDEX_BUILD_THREADS,
+        sort_memory_mb=0,
+        building_index=True,
+    )
+
     return await queue.enqueue(
         "build_index",
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(
+            cpu=INDEX_BUILD_THREADS, mem_mb=mem_mb, io=IoClass.HEAVY
+        ),
         max_attempts=2,
         dedup_key=dedup_key,
         project_id=reference.project_id,
@@ -1181,9 +1244,27 @@ async def launch_alignment(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        # The user's thread count, exactly as trim_reads declares it.
+        # The user's thread count, exactly as trim_reads declares it, and a
+        # memory reservation from the estimator rather than a flat 8 GB that
+        # was right for one aligner on one genome size.
+        #
+        # Recomputed with `building_index=False` rather than reusing the
+        # `estimate` above, which is deliberately not the same number: that one
+        # answers "can this whole operation fit on the host" and so includes
+        # the index build, while this job only ever loads a finished index --
+        # the build is a separate job with its own reservation. Reusing it
+        # would reserve bowtie2's 3x and HISAT2's 4x build multiplier for
+        # every alignment against a not-yet-indexed reference.
         resources=JobResources(
-            cpu=align_params.threads, mem_mb=8192, io=IoClass.HEAVY
+            cpu=align_params.threads,
+            mem_mb=declared_align_mem_mb(
+                aligner=aligner,
+                reference_bases=reference.size or 0,
+                threads=align_params.threads,
+                sort_memory_mb=align_params.sort_memory_mb,
+                building_index=False,
+            ),
+            io=IoClass.HEAVY,
         ),
         max_attempts=2,
         dedup_key=dedup_key,
@@ -1943,3 +2024,531 @@ async def launch_annotation(*, object_id: PydanticObjectId, owner: str):
         project_id=vcf.project_id,
         object_id=vcf.id,
     )
+
+
+# --- Expression: quantification and differential testing --------------------
+
+
+def _check_quantifiable(obj: DataObject) -> None:
+    """Whether a file can be counted.
+
+    Format only. Whether the BAM is *RNA-seq* is not knowable from the bytes
+    and is not checked: counting a DNA alignment against a gene annotation is
+    a strange thing to do but not a wrong one, and refusing it would mean
+    refusing legitimate uses (targeted panels, CDS-level coverage) to prevent
+    a mistake the assignment rate reports anyway.
+    """
+    kind = obj.format.kind
+    if kind not in (FormatKind.BAM, FormatKind.SAM, FormatKind.CRAM):
+        raise ValidationError(
+            f"{obj.name!r} is {kind.value if kind else 'an unknown format'}, "
+            "not an alignment. Counting needs an aligned BAM.",
+            details={"object_id": str(obj.id), "kind": str(kind)},
+        )
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready ({obj.status.value}).",
+            details={"object_id": str(obj.id)},
+        )
+
+
+def _is_annotation(obj: DataObject) -> bool:
+    """Whether an object is a gene annotation featureCounts can read.
+
+    Format first, role second -- and this is the way round that matters. Every
+    annotation in a real project arrives from `download_assembly` with
+    `role=None`, because the format already says GFF/GTF and the ingest path
+    only sets a role where format cannot answer. A rule written as
+    `role == ObjectRole.ANNOTATION` therefore matches *nothing* on a real
+    library while passing any test that builds its objects by hand.
+
+    Checked against the live database rather than reasoned about: of 29
+    objects there, 4 were GFF/GTF and 0 carried the annotation role.
+    """
+    if obj.status is not ObjectStatus.READY:
+        return False
+    return obj.format.kind in (FormatKind.GFF, FormatKind.GTF)
+
+
+async def annotations_for_project(
+    project_id: PydanticObjectId, *, owner: str
+) -> list[DataObject]:
+    """Every annotation in a project, GTF first.
+
+    GTF first because featureCounts' conventional `-t exon -g gene_id` works
+    on it and does not work on NCBI's GFF3 -- see
+    `counts_runner.attributes_for_format`. NCBI ships both for an assembly, so
+    preferring the GTF costs nothing and avoids the failure entirely on the
+    common path.
+    """
+    from app.services import object_service
+
+    objects = await object_service.list_objects(project_id, owner=owner)
+    annotations = [o for o in objects if _is_annotation(o)]
+    annotations.sort(
+        key=lambda o: (0 if o.format.kind is FormatKind.GTF else 1, o.name)
+    )
+    return annotations
+
+
+async def resolve_annotation(
+    bam: DataObject,
+    annotation_id: PydanticObjectId | None,
+    *,
+    owner: str,
+) -> DataObject:
+    """The annotation to count against: explicit if given, else the project's.
+
+    Ambiguity is refused rather than guessed at when more than one distinct
+    annotation is available and none was named. Counting against the wrong one
+    produces a full counts file with a low assignment rate, which looks like a
+    bad sample rather than a wrong input.
+    """
+    from app.services import object_service
+
+    if annotation_id is not None:
+        annotation = await object_service.get_object(annotation_id, owner=owner)
+        if not _is_annotation(annotation):
+            raise ValidationError(
+                f"{annotation.name!r} is not a GTF or GFF annotation.",
+                details={"object_id": str(annotation.id)},
+            )
+        if annotation.project_id != bam.project_id:
+            raise ValidationError(
+                "BAM and annotation must be in the same project"
+            )
+        return annotation
+
+    candidates = await annotations_for_project(bam.project_id, owner=owner)
+    if not candidates:
+        raise ValidationError(
+            "This project has no gene annotation to count against. Download "
+            "one with the assembly, or upload a GTF.",
+            details={"project_id": str(bam.project_id), "needs": "annotation"},
+        )
+
+    # One assembly's GFF and GTF are the same annotation in two formats, not
+    # two choices -- picking the GTF is the whole point of the sort above.
+    # Distinct *assemblies* are a real ambiguity and are refused.
+    distinct = {_assembly_stem(o.name) for o in candidates}
+    if len(distinct) > 1:
+        raise ValidationError(
+            "This project has more than one annotation and none was chosen: "
+            f"{', '.join(sorted(distinct))}. Pick the one matching the "
+            "reference this BAM was aligned against.",
+            details={
+                "project_id": str(bam.project_id),
+                "needs": "annotation_id",
+                "choices": [
+                    {"id": str(o.id), "name": o.name} for o in candidates
+                ],
+            },
+        )
+
+    return candidates[0]
+
+
+def _assembly_stem(filename: str) -> str:
+    """The assembly a GFF/GTF belongs to, from its name.
+
+    `GCF_000146045.2_R64_genomic.gtf` and `..._genomic.gff` are one annotation
+    published in two formats; collapsing them here is what keeps the two-file
+    NCBI download from reading as an ambiguous choice.
+    """
+    stem = Path(filename).name
+    for suffix in (".gtf", ".gff3", ".gff"):
+        if stem.lower().endswith(suffix):
+            return stem[: -len(suffix)]
+    return stem
+
+
+async def paired_for_bam(bam: DataObject) -> bool:
+    """Whether this BAM's reads are paired.
+
+    Three sources, in descending order of trust, because getting it wrong
+    doubles every count on paired data and nothing downstream notices:
+
+    1. `properly_paired_reads > 0` in facts, written by `index_bam`. Definite.
+    2. The alignment run's inputs -- a paired alignment has a MATE input. Also
+       definite, and available for anything this app aligned even when
+       index_bam has not run.
+    3. False, for an uploaded BAM with neither. The dialog shows the value it
+       chose and lets the user correct it, which is the honest handling of a
+       question the file genuinely does not answer.
+
+    Deliberately not answered by reading the BAM's records: `run_subprocess`
+    streams a child to completion, so sampling the first thousand alignments
+    would decompress the whole file to reach them.
+    """
+    from_facts = counts_runner.paired_from_facts(bam.facts)
+    if from_facts is not None:
+        return from_facts
+
+    if bam.produced_by_job is not None:
+        from app.models import PipelineRun
+
+        run_id = await run_service.run_for_job(bam.produced_by_job)
+        if run_id is not None:
+            run = await PipelineRun.get(run_id)
+            if run is not None:
+                return any(i.role is RunInputRole.MATE for i in run.inputs)
+
+    return False
+
+
+async def default_count_params(
+    bam: DataObject, annotation: DataObject
+) -> dict:
+    """The counting parameters this BAM and annotation imply.
+
+    Both interesting values are derived rather than defaulted. Strandedness
+    comes off the alignment's own `--rna-strandness`, so a user who answered
+    the question once at alignment does not answer it again here and get it
+    wrong; the feature/attribute pair comes from the annotation's format,
+    where the conventional default is silently wrong for GFF3.
+    """
+    align_params = (bam.facts or {}).get("align_params") or {}
+    strandedness = counts_runner.strandedness_for_align_params(align_params)
+    feature_type, attribute = counts_runner.attributes_for_format(
+        annotation.format.kind
+    )
+
+    return counts_runner.CountsParams(
+        threads=settings.pipeline_default_threads,
+        strandedness=(
+            strandedness if strandedness is not None else counts_runner.UNSTRANDED
+        ),
+        paired=await paired_for_bam(bam),
+        feature_type=feature_type,
+        attribute=attribute,
+    ).as_dict()
+
+
+async def launch_quantify(
+    *,
+    bam_id: PydanticObjectId,
+    owner: str,
+    annotation_id: PydanticObjectId | None = None,
+    params: dict | None = None,
+) -> Job:
+    """Queue a per-gene count over one aligned BAM.
+
+    Unlike variant calling this needs no index: featureCounts streams the BAM
+    in the order it finds it and never seeks.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    bam = await object_service.get_object(bam_id, owner=owner)
+    _check_quantifiable(bam)
+
+    annotation = await resolve_annotation(bam, annotation_id, owner=owner)
+
+    merged = counts_runner.CountsParams.from_dict({
+        **(await default_count_params(bam, annotation)),
+        **(params or {}),
+    })
+
+    tools.require(tools.featurecounts())
+
+    payload: dict = {
+        "object_id": str(bam.id),
+        "annotation_object_id": str(annotation.id),
+        "project_id": str(bam.project_id),
+        "bam_name": bam.name,
+        "annotation_name": annotation.name,
+        "params": merged.as_dict(),
+    }
+    for key, obj in (("bam", bam), ("annotation", annotation)):
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            payload[f"{key}_sha256"] = digest
+        if path:
+            payload[f"{key}_path"] = path
+
+    run = await run_service.create_run(
+        kind=RunKind.QUANTIFY,
+        project_id=bam.project_id,
+        label=f"{bam.name} → counts ({annotation.name})",
+        inputs=[
+            RunInput(object_id=bam.id, name=bam.name, role=RunInputRole.ALIGNMENT),
+            RunInput(
+                object_id=annotation.id,
+                name=annotation.name,
+                role=RunInputRole.ANNOTATION,
+            ),
+        ],
+        params=merged.as_dict(),
+        owner=owner,
+        tool="featurecounts",
+    )
+
+    job = await queue.enqueue(
+        "quantify",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=merged.threads, mem_mb=4096, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=(
+            f"quantify:{bam.id}:{annotation.id}:"
+            f"{_params_fingerprint(merged.as_dict())}"
+        ),
+        project_id=bam.project_id,
+        object_id=bam.id,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical quantification is already queued or running",
+            details={"bam_id": str(bam.id), "annotation_id": str(annotation.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.QUANTIFY)
+    log.info(
+        "quantify_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        bam_id=str(bam.id),
+        strandedness=merged.strandedness,
+        paired=merged.paired,
+    )
+    return job
+
+
+def sample_name_for(obj: DataObject) -> str:
+    """The readable name for a counts object in a matrix or a results table.
+
+    `sample_id` -- an existing common metadata field, not one invented for
+    this -- if the user set one, else the file name with its pipeline suffixes
+    stripped. `SRR1234567_trimmed.sorted.counts.tsv` is what the pipeline
+    produces and is nobody's idea of a column header.
+    """
+    explicit = (obj.metadata or {}).get("sample_id")
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    return de_runner.counts_path_stem(obj.name)
+
+
+async def counts_for_project(
+    project_id: PydanticObjectId, *, owner: str
+) -> list[DataObject]:
+    """Every counts object in a project, newest last."""
+    from app.services import object_service
+
+    objects = await object_service.list_objects(project_id, owner=owner)
+    counts = [
+        o
+        for o in objects
+        if o.role is ObjectRole.COUNTS and o.status is ObjectStatus.READY
+    ]
+    counts.sort(key=lambda o: (o.created_at, o.name))
+    return counts
+
+
+async def differential_expression_defaults(
+    project_id: PydanticObjectId, *, owner: str
+) -> dict:
+    """What the DE dialog opens with.
+
+    The design is read from each counts object's `condition` metadata, which
+    is where the metadata editor and the bulk edit bar already write -- so
+    "tag these six as treated" is a gesture the user has already been able to
+    make, on the reads, and it arrives here through the metadata each applier
+    copies forward.
+
+    Everything here is a *default*. Nothing refuses to open because the
+    metadata is incomplete: the dialog is where a design gets finished, not
+    where it has to have been finished already.
+    """
+    counts = await counts_for_project(project_id, owner=owner)
+
+    samples = [
+        {
+            "object_id": str(o.id),
+            "name": o.name,
+            "sample": sample_name_for(o),
+            "condition": str((o.metadata or {}).get("condition") or ""),
+            "assigned_pct": (o.facts or {}).get("assigned_pct"),
+            "genes_detected": (o.facts or {}).get("genes_detected"),
+            # Surfaced so the dialog can warn before a run rather than after:
+            # a sample counted against a different annotation cannot be merged
+            # with the others, and finding that out from a failed job is a
+            # worse experience than seeing it greyed out in the list.
+            "annotation_sha256": (o.facts or {}).get("annotation_sha256"),
+            "annotation_name": (o.facts or {}).get("annotation_name"),
+        }
+        for o in counts
+    ]
+
+    conditions = sorted({s["condition"] for s in samples if s["condition"]})
+
+    return {
+        "samples": samples,
+        "conditions": conditions,
+        # Two conditions is the common case and the only one this supports, so
+        # pre-fill the contrast when there are exactly two. Alphabetical, with
+        # the second as the test group -- arbitrary, and the dialog lets it be
+        # swapped, which is cheaper than guessing which name means "treated".
+        "contrast": (
+            {"reference": conditions[0], "test": conditions[1]}
+            if len(conditions) == 2
+            else None
+        ),
+        "min_replicates": de_runner.MIN_REPLICATES,
+        "available": tools.pydeseq2().available,
+    }
+
+
+async def launch_differential_expression(
+    *,
+    project_id: PydanticObjectId,
+    owner: str,
+    design: dict[str, str],
+    contrast: dict,
+    threads: int | None = None,
+) -> Job:
+    """Queue a differential expression test over N counts objects.
+
+    `design` maps counts object id to condition name. Validated fully here
+    rather than in the handler: every failure mode this has -- a singleton
+    group, a contrast naming a condition nobody is in, samples counted against
+    different annotations -- is knowable before anything is enqueued, and a
+    job that dies twenty seconds in with a KeyError from inside PyDESeq2 is a
+    worse version of the same answer.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not design:
+        raise ValidationError("No samples were assigned to a condition.")
+
+    test = str(contrast.get("test") or "")
+    reference = str(contrast.get("reference") or "")
+    if not test or not reference:
+        raise ValidationError(
+            "A contrast needs both a test and a reference condition."
+        )
+
+    objects: list[DataObject] = []
+    for object_id in design:
+        obj = await object_service.get_object(
+            PydanticObjectId(object_id), owner=owner
+        )
+        if obj.role is not ObjectRole.COUNTS:
+            raise ValidationError(
+                f"{obj.name!r} is not a counts file.",
+                details={"object_id": str(obj.id)},
+            )
+        if obj.project_id != project_id:
+            raise ValidationError(
+                f"{obj.name!r} is in a different project.",
+                details={"object_id": str(obj.id)},
+            )
+        objects.append(obj)
+
+    samples = [
+        de_runner.SampleCounts(
+            sample=sample_name_for(o),
+            condition=str(design[str(o.id)]),
+            counts={},
+            annotation_sha256=(o.facts or {}).get("annotation_sha256"),
+            object_id=str(o.id),
+        )
+        for o in objects
+    ]
+
+    # Both checks run before the enqueue. validate_design catches the design
+    # errors; the annotation check here is the cheap half of what
+    # de_runner.merge_counts will re-check on the real gene sets -- the
+    # digests are known now, the gene sets are not.
+    de_runner.validate_design(samples, test=test, reference=reference)
+
+    digests = {s.annotation_sha256 for s in samples if s.annotation_sha256}
+    if len(digests) > 1:
+        raise ValidationError(
+            "These samples were counted against different annotations, so "
+            "their counts are not comparable. Re-quantify them against one "
+            "annotation before testing.",
+            details={"annotations": sorted(d for d in digests if d)},
+        )
+
+    tools.require(tools.pydeseq2())
+
+    payload_samples = []
+    for obj, sample in zip(objects, samples, strict=True):
+        entry = {
+            "counts_object_id": str(obj.id),
+            "name": obj.name,
+            "sample": sample.sample,
+            "condition": sample.condition,
+            "annotation_sha256": sample.annotation_sha256,
+        }
+        digest, path = await _resolve_readable(obj)
+        if digest:
+            entry["counts_sha256"] = digest
+        if path:
+            entry["counts_path"] = path
+        payload_samples.append(entry)
+
+    resolved_threads = threads or settings.pipeline_default_threads
+    payload = {
+        "project_id": str(project_id),
+        "samples": payload_samples,
+        "contrast": {"test": test, "reference": reference},
+        "threads": resolved_threads,
+    }
+
+    run = await run_service.create_run(
+        kind=RunKind.DIFFERENTIAL_EXPRESSION,
+        project_id=project_id,
+        # Not "a → b": this is the one run kind with N inputs, and naming them
+        # all would produce a 400-character label. What a person needs to tell
+        # two DE runs apart is the contrast and the size, not the file list.
+        label=(
+            f"{len(samples)} samples — {test} vs {reference}"
+        ),
+        inputs=[
+            RunInput(object_id=o.id, name=o.name, role=RunInputRole.COUNTS)
+            for o in objects
+        ],
+        params={
+            "contrast": {"test": test, "reference": reference},
+            "design": {s.sample: s.condition for s in samples},
+            "threads": resolved_threads,
+        },
+        owner=owner,
+        tool="pydeseq2",
+    )
+
+    job = await queue.enqueue(
+        "differential_expression",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=resolved_threads, mem_mb=4096, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=(
+            f"de:{project_id}:{test}:{reference}:"
+            f"{_params_fingerprint({k: v for k, v in sorted(design.items())})}"
+        ),
+        project_id=project_id,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical differential expression run is already queued or "
+            "running",
+            details={"project_id": str(project_id), "contrast": [test, reference]},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.TEST)
+    log.info(
+        "differential_expression_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        samples=len(samples),
+        test=test,
+        reference=reference,
+    )
+    return job

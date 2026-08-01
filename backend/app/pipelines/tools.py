@@ -166,7 +166,15 @@ def _looks_like_version(value: str | None) -> bool:
     `_clean_version` returns its input verbatim when nothing parses, so a
     non-empty result is not by itself evidence that a version was found.
     """
-    return bool(value and re.fullmatch(r"\d+\.\d+(?:\.\d+)?", value))
+    return bool(value and re.fullmatch(_VERSION_PATTERN, value))
+
+
+# The trailing letter is STAR's: it releases 2.7.11a and 2.7.11b as distinct
+# versions, and truncating to 2.7.11 names a release that is not the one that
+# ran. Kept to a single letter so it cannot swallow a suffix that is not part
+# of the version -- minimap2's "2.28-r1209" still parses as 2.28, since the
+# separator is a dash rather than a letter.
+_VERSION_PATTERN = r"\d+\.\d+(?:\.\d+)?[a-z]?"
 
 
 def _clean_version(raw: str) -> str:
@@ -185,7 +193,7 @@ def _clean_version(raw: str) -> str:
     for line in (raw or "").splitlines():
         # Anchored to a digit-dot-digit so the `2` in "bwa-mem2.avx2" cannot
         # be mistaken for a version on the dispatch line.
-        match = re.search(r"v?(\d+\.\d+(?:\.\d+)?)", line)
+        match = re.search(rf"v?({_VERSION_PATTERN})", line)
         if match:
             return match.group(1)
     return raw.splitlines()[0].strip() if raw else ""
@@ -274,6 +282,16 @@ def bowtie2() -> Tool:
 @lru_cache(maxsize=1)
 def hisat2() -> Tool:
     return _probe("hisat2", settings.hisat2_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def star() -> Tool:
+    # `--version` prints the bare version and exits 0. Note the Debian package
+    # installs /usr/bin/STAR as a dispatcher that execs STAR-avx2 or a plainer
+    # build depending on the CPU, so the fingerprint covers the dispatcher and
+    # not the binary that ultimately runs -- the same known gap the interpreter
+    # wrappers have, and accepted for the same reason.
+    return _probe("star", settings.star_path, ["--version"])
 
 
 @lru_cache(maxsize=1)
@@ -454,6 +472,52 @@ def flye() -> Tool:
     return _probe("flye", settings.flye_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def featurecounts() -> Tool:
+    # Writes its banner to stderr and exits non-zero on `-v` with no input
+    # files. `_probe` already reads whichever stream produced something, and
+    # already accepts a non-zero exit when the output still looks like a
+    # version, so both are handled without a special case here.
+    return _probe("featurecounts", settings.featurecounts_path, ["-v"])
+
+
+@lru_cache(maxsize=1)
+def pydeseq2() -> Tool:
+    """The differential expression engine.
+
+    A Python library, not a binary, so `_probe`'s shutil.which model does not
+    apply -- there is nothing on PATH to find and nothing to exec. It is
+    reported as a tool anyway, deliberately: the version that ran a test is
+    half of that result's provenance in exactly the way an aligner version is,
+    and a DE result whose engine version is not recorded anywhere is not
+    reproducible. Leaving it out of the panel would mean the one number a
+    methods section needs is the one number the app does not show.
+
+    `path` carries the installed module's file rather than a PATH entry, which
+    keeps `available` (path is not None and no error) meaning the same thing
+    it means for every other tool, so `require()` needs no special case.
+    """
+    try:
+        import pydeseq2 as _pydeseq2
+    except ImportError as e:
+        return Tool(
+            name="pydeseq2",
+            path=None,
+            version=None,
+            error=(
+                "pydeseq2 is not importable. It is pip-installed in the "
+                f"backend image; if you are running outside Docker, install "
+                f"it with `pip install pydeseq2`. ({e})"
+            ),
+        )
+
+    return Tool(
+        name="pydeseq2",
+        path=getattr(_pydeseq2, "__file__", None) or "pydeseq2",
+        version=getattr(_pydeseq2, "__version__", None),
+    )
+
+
 def all_tools() -> list[Tool]:
     return [
         fastp(),
@@ -465,6 +529,7 @@ def all_tools() -> list[Tool]:
         minimap2(),
         bowtie2(),
         hisat2(),
+        star(),
         samtools(),
         bcftools(),
         clair3(),
@@ -473,6 +538,8 @@ def all_tools() -> list[Tool]:
         fasterq_dump(),
         prefetch(),
         datasets(),
+        featurecounts(),
+        pydeseq2(),
     ]
 
 
@@ -493,6 +560,11 @@ class PipelineType(StrEnum):
     # misleading listed as utilities beside samtools.
     DOWNLOAD = "download"
     VARIANT = "variant"
+    # Counting reads per gene and testing those counts between conditions.
+    # One member rather than two: quantification and the test are separate
+    # pipelines, but a tool selector splitting them would show two screens of
+    # one card each, and a user thinking "RNA-seq" is looking for both.
+    EXPRESSION = "expression"
     ASSEMBLE = "assemble"
 
 
@@ -802,7 +874,7 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1109/IPDPS.2019.00041",
         license="MIT",
         usage=(
-            "One of the four aligners an alignment job can select, and the "
+            "One of the five aligners an alignment job can select, and the "
             "default suggested for short reads. Builds its own index for a "
             "reference the first time one is needed, then aligns straight into "
             "a sorted BAM."
@@ -855,7 +927,7 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1038/nmeth.1923",
         license="GPL-3.0-or-later",
         usage=(
-            "One of the four aligners an alignment job can select. Its index is "
+            "One of the five aligners an alignment job can select. Its index is "
             "built by a separate bowtie2-build binary, which this application "
             "runs on demand rather than asking the user to prepare a reference "
             "beforehand."
@@ -883,9 +955,42 @@ TOOL_META: dict[str, ToolMeta] = {
         citation_url="https://doi.org/10.1038/s41587-019-0201-4",
         license="GPL-3.0-or-later",
         usage=(
-            "One of the four aligners an alignment job can select, and the "
+            "One of the five aligners an alignment job can select, and the "
             "RNA-seq choice. Like bowtie2 its index comes from a separate "
             "hisat2-build binary this application runs on demand."
+        ),
+    ),
+    "star": ToolMeta(
+        pipelines=(PipelineType.ALIGN,),
+        one_liner="Splice-aware RNA-seq aligner, fastest but memory-hungry",
+        summary=(
+            "The reference RNA-seq aligner, and the one most published "
+            "pipelines use. It is substantially faster than HISAT2 and finds "
+            "novel junctions more sensitively, at the cost of an uncompressed "
+            "suffix-array index that must be resident in RAM: roughly 30 GB "
+            "for a human genome, against HISAT2's 4 GB. On a machine that "
+            "cannot spare that, HISAT2 is the alignment that finishes."
+        ),
+        strengths=(
+            "Splice-aware, with sensitive novel-junction discovery",
+            "Faster than other splice-aware aligners on the same hardware",
+            "Two-pass mode re-aligns against junctions found in the first pass",
+            "Reports per-junction counts and a detailed mapping summary",
+            "The conventional choice in published RNA-seq pipelines",
+        ),
+        homepage="https://github.com/alexdobin/STAR",
+        repository="https://github.com/alexdobin/STAR",
+        citation="Dobin et al., Bioinformatics 2013",
+        citation_url="https://doi.org/10.1093/bioinformatics/bts635",
+        license="GPL-3.0-or-later",
+        usage=(
+            "One of the five aligners an alignment job can select, and the "
+            "fast RNA-seq choice. Its index is a directory this application "
+            "builds on demand with STAR's own genomeGenerate mode, sizing the "
+            "suffix-array and chromosome-bin parameters from the reference "
+            "rather than leaving defaults that misbehave on small genomes. "
+            "Alignment runs without an annotation file, so junctions are "
+            "discovered from the reads rather than read from a GTF."
         ),
     ),
     "samtools": ToolMeta(
@@ -1051,6 +1156,81 @@ TOOL_META: dict[str, ToolMeta] = {
             "cannot assemble them."
         ),
     ),
+    "featurecounts": ToolMeta(
+        pipelines=(PipelineType.EXPRESSION,),
+        one_liner="Counts reads per gene from an aligned BAM",
+        summary=(
+            "Assigns aligned reads to genomic features and counts them per "
+            "gene. The step between an RNA-seq alignment and any differential "
+            "expression test: a BAM says where reads landed, and this turns "
+            "that into one number per gene per sample."
+        ),
+        strengths=(
+            "Fast: counts a typical RNA-seq BAM in well under a minute",
+            "Handles paired-end fragments without double-counting mates",
+            "Strand-specific counting for stranded library preps",
+            "Reads GTF directly, including NCBI's published annotations",
+        ),
+        homepage="https://subread.sourceforge.net/",
+        repository="https://github.com/ShiLab-Bioinformatics/subread",
+        citation=(
+            "Liao Y, Smyth GK, Shi W. featureCounts: an efficient "
+            "general-purpose program for assigning sequence reads to genomic "
+            "features. Bioinformatics. 2014;30(7):923-30."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btt656",
+        # From Debian's copyright file for subread 2.0.8+dfsg-1, which is the
+        # build actually in this image. The project's own homepage does not
+        # state a license anywhere, so upstream could not confirm it.
+        license="GPL-3.0+",
+        usage=(
+            "Runs one sample at a time, taking an aligned RNA-seq BAM and an "
+            "annotation and producing a per-gene count file registered as a "
+            "project object. One sample per job rather than all of them in "
+            "one invocation, so adding a sample later costs one job instead "
+            "of redoing every sample; the differential expression job is what "
+            "merges the per-sample counts back into a matrix. Strandedness "
+            "follows the alignment's recorded library orientation where the "
+            "BAM has one, since a mismatch there silently returns near-zero "
+            "counts rather than failing."
+        ),
+    ),
+    "pydeseq2": ToolMeta(
+        pipelines=(PipelineType.EXPRESSION,),
+        one_liner="Differential expression testing on count data",
+        summary=(
+            "Tests whether per-gene counts differ between conditions, fitting "
+            "a negative binomial model with shrunken dispersion estimates. A "
+            "Python reimplementation of DESeq2's method, and the step that "
+            "turns a counts matrix into a ranked list of genes with fold "
+            "changes and multiple-testing-corrected p-values."
+        ),
+        strengths=(
+            "Models count data properly rather than treating it as continuous",
+            "Shares dispersion information across genes, which is what makes "
+            "small replicate numbers usable",
+            "Corrects for multiple testing across every gene tested",
+            "Same method as DESeq2 without requiring an R runtime",
+        ),
+        homepage="https://pydeseq2.readthedocs.io/en/stable/",
+        repository="https://github.com/owkin/PyDESeq2",
+        citation=(
+            "Muzellec B, Telenczuk M, Cabeli V, Andreux M. PyDESeq2: a python "
+            "package for bulk RNA-seq differential expression analysis. "
+            "Bioinformatics. 2023."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btad547",
+        license="MIT",
+        usage=(
+            "Backs the differential expression job. Takes the per-gene count "
+            "files produced by quantification plus the condition each sample "
+            "belongs to, fits the model, and returns per-gene fold changes "
+            "and adjusted p-values. A Python library rather than a binary, so "
+            "it runs inside the worker process instead of being executed; its "
+            "version is still reported here because it is half the provenance "
+            "of any result it produces."
+        ),
+    ),
 }
 
 
@@ -1129,6 +1309,7 @@ def reset_cache() -> None:
     minimap2.cache_clear()
     bowtie2.cache_clear()
     hisat2.cache_clear()
+    star.cache_clear()
     bowtie2_build.cache_clear()
     hisat2_build.cache_clear()
     samtools.cache_clear()
@@ -1139,3 +1320,5 @@ def reset_cache() -> None:
     fasterq_dump.cache_clear()
     prefetch.cache_clear()
     datasets.cache_clear()
+    featurecounts.cache_clear()
+    pydeseq2.cache_clear()

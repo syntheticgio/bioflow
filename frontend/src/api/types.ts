@@ -51,7 +51,14 @@ export type ObjectRole =
    * aligner's reference picker -- both are FASTA. */
   | "protein"
   /** CDS / transcript nucleotide FASTA. Same hazard as "protein". */
-  | "transcript";
+  | "transcript"
+  /** Per-gene read counts for one sample. Anonymous TSV, so only the role
+   * distinguishes it. */
+  | "counts"
+  /** Per-gene fold changes and adjusted p-values from a DE test. Also
+   * anonymous TSV, and kept separate from "counts" so a results table can
+   * never be fed back into a DE run as if it were input. */
+  | "de_results";
 
 /**
  * What kind of scaffolding a sidecar is. Distinct from ObjectRole: a role says
@@ -60,6 +67,14 @@ export type ObjectRole =
 export type SidecarRole =
   | "bwa-mem2-index"
   | "minimap2-index"
+  | "bowtie2-index"
+  | "hisat2-index"
+  /**
+   * One role for all eight files of STAR's genome directory. They are stored
+   * flat as `<reference>.STARindex.<member>` and only become a directory when
+   * a job materializes them for STAR.
+   */
+  | "star-index"
   | "fai"
   | "bai"
   /** The tabix index beside a bgzipped VCF -- to a VCF what bai is to a BAM. */
@@ -351,6 +366,7 @@ export type PipelineType =
   | "utility"
   | "download"
   | "variant"
+  | "expression"
   | "assemble";
 
 export interface PipelineTool {
@@ -478,7 +494,9 @@ export type RunKind =
   | "sra_download"
   | "variant_calling"
   | "assembly_download"
-  | "uniprot_download";
+  | "uniprot_download"
+  | "quantify"
+  | "differential_expression";
 
 /** Derived from member job states on the server, never stored. */
 export type RunStatus =
@@ -489,7 +507,14 @@ export type RunStatus =
   /** Finished, but an optional step (a header parse) did not succeed. */
   | "partial";
 
-export type RunInputRole = "reads" | "mate" | "reference";
+export type RunInputRole =
+  | "reads"
+  | "mate"
+  | "reference"
+  | "alignment"
+  | "annotation"
+  /** Appears many times in one run's inputs -- a DE run has one per sample. */
+  | "counts";
 
 export type RunJobRole =
   | "index"
@@ -499,7 +524,9 @@ export type RunJobRole =
   | "ingest"
   | "download"
   | "qc"
-  | "call_variants";
+  | "call_variants"
+  | "quantify"
+  | "test";
 
 export interface RunInput {
   object_id: string;
@@ -539,7 +566,12 @@ export interface RunDetail extends RunSummary {
   jobs: RunMemberJob[];
 }
 
-export type AlignerName = "bwa-mem2" | "minimap2" | "bowtie2" | "hisat2";
+export type AlignerName =
+  | "bwa-mem2"
+  | "minimap2"
+  | "bowtie2"
+  | "hisat2"
+  | "star";
 
 /** minimap2 presets. The wrong one for long reads aligns poorly rather than failing. */
 export type AlignPreset = "map-ont" | "map-pb" | "map-hifi" | "lr:hq" | "sr";
@@ -566,6 +598,10 @@ export interface AlignParams {
   max_intronlen?: number;
   no_spliced_alignment?: boolean;
   dta?: boolean;
+  two_pass?: boolean;
+  out_filter_multimap_nmax?: number;
+  align_intron_max?: number;
+  out_sam_unmapped?: boolean;
 }
 
 /** One input in the generated parameter form. Mirrors registry ParamField. */
@@ -675,6 +711,96 @@ export interface VariantRequest {
   reference_id?: string | null;
   caller?: VariantCallerName | null;
   params?: Partial<VariantParams>;
+}
+
+/* --- Expression: counting and differential testing ----------------------- */
+
+/** featureCounts' -s. 0 unstranded, 1 forward, 2 reverse. */
+export type Strandedness = 0 | 1 | 2;
+
+/** Mirrors counts_runner.CountsParams. */
+export interface CountsParams {
+  threads: number;
+  strandedness: Strandedness;
+  strandedness_label: string;
+  /** Counts fragments rather than reads. Wrong on paired data doubles
+   * every count, which is why the dialog shows where the value came from. */
+  paired: boolean;
+  feature_type: string;
+  attribute: string;
+  count_multi_mapping: boolean;
+}
+
+export interface QuantifyDefaults {
+  params: CountsParams | Record<string, never>;
+  annotation_id: string | null;
+  annotation_name: string | null;
+  /** True when the project has several annotations and none could be picked. */
+  needs_annotation: boolean;
+  annotations: { id: string; name: string; kind: string }[];
+  /** "alignment" when read off the aligner's --rna-strandness, else
+   * "default" -- the dialog says which, because a guess and a derived value
+   * deserve different confidence. */
+  strandedness_source: "alignment" | "default";
+  paired_source: "flagstat" | "alignment";
+  available: boolean;
+  max_threads: number;
+}
+
+export interface QuantifyRequest {
+  bam_id: string;
+  annotation_id?: string | null;
+  params?: Partial<CountsParams>;
+}
+
+/** One counts file, as the DE dialog sees it before a design is chosen. */
+export interface DeSample {
+  object_id: string;
+  name: string;
+  sample: string;
+  /** From the `condition` metadata field. Empty when never tagged. */
+  condition: string;
+  assigned_pct: number | null;
+  genes_detected: number | null;
+  /** Samples counted against different annotations cannot be merged. */
+  annotation_sha256: string | null;
+  annotation_name: string | null;
+}
+
+export interface DeDefaults {
+  samples: DeSample[];
+  conditions: string[];
+  /** Pre-filled only when exactly two conditions are present. */
+  contrast: { test: string; reference: string } | null;
+  min_replicates: number;
+  available: boolean;
+}
+
+export interface DeRequest {
+  project_id: string;
+  /** counts object id -> condition name. */
+  design: Record<string, string>;
+  contrast: { test: string; reference: string };
+  threads?: number | null;
+}
+
+/** One gene's result. Nulls are real: DESeq2 leaves padj unset for genes it
+ * filtered out of multiple-testing correction. */
+export interface DeRow {
+  gene: string;
+  base_mean: number | null;
+  log2_fold_change: number | null;
+  lfc_std_error: number | null;
+  stat: number | null;
+  p_value: number | null;
+  padj: number | null;
+}
+
+export interface DeResultsPage {
+  rows: DeRow[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 /** Alignment statistics read from `samtools flagstat` during index_bam. */

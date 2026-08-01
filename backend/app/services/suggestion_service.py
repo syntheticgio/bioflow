@@ -325,6 +325,16 @@ def _align_tool_and_why(obj, chemistry) -> tuple[dict, str]:
         # `preset` is left as the delegate wrote it. It is a minimap2 concept,
         # but `Hisat2Params.from_dict` reads only the keys it knows and
         # ignores the rest, so a stray preset is inert rather than a bad flag.
+        # HISAT2 and not STAR, deliberately, even though STAR is the faster
+        # aligner and the one most published RNA-seq pipelines use. This is a
+        # single-user tool on one machine, and the two indexes are not
+        # comparable: ~4 GB for HISAT2 against ~30 GB resident for STAR on a
+        # human genome. Suggesting STAR would put a card on the Actions tab
+        # that the memory estimator blocks on most hardware -- advice that
+        # cannot be taken is worse than slightly slower advice that can.
+        #
+        # STAR stays a deliberate choice from the align dialog, where the
+        # estimator's warning is visible next to the thread and memory knobs.
         params = {**params, "aligner": "hisat2"}
         return params, "RNA-seq on a eukaryote: splice-aware alignment."
 
@@ -670,6 +680,79 @@ def build_assemble_card(obj) -> SuggestionCard | None:
     )
 
 
+def build_quantify_card(obj, annotations) -> SuggestionCard | None:
+    """Count reads per gene for this alignment.
+
+    `annotations` is a parameter rather than something looked up here, for the
+    same reason `chemistry` is on the variants card: finding them lists the
+    project, which is async, and the builders here are uniformly synchronous
+    and pure.
+
+    Note what the endpoint filters on. Every annotation in a real project
+    arrives from `download_assembly` with `role=None` -- the ingest path only
+    assigns a role where format cannot answer, and GFF/GTF answers -- so a
+    rule written against `ObjectRole.ANNOTATION` matches nothing while passing
+    any test that builds its objects by hand. Checked against the live
+    database: 4 GFF/GTF objects, 0 carrying the annotation role. See
+    `pipeline_service._is_annotation`.
+
+    Deliberately offered on any BAM rather than only an RNA-seq one. Whether
+    an alignment is RNA-seq is not knowable from the file, and the honest
+    failure -- a low assignment rate, reported on the counts file -- is more
+    useful than a card that hides itself for a reason it cannot verify.
+    """
+    if obj.format.kind is not FormatKind.BAM:
+        return None
+
+    title = "Count reads per gene"
+    description = "Count this alignment's reads against a gene annotation."
+
+    tool = tools.featurecounts()
+    if not tool.available:
+        return SuggestionCard(
+            kind="quantify",
+            category="EXPRESSION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=f"{tool.name} is not installed.",
+        )
+
+    if not annotations:
+        return SuggestionCard(
+            kind="quantify",
+            category="EXPRESSION",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This project has no gene annotation. Download one with the "
+                "assembly, or upload a GTF."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="quantify",
+        category="EXPRESSION",
+        title=title,
+        description=description,
+        why=(
+            "Counts per gene are what a differential expression test needs, "
+            "and this alignment has an annotation to count against."
+        ),
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/quantify",
+            # Like the variants card, this keys on `bam_id` rather than
+            # `object_id`. `annotation_id` is omitted so the server resolves
+            # it -- preferring the GTF over the GFF3 of the same assembly,
+            # which matters because featureCounts' conventional attribute is
+            # absent from NCBI's GFF3 entirely.
+            "body": {"bam_id": str(obj.id), "params": {}},
+        },
+    )
+
+
 async def suggestions_for(obj) -> list[dict]:
     """Every card for one file, in fixed order.
 
@@ -712,6 +795,14 @@ async def suggestions_for(obj) -> list[dict]:
             and o.role is ObjectRole.REFERENCE
         ]
 
+    annotations: list[DataObject] = []
+    if obj.format.kind is FormatKind.BAM:
+        # BAM only: the quantify card is the sole consumer, so listing a
+        # project's annotations on a FASTQ click would discard the result.
+        annotations = await pipeline_service.annotations_for_project(
+            obj.project_id, owner=obj.owner
+        )
+
     chemistry = None
     if obj.format.kind is FormatKind.BAM:
         # BAM only, and awaited here rather than inside the builder: it is a
@@ -732,6 +823,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
         ("variants", lambda: build_variants_card(obj, chemistry)),
+        ("quantify", lambda: build_quantify_card(obj, annotations)),
         ("annotate", lambda: build_annotate_card(obj, annotation_inputs)),
         ("assemble", lambda: build_assemble_card(obj)),
     )

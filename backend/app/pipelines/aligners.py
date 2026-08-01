@@ -35,6 +35,7 @@ class Aligner(StrEnum):
     MINIMAP2 = "minimap2"
     BOWTIE2 = "bowtie2"
     HISAT2 = "hisat2"
+    STAR = "star"
 
 
 # bwa-mem2's index is a five-file set, all named by appending to the reference
@@ -68,13 +69,53 @@ HISAT2_SUFFIXES: tuple[str, ...] = (
     ".5.ht2", ".6.ht2", ".7.ht2", ".8.ht2",
 )
 
+# STAR is the directory shape: `--genomeDir` names a directory, and the files
+# inside it carry fixed names of STAR's choosing that have nothing to do with
+# the reference's. The directory itself is named after the reference, which is
+# what keeps two genomes' indexes from colliding in one workdir.
+STAR_DIR_SUFFIX = ".STARindex"
+
+# What `STAR --runMode genomeGenerate` writes into that directory, verified by
+# running STAR 2.7.11b rather than recalled: a run *without* an annotation
+# produces exactly these eight files. Recollection said it also wrote
+# exonInfo.tab, geneInfo.tab and transcriptInfo.tab -- it does not, and
+# requiring them would have failed every index build. STAR writes those only
+# when given --sjdbGTFfile, which this application does not yet do.
+#
+# `Log.out` is also written into the directory and is deliberately absent from
+# this list: it is a build transcript, not something STAR reads back at
+# alignment time, so carrying it as a sidecar would store a log file forever
+# under the guise of an index member.
+STAR_MEMBERS: tuple[str, ...] = (
+    "Genome",
+    "SA",
+    "SAindex",
+    "chrLength.txt",
+    "chrName.txt",
+    "chrNameLength.txt",
+    "chrStart.txt",
+    "genomeParameters.txt",
+)
+
 
 INDEX_ROLE: dict[Aligner, SidecarRole] = {
     Aligner.BWA_MEM2: SidecarRole.BWA_MEM2_INDEX,
     Aligner.MINIMAP2: SidecarRole.MINIMAP2_INDEX,
     Aligner.BOWTIE2: SidecarRole.BOWTIE2_INDEX,
     Aligner.HISAT2: SidecarRole.HISAT2_INDEX,
+    Aligner.STAR: SidecarRole.STAR_INDEX,
 }
+
+
+# STAR's members become suffixes too -- `.STARindex.SA`, `.STARindex.Genome`.
+# Flattening the directory into the same suffix-per-file shape the other three
+# aligners use is what lets the whole sidecar model (naming, `owns_sidecar`,
+# the database records, `plan_links`' path sanitization) stay exactly as it
+# was. Only `materialize` needs to know a directory is wanted, and only at the
+# moment it hands the files to a tool.
+STAR_SUFFIXES: tuple[str, ...] = tuple(
+    f"{STAR_DIR_SUFFIX}.{member}" for member in STAR_MEMBERS
+)
 
 
 def index_suffixes(aligner: Aligner) -> tuple[str, ...]:
@@ -85,6 +126,8 @@ def index_suffixes(aligner: Aligner) -> tuple[str, ...]:
         return BOWTIE2_SUFFIXES
     if aligner is Aligner.HISAT2:
         return HISAT2_SUFFIXES
+    if aligner is Aligner.STAR:
+        return STAR_SUFFIXES
     return (MINIMAP2_SUFFIX,)
 
 
@@ -109,35 +152,77 @@ class IndexLayout:
     - prefix: files named by appending to a basename that is passed to the
       tool explicitly via -x (bowtie2, HISAT2)
     - directory: a fixed set of names inside a directory passed via a flag
-      (STAR) -- specified in the design, not implemented yet
+      (STAR's `--genomeDir`)
 
     The distinction that matters for correctness is `owns_sidecar`. Dropping a
     sidecar that does not belong to a reference is what stops an index built
     for one genome from being silently materialized beside another; the
     resulting run would produce a plausible-looking wrong answer rather than
     an error.
+
+    The directory shape is stored flat and only becomes a directory here.
+    STAR's members (`SA`, `Genome`, `chrName.txt`) share no prefix with the
+    reference and would collide between two genomes in one workdir, so they
+    are *recorded* as `genome.fna.STARindex.SA` -- which `owns_sidecar` and
+    every database record handle like any other suffix -- and `workdir_path`
+    translates each back to `genome.fna.STARindex/SA` at materialize time.
+    Storing them under their bare names instead would have meant teaching the
+    sidecar model about directories end to end for one aligner.
     """
 
     suffixes: tuple[str, ...]
     # The separate binary that builds this index, when there is one. bwa-mem2
     # uses `bwa-mem2 index` and minimap2 uses `minimap2 -d`, so both are None.
     builder: str | None = None
+    # Set for the directory shape: the suffix naming the directory itself,
+    # e.g. `.STARindex`. None for the suffix and prefix shapes.
+    directory_suffix: str | None = None
 
     def filenames(self, reference_name: str) -> tuple[str, ...]:
         return tuple(f"{reference_name}{s}" for s in self.suffixes)
 
+    def directory_name(self, reference_name: str) -> str | None:
+        if self.directory_suffix is None:
+            return None
+        return f"{reference_name}{self.directory_suffix}"
+
+    def workdir_path(self, reference_name: str, stored_name: str) -> str:
+        """Where a stored sidecar belongs in the workdir, relative to it.
+
+        Identity for the suffix and prefix shapes. For the directory shape,
+        `genome.fna.STARindex.SA` becomes `genome.fna.STARindex/SA` -- the
+        one place the flattening is undone.
+
+        A name that does not carry this layout's directory prefix is returned
+        unchanged rather than forced into the directory: `fai` and `bai`
+        sidecars travel in the same dict as the index members and belong
+        beside the reference, not inside its index directory.
+        """
+        directory = self.directory_name(reference_name)
+        if directory is None:
+            return stored_name
+        prefix = f"{directory}."
+        if not stored_name.startswith(prefix):
+            return stored_name
+        return f"{directory}/{stored_name[len(prefix):]}"
+
     def reference_argument(self, reference: Path) -> str:
         """What to hand the aligner to locate the index.
 
-        The same string for both shapes today, and deliberately so: index
-        files are named after the *full* reference filename
+        The same string for the suffix and prefix shapes, and deliberately so:
+        index files are named after the *full* reference filename
         (`genome.fna.1.bt2`), so bowtie2's basename is the full reference
         path. Stripping the extension to form a basename would make the tool
-        look for `genome.1.bt2` and find nothing. This method exists so that
-        assumption is stated in one place rather than assumed at each call
-        site, and so a future layout can differ.
+        look for `genome.1.bt2` and find nothing.
+
+        The directory shape is where this stops being an identity function:
+        STAR wants the directory, not the reference inside it, and handing it
+        the reference path produces "genome directory does not exist".
         """
-        return str(reference)
+        directory = self.directory_name(reference.name)
+        if directory is None:
+            return str(reference)
+        return str(reference.parent / directory)
 
     def owns_sidecar(self, reference_name: str, sidecar_name: str) -> bool:
         return Path(sidecar_name).name.startswith(reference_name)
@@ -148,6 +233,11 @@ _LAYOUTS: dict[Aligner, IndexLayout] = {
     Aligner.MINIMAP2: IndexLayout(suffixes=(MINIMAP2_SUFFIX,)),
     Aligner.BOWTIE2: IndexLayout(suffixes=BOWTIE2_SUFFIXES, builder="bowtie2-build"),
     Aligner.HISAT2: IndexLayout(suffixes=HISAT2_SUFFIXES, builder="hisat2-build"),
+    # STAR indexes through its own binary in a different --runMode, so there
+    # is no separate builder the way bowtie2-build is one.
+    Aligner.STAR: IndexLayout(
+        suffixes=STAR_SUFFIXES, directory_suffix=STAR_DIR_SUFFIX
+    ),
 }
 
 
@@ -176,26 +266,61 @@ class MaterializedRef:
 
     @property
     def missing_index(self) -> bool:
+        """True when no sidecar at all was linked.
+
+        Deliberately weaker than `missing_index_for`: a caller that does not
+        name an aligner (variant calling, which needs only the `.fai`) still
+        gets a useful answer.
+        """
         return not self.linked
+
+    def missing_index_for(self, layout: "IndexLayout", reference_name: str) -> bool:
+        """True when this aligner's own index files are not all present.
+
+        `missing_index` alone is not enough to gate an alignment, and the gap
+        is not theoretical: a reference carrying only a `.fai` has *something*
+        linked, so the weaker check passed and the run proceeded to fail
+        inside the aligner -- STAR reporting that its genome directory did not
+        exist, which reads as a broken index rather than an absent one.
+        """
+        expected = {
+            layout.workdir_path(reference_name, name)
+            for name in layout.filenames(reference_name)
+        }
+        return not expected.issubset(set(self.linked))
 
 
 def plan_links(
     *,
     reference_name: str,
     sidecars: dict[str, str],
+    layout: IndexLayout | None = None,
 ) -> dict[str, str]:
-    """Map workdir filename -> blob path, for a reference and its sidecars.
+    """Map workdir path -> blob path, for a reference and its sidecars.
 
     Pure: the mapping is the decision worth testing, separately from whether
-    the symlinks were created. `sidecars` is {stored sidecar name: blob path}.
+    the symlinks were created. `sidecars` is {stored sidecar name: blob path},
+    and the keys of the result are paths *relative to the workdir* -- which is
+    the same thing as a filename for every layout except the directory shape.
 
     A sidecar whose name does not belong to this reference is dropped rather
     than linked under a corrected name. Silently renaming it would hide a
     genuine bookkeeping error -- an index attached to the wrong reference -- in
     exactly the way that produces a plausible-looking wrong result.
+
+    `layout` is optional because most callers only need the reference and its
+    `.fai`: `variant_handlers` materializes a reference to call against and
+    never touches an aligner index. Omitting it for a STAR index would link
+    the members flat, which STAR reads as a missing genome directory -- an
+    error, not a wrong answer.
     """
     links: dict[str, str] = {}
     for name, blob in sidecars.items():
+        # `Path(name).name` is the sanitizer, and it runs *before* any layout
+        # translation for a reason: a stored name is untrusted input, and
+        # translating first would let `../../etc/x` become a path that escapes
+        # the workdir. Stored names are flat by construction, so this only
+        # ever discards a directory component that should not have been there.
         safe = Path(name).name
         if not safe.startswith(reference_name):
             log.warning(
@@ -204,7 +329,10 @@ def plan_links(
                 sidecar=safe,
             )
             continue
-        links[safe] = blob
+        if layout is not None:
+            links[layout.workdir_path(reference_name, safe)] = blob
+        else:
+            links[safe] = blob
     return links
 
 
@@ -214,6 +342,7 @@ def materialize(
     reference_name: str,
     reference_blob: Path,
     sidecars: dict[str, str],
+    layout: IndexLayout | None = None,
 ) -> MaterializedRef:
     """Build a directory where a reference and its sidecars appear as siblings.
 
@@ -223,8 +352,18 @@ def materialize(
                           genome.fna.fai   -> ...
     ```
 
+    A directory-shaped index (STAR) gains one level, built from the same flat
+    sidecar names:
+
+    ```
+    tmp/align/<job_id>/ref/genome.fna
+                          genome.fna.fai
+                          genome.fna.STARindex/SA
+                          genome.fna.STARindex/Genome
+    ```
+
     Symlinks rather than copies: an index for a mammalian genome is several
-    gigabytes, and every tool here follows links happily.
+    gigabytes -- STAR's is ~30 GB -- and every tool here follows links happily.
     """
     workdir.mkdir(parents=True, exist_ok=True)
 
@@ -233,8 +372,16 @@ def materialize(
     _link(reference_link, reference_blob)
 
     linked: list[str] = []
-    for name, blob in sorted(plan_links(reference_name=safe_reference, sidecars=sidecars).items()):
-        _link(workdir / name, Path(blob))
+    planned = plan_links(
+        reference_name=safe_reference, sidecars=sidecars, layout=layout
+    )
+    for name, blob in sorted(planned.items()):
+        link = workdir / name
+        # Only the directory shape ever has a parent to create, but doing it
+        # unconditionally costs one stat and keeps the loop free of a branch
+        # that would only be exercised by one aligner.
+        link.parent.mkdir(parents=True, exist_ok=True)
+        _link(link, Path(blob))
         linked.append(name)
 
     log.info(

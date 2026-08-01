@@ -33,6 +33,10 @@ class TestVersionParsing:
             ("FastQC v0.12.1\nCopyright 2023", "0.12.1"),
             ("2.28-r1209", "2.28"),  # minimap2
             ("samtools 1.19.2\nUsing htslib 1.19.1", "1.19.2"),
+            # STAR's letter suffix is part of the version: 2.7.11a and
+            # 2.7.11b are different releases, so truncating to 2.7.11 records
+            # a release that never ran.
+            ("2.7.11b", "2.7.11b"),
         ],
     )
     def test_extracts_the_bare_version(self, raw, expected):
@@ -248,6 +252,7 @@ class TestSerialization:
             "minimap2",
             "bowtie2",
             "hisat2",
+            "star",
             "samtools",
             "bcftools",
             "clair3",
@@ -256,6 +261,12 @@ class TestSerialization:
             "fasterq-dump",
             "prefetch",
             "datasets",
+            "featurecounts",
+            # Not a binary at all -- a Python library, probed by import rather
+            # than by shutil.which. It is in `all_tools` deliberately: the
+            # version that ran a differential expression test is half that
+            # result's provenance, and the panel is where a user reads it.
+            "pydeseq2",
         }
 
 

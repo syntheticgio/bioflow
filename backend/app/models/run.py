@@ -35,6 +35,15 @@ class RunKind(StrEnum):
     # only the query differs -- so splitting the enum would describe a
     # distinction the machine does not make. The run label carries it instead.
     UNIPROT_DOWNLOAD = "uniprot_download"
+    # Counting reads per gene for one sample.
+    QUANTIFY = "quantify"
+    # The test across samples. Separate from QUANTIFY for the same reason
+    # ASSEMBLY_DOWNLOAD is separate from SRA_DOWNLOAD -- this is a display and
+    # grouping vocabulary, and "counted one sample" and "compared twelve of
+    # them" are not the same line in an activity view. They are also genuinely
+    # different shapes: every other member here describes a run with one or two
+    # inputs, and this is the first with N.
+    DIFFERENTIAL_EXPRESSION = "differential_expression"
     # De novo assembly. Distinct from ASSEMBLY_DOWNLOAD, which fetches a
     # published one -- the two produce the same kind of file by completely
     # different means, and a run list that conflated them would claim credit
@@ -65,6 +74,13 @@ class RunInputRole(StrEnum):
     READS = "reads"
     MATE = "mate"
     REFERENCE = "reference"
+    # The BAM a quantification counted.
+    ALIGNMENT = "alignment"
+    # The GTF/GFF it counted against.
+    ANNOTATION = "annotation"
+    # A per-sample count file going into a differential expression run. The
+    # first role that appears many times in one run's `inputs`.
+    COUNTS = "counts"
 
 
 class RunInput(BaseModel):
@@ -114,6 +130,13 @@ class RunJobRole(StrEnum):
     DOWNLOAD = "download"
     QC = "qc"
     CALL_VARIANTS = "call_variants"
+    QUANTIFY = "quantify"
+    # The differential expression test itself. Not in OPTIONAL_ROLES below:
+    # it is the whole point of its run, and a run reporting anything but
+    # failure when it fails would be claiming a results table exists.
+    TEST = "test"
+    # Likewise not optional: an assembly run whose assembly failed produced
+    # nothing.
     ASSEMBLE = "assemble"
 
 

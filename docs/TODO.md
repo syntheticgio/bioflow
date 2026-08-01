@@ -450,7 +450,99 @@ the column layout must not depend on any of those being short.
 
 Touches: `frontend/src/components/HelpSoftware.tsx`, `frontend/src/styles.css`.
 
-## Aligners: STAR and DRAGMAP
+## Aligners: STAR and DRAGMAP — STAR FIXED, DRAGMAP still open
+
+STAR shipped 2026-08-01 (`Merge STAR aligner support with directory-shaped
+index layout`, plus a same-day follow-up fix). DRAGMAP was considered and
+deliberately deferred; the rest of this entry stands for it.
+
+**What shipped.** `Aligner.STAR`, `SidecarRole.STAR_INDEX`, `StarParams`, a
+registry spec with four biology fields, `rna-star` in the Dockerfile, and the
+directory-shaped `IndexLayout` this entry predicted would be needed. Members
+are stored *flat* as `<reference>.STARindex.<member>` and reassembled into a
+real `--genomeDir` in `aligners.materialize`, so the sidecar model, the
+database records and `owns_sidecar` were left untouched -- rather than the
+"directory-shaped branch" through the existence checks this entry imagined.
+
+**Where the implementation departed from this entry.**
+
+- **No GTF.** This entry says STAR "needs a GTF/GFF3 at index time for splice
+  junctions". It does not: STAR discovers junctions de novo, and the shipped
+  index is built without an annotation. Measured on real yeast data: 9,818
+  splices found with no GTF supplied. Annotation-aware indexing (`--sjdbGTFfile`,
+  `--sjdbOverhang`) remains genuinely useful and genuinely unbuilt -- and the
+  object model has no annotation concept yet, which is the larger part of that
+  work. The yeast project already holds `GCF_..._genomic.gtf` files, so the
+  input exists whenever someone wants it.
+- **`JobResources` — asked for by this entry, missed by the STAR change, then
+  done the same day.** Both launch sites now size the reservation from the
+  registry's `MemoryModel` and the reference, via
+  `pipeline_service.declared_align_mem_mb`. Measured on a 3.1 Gb human
+  genome, against the flat 8.0 GB every one of these used to declare:
+
+      aligner     human align  human build
+      bwa-mem2          11.3G        13.0G
+      minimap2          10.8G         9.0G
+      bowtie2            7.9G         9.7G
+      hisat2             8.8G        16.0G
+      star              34.7G        36.4G
+
+  So a STAR index build was admitted believing it needed a quarter of what it
+  does. Small genomes were over-declared in the same breath: a yeast STAR
+  alignment reserves 6,038 MB, verified on a real launch. Two details that
+  are easy to get wrong -- the index build passes `sort_memory_mb=0` because
+  it runs no samtools sort, and the alignment recomputes with
+  `building_index=False` rather than reusing the launch estimate, which
+  answers the different question "does the whole operation fit" and would
+  otherwise charge every alignment against an unindexed reference for
+  HISAT2's 4x build multiplier. The handler-level `@handler(resources=...)`
+  values stay at 8192 and are now only a fallback for the development
+  enqueue route in `api/v1/jobs.py`.
+- **No suggestion rule, deliberately.** This entry (and CLAUDE.md) require
+  `suggestion_service.py` to gain a rule that can pick a new tool. STAR
+  intentionally has none: HISAT2's ~4 GB index beats STAR's ~30 GB resident on
+  this hardware, so a STAR card would be blocked by the estimator on most
+  machines. The reasoning is recorded at the rule and asserted by
+  `test_rna_seq_stays_on_hisat2_even_with_star_installed`, since preferring
+  STAR is the natural next edit.
+- **Not built with or before differential expression**, which this entry
+  suggested. DE shipped separately on
+  `claude/differential-expression-tool-75cbcf` and is now closed out below --
+  it consumes STAR's BAMs without needing anything from this entry, which is
+  the evidence that splitting them was right. One gap the split left: STAR
+  records no `--rna-strandness` equivalent, so a STAR-aligned BAM reaches
+  counting with no strandedness to infer and falls back to unstranded.
+
+**A third hand-maintained mapping, not in this entry's list.** Registering the
+tool was not half the change but two thirds of it. `results._SIDECAR_ROLES`
+was a hand-listed role allowlist, and `star-index` was missing from it: the
+first real run stored *zero* of the eight index files while `build_index`
+still reported success, and the failure surfaced later as STAR complaining its
+genome directory did not exist. The full unit suite was green throughout,
+because every fixture fed the appliers roles already in the allowlist. It is
+now derived from `SidecarRole` so the next role cannot repeat it. CLAUDE.md
+names `suggestion_service` and `TOOL_META` as the mappings a new tool must
+reach; this was a third, and worth adding to that list.
+
+**Three defaults depart from STAR's own**, each because the alternative fails
+silently: `--outSAMunmapped Within` (STAR discards unmapped reads, which makes
+flagstat report 100% mapped whatever the truth is -- the real run read 95.67%,
+which is the evidence it works), `--readFilesCommand zcat` for gzipped input
+(STAR neither sniffs nor infers from the extension), and index sizing computed
+from the reference's `.fai` (STAR's defaults build an index that maps almost
+nothing on a small genome *while exiting 0*).
+
+**Verified** end to end in the running app, not only by unit test: 2,176,214
+Illumina reads against the yeast genome, 95.67% mapped, 86.64% properly
+paired, `Log.final.out` harvested into the job log. Two facts were corrected
+by running STAR 2.7.11b rather than recalling it -- genomeGenerate without an
+annotation writes eight files, not eleven (requiring the phantom three would
+have failed every index build), and the version probe truncated `2.7.11b` to
+`2.7.11`, naming a release that never ran.
+
+**Known rough edge, not fixed.** STAR reports MAPQ 255 for uniquely-mapped
+reads while every other aligner here uses the 0-60 scale, so the alignment
+report shows a mean MAPQ of ~247 against bwa-mem2's ~50 for the same reads.
 
 Raised: 2026-07-31, requested.
 
@@ -699,7 +791,91 @@ something else and improve it.
 All three are chemistry- and context-dependent enough that
 `suggestion_service.py` will need real rules, not just availability checks.
 
-## RNA-seq differential expression
+## RNA-seq differential expression — FIXED
+
+Shipped 2026-08-01 on `claude/differential-expression-tool-75cbcf`.
+`pipelines/counts_runner.py`, `pipelines/de_runner.py`,
+`queue/expression_handlers.py` (`quantify`, `differential_expression`),
+appliers in `queue/results.py`, launch paths in `services/pipeline_service.py`,
+four routes plus a results-table route in `api/v1/pipelines.py`, and
+`QuantifyDialog` / `DifferentialExpressionDialog` / `ExpressionCharts` /
+`ExpressionResults` on the front end.
+
+**What the implementation did differently.**
+
+- **The sample sheet needed no home to be built.** This entry's central
+  question -- "where does a sample sheet live" -- turned out to be already
+  answered: `condition`, `sample_id` and `batch` are `COMMON_FIELDS` in
+  `metadata/schemas.py`, and every applier copies metadata forward from reads
+  to trimmed reads to BAM to counts. So bulk-tagging six FASTQs at upload
+  arrives at the DE dialog as a filled-in design. A `COUNTS_FIELDS` group was
+  written and then deleted: it would have shadowed the common `condition` and
+  split one concept across two keys. No new document, no new collection.
+- **The split is quantify / test, not align / count / test.** Counting is
+  per-sample and fits the existing one-object-in model exactly, so it is an
+  Actions-tab card like any other. Only the test fans in, and it is the only
+  thing that needed new shape.
+- **Differential expression got no suggestion card, deliberately** -- the one
+  place this departs from the "a new tool needs a rule" instruction in
+  CLAUDE.md. A card exists to pre-answer a question, and none of "which
+  samples", "which groups", "which way round" can be pre-answered. It is a
+  project-level button in `ProjectExplorer` instead, shown once the project
+  has counts. `quantify` does have a rule and a test.
+- **PyDESeq2, as this entry suggested, and `TOOL_META.usage` says so.**
+  Measured rather than assumed: `r-bioc-deseq2` is 110 apt packages plus an R
+  runtime; `pydeseq2` is 28 pip packages in the Python the worker already
+  runs.
+- **featureCounts over HTSeq**, because it consumes the BAM STAR/HISAT2
+  already produce and reuses annotations already in the library.
+
+**Three things only real data exposed**, none of which any fixture would have:
+
+- **Annotations carry no role.** All four GFF/GTF objects in the live library
+  have `role=None` -- ingest only assigns a role where format cannot answer.
+  A rule written against `ObjectRole.ANNOTATION` matches *nothing* in a real
+  project while passing any hand-built test. `_is_annotation` filters on
+  format. This is the same trap this file already records for the Actions-tab
+  rules, hit again in a new place.
+- **`-t exon -g gene_id` does not work on NCBI's GFF3.** Across the yeast
+  RefSeq annotation's 6852 exon lines: `locus_tag` 6852, `gene` 5790,
+  `gene_id` 0. featureCounts stops with "failed to find the gene identifier
+  attribute" -- loudly, which is the good outcome. The launch path prefers the
+  GTF NCBI ships alongside; the GFF3 fallback groups on `locus_tag`, not
+  `gene`, which would silently drop the ~15% of features never named.
+  Verified equivalent: the same BAM counted against the GTF with `gene_id`
+  and the GFF3 with `locus_tag` gave identical numbers, 733,174 assigned
+  fragments over 6,477 genes.
+- **`-p` alone silently doubles every count.** In featureCounts 2.x `-p` means
+  "the input is paired-end" and still counts *reads*; `--countReadPairs` is
+  what switches the unit to fragments. Confirmed on a real BAM: 2,176,214
+  reads counted 1,088,107 fragments, exactly half.
+
+**Measurements.** End-to-end on six samples with 200 genes given a known 4x
+effect: recall 200/200, precision 0.98, log2 fold changes of 2.0-2.2 against
+the injected log2(4) = 2, and PC1 separating the conditions cleanly.
+Quantifying one 2.2M-read BAM takes ~10s; the six-sample test ~15s.
+
+**Two bugs manual UI testing caught that the suite did not**, both of the
+"looks right, is wrong" kind this file keeps collecting:
+
+- Sorting the results table by fold change *descending* put the untested genes
+  first. A `(value is None, value)` sort key does the right thing ascending and
+  exactly the wrong thing descending, because `reverse` flips the whole tuple.
+  Now partitioned in `de_runner.sort_rows`, with the regression pinned.
+- The quantify dialog told the user "this alignment looks single-end" about a
+  BAM with 1.9M properly-paired reads, whenever the project held two
+  assemblies' annotations: the defaults endpoint skipped deriving parameters
+  when it could not resolve the annotation, and the dialog rendered its own
+  fallbacks as though they were facts about the file. The server counted it as
+  paired regardless, so the screen disagreed with the behaviour.
+
+**Still open, deliberately.** Strandedness is inferred from HISAT2's
+`--rna-strandness` only; STAR records no equivalent, so a STAR-aligned BAM
+defaults to unstranded and the dialog says so rather than guessing. Salmon and
+kallisto (alignment-free) are not wired up. Multi-factor designs are not
+supported -- the design is a single `condition` column and one contrast.
+
+--- original entry ---
 
 Raised: 2026-07-31, requested. **Wants STAR (above) first.**
 

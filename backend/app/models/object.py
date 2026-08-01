@@ -91,6 +91,17 @@ class ObjectRole(StrEnum):
     # slightly worse: `cds_from_genomic.fna` is nucleotide FASTA that would
     # pass any "does this look like a genome" sniff test.
     TRANSCRIPT = "transcript"
+    # Per-gene read counts for one sample. Anonymous TSV on disk, which is the
+    # criterion this enum exists for: nothing in the bytes distinguishes a
+    # counts table from any other tab-separated file, and only this keeps it
+    # out of pickers that want a genome or an annotation.
+    COUNTS = "counts"
+    # The output of a differential expression test -- per-gene fold changes and
+    # adjusted p-values. Also anonymous TSV, and deliberately a separate role
+    # from COUNTS rather than a flag on it: feeding a results table back into a
+    # DE run as if it were counts is exactly the silent error the split
+    # prevents.
+    DE_RESULTS = "de_results"
     # An assembly graph (GFA) from a de novo assembly. A role rather than a
     # `SidecarRole`: sidecars are scaffolding for tools -- indexes beside the
     # file they index, which no person opens -- and a graph is a result
@@ -111,6 +122,10 @@ class SidecarRole(StrEnum):
     MINIMAP2_INDEX = "minimap2-index"
     BOWTIE2_INDEX = "bowtie2-index"
     HISAT2_INDEX = "hisat2-index"
+    # One role for all eight files of STAR's genome directory. They are stored
+    # flat, named `<reference>.STARindex.<member>`, and reassembled into a
+    # directory at materialize time -- see aligners.IndexLayout.
+    STAR_INDEX = "star-index"
     FAI = "fai"
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.
