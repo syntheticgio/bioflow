@@ -734,7 +734,12 @@ async def _apply_run_qc(result: dict, *, launching_owner: str) -> None:
     from app.services import pipeline_service
 
     try:
-        await pipeline_service.launch_summary(object_id=obj.id)
+        # `launching_owner`, not `obj.owner`: launch_summary now scopes its own
+        # lookup, and the QC job that got here was enqueued under the profile
+        # that owns this file, so the two agree. Passing the launching profile
+        # keeps the chained job in the same partition as the job that spawned
+        # it, which is what the activity view groups on.
+        await pipeline_service.launch_summary(object_id=obj.id, owner=launching_owner)
     except Exception as e:  # noqa: BLE001 - an additive extra cannot fail QC
         log.warning("summary_launch_failed", object_id=object_id, error=str(e))
 
@@ -1073,7 +1078,11 @@ async def _apply_index_bam(result: dict, *, launching_owner: str) -> None:
         from app.services import pipeline_service
 
         try:
-            await pipeline_service.launch_bam_stats(object_id=bam.id)
+            # Same reasoning as the QC -> summary chain: the index job carried
+            # the launching profile, and launch_bam_stats now scopes its own
+            # BAM lookup, so handing it that profile is what lets the chained
+            # computation resolve the very BAM the index was just built for.
+            await pipeline_service.launch_bam_stats(object_id=bam.id, owner=launching_owner)
         except AppError as e:
             log.warning("bam_stats_chain_failed", object_id=bam_id, error=str(e))
 

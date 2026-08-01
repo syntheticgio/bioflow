@@ -11,11 +11,16 @@ from app.api.deps import OwnerDep
 from app.api.v1.jobs import JobOut
 from app.config import settings
 from app.errors import ConflictError, NotFoundError
-from app.models import DataObject, ObjectStatus
-from app.pipelines import align_runner, aligner_registry, bam_stats_runner, tools
-from app.pipelines import variant_db
+from app.models import ObjectStatus
+from app.pipelines import (
+    align_runner,
+    aligner_registry,
+    bam_stats_runner,
+    tools,
+    variant_db,
+)
 from app.pipelines.aligners import Aligner
-from app.services import pipeline_service, structure_lookup
+from app.services import object_service, pipeline_service, structure_lookup
 
 router = APIRouter(prefix="/pipelines", tags=["pipelines"])
 
@@ -41,6 +46,12 @@ class MateSuggestion(BaseModel):
 async def list_tools() -> dict:
     """Resolved paths and versions for the external tools.
 
+    Deliberately *not* owner-scoped. This probes the container's filesystem for
+    installed binaries -- it describes the image, not anybody's library, and
+    the answer is byte-identical for every profile. Requiring a header would
+    buy no isolation and would break the launch dialog's availability check for
+    a client that has not resolved a profile yet.
+
     Lets the launch dialog say "fastp is not installed" before a user commits
     to a run, rather than surfacing it as a job that dies minutes later.
 
@@ -60,7 +71,7 @@ async def list_tools() -> dict:
 
 
 @router.get("/suggestions/{object_id}")
-async def list_suggestions(object_id: PydanticObjectId) -> dict:
+async def list_suggestions(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Pipelines worth offering for this file, with the reason for each.
 
     Advisory: a card is a pre-answered instance of an operation the
@@ -70,9 +81,7 @@ async def list_suggestions(object_id: PydanticObjectId) -> dict:
     """
     from app.services import suggestion_service
 
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
 
     return {"suggestions": await suggestion_service.suggestions_for(obj)}
 
@@ -80,7 +89,13 @@ async def list_suggestions(object_id: PydanticObjectId) -> dict:
 @router.get("/defaults")
 async def trim_defaults(tool: str = "fastp") -> dict:
     """Default trim parameters for the given tool, owned by the server so the
-    form does not encode its own copy."""
+    form does not encode its own copy.
+
+    Deliberately *not* owner-scoped, like `/tools` above: these are constants
+    the runner module declares, keyed by tool name and touching no collection.
+    Every profile gets the same numbers because they are a property of the
+    code rather than of anyone's library.
+    """
     return {
         "params": pipeline_service.default_params(tool),
         "max_threads": settings.pipeline_default_threads,
@@ -88,11 +103,9 @@ async def trim_defaults(tool: str = "fastp") -> dict:
 
 
 @router.get("/mate/{object_id}", response_model=MateSuggestion | None)
-async def detect_mate(object_id: PydanticObjectId) -> MateSuggestion | None:
+async def detect_mate(object_id: PydanticObjectId, owner: OwnerDep) -> MateSuggestion | None:
     """The file this one would be trimmed alongside, if any."""
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
 
     mate = await pipeline_service.suggest_mate(obj)
     if mate is None:
@@ -106,10 +119,11 @@ async def detect_mate(object_id: PydanticObjectId) -> MateSuggestion | None:
 
 
 @router.post("/trim", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_trim(body: TrimRequest) -> JobOut:
+async def launch_trim(body: TrimRequest, owner: OwnerDep) -> JobOut:
     """Queue an adapter-trimming run over a FASTQ file or an R1/R2 pair."""
     job = await pipeline_service.launch_trim(
         object_id=body.object_id,
+        owner=owner,
         mate_object_id=body.mate_object_id,
         params=body.params,
         paired=body.paired,
@@ -123,9 +137,9 @@ class QCRequest(BaseModel):
 
 
 @router.post("/qc", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_qc(body: QCRequest) -> JobOut:
+async def launch_qc(body: QCRequest, owner: OwnerDep) -> JobOut:
     """Queue a QC run over a FASTQ file. Read-only: produces a report."""
-    job = await pipeline_service.launch_qc(object_id=body.object_id)
+    job = await pipeline_service.launch_qc(object_id=body.object_id, owner=owner)
     return JobOut.of(job)
 
 
@@ -143,6 +157,12 @@ async def summary_status() -> dict:
     Exists so the UI can hide an affordance that would only fail. Probed live
     rather than cached -- the model server is a process the user starts and
     stops by hand, so a remembered answer is the one most likely to be wrong.
+
+    Deliberately *not* owner-scoped: this reports on a configuration flag and a
+    socket to the host's model server. There is one such server for the whole
+    machine, so the answer cannot differ by profile, and gating it behind a
+    header would hide the summarize button from a client that has not resolved
+    one rather than telling it the truth.
     """
     import asyncio
 
@@ -162,9 +182,11 @@ async def summary_status() -> dict:
 
 
 @router.post("/summary", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_summary(body: SummaryRequest) -> JobOut:
+async def launch_summary(body: SummaryRequest, owner: OwnerDep) -> JobOut:
     """Queue a narrative summary of a file's QC data and metadata."""
-    job = await pipeline_service.launch_summary(object_id=body.object_id, force=body.force)
+    job = await pipeline_service.launch_summary(
+        object_id=body.object_id, owner=owner, force=body.force
+    )
     if job is None:
         # Only reachable on the explicit user path, where returning nothing
         # would read as a dead button. The service's other "no" -- an existing
@@ -194,6 +216,14 @@ async def get_organism_blurb(organism: str, refresh: bool = False) -> OrganismBl
 
     Reads are cheap after the first: the text is cached per species, so every
     file of one organism after the first is an indexed document read.
+
+    Deliberately *not* owner-scoped. The cache is keyed on the species name and
+    holds generated encyclopedia prose about *E. coli*, not anything the user
+    stored -- two profiles looking up the same organism should get the same
+    paragraph and share the one generation rather than each paying for their
+    own copy of a public fact. The organism name arrives in the path from a
+    file the caller already read through a scoped route, so this leaks no
+    knowledge of which profiles hold what.
     """
     from app.services import organism_service
 
@@ -204,12 +234,20 @@ async def get_organism_blurb(organism: str, refresh: bool = False) -> OrganismBl
 
 
 @router.get("/qc/report/{object_id}/{report_path:path}")
-async def get_qc_report(object_id: PydanticObjectId, report_path: str) -> FileResponse:
+async def get_qc_report(
+    object_id: PydanticObjectId, report_path: str, owner: OwnerDep
+) -> FileResponse:
     """Serve a generated QC report (FastQC or fastp HTML).
 
     Reports are not content-addressed objects -- they are regenerable
     derivatives -- so they live under qc_reports/ and are served from here
     rather than through the blob routes.
+
+    The ownership check is a database lookup even though the bytes come from
+    disk. Report directories are named by object id and nothing else, so
+    without it the filesystem layout *is* the access rule: any caller holding
+    an id could read any profile's report. The object read below is discarded
+    -- it is there to make the 404 happen.
 
     **These pages are not trusted.** FastQC embeds overrepresented sequences
     taken verbatim from the reads, so a crafted FASTQ can put attacker-chosen
@@ -231,6 +269,8 @@ async def get_qc_report(object_id: PydanticObjectId, report_path: str) -> FileRe
     # collapsing does on its own: `/report/AAA/../BBB/x.html` arrives with
     # object_id already rewritten to BBB, so the id in the URL is not by itself
     # evidence of which directory is being read.
+    await object_service.get_object(object_id, owner=owner)
+
     parts = PurePosixPath(report_path).parts
     if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
         raise NotFoundError(f"No such QC report: {report_path}")
@@ -265,10 +305,10 @@ class BamStatsRequest(BaseModel):
 
 
 @router.post("/bamstats", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_bam_stats(body: BamStatsRequest) -> JobOut:
+async def launch_bam_stats(body: BamStatsRequest, owner: OwnerDep) -> JobOut:
     """Queue the Results computation for a BAM: coverage, per-contig table,
     binned depth. Read-only: produces facts and one TSV report."""
-    job = await pipeline_service.launch_bam_stats(object_id=body.object_id)
+    job = await pipeline_service.launch_bam_stats(object_id=body.object_id, owner=owner)
     return JobOut.of(job)
 
 
@@ -276,6 +316,7 @@ async def launch_bam_stats(body: BamStatsRequest) -> JobOut:
 async def get_bam_stats_report(
     object_id: PydanticObjectId,
     report_path: str,
+    owner: OwnerDep,
     download: bool = False,
     offset: int = 0,
     limit: int = 100,
@@ -284,15 +325,19 @@ async def get_bam_stats_report(
 
     Same containment rules as get_qc_report -- `..` and absolute paths are
     rejected outright, then the resolved path is re-checked against the report
-    root. Unlike a QC report, this file is generated by this app from numeric
-    samtools output rather than embedding read-derived strings, and it is
-    never rendered as a document -- so the sandboxed CSP that HTML report
-    serving needs does not apply here.
+    root, and the object is resolved under the caller's profile first so a
+    directory named by object id is not itself the access rule. Unlike a QC
+    report, this file is generated by this app from numeric samtools output
+    rather than embedding read-derived strings, and it is never rendered as a
+    document -- so the sandboxed CSP that HTML report serving needs does not
+    apply here.
 
     Two modes: `?download=1` returns the whole TSV as an attachment; the
     default paginates it as JSON, which is what the Results tab's contig table
     reads from.
     """
+    await object_service.get_object(object_id, owner=owner)
+
     parts = PurePosixPath(report_path).parts
     if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
         raise NotFoundError(f"No such report: {report_path}")
@@ -336,10 +381,10 @@ class VcfStatsRequest(BaseModel):
 
 
 @router.post("/vcfstats", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_vcf_stats(body: VcfStatsRequest) -> JobOut:
+async def launch_vcf_stats(body: VcfStatsRequest, owner: OwnerDep) -> JobOut:
     """Queue the Results computation for a VCF: call-set summary statistics
     and the per-variant table. Read-only."""
-    job = await pipeline_service.launch_vcf_stats(object_id=body.object_id)
+    job = await pipeline_service.launch_vcf_stats(object_id=body.object_id, owner=owner)
     return JobOut.of(job)
 
 
@@ -348,15 +393,16 @@ class AnnotateRequest(BaseModel):
 
 
 @router.post("/annotate", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_annotate(body: AnnotateRequest) -> JobOut:
+async def launch_annotate(body: AnnotateRequest, owner: OwnerDep) -> JobOut:
     """Queue consequence annotation for a called VCF."""
-    job = await pipeline_service.launch_annotation(object_id=body.object_id)
+    job = await pipeline_service.launch_annotation(object_id=body.object_id, owner=owner)
     return JobOut.of(job)
 
 
 @router.get("/vcfstats/variants/{object_id}")
 async def get_vcf_stats_variants(
     object_id: PydanticObjectId,
+    owner: OwnerDep,
     offset: int = 0,
     limit: int = 100,
     contig: str | None = None,
@@ -378,7 +424,14 @@ async def get_vcf_stats_variants(
     Unlike the BAM per-contig route this reads a database rather than slicing
     a TSV -- a plant VCF holds millions of rows, where read-the-whole-file
     costs ~440 MB of RSS per request.
+
+    The ownership check runs before the path is built, for the same reason the
+    report routes do it: `vcf_stats_dir` is laid out by object id alone, so the
+    only thing standing between one profile and another profile's called
+    variants is this lookup.
     """
+    await object_service.get_object(object_id, owner=owner)
+
     db_path = settings.vcf_stats_dir / str(object_id) / "variants.db"
     if not db_path.exists():
         raise NotFoundError(
@@ -407,7 +460,9 @@ async def get_vcf_stats_variants(
 
 
 @router.get("/vcfstats/structure/{object_id}")
-async def get_variant_structure(object_id: PydanticObjectId, gene: str) -> dict:
+async def get_variant_structure(
+    object_id: PydanticObjectId, gene: str, owner: OwnerDep
+) -> dict:
     """The protein structure for one gene's variants, if there is one.
 
     Takes the object rather than a taxid so the VCF -> reference -> organism
@@ -424,9 +479,7 @@ async def get_variant_structure(object_id: PydanticObjectId, gene: str) -> dict:
     gene: most rows would resolve to nothing, and pre-resolving a page would
     spend dozens of round trips to render buttons that mostly do not fire.
     """
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
 
     db_path = settings.vcf_stats_dir / str(object_id) / "variants.db"
     if not db_path.exists():
@@ -465,14 +518,16 @@ async def get_variant_structure(object_id: PydanticObjectId, gene: str) -> dict:
 
 @router.get("/vcfstats/report/{object_id}/{report_path:path}")
 async def get_vcf_stats_report(
-    object_id: PydanticObjectId, report_path: str
+    object_id: PydanticObjectId, report_path: str, owner: OwnerDep
 ) -> FileResponse:
     """Serve the downloadable variants TSV.
 
-    Same containment rules as get_bam_stats_report -- `..` and absolute paths
-    are rejected outright, then the resolved path is re-checked against the
-    report root.
+    Same containment rules as get_bam_stats_report -- the object is resolved
+    under the caller's profile, then `..` and absolute paths are rejected
+    outright, then the resolved path is re-checked against the report root.
     """
+    await object_service.get_object(object_id, owner=owner)
+
     parts = PurePosixPath(report_path).parts
     if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
         raise NotFoundError(f"No such report: {report_path}")
@@ -514,16 +569,18 @@ class VariantRequest(BaseModel):
 
 
 @router.get("/align/defaults/{object_id}")
-async def align_defaults(object_id: PydanticObjectId) -> dict:
+async def align_defaults(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Defaults for the alignment dialog, including the read group.
 
     Read-group fields come from the reads' own metadata, so the dialog is
     usually a confirmation rather than data entry -- and the aligner defaults
     to one that is actually installed.
+
+    Scoped despite being a read of mostly-static defaults: the read group is
+    built from this file's sample name and platform, which are the user's own
+    metadata and not the server's constants.
     """
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
 
     return {
         "params": pipeline_service.default_align_params(obj),
@@ -548,6 +605,10 @@ async def aligner_schema(aligner: str) -> dict:
     Served from the registry rather than duplicated in the frontend: two
     copies of a tool's knobs drift, and the frontend copy is the one nobody
     updates when a flag is added.
+
+    Deliberately *not* owner-scoped: the registry is a static description of
+    minimap2's and bwa-mem2's flags. It is the same schema for everyone, which
+    is exactly what makes it safe to serve without a profile.
     """
     try:
         parsed = Aligner(aligner)
@@ -557,16 +618,22 @@ async def aligner_schema(aligner: str) -> dict:
 
 
 @router.get("/align-envelope")
-async def align_envelope(object_id: PydanticObjectId, reference_id: PydanticObjectId) -> dict:
+async def align_envelope(
+    object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
     """Everything the dialog needs to estimate memory without a round trip.
 
     Sent once when the dialog opens; the client then evaluates the same
     arithmetic locally as sliders move. The formula stays in Python -- only
     the coefficients ship -- so there is no second implementation to drift,
     and `launch_alignment` re-runs the authoritative check regardless.
+
+    The host budgets in the response are global, but the input sizes are not:
+    reporting a reference's size back to a caller who cannot otherwise see it
+    would confirm both that the id exists and roughly how big that genome is.
     """
     return await pipeline_service.align_envelope(
-        object_id=object_id, reference_id=reference_id
+        object_id=object_id, reference_id=reference_id, owner=owner
     )
 
 
@@ -577,8 +644,6 @@ async def list_references(project_id: PydanticObjectId, owner: OwnerDep) -> dict
     Index status rides along so the dialog can say "this will build an index
     first" rather than surprising the user with a long job.
     """
-    from app.services import object_service
-
     objects = await object_service.list_objects(project_id, owner=owner, limit=500)
     references = [
         o
@@ -602,24 +667,25 @@ async def list_references(project_id: PydanticObjectId, owner: OwnerDep) -> dict
 
 
 @router.post("/index", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def build_index(body: BuildIndexRequest) -> JobOut:
+async def build_index(body: BuildIndexRequest, owner: OwnerDep) -> JobOut:
     """Build an aligner index for a reference, eagerly.
 
     The same job the alignment path queues when an index is missing, so there
     is no second code path to keep correct.
     """
     job = await pipeline_service.launch_build_index(
-        reference_id=body.reference_id, aligner=body.aligner
+        reference_id=body.reference_id, owner=owner, aligner=body.aligner
     )
     return JobOut.of(job)
 
 
 @router.post("/align", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_alignment(body: AlignRequest) -> JobOut:
+async def launch_alignment(body: AlignRequest, owner: OwnerDep) -> JobOut:
     """Queue an alignment, building the reference index first if needed."""
     job = await pipeline_service.launch_alignment(
         object_id=body.object_id,
         reference_id=body.reference_id,
+        owner=owner,
         mate_object_id=body.mate_object_id,
         read_group=body.read_group,
         params=body.params,
@@ -629,16 +695,18 @@ async def launch_alignment(body: AlignRequest) -> JobOut:
 
 
 @router.get("/variants/defaults/{bam_id}")
-async def variant_defaults(bam_id: PydanticObjectId) -> dict:
+async def variant_defaults(bam_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Defaults for the variant calling dialog.
 
     Reports the inferred chemistry and the caller it implies, plus whether the
     reference could be resolved -- so the dialog knows to ask for one rather
     than discovering at submit time that it has to.
+
+    Scoped: `reference_name` in the response is the name of a file in the
+    caller's library, resolved by walking this BAM's provenance. Serving that
+    for a BAM the caller does not own would name another profile's genome.
     """
-    obj = await DataObject.get(bam_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {bam_id}")
+    obj = await object_service.get_object(bam_id, owner=owner)
 
     # Resolved once each: the chemistry lookup may read the BAM's parent, and
     # calling it twice to fill two response fields would double that.
@@ -665,10 +733,11 @@ async def variant_defaults(bam_id: PydanticObjectId) -> dict:
 
 
 @router.post("/variants", response_model=JobOut, status_code=status.HTTP_201_CREATED)
-async def launch_variant_calling(body: VariantRequest) -> JobOut:
+async def launch_variant_calling(body: VariantRequest, owner: OwnerDep) -> JobOut:
     """Queue a variant calling run over an aligned, indexed BAM."""
     job = await pipeline_service.launch_variant_calling(
         bam_id=body.bam_id,
+        owner=owner,
         reference_id=body.reference_id,
         caller=body.caller,
         params=body.params,

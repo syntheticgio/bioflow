@@ -16,6 +16,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
+from app.api.deps import OwnerDep
 from app.logging import get_logger
 from app.metadata import assembly, assembly_components, sra_resolver
 from app.services import assembly_service, sra_service
@@ -149,7 +150,7 @@ class AssemblyAccepted(BaseModel):
     download_job_ids: list[str]
 
 
-async def sra_resolve(body: SraResolveRequest) -> SraResolveResponse:
+async def sra_resolve(body: SraResolveRequest, owner: OwnerDep) -> SraResolveResponse:
     """Resolve any INSDC accession to the runs beneath it.
 
     Read-only and starts nothing. Cached in Redis for an hour, because the
@@ -158,6 +159,10 @@ async def sra_resolve(body: SraResolveRequest) -> SraResolveResponse:
     A resolution that finds nothing is a 200 with `error` set rather than a
     404: "no runs found for this accession" is a result the dialog renders, not
     a failed request.
+
+    The accession lookup itself is public NCBI data and needs no profile. The
+    owner is here for the `already_downloaded` cross-check below, which reads
+    the caller's own library to decide which runs to grey out.
     """
     resolution = await sra_resolver.resolve_cached(
         body.accession, platform_filter=body.platform_filter
@@ -166,7 +171,7 @@ async def sra_resolve(body: SraResolveRequest) -> SraResolveResponse:
     present: set[str] = set()
     if body.project_id is not None and resolution.runs:
         present = await sra_service.already_downloaded(
-            body.project_id, [r.accession for r in resolution.runs]
+            body.project_id, [r.accession for r in resolution.runs], owner=owner
         )
 
     return SraResolveResponse(
@@ -188,7 +193,7 @@ async def sra_resolve(body: SraResolveRequest) -> SraResolveResponse:
     )
 
 
-async def sra_download(body: SraDownloadRequest) -> SraAccepted:
+async def sra_download(body: SraDownloadRequest, owner: OwnerDep) -> SraAccepted:
     """Download selected runs from SRA.
 
     202 rather than 201: this accepts the work and returns immediately. One
@@ -198,6 +203,7 @@ async def sra_download(body: SraDownloadRequest) -> SraAccepted:
     run, job_ids, skipped = await sra_service.launch_download(
         project_id=body.project_id,
         run_accessions=body.run_accessions,
+        owner=owner,
         run_qc=body.run_qc,
     )
     return SraAccepted(
@@ -206,26 +212,31 @@ async def sra_download(body: SraDownloadRequest) -> SraAccepted:
 
 
 @router.post("/resolve", response_model=NcbiResolveResponse)
-async def ncbi_resolve(body: SraResolveRequest) -> NcbiResolveResponse:
+async def ncbi_resolve(body: SraResolveRequest, owner: OwnerDep) -> NcbiResolveResponse:
     """Resolve any NCBI accession -- sequencing data or a published assembly.
 
     Read-only and starts nothing. A resolution that finds nothing is a 200
     with `error` set rather than a 404: "nothing found for this accession" is
     a result the dialog renders, not a failed request.
+
+    Owner-scoped for the same narrow reason as `sra_resolve`: both branches
+    end in an "already downloaded" check against the caller's own library.
     """
     kind = sra_resolver.classify(body.accession) or "unknown"
 
     if kind == "assembly":
         return NcbiResolveResponse(
             kind=kind,
-            assembly=await _resolve_assembly(body.accession, body.project_id),
+            assembly=await _resolve_assembly(
+                body.accession, body.project_id, owner=owner
+            ),
         )
 
-    return NcbiResolveResponse(kind=kind, sra=await sra_resolve(body))
+    return NcbiResolveResponse(kind=kind, sra=await sra_resolve(body, owner))
 
 
 async def _resolve_assembly(
-    accession: str, project_id: PydanticObjectId | None
+    accession: str, project_id: PydanticObjectId | None, *, owner: str
 ) -> AssemblyResolveResponse:
     """The assembly branch: one record plus what it offers for download.
 
@@ -264,7 +275,9 @@ async def _resolve_assembly(
 
     present = False
     if project_id is not None:
-        present = await assembly_service.already_downloaded(project_id, accession)
+        present = await assembly_service.already_downloaded(
+            project_id, accession, owner=owner
+        )
 
     return AssemblyResolveResponse(
         accession=meta.accession or accession,
@@ -292,7 +305,9 @@ async def _resolve_assembly(
     response_model=AssemblyAccepted,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def download_assembly(body: AssemblyDownloadRequest) -> AssemblyAccepted:
+async def download_assembly(
+    body: AssemblyDownloadRequest, owner: OwnerDep
+) -> AssemblyAccepted:
     """Download an assembly's selected components.
 
     202 rather than 201: this accepts the work and returns immediately.
@@ -301,5 +316,6 @@ async def download_assembly(body: AssemblyDownloadRequest) -> AssemblyAccepted:
         project_id=body.project_id,
         accession=body.accession,
         components=body.components,
+        owner=owner,
     )
     return AssemblyAccepted(run_id=str(run.id), download_job_ids=job_ids)

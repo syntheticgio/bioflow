@@ -8,9 +8,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.v1 import pipelines as pipelines_api
 from app.api.v1.pipelines import router
 from app.config import settings
 from app.errors import register_exception_handlers
+from tests.api.bare_app import override_owner, stub_get_object
 
 OBJECT_ID = "507f1f77bcf86cd799439011"
 OTHER_ID = "507f191e810c19729de860ea"
@@ -35,9 +37,16 @@ def client(tmp_path, monkeypatch):
 
     (tmp_path / "secret.txt").write_text("blob bytes")
 
+    # Both ids resolve: these tests cover pagination, download and path
+    # containment, and refusing OTHER_ID would let the traversal cases pass on
+    # a 404 from the ownership lookup rather than from the containment check
+    # they exist to exercise. Isolation is covered in test_pipelines_profiles.py.
+    stub_get_object(monkeypatch, pipelines_api, known={OBJECT_ID, OTHER_ID})
+
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router)
+    override_owner(app)
     return TestClient(app)
 
 

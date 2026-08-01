@@ -7,7 +7,7 @@ of the router so the launch rules are testable without HTTP.
 
 from beanie import PydanticObjectId
 
-from app.errors import ConflictError, NotFoundError, ValidationError
+from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
 from app.metadata import sra_resolver
 from app.models import (
@@ -15,7 +15,6 @@ from app.models import (
     IoClass,
     JobClass,
     JobResources,
-    Project,
     RunJobRole,
     RunKind,
 )
@@ -31,7 +30,7 @@ MAX_RUNS_PER_REQUEST = 100
 
 
 async def already_downloaded(
-    project_id: PydanticObjectId, accessions: list[str]
+    project_id: PydanticObjectId, accessions: list[str], *, owner: str
 ) -> set[str]:
     """Which of these runs the project already holds.
 
@@ -39,12 +38,21 @@ async def already_downloaded(
     file downloaded here *or* uploaded by hand and enriched at ingest both
     count. The resolver surfaces this so the checklist can grey them out rather
     than letting someone spend an hour re-fetching what they have.
+
+    Owner-filtered even though `project_id` already narrows this hard. A
+    project does not span profiles today, so the owner clause is redundant --
+    but the failure it prevents is a *grey-out*, which is the one answer here
+    a user cannot argue with: a checklist that greys a run out because some
+    other profile downloaded it tells this profile it has a file it does not
+    have, and the run it then declines to fetch is one it will go looking for
+    later. Belt and braces, on the query whose wrong answer is silent.
     """
     if not accessions:
         return set()
 
     objects = await DataObject.find(
         DataObject.project_id == project_id,
+        DataObject.owner == owner,
         {"metadata.sra_run": {"$in": accessions}},
     ).to_list()
     return {
@@ -58,6 +66,7 @@ async def launch_download(
     *,
     project_id: PydanticObjectId,
     run_accessions: list[str],
+    owner: str,
     run_qc: bool = True,
 ):
     """Queue one download job per selected run, grouped into a single run.
@@ -66,8 +75,15 @@ async def launch_download(
     of work, and one unavailable accession must not lose the other forty. They
     fail and retry independently, and the `PipelineRun` is what makes them read
     as the single action the user took.
+
+    `owner` gates the project lookup. This route spends hours of network and
+    terabytes of disk, and the objects it creates land in whichever project it
+    was pointed at -- so an unscoped lookup here would let one profile fill
+    another profile's project, which is the most expensive version of the
+    mistake this partition exists to prevent.
     """
     from app.queue import queue
+    from app.services import project_service
 
     tools.require(tools.fasterq_dump())
 
@@ -94,9 +110,9 @@ async def launch_download(
             details={"accessions": invalid[:20]},
         )
 
-    project = await Project.get(project_id)
-    if project is None:
-        raise NotFoundError(f"Project not found: {project_id}")
+    # Resolved for the refusal, not for the value: a project the caller does
+    # not own raises NotFoundError here, before any of the work below.
+    await project_service.get_project(project_id, owner=owner)
 
     # Resolved once for the whole batch so each job's payload carries its own
     # platform and size. The handler needs the size for its disk pre-flight and
@@ -114,8 +130,10 @@ async def launch_download(
             "run_qc": run_qc,
             "source": "ncbi_sra",
         },
-        # The project the download lands in owns the run that groups it.
-        owner=project.owner,
+        # The caller's profile. The project lookup above is scoped to it, so
+        # this is the project's owner too -- the download lands where the
+        # person who asked for it can see it.
+        owner=owner,
     )
 
     job_ids: list[str] = []
@@ -134,7 +152,7 @@ async def launch_download(
 
         job = await queue.enqueue(
             "download_sra_run",
-            owner=project.owner,
+            owner=owner,
             payload=payload,
             # USER_INTERACTIVE: someone clicked a button and is watching for
             # the file to appear. The work is IO-bound waiting on NCBI rather

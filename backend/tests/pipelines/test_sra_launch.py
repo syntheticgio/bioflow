@@ -110,7 +110,9 @@ class TestLaunchValidation:
 
         monkeypatch.setattr(sra_service.tools, "require", lambda t: t)
         with pytest.raises(ValidationError, match="No runs selected"):
-            await sra_service.launch_download(project_id=None, run_accessions=[])
+            await sra_service.launch_download(
+                project_id=None, run_accessions=[], owner="o"
+            )
 
     async def test_a_non_run_accession_is_rejected_with_guidance(self, monkeypatch):
         """Only runs are downloadable. A user who pastes a study accession
@@ -120,7 +122,7 @@ class TestLaunchValidation:
         monkeypatch.setattr(sra_service.tools, "require", lambda t: t)
         with pytest.raises(ValidationError, match="Only runs"):
             await sra_service.launch_download(
-                project_id="x", run_accessions=["SRP261086"]
+                project_id="x", run_accessions=["SRP261086"], owner="o"
             )
 
     async def test_too_many_runs_is_refused_before_queueing_any(self, monkeypatch):
@@ -131,33 +133,47 @@ class TestLaunchValidation:
         monkeypatch.setattr(sra_service.tools, "require", lambda t: t)
         too_many = [f"SRR{i}" for i in range(sra_service.MAX_RUNS_PER_REQUEST + 1)]
         with pytest.raises(ValidationError, match="Too many runs"):
-            await sra_service.launch_download(project_id="x", run_accessions=too_many)
+            await sra_service.launch_download(
+                project_id="x", run_accessions=too_many, owner="o"
+            )
 
     async def test_the_selection_is_checked_before_the_database(self, monkeypatch):
         """These validations need no round trip, and answering "no runs
         selected" should not depend on one that tells us nothing."""
         from app.errors import ValidationError
-        from app.models import Project
+        from app.services import project_service
 
         monkeypatch.setattr(sra_service.tools, "require", lambda t: t)
 
-        def explode(_id):
+        # Patched at `project_service.get_project` rather than `Project.get`:
+        # the owner-scoped lookup is what the service calls now, and patching
+        # the model underneath it would leave this test passing while the
+        # round trip it forbids happened one layer up.
+        async def explode(*a, **kw):
             raise AssertionError("should not have queried for the project")
 
-        monkeypatch.setattr(Project, "get", staticmethod(explode))
+        monkeypatch.setattr(project_service, "get_project", explode)
         with pytest.raises(ValidationError):
-            await sra_service.launch_download(project_id="x", run_accessions=["  "])
+            await sra_service.launch_download(
+                project_id="x", run_accessions=["  "], owner="o"
+            )
 
     async def test_a_missing_project_is_a_not_found(self, monkeypatch):
         from app.errors import NotFoundError
-        from app.models import Project
+        from app.services import project_service
 
         monkeypatch.setattr(sra_service.tools, "require", lambda t: t)
-        monkeypatch.setattr(Project, "get", staticmethod(lambda _id: _async(None)))
+
+        # `get_project` raises for a missing project *and* for one owned by
+        # another profile -- the same NotFoundError, deliberately. This test
+        # covers both cases at once, which is the point of that design.
+        async def _not_found(*a, **kw):
+            raise NotFoundError("Project not found")
+
+        monkeypatch.setattr(project_service, "get_project", _not_found)
 
         with pytest.raises(NotFoundError):
-            await sra_service.launch_download(project_id="x", run_accessions=["SRR1"])
+            await sra_service.launch_download(
+                project_id="x", run_accessions=["SRR1"], owner="o"
+            )
 
-
-async def _async(value):
-    return value

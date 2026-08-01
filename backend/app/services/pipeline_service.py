@@ -12,7 +12,7 @@ from pathlib import Path
 from beanie import PydanticObjectId
 
 from app.config import settings
-from app.errors import ConflictError, NotFoundError, ValidationError
+from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
 from app.models import (
     ACTIVE_STATES,
@@ -167,6 +167,7 @@ def _check_fastq_ready(obj: DataObject, *, verb: str = "trim") -> None:
 async def launch_trim(
     *,
     object_id: PydanticObjectId,
+    owner: str,
     mate_object_id: PydanticObjectId | None = None,
     params: dict | None = None,
     paired: bool = True,
@@ -176,15 +177,21 @@ async def launch_trim(
 
     `paired=False` forces single-end treatment even when a mate is known, which
     is the escape hatch for a pair that should not be trimmed together.
+
+    `owner` gates the input lookup rather than merely labelling the output, and
+    that ordering is the whole point. Resolving the reads unscoped and then
+    stamping the caller's profile onto the job would let one profile spend the
+    machine on another profile's file and deposit the trimmed FASTQ into its
+    own library -- a read leak and a write leak from one mistake. Refusing the
+    read is the only version that cannot go wrong in either direction.
     """
     from app.queue import queue
+    from app.services import object_service
 
     _check_tool_runnable(tool)
     tools.require(_trim_tool(tool))
 
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
     _check_fastq_ready(obj)
 
     # fastp's and Trimmomatic's default length/quality filters are tuned for
@@ -205,9 +212,10 @@ async def launch_trim(
     mate: DataObject | None = None
     if paired:
         if mate_object_id is not None:
-            mate = await DataObject.get(mate_object_id)
-            if mate is None:
-                raise NotFoundError(f"Mate object not found: {mate_object_id}")
+            # Scoped like the primary read: an explicit mate id is just as
+            # caller-supplied, and an unscoped fetch here would put another
+            # profile's R2 into this profile's trim.
+            mate = await object_service.get_object(mate_object_id, owner=owner)
         else:
             mate = await suggest_mate(obj)
 
@@ -268,7 +276,7 @@ async def launch_trim(
 
     job = await queue.enqueue(
         "trim_reads",
-        owner=obj.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(
@@ -293,11 +301,12 @@ async def launch_trim(
         label=_trim_label(obj, mate),
         inputs=_trim_inputs(obj, mate),
         params=payload["params"],
-        # The run inherits the owner of the file it operates on. launch_trim
-        # still resolves that file with an unscoped DataObject.get, so this is
-        # as good as the caller's own scope -- Task 10 tightens the lookup when
-        # the route learns to resolve get_current_owner.
-        owner=obj.owner,
+        # The caller's profile, not `obj.owner`. The lookup above is scoped, so
+        # the two are now equal by construction -- naming the caller keeps that
+        # equality enforced at the seam that checks it rather than re-derived
+        # from a field that would silently carry a stale value if the fetch
+        # ever widened again.
+        owner=owner,
         tool=tool,
     )
     await run_service.link_job(run.id, job.id, RunJobRole.TRIM)
@@ -378,7 +387,7 @@ def is_long_read(obj: DataObject) -> bool:
     return _qc_platform(obj) in _LONG_READ_QC_PLATFORMS
 
 
-async def launch_qc(*, object_id: PydanticObjectId):
+async def launch_qc(*, object_id: PydanticObjectId, owner: str):
     """Queue a QC run over a single FASTQ file.
 
     Read-only: it produces a description of the file rather than a new file,
@@ -391,12 +400,11 @@ async def launch_qc(*, object_id: PydanticObjectId):
     the activity view that says nothing the job does not.
     """
     from app.queue import queue
+    from app.services import object_service
 
     tools.require(tools.fastp())
 
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
     _check_fastq_ready(obj, verb="QC")
 
     digest, path = await _resolve_readable(obj)
@@ -425,7 +433,7 @@ async def launch_qc(*, object_id: PydanticObjectId):
     # path uses, so a manual click and an automatic run collapse into one job.
     job = await queue.enqueue(
         "run_qc",
-        owner=obj.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         # Matches the handler's declaration -- see run_qc for why 2048.
@@ -470,6 +478,7 @@ def summary_fingerprint(obj: DataObject) -> str:
 async def launch_summary(
     *,
     object_id: PydanticObjectId,
+    owner: str,
     force: bool = False,
     job_class: JobClass = JobClass.USER_BACKGROUND,
 ) -> Job | None:
@@ -486,13 +495,18 @@ async def launch_summary(
     for another attempt, perhaps against a different model.
     """
     from app.queue import queue
+    from app.services import object_service
 
     if not settings.llm_summaries_enabled:
         return None
 
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    # Raises rather than returning None, unlike the two "nothing to do" exits
+    # around it. A wrong-owner id is not an ordinary outcome of an additive
+    # feature -- returning None would let the API report it as the 409
+    # "disabled or nothing to summarize", which tells a caller poking at
+    # another profile's id something different from what it tells a caller
+    # poking at a nonexistent one. The 404 keeps those two indistinguishable.
+    obj = await object_service.get_object(object_id, owner=owner)
 
     # Nothing to describe. Checked here rather than in the handler so an
     # unsummarizable file never becomes a queued job at all.
@@ -530,7 +544,7 @@ async def launch_summary(
 
     job = await queue.enqueue(
         "summarize_object",
-        owner=obj.owner,
+        owner=owner,
         payload=payload,
         job_class=job_class,
         resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
@@ -798,7 +812,7 @@ async def reference_index_status(reference: DataObject) -> dict:
 
 
 async def align_envelope(
-    *, object_id: PydanticObjectId, reference_id: PydanticObjectId
+    *, object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: str
 ) -> dict:
     """Host budgets, input sizes, and the per-aligner memory coefficients.
 
@@ -810,14 +824,10 @@ async def align_envelope(
     from dataclasses import asdict
 
     from app.queue.governor import LoadGovernor
+    from app.services import object_service
 
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
-
-    reference = await DataObject.get(reference_id)
-    if reference is None:
-        raise NotFoundError(f"Reference not found: {reference_id}")
+    obj = await object_service.get_object(object_id, owner=owner)
+    reference = await object_service.get_object(reference_id, owner=owner)
 
     governor = LoadGovernor()
 
@@ -863,7 +873,7 @@ async def sidecar_payload(reference: DataObject, aligner: Aligner) -> dict:
 
 
 async def launch_build_index(
-    *, reference_id: PydanticObjectId, aligner: str | Aligner = Aligner.MINIMAP2
+    *, reference_id: PydanticObjectId, owner: str, aligner: str | Aligner = Aligner.MINIMAP2
 ):
     """Queue an index build for one (reference, aligner) pair.
 
@@ -871,16 +881,16 @@ async def launch_build_index(
     same job type the alignment path queues, so there is no second code path to
     keep correct.
     """
+    from app.services import object_service
+
     aligner = Aligner(aligner)
     tools.require(_aligner_tool(aligner))
     tools.require(tools.samtools())
 
-    reference = await DataObject.get(reference_id)
-    if reference is None:
-        raise NotFoundError(f"Reference not found: {reference_id}")
+    reference = await object_service.get_object(reference_id, owner=owner)
     _check_reference(reference)
 
-    job = await _enqueue_build_index(reference, aligner)
+    job = await _enqueue_build_index(reference, aligner, owner=owner)
     if job is None:
         raise ConflictError(
             "An index for this reference is already being built",
@@ -889,8 +899,14 @@ async def launch_build_index(
     return job
 
 
-async def _enqueue_build_index(reference: DataObject, aligner: Aligner):
-    """Queue the index build, deduplicated on (reference blob, aligner)."""
+async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner: str):
+    """Queue the index build, deduplicated on (reference blob, aligner).
+
+    `owner` is the caller's profile. Both call sites resolve `reference`
+    through an owner-scoped lookup first, so it equals `reference.owner` -- it
+    is passed explicitly so this function does not have to trust that a
+    reference it was merely handed was fetched under the right scope.
+    """
     from app.queue import queue
 
     digest, path = await _resolve_readable(reference)
@@ -917,7 +933,7 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner):
 
     return await queue.enqueue(
         "build_index",
-        owner=reference.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
@@ -960,6 +976,7 @@ async def launch_alignment(
     *,
     object_id: PydanticObjectId,
     reference_id: PydanticObjectId,
+    owner: str,
     mate_object_id: PydanticObjectId | None = None,
     read_group: dict | None = None,
     params: dict | None = None,
@@ -974,6 +991,7 @@ async def launch_alignment(
     queued forever.
     """
     from app.queue import queue
+    from app.services import object_service
 
     merged_params = {**default_align_params(), **(params or {})}
     align_params = align_params_module.from_dict(merged_params)
@@ -981,14 +999,15 @@ async def launch_alignment(
     tools.require(_aligner_tool(aligner))
     tools.require(tools.samtools())
 
-    obj = await DataObject.get(object_id)
-    if obj is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    # Reads and reference are both scoped to the caller. The same-project check
+    # below would already catch most cross-profile pairings, since projects do
+    # not span profiles -- but it would catch them as a ValidationError naming
+    # the other profile's reference, which is a worse answer than a 404 that
+    # never confirms the id resolves at all.
+    obj = await object_service.get_object(object_id, owner=owner)
     _check_alignable(obj)
 
-    reference = await DataObject.get(reference_id)
-    if reference is None:
-        raise NotFoundError(f"Reference not found: {reference_id}")
+    reference = await object_service.get_object(reference_id, owner=owner)
     _check_reference(reference)
     if reference.project_id != obj.project_id:
         raise ValidationError("Reads and reference must be in the same project")
@@ -1033,13 +1052,13 @@ async def launch_alignment(
 
     mate: DataObject | None = None
     if paired:
+        # An explicit mate is scoped like the primary read; a suggested one is
+        # already same-project, hence same-profile, by construction.
         mate = (
-            await DataObject.get(mate_object_id)
+            await object_service.get_object(mate_object_id, owner=owner)
             if mate_object_id is not None
             else await suggest_mate(obj)
         )
-        if mate_object_id is not None and mate is None:
-            raise NotFoundError(f"Mate object not found: {mate_object_id}")
 
     if mate is not None:
         if mate.id == obj.id:
@@ -1063,10 +1082,11 @@ async def launch_alignment(
         label=_alignment_label(obj, mate, reference),
         inputs=_alignment_inputs(obj, mate, reference),
         params={**align_params.as_dict(), "read_group": rg.as_dict()},
-        # The reads' owner, not the reference's: the two are already required
-        # to share a project above, so they agree, and the reads are what the
-        # user launched this on.
-        owner=obj.owner,
+        # The caller's profile. Reads and reference were both resolved under
+        # it, and they are required to share a project, so all three agree --
+        # naming the caller states which of them is authoritative rather than
+        # leaving a reader to work out that it does not matter.
+        owner=owner,
     )
 
     # Build the index first if it is missing, and hold the alignment behind it.
@@ -1076,7 +1096,7 @@ async def launch_alignment(
     depends_on = []
     index_job = None
     if needs_index:
-        index_job = await _enqueue_build_index(reference, aligner)
+        index_job = await _enqueue_build_index(reference, aligner, owner=owner)
         if index_job is not None:
             depends_on.append(index_job.id)
             await run_service.link_job(run.id, index_job.id, RunJobRole.INDEX)
@@ -1158,7 +1178,7 @@ async def launch_alignment(
 
     job = await queue.enqueue(
         "align_reads",
-        owner=obj.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         # The user's thread count, exactly as trim_reads declares it.
@@ -1297,7 +1317,7 @@ def _check_bam_stats_callable(obj: DataObject) -> None:
         )
 
 
-async def launch_bam_stats(*, object_id: PydanticObjectId):
+async def launch_bam_stats(*, object_id: PydanticObjectId, owner: str):
     """Queue the Results computation for a BAM: coverage, idxstats-derived
     per-contig counts, and binned depth across the reference.
 
@@ -1311,12 +1331,11 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
     finishes -- see `_apply_index_bam` in queue/results.py.
     """
     from app.queue import queue
+    from app.services import object_service
 
     tools.require(tools.samtools())
 
-    bam = await DataObject.get(object_id)
-    if bam is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    bam = await object_service.get_object(object_id, owner=owner)
     _check_bam_stats_callable(bam)
 
     bai = await _sidecar_of_role(bam, SidecarRole.BAI)
@@ -1327,7 +1346,7 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
             )
         index_job = await queue.enqueue(
             "index_bam",
-            owner=bam.owner,
+            owner=owner,
             payload={
                 "bam_object_id": str(bam.id),
                 "bam_sha256": bam.blob_sha256,
@@ -1371,7 +1390,7 @@ async def launch_bam_stats(*, object_id: PydanticObjectId):
     # result, so the object id alone is the dedup key.
     job = await queue.enqueue(
         "run_bam_stats",
-        owner=bam.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=1024, io=IoClass.HEAVY),
@@ -1410,7 +1429,7 @@ def _check_vcf_stats_callable(obj) -> None:
         )
 
 
-async def launch_vcf_stats(*, object_id: PydanticObjectId):
+async def launch_vcf_stats(*, object_id: PydanticObjectId, owner: str):
     """Queue the Results computation for a VCF: call-set summary statistics
     and the per-variant table.
 
@@ -1418,12 +1437,11 @@ async def launch_vcf_stats(*, object_id: PydanticObjectId):
     onto the object plus a TSV and a SQLite database on disk.
     """
     from app.queue import queue
+    from app.services import object_service
 
     tools.require(tools.bcftools())
 
-    vcf = await DataObject.get(object_id)
-    if vcf is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    vcf = await object_service.get_object(object_id, owner=owner)
     _check_vcf_stats_callable(vcf)
 
     digest, path = await _resolve_readable(vcf)
@@ -1446,7 +1464,7 @@ async def launch_vcf_stats(*, object_id: PydanticObjectId):
 
     return await queue.enqueue(
         "run_vcf_stats",
-        owner=vcf.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
@@ -1516,6 +1534,7 @@ async def _sidecar_of_role(obj: DataObject, role: SidecarRole) -> DataObject | N
 async def launch_variant_calling(
     *,
     bam_id: PydanticObjectId,
+    owner: str,
     reference_id: PydanticObjectId | None = None,
     caller: str | None = None,
     params: dict | None = None,
@@ -1529,10 +1548,9 @@ async def launch_variant_calling(
     work the user did not ask for.
     """
     from app.queue import queue
+    from app.services import object_service
 
-    bam = await DataObject.get(bam_id)
-    if bam is None:
-        raise NotFoundError(f"BAM not found: {bam_id}")
+    bam = await object_service.get_object(bam_id, owner=owner)
     _check_variant_callable(bam)
 
     # Refuse CLR before anything is enqueued. Raises ValidationError naming the
@@ -1541,7 +1559,7 @@ async def launch_variant_calling(
     if chemistry is not None:
         variant_runner.caller_for_chemistry(chemistry)
 
-    reference = await _resolve_variant_reference(bam, reference_id)
+    reference = await _resolve_variant_reference(bam, reference_id, owner=owner)
 
     bai = await _sidecar_of_role(bam, SidecarRole.BAI)
     if bai is None:
@@ -1600,13 +1618,13 @@ async def launch_variant_calling(
             ),
         ],
         params=merged.as_dict(),
-        owner=bam.owner,
+        owner=owner,
         tool=merged.caller.value,
     )
 
     job = await queue.enqueue(
         "call_variants",
-        owner=bam.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=merged.threads, mem_mb=8192, io=IoClass.HEAVY),
@@ -1636,13 +1654,18 @@ async def launch_variant_calling(
 
 
 async def _resolve_variant_reference(
-    bam: DataObject, reference_id: PydanticObjectId | None
+    bam: DataObject, reference_id: PydanticObjectId | None, *, owner: str
 ) -> DataObject:
-    """The reference to call against: explicit if given, else the BAM's own."""
+    """The reference to call against: explicit if given, else the BAM's own.
+
+    Only the explicit branch needs `owner`: it is the one taking an id straight
+    from the request body. The inferred branch walks the BAM's own provenance,
+    which cannot leave the profile the BAM is already in.
+    """
+    from app.services import object_service
+
     if reference_id is not None:
-        reference = await DataObject.get(reference_id)
-        if reference is None:
-            raise NotFoundError(f"Reference not found: {reference_id}")
+        reference = await object_service.get_object(reference_id, owner=owner)
         _check_reference(reference)
         if reference.project_id != bam.project_id:
             raise ValidationError("BAM and reference must be in the same project")
@@ -1863,7 +1886,7 @@ async def resolve_annotation_inputs(vcf: DataObject) -> AnnotationInputs:
     return AnnotationInputs(ok=True, reference=reference, annotation=annotation)
 
 
-async def launch_annotation(*, object_id: PydanticObjectId):
+async def launch_annotation(*, object_id: PydanticObjectId, owner: str):
     """Queue a consequence-annotation run for a VCF.
 
     Resolution goes through `resolve_annotation_inputs` rather than repeating
@@ -1871,12 +1894,11 @@ async def launch_annotation(*, object_id: PydanticObjectId):
     the reverse.
     """
     from app.queue import queue
+    from app.services import object_service
 
     tools.require(tools.bcftools_csq())
 
-    vcf = await DataObject.get(object_id)
-    if vcf is None:
-        raise NotFoundError(f"Object not found: {object_id}")
+    vcf = await object_service.get_object(object_id, owner=owner)
 
     inputs = await resolve_annotation_inputs(vcf)
     if not inputs.ok:
@@ -1917,7 +1939,7 @@ async def launch_annotation(*, object_id: PydanticObjectId):
 
     return await queue.enqueue(
         "annotate_variants",
-        owner=vcf.owner,
+        owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),

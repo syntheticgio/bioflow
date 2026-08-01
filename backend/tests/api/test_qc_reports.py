@@ -13,9 +13,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.v1 import pipelines as pipelines_api
 from app.api.v1.pipelines import router
 from app.config import settings
 from app.errors import register_exception_handlers
+from tests.api.bare_app import override_owner, stub_get_object
 
 OBJECT_ID = "507f1f77bcf86cd799439011"
 OTHER_ID = "507f191e810c19729de860ea"
@@ -28,6 +30,13 @@ def client(tmp_path, monkeypatch):
     `qc_reports_dir` is a property derived from `bioinfo_home`, so the home is
     what gets redirected -- patching the property itself would diverge from how
     the route resolves it.
+
+    Both ids resolve through the stubbed ownership lookup. These tests are
+    about path containment, not about isolation, and a stub that refused
+    OTHER_ID would let the traversal tests pass for the wrong reason -- 404
+    from the lookup rather than from the check they exist to exercise.
+    Isolation itself is covered in test_pipelines_profiles.py against a real
+    database.
     """
     monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
 
@@ -42,9 +51,12 @@ def client(tmp_path, monkeypatch):
     # reaching for.
     (tmp_path / "secret.txt").write_text("blob bytes")
 
+    stub_get_object(monkeypatch, pipelines_api, known={OBJECT_ID, OTHER_ID})
+
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router)
+    override_owner(app)
     return TestClient(app)
 
 
@@ -133,9 +145,10 @@ class TestPathTraversal:
         pre-encoded."""
         from app.api.v1.pipelines import get_qc_report
         from app.errors import NotFoundError
+        from tests.api.bare_app import TEST_OWNER
 
         with pytest.raises(NotFoundError):
-            await get_qc_report(OBJECT_ID, attack)
+            await get_qc_report(OBJECT_ID, attack, TEST_OWNER)
 
     def test_the_asgi_layer_rewrites_the_object_id_before_routing(self, client):
         """Documenting a real hazard rather than blessing it.
@@ -144,9 +157,13 @@ class TestPathTraversal:
         traversal: the transport collapses it and the route matches with
         object_id already rewritten to <b>. So <b>'s own report is served,
         correctly and from its own directory -- but the id in the URL is not
-        evidence of which directory was read. Anything that later
-        authorizes this route must authorize the *resolved* object, not the
-        one the URL appears to name."""
+        evidence of which directory was read.
+
+        The ownership check this route now runs satisfies the requirement this
+        docstring used to state as a warning: it resolves the `object_id`
+        parameter, which is the *rewritten* one, so it authorizes the directory
+        actually read rather than the id the URL appears to name. Both ids
+        resolve for this client, which is why <b>'s report still comes back."""
         r = get(client, f"../{OTHER_ID}/fastp.html")
         assert r.status_code == 200
         assert "someone else" in r.text

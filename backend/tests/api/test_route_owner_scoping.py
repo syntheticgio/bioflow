@@ -54,6 +54,7 @@ async def _object(
     *,
     fmt_kind: FormatKind = FormatKind.UNKNOWN,
     status: ObjectStatus = ObjectStatus.UPLOADING,
+    digest: str | None = None,
 ) -> DataObject:
     """A bare object row.
 
@@ -64,6 +65,12 @@ async def _object(
     `fmt_kind`/`status` exist for the reference listing, which filters on both
     before the owner filter is even observable -- an object left at the
     defaults would be absent from that response for the wrong reason.
+
+    `digest` is the same kind of prerequisite for the launch tests: the launch
+    services resolve an object's bytes before enqueueing, and one with no
+    `blob_sha256` is refused for having no content long before the owner is
+    consulted. The launch tests need the *positive* direction to actually
+    reach the queue, so they pass one.
     """
     obj = DataObject(
         project_id=project_id,
@@ -71,6 +78,7 @@ async def _object(
         owner=owner,
         format=FormatInfo(kind=fmt_kind),
         status=status,
+        blob_sha256=digest,
     )
     await obj.insert()
     return obj
@@ -274,6 +282,789 @@ class TestPipelinesRouter:
 
         assert [r["name"] for r in mine.json()["references"]] == ["genome.fasta"]
         assert theirs.json()["references"] == []
+
+    async def test_another_profile_cannot_read_align_defaults(
+        self, client, two_profiles
+    ):
+        """The read group in this response is built from the file's own sample
+        name and platform, so serving it for a foreign object hands over the
+        user's metadata, not just the server's constants."""
+        project = await _project(two_profiles["a"].owner_id(), "a-defaults")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+        )
+
+        mine = await client.get(
+            f"/api/v1/pipelines/align/defaults/{obj.id}",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/align/defaults/{obj.id}",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert mine.status_code == 200
+        assert theirs.status_code == 404
+
+    async def test_another_profile_cannot_read_variant_defaults(
+        self, client, two_profiles
+    ):
+        """`reference_name` names a file in the caller's library, resolved by
+        walking the BAM's provenance -- a foreign read would name another
+        profile's genome."""
+        project = await _project(two_profiles["a"].owner_id(), "a-variant-defaults")
+        bam = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "aligned.bam",
+            fmt_kind=FormatKind.BAM,
+            status=ObjectStatus.READY,
+        )
+
+        mine = await client.get(
+            f"/api/v1/pipelines/variants/defaults/{bam.id}",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/variants/defaults/{bam.id}",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert mine.status_code == 200
+        assert theirs.status_code == 404
+
+    async def test_another_profile_cannot_read_suggestions(
+        self, client, two_profiles
+    ):
+        project = await _project(two_profiles["a"].owner_id(), "a-suggestions")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+        )
+
+        mine = await client.get(
+            f"/api/v1/pipelines/suggestions/{obj.id}",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/suggestions/{obj.id}",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert mine.status_code == 200
+        assert theirs.status_code == 404
+
+    async def test_another_profile_cannot_read_computed_variants(
+        self, client, two_profiles
+    ):
+        """The variant table is a SQLite file in a directory named by object
+        id and nothing else, so this lookup is the only thing standing between
+        one profile and another's called variants.
+
+        B's 404 arrives before the path is built, which is why this passes even
+        though neither profile has computed results here -- A gets the "compute
+        results first" 404 from the missing database, B gets the ownership one.
+        Both are 404s, so the bodies are what distinguish them.
+        """
+        project = await _project(two_profiles["a"].owner_id(), "a-variants")
+        vcf = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "calls.vcf",
+            fmt_kind=FormatKind.VCF,
+            status=ObjectStatus.READY,
+        )
+
+        mine = await client.get(
+            f"/api/v1/pipelines/vcfstats/variants/{vcf.id}",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/vcfstats/variants/{vcf.id}",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert mine.status_code == 404
+        assert "Compute results first" in mine.text
+        assert theirs.status_code == 404
+        # B never reaches the message about computing results, because B never
+        # got past the ownership check to learn whether any exist.
+        assert "Compute results first" not in theirs.text
+
+    async def test_another_profile_cannot_read_a_qc_report(
+        self, client, two_profiles, tmp_path, monkeypatch
+    ):
+        """Report directories are named by object id, so without the ownership
+        lookup the filesystem layout would be the access rule.
+
+        A real report file is written so the two directions produce *different*
+        statuses. Both profiles get a 404 otherwise -- A because the file is
+        missing, B because of ownership -- and a test asserting only B's 404
+        stays green against a route pinned to `"local"`. Established by
+        mutation: that pinning survived the refusal-only version of this test.
+        """
+        project = await _project(two_profiles["a"].owner_id(), "a-qc-report")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+        )
+
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
+        report_dir = tmp_path / "qc_reports" / str(obj.id)
+        report_dir.mkdir(parents=True)
+        (report_dir / "fastp.html").write_text("<html>a's report</html>")
+
+        mine = await client.get(
+            f"/api/v1/pipelines/qc/report/{obj.id}/fastp.html",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/qc/report/{obj.id}/fastp.html",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert mine.status_code == 200
+        assert "a's report" in mine.text
+        assert theirs.status_code == 404
+
+    async def test_pipelines_reads_require_a_profile_header(
+        self, client, two_profiles
+    ):
+        """No header at all is refused, not silently defaulted to `"local"`."""
+        project = await _project(two_profiles["a"].owner_id(), "a-no-header")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+        )
+
+        for path in (
+            f"/api/v1/pipelines/references/{project.id}",
+            f"/api/v1/pipelines/suggestions/{obj.id}",
+            f"/api/v1/pipelines/align/defaults/{obj.id}",
+            f"/api/v1/pipelines/variants/defaults/{obj.id}",
+        ):
+            resp = await client.get(path)
+            assert resp.status_code == 400, path
+
+    async def test_global_pipeline_reads_stay_open(self, client, two_profiles):
+        """The deliberately unscoped routes, asserted as such.
+
+        Tool availability and the trim defaults describe the container and the
+        code, not anybody's library. They answer without a header on purpose --
+        and a later pass that "finishes the sweep" by scoping them would break
+        the launch dialog for a client that has not resolved a profile yet.
+        """
+        assert (await client.get("/api/v1/pipelines/tools")).status_code == 200
+        assert (await client.get("/api/v1/pipelines/defaults")).status_code == 200
+        assert (
+            await client.get("/api/v1/pipelines/summary/status")
+        ).status_code == 200
+        assert (
+            await client.get("/api/v1/pipelines/aligners/minimap2/schema")
+        ).status_code == 200
+
+
+class TestPipelineLaunchesAreScoped:
+    """Launch routes, which are the ones worth the most care.
+
+    A read route with the wrong owner shows someone a filename. A *launch*
+    route with the wrong owner spends the machine's CPU on another profile's
+    file and writes the output into a library, where it persists after the
+    request is forgotten and after the mistake is noticed. That asymmetry is
+    why these are tested harder than the reads above.
+
+    **Every case asserts both directions, and the positive one is the load-
+    bearing half.** A refusal on its own proves nothing here: a route pinned
+    to a hardcoded `"local"` also refuses B, because A's object is not under
+    `"local"` either -- so a B-only assertion stays green against exactly the
+    bug it is meant to catch. This was confirmed by mutation rather than
+    reasoned about: pinning `launch_qc` to `"local"` left a B-only test
+    passing. What kills that mutation is asserting A's own launch reaches the
+    queue *carrying A's owner*, which is what `_assert_scoped_launch` does.
+
+    `queue.enqueue` is mocked throughout: what is under test is the route's
+    scoping, and a real enqueue would need Redis. The mock does double duty --
+    `assert_not_awaited` proves B was refused before any work was queued, and
+    the recorded `owner` kwarg proves A's job was filed under A.
+    """
+
+    async def _assert_scoped_launch(
+        self, client, two_profiles, monkeypatch, *, path: str, body: dict
+    ):
+        """Post `body` to `path` as B, then as A, and assert both directions.
+
+        Returns nothing; the assertions are the point. B must be refused with a
+        404 and reach no queue, and A must reach the queue with A's own owner
+        string -- not `"local"`, and not the reference's or the mate's.
+        """
+        from app.queue import queue
+
+        # Returns a real Job rather than a bare AsyncMock: the launch routes
+        # serialize whatever comes back through `JobOut.of`, which needs actual
+        # fields. A mock's auto-attributes fail that validation, and the 500
+        # that follows would mask the very success this test is asserting.
+        enqueue = AsyncMock(return_value=Job(type="probe", owner="unused"))
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        refused = await client.post(
+            path, json=body, headers=two_profiles["b_headers"]
+        )
+        assert refused.status_code == 404, refused.text
+        enqueue.assert_not_awaited()
+
+        allowed = await client.post(
+            path, json=body, headers=two_profiles["a_headers"]
+        )
+        assert allowed.status_code < 400, allowed.text
+        assert enqueue.await_count >= 1
+        assert (
+            enqueue.await_args_list[0].kwargs["owner"]
+            == two_profiles["a"].owner_id()
+        )
+
+    async def _reads(self, two_profiles, name: str = "reads.fastq"):
+        project = await _project(two_profiles["a"].owner_id(), f"a-launch-{name}")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            name,
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+            digest="a" * 64,
+        )
+        return project, obj
+
+    async def test_qc_is_scoped(self, client, two_profiles, monkeypatch):
+        _, obj = await self._reads(two_profiles, "qc.fastq")
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/qc",
+            body={"object_id": str(obj.id)},
+        )
+
+    async def test_trim_is_scoped(self, client, two_profiles, monkeypatch):
+        _, obj = await self._reads(two_profiles, "trim.fastq")
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/trim",
+            body={"object_id": str(obj.id), "paired": False},
+        )
+
+    async def test_bam_stats_is_scoped(self, client, two_profiles, monkeypatch):
+        project = await _project(two_profiles["a"].owner_id(), "a-bamstats")
+        bam = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "aligned.bam",
+            fmt_kind=FormatKind.BAM,
+            status=ObjectStatus.READY,
+            digest="b" * 64,
+        )
+        bam.facts = {"sorted": True, "sort_order": "coordinate"}
+        await bam.save()
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/bamstats",
+            body={"object_id": str(bam.id)},
+        )
+
+    async def test_vcf_stats_is_scoped(self, client, two_profiles, monkeypatch):
+        project = await _project(two_profiles["a"].owner_id(), "a-vcfstats")
+        vcf = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "calls.vcf",
+            fmt_kind=FormatKind.VCF,
+            status=ObjectStatus.READY,
+            digest="c" * 64,
+        )
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/vcfstats",
+            body={"object_id": str(vcf.id)},
+        )
+
+    async def test_index_build_is_scoped(self, client, two_profiles, monkeypatch):
+        project = await _project(two_profiles["a"].owner_id(), "a-buildindex")
+        ref = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "genome.fasta",
+            fmt_kind=FormatKind.FASTA,
+            status=ObjectStatus.READY,
+            digest="d" * 64,
+        )
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/index",
+            body={"reference_id": str(ref.id)},
+        )
+
+    async def test_summary_refuses_a_foreign_object_without_a_409(
+        self, client, two_profiles, monkeypatch
+    ):
+        """The summary service answers "nothing to do" with None, which the
+        route renders as a 409. A foreign id must not land there.
+
+        Asserted on its own rather than through `_assert_scoped_launch`,
+        because the positive direction depends on `llm_summaries_enabled` and
+        on the file having facts to summarize -- neither of which this test
+        controls. What it does pin down is that B's refusal is a 404 and not
+        the 409, since a 409 would confirm to B that the object exists.
+        """
+        from app.queue import queue
+
+        _, obj = await self._reads(two_profiles, "summary.fastq")
+        enqueue = AsyncMock()
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        resp = await client.post(
+            "/api/v1/pipelines/summary",
+            json={"object_id": str(obj.id)},
+            headers=two_profiles["b_headers"],
+        )
+
+        assert resp.status_code == 404
+        enqueue.assert_not_awaited()
+
+    async def test_annotation_is_scoped(self, client, two_profiles, monkeypatch):
+        """Same shape as variant calling: A cannot reach the queue either --
+        annotation needs a resolvable reference and its `.fai` -- so the
+        distinguishing assertion is again that A's failure is *not* a
+        not-found. Pinning the service lookup to `"local"` turns A's answer
+        into one and fails this."""
+        from app.queue import queue
+
+        project = await _project(two_profiles["a"].owner_id(), "a-annot")
+        vcf = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "calls.vcf",
+            fmt_kind=FormatKind.VCF,
+            status=ObjectStatus.READY,
+            digest="e" * 64,
+        )
+        enqueue = AsyncMock()
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        refused = await client.post(
+            "/api/v1/pipelines/annotate",
+            json={"object_id": str(vcf.id)},
+            headers=two_profiles["b_headers"],
+        )
+        assert refused.status_code == 404
+        assert refused.json()["code"] == "not_found"
+        enqueue.assert_not_awaited()
+
+        mine = await client.post(
+            "/api/v1/pipelines/annotate",
+            json={"object_id": str(vcf.id)},
+            headers=two_profiles["a_headers"],
+        )
+        assert mine.json()["code"] != "not_found", mine.text
+        enqueue.assert_not_awaited()
+
+    async def test_variant_calling_is_scoped(
+        self, client, two_profiles, monkeypatch
+    ):
+        """B is refused, and A gets *past* the ownership check.
+
+        This one cannot assert on an enqueued owner: `launch_variant_calling`
+        deliberately refuses to build the `.bai` and reference `.fai` it needs,
+        so A never reaches the queue in this fixture either. The distinguishing
+        assertion is therefore the *shape* of A's failure -- A is stopped by a
+        missing index, B by ownership, and those are different errors.
+
+        Without that second assertion this test is worthless, which was
+        established by mutation rather than assumed: pinning the service's BAM
+        lookup to `"local"` left a B-only version green, because A's BAM is not
+        under `"local"` either. Under that mutation A gets a 404 "Object not
+        found" instead of the 400 about a missing index, and this test fails.
+        """
+        from app.queue import queue
+
+        project = await _project(two_profiles["a"].owner_id(), "a-calling")
+        bam = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "aligned.bam",
+            fmt_kind=FormatKind.BAM,
+            status=ObjectStatus.READY,
+            digest="f" * 64,
+        )
+        enqueue = AsyncMock()
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        refused = await client.post(
+            "/api/v1/pipelines/variants",
+            json={"bam_id": str(bam.id)},
+            headers=two_profiles["b_headers"],
+        )
+        assert refused.status_code == 404
+        assert refused.json()["code"] == "not_found"
+        enqueue.assert_not_awaited()
+
+        # A resolves its own BAM and is stopped later, by the missing index --
+        # a different failure from B's, which is the whole point.
+        mine = await client.post(
+            "/api/v1/pipelines/variants",
+            json={"bam_id": str(bam.id)},
+            headers=two_profiles["a_headers"],
+        )
+        assert mine.json()["code"] != "not_found", mine.text
+        enqueue.assert_not_awaited()
+
+    async def test_alignment_is_scoped(self, client, two_profiles, monkeypatch):
+        """Both inputs belong to A, so B is refused on the reads -- and A's own
+        launch must still reach the queue under A.
+
+        The positive half is not decoration. Checked by mutation: pinning this
+        route's `owner=` to `"local"` leaves the refusal green, because A's
+        reads are not under `"local"` either. Only the enqueued owner tells the
+        two apart.
+
+        An unindexed reference makes `launch_alignment` queue `build_index`
+        first and the alignment behind it, so the first enqueue here is the
+        index build -- which is exactly the call whose owner decides whose
+        library the resulting `.mmi` lands in.
+        """
+        project = await _project(two_profiles["a"].owner_id(), "a-align")
+        reads = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+            digest="1" * 64,
+        )
+        ref = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "genome.fasta",
+            fmt_kind=FormatKind.FASTA,
+            status=ObjectStatus.READY,
+            digest="2" * 64,
+        )
+
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/align",
+            body={
+                "object_id": str(reads.id),
+                "reference_id": str(ref.id),
+                "paired": False,
+            },
+        )
+
+    async def test_a_profile_cannot_align_its_own_reads_to_a_foreign_reference(
+        self, client, two_profiles, monkeypatch
+    ):
+        """The mixed case, which the single-owner tests cannot reach.
+
+        B owns the reads and asks to align them against A's genome. The reads
+        resolve under B, so the refusal has to come from the *reference's* own
+        scoped lookup -- this is the assertion that fails if `object_id` were
+        scoped and `reference_id` were left reading whatever it was handed.
+        """
+        from app.queue import queue
+
+        a_project = await _project(two_profiles["a"].owner_id(), "a-genome")
+        foreign_ref = await _object(
+            two_profiles["a"].owner_id(),
+            a_project.id,
+            "genome.fasta",
+            fmt_kind=FormatKind.FASTA,
+            status=ObjectStatus.READY,
+            digest="3" * 64,
+        )
+        b_project = await _project(two_profiles["b"].owner_id(), "b-reads")
+        my_reads = await _object(
+            two_profiles["b"].owner_id(),
+            b_project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+            digest="4" * 64,
+        )
+        enqueue = AsyncMock()
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        resp = await client.post(
+            "/api/v1/pipelines/align",
+            json={
+                "object_id": str(my_reads.id),
+                "reference_id": str(foreign_ref.id),
+                "paired": False,
+            },
+            headers=two_profiles["b_headers"],
+        )
+
+        assert resp.status_code == 404
+        enqueue.assert_not_awaited()
+
+    async def test_a_profile_cannot_trim_against_a_foreign_mate(
+        self, client, two_profiles, monkeypatch
+    ):
+        """The mate is caller-supplied too, so it gets its own scoped lookup.
+
+        Same shape as the alignment case above: B owns the R1, so the refusal
+        can only be coming from the explicit `mate_object_id` being resolved
+        under B's scope.
+        """
+        from app.queue import queue
+
+        a_project = await _project(two_profiles["a"].owner_id(), "a-mate")
+        foreign_mate = await _object(
+            two_profiles["a"].owner_id(),
+            a_project.id,
+            "sample_R2.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+            digest="5" * 64,
+        )
+        b_project = await _project(two_profiles["b"].owner_id(), "b-mate")
+        my_reads = await _object(
+            two_profiles["b"].owner_id(),
+            b_project.id,
+            "sample_R1.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+            digest="6" * 64,
+        )
+        enqueue = AsyncMock()
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        resp = await client.post(
+            "/api/v1/pipelines/trim",
+            json={
+                "object_id": str(my_reads.id),
+                "mate_object_id": str(foreign_mate.id),
+                "paired": True,
+            },
+            headers=two_profiles["b_headers"],
+        )
+
+        assert resp.status_code == 404
+        enqueue.assert_not_awaited()
+
+    async def test_launches_require_a_profile_header(self, client, two_profiles):
+        """No header is refused outright rather than defaulted."""
+        _, obj = await self._reads(two_profiles, "noheader.fastq")
+
+        resp = await client.post(
+            "/api/v1/pipelines/qc", json={"object_id": str(obj.id)}
+        )
+        assert resp.status_code == 400
+
+
+class TestNcbiRouter:
+    """The download routes, and the dedup checks in front of them.
+
+    A dedup check that spanned profiles would tell one profile that another
+    had already fetched an accession -- greying out a download the caller does
+    not actually hold. That is a silent wrong answer rather than an error,
+    which is why it is asserted in both directions here.
+    """
+
+    async def test_the_sra_download_is_scoped(
+        self, client, two_profiles, monkeypatch
+    ):
+        """B cannot download into A's project, and A still can.
+
+        The positive half is required, not decorative: pinning the project
+        lookup to `"local"` leaves a B-only assertion green, because A's
+        project is not owned by `"local"` either. Confirmed by mutation.
+
+        `_resolve_metadata` is stubbed because the real one calls NCBI over the
+        network; what is under test is which profile the job is filed under,
+        not what SRA says about SRR1.
+        """
+        from app.queue import queue
+        from app.services import sra_service
+
+        project = await _project(two_profiles["a"].owner_id(), "a-sra")
+
+        async def _meta(accessions):
+            return {a: {"platform": "ILLUMINA", "metadata": {}} for a in accessions}
+
+        monkeypatch.setattr(sra_service, "_resolve_metadata", _meta)
+        enqueue = AsyncMock(return_value=Job(type="probe", owner="unused"))
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        body = {"project_id": str(project.id), "run_accessions": ["SRR1"]}
+
+        # `/sra/download`, not `/ncbi/download`: the SRA download never moved
+        # when the resolver did, and only the `/sra/*` alias mounts it. An
+        # earlier draft of this test posted to `/ncbi/download` and "passed" on
+        # Starlette's routing 404 without ever reaching the ownership check --
+        # which is exactly the class of empty test this module exists to avoid,
+        # and is why the positive direction below is not optional.
+        refused = await client.post(
+            "/api/v1/sra/download", json=body, headers=two_profiles["b_headers"]
+        )
+        assert refused.status_code == 404
+        assert refused.json()["code"] == "not_found"
+        enqueue.assert_not_awaited()
+
+        allowed = await client.post(
+            "/api/v1/sra/download", json=body, headers=two_profiles["a_headers"]
+        )
+        assert allowed.status_code < 400, allowed.text
+        assert enqueue.await_count >= 1
+        assert (
+            enqueue.await_args_list[0].kwargs["owner"]
+            == two_profiles["a"].owner_id()
+        )
+
+    async def test_the_assembly_download_is_scoped(
+        self, client, two_profiles, monkeypatch
+    ):
+        """B cannot fetch a genome into A's project, and A still can.
+
+        Both directions, for the reason established by mutation on the SRA
+        twin: pinning the project lookup to `"local"` leaves a refusal-only
+        test green, since A's project is not `"local"`-owned either.
+
+        `assembly.lookup` and `component_availability` are stubbed -- the real
+        pair makes a blocking HTTP call and shells out to the `datasets` CLI,
+        neither of which this test is about.
+        """
+        from app.metadata import assembly
+        from app.queue import queue
+
+        project = await _project(two_profiles["a"].owner_id(), "a-assembly")
+        monkeypatch.setattr(
+            assembly,
+            "lookup",
+            lambda a: assembly.AssemblyMetadata(accession=a, organism="E. coli"),
+        )
+        monkeypatch.setattr(assembly, "component_availability", lambda a: [])
+        enqueue = AsyncMock(return_value=Job(type="probe", owner="unused"))
+        monkeypatch.setattr(queue, "enqueue", enqueue)
+
+        body = {
+            "project_id": str(project.id),
+            "accession": "GCF_000002445.2",
+            "components": ["genome"],
+        }
+
+        refused = await client.post(
+            "/api/v1/ncbi/download-assembly",
+            json=body,
+            headers=two_profiles["b_headers"],
+        )
+        assert refused.status_code == 404
+        # The body, not just the status: Starlette answers an unrouted path
+        # with a 404 too, and a test that accepted that would pass without ever
+        # reaching the ownership check. This is the app's own error shape.
+        assert refused.json()["code"] == "not_found"
+        enqueue.assert_not_awaited()
+
+        allowed = await client.post(
+            "/api/v1/ncbi/download-assembly",
+            json=body,
+            headers=two_profiles["a_headers"],
+        )
+        assert allowed.status_code < 400, allowed.text
+        assert enqueue.await_count >= 1
+        assert (
+            enqueue.await_args_list[0].kwargs["owner"]
+            == two_profiles["a"].owner_id()
+        )
+
+    async def test_the_sra_dedup_check_does_not_span_profiles(self, two_profiles):
+        """A's downloaded run must not read as B's.
+
+        Both directions, and here that matters for the reason CLAUDE.md warns
+        about: "B sees nothing" alone is also what a check hardcoded to
+        `"local"` returns, since A's row is not under `"local"` either. Only
+        A's own lookup coming back *non-empty* separates a scoped query from a
+        broken one.
+        """
+        from app.services import sra_service
+
+        project = await _project(two_profiles["a"].owner_id(), "a-dedup")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "SRR999.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+        )
+        obj.metadata = {"sra_run": "SRR999"}
+        await obj.save()
+
+        mine = await sra_service.already_downloaded(
+            project.id, ["SRR999"], owner=two_profiles["a"].owner_id()
+        )
+        theirs = await sra_service.already_downloaded(
+            project.id, ["SRR999"], owner=two_profiles["b"].owner_id()
+        )
+
+        assert mine == {"SRR999"}
+        assert theirs == set()
+
+    async def test_the_assembly_dedup_check_does_not_span_profiles(
+        self, two_profiles
+    ):
+        """Same both-directions reasoning as the SRA dedup check above."""
+        from app.models import ObjectRole
+        from app.services import assembly_service
+
+        project = await _project(two_profiles["a"].owner_id(), "a-asm-dedup")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "genome.fasta",
+            fmt_kind=FormatKind.FASTA,
+            status=ObjectStatus.READY,
+        )
+        obj.role = ObjectRole.REFERENCE
+        obj.metadata = {"assembly_accession": "GCF_000002445.2"}
+        await obj.save()
+
+        mine = await assembly_service.already_downloaded(
+            project.id, "GCF_000002445.2", owner=two_profiles["a"].owner_id()
+        )
+        theirs = await assembly_service.already_downloaded(
+            project.id, "GCF_000002445.2", owner=two_profiles["b"].owner_id()
+        )
+
+        assert mine is True
+        assert theirs is False
+
+    async def test_ncbi_routes_require_a_profile_header(self, client, two_profiles):
+        resp = await client.post(
+            "/api/v1/ncbi/resolve", json={"accession": "SRR1"}
+        )
+        assert resp.status_code == 400
 
 
 async def _job(owner: str, job_type: str, *, state: JobState = JobState.FAILED) -> Job:
