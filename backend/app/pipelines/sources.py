@@ -122,6 +122,42 @@ DATA_SOURCES: tuple[DataSource, ...] = (
         citation_url="https://doi.org/10.1093/nar/gkq1019",
         terms="https://www.ncbi.nlm.nih.gov/home/about/policies/",
     ),
+    DataSource(
+        name="UniProt",
+        kind="api",
+        summary=(
+            "The UniProt Knowledgebase: curated protein sequences and their "
+            "annotation. Entries are either reviewed (Swiss-Prot, manually "
+            "curated) or unreviewed (TrEMBL, automatically annotated), and "
+            "proteomes group an organism's entries into a downloadable set. "
+            "A proteome record also names the genome assembly its sequences "
+            "were derived from, which is how a downloaded proteome links "
+            "back to the NCBI assembly it belongs with."
+        ),
+        usage=(
+            "Resolves whatever is typed into the UniProt download box -- a "
+            "proteome identifier, one or more accessions, a taxon, an "
+            "organism name, or a protein name -- and offers what it finds as "
+            "a FASTA that is stored in the project as protein sequences. "
+            "Both the reviewed-only and the complete protein counts are "
+            "shown before downloading, because for some organisms they "
+            "differ several-fold and the choice is not recoverable from the "
+            "file afterwards. Separately, the variants table asks UniProt "
+            "which protein a gene symbol names in order to offer a structure "
+            "view; that lookup is best-effort and a failure hides the button "
+            "rather than failing the table."
+        ),
+        homepage="https://www.uniprot.org/",
+        docs="https://www.uniprot.org/help/api",
+        # Verified 2026-07-31 against the release README and an entry record,
+        # both of which state CC BY 4.0 outright, rather than recalled. The
+        # citation is the current database-issue paper, confirmed via Europe
+        # PMC. `terms` is the URL UniProt's own records cite, not the
+        # JavaScript-rendered help page.
+        citation="The UniProt Consortium, Nucleic Acids Research 2025",
+        citation_url="https://doi.org/10.1093/nar/gkae1010",
+        terms="https://www.uniprot.org/terms",
+    ),
 )
 
 

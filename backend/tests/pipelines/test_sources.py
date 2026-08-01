@@ -9,6 +9,10 @@ class TestSourceCatalog:
         assert "NCBI Datasets" in names
         assert "NCBI E-utilities" in names
         assert "NCBI Sequence Read Archive" in names
+        # Two features call it: the proteome download and the variants
+        # table's structure lookup. A source the app calls but does not list
+        # is a reference page that quietly omits where the data came from.
+        assert "UniProt" in names
 
     def test_every_source_is_documented(self):
         """Same forcing function as the tool catalog: a source added without
