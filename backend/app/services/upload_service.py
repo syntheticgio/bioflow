@@ -63,6 +63,7 @@ def chunk_path(staging: Path, index: int) -> Path:
 async def create_session(
     *,
     project_id: PydanticObjectId,
+    owner: str,
     filename: str,
     total_size: int,
     client_sha256: str | None = None,
@@ -72,11 +73,21 @@ async def create_session(
     Returns (session, None) for a normal upload, or (None, object) when the
     client's digest matched a blob already in the store -- in which case zero
     bytes cross the wire.
+
+    `owner` is stamped on the session (and on any object this creates) so the
+    owner-scoped cascade in project_service.delete_project_tree can see them.
+    Without it every session took the "local" default from
+    TimestampedDocument, and an upload into a non-"local" project left a
+    session -- and a staging directory -- that deleting the project could not
+    reach.
     """
     require_home()
 
+    # Resolved through the owner-scoped lookup rather than Project.get, matching
+    # object_service's register_* paths: a wrong-owner project reads as missing
+    # rather than as someone else's.
     project = await Project.get(project_id)
-    if project is None:
+    if project is None or project.owner != owner:
         raise NotFoundError(f"Project not found: {project_id}")
 
     name = Path(filename).name.strip()
@@ -87,7 +98,7 @@ async def create_session(
 
     if client_sha256:
         client_sha256 = validate_sha256(client_sha256)
-        obj = await _try_dedup(project_id, name, client_sha256, total_size)
+        obj = await _try_dedup(project_id, owner, name, client_sha256, total_size)
         if obj is not None:
             log.info("upload_dedup_preflight", digest=client_sha256, name=name)
             return None, obj
@@ -97,6 +108,7 @@ async def create_session(
 
     session = UploadSession(
         project_id=project_id,
+        owner=owner,
         filename=name,
         total_size=total_size,
         chunk_size=chunk_size,
@@ -120,7 +132,7 @@ async def create_session(
 
 
 async def _try_dedup(
-    project_id: PydanticObjectId, name: str, digest: str, size: int
+    project_id: PydanticObjectId, owner: str, name: str, digest: str, size: int
 ) -> DataObject | None:
     from app.services import blob_service, object_service, project_service
     from app.storage.paths import blob_path
@@ -135,6 +147,7 @@ async def _try_dedup(
 
     obj = DataObject(
         project_id=project_id,
+        owner=owner,
         name=name,
         status=ObjectStatus.HASHING,
         size=size or blob.size,
@@ -145,10 +158,9 @@ async def _try_dedup(
         object_id=obj.id, digest=digest, size=blob.size
     )
     await project_service.bump_counters(project_id, objects=1, total_bytes=blob.size)
-    # The object's own owner. upload_service does not set one yet (that is
-    # tracked separately from Task 4), so this is "local" in practice today --
-    # but it becomes correct on its own the moment that writer lands, rather
-    # than leaving a literal behind to be found.
+    # The object's own owner, which is now its project's rather than the
+    # TimestampedDocument default: this is the one path where a dedup hit
+    # creates an object without going through object_service's register_*.
     await object_service.enqueue_ingest(obj, owner=obj.owner, digest=digest)
     return await DataObject.get(obj.id)
 
@@ -291,6 +303,10 @@ async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession,
 
     obj = DataObject(
         project_id=session.project_id,
+        # From the session rather than a parameter: the session already carries
+        # the owner create_session resolved, and completing an upload must not
+        # be a chance to re-attribute it.
+        owner=session.owner,
         name=session.filename,
         status=ObjectStatus.UPLOADING,
         size=session.total_size,
@@ -304,9 +320,7 @@ async def complete_session(session_id: PydanticObjectId) -> tuple[UploadSession,
 
     job = await queue.enqueue(
         "assemble_upload",
-        # The object's own owner, same reasoning as the enqueue_ingest call
-        # above: upload_service does not set one yet, so this is "local" in
-        # practice today and becomes correct on its own when that writer lands.
+        # The object's own owner, inherited from the session just above.
         owner=obj.owner,
         payload={"session_id": str(session_id), "object_id": str(obj.id)},
         # The user just clicked "upload" and is watching a progress bar.

@@ -275,18 +275,17 @@ async def delete_project_tree(project_id: PydanticObjectId, *, owner: str) -> di
     # passes the owner of the object, project, or run it is acting on. A
     # non-"local" project's jobs really are matched here.
     #
-    # The UploadSession filter is the last one still written for the end state
-    # and inert: nothing sets `owner` on those documents, so every session row
-    # carries the "local" default from TimestampedDocument (upload_service is
-    # tracked separately). Until it lands, a non-"local" project's cascade
-    # matches no sessions, and the project document is deleted while its
-    # sessions survive as orphans pointing at a dead project_id. Milder than
-    # the object leak this once described, since those rows hold no blob
-    # refcount, but the same shape; unreachable at the moment only because
-    # every route in api/v1/projects.py hardcodes owner="local" pending
-    # get_current_owner. Do not read a green suite as evidence the remaining
-    # gap is closed -- the deletion fixtures in tests/services/helpers.py set
-    # the owner on rows whose writers do not.
+    # The UploadSession filter is live too: upload_service.create_session now
+    # takes an owner and stamps it on the session, so a non-"local" project's
+    # sessions really are matched here and their staging directories really are
+    # removed. Before that, every session carried the "local" default from
+    # TimestampedDocument, and deleting a profile-owned project left the
+    # session orphaned and its chunks on disk indefinitely.
+    #
+    # All four filters are now backed by a writer that sets `owner`. The
+    # remaining gap is above the service layer: the routes in api/v1 still
+    # hardcode owner="local" pending get_current_owner, so nothing yet produces
+    # a non-"local" row in normal use.
 
     # Deepest first: if this fails partway, what remains is a valid tree rather
     # than orphans pointing at a parent that no longer exists.

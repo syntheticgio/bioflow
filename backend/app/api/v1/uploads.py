@@ -86,8 +86,11 @@ class CompleteAccepted(BaseModel):
 
 @router.post("", response_model=UploadCreated, status_code=status.HTTP_201_CREATED)
 async def create_upload(body: UploadCreate) -> UploadCreated:
+    # TODO(profiles): thread owner from the route once its API layer resolves
+    # get_current_owner
     session, obj = await upload_service.create_session(
         project_id=PydanticObjectId(body.project_id),
+        owner="local",
         filename=body.filename,
         total_size=body.total_size,
         client_sha256=body.client_sha256,

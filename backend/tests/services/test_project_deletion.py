@@ -183,26 +183,96 @@ class TestDeleteProjectTree:
         if not check_home().ok:
             pytest.skip("needs a configured storage home")
 
-        # Owned by "local" rather than TEST_OWNER: upload_service does not take
-        # an owner yet, so the session it creates carries the TimestampedDocument
-        # default. Matching the project to it keeps this test about staging-dir
-        # cleanup. Threading owner through upload_service is its own task, and
-        # until then an upload into a non-"local" project leaves a session the
-        # cascade cannot see.
-        root = await make_project("tree-uploads", owner="local")
+        root = await make_project("tree-uploads")
         # Returns (session, None) for a normal upload, or (None, object) when
         # the content was already held. No client digest is passed, so the
         # dedup short-circuit cannot fire and `session` is always set.
         session, _ = await upload_service.create_session(
-            project_id=root.id, filename="pending.fastq.gz", total_size=1000
+            project_id=root.id,
+            owner=TEST_OWNER,
+            filename="pending.fastq.gz",
+            total_size=1000,
         )
         staging = Path(session.staging_dir)
         assert staging.exists()
 
-        await project_service.delete_project_tree(root.id, owner="local")
+        await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
         assert not staging.exists()
         assert await UploadSession.find({"project_id": root.id}).count() == 0
+
+    async def test_upload_session_carries_its_projects_owner(self):
+        """The stamp itself, asserted separately from the cascade above.
+
+        create_session used to omit `owner`, so every session took the "local"
+        default from TimestampedDocument regardless of whose project it was
+        for. That was invisible while everything was "local", and became a
+        leaked staging directory the moment a profile owned a project: the
+        owner-scoped cascade in delete_project_tree matched no sessions, the
+        project was deleted, and the chunks stayed on disk indefinitely.
+
+        The cascade test above would now pass even against a session stamped
+        with the wrong owner if that owner happened to be the one it deletes
+        with, which is why this asserts the stored value directly.
+        """
+        from app.models import UploadSession
+        from app.services import upload_service
+        from app.storage.home import check_home
+
+        if not check_home().ok:
+            pytest.skip("needs a configured storage home")
+
+        root = await make_project("upload-owner-stamp")
+        session, _ = await upload_service.create_session(
+            project_id=root.id,
+            owner=TEST_OWNER,
+            filename="owned.fastq.gz",
+            total_size=1000,
+        )
+
+        assert session.owner == TEST_OWNER
+        # Re-read: the constructor's value is not proof it survived the insert
+        # and the staging_dir save.
+        assert (await UploadSession.get(session.id)).owner == TEST_OWNER
+
+    async def test_a_wrong_owner_cascade_leaves_the_session_alone(self):
+        """The direction that fails if the stamp regresses to "local".
+
+        Asserting only that the right owner cleans up would pass against a
+        cascade that ignored `owner` entirely. This pins the partition: a
+        delete run as somebody else must not reach into this session's
+        staging directory.
+        """
+        from pathlib import Path
+
+        from app.models import UploadSession
+        from app.services import upload_service
+        from app.storage.home import check_home
+
+        if not check_home().ok:
+            pytest.skip("needs a configured storage home")
+
+        root = await make_project("upload-owner-partition")
+        session, _ = await upload_service.create_session(
+            project_id=root.id,
+            owner=TEST_OWNER,
+            filename="not-yours.fastq.gz",
+            total_size=1000,
+        )
+        staging = Path(session.staging_dir)
+
+        # A different owner's delete cannot even resolve the project, so it
+        # raises rather than silently deleting nothing.
+        from app.errors import NotFoundError
+
+        with pytest.raises(NotFoundError):
+            await project_service.delete_project_tree(root.id, owner="someone-else")
+
+        assert staging.exists()
+        assert await UploadSession.get(session.id) is not None
+
+        # Cleanup, so this test does not leave the staging dir behind.
+        await upload_service.abort_session(session.id)
 
     async def test_refuses_while_a_job_is_active(self):
         from app.errors import ConflictError
