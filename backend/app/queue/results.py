@@ -640,6 +640,90 @@ async def _apply_assembly_download(result: dict) -> None:
     )
 
 
+async def _apply_uniprot_download(result: dict) -> None:
+    """Take a finished UniProt download into the project.
+
+    Mirrors `_apply_assembly_download`: the handler ran in a worker thread
+    and could not touch the database, so the ingest happens here.
+
+    Simpler than the assembly case in one way -- there is exactly one file,
+    not up to four -- and the loop is kept anyway so a future multi-file
+    shape does not have to reintroduce it.
+
+    No QC and no mate linking: protein sequences have no reads to QC and no
+    pair.
+    """
+    from app.services import object_service, run_service
+
+    staged = result.get("staged") or []
+    project_id = result.get("project_id")
+    if not staged or not project_id:
+        return
+
+    project_id = PydanticObjectId(project_id)
+    job_id = result.get("job_id")
+
+    # Provenance, distinct from the biology: which query produced these bytes
+    # and which UniProt release they came from. The release is recorded here,
+    # per-download, rather than on the `DataSource` entry -- what is true of a
+    # source and what is true of one download from it are different claims,
+    # and `sources.py` argues at length that a source has no version.
+    facts = {
+        "uniprot_query": result.get("query"),
+        "uniprot_release": result.get("release"),
+        "uniprot_proteome": result.get("proteome_id"),
+        "uniprot_reviewed_only": bool(result.get("reviewed_only")),
+        "uniprot_protein_count": result.get("protein_count"),
+        "uniprot_download_source": "uniprot",
+    }
+    metadata = {}
+    if result.get("organism"):
+        metadata["organism"] = result["organism"]
+
+    created = []
+    for entry in staged:
+        try:
+            obj = await object_service.ingest_local_file(
+                project_id=project_id,
+                path=Path(entry["path"]),
+                name=entry["name"],
+                # The role that keeps a protein FASTA out of the aligner's
+                # reference picker. Both are FormatKind.FASTA; only this
+                # tells them apart.
+                role=ObjectRole.PROTEIN,
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts={k: v for k, v in facts.items() if v is not None},
+                metadata=metadata,
+            )
+        except Exception as e:  # noqa: BLE001 - the transfer already succeeded
+            log.error(
+                "uniprot_ingest_failed",
+                query=result.get("query"),
+                name=entry.get("name"),
+                error=str(e),
+            )
+            continue
+        created.append(obj)
+
+    if not created:
+        log.error("uniprot_download_ingested_nothing", query=result.get("query"))
+        return
+
+    # Two steps, matching `_apply_assembly_download`: a job does not know its
+    # run, so the run is looked up first. There is no single "attach outputs
+    # to this job" call.
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [o.id for o in created])
+
+    log.info(
+        "uniprot_download_applied",
+        query=result.get("query"),
+        objects=[str(o.id) for o in created],
+        proteins=result.get("protein_count"),
+    )
+
+
 async def _apply_run_qc(result: dict) -> None:
     """Record a QC run's numbers on the object it described.
 
@@ -1261,6 +1345,7 @@ _APPLIERS = {
     "summarize_object": _apply_summarize_object,
     "download_sra_run": _apply_sra_download,
     "download_assembly": _apply_assembly_download,
+    "download_uniprot": _apply_uniprot_download,
     "build_index": _apply_build_index,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
