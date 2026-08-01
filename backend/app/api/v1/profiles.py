@@ -18,7 +18,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, status
 
 from app.api.v1.schemas import ProfileCreate, ProfileOut, ProfileSelect
-from app.errors import ValidationError, WrongProfilePasswordError
+from app.errors import NotFoundError, ValidationError, WrongProfilePasswordError
 from app.models import Profile
 from app.models.base import utcnow
 from app.services import profile_service
@@ -103,6 +103,14 @@ async def _load(profile_id: str) -> Profile:
     FastAPI's own validation and produce a `{"detail": ...}` body that
     `frontend/src/api/client.ts` discards. Same shape of fix as
     `get_current_owner` in app/api/deps.py.
+
+    The two failures are deliberately different codes. A malformed id is a bad
+    request (422); an id that is well-formed but names nothing is a missing
+    resource (404), and it is the *expected* steady-state failure -- a profile
+    id remembered in localStorage goes stale the moment that profile is
+    deleted. The picker has to tell "that profile is gone, choose another"
+    apart from "that is not an id at all", and one shared code cannot carry
+    both.
     """
     try:
         oid = PydanticObjectId(profile_id)
@@ -111,5 +119,5 @@ async def _load(profile_id: str) -> Profile:
 
     profile = await Profile.get(oid)
     if profile is None:
-        raise ValidationError(f"Profile not found: {profile_id}")
+        raise NotFoundError(f"Profile not found: {profile_id}")
     return profile

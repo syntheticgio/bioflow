@@ -240,17 +240,26 @@ class TestSelectProfile:
 
         assert (await Profile.get(profile.id)).last_used_at is None
 
-    async def test_selecting_an_unknown_profile_is_rejected(self, client):
+    async def test_selecting_an_unknown_profile_is_a_404(self, client):
+        """A well-formed id naming nothing is a missing resource, and it is the
+        expected steady-state failure -- a remembered id goes stale the moment
+        that profile is deleted. The picker recovers from it, so it must not
+        arrive looking like the malformed-id case below."""
         await Profile.find_all().delete()
 
         r = await client.post("/api/v1/profiles/000000000000000000000000/select", json={})
 
-        assert r.status_code == 422
+        assert r.status_code == 404
+        assert r.json()["code"] == "not_found"
 
-    async def test_a_malformed_profile_id_is_not_a_500(self, client):
+    async def test_a_malformed_profile_id_is_a_422_not_a_500(self, client):
+        """Distinct from the stale-id case above: this one is a bad request,
+        not a missing resource. Asserting the exact status rather than merely
+        `< 500` -- an accidental 200 would otherwise pass."""
         r = await client.post("/api/v1/profiles/not-an-id/select", json={})
 
-        assert r.status_code < 500
+        assert r.status_code == 422
+        assert r.json()["code"] == "validation_error"
 
     async def test_the_body_is_optional(self, client):
         """The picker posts nothing at all for a passwordless profile."""
