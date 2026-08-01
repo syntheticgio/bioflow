@@ -153,6 +153,13 @@ def _fai_geometry(fai: Path) -> tuple[int, int]:
     "build_index",
     mode=HandlerMode.SUBPROCESS,
     job_class=JobClass.COMPUTE,
+    # A fallback, not the number this job normally runs with. Every real
+    # launch goes through `pipeline_service._enqueue_build_index`, which sizes
+    # the reservation from the aligner's memory model and the reference --
+    # a STAR human index is ~36 GB, not 8. `default_resources` reaches the
+    # queue only via the development enqueue route in `api/v1/jobs.py`, so
+    # this stays a plausible generic value rather than being raised to the
+    # worst case and starving everything else on that path.
     resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
     # As for trimming: an index failure is almost always deterministic, and
     # retrying a long build delays the error without making it less likely.
@@ -285,8 +292,11 @@ def build_index(ctx: JobContext) -> dict:
     "align_reads",
     mode=HandlerMode.SUBPROCESS,
     job_class=JobClass.COMPUTE,
-    # cpu is overridden per job with the user's thread count, exactly as
-    # trim_reads does -- see pipeline_service.launch_alignment.
+    # cpu *and* mem_mb are overridden per job -- the thread count from the
+    # user, the memory from `resource_estimator` against this aligner and this
+    # reference. See pipeline_service.launch_alignment; as with build_index
+    # above, these values are only a fallback for the development enqueue
+    # route.
     resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
     max_attempts=2,
 )
