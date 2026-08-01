@@ -479,22 +479,25 @@ class TestAlignCard:
 
 
 @contextmanager
-def installed_callers(clair3=True, bcftools=True):
-    """Pin the two variant-caller probes.
+def installed_callers(clair3=True, bcftools=True, deepvariant=True):
+    """Pin the three variant-caller probes.
 
     Safe to patch this way -- unlike the aligners, which reach their probes
     through `aligner_registry`'s frozen specs, the variants card calls
-    `tools.clair3()` and `tools.bcftools()` as plain module-attribute lookups
-    on the name `suggestion_service` imported. Patching that name therefore
-    does reach the call; `test_the_caller_patch_actually_takes_effect` pins
-    that rather than trusting it, because a patch that misses would leave
-    every test below silently reading whatever this host has installed.
+    `tools.clair3()`, `tools.bcftools()` and `tools.deepvariant()` as plain
+    module-attribute lookups on the name `suggestion_service` imported.
+    Patching that name therefore does reach the call;
+    `test_the_caller_patch_actually_takes_effect` pins that rather than
+    trusting it, because a patch that misses would leave every test below
+    silently reading whatever this host has installed.
     """
     with (
         patch("app.services.suggestion_service.tools.clair3",
               return_value=_FakeTool(clair3, name="clair3")),
         patch("app.services.suggestion_service.tools.bcftools",
               return_value=_FakeTool(bcftools, name="bcftools")),
+        patch("app.services.suggestion_service.tools.deepvariant",
+              return_value=_FakeTool(deepvariant, name="deepvariant")),
     ):
         yield
 
@@ -609,13 +612,30 @@ class TestVariantsCard:
         assert card.reason == str(excinfo.value)
 
     def test_a_missing_clair3_gates_a_long_read_card(self):
-        with installed_callers(clair3=False):
+        """Clair3 stays the preferred long-read caller -- DeepVariant is not
+        the automatic default (see the design doc) -- so this only gates when
+        DeepVariant is unavailable too."""
+        with installed_callers(clair3=False, deepvariant=False):
             card = build_variants_card(
                 _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
             )
         assert card.status is CardStatus.UNAVAILABLE
         assert card.launch is None
         assert "clair3" in card.reason
+
+    def test_a_missing_clair3_falls_back_to_deepvariant_when_it_is_installed(self):
+        """The rule DeepVariant's probe makes newly pickable: Clair3 remains
+        preferred (this is a fallback, not a new default), but a card that
+        would otherwise sit gated for a missing binary can instead run
+        against an installed alternative. The direction that fails when the
+        seam breaks: patch DeepVariant off too, in the test above, and the
+        card must go back to gated."""
+        with installed_callers(clair3=False, deepvariant=True):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["body"]["params"]["caller"] == "deepvariant"
 
     def test_a_missing_bcftools_gates_a_short_read_card(self):
         with installed_callers(bcftools=False):

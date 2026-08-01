@@ -961,6 +961,35 @@ TOOL_META: dict[str, ToolMeta] = {
             "still indexes the VCF it writes."
         ),
     ),
+    "deepvariant": ToolMeta(
+        pipelines=(PipelineType.VARIANT,),
+        one_liner="Deep-learning variant caller from Google",
+        summary=(
+            "A deep-learning variant caller from Google. Turns the pileup at "
+            "each position into an image and classifies it with a "
+            "convolutional network, rather than applying a statistical model."
+        ),
+        strengths=(
+            "Consistently high accuracy on short-read SNVs and small indels",
+            "Models trained per sequencing chemistry",
+        ),
+        homepage="https://github.com/google/deepvariant",
+        repository="https://github.com/antomicblitz/deepvariant-linux-arm64",
+        citation=(
+            "Poplin R, et al. A universal SNP and small-indel variant caller "
+            "using deep neural networks. Nat Biotechnol. 2018."
+        ),
+        citation_url="https://doi.org/10.1038/nbt.4235",
+        license="BSD-3-Clause",
+        usage=(
+            "Runs as a separate container image rather than being installed "
+            "in the BioFlow image, and is downloaded the first time it is "
+            "used. BioFlow picks the model from the reads' inferred "
+            "chemistry. This is a community port built for arm64; the "
+            "upstream project publishes x86-64 only."
+        ),
+        runnable=True,
+    ),
 }
 
 

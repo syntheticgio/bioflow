@@ -493,21 +493,38 @@ def build_variants_card(obj, chemistry) -> SuggestionCard | None:
     # Only the caller this chemistry would actually run. Probing both would
     # gate a perfectly runnable Clair3 card on an unrelated missing bcftools.
     tool = tools.clair3() if long_read else tools.bcftools()
-    if not tool.available:
-        return SuggestionCard(
-            kind="variants",
-            category="VARIANTS",
-            title=title,
-            description=description,
-            status=CardStatus.UNAVAILABLE,
-            reason=f"{tool.name} is not installed.",
-        )
-
     why = (
         "Long, high-accuracy reads: Clair3's model is trained on them."
         if long_read
         else "Short reads: bcftools mpileup is the standard pileup caller."
     )
+
+    if not tool.available:
+        # DeepVariant is not the automatic default for any chemistry (see the
+        # sidecar design doc) -- Clair3 stays preferred and is tried first,
+        # above. But a long-read card gated purely because Clair3's binary is
+        # missing, while a DeepVariant image is reachable and covers the same
+        # chemistry (ONT_R104/PACBIO), is a card refusing to run work it
+        # could actually do. Short reads have no such fallback: DeepVariant's
+        # WGS model would need an explicit choice bcftools already covers.
+        dv_tool = tools.deepvariant() if long_read else None
+        if dv_tool is not None and dv_tool.available:
+            caller = variant_runner.VariantCaller.DEEPVARIANT
+            tool = dv_tool
+            title = "DeepVariant long-read calls"
+            why = (
+                "Clair3 is not installed; DeepVariant covers this chemistry "
+                "too and is available as a fallback."
+            )
+        else:
+            return SuggestionCard(
+                kind="variants",
+                category="VARIANTS",
+                title=title,
+                description=description,
+                status=CardStatus.UNAVAILABLE,
+                reason=f"{tool.name} is not installed.",
+            )
 
     return SuggestionCard(
         kind="variants",
