@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { PipelineTool, PipelineType } from "../api/types";
+import type { DataObject, PipelineTool, PipelineType } from "../api/types";
 import { ToolDetailPane } from "./ToolDetailPane";
 
 interface Props {
@@ -10,6 +10,34 @@ interface Props {
   onSelect: (toolName: string) => void;
   onContinue: () => void;
   onClose: () => void;
+  /**
+   * The object being launched against, when known. Only used to warn on
+   * `align`: aligners that cannot handle this file's chemistry are still
+   * choosable (CLAUDE.md's position is that the dialog can afford a looser
+   * filter than the suggestion engine, since a human is choosing), but the
+   * choice should be an informed one rather than a FATAL ERROR forty seconds
+   * into a queued job.
+   */
+  object?: DataObject;
+}
+
+// Chemistries qc_stats.infer_chemistry can report for a long-read file.
+// Kept in sync with ReadChemistry on the backend rather than imported, since
+// the frontend has no access to backend enums -- same duplication TrimDialog
+// already carries for the same reason.
+const LONG_READ_CHEMISTRIES = new Set(["hifi", "clr", "ont_simplex", "ont_duplex"]);
+
+// Aligners this app registers that only handle short reads. minimap2 is the
+// omission -- it covers every chemistry via its presets -- so it is never in
+// this set.
+const SHORT_READ_ONLY_ALIGNERS = new Set(["bwa-mem2", "bowtie2", "hisat2", "star"]);
+
+function longReadChemistry(object: DataObject | undefined): string | null {
+  const chemistry = object?.facts?.qc_read_chemistry;
+  if (typeof chemistry === "string" && LONG_READ_CHEMISTRIES.has(chemistry)) {
+    return chemistry;
+  }
+  return null;
 }
 
 // Exhaustive by type, deliberately: this is the one mirror of PipelineType
@@ -61,8 +89,10 @@ export function PipelineToolSelector({
   onSelect,
   onContinue,
   onClose,
+  object,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
+  const chemistry = pipeline === "align" ? longReadChemistry(object) : null;
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["pipelines", "tools"],
@@ -145,6 +175,15 @@ export function PipelineToolSelector({
           <div className="warn-box">
             No {label} tools are known to this pipeline. That is a
             configuration problem, not a missing binary — report it.
+          </div>
+        )}
+
+        {chemistry && focusedTool && SHORT_READ_ONLY_ALIGNERS.has(focusedTool.name) && (
+          <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
+            QC found this file's chemistry to be {chemistry.replace("_", " ")},
+            which {focusedTool.name} does not align. minimap2 is the aligner
+            that handles it — this file will likely fail if launched with{" "}
+            {focusedTool.name} anyway.
           </div>
         )}
 
