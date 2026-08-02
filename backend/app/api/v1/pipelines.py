@@ -276,13 +276,20 @@ async def get_qc_report(
 
     NanoPlot is the deliberate exception to the "no scripting" rule above.
     Its report has no static-image fallback at all -- every plot is a Plotly
-    figure rendered by a `<script src="https://cdn.plot.ly/...">` -- so under
-    the FastQC/fastp policy it does not degrade to a blank chart the way
-    fastp's does, it renders as a near-empty page. `sandbox` disables
-    scripting outright regardless of `script-src`, so there is no way to
-    allow just the CDN script while keeping `sandbox`; NanoPlot reports drop
-    `sandbox` and add that one script source instead, same content-derived
-    XSS exposure fastp already accepts, just without the erasure.
+    figure. The library itself loads from `<script src="https://cdn.plot.ly/...">`,
+    but each individual plot is drawn by its own inline `<script>` block that
+    calls `Plotly.newPlot(...)` with the plot's data embedded literally --
+    there is no nonce or hash on those blocks, so `script-src` needs
+    `'unsafe-inline'` too or the library loads but every plot silently stays
+    blank (confirmed against a real report: 0 of 7 plots rendered without it,
+    all 7 rendered with it). `sandbox` disables scripting outright regardless
+    of `script-src`, so there is no way to allow the CDN script and the inline
+    calls while keeping `sandbox`; NanoPlot reports drop `sandbox` and add
+    those two script allowances instead, same content-derived XSS exposure
+    fastp already accepts, just without the erasure. NanoPlot's inline data is
+    numeric read-length/quality stats rather than verbatim read sequences, so
+    it does not carry the same attacker-chosen-bytes risk as FastQC's
+    overrepresented-sequences table.
     """
     # Rejected outright rather than resolved away. The ASGI layer collapses
     # `..` before routing, so a path that reaches here still containing one is
@@ -313,8 +320,13 @@ async def get_qc_report(
         # `crossorigin="anonymous"`, so an attacker who compromises the CDN
         # response but not the hash still can't execute; we don't duplicate
         # that hash here because CSP has no equivalent of "require SRI",
-        # only "allow this origin".
-        csp = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src https://cdn.plot.ly"
+        # only "allow this origin". `'unsafe-inline'` is also required in
+        # `script-src`: it's what lets each plot's own inline `Plotly.newPlot`
+        # call run at all, not just the shared library.
+        csp = (
+            "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
+            "script-src https://cdn.plot.ly 'unsafe-inline'"
+        )
     else:
         csp = (
             "sandbox; default-src 'none'; "
