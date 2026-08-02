@@ -7,6 +7,7 @@ interface Props {
   canDifferentialExpression: boolean;
   canQC: boolean;
   hasQc: boolean;
+  hasTrim: boolean;
   /** Named reference for the Align button, when the project has one. */
   alignTarget: string | null;
   onStart: (pipeline: "trim" | "align" | "variant") => void;
@@ -42,6 +43,7 @@ export function Computations({
   canDifferentialExpression,
   canQC,
   hasQc,
+  hasTrim,
   alignTarget,
   onStart,
   onQuantify,
@@ -72,6 +74,9 @@ export function Computations({
                 length-filters, which the narrower name hides. The pipeline key
                 is still "trim". */}
             Preprocess
+            {!hasTrim && (
+              <span className="outstanding-badge" aria-label="Not yet run" />
+            )}
           </button>
         )}
         {canAlign && (
@@ -140,7 +145,10 @@ export function Computations({
             disabled={qcPending}
             title="Measure read quality with fastp and FastQC"
           >
-            {qcPending ? "Running QC…" : hasQc ? "Re-run QC" : "Run QC"}
+            {qcPending ? "Running QC…" : "Run QC"}
+            {!hasQc && !qcPending && (
+              <span className="outstanding-badge" aria-label="Not yet run" />
+            )}
           </button>
         )}
         {/* Set as text -- it is a repair action, not one of the pipeline
