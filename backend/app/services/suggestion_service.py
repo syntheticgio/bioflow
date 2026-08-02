@@ -19,7 +19,13 @@ from enum import StrEnum
 from app.errors import ValidationError
 from app.logging import get_logger
 from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
-from app.pipelines import align_runner, aligner_registry, tools, variant_runner
+from app.pipelines import (
+    align_runner,
+    aligner_registry,
+    assembler_registry,
+    tools,
+    variant_runner,
+)
 from app.pipelines.aligners import Aligner
 from app.services import object_service, pipeline_service
 
@@ -95,6 +101,16 @@ class SuggestionCard:
             "reason": self.reason,
             "launch": self.launch,
         }
+
+
+# How to name a chemistry in a sentence. Only the long-read ones: the card
+# that uses this is unreachable for the others.
+_CHEMISTRY_LABELS: dict = {
+    align_runner.ReadChemistry.HIFI: "PacBio HiFi",
+    align_runner.ReadChemistry.CLR: "PacBio CLR",
+    align_runner.ReadChemistry.ONT_SIMPLEX: "Nanopore simplex",
+    align_runner.ReadChemistry.ONT_DUPLEX: "Nanopore duplex",
+}
 
 
 def _is_long_read(chemistry: align_runner.ReadChemistry | None) -> bool:
@@ -651,32 +667,103 @@ def build_annotate_card(obj, inputs) -> SuggestionCard | None:
 
 
 def build_assemble_card(obj) -> SuggestionCard | None:
-    """De novo assembly. Always unavailable.
+    """De novo assembly.
 
-    Shown rather than hidden on purpose: the card count then stays stable
-    across files, so the Actions tab does not appear to lose steps as you click
-    between them, and the capability stays discoverable as something this tool
-    knows about but cannot yet do.
+    Shown even when it cannot run, which was this card's whole purpose for
+    months: the card count stays stable across files, so the Actions tab does
+    not appear to lose steps as you click between them.
 
-    The reason names the missing binary rather than the absent pipeline system.
-    Both are true -- there is no assembler installed and no DAG to run it under
-    -- but the binary is the blocking constraint and the one the user could
-    actually act on. "The pipeline system isn't built yet" reads as a promise
-    about our roadmap; "No assembler is installed" is a fact about their host.
+    What changed on 2026-08-01 is that it can now run. The old reason -- "No
+    assembler is installed" -- was a fact about the host and correct while
+    tools.py declared no assembler at all. Flye is installed now, and leaving
+    that sentence in place would have been the exact failure CLAUDE.md
+    predicts: a card reading "No assembler is installed" beside an installed
+    assembler.
+
+    The two remaining refusals are kept distinct on purpose. Short reads have
+    an assembler that is not installed, which the user cannot fix today.
+    Unknown chemistry is a *missing fact*, which they can fix by running QC --
+    and telling them to install something instead would send them nowhere.
     """
     if obj.format.kind is not FormatKind.FASTQ:
         return None
 
+    chemistry = pipeline_service.read_chemistry(obj)
+    spec = assembler_registry.spec_for_chemistry(chemistry)
+
+    if spec is None:
+        if chemistry is align_runner.ReadChemistry.SHORT:
+            return SuggestionCard(
+                kind="assemble",
+                category="ASSEMBLE",
+                title="De novo assembly",
+                description="Assemble these reads into contigs without a reference.",
+                status=CardStatus.UNAVAILABLE,
+                reason=(
+                    "Short-read assembly is not installed. Only long reads "
+                    "can be assembled here."
+                ),
+            )
+        if chemistry is None or chemistry is align_runner.ReadChemistry.UNKNOWN:
+            return SuggestionCard(
+                kind="assemble",
+                category="ASSEMBLE",
+                title="De novo assembly",
+                description=(
+                    "Assemble these reads into contigs without a reference."
+                ),
+                status=CardStatus.UNAVAILABLE,
+                # Actionable, which is the bar every other card here meets: the
+                # assembler's input mode is a claim about read accuracy, and QC
+                # is what establishes it.
+                reason="Run QC first, to determine how accurate these reads are.",
+            )
+        # A known long-read chemistry with no assembler. Unreachable today --
+        # Flye covers all four -- and written out anyway because the
+        # alternative is falling into the "run QC" branch above and telling
+        # someone to establish a fact that is already established, which is
+        # the kind of wrong advice that survives for months.
+        return SuggestionCard(
+            kind="assemble",
+            category="ASSEMBLE",
+            title="De novo assembly",
+            description="Assemble these reads into contigs without a reference.",
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                f"No assembler here handles "
+                f"{_CHEMISTRY_LABELS.get(chemistry, chemistry.value)} reads."
+            ),
+        )
+
+    if not spec.available():
+        return SuggestionCard(
+            kind="assemble",
+            category="ASSEMBLE",
+            title="De novo assembly",
+            description="Assemble these reads into contigs without a reference.",
+            status=CardStatus.UNAVAILABLE,
+            reason=spec.unavailable_reason
+            or f"{spec.assembler.value} is not installed.",
+        )
+
+    mode = assembler_registry.mode_for_chemistry(spec, chemistry)
     return SuggestionCard(
         kind="assemble",
         category="ASSEMBLE",
-        title="De novo assembly",
+        title=f"De novo assembly -- {spec.assembler.value}",
         description="Assemble these reads into contigs without a reference.",
-        status=CardStatus.UNAVAILABLE,
-        # Not probed, because there is nothing to probe: `tools.py` declares no
-        # assembler at all -- no Flye, no SPAdes, no Canu -- so this is a fact
-        # about the image rather than about this particular host.
-        reason="No assembler is installed.",
+        why=f"{_CHEMISTRY_LABELS.get(chemistry, 'Long')} reads, assembled as {mode}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/assemble",
+            # Only the object id. Unlike the trim card, the parameters are not
+            # assembled here: genome-size inference walks the project, which is
+            # an async database read, and every builder in this module is
+            # deliberately synchronous and pure. `/pipelines/assemble` fills
+            # them in from `default_assembly_params` when `params` is absent,
+            # so the card and the dialog reach the same defaults by one path.
+            "body": {"object_id": str(obj.id)},
+        },
     )
 
 

@@ -4,6 +4,13 @@ import { notify } from "../stores/messageStore";
 import type { AlignerName, DataObject } from "../api/types";
 
 /**
+ * Keys in a reference's index status that are not aligner indexes. The
+ * samtools `.fai` rides along in the same map but has its own row below and
+ * no "build" button, since every path that needs it makes one.
+ */
+const NON_ALIGNER_INDEXES = new Set(["fai"]);
+
+/**
  * Which indexes a reference has, and a way to build the ones it does not.
  *
  * Indexes are filtered out of the explorer listing -- a bwa-mem2 index is five
@@ -41,7 +48,13 @@ export function IndexStatus({ object }: { object: DataObject }) {
   const entry = data?.references.find((r) => r.object_id === object.id);
   if (isLoading || !entry) return null;
 
-  const aligners: AlignerName[] = ["bwa-mem2", "minimap2"];
+  // The backend keys this map over every Aligner member, so reading the keys
+  // back means a newly registered aligner shows up here without a frontend
+  // edit -- which the previous hardcoded pair did not, and it sat two
+  // aligners behind the backend for three additions.
+  const aligners = Object.keys(entry.indexes).filter(
+    (name) => !NON_ALIGNER_INDEXES.has(name),
+  ) as AlignerName[];
 
   return (
     <div className="section">

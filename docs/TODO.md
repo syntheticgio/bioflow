@@ -577,6 +577,97 @@ Touches: `backend/app/pipelines/aligners.py`,
 `backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
+## STAR: annotation-aware indexing (`--sjdbGTFfile`)
+
+Raised: 2026-08-01, split out of the STAR entry above so it is findable. That
+entry's heading says FIXED, which is a reason to skip reading it, and this is
+open work buried in its body.
+
+STAR ships indexing *without* an annotation. Junctions are found de novo and
+that works -- 9,818 splices on real yeast data with no GTF -- but supplying
+one improves sensitivity for junctions with few supporting reads, which is
+the case RNA-seq cares about most.
+
+**This is now unblocked.** The blocker was that the object model had no
+annotation concept; the differential-expression merge brought one --
+`pipeline_service.annotations_for_project` and `resolve_annotation`, plus a
+`needs_annotation` contract the dialogs already consume. STAR's index build
+can use the same resolution featureCounts does.
+
+Two wrinkles specific to STAR. `--sjdbOverhang` should be read length minus
+one, which ties the index to the reads it will be used with -- and indexes
+here are cached per reference with no read-length dimension, so either accept
+the default 100 (fine for typical 100-150bp Illumina) or encode the overhang
+in the sidecar name. And an annotation-built index writes extra files
+(`exonInfo.tab`, `geneInfo.tab`, `transcriptInfo.tab`, `sjdbList.out.tab`)
+that `aligners.STAR_MEMBERS` does not list, so that tuple becomes conditional
+on whether a GTF was supplied. Verify by running genomeGenerate with a GTF and
+listing the directory rather than predicting it -- predicting it is what got
+the no-GTF file list wrong the first time.
+
+## STAR reports MAPQ 255, which the alignment stats present as a 0-60 score
+
+Raised: 2026-08-01, observed on a real run. Also filed as a background task.
+
+STAR uses MAPQ 255 for "uniquely mapped" (and 3/1/0 for 2/3-4/5+ loci), while
+every other aligner here uses the conventional phred-like 0-60 scale, where
+255 means "unavailable" per the SAM spec. Measured on a real yeast alignment:
+`mean_mapping_quality: 246.59`, `mapq_histogram` with 193,348 reads at 255.
+
+So the same reads aligned with STAR and with bwa-mem2 produce ~247 against
+~50, which reads as a dramatically better alignment rather than a different
+encoding. A histogram axis running to 255 also flattens the other aligners'
+distributions.
+
+Computed in `pipelines/bam_stats_runner.py`, displayed in
+`AlignmentReport.tsx` / `BamResults.tsx`. Prefer labelling the scale or
+bucketing 255 as "unique" over rescaling STAR's values to look like bwa's --
+the number should stay honest.
+
+## The align dialog offers aligners the reads cannot use
+
+Raised: 2026-08-01, hit while testing STAR.
+
+Feeding `SRR39891651.trimmed.fastq` (PacBio HiFi, reads up to 3,550 bp) to
+STAR through the align dialog was accepted, queued, and failed ~40s later
+with `EXITING because of FATAL ERROR in reads input: quality string length is
+not equal to sequence length` -- a message that reads as a corrupt FASTQ
+rather than "this is a short-read aligner".
+
+The information to prevent it is already present and already used elsewhere:
+`suggestion_service` reads `qc_read_chemistry` and correctly recommends
+`minimap2 map-hifi` for that file. The dialog just does not consult it. The
+same hazard applies to bowtie2 and HISAT2, which are equally short-read.
+
+Deliberately a warning rather than a block -- CLAUDE.md's position is that the
+dialog can afford a looser filter than the suggestion engine because a human
+is choosing. But "a human is choosing" only holds if the human is told.
+
+## Audit the hand-maintained registries a new tool must reach
+
+Raised: 2026-08-01, after the third instance in one change.
+
+CLAUDE.md names two mappings a new tool must be added to -- `TOOL_META` and
+`suggestion_service`'s rules. Adding STAR found a third,
+`results._SIDECAR_ROLES`, and missing it cost a `build_index` that reported
+success while storing none of the eight index files. The full suite was green
+throughout, because every fixture fed the appliers roles already in the
+allowlist.
+
+The pattern is a module-level dict keyed by something an enum already
+enumerates, where a missing key is skipped rather than raised.
+`_SIDECAR_ROLES` is now derived (`{role.value: role for role in
+SidecarRole}`), which makes that class of drift impossible rather than merely
+fixed. Worth walking the others and deriving the ones that can be:
+`_QC_STATS_PLATFORM`, `EXTENSION_MAP`, `_TOKEN_SEQUENCE_TYPES`,
+`_EXTENSION_SEQUENCE_TYPES`, `metadata/schemas.py`'s `FORMAT_FIELDS` and
+`ROLE_FIELDS`, `assembly_components.COMPONENTS`.
+
+Not all of them should be derived -- some genuinely hold information the enum
+does not, and a passthrough would be worse than an allowlist. The test to add
+where deriving is wrong is the one `_SIDECAR_ROLES` lacked: every enum member
+is handled, asserted directly.
+
 ## `_APPLIERS` dispatch passed `owner=` while 11 appliers took `launching_owner=` — FIXED
 
 Fixed 2026-08-01, same day, after the user asked for it directly. Also noted
@@ -920,6 +1011,31 @@ DESeq2 and edgeR are also R, which this image has no runtime for -- either add
 R, or use a Python reimplementation (`pydeseq2`) and say so plainly in
 `TOOL_META.usage`, since the choice affects whether results match what a
 reviewer expects.
+
+## The in-app DESeq2 path has never been run end to end
+
+Raised: 2026-08-01, during the pre-merge review of the entry above. Split out
+of it because that entry's heading says FIXED and this is the one part of it
+that is not verified.
+
+What *is* verified: featureCounts through the app on real data (733,174 of
+1,088,107 fragments assigned, 6,302 of 6,477 yeast genes), and pydeseq2 0.5.4
+fitting a model in this image on synthetic counts -- 6 samples, a planted 4x
+change, all 40 changed genes recovered at padj < 0.05 with log2 fold changes
+of 2.05-2.25 against an expected 2.0.
+
+What is not: `differential_expression` as a job, launched from
+`DifferentialExpressionDialog`, over real counts files. That needs two
+conditions with replicates -- four counts files minimum -- and the yeast test
+project has one RNA-seq sample. Nobody has seen the handler, the applier, the
+results object, or `ExpressionResults` / `ExpressionCharts` handle real
+output.
+
+The cheapest honest way to close this is a small multi-sample RNA-seq project
+rather than synthetic counts: the parts still unexercised are the queue and
+UI wiring, and synthetic files would exercise the runner that already has
+unit tests. Note the tools' own floor -- `min_replicates: 2` -- so a 2x2
+design is the minimum that will launch.
 
 ## Generic pipeline workflows (DAG)
 
