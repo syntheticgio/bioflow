@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.config import settings
 from app.errors import ValidationError
 from app.logging import get_logger
 from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
@@ -23,6 +24,8 @@ from app.pipelines import (
     align_runner,
     aligner_registry,
     assembler_registry,
+    assembly_qc_registry,
+    lineage_inference,
     tools,
     variant_runner,
 )
@@ -747,6 +750,88 @@ def build_assemble_card(obj) -> SuggestionCard | None:
     )
 
 
+def build_completeness_card(obj) -> SuggestionCard | None:
+    """Assembly completeness, scored by compleasm.
+
+    Not gated on provenance: an uploaded assembly is as eligible as one this
+    application produced, so this triggers on shape (FASTA, the right role)
+    rather than on `produced_by_job`. That is what makes the role check below
+    load-bearing rather than defensive -- `protein.faa` and
+    `cds_from_genomic.fna` are the same FormatKind.FASTA the align card
+    already had to learn to exclude, and this card has no `derived_from` walk
+    to lean on instead.
+
+    Three refusals, kept distinct the way the assemble card keeps its two:
+    each names a different fix.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    title = "Assembly completeness"
+    description = (
+        "Score what fraction of a lineage-specific ortholog set can be "
+        "found in this assembly (compleasm, a faster BUSCO)."
+    )
+
+    tool = tools.compleasm()
+    if not tool.available:
+        return SuggestionCard(
+            kind="completeness",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=tool.error or "compleasm is not installed.",
+        )
+
+    organism = obj.metadata.get("organism") if obj.metadata else None
+    lineage = lineage_inference.infer_lineage(organism)
+    if lineage is None:
+        return SuggestionCard(
+            kind="completeness",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            # Actionable like the assemble card's "run QC first": naming what
+            # the user can supply rather than a fact they cannot act on.
+            reason=(
+                "No organism metadata to choose a lineage from. Add an "
+                "organism, or pick a lineage manually."
+            ),
+        )
+
+    odb = assembly_qc_registry.COMPLEASM_SPEC.odb
+    from app.queue.lineage_handlers import lineage_present
+
+    if not lineage_present(settings.lineages_dir, lineage, odb):
+        return SuggestionCard(
+            kind="completeness",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                f"The {lineage}_{odb} lineage dataset is not downloaded yet."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="completeness",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"Organism: {organism} -> {lineage} ({odb}).",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/completeness",
+            "body": {"object_id": str(obj.id), "lineage": lineage, "odb": odb},
+        },
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -893,6 +978,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("quantify", lambda: build_quantify_card(obj, annotations)),
         ("annotate", lambda: build_annotate_card(obj, annotation_inputs)),
         ("assemble", lambda: build_assemble_card(obj)),
+        ("completeness", lambda: build_completeness_card(obj)),
     )
 
     cards: list[dict] = []
