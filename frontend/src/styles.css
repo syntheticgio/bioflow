@@ -1838,6 +1838,10 @@ a.btn {
   color: var(--text-faint);
 }
 
+.sra-refseq-badge {
+  margin-left: 6px;
+}
+
 .sra-organism-view-link {
   background: none;
   border: none;

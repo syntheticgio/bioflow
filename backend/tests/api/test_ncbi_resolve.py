@@ -165,7 +165,9 @@ class TestOrganismSearch:
             lambda tax_id, **k: ncbi_taxonomy.AssemblyPage(
                 assemblies=[
                     ncbi_assembly.AssemblyMetadata(
-                        accession="GCF_000002445.2", organism="Trypanosoma brucei"
+                        accession="GCF_000002445.2",
+                        organism="Trypanosoma brucei",
+                        refseq_category="reference genome",
                     )
                 ],
                 next_page_token="next-token",
@@ -195,6 +197,7 @@ class TestOrganismSearch:
         body = r.json()
         assert len(body["assemblies"]) == 1
         assert body["assemblies"][0]["accession"] == "GCF_000002445.2"
+        assert body["assemblies"][0]["refseq_category"] == "reference genome"
         assert body["assemblies_next_page_token"] == "next-token"
         assert len(body["sra_runs"]) == 1
         assert body["sra_runs"][0]["accession"] == "SRR1"

@@ -52,6 +52,11 @@ class AssemblyMetadata:
     release_date: str | None = None
     bioproject: str | None = None
     paired_accession: str | None = None
+    # NCBI's own pick of "the" assembly for this organism -- "reference
+    # genome" (at most one per species) or "representative genome" (one per
+    # strain/lineage when there's no single species-wide reference). None for
+    # every other assembly of the same organism.
+    refseq_category: str | None = None
     # Statistics describe the *published* assembly, not the file on disk.
     total_length: int | None = None
     # Both counts are kept, but they answer different questions: a FASTA's
@@ -203,6 +208,7 @@ def _parse_one_report(r: dict) -> AssemblyMetadata | None:
         release_date=_text(info.get("release_date")),
         bioproject=_text(info.get("bioproject_accession")),
         paired_accession=_text(r.get("paired_accession")),
+        refseq_category=_text(info.get("refseq_category")),
         total_length=_int(stats.get("total_sequence_length")),
         scaffold_count=_int(stats.get("number_of_scaffolds")),
         contig_count=_int(stats.get("number_of_contigs")),

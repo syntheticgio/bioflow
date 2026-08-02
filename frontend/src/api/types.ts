@@ -1163,6 +1163,9 @@ export interface OrganismAssemblySummary {
   assembly_level: string | null;
   submitter: string | null;
   release_date: string | null;
+  /** NCBI's own pick for this organism: "reference genome" or
+   *  "representative genome". Null for every other assembly. */
+  refseq_category: string | null;
   total_length: number | null;
   scaffold_count: number | null;
   gc_percent: number | null;
