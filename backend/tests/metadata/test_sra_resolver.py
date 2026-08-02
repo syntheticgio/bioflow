@@ -377,3 +377,53 @@ class TestAssemblyClassification:
         assert result.kind == "assembly"
         assert result.error is not None
         assert "assembly" in result.error.lower()
+
+
+class TestSearchRunsByOrganism:
+    """Paginated search, unlike `search_uids`'s single capped shot.
+
+    `sra._get` is stubbed directly rather than `search_uids`, since this
+    exercises the real esearch call shape (retstart/retmax) that a paginated
+    organism search needs and an accession resolution never does.
+    """
+
+    def test_parses_uids_and_total_count(self, monkeypatch):
+        import json
+
+        monkeypatch.setattr(
+            sra_resolver.sra,
+            "_get",
+            lambda url: json.dumps(
+                {"esearchresult": {"idlist": ["1", "2", "3"], "count": "500"}}
+            ),
+        )
+        uids, total = sra_resolver.search_runs_by_organism("Homo sapiens")
+        assert uids == ["1", "2", "3"]
+        assert total == 500
+
+    def test_retstart_and_retmax_reach_the_request(self, monkeypatch):
+        seen = {}
+
+        def fake_get(url):
+            seen["url"] = url
+            return '{"esearchresult": {"idlist": [], "count": "0"}}'
+
+        monkeypatch.setattr(sra_resolver.sra, "_get", fake_get)
+        sra_resolver.search_runs_by_organism("Mus musculus", retstart=40, retmax=20)
+
+        assert "retstart=40" in seen["url"]
+        assert "retmax=20" in seen["url"]
+        assert "term=Mus" in seen["url"]
+        assert "%5BOrganism%5D" in seen["url"] or "[Organism]" in seen["url"]
+
+    def test_network_failure_yields_nothing(self, monkeypatch):
+        monkeypatch.setattr(sra_resolver.sra, "_get", lambda url: None)
+        uids, total = sra_resolver.search_runs_by_organism("Homo sapiens")
+        assert uids == []
+        assert total == 0
+
+    def test_unparseable_body_yields_nothing(self, monkeypatch):
+        monkeypatch.setattr(sra_resolver.sra, "_get", lambda url: "not json")
+        uids, total = sra_resolver.search_runs_by_organism("Homo sapiens")
+        assert uids == []
+        assert total == 0

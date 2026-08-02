@@ -1166,6 +1166,60 @@ export interface AssemblyAccepted {
   download_job_ids: string[];
 }
 
+/** One candidate organism from NCBI's taxon_suggest, for autocomplete. */
+export interface OrganismSuggestion {
+  sci_name: string;
+  tax_id: number;
+  common_name: string | null;
+  rank: string | null;
+  group_name: string | null;
+}
+
+export interface OrganismSuggestResponse {
+  suggestions: OrganismSuggestion[];
+}
+
+/**
+ * A row in an organism's assembly list. Lighter than `AssemblyResolveResponse`:
+ * no `components`, since that needs a CLI shellout per accession and this can
+ * be a page of up to 20. Picking one assembly for its component picker goes
+ * back through the existing single-accession `/ncbi/resolve` path.
+ */
+export interface OrganismAssemblySummary {
+  accession: string | null;
+  organism: string | null;
+  tax_id: number | null;
+  strain: string | null;
+  assembly_name: string | null;
+  assembly_level: string | null;
+  submitter: string | null;
+  release_date: string | null;
+  total_length: number | null;
+  scaffold_count: number | null;
+  gc_percent: number | null;
+  already_downloaded: boolean;
+}
+
+export interface OrganismSearchRequest {
+  tax_id: number;
+  sci_name: string;
+  project_id?: string | null;
+  assembly_page_token?: string | null;
+  sra_offset?: number;
+  page_size?: number;
+}
+
+export interface OrganismSearchResponse {
+  tax_id: number;
+  sci_name: string | null;
+  assemblies: OrganismAssemblySummary[];
+  assemblies_next_page_token: string | null;
+  sra_runs: SraRunInfo[];
+  sra_total_count: number;
+  sra_next_offset: number | null;
+  error: string | null;
+}
+
 export interface TrimRequest {
   object_id: string;
   mate_object_id?: string | null;
