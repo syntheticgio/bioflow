@@ -8,9 +8,12 @@ import type { DeSample } from "../api/types";
 /**
  * Launch a differential expression test across a project's counts files.
  *
- * The one dialog here that is not a settings screen for a file. Its subject is
- * a *design*: which samples, in which groups, compared which way round. That
- * is why differential expression has no Actions-tab card -- a card exists to
+ * The one dialog here that is not a settings screen for a single file. Its
+ * subject is a *design*: which samples, in which groups, compared which way
+ * round. It is reached from the Actions tab of any counts file (the button
+ * lives in Computations, gated on `obj.role === "counts"`), but it always
+ * operates across the whole project's counts files, not just the one clicked
+ * -- there is no per-file "suggestion card" for it because a card exists to
  * pre-answer a question, and none of these three can be pre-answered.
  *
  * The condition column is seeded from each counts file's `condition` metadata,
