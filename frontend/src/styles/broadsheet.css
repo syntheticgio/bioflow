@@ -602,9 +602,18 @@
 .theme-broadsheet .kv {
   font-size: 14px;
   gap: 0;
-  align-items: baseline;
 }
 
+/* dt and dd are separate grid cells in the same row, sized independently.
+   With align-items: baseline (the previous rule), each cell shrink-wraps its
+   own content and is positioned by baseline -- so when dd wraps to more
+   lines than dt (e.g. a multi-line CollapsibleList under a one-line label),
+   dd's box is taller than dt's, and a border-bottom on each lands at two
+   different heights: the rule broke in two instead of running under both
+   columns. The default grid stretch (no align-items override) makes both
+   cells fill the row's full height -- the height of the taller one -- so
+   a border-bottom on both now lands at the same line regardless of which
+   side wraps. */
 .theme-broadsheet .kv dt,
 .theme-broadsheet .kv dd {
   padding: var(--space-2) 0;
