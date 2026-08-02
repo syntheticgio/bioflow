@@ -23,6 +23,11 @@ log = get_logger(__name__)
 
 # Progress writes are throttled: a job reporting at 5 Hz would otherwise cause a
 # Mongo write and an SSE fan-out per tick, swamping the UI with refetches.
+#
+# The throttle *drops* updates rather than deferring them, which is correct for
+# a percentage -- the next tick supersedes whatever was skipped -- and wrong for
+# a phase, which changes rarely and then stands for minutes. A phase change is
+# therefore exempt; see `_schedule_progress`.
 PROGRESS_INTERVAL_SECONDS = 0.5
 
 # Grace period between SIGTERM and SIGKILL for subprocess handlers.
@@ -33,6 +38,10 @@ class JobExecutor:
     def __init__(self, worker_id: str):
         self.worker_id = worker_id
         self._last_progress: dict[str, float] = {}
+        # Last phase written per job, so a change can bypass the throttle.
+        # Cleaned up alongside _last_progress; a leak here would be a slow
+        # one, but it is the same lifetime and belongs in the same place.
+        self._last_phase: dict[str, str] = {}
 
     async def run(
         self, job: Job, spec: HandlerSpec, epoch: int, *, ctx: JobContext | None = None
@@ -112,6 +121,7 @@ class JobExecutor:
                 log.warning("job_failed_retrying", job_id=job_id, attempts=attempts)
         finally:
             self._last_progress.pop(job_id, None)
+            self._last_phase.pop(job_id, None)
 
     async def _record_timing(self, job: Job) -> None:
         """Feed this run into the duration model.
@@ -212,12 +222,31 @@ class JobExecutor:
     def _schedule_progress(
         self, job_id: str, epoch: int, update: dict, *, owner: str
     ) -> None:
-        """Throttle and persist a progress update from any thread."""
+        """Throttle and persist a progress update from any thread.
+
+        A *phase change* bypasses the throttle. Found by running a real
+        assembly: the handler reported "starting", and Flye's `configure` and
+        `assembly` banners both arrived inside the same second, so both were
+        dropped -- then the tool ran for six minutes with no further stage
+        line, and the job sat at "starting" for its entire life.
+
+        Dropping is the right behaviour for a percentage, because the next tick
+        carries the value the skipped one would have shown. A phase carries no
+        such successor: it changes a handful of times and stands between
+        changes, so a dropped one is not delayed, it is lost. Assembly makes
+        this obvious because phases are all it has -- its stages differ in
+        duration too much for an honest percentage -- but alignment's
+        "sorting" transition had the same exposure.
+        """
         now = datetime.now(UTC).timestamp()
         last = self._last_progress.get(job_id, 0.0)
-        if now - last < PROGRESS_INTERVAL_SECONDS:
+        phase = update.get("phase")
+        phase_changed = phase is not None and phase != self._last_phase.get(job_id)
+        if not phase_changed and now - last < PROGRESS_INTERVAL_SECONDS:
             return
         self._last_progress[job_id] = now
+        if phase is not None:
+            self._last_phase[job_id] = phase
 
         try:
             loop = asyncio.get_running_loop()
