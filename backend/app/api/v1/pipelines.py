@@ -7,7 +7,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import OwnerDep
+from app.api.deps import LinkableOwnerDep, OwnerDep
 from app.api.v1.jobs import JobOut
 from app.config import settings
 from app.errors import ConflictError, NotFoundError, ValidationError
@@ -240,13 +240,18 @@ async def get_organism_blurb(organism: str, refresh: bool = False) -> OrganismBl
 
 @router.get("/qc/report/{object_id}/{report_path:path}")
 async def get_qc_report(
-    object_id: PydanticObjectId, report_path: str, owner: OwnerDep
+    object_id: PydanticObjectId, report_path: str, owner: LinkableOwnerDep
 ) -> FileResponse:
     """Serve a generated QC report (FastQC or fastp HTML).
 
     Reports are not content-addressed objects -- they are regenerable
     derivatives -- so they live under qc_reports/ and are served from here
     rather than through the blob routes.
+
+    Takes `LinkableOwnerDep` rather than `OwnerDep`: the frontend opens this
+    URL as a plain `<a href target="_blank">`, which never runs the JS that
+    attaches `X-BioFlow-Profile`, so the route also accepts `?profile=` --
+    see `get_current_owner_linkable`.
 
     The ownership check is a database lookup even though the bytes come from
     disk. Report directories are named by object id and nothing else, so
@@ -342,7 +347,7 @@ async def launch_bam_stats(body: BamStatsRequest, owner: OwnerDep) -> JobOut:
 async def get_bam_stats_report(
     object_id: PydanticObjectId,
     report_path: str,
-    owner: OwnerDep,
+    owner: LinkableOwnerDep,
     download: bool = False,
     offset: int = 0,
     limit: int = 100,
@@ -360,7 +365,9 @@ async def get_bam_stats_report(
 
     Two modes: `?download=1` returns the whole TSV as an attachment; the
     default paginates it as JSON, which is what the Results tab's contig table
-    reads from.
+    reads from. The paginated mode is fetched by app code and always carries
+    the header; `?download=1` is a plain link, hence `LinkableOwnerDep` rather
+    than `OwnerDep` -- see `get_current_owner_linkable`.
     """
     await object_service.get_object(object_id, owner=owner)
 
@@ -544,13 +551,17 @@ async def get_variant_structure(
 
 @router.get("/vcfstats/report/{object_id}/{report_path:path}")
 async def get_vcf_stats_report(
-    object_id: PydanticObjectId, report_path: str, owner: OwnerDep
+    object_id: PydanticObjectId, report_path: str, owner: LinkableOwnerDep
 ) -> FileResponse:
     """Serve the downloadable variants TSV.
 
     Same containment rules as get_bam_stats_report -- the object is resolved
     under the caller's profile, then `..` and absolute paths are rejected
     outright, then the resolved path is re-checked against the report root.
+
+    Always reached via a plain link, never `fetch` -- `LinkableOwnerDep`
+    accepts `?profile=` for exactly that reason; see
+    `get_current_owner_linkable`.
     """
     await object_service.get_object(object_id, owner=owner)
 

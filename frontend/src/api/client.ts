@@ -81,6 +81,17 @@ function profileHeaders(): Record<string, string> {
   return id ? { "X-BioFlow-Profile": id } : {};
 }
 
+/**
+ * `?profile=<id>` for URLs opened as a plain `<a href>` rather than fetched
+ * through `request()`. A browser-native navigation never runs `profileHeaders`,
+ * so these routes take the same profile id as a query param instead -- see
+ * `get_current_owner_linkable` on the backend.
+ */
+function profileQuery(): string {
+  const id = useProfileStore.getState().current?.id;
+  return id ? `profile=${encodeURIComponent(id)}` : "";
+}
+
 export class ApiRequestError extends Error {
   code: string;
   status: number;
@@ -227,9 +238,12 @@ export const api = {
    *
    * A plain URL rather than a `request` call: these files run to gigabytes, so
    * the browser should stream it to disk itself instead of us buffering the
-   * whole thing into memory as a Blob to hand back.
+   * whole thing into memory as a Blob to hand back. Opened via a plain
+   * `<a href>`, which never attaches `X-BioFlow-Profile`, so the profile
+   * rides along as a query param instead -- see `get_current_owner_linkable`.
    */
-  objectDownloadUrl: (id: string) => `${BASE}/objects/${id}/download`,
+  objectDownloadUrl: (id: string) =>
+    `${BASE}/objects/${id}/download?${profileQuery()}`,
 
   // --- Chunked uploads ---
   createUpload: (body: {
@@ -457,10 +471,12 @@ export const api = {
    *
    * Not fetched through `request`: the report is an HTML page opened in a new
    * tab, not JSON. The server sandboxes it via CSP -- see `get_qc_report` --
-   * because FastQC embeds sequence data taken straight from the reads.
+   * because FastQC embeds sequence data taken straight from the reads. The
+   * profile rides along as a query param for the same reason the CSP is
+   * needed at all: this is a plain link, not a `fetch` call.
    */
   qcReportUrl: (objectId: string, reportPath: string) =>
-    `${BASE}/pipelines/qc/report/${objectId}/${reportPath}`,
+    `${BASE}/pipelines/qc/report/${objectId}/${reportPath}?${profileQuery()}`,
 
   // --- NCBI SRA ---
 
@@ -675,7 +691,7 @@ export const api = {
 
   /** URL for downloading the complete per-contig TSV. */
   bamStatsDownloadUrl: (objectId: string, reportPath: string) =>
-    `${BASE}/pipelines/bamstats/report/${objectId}/${reportPath}?download=1`,
+    `${BASE}/pipelines/bamstats/report/${objectId}/${reportPath}?download=1&${profileQuery()}`,
 
   /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
    * and a variants TSV, no derived objects. */
@@ -724,7 +740,7 @@ export const api = {
 
   /** URL for downloading the complete variants TSV. */
   vcfStatsDownloadUrl: (objectId: string, reportPath: string) =>
-    `${BASE}/pipelines/vcfstats/report/${objectId}/${reportPath}`,
+    `${BASE}/pipelines/vcfstats/report/${objectId}/${reportPath}?${profileQuery()}`,
 
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,

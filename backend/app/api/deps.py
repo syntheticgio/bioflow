@@ -20,7 +20,7 @@ from typing import Annotated
 
 from beanie import PydanticObjectId
 from bson.errors import InvalidId
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Query
 
 from app.errors import ProfileUnresolvedError
 from app.models import Profile
@@ -79,3 +79,24 @@ async def get_current_owner(
 # the dependency named in a single place -- swapping what resolution does is
 # then a change here, not in every signature that consumes an owner.
 OwnerDep = Annotated[str, Depends(get_current_owner)]
+
+
+async def get_current_owner_linkable(
+    x_bioflow_profile: str | None = Header(default=None),
+    profile: str | None = Query(default=None),
+) -> str:
+    """`OwnerDep`, plus a `?profile=` fallback for routes reached by a plain
+    `<a href>` link rather than the app's own `fetch` wrapper.
+
+    A browser-native navigation -- a download link, a report opened in a new
+    tab -- never runs the JS that attaches `X-BioFlow-Profile`, the same
+    constraint `resolve_owner`'s docstring already notes for `EventSource`.
+    The header still wins when both are somehow present, matching
+    `profileHeaders()` being the only thing that sets it from application
+    code; the query param exists for markup the app does not control at
+    request time.
+    """
+    return await resolve_owner(x_bioflow_profile or profile)
+
+
+LinkableOwnerDep = Annotated[str, Depends(get_current_owner_linkable)]

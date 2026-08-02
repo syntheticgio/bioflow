@@ -6,7 +6,7 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, status
 from fastapi.responses import FileResponse
 
-from app.api.deps import OwnerDep
+from app.api.deps import LinkableOwnerDep, OwnerDep
 from app.api.v1.schemas import BlobOut, ObjectDetail, ObjectOut, ObjectUpdate, PairRequest
 from app.errors import NotFoundError, ValidationError
 from app.models import BlobStorage, JobClass
@@ -60,7 +60,9 @@ async def unpair_object(object_id: PydanticObjectId, owner: OwnerDep) -> ObjectO
 
 
 @router.get("/{object_id}/download")
-async def download_object(object_id: PydanticObjectId, owner: OwnerDep) -> FileResponse:
+async def download_object(
+    object_id: PydanticObjectId, owner: LinkableOwnerDep
+) -> FileResponse:
     """Serve the object's raw bytes as an attachment.
 
     The file is returned exactly as stored -- still gzipped if it was ingested
@@ -68,6 +70,10 @@ async def download_object(object_id: PydanticObjectId, owner: OwnerDep) -> FileR
     not a re-encoded copy. `name` is what the user called the file, so it is
     what the download is named; the digest is an implementation detail of where
     we put it.
+
+    Takes `LinkableOwnerDep`: the frontend's download links are plain
+    `<a href download>` elements, not `fetch` calls, so `X-BioFlow-Profile`
+    is never attached -- see `get_current_owner_linkable`.
 
     Managed and external blobs both resolve here. Neither path is
     caller-controlled: a managed path is built from the validated digest, and

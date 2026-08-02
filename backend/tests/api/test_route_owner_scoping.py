@@ -440,6 +440,43 @@ class TestPipelinesRouter:
         assert "a's report" in mine.text
         assert theirs.status_code == 404
 
+    async def test_a_qc_report_link_authenticates_with_a_query_param(
+        self, client, two_profiles, tmp_path, monkeypatch
+    ):
+        """The QC report link is a plain `<a href>`, opened in a new tab --
+        never a `fetch` call -- so the browser never attaches
+        `X-BioFlow-Profile`. `?profile=` is the fallback the frontend's
+        `qcReportUrl` sends instead; this proves the route accepts it and
+        still enforces the same partition as the header does above."""
+        project = await _project(two_profiles["a"].owner_id(), "a-qc-report-query")
+        obj = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "reads.fastq",
+            fmt_kind=FormatKind.FASTQ,
+            status=ObjectStatus.READY,
+        )
+
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
+        report_dir = tmp_path / "qc_reports" / str(obj.id)
+        report_dir.mkdir(parents=True)
+        (report_dir / "fastp.html").write_text("<html>a's report</html>")
+
+        mine = await client.get(
+            f"/api/v1/pipelines/qc/report/{obj.id}/fastp.html",
+            params={"profile": two_profiles["a"].owner_id()},
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/qc/report/{obj.id}/fastp.html",
+            params={"profile": two_profiles["b"].owner_id()},
+        )
+
+        assert mine.status_code == 200
+        assert "a's report" in mine.text
+        assert theirs.status_code == 404
+
     async def test_pipelines_reads_require_a_profile_header(
         self, client, two_profiles
     ):

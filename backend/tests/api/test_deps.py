@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.deps import get_current_owner
+from app.api.deps import get_current_owner, get_current_owner_linkable
 from app.errors import ProfileUnresolvedError
 from app.models import Profile
 
@@ -107,3 +107,39 @@ class TestGetCurrentOwner:
         finally:
             for profile in existing:
                 await profile.insert()
+
+
+class TestGetCurrentOwnerLinkable:
+    """The `?profile=` fallback for routes reached by a plain `<a href>` --
+    QC/BAM/VCF report links and file downloads -- where the browser never
+    attaches `X-BioFlow-Profile` because no application JS runs first."""
+
+    async def test_resolves_from_the_query_param_when_no_header_is_sent(self):
+        profile = await Profile(username="deps-linkable-query", display={}).insert()
+
+        owner = await get_current_owner_linkable(
+            x_bioflow_profile=None, profile=str(profile.id)
+        )
+
+        assert owner == str(profile.id)
+
+    async def test_the_header_wins_when_both_are_present(self):
+        """`profileHeaders()` is the only application code that sets the
+        header, so if it is ever present it reflects the current profile more
+        directly than a query param baked into a link at render time."""
+        header_profile = await Profile(
+            username="deps-linkable-header", display={}
+        ).insert()
+        query_profile = await Profile(
+            username="deps-linkable-stale-query", display={}
+        ).insert()
+
+        owner = await get_current_owner_linkable(
+            x_bioflow_profile=str(header_profile.id), profile=str(query_profile.id)
+        )
+
+        assert owner == str(header_profile.id)
+
+    async def test_neither_header_nor_query_is_profile_unresolved(self):
+        with pytest.raises(ProfileUnresolvedError):
+            await get_current_owner_linkable(x_bioflow_profile=None, profile=None)
