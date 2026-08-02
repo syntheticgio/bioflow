@@ -3,22 +3,12 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { VariantContigRow, VariantRow } from "../api/types";
 import { isNcbiNucleotideAccession, markerLabel } from "../lib/chromosomes";
+import { useDebounced } from "../lib/useDebounced";
 import { canShowStructure } from "../lib/variants";
 import { SequenceViewerModal } from "./SequenceViewerModal";
 import { StructureViewerModal } from "./StructureViewerModal";
 
 const PAGE_SIZE = 50;
-
-/** Debounces a fast-changing value so a text field can drive a query without
- *  firing one request per keystroke. */
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(value), delayMs);
-    return () => clearTimeout(id);
-  }, [value, delayMs]);
-  return debounced;
-}
 
 /**
  * The complete variant table, paginated and filtered server-side against the
