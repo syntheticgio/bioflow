@@ -3,9 +3,9 @@
 Deliberately *not* owner-scoped, unlike almost every other router here. The
 schedules are the installation's own maintenance -- garbage collection and file
 verification -- and `queue/scheduler.py` already says so in code: both `tick`
-and `run_now` enqueue with a hardcoded `owner="local"` under a comment reading
+and `run_now` enqueue with `owner=keys.SYSTEM_OWNER` under a comment reading
 that this work "runs against the whole installation, not any one profile's
-library. There is no owner to inherit here and there never will be."
+library, so there is no owner to inherit here and there never will be."
 
 Scoping these five routes per profile would therefore produce one of two
 useless outcomes: every profile seeing an empty list, or five identical copies
@@ -22,9 +22,17 @@ rather than a fix to this one. It would need its own `owner` field on
 routes filtering on it. That door is open; nothing here has quietly shut it.
 
 One consequence worth knowing when reading the UI: because maintenance jobs
-carry `owner: "local"`, they appear in the *adopted* profile's job list and its
-event stream, and in nobody else's. Recorded as a deferred finding in
-docs/TODO.md.
+carry `owner: "system"`, they appear in *every* profile's job list and event
+stream rather than in one profile's. That is deliberate, and it is what makes
+these global routes honest -- a schedule any profile can edit and fire should
+not produce a job only one of them can watch.
+
+It was not always so. These jobs used to carry a hardcoded `owner: "local"`,
+which reads as "the installation" but is really the owner string of whichever
+profile adopted the pre-profiles library, so they landed in exactly one real
+person's queue and a second profile pressing Run now watched the job vanish.
+See docs/TODO.md, "Maintenance jobs belong to whichever profile adopted
+'local'".
 """
 
 from datetime import datetime

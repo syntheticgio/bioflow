@@ -29,6 +29,7 @@ from app.models import (
     UploadSession,
     UploadState,
 )
+from app.queue import keys
 from app.services import (
     object_service,
     project_service,
@@ -1153,6 +1154,81 @@ class TestJobsRouter:
 
         assert r.status_code == 400
         assert r.json()["code"] == "profile_unresolved"
+
+    async def test_a_system_job_is_listed_for_every_profile(self, client, two_profiles):
+        """Installation-wide maintenance belongs to nobody, so everybody sees it.
+
+        The one deliberate hole in the partition, and the reason it is a hole
+        rather than a leak: `queue/scheduler.py` enqueues GC and file
+        verification under `keys.SYSTEM_OWNER`, which names no profile's
+        library. Before that these carried a hardcoded `"local"` -- the owner
+        string of whichever profile adopted the pre-profiles library -- so they
+        landed in one real person's queue and a second profile pressing "Run
+        now" on a schedule watched its job vanish.
+
+        Asserted alongside the private job below, not alone: this half passes
+        against a route that has stopped partitioning at all.
+        """
+        maintenance = await _job(keys.SYSTEM_OWNER, "gc_blobs")
+
+        mine = await client.get("/api/v1/jobs", headers=two_profiles["a_headers"])
+        theirs = await client.get("/api/v1/jobs", headers=two_profiles["b_headers"])
+
+        assert str(maintenance.id) in [j["id"] for j in mine.json()]
+        assert str(maintenance.id) in [j["id"] for j in theirs.json()]
+
+    async def test_unioning_the_system_owner_does_not_widen_the_partition(
+        self, client, two_profiles
+    ):
+        """The direction that fails if the `$in` is written wrong.
+
+        `{"owner": {"$in": [owner, SYSTEM_OWNER]}}` has two ways to be
+        mistyped, and the test above catches neither: swapping `owner` out for
+        `SYSTEM_OWNER` turns every profile's list into the maintenance list,
+        and dropping the `owner` term entirely does the same. Both still show
+        the system job to both profiles.
+
+        So this asserts all three facts in one listing -- A sees its own job,
+        A sees the system job, and A does not see B's -- because it is the
+        combination that pins the query shape.
+        """
+        a_job = await _job(two_profiles["a"].owner_id(), "a_private_job")
+        b_job = await _job(two_profiles["b"].owner_id(), "b_private_job")
+        maintenance = await _job(keys.SYSTEM_OWNER, "verify_files")
+
+        listed = [
+            j["id"] for j in (
+                await client.get("/api/v1/jobs", headers=two_profiles["a_headers"])
+            ).json()
+        ]
+
+        assert str(a_job.id) in listed
+        assert str(maintenance.id) in listed
+        assert str(b_job.id) not in listed
+
+    async def test_a_system_job_still_cannot_be_cancelled_by_a_profile(
+        self, client, two_profiles
+    ):
+        """Visible is not the same as owned, and the detail routes keep the
+        stricter rule.
+
+        `_owned_job` stays a strict equality on purpose: listing a maintenance
+        job answers "what is this machine doing", while cancelling one is an
+        installation-level act that a guessed id should not reach. `run_now` on
+        /schedules is the deliberate door for firing them; there is no matching
+        door for killing one.
+        """
+        maintenance = await _job(
+            keys.SYSTEM_OWNER, "gc_blobs", state=JobState.PENDING
+        )
+
+        r = await client.post(
+            f"/api/v1/jobs/{maintenance.id}/cancel",
+            headers=two_profiles["a_headers"],
+        )
+
+        assert r.status_code == 404
+        assert (await Job.get(maintenance.id)).cancel_requested is False
 
 
 async def _session(owner: str, project_name: str):
