@@ -807,6 +807,7 @@ textarea:focus {
 }
 
 .btn {
+  position: relative; /* anchors .outstanding-badge */
   padding: 5px 11px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -2212,6 +2213,22 @@ a.btn {
 
 .q-badge-1 {
   background: var(--error);
+}
+
+/* Outstanding-work badge ------------------------------------------------ */
+
+/* Corner dot on a Computations button, meaning "this hasn't been run yet".
+   Same shape as .q-badge but a fixed color (red is always "outstanding"
+   here, unlike the tiered read-quality score). */
+.outstanding-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
 }
 
 /* Help pages ---------------------------------------------------------- */

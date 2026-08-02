@@ -518,10 +518,15 @@ function ObjectDetail({ id }: { id: string }) {
 
   const stats = fileStats(obj);
 
-  // Distinguishes "Run QC" from "Re-run QC": qc_tool is written by whichever
-  // QC path actually ran, so its presence is the honest test of whether there
-  // is anything to re-run.
+  // Whether QC has already been run, for the outstanding-work badge on its
+  // button: qc_tool is written by whichever QC path actually ran, so its
+  // presence is the honest test.
   const hasQc = typeof obj.facts.qc_tool === "string";
+
+  // Same idea for Preprocess: trimmed_by is written after a trim job
+  // completes (backend/app/queue/results.py), so its presence is the honest
+  // test of whether preprocessing has run.
+  const hasTrim = typeof obj.facts.trimmed_by === "string";
 
   // Names the reference the Align button would default to, so it can say
   // "Align to ASM244v1" rather than just "Align". Only when the project holds
@@ -719,6 +724,7 @@ function ObjectDetail({ id }: { id: string }) {
                   onAssemble={() => setAssembleOpen(true)}
                   canQC={canQC}
                   hasQc={hasQc}
+                  hasTrim={hasTrim}
                   alignTarget={alignTarget}
                   onStart={startFlow}
                   onRunQC={() => runQC.mutate()}
