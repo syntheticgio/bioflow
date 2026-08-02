@@ -53,6 +53,38 @@ export function AssemblyFacts({ facts }: Props) {
   const hasNcbi =
     ncbiTotal !== undefined || ncbiSequences !== undefined || ncbiGc !== undefined;
 
+  // Contiguity: computed in the parser at ingest, not by a separate tool --
+  // see docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md.
+  const n50 = facts.sequence_n50 as number | undefined;
+  const n90 = facts.sequence_n90 as number | undefined;
+  const l50 = facts.sequence_l50 as number | undefined;
+  const auN = facts.sequence_auN as number | undefined;
+  const gapCount = facts.sequence_gap_count as number | undefined;
+  const hasContiguity = n50 !== undefined;
+
+  // Completeness: compleasm, a separate job the user launches.
+  const completenessTool = facts.assembly_completeness_tool as string | undefined;
+  const completenessLineage = facts.assembly_completeness_lineage as
+    | string
+    | undefined;
+  const completePct = facts.assembly_completeness_complete_pct as
+    | number
+    | undefined;
+  const singlePct = facts.assembly_completeness_single_pct as number | undefined;
+  const duplicatedPct = facts.assembly_completeness_duplicated_pct as
+    | number
+    | undefined;
+  const fragmentedPct = facts.assembly_completeness_fragmented_pct as
+    | number
+    | undefined;
+  const missingPct = facts.assembly_completeness_missing_pct as
+    | number
+    | undefined;
+  const completenessTotal = facts.assembly_completeness_total as
+    | number
+    | undefined;
+  const hasCompleteness = completenessTool !== undefined;
+
   // A file named for a full assembly that holds one chromosome is a real and
   // easily-missed problem. Compare only when both sides are known.
   const countDiverges =
@@ -63,7 +95,7 @@ export function AssemblyFacts({ facts }: Props) {
     Math.abs(totalBases - ncbiTotal) / ncbiTotal > 0.01;
   const diverges = countDiverges || lengthDiverges;
 
-  if (!hasAnything && !hasNcbi && !assemblyError) {
+  if (!hasAnything && !hasNcbi && !assemblyError && !hasContiguity && !hasCompleteness) {
     return (
       <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
         No assembly facts extracted yet.
@@ -106,6 +138,38 @@ export function AssemblyFacts({ facts }: Props) {
               <span className="mono">{shortest.name}</span> ·{" "}
               {formatBases(shortest.length)}
             </dd>
+          </>
+        )}
+        {n50 !== undefined && (
+          <>
+            <dt>N50</dt>
+            <dd>
+              {formatBases(n50)}
+              {l50 !== undefined && (
+                <span style={{ color: "var(--text-faint)" }}>
+                  {" "}
+                  ({l50.toLocaleString()} sequence{l50 === 1 ? "" : "s"})
+                </span>
+              )}
+            </dd>
+          </>
+        )}
+        {n90 !== undefined && (
+          <>
+            <dt>N90</dt>
+            <dd>{formatBases(n90)}</dd>
+          </>
+        )}
+        {auN !== undefined && (
+          <>
+            <dt>auN</dt>
+            <dd>{formatBases(auN)}</dd>
+          </>
+        )}
+        {gapCount !== undefined && gapCount > 0 && (
+          <>
+            <dt>Gaps</dt>
+            <dd>{gapCount.toLocaleString()}</dd>
           </>
         )}
         {gc !== undefined && (
@@ -244,6 +308,67 @@ export function AssemblyFacts({ facts }: Props) {
               {ncbiSequences !== undefined && ncbiTotal !== undefined && " "}
               {ncbiTotal !== undefined && <>totalling {formatBases(ncbiTotal)}</>}. It
               may be a subset, or a different patch level.
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasCompleteness && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            Completeness ({completenessTool}
+            {completenessLineage ? ` · ${completenessLineage}` : ""})
+          </div>
+          <dl className="kv">
+            {completePct !== undefined && (
+              <>
+                <dt>Complete</dt>
+                <dd>
+                  {completePct}%
+                  {completenessTotal !== undefined && (
+                    <span style={{ color: "var(--text-faint)" }}>
+                      {" "}
+                      of {completenessTotal.toLocaleString()} markers
+                    </span>
+                  )}
+                </dd>
+              </>
+            )}
+            {singlePct !== undefined && (
+              <>
+                <dt>Single-copy</dt>
+                <dd>{singlePct}%</dd>
+              </>
+            )}
+            {duplicatedPct !== undefined && (
+              <>
+                <dt>Duplicated</dt>
+                <dd>{duplicatedPct}%</dd>
+              </>
+            )}
+            {fragmentedPct !== undefined && (
+              <>
+                <dt>Fragmented</dt>
+                <dd>{fragmentedPct}%</dd>
+              </>
+            )}
+            {missingPct !== undefined && (
+              <>
+                <dt>Missing</dt>
+                <dd>{missingPct}%</dd>
+              </>
+            )}
+          </dl>
+          {/* Duplicated percentage is the haplotypic-duplication signal, and
+              a single headline "complete" number throws it away -- worth
+              flagging when it is large enough to matter rather than left to
+              be noticed only by someone reading every row. */}
+          {duplicatedPct !== undefined && duplicatedPct > 5 && (
+            <div className="warn-box" style={{ marginTop: 8 }}>
+              {duplicatedPct}% of markers are duplicated, which can mean
+              retained haplotypes rather than real gene duplication.
             </div>
           )}
         </div>

@@ -4,6 +4,7 @@ interface Props {
   canCallVariants: boolean;
   canQuantify: boolean;
   canAssemble: boolean;
+  canScoreCompleteness: boolean;
   canQC: boolean;
   hasQc: boolean;
   /** Named reference for the Align button, when the project has one. */
@@ -13,6 +14,7 @@ interface Props {
    * directly rather than going through the tool selector first. */
   onQuantify: () => void;
   onAssemble: () => void;
+  onScoreCompleteness: () => void;
   onRunQC: () => void;
   qcPending: boolean;
   onReingest: () => void;
@@ -37,12 +39,14 @@ export function Computations({
   canCallVariants,
   canQuantify,
   canAssemble,
+  canScoreCompleteness,
   canQC,
   hasQc,
   alignTarget,
   onStart,
   onQuantify,
   onAssemble,
+  onScoreCompleteness,
   onRunQC,
   qcPending,
   onReingest,
@@ -106,6 +110,16 @@ export function Computations({
             title="Assemble these long reads into contigs, with no reference"
           >
             Assemble
+          </button>
+        )}
+        {canScoreCompleteness && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onScoreCompleteness}
+            title="Score what fraction of a lineage-specific ortholog set can be found in this assembly"
+          >
+            Score completeness
           </button>
         )}
         {canQuantify && (
