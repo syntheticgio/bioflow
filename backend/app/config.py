@@ -118,6 +118,11 @@ class Settings(BaseSettings):
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
     flye_path: str = "flye"
+    # Assembly completeness. Built from source in the Dockerfile -- neither is
+    # packaged for trixie -- so compleasm resolves miniprot on PATH under this
+    # exact name rather than needing a second setting passed through to it.
+    compleasm_path: str = "compleasm"
+    miniprot_path: str = "miniprot"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

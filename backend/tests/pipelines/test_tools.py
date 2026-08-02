@@ -258,6 +258,8 @@ class TestSerialization:
             "clair3",
             "deepvariant",
             "flye",
+            "miniprot",
+            "compleasm",
             "fasterq-dump",
             "prefetch",
             "datasets",

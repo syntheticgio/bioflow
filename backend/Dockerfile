@@ -69,7 +69,11 @@ RUN apt-get update \
         tabix \
         subread \
         flye \
+        hmmer \
     && rm -rf /var/lib/apt/lists/*
+# hmmer is compleasm's dependency, not a standalone BioFlow tool -- see the
+# compleasm install below and its own comment for why miniprot and compleasm
+# itself are not on this list.
 # subread is the package; featureCounts is the binary inside it, and the only
 # part of it anything here calls. Named for the package rather than the tool
 # because that is what apt understands.
@@ -256,6 +260,24 @@ RUN pip install --no-cache-dir NanoPlot==1.45.0
 # reinstall them. Pinned, because a DE result is only comparable to another
 # one from the same version.
 RUN pip install --no-cache-dir pydeseq2==0.5.4
+
+# compleasm, the assembly completeness tool -- BUSCO's job, ~10-20x faster,
+# and it recovers BUSCOs the metaeuk step in Debian's own busco package
+# misses. Placed after the pip installs above rather than beside Clair3:
+# compleasm imports pandas directly and setup.py declares no dependency on
+# it, so this relies on NanoPlot/PyDESeq2 having already installed a
+# pandas-compatible stack for it to resolve against. See
+# docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md and the
+# install script's own comments for why this is a source build rather than
+# the release tarball (x86-only) or the biocontainer (also x86-only, despite
+# looking multi-arch).
+ARG MINIPROT_VERSION=0.18
+ARG COMPLEASM_VERSION=0.2.9
+COPY scripts/install-compleasm.sh /srv/scripts/install-compleasm.sh
+RUN chmod +x /srv/scripts/install-compleasm.sh \
+    && MINIPROT_VERSION="${MINIPROT_VERSION}" \
+       COMPLEASM_VERSION="${COMPLEASM_VERSION}" \
+       /srv/scripts/install-compleasm.sh
 
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \

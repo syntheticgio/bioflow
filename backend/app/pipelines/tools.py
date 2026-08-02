@@ -473,6 +473,24 @@ def flye() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def miniprot() -> Tool:
+    # compleasm's protein aligner, built from source alongside it -- see
+    # install-compleasm.sh. Probed separately from compleasm() so a broken
+    # miniprot (the more likely failure, since it is the compiled half) shows
+    # up as its own row in the tool panel rather than being hidden behind
+    # compleasm's own "not found" message.
+    return _probe("miniprot", settings.miniprot_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
+def compleasm() -> Tool:
+    # `--version` prints "compleasm X.Y.Z" with no import cost worth a slow
+    # timeout -- unlike NanoPlot, its own imports are pandas and its own
+    # modules, not a plotting stack.
+    return _probe("compleasm", settings.compleasm_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -535,6 +553,8 @@ def all_tools() -> list[Tool]:
         clair3(),
         deepvariant(),
         flye(),
+        miniprot(),
+        compleasm(),
         fasterq_dump(),
         prefetch(),
         datasets(),
@@ -1164,6 +1184,78 @@ TOOL_META: dict[str, ToolMeta] = {
             "cannot assemble them."
         ),
     ),
+    "miniprot": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Protein-to-genome aligner behind compleasm",
+        summary=(
+            "Aligns protein sequences to a genome assembly, splice-aware. "
+            "BioFlow's only use of it is as compleasm's aligner: it maps each "
+            "lineage's marker proteins onto the assembly so compleasm can "
+            "score which ones were found."
+        ),
+        strengths=(
+            "Splice-aware protein-to-genome alignment",
+            "Native SSE2/NEON support -- no arm64 patching needed, unlike "
+            "bwa-mem2",
+            "Fast enough to make compleasm's speed advantage over BUSCO real",
+        ),
+        homepage="https://github.com/lh3/miniprot",
+        repository="https://github.com/lh3/miniprot",
+        citation=(
+            "Li H. Protein-to-genome alignment with miniprot. "
+            "Bioinformatics. 2023."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btad014",
+        # Verified against the upstream repository's LICENSE.txt on
+        # 2026-08-02.
+        license="MIT",
+        # Not surfaced on its own card: nothing in BioFlow dispatches to
+        # miniprot directly, only through compleasm.
+        runnable=False,
+        usage=(
+            "Invoked by compleasm, never directly. BioFlow does not expose a "
+            "standalone protein-alignment pipeline."
+        ),
+    ),
+    "compleasm": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Fast BUSCO reimplementation for assembly completeness",
+        summary=(
+            "Scores what fraction of a lineage-specific set of single-copy "
+            "orthologs (BUSCOs) can be found in an assembly, split into "
+            "single-copy, duplicated, fragmented and missing. A "
+            "miniprot-based reimplementation of BUSCO: 10-20x faster, and "
+            "it recovers some BUSCOs that BUSCO's own metaeuk step misses."
+        ),
+        strengths=(
+            "10-20x faster than BUSCO on the same lineage set",
+            "Recovers BUSCOs metaeuk calls missing",
+            "No separate eukaryotic gene-finder to install or forget: "
+            "alignment is miniprot for every lineage",
+        ),
+        homepage="https://github.com/huangnengCSU/compleasm",
+        repository="https://github.com/huangnengCSU/compleasm",
+        citation=(
+            "Huang N, Li H. compleasm: a faster and more accurate "
+            "reimplementation of BUSCO. Bioinformatics. 2023."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btad595",
+        # Verified against the upstream repository's LICENSE (Apache-2.0) and
+        # bundled LICENSE-BUSCO (MIT, for the inherited BUSCO lineage-scoring
+        # logic) on 2026-08-02.
+        license="Apache-2.0",
+        usage=(
+            "Scores assembly completeness against a lineage-specific "
+            "ortholog set chosen from the assembly's organism metadata, not "
+            "auto-detected -- autolineage would download several lineage "
+            "datasets to decide between them, which is the expensive way to "
+            "answer a question BioFlow mostly already knows. Runs as its "
+            "own job, separate from contiguity, since a bacterial run is "
+            "minutes and a vertebrate one can be hours. Records lineage and "
+            "OrthoDB version alongside the four percentages, since a score "
+            "from one version is not comparable to a score from another."
+        ),
+    ),
     "featurecounts": ToolMeta(
         pipelines=(PipelineType.EXPRESSION,),
         one_liner="Counts reads per gene from an aligned BAM",
@@ -1325,6 +1417,8 @@ def reset_cache() -> None:
     bcftools_csq.cache_clear()
     clair3.cache_clear()
     deepvariant.cache_clear()
+    miniprot.cache_clear()
+    compleasm.cache_clear()
     fasterq_dump.cache_clear()
     prefetch.cache_clear()
     datasets.cache_clear()

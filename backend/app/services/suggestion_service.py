@@ -27,6 +27,7 @@ from app.pipelines import (
     variant_runner,
 )
 from app.pipelines.aligners import Aligner
+from app.pipelines.organism_taxonomy import is_eukaryotic
 from app.services import object_service, pipeline_service
 
 log = get_logger(__name__)
@@ -37,33 +38,12 @@ class CardStatus(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-# Genus -> domain. Hand-maintained and deliberately small: `organism` is free
-# text, and this only has to separate "has introns" from "does not" well
-# enough to pick a short-read aligner. Matched on the first word of the name.
-#
-# An unrecognised genus is treated as eukaryotic (see `is_eukaryotic`), so
-# this table only needs the prokaryotes it is likely to meet.
-_PROKARYOTE_GENERA: frozenset[str] = frozenset({
-    "escherichia", "bacillus", "staphylococcus", "streptococcus",
-    "salmonella", "pseudomonas", "mycobacterium", "listeria",
-    "campylobacter", "clostridium", "vibrio", "helicobacter",
-    "neisseria", "klebsiella", "acinetobacter", "enterococcus",
-    "lactobacillus", "borrelia", "rickettsia", "chlamydia",
-})
-
-
-def is_eukaryotic(organism: str | None) -> bool:
-    """Whether splice-aware alignment is appropriate for this organism.
-
-    Unrecognised and missing names default to True. The asymmetry is
-    deliberate: hisat2 on an intron-free genome simply finds no junctions,
-    while a non-splice-aware aligner on a genome that has them drops real
-    alignments without saying so.
-    """
-    if not organism or not organism.strip():
-        return True
-    genus = organism.strip().split()[0].lower()
-    return genus not in _PROKARYOTE_GENERA
+# Re-exported from organism_taxonomy: `lineage_inference` needed the same
+# genus classification for compleasm's lineage choice, and this module is in
+# app/services while pipelines is the lower layer, so the table moved down
+# rather than being duplicated or imported upward. `is_eukaryotic` stays
+# importable from here since that is this module's own public name for it,
+# used at line ~339 below and by this file's existing tests.
 
 
 @dataclass(frozen=True)
