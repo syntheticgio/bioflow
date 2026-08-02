@@ -42,6 +42,7 @@ import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
 import { TrimDialog } from "./TrimDialog";
+import { AssembleDialog } from "./AssembleDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
@@ -351,6 +352,7 @@ function ObjectDetail({ id }: { id: string }) {
   // the two-step tool-selection dance, and counting has exactly one tool --
   // routing it through a selector would mean a screen offering one card.
   const [quantifyOpen, setQuantifyOpen] = useState(false);
+  const [assembleOpen, setAssembleOpen] = useState(false);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
     setPendingTool(null);
@@ -554,6 +556,15 @@ function ObjectDetail({ id }: { id: string }) {
   // RNA-seq is not knowable from the file, and the annotation it needs is
   // checked server-side at launch, where the answer can say what is missing.
   const canQuantify = obj.status === "ready" && obj.format.kind === "bam";
+  // Long reads only, and only once QC has said which kind. The Actions card
+  // explains the two refusals; this button simply does not appear, because a
+  // permanently disabled button in a row of live ones reads as broken.
+  const canAssemble =
+    obj.status === "ready" &&
+    obj.format.kind === "fastq" &&
+    ["hifi", "clr", "ont_simplex", "ont_duplex"].includes(
+      String(obj.facts?.qc_read_chemistry ?? ""),
+    );
 
   return (
     <div className="panel">
@@ -704,6 +715,8 @@ function ObjectDetail({ id }: { id: string }) {
                   canCallVariants={canCallVariants}
                   canQuantify={canQuantify}
                   onQuantify={() => setQuantifyOpen(true)}
+                  canAssemble={canAssemble}
+                  onAssemble={() => setAssembleOpen(true)}
                   canQC={canQC}
                   hasQc={hasQc}
                   alignTarget={alignTarget}
@@ -774,6 +787,9 @@ function ObjectDetail({ id }: { id: string }) {
       )}
       {quantifyOpen && (
         <QuantifyDialog object={obj} onClose={() => setQuantifyOpen(false)} />
+      )}
+      {assembleOpen && (
+        <AssembleDialog object={obj} onClose={() => setAssembleOpen(false)} />
       )}
     </div>
   );

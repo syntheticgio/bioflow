@@ -2,6 +2,9 @@ import type {
   AlignDefaults,
   AlignEnvelope,
   AlignerSchema,
+  AssembleRequest,
+  AssemblerSchema,
+  AssemblyParams,
   AlignRequest,
   AssemblyAccepted,
   BulkResult,
@@ -584,6 +587,20 @@ export const api = {
     }),
 
   /** Variant calling defaults for one BAM, including the inferred caller. */
+  assemblerSchema: (assembler: string) =>
+    request<AssemblerSchema>(
+      `/pipelines/assemblers/${encodeURIComponent(assembler)}/schema`,
+    ),
+
+  assembleDefaults: (objectId: string) =>
+    request<Partial<AssemblyParams>>(`/pipelines/assemble/defaults/${objectId}`),
+
+  launchAssembly: (body: AssembleRequest) =>
+    request<JobSummary>("/pipelines/assemble", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
   variantDefaults: (bamId: string) =>
     request<VariantDefaults>(`/pipelines/variants/defaults/${bamId}`),
 

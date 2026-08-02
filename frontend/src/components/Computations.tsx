@@ -3,6 +3,7 @@ interface Props {
   canAlign: boolean;
   canCallVariants: boolean;
   canQuantify: boolean;
+  canAssemble: boolean;
   canQC: boolean;
   hasQc: boolean;
   /** Named reference for the Align button, when the project has one. */
@@ -11,6 +12,7 @@ interface Props {
   /** Not part of `onStart`: counting has one tool, so it opens its dialog
    * directly rather than going through the tool selector first. */
   onQuantify: () => void;
+  onAssemble: () => void;
   onRunQC: () => void;
   qcPending: boolean;
   onReingest: () => void;
@@ -34,11 +36,13 @@ export function Computations({
   canAlign,
   canCallVariants,
   canQuantify,
+  canAssemble,
   canQC,
   hasQc,
   alignTarget,
   onStart,
   onQuantify,
+  onAssemble,
   onRunQC,
   qcPending,
   onReingest,
@@ -92,6 +96,16 @@ export function Computations({
             title="Call variants from this alignment"
           >
             Call variants
+          </button>
+        )}
+        {canAssemble && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onAssemble}
+            title="Assemble these long reads into contigs, with no reference"
+          >
+            Assemble
           </button>
         )}
         {canQuantify && (
