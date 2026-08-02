@@ -879,6 +879,7 @@ function OrganismAssemblyRow({
         >
           {assembly.accession}
         </button>
+        <RefseqCategoryBadge category={assembly.refseq_category} />
         {assembly.already_downloaded && (
           <span className="sra-have-tag" title="Already in this project">
             have
@@ -893,6 +894,18 @@ function OrganismAssemblyRow({
         {assembly.total_length != null ? formatBytes(assembly.total_length) : "—"}
       </td>
     </tr>
+  );
+}
+
+/** NCBI's own pick of "the" assembly for an organism -- the green checkmark
+ *  on their genome browser, reworked into this app's badge vocabulary. */
+function RefseqCategoryBadge({ category }: { category: string | null }) {
+  if (!category) return null;
+  const short = category === "reference genome" ? "Reference" : "Representative";
+  return (
+    <span className="badge present sra-refseq-badge" title={`NCBI ${category}`}>
+      ✓ {short}
+    </span>
   );
 }
 

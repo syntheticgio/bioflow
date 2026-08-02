@@ -87,7 +87,10 @@ class TestSearchAssembliesByTaxon:
                         "tax_id": 185431,
                         "organism_name": "Trypanosoma brucei brucei TREU927",
                     },
-                    "assembly_info": {"assembly_level": "Chromosome"},
+                    "assembly_info": {
+                        "assembly_level": "Chromosome",
+                        "refseq_category": "reference genome",
+                    },
                     "assembly_stats": {"total_sequence_length": "26131000"},
                 },
                 {
@@ -108,6 +111,8 @@ class TestSearchAssembliesByTaxon:
         assert len(page.assemblies) == 2
         assert page.assemblies[0].accession == "GCF_000002445.2"
         assert page.assemblies[0].total_length == 26131000
+        assert page.assemblies[0].refseq_category == "reference genome"
+        assert page.assemblies[1].refseq_category is None
         assert page.next_page_token == "abc123"
         assert page.total_count == 42
 

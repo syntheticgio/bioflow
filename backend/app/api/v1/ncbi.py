@@ -168,6 +168,9 @@ class OrganismAssemblySummary(BaseModel):
     assembly_level: str | None = None
     submitter: str | None = None
     release_date: str | None = None
+    # "reference genome" or "representative genome" -- NCBI's own pick for
+    # this organism, shown as a badge. None for every other assembly.
+    refseq_category: str | None = None
     total_length: int | None = None
     scaffold_count: int | None = None
     gc_percent: float | None = None
@@ -438,6 +441,7 @@ async def organism_search(
                 assembly_level=meta.assembly_level,
                 submitter=meta.submitter,
                 release_date=meta.release_date,
+                refseq_category=meta.refseq_category,
                 total_length=meta.total_length,
                 scaffold_count=meta.scaffold_count,
                 gc_percent=meta.gc_percent,
