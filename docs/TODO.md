@@ -360,7 +360,7 @@ does not, and a passthrough would be worse than an allowlist. The test to add
 where deriving is wrong is the one `_SIDECAR_ROLES` lacked: every enum member
 is handled, asserted directly.
 
-## Post-assembly QC — DESIGNED 2026-08-02, not built
+## Post-assembly QC: designed, not built
 
 **Unblocked 2026-08-02**: assembly shipped. Design:
 `docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md`.
