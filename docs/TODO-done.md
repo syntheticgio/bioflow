@@ -1204,9 +1204,11 @@ contigs: **an absence-of-symbol grep proves nothing unless you have checked
 what the symbol is actually called**, and this repo's own guidance to verify a
 TODO against the code assumed the verification would be done right.
 
-The two entries above (QUAST/BUSCO, and the assembly design below) should not
-count this as work they close -- there is nothing left to close. N50 across a
-FASTA is still genuinely missing and still belongs to QUAST.
+The post-assembly QC entry (now "Post-assembly QC" in `docs/TODO.md`) and the
+assembly design below should not count this as work they close -- there is
+nothing left to close. N50 across a FASTA was still genuinely missing; the
+2026-08-02 post-assembly QC design puts it in `_parse_fasta` rather than in
+QUAST, which is not packaged for trixie at all.
 
 ## Assembly: designed, not built — FIXED (the assembly half, 2026-08-02)
 
@@ -1258,8 +1260,8 @@ above was wrong -- it had shipped two days before it was raised.
 
 **Still open:** an end-to-end assembly on adequately-covered reads. The only
 long-read data in the library is a ~1.2x yeast HiFi subsample, which cannot
-assemble. See "Post-assembly QC: BUSCO and QUAST" and "Reference-guided
-assembly" above, both of which this unblocks.
+assemble. See "Post-assembly QC" and "Reference-guided assembly" in
+`docs/TODO.md`, both of which this unblocks.
 
 The original entry follows, kept because its diagnosis explains why the code
 looks the way it does.
