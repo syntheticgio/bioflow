@@ -31,6 +31,7 @@ const TITLES: Record<string, string> = {
   qc: "Quality control",
   trim: "Trimming",
   assemble: "Assembly",
+  assembly_qc: "Assembly QC",
   align: "Alignment",
   expression: "Expression",
   variant: "Variant calling",
@@ -39,8 +40,8 @@ const TITLES: Record<string, string> = {
 };
 
 const ORDER: PipelineType[] = [
-  "qc", "trim", "assemble", "align", "expression", "variant", "download",
-  "utility",
+  "qc", "trim", "assemble", "assembly_qc", "align", "expression", "variant",
+  "download", "utility",
 ];
 
 /**

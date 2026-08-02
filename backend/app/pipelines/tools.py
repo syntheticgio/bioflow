@@ -566,6 +566,14 @@ class PipelineType(StrEnum):
     # one card each, and a user thinking "RNA-seq" is looking for both.
     EXPRESSION = "expression"
     ASSEMBLE = "assemble"
+    # Tools that judge an assembly rather than produce one -- compleasm,
+    # eventually gfastats or a reference-based QC tool. Kept separate from
+    # ASSEMBLE rather than folded in: `PipelineType` crosses the API and
+    # `PipelineToolSelector.tsx` filters the user's tool picker on it, so a
+    # completeness tool declared ASSEMBLE would be offered in the picker
+    # headed "an assembler", beside Flye, as something to assemble *with*.
+    # See docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md.
+    ASSEMBLY_QC = "assembly_qc"
 
 
 @dataclass(frozen=True)

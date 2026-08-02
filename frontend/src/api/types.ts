@@ -371,7 +371,8 @@ export type PipelineType =
   | "download"
   | "variant"
   | "expression"
-  | "assemble";
+  | "assemble"
+  | "assembly_qc";
 
 export interface PipelineTool {
   name: string;
