@@ -36,6 +36,20 @@ CANCEL_CHECK_READS = 20_000
 INSERT_SIZE_BIN_WIDTH = 10
 INSERT_SIZE_MAX = 2000
 
+# STAR does not use the phred-like scale the other four aligners here do. It
+# writes 255 for a uniquely mapped read, and 3, 1 or 0 for a read placed at 2,
+# 3-4 or 5+ loci -- ordinal codes for locus count, not qualities. Averaging
+# them produces ~247 for a good STAR run against ~50 for the identical reads
+# through bwa-mem2, which reads as a dramatically better alignment when it is
+# only a different encoding.
+#
+# 255 is the detection signal because the SAM spec reserves it for "mapping
+# quality unavailable", so a phred-scale aligner does not emit it (bwa-mem2,
+# minimap2 and hisat2 cap at 60, bowtie2 at 42). Reading it from the records
+# rather than from the run's `aligned_by` provenance means an imported STAR
+# BAM -- which has no provenance to read -- is recognized the same way.
+STAR_MAPQ_UNIQUE = 255
+
 # Blocks a strided FASTA sample is spread across. Enough to cross every
 # chromosome of a human reference, while keeping each block large enough that
 # per-seek overhead stays negligible against the bytes read.
@@ -441,13 +455,24 @@ def alignment_stats(
     facts["mapped_percent"] = round(100.0 * mapped / reads, 2)
     if duplicates:
         facts["duplicate_percent"] = round(100.0 * duplicates / reads, 2)
-    if mapq_n:
-        facts["mean_mapping_quality"] = round(mapq_sum / mapq_n, 2)
 
     if mapq_histogram:
         facts["mapq_histogram"] = [
             {"mapq": mapq, "count": n} for mapq, n in sorted(mapq_histogram.items())
         ]
+
+    if mapq_n:
+        if STAR_MAPQ_UNIQUE in mapq_histogram:
+            # Not a phred scale, so neither the mean nor the histogram's
+            # x-axis means what it does for every other aligner here. See
+            # STAR_MAPQ_UNIQUE. The fraction the codes actually assert is
+            # reported instead of a mean over them.
+            facts["mapq_scale"] = "star"
+            facts["uniquely_mapped_percent"] = round(
+                100.0 * mapq_histogram[STAR_MAPQ_UNIQUE] / mapq_n, 2
+            )
+        else:
+            facts["mean_mapping_quality"] = round(mapq_sum / mapq_n, 2)
     # Absent rather than a bucket of zeros for an unpaired BAM, so the
     # frontend can tell "unpaired" from "measured as zero".
     if saw_paired and insert_size_histogram:

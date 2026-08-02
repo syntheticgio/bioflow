@@ -170,7 +170,11 @@ def _alignment_stats(facts: dict) -> list[str]:
             _num(facts.get("duplicate_pct") or facts.get("duplicate_percent")),
             "%",
         ),
+        # Only one of these is ever present: STAR's MAPQ codes have no
+        # meaningful mean, so ingest reports the uniquely-mapped fraction
+        # instead. See STAR_MAPQ_UNIQUE in sequence_stats.
         _line("Mean mapping quality", _num(facts.get("mean_mapping_quality"))),
+        _line("Uniquely mapped", _num(facts.get("uniquely_mapped_percent")), "%"),
         _line("Reference sequences", _num(facts.get("reference_count"))),
         _line("Reference total length", _num(facts.get("reference_total_length")), " bp"),
         _line("Sort order", facts.get("sort_order")),
@@ -297,7 +301,8 @@ _CLAIMED = frozenset(
         "gc_content_percent", "mean_quality", "min_position_quality", "quality_encoding",
         "read_length", "read_length_min", "read_length_max", "read_count_estimate",
         "total_reads", "mapped_reads", "mapped_pct", "mapped_percent", "properly_paired_pct",
-        "duplicate_pct", "duplicate_percent", "mean_mapping_quality", "reference_count",
+        "duplicate_pct", "duplicate_percent", "mean_mapping_quality",
+        "uniquely_mapped_percent", "mapq_scale", "reference_count",
         "reference_total_length", "sort_order", "aligned_by", "sample_names", "platforms",
         "sampled_records", "sample_count", "vcf_version", "called_by", "variant_types_sampled",
         "filters", "sequence_count", "total_length", "n50", "longest_sequence",

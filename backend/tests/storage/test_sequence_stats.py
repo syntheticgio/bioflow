@@ -387,6 +387,81 @@ class TestMapqHistogram:
         assert total == 1
 
 
+class TestStarMapqScale:
+    """STAR's MAPQ is a locus-count code, not a phred score.
+
+    Averaging {0, 1, 3, 255} lands near 250 for a good run, against ~50 for
+    the same reads through bwa-mem2 -- so the mean is suppressed in favour of
+    the fraction those codes actually assert.
+    """
+
+    def _star_bam(self, tmp_path, name="star.bam"):
+        # 3 unique, 1 at two loci, 1 at 5+ -- STAR's whole vocabulary.
+        return _write_bam(
+            tmp_path / name,
+            [
+                {"name": "r1", "mapq": 255},
+                {"name": "r2", "mapq": 255},
+                {"name": "r3", "mapq": 255},
+                {"name": "r4", "mapq": 3},
+                {"name": "r5", "mapq": 0},
+            ],
+        )
+
+    def test_mean_is_suppressed_on_the_star_scale(self, tmp_path):
+        from app.models import FormatKind
+
+        facts = ss.alignment_stats(self._star_bam(tmp_path), FormatKind.BAM)
+        assert "mean_mapping_quality" not in facts
+        assert facts["mapq_scale"] == "star"
+
+    def test_uniquely_mapped_percent_replaces_it(self, tmp_path):
+        from app.models import FormatKind
+
+        facts = ss.alignment_stats(self._star_bam(tmp_path), FormatKind.BAM)
+        assert facts["uniquely_mapped_percent"] == 60.0
+
+    def test_histogram_keeps_star_codes_verbatim(self, tmp_path):
+        """The codes are the honest record of what STAR wrote; only their
+        presentation changes. Rescaling them to look phred-like would make a
+        STAR BAM's own numbers unrecognizable against its SAM records."""
+        from app.models import FormatKind
+
+        facts = ss.alignment_stats(self._star_bam(tmp_path), FormatKind.BAM)
+        histogram = {h["mapq"]: h["count"] for h in facts["mapq_histogram"]}
+        assert histogram == {0: 1, 3: 1, 255: 3}
+
+    def test_phred_aligners_are_untouched(self, tmp_path):
+        """The detection must not fire on the other four aligners, which cap
+        at 60 (bwa-mem2, minimap2, hisat2) or 42 (bowtie2)."""
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "bwa.bam",
+            [{"name": "r1", "mapq": 60}, {"name": "r2", "mapq": 42}, {"name": "r3", "mapq": 0}],
+        )
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        assert facts["mean_mapping_quality"] == 34.0
+        assert "mapq_scale" not in facts
+        assert "uniquely_mapped_percent" not in facts
+
+    def test_unmapped_reads_do_not_dilute_the_unique_fraction(self, tmp_path):
+        """The denominator is mapped reads, matching the histogram -- an
+        unmapped read has no MAPQ to be unique or not."""
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "star_unmapped.bam",
+            [
+                {"name": "r1", "mapq": 255},
+                {"name": "r2", "mapq": 0},
+                {"name": "r3", "flag": 4, "mapq": 0},
+            ],
+        )
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        assert facts["uniquely_mapped_percent"] == 50.0
+
+
 class TestInsertSizeHistogram:
     def test_positive_template_lengths_are_binned(self, tmp_path):
         from app.models import FormatKind
