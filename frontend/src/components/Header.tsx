@@ -21,6 +21,7 @@ const HELP_ITEMS: { to: string; label: string }[] = [
   { to: "/help/calculations", label: "BioFlow Calculations" },
   { to: "/help/software", label: "Software" },
   { to: "/help/sources", label: "Data Sources" },
+  { to: "/help/workflow-diagrams", label: "Workflow Diagrams" },
 ];
 
 export function Header() {

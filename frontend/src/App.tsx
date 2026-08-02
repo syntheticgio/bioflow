@@ -9,6 +9,7 @@ import { Header } from "./components/Header";
 import { HelpCalculations } from "./components/HelpCalculations";
 import { HelpSoftware } from "./components/HelpSoftware";
 import { HelpSources } from "./components/HelpSources";
+import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
@@ -72,6 +73,10 @@ function Shell() {
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
+          <Route
+            path="/help/workflow-diagrams"
+            element={<HelpWorkflowDiagrams />}
+          />
         </Routes>
         {!singleColumn && <DetailPanel />}
       </div>
