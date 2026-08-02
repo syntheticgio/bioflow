@@ -3700,3 +3700,382 @@ table.software-matrix thead th.software-matrix-corner {
   background: var(--bg-hover);
   border-color: var(--accent-dim);
 }
+
+/* --- Genome Analysis Review help page ---------------------------------
+
+   This document (frontend/src/assets/genome-analysis-review/body.html)
+   brings its own complete typography system -- its own h1/h2/h3, p, a,
+   table, code, blockquote rules -- because it's a ~1300-line article
+   rendered whole rather than rebuilt as JSX (see HelpGenomeAnalysisReview
+   for why). Every rule below is scoped under .genome-review-doc, which is
+   how the source document's originally-global tag selectors (h1, p, a, ...)
+   were made safe to ship: unscoped, "h1{...}" or "a{color:...}" would have
+   restyled every heading and link in the rest of BioFlow. .help-page's own
+   padding is zeroed here so it doesn't stack with the source doc's own
+   main{padding:...}. */
+
+.genome-review-page {
+  padding: 0;
+  max-width: none;
+  overflow: hidden;
+}
+
+.genome-review-doc {
+  height: 100%;
+  overflow-y: auto;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 16.5px;
+  line-height: 1.68;
+  -webkit-font-smoothing: antialiased;
+}
+
+.genome-review-doc {
+  --bg: #fcfbf9;
+  --surface: #fff;
+  --panel: #f5f2ed;
+  --ink: #1c1a17;
+  --ink2: #494440;
+  --ink3: #7d766c;
+  --rule: #e4dfd6;
+  --rule2: #f1ede6;
+  --accent: #2a6b52;
+  --accent-soft: #e9f1ec;
+  --code: #f4f1ea;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Helvetica,
+    Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  .genome-review-doc {
+    --bg: #14140f;
+    --surface: #1b1b16;
+    --panel: #22221c;
+    --ink: #eeece6;
+    --ink2: #c3c0b6;
+    --ink3: #8e877c;
+    --rule: #312e26;
+    --rule2: #26241e;
+    --accent: #7fc0a0;
+    --accent-soft: #1a251f;
+    --code: #201e19;
+  }
+}
+
+.genome-review-doc * {
+  box-sizing: border-box;
+}
+
+.genome-review-doc .wrap {
+  display: grid;
+  grid-template-columns: 288px minmax(0, 1fr);
+  max-width: 1560px;
+  margin: 0 auto;
+}
+
+.genome-review-doc nav.toc {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2.4rem 1.1rem 4rem 1.6rem;
+  border-right: 1px solid var(--rule);
+  font-size: 0.79rem;
+  line-height: 1.45;
+}
+
+.genome-review-doc nav.toc .toc-title {
+  font-size: 0.65rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  font-weight: 700;
+  margin-bottom: 1rem;
+}
+
+.genome-review-doc nav.toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.genome-review-doc nav.toc ul ul {
+  padding-left: 0.82rem;
+  margin: 0.15rem 0 0.5rem;
+}
+
+.genome-review-doc nav.toc li {
+  margin: 0.14rem 0;
+}
+
+.genome-review-doc nav.toc a {
+  color: var(--ink2);
+  text-decoration: none;
+  display: block;
+  padding: 0.16rem 0.32rem;
+  border-radius: 4px;
+}
+
+.genome-review-doc nav.toc a:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.genome-review-doc nav.toc > ul > li > a {
+  font-weight: 640;
+  color: var(--ink);
+}
+
+.genome-review-doc main {
+  padding: 3rem 3.4rem 7rem;
+  min-width: 0;
+  max-width: none;
+}
+
+.genome-review-doc article {
+  max-width: none;
+}
+
+.genome-review-doc article > p,
+.genome-review-doc article > ul,
+.genome-review-doc article > ol,
+.genome-review-doc article > blockquote,
+.genome-review-doc article > h2,
+.genome-review-doc article > h3,
+.genome-review-doc article > h4,
+.genome-review-doc article > hr,
+.genome-review-doc article > footer {
+  max-width: 79ch;
+}
+
+.genome-review-doc h1 {
+  font-family: var(--serif);
+  font-size: 2.9rem;
+  line-height: 1.1;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.2rem;
+}
+
+.genome-review-doc h1 + p em {
+  font-size: 1.3rem;
+  color: var(--ink2);
+  font-family: var(--serif);
+  font-style: italic;
+}
+
+.genome-review-doc h1 + p {
+  margin: 0.1rem 0 1.5rem;
+}
+
+.genome-review-doc h2 {
+  font-family: var(--serif);
+  font-size: 1.85rem;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  margin: 3.6rem 0 1.1rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.genome-review-doc h3 {
+  font-size: 1.2rem;
+  font-weight: 680;
+  margin: 2.4rem 0 0.7rem;
+}
+
+.genome-review-doc h4 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 1.6rem 0 0.45rem;
+  color: var(--ink2);
+}
+
+/* PART dividers, rendered as h1 in the source markdown */
+.genome-review-doc article > h1:not(:first-of-type) {
+  font-size: 0.78rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-family: var(--sans);
+  font-weight: 750;
+  color: var(--accent);
+  margin: 4.4rem 0 0;
+  padding-top: 2rem;
+  border-top: 2px solid var(--accent);
+}
+
+.genome-review-doc p {
+  margin: 0 0 1.1rem;
+}
+
+.genome-review-doc a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.genome-review-doc a:hover {
+  border-bottom-color: var(--accent);
+}
+
+.genome-review-doc strong {
+  font-weight: 670;
+}
+
+.genome-review-doc ul,
+.genome-review-doc ol {
+  margin: 0 0 1.2rem;
+  padding-left: 1.35rem;
+}
+
+.genome-review-doc li {
+  margin: 0.38rem 0;
+}
+
+.genome-review-doc hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 3rem 0;
+}
+
+.genome-review-doc code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--code);
+  padding: 0.13em 0.38em;
+  border-radius: 4px;
+}
+
+.genome-review-doc pre {
+  background: var(--code);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  margin: 0 0 1.4rem;
+  font-size: 0.815rem;
+  line-height: 1.6;
+  max-width: none;
+}
+
+.genome-review-doc pre code {
+  background: none;
+  padding: 0;
+  font-size: 1em;
+}
+
+.genome-review-doc blockquote {
+  margin: 0 0 1.3rem;
+  padding: 0.8rem 1.15rem;
+  border-left: 3px solid var(--rule);
+  color: var(--ink2);
+  background: var(--rule2);
+  border-radius: 0 5px 5px 0;
+}
+
+.genome-review-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 1.8rem;
+  font-size: 0.86rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  display: block;
+  overflow-x: auto;
+  max-width: none;
+}
+
+.genome-review-doc thead th {
+  background: var(--rule2);
+  text-align: left;
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink2);
+  padding: 0.62rem 0.8rem;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: bottom;
+}
+
+.genome-review-doc td {
+  padding: 0.58rem 0.8rem;
+  border-bottom: 1px solid var(--rule2);
+  vertical-align: top;
+}
+
+.genome-review-doc tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.genome-review-doc tbody tr:hover {
+  background: var(--rule2);
+}
+
+.genome-review-doc .figframe {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 2rem 0 0.7rem;
+  max-width: 1420px;
+}
+
+.genome-review-doc .figframe svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 1080px;
+}
+
+.genome-review-doc .figframe + p {
+  font-size: 0.87rem;
+  color: var(--ink2);
+  max-width: 1420px;
+  margin-bottom: 2.4rem;
+}
+
+.genome-review-doc p > code {
+  white-space: nowrap;
+}
+
+.genome-review-doc footer {
+  margin-top: 4.5rem;
+  padding-top: 1.3rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.82rem;
+  color: var(--ink3);
+}
+
+@media (max-width: 960px) {
+  .genome-review-doc .wrap {
+    grid-template-columns: 1fr;
+  }
+  .genome-review-doc nav.toc {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--rule);
+    padding: 1.4rem 1.1rem;
+  }
+  .genome-review-doc main {
+    padding: 1.8rem 1.1rem 4rem;
+  }
+  .genome-review-doc h1 {
+    font-size: 2rem;
+  }
+  .genome-review-doc h2 {
+    font-size: 1.36rem;
+  }
+  .genome-review-doc table {
+    font-size: 0.78rem;
+  }
+}
