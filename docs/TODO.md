@@ -1017,7 +1017,15 @@ Touches: `backend/app/queue/variant_handlers.py`,
 `backend/app/services/pipeline_service.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
-## Post-assembly QC: BUSCO and QUAST
+## Post-assembly QC — DESIGNED 2026-08-02, not built
+
+**Unblocked 2026-08-02**: assembly shipped. Design:
+`docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md`.
+
+The design keeps this entry's diagnosis and changes both of its tools. Read the
+original below first -- it is still why this exists -- then the delta.
+
+### Original entry
 
 Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
 
@@ -1040,6 +1048,79 @@ report format.
 The contig-length gap recorded below (longest/shortest contig, never shipped
 from the 2026-07-29 todo-batch plan) is the small end of this same question and
 could fold into QUAST rather than being built separately.
+
+### What the design changed, and why
+
+The one sentence that survived unaltered is the one about lineage datasets
+being reference-download machinery rather than a tool probe. That was right.
+
+**Neither named tool is what gets built.**
+
+- **QUAST is not in Debian trixie.** Read out of the running `api` container,
+  not recalled: it is not in the archive at all, only *referred to* by
+  `med-bio` and `multiqc`, and `apt-get install quast` reports "no installation
+  candidate". So the entry's cheap-looking half costs a source build, to obtain
+  numbers we can compute in a function. Contiguity is computed in
+  `_parse_fasta` instead -- `sequence_n50`, `sequence_n90`, `sequence_l50`,
+  `sequence_auN`, `sequence_gap_count`, `sequence_gap_bases` -- with no tool,
+  no image growth, and coverage of every FASTA at ingest rather than only ones
+  a QC job was run on. QUAST's genuinely unreplaceable capability is
+  *reference-based* misassembly detection; that becomes its own entry.
+- **compleasm replaces BUSCO**, 10-20x faster and without BUSCO's metaeuk step.
+  BUSCO stays declared-but-unavailable in the registry the way `HIFIASM_SPEC`
+  is, because it is the name a reviewer asks for.
+
+**`assembly_n50` is deleted.** `parse_assembly_info` computes it from Flye's
+table; the parser will compute it from the FASTA bytes. Two facts that are
+supposed to agree, on one object, is a bug with a delay fuse. Nothing renders
+it and no test asserts it.
+
+**Scope widened: uploaded assemblies count.** The card keys on shape, not on
+provenance, so an assembly a user brought with them gets the same QC. Which
+means it inherits the align card's trap directly -- `protein.faa` and
+`cds_from_genomic.fna` are FASTA -- and the card must exclude roles `PROTEIN`
+and `TRANSCRIPT` explicitly.
+
+**Facts namespace is `assembly_completeness_*`, not `busco_*`.** `busco_score`
+is taken: it is UniProt proteome metadata (`app/api/v1/uniprot.py`), meaning
+something NCBI computed about a proteome rather than something we measured
+about an assembly. One object can carry both. All four categories are stored,
+not a headline number -- duplicated percentage is the haplotypic-duplication
+signal and a single "97.3%" discards it. Lineage and ODB version are stored
+too: compleasm defaults to odb12, BUSCO 5.5 is odb10, and percentages across
+versions are not comparable.
+
+**The contig-length paragraph above is stale** and was already corrected
+elsewhere in this file: `sequence_longest`/`sequence_shortest` shipped in
+`19f6b62`. N50 over a FASTA was the part genuinely missing, and it is the
+contiguity work above.
+
+### Traps found while designing this, for whoever builds the rest
+
+- **`meryl` is in trixie and is the wrong meryl.** `0~20150903+r2013-9+b1` is
+  the Celera Assembler k-mer suite; Merqury needs Marbl meryl 1.3+. The probe
+  would succeed against it and report an available tool that cannot do the job.
+- **Debian's BUSCO cannot do eukaryotes as installed.** Its dependencies bring
+  `prodigal`, not `metaeuk`; `metaeuk` is a separate package. A green install,
+  a runtime failure.
+- **compleasm's release asset and biocontainer are both x86-only.**
+  `compleasm-0.2.9_x64-linux.tar.bz2` is the only release asset, and
+  `quay.io/biocontainers/compleasm:0.2.9--pyhdfd78af_0` reports
+  `is_manifest_list: false`. Either would repeat the bwa-mem2 arm64 failure.
+  Build from source with miniprot from source -- miniprot supports NEON
+  upstream, so unlike bwa-mem2 there is nothing to patch.
+- **`assembly_runner.py` has no tests at all**, despite the assembly design's
+  testing section listing them. `grep` for `parse_assembly_info` across
+  `backend/tests/` returns nothing. The contiguity work edits that file.
+
+### Deferred, with reasons
+
+CRAQ, GCI and Merqury all need reads realigned to the assembly, which is the
+**Pilon** entry's blocker rather than this one -- they are not peers of
+completeness and contiguity, and building them means building that first.
+gfastats is superseded by computing contiguity here. Contamination screening is
+a real axis nothing here covers and is a named non-goal: FCS-GX's database is
+~470 GB.
 
 ## Reference-guided assembly: Pilon, RagTag, iVar
 
