@@ -681,16 +681,26 @@ function ObjectDetail({ id }: { id: string }) {
               // Computations section drives; QcTab only decides where it sits.
               runQcPrompt={
                 canQC && !hasQc ? (
-                  <div className="section">
-                    <div className="section-note" style={{ marginBottom: 8 }}>
+                  <div
+                    className="warn-box"
+                    style={{
+                      marginBottom: 12,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                    }}
+                  >
+                    <span>
                       No QC has been run on this file yet. Read chemistry,
                       adapter content and the quality distribution all come
                       from it — and several pipeline suggestions stay disabled
                       without it.
-                    </div>
+                    </span>
                     <button
                       type="button"
                       className="btn primary"
+                      style={{ flexShrink: 0 }}
                       onClick={() => runQC.mutate()}
                       disabled={runQC.isPending}
                     >
