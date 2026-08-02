@@ -173,17 +173,15 @@ def _obj(value) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def parse_report(payload: dict) -> AssemblyMetadata | None:
-    """Normalize a Datasets `dataset_report` response.
+def _parse_one_report(r: dict) -> AssemblyMetadata | None:
+    """Normalize one `reports[]` record from a Datasets response.
 
-    Every field is optional: NCBI omits plenty for older or sparse assemblies,
-    and neither a missing field nor a wrong-typed one may raise.
+    Split out from `parse_report` so a multi-record response (search by
+    taxon) can reuse the exact same per-record field extraction that a
+    single-accession lookup uses -- a missing or wrong-typed field must be
+    handled identically in both places.
     """
-    reports = _obj(payload).get("reports")
-    # A dict here would make `reports[0]` silently return a key, not a record.
-    if not isinstance(reports, list) or not reports:
-        return None
-    r = _obj(reports[0])
+    r = _obj(r)
     if not r:
         return None
 
@@ -211,6 +209,37 @@ def parse_report(payload: dict) -> AssemblyMetadata | None:
         gc_percent=_float(stats.get("gc_percent")),
         scaffold_n50=_int(stats.get("scaffold_n50")),
     )
+
+
+def parse_report(payload: dict) -> AssemblyMetadata | None:
+    """Normalize a Datasets `dataset_report` response.
+
+    Every field is optional: NCBI omits plenty for older or sparse assemblies,
+    and neither a missing field nor a wrong-typed one may raise.
+    """
+    reports = _obj(payload).get("reports")
+    # A dict here would make `reports[0]` silently return a key, not a record.
+    if not isinstance(reports, list) or not reports:
+        return None
+    return _parse_one_report(reports[0])
+
+
+def parse_report_list(payload: dict) -> list[AssemblyMetadata]:
+    """Normalize every record in a multi-assembly `dataset_report` response.
+
+    Used for a search-by-taxon response, which can hold many records where
+    `parse_report` only ever looks at the first. A record that fails to parse
+    is dropped rather than failing the whole page.
+    """
+    reports = _obj(payload).get("reports")
+    if not isinstance(reports, list):
+        return []
+    out: list[AssemblyMetadata] = []
+    for r in reports:
+        meta = _parse_one_report(r)
+        if meta is not None:
+            out.append(meta)
+    return out
 
 
 def parse_sequence_reports(payload: dict) -> dict[str, str]:

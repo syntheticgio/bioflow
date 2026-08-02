@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.api.deps import OwnerDep
 from app.logging import get_logger
-from app.metadata import ncbi_assembly, ncbi_assembly_components, sra_resolver
+from app.metadata import ncbi_assembly, ncbi_assembly_components, ncbi_taxonomy, sra_resolver
 from app.services import ncbi_assembly_service, sra_service
 
 log = get_logger(__name__)
@@ -137,6 +137,65 @@ class NcbiResolveResponse(BaseModel):
     kind: str
     sra: SraResolveResponse | None = None
     assembly: AssemblyResolveResponse | None = None
+
+
+class OrganismSuggestionOut(BaseModel):
+    sci_name: str
+    tax_id: int
+    common_name: str | None = None
+    rank: str | None = None
+    group_name: str | None = None
+
+
+class OrganismSuggestResponse(BaseModel):
+    suggestions: list[OrganismSuggestionOut] = Field(default_factory=list)
+
+
+class OrganismAssemblySummary(BaseModel):
+    """A row in an organism's assembly list.
+
+    Deliberately lighter than `AssemblyResolveResponse`: `components` requires
+    a CLI shellout per accession, which is fine for one resolved assembly but
+    not for a page of up to 20. Picking one assembly for its full component
+    picker goes back through the existing `/ncbi/resolve` accession path.
+    """
+
+    accession: str | None = None
+    organism: str | None = None
+    tax_id: int | None = None
+    strain: str | None = None
+    assembly_name: str | None = None
+    assembly_level: str | None = None
+    submitter: str | None = None
+    release_date: str | None = None
+    total_length: int | None = None
+    scaffold_count: int | None = None
+    gc_percent: float | None = None
+    already_downloaded: bool = False
+
+
+class OrganismSearchRequest(BaseModel):
+    tax_id: int
+    # NCBI's `esearch ... [Organism]` field matches on the name, not the
+    # numeric tax_id -- `9606[Organism]` matches nothing, `Homo sapiens[Organism]`
+    # matches the SRA archive. The assembly search takes the tax_id directly,
+    # so both are needed.
+    sci_name: str
+    project_id: PydanticObjectId | None = None
+    assembly_page_token: str | None = None
+    sra_offset: int = 0
+    page_size: int = 20
+
+
+class OrganismSearchResponse(BaseModel):
+    tax_id: int
+    sci_name: str | None = None
+    assemblies: list[OrganismAssemblySummary] = Field(default_factory=list)
+    assemblies_next_page_token: str | None = None
+    sra_runs: list[RunInfoOut] = Field(default_factory=list)
+    sra_total_count: int = 0
+    sra_next_offset: int | None = None
+    error: str | None = None
 
 
 class AssemblyDownloadRequest(BaseModel):
@@ -319,3 +378,108 @@ async def download_assembly(
         owner=owner,
     )
     return AssemblyAccepted(run_id=str(run.id), download_job_ids=job_ids)
+
+
+@router.get("/organism-suggest", response_model=OrganismSuggestResponse)
+async def organism_suggest(q: str) -> OrganismSuggestResponse:
+    """Autocomplete candidates for a partially typed organism name.
+
+    A thin proxy over NCBI's `taxon_suggest`, so all NCBI traffic stays
+    server-side and under the same throttle as every other lookup here.
+    Public NCBI data, so no owner scoping is needed -- there is no
+    already-downloaded cross-check to make against a suggestion list.
+    """
+    suggestions = await asyncio.to_thread(ncbi_taxonomy.suggest_organisms, q)
+    return OrganismSuggestResponse(
+        suggestions=[OrganismSuggestionOut(**s.as_dict()) for s in suggestions]
+    )
+
+
+@router.post("/organism-search", response_model=OrganismSearchResponse)
+async def organism_search(
+    body: OrganismSearchRequest, owner: OwnerDep
+) -> OrganismSearchResponse:
+    """Paginated assemblies and sequencing runs for a resolved organism.
+
+    Two independent, real server-side-paginated lists rather than one merged
+    page: assemblies page by NCBI's own `page_token` cursor, SRA runs page by
+    `esearch` offset, and neither pagination scheme fits the other's result
+    shape.
+    """
+    assembly_page, (uids, sra_total) = await asyncio.gather(
+        asyncio.to_thread(
+            ncbi_taxonomy.search_assemblies_by_taxon,
+            body.tax_id,
+            page_token=body.assembly_page_token,
+            page_size=body.page_size,
+        ),
+        asyncio.to_thread(
+            sra_resolver.search_runs_by_organism,
+            body.sci_name,
+            retstart=body.sra_offset,
+            retmax=body.page_size,
+        ),
+    )
+
+    assemblies: list[OrganismAssemblySummary] = []
+    for meta in assembly_page.assemblies:
+        present = False
+        if body.project_id is not None and meta.accession:
+            present = await ncbi_assembly_service.already_downloaded(
+                body.project_id, meta.accession, owner=owner
+            )
+        assemblies.append(
+            OrganismAssemblySummary(
+                accession=meta.accession,
+                organism=meta.organism,
+                tax_id=meta.tax_id,
+                strain=meta.strain,
+                assembly_name=meta.assembly_name,
+                assembly_level=meta.assembly_level,
+                submitter=meta.submitter,
+                release_date=meta.release_date,
+                total_length=meta.total_length,
+                scaffold_count=meta.scaffold_count,
+                gc_percent=meta.gc_percent,
+                already_downloaded=present,
+            )
+        )
+
+    sra_runs: list[RunInfoOut] = []
+    if uids:
+        packages = await asyncio.to_thread(sra_resolver.fetch_packages, uids)
+        runs = []
+        for package in packages:
+            try:
+                runs.extend(sra_resolver.runs_from_package(package))
+            except Exception as e:  # noqa: BLE001 - one bad package must not lose the rest
+                log.warning("organism_search_package_failed", error=str(e))
+
+        present_runs: set[str] = set()
+        if body.project_id is not None and runs:
+            present_runs = await sra_service.already_downloaded(
+                body.project_id, [r.accession for r in runs], owner=owner
+            )
+        sra_runs = [
+            RunInfoOut(**r.as_dict(), already_downloaded=r.accession in present_runs)
+            for r in runs
+        ]
+
+    sra_next_offset = (
+        body.sra_offset + len(uids)
+        if body.sra_offset + len(uids) < sra_total
+        else None
+    )
+
+    return OrganismSearchResponse(
+        tax_id=body.tax_id,
+        sci_name=body.sci_name,
+        assemblies=assemblies,
+        assemblies_next_page_token=assembly_page.next_page_token,
+        sra_runs=sra_runs,
+        sra_total_count=sra_total,
+        sra_next_offset=sra_next_offset,
+        error=None
+        if (assemblies or sra_runs)
+        else f"No assemblies or sequencing runs found for tax_id {body.tax_id}.",
+    )

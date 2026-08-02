@@ -210,6 +210,39 @@ def search_uids(accession: str, *, retmax: int = MAX_RUNS) -> tuple[list[str], i
         return [], 0
 
 
+def search_runs_by_organism(
+    organism: str, *, retstart: int = 0, retmax: int = 20
+) -> tuple[list[str], int]:
+    """SRA UIDs for an organism name search, and NCBI's total count.
+
+    Unlike `search_uids` (built for a single accession's runs, capped at
+    `MAX_RUNS`), this is a real paginated search: an organism can back
+    thousands of runs, and `retstart`/`retmax` are esearch's own offset and
+    page-size parameters, so the caller pages forward without ever pulling
+    more than one page's worth of packages.
+    """
+    params = urllib.parse.urlencode(
+        {
+            "db": "sra",
+            "term": f"{organism}[Organism]",
+            "retmode": "json",
+            "retstart": str(retstart),
+            "retmax": str(retmax),
+            "tool": sra.TOOL,
+        }
+    )
+    body = sra._get(f"{sra.EUTILS}/esearch.fcgi?{params}")
+    if body is None:
+        return [], 0
+
+    try:
+        result = json.loads(body)["esearchresult"]
+        return list(result.get("idlist", [])), int(result.get("count", 0))
+    except (ValueError, KeyError, TypeError):
+        log.warning("sra_organism_search_unparseable", organism=organism)
+        return [], 0
+
+
 def fetch_packages(uids: list[str]) -> list[ET.Element]:
     """EXPERIMENT_PACKAGE elements for a list of UIDs, fetched in batches.
 
