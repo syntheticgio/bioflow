@@ -15,6 +15,7 @@ from app.models import BlobStorage, ObjectRole, ObjectStatus
 from app.pipelines import (
     align_runner,
     aligner_registry,
+    assembler_registry,
     bam_stats_runner,
     counts_runner,
     de_runner,
@@ -22,6 +23,7 @@ from app.pipelines import (
     variant_db,
 )
 from app.pipelines.aligners import Aligner
+from app.pipelines.assemblers import Assembler
 from app.services import object_service, pipeline_service, structure_lookup
 from app.storage.paths import blob_path
 
@@ -623,6 +625,50 @@ async def aligner_schema(aligner: str) -> dict:
     except ValueError:
         raise NotFoundError(f"Unknown aligner: {aligner}") from None
     return aligner_registry.schema_for(parsed)
+
+
+class AssembleRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Omitted by the Actions card, which launches with whatever the server
+    # decides; supplied by the dialog when the user has changed something.
+    params: dict | None = None
+
+
+@router.post("/assemble", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_assemble(body: AssembleRequest, owner: OwnerDep) -> JobOut:
+    """Queue a de novo assembly of one long-read FASTQ."""
+    job = await pipeline_service.launch_assembly(
+        object_id=body.object_id, owner=owner, params=body.params
+    )
+    return JobOut.of(job)
+
+
+@router.get("/assemble/defaults/{object_id}")
+async def assemble_defaults(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """What the assemble dialog should open with for these reads.
+
+    Owner-scoped, unlike the assembler schema below, because this reads the
+    object *and* walks the project looking for a genome size -- both of which
+    are one profile's data.
+    """
+    from app.services import object_service
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    return await pipeline_service.default_assembly_params(obj)
+
+
+@router.get("/assemblers/{assembler}/schema")
+async def assembler_schema(assembler: str) -> dict:
+    """The parameter fields for one assembler, for the dialog to render.
+
+    Same reasoning and same non-scoping as `aligner_schema`: a static
+    description of a tool's knobs is the same for every profile.
+    """
+    try:
+        parsed = Assembler(assembler)
+    except ValueError:
+        raise NotFoundError(f"Unknown assembler: {assembler}") from None
+    return assembler_registry.schema_for(parsed)
 
 
 @router.get("/align-envelope")

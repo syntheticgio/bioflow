@@ -38,6 +38,9 @@ from app.pipelines import (
     align_runner,
     aligner_registry,
     aligners,
+    assembler_registry,
+    assembly_params as assembly_params_module,
+    assemblers,
     counts_runner,
     cutadapt_runner,
     de_runner,
@@ -2550,5 +2553,243 @@ async def launch_differential_expression(
         samples=len(samples),
         test=test,
         reference=reference,
+    )
+    return job
+
+
+# --- De novo assembly --------------------------------------------------------
+
+
+def _check_assemblable(obj: DataObject) -> None:
+    """Whether these reads can be assembled at all.
+
+    Format and status only. Chemistry is checked by the caller, because "no
+    assembler for short reads" and "run QC first" are different answers and
+    only one of them is the user's to fix.
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready to assemble (status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind is not FormatKind.FASTQ:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not reads to assemble",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+
+async def infer_genome_size(obj: DataObject) -> tuple[int | None, str | None]:
+    """A genome size for the memory estimate, and the file it came from.
+
+    Looks for a reference in the same project whose organism matches these
+    reads', and takes its total length. That is a *measured* number from a
+    real assembly of the same organism, which is the only kind of inference
+    worth making here.
+
+    Deliberately not derived from read volume. Total bases divided by an
+    assumed coverage is a guess wearing a measurement's clothes, and it would
+    be wrong by exactly the factor the user does not know.
+
+    Returns (None, None) when nothing in the project can say -- the normal
+    case for de novo assembly, and not an error.
+    """
+    from app.services import object_service
+
+    organism = (obj.metadata or {}).get("organism")
+    if not organism or not str(organism).strip():
+        return None, None
+    target = str(organism).strip().lower()
+
+    candidates = await object_service.list_objects(
+        obj.project_id, owner=obj.owner, limit=500, status=ObjectStatus.READY
+    )
+    for candidate in candidates:
+        if candidate.format.kind is not FormatKind.FASTA:
+            continue
+        if candidate.role is not ObjectRole.REFERENCE:
+            continue
+        candidate_organism = (candidate.metadata or {}).get("organism")
+        if not candidate_organism:
+            continue
+        if str(candidate_organism).strip().lower() != target:
+            continue
+        facts = candidate.facts or {}
+        # `ncbi_total_length` is NCBI's figure for a downloaded assembly;
+        # `total_bases` is what _parse_fasta counted. Prefer NCBI's: it
+        # describes the whole assembly, while total_bases is absent entirely
+        # for a FASTA above the parser's 256MB exact-count limit.
+        size = facts.get("ncbi_total_length") or facts.get("total_bases")
+        if size:
+            return int(size), candidate.name
+    return None, None
+
+
+async def default_assembly_params(obj: DataObject) -> dict:
+    """The dialog's starting point for these reads.
+
+    The assembler and input mode follow the inferred chemistry, and genome
+    size is filled in from the project when something there can say. Every
+    value is overridable; `genome_size_source` is what lets the dialog tell
+    the user which of them BioFlow guessed.
+    """
+    chemistry = read_chemistry(obj)
+    spec = assembler_registry.spec_for_chemistry(chemistry)
+    if spec is None:
+        raise ValidationError(
+            "No assembler is available for these reads",
+            details={"chemistry": chemistry.value if chemistry else None},
+        )
+
+    size, source_name = await infer_genome_size(obj)
+    params: dict = {
+        "assembler": spec.assembler.value,
+        "mode": assembler_registry.mode_for_chemistry(spec, chemistry),
+        "threads": 8,
+        "iterations": 1,
+    }
+    if size is not None:
+        params["genome_size"] = size
+        params["genome_size_source"] = "inferred"
+        params["genome_size_from"] = source_name
+    return params
+
+
+async def launch_assembly(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    params: dict | None = None,
+) -> Job:
+    """Queue a de novo assembly of one long-read FASTQ."""
+    from app.queue import queue
+    from app.queue.governor import LoadGovernor
+    from app.services import object_service, run_service
+
+    reads = await object_service.get_object(object_id, owner=owner)
+    _check_assemblable(reads)
+
+    chemistry = read_chemistry(reads)
+    spec = assembler_registry.spec_for_chemistry(chemistry)
+    if spec is None:
+        # Two different refusals. Short reads have an assembler that is not
+        # installed; unknown chemistry has a fact the user can supply by
+        # running QC. Collapsing them would send someone looking for a missing
+        # binary when they need to press a button.
+        if chemistry is align_runner.ReadChemistry.SHORT:
+            raise ValidationError(
+                "Short-read assembly is not installed. Only long reads "
+                "(Nanopore, PacBio) can be assembled here.",
+                details={"object_id": str(reads.id), "chemistry": "short"},
+            )
+        raise ValidationError(
+            f"{reads.name!r} has no known read chemistry. Run QC on it first "
+            "-- the assembler's input mode depends on how accurate the reads "
+            "are.",
+            details={"object_id": str(reads.id)},
+        )
+
+    if not spec.available():
+        raise ValidationError(
+            spec.unavailable_reason or f"{spec.assembler.value} is not installed",
+            details={"assembler": spec.assembler.value},
+        )
+
+    if params is None:
+        params = await default_assembly_params(reads)
+    parsed = assembly_params_module.from_dict(params)
+
+    # The memory guard, at launch rather than dispatch: governor.py does not
+    # read a job's mem_mb, so declaring it reserves nothing. A missing genome
+    # size yields no estimate and therefore no refusal -- see
+    # estimate_assembly_mb on why that asymmetry is deliberate.
+    estimate = resource_estimator.estimate_assembly_mb(
+        assembler=parsed.assembler,
+        genome_bases=parsed.genome_size,
+        threads=parsed.threads,
+    )
+    if estimate is not None:
+        mem_budget_mb = int(LoadGovernor().mem_budget_bytes() / (1024 * 1024))
+        band = resource_estimator.classify(
+            estimated_mb=estimate,
+            mem_budget_mb=mem_budget_mb,
+            threads=parsed.threads,
+            cpu_budget=None,
+        )
+        if band is resource_estimator.Band.BLOCK:
+            raise ValidationError(
+                f"This assembly needs about {estimate:,} MB, more than the "
+                f"{mem_budget_mb:,} MB available. Assembling a genome this "
+                "size needs a bigger machine.",
+                details={"estimate_mb": estimate, "budget_mb": mem_budget_mb},
+            )
+
+    digest, path = await _resolve_readable(reads)
+    if not digest and not path:
+        raise ValidationError(
+            f"{reads.name!r} has no stored content yet "
+            f"(status={reads.status.value})",
+            details={"object_id": str(reads.id)},
+        )
+
+    run = await run_service.create_run(
+        kind=RunKind.ASSEMBLY,
+        project_id=reads.project_id,
+        label=f"Assemble {reads.name}",
+        inputs=[RunInput(object_id=reads.id, role=RunInputRole.READS)],
+        params=parsed.as_dict(),
+        owner=owner,
+        tool=parsed.assembler.value,
+    )
+
+    payload: dict = {
+        "object_id": str(reads.id),
+        "project_id": str(reads.project_id),
+        "reads_name": reads.name,
+        "assembler": parsed.assembler.value,
+        "params": parsed.as_dict(),
+    }
+    if digest:
+        payload["reads_sha256"] = digest
+    if path:
+        payload["reads_path"] = path
+
+    job = await queue.enqueue(
+        "assemble_reads",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # cpu from the user's thread count, as trim and align both do. mem_mb
+        # carries the estimate when there is one so the declaration is honest
+        # for whenever the governor learns to read it.
+        resources=JobResources(
+            cpu=parsed.threads,
+            mem_mb=estimate or 16384,
+            io=IoClass.HEAVY,
+        ),
+        # One attempt, matching the handler: a retried assembly costs hours and
+        # fails identically.
+        max_attempts=1,
+        dedup_key=f"assemble:{reads.id}:{_params_fingerprint(parsed.as_dict())}",
+        project_id=reads.project_id,
+        object_id=reads.id,
+    )
+    if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
+        raise ConflictError(
+            "An identical assembly is already queued or running for this file",
+            details={"object_id": str(reads.id)},
+        )
+
+    await run_service.link_job(run.id, job.id, RunJobRole.ASSEMBLE)
+    log.info(
+        "assembly_launched",
+        job_id=str(job.id),
+        run_id=str(run.id),
+        object_id=str(reads.id),
+        assembler=parsed.assembler.value,
+        mode=getattr(parsed, "mode", None),
+        genome_size=parsed.genome_size,
+        estimate_mb=estimate,
     )
     return job
