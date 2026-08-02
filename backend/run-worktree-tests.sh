@@ -84,6 +84,31 @@ until docker exec "$MONGO_NAME" mongosh --quiet --eval \
   sleep 0.5
 done
 
+# Quiet by default, but never on top of a verbosity flag the caller passed.
+#
+# This used to be an unconditional `-q` appended after "$@", and pytest's
+# verbosity is additive, so it corrupted both documented invocations above:
+#
+#   ...tests/ -q   ->  pytest -q -q  ->  *double* quiet, which drops the
+#                      "NNNN passed in Xs" summary line entirely while still
+#                      exiting 0. CLAUDE.md's commit rule is "read the count,
+#                      not the exit code", and the count was unreadable.
+#   ...tests/ -v   ->  pytest -v -q  ->  nets to zero, i.e. not verbose either.
+#
+# So only default the verbosity when the caller expressed no opinion.
+PYTEST_ARGS=("$@")
+if [ "${#PYTEST_ARGS[@]}" -eq 0 ]; then
+  PYTEST_ARGS=(tests/)
+fi
+
+has_verbosity=
+for arg in "${PYTEST_ARGS[@]}"; do
+  case "$arg" in
+    -q | -qq | --quiet | -v | -vv | -vvv | --verbose | --verbosity=*) has_verbosity=1 ;;
+  esac
+done
+[ -n "$has_verbosity" ] || PYTEST_ARGS+=(-q)
+
 docker run --rm \
   --network biopipe_default \
   -v "$REPO_ROOT/backend/app:/srv/app" \
@@ -92,4 +117,4 @@ docker run --rm \
   -w /srv \
   -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \
   -e REDIS_URL="redis://redis:6379/0" \
-  "$IMAGE" python -m pytest "${@:-tests/}" -q
+  "$IMAGE" python -m pytest "${PYTEST_ARGS[@]}"
