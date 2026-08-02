@@ -2567,7 +2567,7 @@ table.software-matrix thead th.software-matrix-corner {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   gap: 0 32px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* Separated by a top border rather than a bottom one. With entries stacked a
@@ -2580,6 +2580,8 @@ table.software-matrix thead th.software-matrix-corner {
    entries a row, and the first row is the only one that must not have a rule
    above it. */
 .software-entry {
+  display: flex;
+  flex-direction: column;
   padding: 18px 0;
   border-top: 1px solid var(--border);
 }
@@ -2663,6 +2665,21 @@ table.software-matrix thead th.software-matrix-corner {
   gap: 12px 32px;
   align-items: start;
   margin-top: 10px;
+  flex: 1;
+}
+
+/* Pinned to the bottom of its column rather than following the prose, so two
+   entries seated side by side in the same grid row (fastqc/nanoplot) show
+   their cards flush with each other even when one tool's prose runs longer
+   than the other's. `.software-entry` stretches to the row's height and
+   `.software-entry-body` fills it -- but `align-items: start` there means the
+   facts grid cell is otherwise only as tall as its own content, giving
+   `margin-top: auto` no free space to push into. `align-self: stretch`
+   overrides that for this one cell so the card's cell fills the full row
+   height, which is what the auto margin needs to work with. */
+.software-facts {
+  align-self: stretch;
+  margin-top: auto;
 }
 
 .software-prose p {
