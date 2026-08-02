@@ -807,6 +807,10 @@ async def reference_index_status(reference: DataObject) -> dict:
     Keyed by content: sidecars attach to the reference object, and the same
     genome registered twice shares one index because the blob is shared. That
     falls out of content addressing rather than being designed in.
+
+    `star_annotated` rides alongside `star` rather than replacing it: the two
+    are built from different sidecar roles and a reference can carry either,
+    neither, or both -- see `aligners.SidecarRole.STAR_ANNOTATED_INDEX`.
     """
     from app.services import object_service
 
@@ -814,7 +818,10 @@ async def reference_index_status(reference: DataObject) -> dict:
     have = {s.sidecar_role for s in sidecars if s.sidecar_role}
     return {
         aligner.value: aligners.INDEX_ROLE[aligner] in have for aligner in Aligner
-    } | {"fai": SidecarRole.FAI in have}
+    } | {
+        "fai": SidecarRole.FAI in have,
+        "star_annotated": SidecarRole.STAR_ANNOTATED_INDEX in have,
+    }
 
 
 async def align_envelope(
@@ -879,13 +886,25 @@ async def sidecar_payload(reference: DataObject, aligner: Aligner) -> dict:
 
 
 async def launch_build_index(
-    *, reference_id: PydanticObjectId, owner: str, aligner: str | Aligner = Aligner.MINIMAP2
+    *,
+    reference_id: PydanticObjectId,
+    owner: str,
+    aligner: str | Aligner = Aligner.MINIMAP2,
+    annotation_id: PydanticObjectId | None = None,
 ):
     """Queue an index build for one (reference, aligner) pair.
 
     The eager entry point behind the explorer's **Build index** button. The
     same job type the alignment path queues, so there is no second code path to
     keep correct.
+
+    `annotation_id` is STAR-only. Explicit-or-refuse rather than
+    auto-picking a lone candidate the way `resolve_annotation` does for
+    counting: unlike featureCounts, which fails loudly on the wrong
+    annotation (a near-zero assignment rate), a STAR index built against the
+    wrong GTF just quietly finds fewer junctions than it could have, so
+    building *without* one is the safer default when the caller did not ask
+    for one by name.
     """
     from app.services import object_service
 
@@ -896,7 +915,19 @@ async def launch_build_index(
     reference = await object_service.get_object(reference_id, owner=owner)
     _check_reference(reference)
 
-    job = await _enqueue_build_index(reference, aligner, owner=owner)
+    annotation: DataObject | None = None
+    if annotation_id is not None:
+        if aligner is not Aligner.STAR:
+            raise ValidationError(
+                f"{aligner.value} has no annotation-aware index; only STAR does."
+            )
+        annotation = await resolve_annotation(
+            reference.project_id, annotation_id, owner=owner
+        )
+
+    job = await _enqueue_build_index(
+        reference, aligner, owner=owner, annotation=annotation
+    )
     if job is None:
         raise ConflictError(
             "An index for this reference is already being built",
@@ -952,13 +983,22 @@ def declared_align_mem_mb(
     return max(estimate, MIN_DECLARED_MEM_MB)
 
 
-async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner: str):
-    """Queue the index build, deduplicated on (reference blob, aligner).
+async def _enqueue_build_index(
+    reference: DataObject,
+    aligner: Aligner,
+    *,
+    owner: str,
+    annotation: DataObject | None = None,
+):
+    """Queue the index build, deduplicated on (reference blob, aligner, annotation).
 
     `owner` is the caller's profile. Both call sites resolve `reference`
     through an owner-scoped lookup first, so it equals `reference.owner` -- it
     is passed explicitly so this function does not have to trust that a
     reference it was merely handed was fetched under the right scope.
+
+    `annotation` is STAR-only -- see `align_handlers.build_index`, which
+    raises if a GTF payload arrives for any other aligner.
     """
     from app.queue import queue
 
@@ -974,6 +1014,15 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner
     if path:
         payload["reference_path"] = path
 
+    gtf_digest: str | None = None
+    gtf_path: str | None = None
+    if annotation is not None:
+        gtf_digest, gtf_path = await _resolve_readable(annotation)
+        if gtf_digest:
+            payload["gtf_sha256"] = gtf_digest
+        if gtf_path:
+            payload["gtf_path"] = gtf_path
+
     # Keyed on the blob rather than the object: the same genome registered in
     # two of one profile's projects is one index, with no cross-project
     # bookkeeping. Deliberately left content-only -- `queue.enqueue` prefixes
@@ -982,7 +1031,14 @@ async def _enqueue_build_index(reference: DataObject, aligner: Aligner, *, owner
     # that happens to remember. Sharing therefore stops at the profile
     # boundary: two profiles aligning against the same genome build one index
     # each, which is the price of neither of them silently getting none.
-    dedup_key = f"build_index:{digest or path}:{aligner.value}"
+    #
+    # The annotation's own digest joins the key rather than a bare
+    # "annotated"/"unannotated" flag: two different GTFs for the same
+    # reference (a stale one and a corrected re-download) are two different
+    # indexes, not the same slot overwritten -- an alignment already run
+    # against the stale one should not have its index silently swapped
+    # underneath it by a later build.
+    dedup_key = f"build_index:{digest or path}:{aligner.value}:{gtf_digest or gtf_path or ''}"
 
     # `sort_memory_mb=0` because an index build runs no samtools sort -- the
     # estimator's sort term would otherwise reserve memory for a step that is
@@ -2095,17 +2151,21 @@ async def annotations_for_project(
 
 
 async def resolve_annotation(
-    bam: DataObject,
+    project_id: PydanticObjectId,
     annotation_id: PydanticObjectId | None,
     *,
     owner: str,
 ) -> DataObject:
-    """The annotation to count against: explicit if given, else the project's.
+    """The annotation to use: explicit if given, else the project's.
 
     Ambiguity is refused rather than guessed at when more than one distinct
-    annotation is available and none was named. Counting against the wrong one
-    produces a full counts file with a low assignment rate, which looks like a
-    bad sample rather than a wrong input.
+    annotation is available and none was named. Counting -- or indexing --
+    against the wrong one produces a plausible-looking result with no error:
+    a full counts file with a low assignment rate for featureCounts, or a
+    STAR index that improves junction sensitivity for the wrong gene set.
+    Takes a project id rather than a BAM: the BAM only ever contributed its
+    `project_id`, and STAR's index build has no BAM yet to hand in -- the
+    whole point is building the index before alignment.
     """
     from app.services import object_service
 
@@ -2116,18 +2176,18 @@ async def resolve_annotation(
                 f"{annotation.name!r} is not a GTF or GFF annotation.",
                 details={"object_id": str(annotation.id)},
             )
-        if annotation.project_id != bam.project_id:
+        if annotation.project_id != project_id:
             raise ValidationError(
-                "BAM and annotation must be in the same project"
+                "The annotation must be in the same project as the target."
             )
         return annotation
 
-    candidates = await annotations_for_project(bam.project_id, owner=owner)
+    candidates = await annotations_for_project(project_id, owner=owner)
     if not candidates:
         raise ValidationError(
-            "This project has no gene annotation to count against. Download "
-            "one with the assembly, or upload a GTF.",
-            details={"project_id": str(bam.project_id), "needs": "annotation"},
+            "This project has no gene annotation. Download one with the "
+            "assembly, or upload a GTF.",
+            details={"project_id": str(project_id), "needs": "annotation"},
         )
 
     # One assembly's GFF and GTF are the same annotation in two formats, not
@@ -2138,9 +2198,9 @@ async def resolve_annotation(
         raise ValidationError(
             "This project has more than one annotation and none was chosen: "
             f"{', '.join(sorted(distinct))}. Pick the one matching the "
-            "reference this BAM was aligned against.",
+            "reference in use.",
             details={
-                "project_id": str(bam.project_id),
+                "project_id": str(project_id),
                 "needs": "annotation_id",
                 "choices": [
                     {"id": str(o.id), "name": o.name} for o in candidates
@@ -2245,7 +2305,7 @@ async def launch_quantify(
     bam = await object_service.get_object(bam_id, owner=owner)
     _check_quantifiable(bam)
 
-    annotation = await resolve_annotation(bam, annotation_id, owner=owner)
+    annotation = await resolve_annotation(bam.project_id, annotation_id, owner=owner)
 
     merged = counts_runner.CountsParams.from_dict({
         **(await default_count_params(bam, annotation)),

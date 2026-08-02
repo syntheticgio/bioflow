@@ -285,34 +285,6 @@ Touches: `backend/app/pipelines/aligners.py`,
 `backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
-## STAR: annotation-aware indexing (`--sjdbGTFfile`)
-
-Raised: 2026-08-01, split out of the STAR entry above so it is findable. That
-entry's heading says FIXED, which is a reason to skip reading it, and this is
-open work buried in its body.
-
-STAR ships indexing *without* an annotation. Junctions are found de novo and
-that works -- 9,818 splices on real yeast data with no GTF -- but supplying
-one improves sensitivity for junctions with few supporting reads, which is
-the case RNA-seq cares about most.
-
-**This is now unblocked.** The blocker was that the object model had no
-annotation concept; the differential-expression merge brought one --
-`pipeline_service.annotations_for_project` and `resolve_annotation`, plus a
-`needs_annotation` contract the dialogs already consume. STAR's index build
-can use the same resolution featureCounts does.
-
-Two wrinkles specific to STAR. `--sjdbOverhang` should be read length minus
-one, which ties the index to the reads it will be used with -- and indexes
-here are cached per reference with no read-length dimension, so either accept
-the default 100 (fine for typical 100-150bp Illumina) or encode the overhang
-in the sidecar name. And an annotation-built index writes extra files
-(`exonInfo.tab`, `geneInfo.tab`, `transcriptInfo.tab`, `sjdbList.out.tab`)
-that `aligners.STAR_MEMBERS` does not list, so that tuple becomes conditional
-on whether a GTF was supplied. Verify by running genomeGenerate with a GTF and
-listing the directory rather than predicting it -- predicting it is what got
-the no-GTF file list wrong the first time.
-
 ## Audit the hand-maintained registries a new tool must reach
 
 Raised: 2026-08-01, after the third instance in one change.

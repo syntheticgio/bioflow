@@ -583,6 +583,10 @@ class AlignRequest(BaseModel):
 class BuildIndexRequest(BaseModel):
     reference_id: PydanticObjectId
     aligner: str = "minimap2"
+    # STAR-only. Building against a GTF improves splice-junction sensitivity
+    # over STAR's own de novo detection; every other aligner has no
+    # annotation concept and `launch_build_index` refuses this when set.
+    annotation_id: PydanticObjectId | None = None
 
 
 class VariantRequest(BaseModel):
@@ -741,6 +745,24 @@ async def list_references(project_id: PydanticObjectId, owner: OwnerDep) -> dict
     }
 
 
+@router.get("/annotations/{project_id}")
+async def list_annotations(project_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """A project's gene annotations, for the STAR annotated-index option.
+
+    A narrower sibling of `quantify_defaults`, which needs a BAM this dialog
+    does not have yet -- the whole point of building an annotated index is
+    to have one ready before an alignment exists.
+    """
+    annotations = await pipeline_service.annotations_for_project(
+        project_id, owner=owner
+    )
+    return {
+        "annotations": [
+            {"object_id": str(a.id), "name": a.name} for a in annotations
+        ]
+    }
+
+
 @router.post("/index", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 async def build_index(body: BuildIndexRequest, owner: OwnerDep) -> JobOut:
     """Build an aligner index for a reference, eagerly.
@@ -749,7 +771,10 @@ async def build_index(body: BuildIndexRequest, owner: OwnerDep) -> JobOut:
     is no second code path to keep correct.
     """
     job = await pipeline_service.launch_build_index(
-        reference_id=body.reference_id, owner=owner, aligner=body.aligner
+        reference_id=body.reference_id,
+        owner=owner,
+        aligner=body.aligner,
+        annotation_id=body.annotation_id,
     )
     return JobOut.of(job)
 
@@ -863,7 +888,7 @@ async def quantify_defaults(bam_id: PydanticObjectId, owner: OwnerDep) -> dict:
     if annotations:
         try:
             annotation = await pipeline_service.resolve_annotation(
-                obj, None, owner=owner
+                obj.project_id, None, owner=owner
             )
         except ValidationError:
             # More than one distinct assembly's annotation, which is a choice

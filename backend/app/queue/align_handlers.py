@@ -180,8 +180,21 @@ def build_index(ctx: JobContext) -> dict:
     tool = tools.require(_aligner_tool(aligner))
     samtools = tools.require(tools.samtools())
 
+    # An annotation is only ever meaningful for STAR -- passing one for any
+    # other aligner is a caller bug, not a request to ignore silently, since
+    # the caller believed it was doing something the build will not do.
+    gtf_payload_present = bool(
+        ctx.payload.get("gtf_sha256") or ctx.payload.get("gtf_path")
+    )
+    if gtf_payload_present and aligner is not Aligner.STAR:
+        raise PermanentError(f"{aligner.value} has no annotation-aware index")
+    annotated = gtf_payload_present and aligner is Aligner.STAR
+
     work = _prepare_workdir(ctx, "align")
     ref = _materialize(ctx, work, ctx.payload)
+    gtf: Path | None = None
+    if annotated:
+        gtf = _resolve_blob(ctx.payload, "gtf")
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -217,7 +230,7 @@ def build_index(ctx: JobContext) -> dict:
             raise RetryableError("STAR index needs the .fai that faidx produces")
 
         genome_dir = ref.reference.parent / aligners.layout_for(
-            Aligner.STAR
+            Aligner.STAR, annotated=annotated
         ).directory_name(ref.reference.name)
         genome_length, contigs = _fai_geometry(fai)
         cmd = align_runner.build_star_index_command(
@@ -228,6 +241,7 @@ def build_index(ctx: JobContext) -> dict:
             genome_length=genome_length,
             contigs=contigs,
             scratch=_star_scratch(work, "index"),
+            gtf=gtf,
         )
         # STAR requires the directory to exist before it will write into it,
         # unlike every other builder here, which creates its own output.
@@ -237,6 +251,7 @@ def build_index(ctx: JobContext) -> dict:
             job_id=ctx.job_id,
             genome_length=genome_length,
             contigs=contigs,
+            annotated=annotated,
         )
     elif aligner is Aligner.MINIMAP2:
         cmd = align_runner.build_index_command(
@@ -258,9 +273,9 @@ def build_index(ctx: JobContext) -> dict:
     if code != 0:
         raise _failure(code, log_path, aligner.value)
 
-    index_role = aligners.INDEX_ROLE[aligner].value
-    layout = aligners.layout_for(aligner)
-    for name in aligners.index_filenames(ref.reference.name, aligner):
+    index_role = aligners.index_role(aligner, annotated=annotated).value
+    layout = aligners.layout_for(aligner, annotated=annotated)
+    for name in aligners.index_filenames(ref.reference.name, aligner, annotated=annotated):
         # `name` is the *stored* name and is what the sidecar record carries;
         # for the directory shape the file is one level down under a different
         # name, which is what `workdir_path` undoes. Identity for the other

@@ -126,6 +126,14 @@ class SidecarRole(StrEnum):
     # flat, named `<reference>.STARindex.<member>`, and reassembled into a
     # directory at materialize time -- see aligners.IndexLayout.
     STAR_INDEX = "star-index"
+    # A STAR index built with --sjdbGTFfile carries seven more files (splice
+    # junction and transcript tables) than STAR_INDEX's eight, and answers a
+    # different question at alignment time -- so it is a distinct role rather
+    # than a flag on STAR_INDEX, the same way FAI and BAI are distinct roles
+    # instead of one "index" role with a kind field. A reference can carry
+    # both: one build for whichever alignment did not have an annotation
+    # available, one for whichever did.
+    STAR_ANNOTATED_INDEX = "star-annotated-index"
     FAI = "fai"
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.
