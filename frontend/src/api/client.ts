@@ -25,6 +25,9 @@ import type {
   NcbiResolveResponse,
   ObjectDetail,
   ObjectRole,
+  OrganismSearchRequest,
+  OrganismSearchResponse,
+  OrganismSuggestResponse,
   OverdueSchedule,
   PipelineSuggestion,
   PipelineTools,
@@ -509,6 +512,19 @@ export const api = {
     components: string[];
   }) =>
     request<AssemblyAccepted>("/ncbi/download-assembly", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /** Autocomplete candidates for a partially typed organism name. */
+  ncbiOrganismSuggest: (q: string) =>
+    request<OrganismSuggestResponse>(
+      `/ncbi/organism-suggest?q=${encodeURIComponent(q)}`,
+    ),
+
+  /** Paginated assemblies and sequencing runs for a resolved organism. */
+  ncbiOrganismSearch: (body: OrganismSearchRequest) =>
+    request<OrganismSearchResponse>("/ncbi/organism-search", {
       method: "POST",
       body: JSON.stringify(body),
     }),

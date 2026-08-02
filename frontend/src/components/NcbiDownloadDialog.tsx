@@ -1,16 +1,24 @@
 import { Fragment, useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
+import { looksLikeAccessionPrefix } from "../lib/ncbiAccessions";
+import { useDebounced } from "../lib/useDebounced";
 import { notify } from "../stores/messageStore";
 import type {
   AssemblyResolveResponse,
+  OrganismAssemblySummary,
+  OrganismSearchResponse,
+  OrganismSuggestion,
   SraResolveResponse,
   SraRunInfo,
 } from "../api/types";
 
 const PAGE_SIZE = 20;
+
+/** How many organism autocomplete candidates to show at once. */
+const SUGGESTION_LIMIT = 8;
 
 /** Mirrors the server's MAX_RUNS_PER_REQUEST, so the limit is visible here. */
 const MAX_SELECTION = 100;
@@ -61,6 +69,73 @@ export function NcbiDownloadDialog({
   const [assembly, setAssembly] = useState<AssemblyResolveResponse | null>(null);
   const [components, setComponents] = useState<Set<string>>(new Set(["genome"]));
 
+  // --- Organism-name search ---
+  const [selectedOrganism, setSelectedOrganism] = useState<{
+    tax_id: number;
+    sci_name: string;
+  } | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const [assemblyPageToken, setAssemblyPageToken] = useState<string | null>(null);
+  const [sraOffset, setSraOffset] = useState(0);
+  // One page at a time per list: the prior page's token/offset is not kept,
+  // so "Previous" on the organism results re-searches from the top rather
+  // than a true back-page. Good enough for a first pass at what NCBI itself
+  // only exposes as forward-only cursors (assemblies) or an offset (runs).
+  const debouncedAccession = useDebounced(accession, 300);
+  const suggestQuery = useQuery({
+    queryKey: ["ncbi-organism-suggest", debouncedAccession],
+    queryFn: () => api.ncbiOrganismSuggest(debouncedAccession.trim()),
+    enabled:
+      debouncedAccession.trim().length >= 3 &&
+      !looksLikeAccessionPrefix(debouncedAccession) &&
+      // Guards the debounce race from picking a suggestion: `pickOrganism`
+      // sets `accession` to the full sci_name in the same tick it sets
+      // `selectedOrganism`, but the 300ms-old debounced value still lags
+      // behind for one more tick and would otherwise re-fire a suggestion
+      // search for the name the user just finished picking.
+      debouncedAccession.trim() !== selectedOrganism?.sci_name &&
+      !selectedOrganism,
+    staleTime: 60_000,
+  });
+  const suggestions = suggestQuery.data?.suggestions.slice(0, SUGGESTION_LIMIT) ?? [];
+
+  const organismSearch = useMutation({
+    mutationFn: (vars: { assemblyPageToken?: string | null; sraOffset?: number }) =>
+      api.ncbiOrganismSearch({
+        tax_id: selectedOrganism!.tax_id,
+        sci_name: selectedOrganism!.sci_name,
+        project_id: projectId,
+        assembly_page_token: vars.assemblyPageToken ?? null,
+        sra_offset: vars.sraOffset ?? 0,
+        page_size: PAGE_SIZE,
+      }),
+    onSuccess: () => {
+      // Same clearing rule as `resolve`: only one result view is shown at a
+      // time, so a fresh organism search must not leave a stale accession
+      // result sitting alongside it.
+      setResolved(null);
+      setAssembly(null);
+      setPage(0);
+      setSelected(new Set());
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const pickOrganism = (o: OrganismSuggestion) => {
+    setSelectedOrganism({ tax_id: o.tax_id, sci_name: o.sci_name });
+    setAccession(o.sci_name);
+    setShowSuggestions(false);
+    setAssemblyPageToken(null);
+    setSraOffset(0);
+    organismSearch.mutate({});
+  };
+
+  const clearOrganism = () => {
+    setSelectedOrganism(null);
+    organismSearch.reset();
+  };
+
   const resolve = useMutation({
     mutationFn: () =>
       api.ncbiResolve({
@@ -73,6 +148,12 @@ export function NcbiDownloadDialog({
       // A fresh resolution starts with every group expanded, not whatever
       // was collapsed from the previous lookup.
       setCollapsed(new Set());
+      // An accession lookup and an organism search are mutually exclusive
+      // results, same reasoning as the assembly/run branches below: leaving
+      // a stale organism result beside a fresh accession lookup would show
+      // two answers for one search.
+      setSelectedOrganism(null);
+      organismSearch.reset();
       // Only one branch is ever populated, and `kind` says which. Clearing
       // the other matters: leaving a stale run table beside a new assembly
       // card would show two answers for one lookup.
@@ -151,7 +232,10 @@ export function NcbiDownloadDialog({
     onError: (e: Error) => notify.error(e.message),
   });
 
-  const runs = resolved?.runs ?? [];
+  // Organism search's SRA runs feed the same selection/download machinery as
+  // an accession resolution's runs -- both are `RunInfoOut` rows, and only
+  // one of the two result views is ever showing at a time.
+  const runs = resolved?.runs ?? organismSearch.data?.sra_runs ?? [];
 
   const sorted = useMemo(() => {
     const copy = [...runs];
@@ -256,20 +340,70 @@ export function NcbiDownloadDialog({
           className="sra-search"
           onSubmit={(e) => {
             e.preventDefault();
+            if (showSuggestions && suggestions[highlighted]) {
+              pickOrganism(suggestions[highlighted]);
+              return;
+            }
+            if (selectedOrganism) {
+              organismSearch.mutate({});
+              return;
+            }
             if (accession.trim()) resolve.mutate();
           }}
         >
-          <label className="sra-search-accession">
-            <span>Accession</span>
+          <label className="sra-search-accession sra-organism-anchor">
+            <span>Accession or organism</span>
             <input
               autoFocus
               value={accession}
-              placeholder="SRR11768093, PRJNA1495534, GCF_000002445.2…"
-              onChange={(e) => setAccession(e.target.value)}
+              placeholder="SRR11768093, PRJNA1495534, GCF_000002445.2, Homo sapiens…"
+              onChange={(e) => {
+                setAccession(e.target.value);
+                if (selectedOrganism) clearOrganism();
+                setShowSuggestions(true);
+                setHighlighted(0);
+              }}
+              onKeyDown={(e) => {
+                if (!showSuggestions || suggestions.length === 0) return;
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setHighlighted((h) => (h + 1) % suggestions.length);
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setHighlighted((h) => (h - 1 + suggestions.length) % suggestions.length);
+                } else if (e.key === "Escape") {
+                  setShowSuggestions(false);
+                }
+              }}
+              onBlur={() => {
+                // Delayed so a click on a suggestion registers before the
+                // dropdown unmounts out from under it.
+                setTimeout(() => setShowSuggestions(false), 150);
+              }}
             />
+            {showSuggestions && suggestions.length > 0 && (
+              <ul className="sra-organism-suggestions">
+                {suggestions.map((s, i) => (
+                  <li key={s.tax_id}>
+                    <button
+                      type="button"
+                      className={i === highlighted ? "active" : undefined}
+                      onMouseEnter={() => setHighlighted(i)}
+                      onClick={() => pickOrganism(s)}
+                    >
+                      <span className="sra-organism-name">{s.sci_name}</span>
+                      {s.common_name && (
+                        <span className="sra-dim"> · {s.common_name}</span>
+                      )}
+                      {s.rank && <span className="sra-organism-rank">{s.rank}</span>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </label>
 
-          {!assembly && (
+          {!assembly && !selectedOrganism && (
             <label className="sra-search-platform">
               <span>Platform</span>
               <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
@@ -285,18 +419,22 @@ export function NcbiDownloadDialog({
           <button
             type="submit"
             className="btn primary"
-            disabled={!accession.trim() || resolve.isPending}
+            disabled={
+              !accession.trim() || resolve.isPending || organismSearch.isPending
+            }
           >
-            {resolve.isPending ? "Looking up…" : "Look up"}
+            {resolve.isPending || organismSearch.isPending
+              ? "Looking up…"
+              : "Look up"}
           </button>
         </form>
 
         <small className="sra-search-hint">
-          A run, experiment, sample, study, BioProject, BioSample, or a
-          GenBank/RefSeq assembly (GCA/GCF).
+          A run, experiment, sample, study, BioProject, BioSample, a
+          GenBank/RefSeq assembly (GCA/GCF), or an organism name.
         </small>
 
-        {resolve.isPending && (
+        {(resolve.isPending || organismSearch.isPending) && (
           <div className="empty">
             <span className="spinner" /> Asking NCBI about {accession.trim()}…
           </div>
@@ -312,6 +450,36 @@ export function NcbiDownloadDialog({
           <div className="warn-box" style={{ fontSize: 12 }}>
             {assembly.error}
           </div>
+        )}
+
+        {organismSearch.data?.error && (
+          <div className="warn-box" style={{ fontSize: 12 }}>
+            {organismSearch.data.error}
+          </div>
+        )}
+
+        {selectedOrganism && organismSearch.data && !organismSearch.data.error && (
+          <OrganismResults
+            data={organismSearch.data}
+            onViewAssembly={(acc) => {
+              setSelectedOrganism(null);
+              organismSearch.reset();
+              setAccession(acc);
+              resolve.mutate();
+            }}
+            onAssemblyPage={(token) => {
+              setAssemblyPageToken(token);
+              organismSearch.mutate({ assemblyPageToken: token, sraOffset });
+            }}
+            onSraPage={(offset) => {
+              setSraOffset(offset);
+              organismSearch.mutate({ assemblyPageToken, sraOffset: offset });
+            }}
+            assemblyPageToken={assemblyPageToken}
+            sraOffset={sraOffset}
+            selected={selected}
+            onToggleRun={toggle}
+          />
         )}
 
         {assembly && !assembly.error && (
@@ -544,6 +712,186 @@ export function NcbiDownloadDialog({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Paginated assemblies and sequencing runs for an organism search. Two
+ * independent lists with two independent pagers -- NCBI's own assembly
+ * search pages by cursor token and its SRA search pages by offset, so one
+ * shared pager would have to fake one of the two schemes.
+ */
+function OrganismResults({
+  data,
+  onViewAssembly,
+  onAssemblyPage,
+  onSraPage,
+  assemblyPageToken,
+  sraOffset,
+  selected,
+  onToggleRun,
+}: {
+  data: OrganismSearchResponse;
+  onViewAssembly: (accession: string) => void;
+  onAssemblyPage: (token: string | null) => void;
+  onSraPage: (offset: number) => void;
+  assemblyPageToken: string | null;
+  sraOffset: number;
+  selected: Set<string>;
+  onToggleRun: (accession: string) => void;
+}) {
+  return (
+    <>
+      <div className="sra-summary">
+        <div>
+          <span style={{ fontStyle: "italic" }}>{data.sci_name}</span>
+          {" · "}
+          {data.assemblies.length} {data.assemblies.length === 1 ? "assembly" : "assemblies"}
+          {" · "}
+          {data.sra_total_count.toLocaleString()}{" "}
+          {data.sra_total_count === 1 ? "sequencing run" : "sequencing runs"}
+        </div>
+      </div>
+
+      {data.assemblies.length > 0 && (
+        <>
+          <h3 style={{ fontSize: 13, margin: "12px 0 4px" }}>Genome assemblies</h3>
+          <div className="sra-table-wrap">
+            <table className="sra-table">
+              <thead>
+                <tr>
+                  <th>Accession</th>
+                  <th>Strain</th>
+                  <th>Level</th>
+                  <th>Submitter</th>
+                  <th>Released</th>
+                  <th className="sra-num">Length</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.assemblies.map((a) => (
+                  <OrganismAssemblyRow
+                    key={a.accession}
+                    assembly={a}
+                    onView={() => a.accession && onViewAssembly(a.accession)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {(assemblyPageToken || data.assemblies_next_page_token) && (
+            <div className="sra-pager">
+              <button
+                type="button"
+                disabled={!assemblyPageToken}
+                onClick={() => onAssemblyPage(null)}
+              >
+                ‹ Restart
+              </button>
+              <button
+                type="button"
+                disabled={!data.assemblies_next_page_token}
+                onClick={() => onAssemblyPage(data.assemblies_next_page_token)}
+              >
+                Next ›
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {data.sra_runs.length > 0 && (
+        <>
+          <h3 style={{ fontSize: 13, margin: "12px 0 4px" }}>Sequencing runs</h3>
+          <div className="sra-table-wrap">
+            <table className="sra-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 28 }} />
+                  <th>Run</th>
+                  <th>Platform</th>
+                  <th>Instrument</th>
+                  <th>Strategy</th>
+                  <th>Layout</th>
+                  <th className="sra-num">Spots</th>
+                  <th className="sra-num">Size</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.sra_runs.map((run) => (
+                  <RunRow
+                    key={run.accession}
+                    run={run}
+                    checked={selected.has(run.accession)}
+                    onToggle={() => onToggleRun(run.accession)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="sra-pager">
+            <button
+              type="button"
+              disabled={sraOffset === 0}
+              onClick={() => onSraPage(Math.max(0, sraOffset - PAGE_SIZE))}
+            >
+              ‹ Previous
+            </button>
+            <span>
+              {sraOffset + 1}–{sraOffset + data.sra_runs.length} of{" "}
+              {data.sra_total_count.toLocaleString()}
+            </span>
+            <button
+              type="button"
+              disabled={data.sra_next_offset == null}
+              onClick={() => {
+                if (data.sra_next_offset != null) onSraPage(data.sra_next_offset);
+              }}
+            >
+              Next ›
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/** One assembly row in an organism's assembly list; no component picker --
+ *  "view details" hands off to the existing single-accession resolve flow,
+ *  which is the only place components are fetched (one CLI shellout each). */
+function OrganismAssemblyRow({
+  assembly,
+  onView,
+}: {
+  assembly: OrganismAssemblySummary;
+  onView: () => void;
+}) {
+  return (
+    <tr>
+      <td className="mono">
+        <button
+          type="button"
+          className="sra-organism-view-link"
+          onClick={onView}
+          title="View components and download"
+        >
+          {assembly.accession}
+        </button>
+        {assembly.already_downloaded && (
+          <span className="sra-have-tag" title="Already in this project">
+            have
+          </span>
+        )}
+      </td>
+      <td className="sra-dim">{assembly.strain ?? "—"}</td>
+      <td className="sra-dim">{assembly.assembly_level ?? "—"}</td>
+      <td className="sra-dim">{assembly.submitter ?? "—"}</td>
+      <td className="sra-dim">{assembly.release_date ?? "—"}</td>
+      <td className="sra-num">
+        {assembly.total_length != null ? formatBytes(assembly.total_length) : "—"}
+      </td>
+    </tr>
   );
 }
 

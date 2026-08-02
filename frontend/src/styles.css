@@ -1779,6 +1779,76 @@ a.btn {
   min-width: 0;
 }
 
+/* The dropdown positions against the label, not the input, so it lines up
+   under the field regardless of the label's own text/gap sizing. */
+.sra-organism-anchor {
+  position: relative;
+}
+
+.sra-organism-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 2px 0 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sra-organism-suggestions li {
+  margin: 0;
+}
+
+.sra-organism-suggestions button {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sra-organism-suggestions button:hover,
+.sra-organism-suggestions button.active {
+  background: var(--bg-hover);
+}
+
+.sra-organism-name {
+  font-style: italic;
+}
+
+.sra-organism-rank {
+  margin-left: auto;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.sra-organism-view-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .sra-search-platform {
   width: 150px;
   flex: none;
