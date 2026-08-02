@@ -124,11 +124,15 @@ class TestNanoplotReport:
         assert "nanoplot" in r.text
         assert "sandbox" not in r.headers["content-security-policy"]
 
-    def test_allows_the_plotly_cdn_script_only(self, client):
+    def test_allows_the_plotly_cdn_script_and_inline_plot_calls(self, client):
+        """Loading plotly.js from the CDN is not enough on its own -- each
+        plot is drawn by its own inline `Plotly.newPlot(...)` script with no
+        nonce or hash, so `'unsafe-inline'` has to be allowed too or every
+        plot silently stays blank while the library loads fine."""
         csp = get(client, "nanoplot/NanoPlot-report.html").headers[
             "content-security-policy"
         ]
-        assert "script-src https://cdn.plot.ly" in csp
+        assert "script-src https://cdn.plot.ly 'unsafe-inline'" in csp
 
     def test_still_cannot_fetch_anything_else(self, client):
         csp = get(client, "nanoplot/NanoPlot-report.html").headers[
