@@ -346,6 +346,46 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## Help → Software: two columns, one section per page — FIXED
+
+Fixed already as of this audit; the print-page-break half of the ask was a
+misstatement the user corrected on 2026-08-02 -- no print/page-break CSS is
+wanted, so its absence is not a gap.
+
+`frontend/src/components/HelpSoftware.tsx` renders `TOOL_META` in
+`.software-group-entries`, a CSS grid at
+`repeat(auto-fit, minmax(420px, 1fr))` (`frontend/src/styles.css:2566`),
+giving two columns on screen and collapsing to one when the viewport (or an
+open side panel) narrows past 872px. Each section (`.software-group`) is its
+own grid, so a new section always starts in the left column rather than
+continuing beside the previous section's last tool -- the section break is
+visible without any explicit break rule, screen or print. Entry-to-entry
+separation uses a top border rather than a bottom one specifically because a
+grid's closing row can leave two cells and only one is `:last-child`; a
+`@container` query (not a viewport media query, since the left panel changes
+the grid's width without the window moving) suppresses the second entry's
+top border only when a second column is actually seated.
+
+Raised: 2026-07-31, requested.
+
+`frontend/src/components/HelpSoftware.tsx` renders `TOOL_META` as a single
+column. Two columns for the descriptions, with each section starting on its own
+page break.
+
+"Page break" cuts two ways here and the answer changes the CSS: for *print*
+it is `break-before: page` inside an `@media print` block; for *screen* it is
+a section that starts at the top of the viewport rather than flowing on. This
+page is a reference people read on screen and occasionally print for a methods
+appendix, so most likely both -- `break-inside: avoid` on each tool entry so a
+tool is never split across a column or page boundary, which is the failure the
+two-column layout otherwise introduces.
+
+Note `TOOL_META` is rendered directly and `test_every_tool_is_documented`
+requires every entry to carry `homepage`, `citation`, `license` and `usage`, so
+the column layout must not depend on any of those being short.
+
+Touches: `frontend/src/components/HelpSoftware.tsx`, `frontend/src/styles.css`.
+
 ## Maintenance jobs belong to whichever profile adopted "local" — FIXED
 
 Fixed 2026-08-02. `scheduler.tick` and `scheduler.run_now` now enqueue with
