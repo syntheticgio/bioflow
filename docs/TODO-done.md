@@ -346,6 +346,87 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## STAR: annotation-aware indexing (`--sjdbGTFfile`) — FIXED
+
+Fixed 2026-08-02. `StarParams` unaffected; the flag lives on the index build,
+not alignment. `align_runner.build_star_index_command` gained `gtf` and
+`sjdb_overhang` (default 100, per this entry's own recommendation --
+read-length-correct overhang was not built, since it would add a read-length
+dimension to index caching for a resolution-only gain). `aligners.py` gained
+`STAR_ANNOTATED_MEMBERS`, a separate `.STARindex.annotated` directory suffix,
+and a `SidecarRole.STAR_ANNOTATED_INDEX` role, so a reference can carry both
+an annotated and unannotated STAR index at once rather than one overwriting
+the other -- verified on the real yeast project via the actual API: `star:
+true` and `star_annotated: true` coexist independently in
+`reference_index_status`.
+
+**Where the file count departed from this entry's own prediction.** This
+entry predicted four extra files from STAR's documentation:
+`exonInfo.tab`, `geneInfo.tab`, `transcriptInfo.tab`, `sjdbList.out.tab`.
+Running `STAR --runMode genomeGenerate --sjdbGTFfile` against the real yeast
+reference and GTF (`GCF_000146045.2_R64_genomic.gtf`) wrote **seven**:
+the prediction missed `exonGeTrInfo.tab`, `sjdbInfo.txt` and
+`sjdbList.fromGTF.out.tab`. Trusting the prediction -- exactly what this
+entry itself warned against -- would have repeated the base STAR index's own
+first bug: `build_index` reporting success while silently dropping three of
+fifteen sidecars, discovered only when the aligner later complained about a
+missing genome directory.
+
+**The unblocking worked as predicted, with one gap closed along the way.**
+`pipeline_service.resolve_annotation` existed but took a BAM it had no
+business requiring -- it only ever used `bam.project_id`, and STAR's index
+build has no BAM yet at the point it needs the same resolution (the whole
+point is building the index *before* alignment). Refactored to take a
+`project_id` directly; both callers (`launch_counts` and the quantify-defaults
+route) updated, full suite stayed green. `launch_build_index` refuses an
+`annotation_id` for every aligner but STAR, and resolves it explicit-only
+(no auto-pick of a lone candidate) -- unlike featureCounts, a wrong GTF here
+fails silently (fewer junctions found, not an error), so building without
+one is the safer default when the caller did not name one.
+
+**New surface, not just new plumbing.** A `/pipelines/annotations/{project_id}`
+endpoint was added (`quantify_defaults`'s BAM-scoped resolution doesn't fit a
+build that has no BAM yet), and the Indexes panel (`IndexStatus.tsx`) gained
+a nested "star (annotated)" row with an annotation picker when a project
+holds more than one distinct assembly's GTF -- verified rendering `✓ built`
+for both `star` and `star (annotated)` independently in the real running app
+against the real yeast reference.
+
+Touched: `backend/app/pipelines/aligners.py`, `align_runner.py`,
+`backend/app/queue/align_handlers.py`, `backend/app/services/pipeline_service.py`,
+`backend/app/api/v1/pipelines.py`, `backend/app/models/object.py`,
+`frontend/src/components/IndexStatus.tsx`, `frontend/src/api/client.ts`,
+`frontend/src/api/types.ts`. Tests:
+`backend/tests/pipelines/test_aligners.py`,
+`backend/tests/pipelines/test_align_runner.py`,
+`backend/tests/services/test_star_annotated_index.py`.
+
+Raised: 2026-08-01, split out of the STAR entry above so it is findable. That
+entry's heading says FIXED, which is a reason to skip reading it, and this is
+open work buried in its body.
+
+STAR ships indexing *without* an annotation. Junctions are found de novo and
+that works -- 9,818 splices on real yeast data with no GTF -- but supplying
+one improves sensitivity for junctions with few supporting reads, which is
+the case RNA-seq cares about most.
+
+**This is now unblocked.** The blocker was that the object model had no
+annotation concept; the differential-expression merge brought one --
+`pipeline_service.annotations_for_project` and `resolve_annotation`, plus a
+`needs_annotation` contract the dialogs already consume. STAR's index build
+can use the same resolution featureCounts does.
+
+Two wrinkles specific to STAR. `--sjdbOverhang` should be read length minus
+one, which ties the index to the reads it will be used with -- and indexes
+here are cached per reference with no read-length dimension, so either accept
+the default 100 (fine for typical 100-150bp Illumina) or encode the overhang
+in the sidecar name. And an annotation-built index writes extra files
+(`exonInfo.tab`, `geneInfo.tab`, `transcriptInfo.tab`, `sjdbList.out.tab`)
+that `aligners.STAR_MEMBERS` does not list, so that tuple becomes conditional
+on whether a GTF was supplied. Verify by running genomeGenerate with a GTF and
+listing the directory rather than predicting it -- predicting it is what got
+the no-GTF file list wrong the first time.
+
 ## Help → Software: two columns, one section per page — FIXED
 
 Fixed already as of this audit; the print-page-break half of the ask was a
