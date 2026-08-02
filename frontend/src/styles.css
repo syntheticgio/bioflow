@@ -2682,6 +2682,15 @@ table.software-matrix thead th.software-matrix-corner {
   margin-top: auto;
 }
 
+/* A solo entry (odd tool out, no row-mate) has no neighbour to line its card
+   up with -- bottom-pinning it here would just strand it below empty space,
+   as flye's long prose demonstrated. Follow the prose instead, same as
+   before entries started stretching to a shared row height. */
+.software-entry.is-solo .software-facts {
+  align-self: start;
+  margin-top: 0;
+}
+
 .software-prose p {
   line-height: 1.6;
   margin: 0 0 10px;
