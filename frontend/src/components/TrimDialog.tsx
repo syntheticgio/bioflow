@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 import type { CutadaptParams, DataObject, TrimmomaticParams, TrimParams } from "../api/types";
 
@@ -110,7 +111,7 @@ export function TrimDialog({
   const longRead = SHORT_READ_TUNED_TOOLS.has(activeTool) && isLongRead(object);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         {/* "Preprocess", not "Trim": this dialog also filters by length and
             quality, which the narrower name undersells. The route, job kind
@@ -363,6 +364,6 @@ export function TrimDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

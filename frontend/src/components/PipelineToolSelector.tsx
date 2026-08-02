@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DataObject, PipelineTool, PipelineType } from "../api/types";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { ToolDetailPane } from "./ToolDetailPane";
 
 interface Props {
@@ -155,7 +156,7 @@ export function PipelineToolSelector({
   const label = PIPELINE_LABEL[pipeline] ?? "a tool";
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal tool-selector" onClick={(e) => e.stopPropagation()}>
         <h2>Select {label}</h2>
 
@@ -258,6 +259,6 @@ export function PipelineToolSelector({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

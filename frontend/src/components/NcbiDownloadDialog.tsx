@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 import type {
   AssemblyResolveResponse,
@@ -244,7 +245,7 @@ export function NcbiDownloadDialog({
     setSort((s) => ({ key, desc: s.key === key ? !s.desc : false }));
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div
         className="modal sra-modal"
         onClick={(e) => e.stopPropagation()}
@@ -543,7 +544,7 @@ export function NcbiDownloadDialog({
           )}
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
 

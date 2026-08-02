@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { accessionUrl } from "../lib/format";
 import { focusWindow } from "../lib/chromosomes";
+import { ModalBackdrop } from "./ModalBackdrop";
 
 const SVIEWER_SRC = "https://www.ncbi.nlm.nih.gov/projects/sviewer/js/sviewer.js";
 
@@ -250,7 +251,7 @@ export function SequenceViewerModal({
   ]);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div
         className="modal sviewer-modal"
         onClick={(e) => e.stopPropagation()}
@@ -304,6 +305,6 @@ export function SequenceViewerModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

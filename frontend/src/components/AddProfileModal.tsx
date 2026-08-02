@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, ApiRequestError } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import type { Profile } from "../stores/profileStore";
 
 interface Props {
@@ -66,8 +67,7 @@ export function AddProfileModal({ isFirstBoot, onCreated, onClose }: Props) {
   };
 
   return (
-    <div
-      className="modal-backdrop"
+    <ModalBackdrop
       onClick={isFirstBoot ? undefined : onClose}
       onKeyDown={(e) => e.key === "Escape" && !isFirstBoot && onClose()}
     >
@@ -136,6 +136,6 @@ export function AddProfileModal({ isFirstBoot, onCreated, onClose }: Props) {
           </div>
         </form>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

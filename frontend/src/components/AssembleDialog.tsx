@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import { AlignerParamFields } from "./AlignerParamFields";
+import { ModalBackdrop } from "./ModalBackdrop";
 import type { AssemblyParams, DataObject } from "../api/types";
 
 const CHEMISTRY_LABELS: Record<string, string> = {
@@ -93,7 +94,7 @@ export function AssembleDialog({
   });
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Assemble
@@ -231,6 +232,6 @@ export function AssembleDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
