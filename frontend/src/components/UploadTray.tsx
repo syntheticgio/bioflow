@@ -73,9 +73,11 @@ export function UploadTray() {
                         ? "Cancelled"
                         : item.phase === "assembling"
                           ? "Assembling on server…"
-                          : item.phase === "preparing"
-                            ? "Preparing…"
-                            : `${formatBytes(item.loaded)} / ${formatBytes(item.size)}`}
+                          : item.phase === "hashing"
+                            ? "Checking for existing copy…"
+                            : item.phase === "preparing"
+                              ? "Preparing…"
+                              : `${formatBytes(item.loaded)} / ${formatBytes(item.size)}`}
                 </span>
 
                 <span style={{ display: "flex", gap: 8 }}>

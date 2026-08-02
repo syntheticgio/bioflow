@@ -1,5 +1,7 @@
 import { api } from "../api/client";
 import type { UploadSessionInfo } from "../api/types";
+import type { HashWorkerRequest, HashWorkerResponse } from "./hashWorker";
+import HashWorker from "./hashWorker?worker";
 
 export const CHUNK_CONCURRENCY = 4;
 const MAX_CHUNK_RETRIES = 3;
@@ -10,6 +12,53 @@ export async function sha256Hex(data: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/**
+ * Whole-file SHA-256, computed off the main thread.
+ *
+ * `crypto.subtle.digest` takes one complete buffer, which is unusable for a
+ * file this app expects to run to 30 GB -- so this hashes incrementally in a
+ * worker via hash-wasm instead, feeding it fixed-size slices the same way
+ * chunks are already read for upload.
+ */
+export function hashFile(
+  file: File,
+  signal: AbortSignal,
+  onProgress?: (bytesHashed: number) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const worker = new HashWorker();
+    const cleanup = () => worker.terminate();
+
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort);
+
+    worker.onmessage = (e: MessageEvent<HashWorkerResponse>) => {
+      const msg = e.data;
+      if (msg.type === "progress") {
+        onProgress?.(msg.bytesHashed);
+      } else if (msg.type === "done") {
+        signal.removeEventListener("abort", onAbort);
+        cleanup();
+        resolve(msg.digest);
+      } else {
+        signal.removeEventListener("abort", onAbort);
+        cleanup();
+        reject(new Error(msg.message));
+      }
+    };
+    worker.onerror = (e) => {
+      signal.removeEventListener("abort", onAbort);
+      cleanup();
+      reject(new Error(e.message || "Hashing failed"));
+    };
+
+    worker.postMessage({ file } satisfies HashWorkerRequest);
+  });
 }
 
 export interface ChunkedUploadCallbacks {
@@ -37,11 +86,17 @@ export async function uploadFileChunked(
   if (existingSessionId) {
     session = await api.getUpload(existingSessionId);
   } else {
+    cb.onPhase?.("hashing");
+    const clientSha256 = await hashFile(file, signal, (bytesHashed) =>
+      cb.onProgress?.(bytesHashed),
+    );
+
     cb.onPhase?.("preparing");
     const created = await api.createUpload({
       project_id: projectId,
       filename: file.name,
       total_size: file.size,
+      client_sha256: clientSha256,
     });
     // The server already had these exact bytes; nothing to transfer.
     if (created.dedup_hit && created.object) {
