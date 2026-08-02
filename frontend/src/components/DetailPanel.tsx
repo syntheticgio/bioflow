@@ -747,6 +747,7 @@ function ObjectDetail({ id }: { id: string }) {
             if (pendingTool) setFlow({ pipeline: flow.pipeline, tool: pendingTool });
           }}
           onClose={() => setFlow(null)}
+          object={obj}
         />
       )}
       {flow?.pipeline === "trim" && flow.tool != null && (
