@@ -1432,7 +1432,61 @@ The two entries above (QUAST/BUSCO, and the assembly design below) should not
 count this as work they close -- there is nothing left to close. N50 across a
 FASTA is still genuinely missing and still belongs to QUAST.
 
-## Assembly: designed, not built — assembly half now SPECCED
+## Assembly: designed, not built — FIXED (the assembly half, 2026-08-02)
+
+De novo assembly shipped 2026-08-02. Flye is installed, the Actions card
+offers it for long reads, and a run produces a contig FASTA roled `reference`
+plus a GFA graph. Code: `app/pipelines/assembler_registry.py`,
+`assembly_params.py`, `assembly_runner.py`, `app/queue/assembly_handlers.py`,
+`pipeline_service.launch_assembly`, `results._apply_assemble_reads`,
+`suggestion_service.build_assemble_card`, `frontend/src/components/
+AssembleDialog.tsx`.
+
+**What the implementation did differently from the design, and from this
+entry.**
+
+- **This entry's `mem_mb` claim was wrong.** It predicted assembly would be
+  "the first real exercise of the `mem_mb` side of the load governor's
+  admission checks". `app/queue/governor.py` does not read `mem_mb` at all --
+  every handler declares it and nothing enforces it. The guard is at launch
+  instead, in the `resource_estimator` shape.
+- **HiFi goes to Flye, not hifiasm.** hifiasm is not packaged for Debian and
+  needs a source build with the arm64 SIMD problem bwa-mem2 already has, so
+  the "hifiasm for HiFi, Flye for ONT/CLR" split is deferred rather than
+  dropped. `spec_for_chemistry` is the one function that changes when it
+  lands.
+- **Genome size is never passed to the assembler.** Flye stopped requiring
+  `--genome-size` at 2.8, and it only alters behaviour alongside
+  `--asm-coverage`, which BioFlow does not offer. It is collected for
+  BioFlow's own memory estimate; sending it anyway would record a parameter in
+  a run's provenance that the tool did not act on.
+- **`FormatKind.GFA` was needed**, which the design did not anticipate --
+  otherwise the assembly graph files as "Text".
+- **`_distinct_assemblies` needed no change.** The design worried hifiasm's
+  `hap1`/`hap2` would be collapsed as one assembly. It keys on an NCBI
+  accession regex, so any filename that does not look like `GCF_..._genomic`
+  is already its own candidate.
+- **Progress is a phase name, not a percentage.** Flye's stages differ in
+  duration by more than an order of magnitude.
+
+**Measurements.** Flye 2.9.5 from Debian, ~37 MB, dependencies already in the
+image. Memory estimates: 3.2 GB for a 4.6 Mb bacterial genome, 121 GB for 3.1
+Gb human. A 40,000-contig draft parses in 1.75 s into a 2.2 KB facts document,
+`samtools faidx` 0.3 s, `minimap2 -d` 1.5 s / 330 MB, `bowtie2-build` 207 s.
+
+**Three bugs this work found in existing code**, none of them in assembly:
+`resolve_reference` told users a genome needed fetching while two sat in the
+project; `/help/software` rendered from a hardcoded list, so featureCounts and
+pydeseq2 were invisible; and the "longest/shortest contig never shipped" entry
+above was wrong -- it had shipped two days before it was raised.
+
+**Still open:** an end-to-end assembly on adequately-covered reads. The only
+long-read data in the library is a ~1.2x yeast HiFi subsample, which cannot
+assemble. See "Post-assembly QC: BUSCO and QUAST" and "Reference-guided
+assembly" above, both of which this unblocks.
+
+The original entry follows, kept because its diagnosis explains why the code
+looks the way it does.
 
 Design: `docs/superpowers/specs/2026-08-01-de-novo-assembly-design.md`
 (2026-08-01), covering the `### Assembly` section below. What the design
