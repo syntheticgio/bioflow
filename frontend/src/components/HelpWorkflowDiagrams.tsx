@@ -1,26 +1,28 @@
-import diagram1 from "../assets/workflow-diagrams/01-orchestration.svg?raw";
-import diagram2 from "../assets/workflow-diagrams/02-assembly-loops.svg?raw";
-import diagram3 from "../assets/workflow-diagrams/03-analysis-lattice.svg?raw";
-import diagram4 from "../assets/workflow-diagrams/04-annotation-fanin.svg?raw";
+import { Link } from "react-router-dom";
+import diagram1 from "../assets/workflow-diagrams/01-assembly-loops.svg?raw";
+import diagram2 from "../assets/workflow-diagrams/02-orchestration.svg?raw";
+import diagram3 from "../assets/workflow-diagrams/03-annotation-fanin.svg?raw";
+import diagram4 from "../assets/workflow-diagrams/04-analysis-lattice.svg?raw";
 import diagram5 from "../assets/workflow-diagrams/05-downstream-trades.svg?raw";
-import dl1Png from "../assets/workflow-diagrams/downloads/01-orchestration.png";
-import dl1Svg from "../assets/workflow-diagrams/downloads/01-orchestration.svg";
-import dl2Png from "../assets/workflow-diagrams/downloads/02-assembly-loops.png";
-import dl2Svg from "../assets/workflow-diagrams/downloads/02-assembly-loops.svg";
-import dl3Png from "../assets/workflow-diagrams/downloads/03-analysis-lattice.png";
-import dl3Svg from "../assets/workflow-diagrams/downloads/03-analysis-lattice.svg";
-import dl4Png from "../assets/workflow-diagrams/downloads/04-annotation-fanin.png";
-import dl4Svg from "../assets/workflow-diagrams/downloads/04-annotation-fanin.svg";
+import dl1Png from "../assets/workflow-diagrams/downloads/01-assembly-loops.png";
+import dl1Svg from "../assets/workflow-diagrams/downloads/01-assembly-loops.svg";
+import dl2Png from "../assets/workflow-diagrams/downloads/02-orchestration.png";
+import dl2Svg from "../assets/workflow-diagrams/downloads/02-orchestration.svg";
+import dl3Png from "../assets/workflow-diagrams/downloads/03-annotation-fanin.png";
+import dl3Svg from "../assets/workflow-diagrams/downloads/03-annotation-fanin.svg";
+import dl4Png from "../assets/workflow-diagrams/downloads/04-analysis-lattice.png";
+import dl4Svg from "../assets/workflow-diagrams/downloads/04-analysis-lattice.svg";
 import dl5Png from "../assets/workflow-diagrams/downloads/05-downstream-trades.png";
 import dl5Svg from "../assets/workflow-diagrams/downloads/05-downstream-trades.svg";
 
 /**
  * Five diagrams of a genome assembly + downstream-analysis project, imported
- * from "Beyond the Pipeline -- A Verified Field Guide to Downstream Genomic
- * Analysis, 2nd Edition". Each SVG is self-contained (its own <style>, its
- * own light/dark palette keyed off prefers-color-scheme) and unrelated to
- * BioFlow's own theme variables, so it renders via dangerouslySetInnerHTML
- * rather than being redrawn against BioFlow's palette.
+ * from "From Reads to Biology -- A Field Guide to Genome Assembly and
+ * Downstream Analysis" (see HelpGenomeAnalysisReview). Each SVG is
+ * self-contained (its own <style>, its own light/dark palette keyed off
+ * prefers-color-scheme) and unrelated to BioFlow's own theme variables, so it
+ * renders via dangerouslySetInnerHTML rather than being redrawn against
+ * BioFlow's palette.
  */
 const DIAGRAMS: {
   id: string;
@@ -34,55 +36,55 @@ const DIAGRAMS: {
   fileBase: string;
 }[] = [
   {
-    id: "d01-orchestration",
+    id: "d01-assembly-loops",
     n: "Diagram 1",
-    title: "Project orchestration",
-    sub: "What runs in parallel, and where the tracks collide",
-    desc: "Three data types enter independently; two stall waiting on a third. The critical path is A → B → C → annotation, and the only genuinely parallel work is the dashed byproducts that projects routinely skip.",
-    svg: diagram1,
-    pngUrl: dl1Png,
-    svgUrl: dl1Svg,
-    fileBase: "01-orchestration",
-  },
-  {
-    id: "d02-assembly-loops",
-    n: "Diagram 2",
     title: "The assembly pipeline",
     sub: "Four loops chained by gates — not a staircase",
     desc: "Phases 0–10 with the software at each step. The back-edges carry the meaning: quality comes from re-entering a phase, not from advancing to the next one. Loops 1–3 buy contiguity by spending certainty; Loop 4 is where certainty is measured.",
+    svg: diagram1,
+    pngUrl: dl1Png,
+    svgUrl: dl1Svg,
+    fileBase: "01-assembly-loops",
+  },
+  {
+    id: "d02-orchestration",
+    n: "Diagram 2",
+    title: "Project orchestration",
+    sub: "What runs in parallel, and where the tracks collide",
+    desc: "Three data types enter independently; two stall waiting on a third. The critical path is A → B → C → annotation, and the only genuinely parallel work is the dashed byproducts that projects routinely skip.",
     svg: diagram2,
     pngUrl: dl2Png,
     svgUrl: dl2Svg,
-    fileBase: "02-assembly-loops",
+    fileBase: "02-orchestration",
   },
   {
-    id: "d03-analysis-lattice",
+    id: "d03-annotation-fanin",
     n: "Diagram 3",
-    title: "The analysis ladder",
-    sub: "A lattice, not a staircase",
-    desc: "Ten rungs and the feedback edges that make the ordering a lie. Rung 2 gates rung 3, rung 9 silently corrupts rung 4, and rung 10 is the only one that can falsify the other nine.",
-    svg: diagram3,
-    pngUrl: dl3Png,
-    svgUrl: dl3Svg,
-    fileBase: "03-analysis-lattice",
-  },
-  {
-    id: "d04-annotation-fanin",
-    n: "Diagram 4",
     title: "Annotation",
     sub: "A fan-in of six evidence streams, one combiner, three QC legs",
     desc: "The evidence hierarchy is a ranking, not a menu. Annotation tools differ far less than the evidence you feed them — which is why annotation quality dominates every comparative result downstream.",
+    svg: diagram3,
+    pngUrl: dl3Png,
+    svgUrl: dl3Svg,
+    fileBase: "03-annotation-fanin",
+  },
+  {
+    id: "d04-analysis-lattice",
+    n: "Diagram 4",
+    title: "The analysis ladder",
+    sub: "A lattice, not a staircase",
+    desc: "Ten rungs and the feedback edges that make the ordering a lie. Rung 2 gates rung 3, rung 9 silently corrupts rung 4, and rung 10 is the only one that can falsify the other nine.",
     svg: diagram4,
     pngUrl: dl4Png,
     svgUrl: dl4Svg,
-    fileBase: "04-annotation-fanin",
+    fileBase: "04-analysis-lattice",
   },
   {
     id: "d05-downstream-trades",
     n: "Diagram 5",
     title: "Downstream workflows",
     sub: "Concurrent programmes that trade outputs",
-    desc: "Four analysis programmes that can all start the day a GFF lands. Run in isolation each produces a list; the red cross-edges are nobody's deliverable and are where the causal claims come from.",
+    desc: "Four analysis programmes that can all start the day an annotation lands. Run in isolation each produces a list; the red cross-edges are nobody's deliverable and are where the causal claims come from.",
     svg: diagram5,
     pngUrl: dl5Png,
     svgUrl: dl5Svg,
@@ -137,11 +139,13 @@ export function HelpWorkflowDiagrams() {
           <p className="help-intro">
             Five views of the same genome assembly and downstream-analysis
             project, drawn to show what actually runs at the same time and
-            what is secretly waiting on what. From{" "}
-            <em>
-              Beyond the Pipeline &mdash; A Verified Field Guide to
-              Downstream Genomic Analysis, 2nd Edition
-            </em>
+            what is secretly waiting on what. Companion to{" "}
+            <Link to="/help/genome-analysis-review">
+              <em>
+                From Reads to Biology &mdash; a field guide to genome assembly
+                and downstream analysis
+              </em>
+            </Link>
             .
           </p>
 

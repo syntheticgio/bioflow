@@ -22,6 +22,7 @@ const HELP_ITEMS: { to: string; label: string }[] = [
   { to: "/help/software", label: "Software" },
   { to: "/help/sources", label: "Data Sources" },
   { to: "/help/workflow-diagrams", label: "Workflow Diagrams" },
+  { to: "/help/genome-analysis-review", label: "Genome Analysis Review" },
 ];
 
 export function Header() {
