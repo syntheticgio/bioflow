@@ -117,10 +117,19 @@ async def tick() -> list[str]:
         job = await queue_mod.enqueue(
             schedule.job_type,
             # System-wide maintenance -- GC, file verification -- runs against
-            # the whole installation, not any one profile's library. There is
-            # no owner to inherit here and there never will be, so "local" is
-            # the answer rather than a placeholder waiting on route wiring.
-            owner="local",
+            # the whole installation, not any one profile's library, so there
+            # is no owner to inherit here and there never will be.
+            #
+            # `SYSTEM_OWNER`, not "local". Both express "belongs to the
+            # installation", but "local" is not a neutral value: it is the
+            # owner string of whichever profile adopted the pre-profiles
+            # library, so these jobs used to land in exactly one real person's
+            # job list and event stream. The same pseudo-owner already carries
+            # the four installation-wide event publishers, and `list_jobs`
+            # unions it in for every profile -- so this also puts these jobs
+            # on `bp:events:system`, which every client subscribes to, rather
+            # than on one profile's private channel.
+            owner=keys.SYSTEM_OWNER,
             payload=schedule.payload,
             job_class=schedule.job_class,
             resources=RESOURCES.get(schedule.job_type, JobResources()),
@@ -157,8 +166,12 @@ async def run_now(name: str) -> str | None:
         schedule.job_type,
         # The same system-wide maintenance as `tick` fires, just at user
         # priority because someone pressed the button. Forcing a GC sweep does
-        # not make that sweep belong to the profile that asked for it.
-        owner="local",
+        # not make that sweep belong to the profile that asked for it -- but
+        # they do need to *see* it, which is the case that makes the system
+        # owner better than filtering maintenance out of the jobs list. Under
+        # the old hardcoded "local" a second profile pressing Run now watched
+        # the job vanish; under `SYSTEM_OWNER` every profile sees it.
+        owner=keys.SYSTEM_OWNER,
         payload=schedule.payload,
         # A human asked for this, so it should not queue behind maintenance.
         job_class=JobClass.USER_INTERACTIVE,

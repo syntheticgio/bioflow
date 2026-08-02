@@ -11,7 +11,68 @@ newest first.
 
 # Planned features
 
-## Profiles — SPECCED
+## Profiles — FIXED
+
+Shipped across 2026-07-31 and 2026-08-01; **found stale on 2026-08-02**, when
+the user asked what was outstanding on profiles and the answer turned out to
+be "the heading". This is the fourth instance of the drift CLAUDE.md says has
+"already gone wrong three times", and the first one caught by a user's
+disbelief rather than an audit.
+
+Where the code lives: `backend/app/models/profile.py` (`Profile`, `owner_id()`,
+a partial unique index so only one profile can adopt the legacy owner),
+`backend/app/api/v1/profiles.py` (list / create / select / delete),
+`backend/app/api/deps.py` (`resolve_owner`, `get_current_owner`, `OwnerDep`),
+and on the front end `stores/profileStore.ts`, `components/ProfilePicker.tsx`,
+`components/AddProfileModal.tsx`, plus `profileHeaders()` in `api/client.ts`
+sending `X-BioFlow-Profile` on every request including the XHR upload path.
+Three plans: `2026-07-31-profiles-backend.md`, `2026-08-01-profiles-frontend.md`,
+`2026-08-01-profiles-events-and-schedules.md`.
+
+**What the implementation did differently from this entry:**
+
+- **"Edit details" was dropped, and the header menu has one item, not three.**
+  This entry specifies Switch profile / Edit details / Logout. Switch and
+  Logout collapsed into one because they are the same action: selecting a
+  profile issues no token and sets no cookie, so there is no session to end --
+  returning to the picker is the entirety of what either would do. Edit was
+  dropped because there is no route behind it; the reasoning is recorded at
+  `Header.tsx:99`, where a reader is already looking.
+- **The Details section was dropped too, and left a dead field.**
+  `Profile.details` exists on the model; `ProfileCreate` carries only
+  `username`, `password`, `email`, `is_first_boot`, and the modal collects
+  nothing else. So name, institution and research areas are unreachable. Noted
+  at `AddProfileModal.tsx:26`. Deliberately left as-is on 2026-08-02 rather
+  than either built or deleted -- but a model field no code can write is the
+  kind of thing that reads as a bug later.
+- **A system pseudo-owner, which this entry does not anticipate at all.**
+  `keys.SYSTEM_OWNER` and `bp:events:system` exist because four event
+  publishers are installation-wide (`system.starvation_override`,
+  `storage.unavailable`, `blob.drifted`, `blob.missing`) and blobs are global
+  by this spec, so there is no owner to attribute them to. Every client
+  subscribes to it alongside its own channel. It has since become the general
+  answer for "belongs to the machine" -- maintenance jobs now use it too.
+- **The dedup trap this entry predicted was real and is fixed.**
+  `queue.py:117` folds the owner into the stored key
+  (`f"{owner}:{dedup_key}"`), so one profile's `build_index` can no longer
+  silently return `None` for another's identical request.
+- **Both traps' second half -- the worker having no request -- was solved by
+  giving `JobContext` an `owner` field**, rather than re-reading the job
+  document on every progress tick at up to 2 Hz per running job.
+- **No data migration, exactly as designed.** The first profile adopts
+  `owner: "local"` literally. Zero documents rewritten, which matters because
+  this repo has no migrations mechanism.
+- **All three plans still show every checkbox unticked.** Per CLAUDE.md that
+  is not evidence of anything -- nothing ticks them. The code is present;
+  `grep` for the symbol, not the box.
+
+**The measure that misled, worth keeping:** `TODO(profiles)` marker count was
+a bad completeness signal, and "0 markers remaining" read as done while
+`/api/v1/jobs` still answered with 100 jobs and no header. There are now zero
+markers *and* it is actually done, which is precisely why the count proves
+nothing either way.
+
+Original entry follows.
 
 Design: `docs/superpowers/specs/2026-07-31-profiles-design.md` (2026-07-31).
 
@@ -422,7 +483,65 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
-## Maintenance jobs belong to whichever profile adopted "local"
+## Maintenance jobs belong to whichever profile adopted "local" — FIXED
+
+Fixed 2026-08-02. `scheduler.tick` and `scheduler.run_now` now enqueue with
+`owner=keys.SYSTEM_OWNER`, and `list_jobs` unions that owner in:
+`{"owner": {"$in": [owner, keys.SYSTEM_OWNER]}}`. So maintenance is visible to
+every profile and owned by none.
+
+**What the implementation did differently from this entry.**
+
+- **It took the first candidate, which this entry recommended against.** The
+  entry called the `owner="system"` route "honest, but the jobs list becomes
+  two queries" and leaned toward filtering maintenance job *types* out
+  instead. **The two-queries objection was simply wrong** -- it is one `$in`
+  on one find. With the only stated cost gone, the entry's own argument
+  against filtering decides it: filtering "hides them from everyone including
+  the person who asked", and `run-now` is precisely when they want to see it.
+- **The event-stream half needed no code at all.** Events already route by
+  `Job.owner`, so stamping `system` puts these on `bp:events:system`, which
+  every client already subscribes to. This entry treats the jobs list and the
+  event stream as two consequences needing two fixes; they were one.
+- **Nothing was invented.** `keys.SYSTEM_OWNER` already existed, from the SSE
+  scoping work that raised this entry -- the fix is jobs becoming *consistent*
+  with events, not a new concept. That is also the argument for preferring it:
+  a second mechanism for "belongs to the installation" would have been the
+  real cost, not a query.
+- **`_owned_job` was deliberately left as strict equality**, so cancel, retry
+  and log stay owner-exact. Listing a maintenance job answers "what is this
+  machine doing"; cancelling one is an installation-level act that a guessed
+  id should not reach. `run_now` is the deliberate door for firing them and
+  there is no matching door for killing one. Asserted, since "visible
+  therefore mutable" is the natural next assumption.
+- **No migration for existing `owner: "local"` maintenance job documents.**
+  Jobs are transient queue records with a TTL index; the historical ones aging
+  out of the adopted profile's list is not worth a migration in a repo with no
+  migrations mechanism.
+
+**Tests.** `backend/tests/queue/test_scheduler_owner.py` is new -- and so was
+the coverage: `grep` found **no scheduler tests at all** before this, so
+`tick` and `run_now` were entirely unexercised. Plus three cases in
+`test_route_owner_scoping.py::TestJobsRouter`. Mutation-checked: reverting the
+route to `{"owner": owner}` and the scheduler to `"local"` fails exactly the
+four new tests and nothing else. Suite green at 2350 passed.
+
+One thing to know if this area is touched again: **`run-worktree-tests.sh`
+swallows pytest's final summary line**, so `tail` shows the progress dots and
+then the warnings block with no count between them. CLAUDE.md says to read the
+count rather than the exit code; here that means counting the progress
+characters, since the line that would state it never arrives.
+
+The trap specific to this fix, and why one test asserts three facts at once:
+`{"owner": {"$in": [owner, SYSTEM_OWNER]}}` has two mistypings -- swapping
+`owner` out, or dropping it from the list -- that both turn every profile's
+list into the maintenance list, and **both still pass a test that only checks
+the system job is visible to both profiles.** Only asserting A's own job
+present *and* B's job absent *and* the system job present, in one listing,
+pins the query shape. Same shape as the warning this file already records
+about "profile B sees nothing" passing against a hardcoded `"local"`.
+
+Original diagnosis follows.
 
 Raised: 2026-08-01, while scoping the SSE stream. Pre-existing; nothing in that
 change caused it, and nothing in that change is the right place to fix it.

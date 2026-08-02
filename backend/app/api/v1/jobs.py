@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import OwnerDep
 from app.errors import NotFoundError, ValidationError
 from app.models import Job, JobClass, JobState
-from app.queue import queue
+from app.queue import keys, queue
 from app.queue.registry import all_handlers, get_handler
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -122,7 +122,19 @@ async def list_jobs(
     # rest narrow a listing the caller asked to narrow, but this one decides
     # whose queue is being listed at all. Building the dict with it already in
     # place is why no later `if` can accidentally produce an unpartitioned find.
-    query: dict = {"owner": owner}
+    #
+    # The system owner is unioned in rather than replaced: installation-wide
+    # maintenance (GC, file verification -- see queue/scheduler.py) belongs to
+    # nobody's library, so every profile sees it and no profile owns it. This
+    # is the same partition the event stream already uses, where every client
+    # subscribes to `bp:events:system` alongside its own channel.
+    #
+    # It must stay a *union*. Writing this as a bare `SYSTEM_OWNER` swap, or
+    # dropping `owner` from the `$in`, silently turns every profile's job list
+    # into the maintenance list -- which is why the test asserts both
+    # directions: system jobs visible to A *and* B, A's own jobs visible only
+    # to A.
+    query: dict = {"owner": {"$in": [owner, keys.SYSTEM_OWNER]}}
     if states:
         query["state"] = {"$in": _parse_states(states)}
     elif state:
