@@ -3390,9 +3390,68 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* Wider than .help-page's 760px measure for the same reason as the Software
    page: the content isn't prose, it's five wide SVG diagrams (viewBox up to
-   1760px) that would be squeezed into an unreadable strip at a prose measure. */
+   1760px) that would be squeezed into an unreadable strip at a prose measure.
+   Padding and scrolling move from .help-page onto .workflow-diagrams-content
+   below, because the sidebar nav needs to be a sibling that stays put while
+   only the diagrams column scrolls underneath it. */
 .workflow-diagrams-page {
   max-width: 1820px;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.workflow-diagrams-layout {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  width: 100%;
+}
+
+.workflow-diagrams-nav {
+  overflow-y: auto;
+  padding: 24px 16px 32px 20px;
+  border-right: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.workflow-diagrams-nav-label {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.workflow-diagrams-nav a {
+  display: block;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 6px 8px;
+  border-radius: 5px;
+  margin: 2px 0;
+}
+
+.workflow-diagrams-nav a:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.workflow-diagrams-nav a b {
+  display: block;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.workflow-diagrams-nav a span {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.workflow-diagrams-content {
+  overflow-y: auto;
+  padding: 24px 32px;
 }
 
 .workflow-diagrams-contract {
