@@ -58,7 +58,11 @@ export type ObjectRole =
   /** Per-gene fold changes and adjusted p-values from a DE test. Also
    * anonymous TSV, and kept separate from "counts" so a results table can
    * never be fed back into a DE run as if it were input. */
-  | "de_results";
+  | "de_results"
+  /** The GFA graph beside a de novo assembly's contigs. A role rather than a
+   * sidecar: it is a result someone opens in Bandage, not scaffolding for
+   * another tool. */
+  | "assembly_graph";
 
 /**
  * What kind of scaffolding a sidecar is. Distinct from ObjectRole: a role says
