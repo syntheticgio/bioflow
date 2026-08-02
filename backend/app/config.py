@@ -251,6 +251,19 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "vcf_stats"
 
     @property
+    def lineages_dir(self) -> Path:
+        """compleasm's `--library_path`: downloaded lineage datasets, shared
+        across every project and every run.
+
+        Reference data, not a per-object artifact -- closer to `ncbi_dir`'s
+        cache than to `objects/`, and for the same underlying reason
+        `download_lineage` is its own job rather than something
+        `assess_completeness` fetches inline: a completeness job must not
+        depend on the network, so what it reads here must already exist.
+        """
+        return self.bioinfo_home / "lineages"
+
+    @property
     def meta_dir(self) -> Path:
         return self.bioinfo_home / ".biopipe"
 
