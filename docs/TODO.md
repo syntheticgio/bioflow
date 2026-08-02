@@ -285,28 +285,6 @@ Touches: `backend/app/pipelines/aligners.py`,
 `backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
-## Help → Software: two columns, one section per page
-
-Raised: 2026-07-31, requested.
-
-`frontend/src/components/HelpSoftware.tsx` renders `TOOL_META` as a single
-column. Two columns for the descriptions, with each section starting on its own
-page break.
-
-"Page break" cuts two ways here and the answer changes the CSS: for *print*
-it is `break-before: page` inside an `@media print` block; for *screen* it is
-a section that starts at the top of the viewport rather than flowing on. This
-page is a reference people read on screen and occasionally print for a methods
-appendix, so most likely both -- `break-inside: avoid` on each tool entry so a
-tool is never split across a column or page boundary, which is the failure the
-two-column layout otherwise introduces.
-
-Note `TOOL_META` is rendered directly and `test_every_tool_is_documented`
-requires every entry to carry `homepage`, `citation`, `license` and `usage`, so
-the column layout must not depend on any of those being short.
-
-Touches: `frontend/src/components/HelpSoftware.tsx`, `frontend/src/styles.css`.
-
 ## STAR: annotation-aware indexing (`--sjdbGTFfile`)
 
 Raised: 2026-08-01, split out of the STAR entry above so it is findable. That
