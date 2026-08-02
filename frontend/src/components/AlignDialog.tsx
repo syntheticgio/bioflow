@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { AlignerParamFields } from "./AlignerParamFields";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { classify, estimateMb, explain } from "../lib/estimate";
 import { notify } from "../stores/messageStore";
 import type {
@@ -193,7 +194,7 @@ export function AlignDialog({
     band !== "block";
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Align reads
@@ -375,6 +376,6 @@ export function AlignDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

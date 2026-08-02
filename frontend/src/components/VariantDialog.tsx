@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 import type {
   DataObject,
@@ -113,7 +114,7 @@ export function VariantDialog({
     callerInfo?.available !== false;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Call variants
@@ -285,6 +286,6 @@ export function VariantDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 import type {
   UniProtProteome,
@@ -93,7 +94,7 @@ export function UniProtDownloadDialog({
   const canDownload = chosenProteome != null || selected.size > 0;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div
         className="modal sra-modal"
         onClick={(e) => e.stopPropagation()}
@@ -198,7 +199,7 @@ export function UniProtDownloadDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }
 
