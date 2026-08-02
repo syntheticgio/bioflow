@@ -371,7 +371,8 @@ export type PipelineType =
   | "download"
   | "variant"
   | "expression"
-  | "assemble";
+  | "assemble"
+  | "assembly_qc";
 
 export interface PipelineTool {
   name: string;
@@ -651,6 +652,36 @@ export interface AssemblyParams {
 export interface AssembleRequest {
   object_id: string;
   params?: Partial<AssemblyParams>;
+}
+
+export interface CompletenessDefaults {
+  organism: string | null;
+  /** The inferred lineage name, or null when there is nothing to infer from --
+   *  the dialog then requires the user to pick one rather than guessing. */
+  lineage: string | null;
+  odb: string;
+  /** Whether `lineage` is a genus/family-level match rather than the broad
+   *  domain fallback (bacteria/eukaryota) -- the dialog says so, the same
+   *  "inferred, labelled as inferred" honesty the assemble dialog's genome
+   *  size uses. */
+  specific: boolean;
+}
+
+export interface CompletenessRequest {
+  object_id: string;
+  lineage?: string | null;
+  odb?: string | null;
+}
+
+export interface LineageDownloadRequest {
+  lineage: string;
+  odb?: string | null;
+}
+
+export interface LineageStatus {
+  lineage: string;
+  odb: string;
+  present: boolean;
 }
 
 export interface AlignerSchema {

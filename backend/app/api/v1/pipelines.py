@@ -16,9 +16,11 @@ from app.pipelines import (
     align_runner,
     aligner_registry,
     assembler_registry,
+    assembly_qc_registry,
     bam_stats_runner,
     counts_runner,
     de_runner,
+    lineage_inference,
     tools,
     variant_db,
 )
@@ -705,6 +707,73 @@ async def assembler_schema(assembler: str) -> dict:
     except ValueError:
         raise NotFoundError(f"Unknown assembler: {assembler}") from None
     return assembler_registry.schema_for(parsed)
+
+
+class CompletenessRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Omitted by the Actions card, which lets the server infer from organism
+    # metadata; supplied once the dialog's lineage picker has a value, either
+    # the inferred one confirmed or a user override.
+    lineage: str | None = None
+    odb: str | None = None
+
+
+@router.post("/completeness", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_completeness_route(body: CompletenessRequest, owner: OwnerDep) -> JobOut:
+    """Queue compleasm against one assembly. Read-only: produces facts, no
+    derived object."""
+    job = await pipeline_service.launch_completeness(
+        object_id=body.object_id, owner=owner, lineage=body.lineage, odb=body.odb
+    )
+    return JobOut.of(job)
+
+
+@router.get("/completeness/defaults/{object_id}")
+async def completeness_defaults(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """What the completeness dialog should open with: the lineage inferred
+    from organism metadata, and whether that inference is specific or just a
+    domain-level guess -- the same "inferred, labelled as inferred,
+    overridable" shape the assemble dialog uses for genome size.
+    """
+    from app.services import object_service
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    organism = obj.metadata.get("organism") if obj.metadata else None
+    lineage = lineage_inference.infer_lineage(organism)
+    return {
+        "organism": organism,
+        "lineage": lineage,
+        "odb": assembly_qc_registry.COMPLEASM_SPEC.odb,
+        "specific": lineage_inference.is_specific(lineage) if lineage else False,
+    }
+
+
+class LineageDownloadRequest(BaseModel):
+    lineage: str
+    odb: str | None = None
+
+
+@router.post(
+    "/completeness/lineage", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def download_lineage_route(body: LineageDownloadRequest, owner: OwnerDep) -> JobOut:
+    """Queue fetching one compleasm lineage dataset, a dependency of
+    `/completeness` rather than something it fetches inline."""
+    job = await pipeline_service.launch_lineage_download(
+        lineage=body.lineage, odb=body.odb, owner=owner
+    )
+    return JobOut.of(job)
+
+
+@router.get("/completeness/lineage-status")
+async def lineage_status(lineage: str, odb: str | None = None) -> dict:
+    """Whether a lineage dataset is already downloaded, for the dialog to
+    decide whether to show a Download button before Score."""
+    from app.queue.lineage_handlers import lineage_present
+
+    odb = odb or assembly_qc_registry.COMPLEASM_SPEC.odb
+    present = lineage_present(settings.lineages_dir, lineage, odb)
+    return {"lineage": lineage, "odb": odb, "present": present}
 
 
 @router.get("/align-envelope")

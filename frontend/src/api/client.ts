@@ -9,6 +9,8 @@ import type {
   AssemblyAccepted,
   BulkResult,
   CompleteAccepted,
+  CompletenessDefaults,
+  CompletenessRequest,
   ContigsPage,
   DataObject,
   DataSources,
@@ -20,6 +22,8 @@ import type {
   Facets,
   JobLog,
   JobSummary,
+  LineageDownloadRequest,
+  LineageStatus,
   MateSuggestion,
   MetadataSchema,
   NcbiResolveResponse,
@@ -626,6 +630,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  completenessDefaults: (objectId: string) =>
+    request<CompletenessDefaults>(`/pipelines/completeness/defaults/${objectId}`),
+
+  launchCompleteness: (body: CompletenessRequest) =>
+    request<JobSummary>("/pipelines/completeness", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  downloadLineage: (body: LineageDownloadRequest) =>
+    request<JobSummary>("/pipelines/completeness/lineage", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  lineageStatus: (lineage: string, odb?: string) =>
+    request<LineageStatus>(
+      `/pipelines/completeness/lineage-status?${new URLSearchParams({
+        lineage,
+        ...(odb ? { odb } : {}),
+      })}`,
+    ),
 
   variantDefaults: (bamId: string) =>
     request<VariantDefaults>(`/pipelines/variants/defaults/${bamId}`),

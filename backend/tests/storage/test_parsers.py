@@ -435,3 +435,116 @@ class TestFastaSequenceLengths:
         p.write_text(">c1\nACGT\n")
         facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
         assert "sequence_lengths_partial" not in facts
+
+
+class TestFastaContiguity:
+    """N50/N90/L50/auN and gap counts -- the numbers QUAST would report,
+    computed here instead since QUAST is not packaged for this image."""
+
+    def test_n50_of_a_simple_set(self, tmp_path):
+        # Lengths 100, 80, 60, 40, 20; total 300, half is 150. Cumulative from
+        # the top: 100, then 180 >= 150 -- so N50 is 80, and it took 2 contigs.
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            ">a\n" + "A" * 100 + "\n"
+            ">b\n" + "A" * 80 + "\n"
+            ">c\n" + "A" * 60 + "\n"
+            ">d\n" + "A" * 40 + "\n"
+            ">e\n" + "A" * 20 + "\n"
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_n50"] == 80
+        assert facts["sequence_l50"] == 2
+
+    def test_n90_needs_more_contigs_than_n50(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            ">a\n" + "A" * 100 + "\n"
+            ">b\n" + "A" * 80 + "\n"
+            ">c\n" + "A" * 60 + "\n"
+            ">d\n" + "A" * 40 + "\n"
+            ">e\n" + "A" * 20 + "\n"
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        # Total 300, 90% is 270. Cumulative: 100, 180, 240, 280 >= 270 -> N90=40.
+        assert facts["sequence_n90"] == 40
+
+    def test_single_contig_is_its_own_n50_and_n90(self, tmp_path):
+        p = tmp_path / "one.fasta"
+        p.write_text(">only\n" + "A" * 500 + "\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_n50"] == 500
+        assert facts["sequence_n90"] == 500
+        assert facts["sequence_l50"] == 1
+
+    def test_auN_of_equal_contigs_equals_their_length(self, tmp_path):
+        # auN degenerates to the contig length when every contig is the same
+        # size: sum(len^2) / total == len^2 * k / (len * k) == len.
+        p = tmp_path / "ref.fasta"
+        p.write_text("".join(f">c{i}\n" + "A" * 50 + "\n" for i in range(4)))
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_auN"] == 50.0
+
+    def test_no_gaps_in_an_ungapped_assembly(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\nACGTACGT\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_gap_count"] == 0
+        assert facts["sequence_gap_bases"] == 0
+
+    def test_gap_runs_are_counted_once_each(self, tmp_path):
+        # One run of 5 Ns and one run of 3 Ns: two gaps, eight gap bases --
+        # not eight gaps, which a per-base count would give.
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\nACGT" + "N" * 5 + "ACGT" + "N" * 3 + "ACGT\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_gap_count"] == 2
+        assert facts["sequence_gap_bases"] == 8
+
+    def test_gap_run_spanning_a_wrapped_line_is_one_gap(self, tmp_path):
+        # The N run crosses the boundary between two 60-char wrapped lines.
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\n" + "A" * 58 + "NN" + "\n" + "NNN" + "A" * 57 + "\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_gap_count"] == 1
+        assert facts["sequence_gap_bases"] == 5
+
+    def test_lowercase_n_counts_as_a_gap(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\nACGT" + "n" * 4 + "ACGT\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_gap_count"] == 1
+        assert facts["sequence_gap_bases"] == 4
+
+    def test_gaps_are_summed_across_records(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(">c1\nAC" + "N" * 2 + "GT\n>c2\nAC" + "N" * 3 + "GT\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_gap_count"] == 2
+        assert facts["sequence_gap_bases"] == 5
+
+    def test_truncated_parse_omits_contiguity_entirely(self, tmp_path, monkeypatch):
+        """A prefix's N50 is not an approximate N50 -- it is the wrong number
+        computed from the wrong population, so the keys must be absent
+        entirely rather than present and flagged partial."""
+        monkeypatch.setattr(parsers, "FASTA_EXACT_LIMIT", 10)
+        p = tmp_path / "ref.fasta"
+        p.write_text(">a\n" + "A" * 100 + "\n>b\n" + "A" * 100 + "\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert facts["sequence_lengths_partial"] is True
+        for key in (
+            "sequence_n50",
+            "sequence_n90",
+            "sequence_l50",
+            "sequence_auN",
+            "sequence_gap_count",
+            "sequence_gap_bases",
+        ):
+            assert key not in facts
+
+    def test_empty_file_has_no_contiguity_facts(self, tmp_path):
+        p = tmp_path / "empty.fasta"
+        p.write_text("")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert "sequence_n50" not in facts
+        assert "sequence_gap_count" not in facts

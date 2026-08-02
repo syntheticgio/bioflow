@@ -1397,6 +1397,40 @@ async def _apply_run_vcf_stats(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
+    """Record compleasm's completeness scores on the assembly it described.
+
+    Read-only like BAM stats and VCF stats: no files to ingest, just facts
+    merged onto the object. Unlike those two, the input can be an uploaded
+    assembly with no `produced_by_job` of its own, which is fine here -- this
+    applier only needs the object to exist, not to have been produced by a
+    prior BioFlow run.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("completeness_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "completeness_applied",
+        object_id=object_id,
+        complete_pct=facts.get("assembly_completeness_complete_pct"),
+        lineage=facts.get("assembly_completeness_lineage"),
+    )
+
+
 def variant_provenance(result: dict) -> dict:
     """The facts a variant calling run stamps onto the VCF it produced.
 
@@ -1729,4 +1763,5 @@ _APPLIERS = {
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
+    "assess_completeness": _apply_assess_completeness,
 }

@@ -45,6 +45,20 @@ describe("groupsFrom", () => {
     expect(groups).toEqual([{ type: "expression", title: "Expression" }]);
   });
 
+  it("orders assembly_qc right after assemble, not with an unrelated type", () => {
+    const groups = groupsFrom([
+      tool("compleasm", ["assembly_qc"]),
+      tool("flye", ["assemble"]),
+      tool("fastp", ["trim", "qc"]),
+    ]);
+    expect(groups.map((g) => g.type)).toEqual([
+      "qc",
+      "trim",
+      "assemble",
+      "assembly_qc",
+    ]);
+  });
+
   it("renders a pipeline type this build has never heard of", () => {
     // The self-healing branch. Without it, a backend that adds a type before
     // the frontend knows about it drops those tools off the page entirely --

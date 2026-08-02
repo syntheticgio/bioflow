@@ -118,6 +118,11 @@ class Settings(BaseSettings):
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
     flye_path: str = "flye"
+    # Assembly completeness. Built from source in the Dockerfile -- neither is
+    # packaged for trixie -- so compleasm resolves miniprot on PATH under this
+    # exact name rather than needing a second setting passed through to it.
+    compleasm_path: str = "compleasm"
+    miniprot_path: str = "miniprot"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"
@@ -244,6 +249,19 @@ class Settings(BaseSettings):
         cost a blob record per run.
         """
         return self.bioinfo_home / "vcf_stats"
+
+    @property
+    def lineages_dir(self) -> Path:
+        """compleasm's `--library_path`: downloaded lineage datasets, shared
+        across every project and every run.
+
+        Reference data, not a per-object artifact -- closer to `ncbi_dir`'s
+        cache than to `objects/`, and for the same underlying reason
+        `download_lineage` is its own job rather than something
+        `assess_completeness` fetches inline: a completeness job must not
+        depend on the network, so what it reads here must already exist.
+        """
+        return self.bioinfo_home / "lineages"
 
     @property
     def meta_dir(self) -> Path:

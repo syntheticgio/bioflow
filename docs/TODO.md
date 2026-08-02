@@ -310,13 +310,26 @@ does not, and a passthrough would be worse than an allowlist. The test to add
 where deriving is wrong is the one `_SIDECAR_ROLES` lacked: every enum member
 is handled, asserted directly.
 
-## Post-assembly QC: designed, not built
+## Post-assembly QC: BUSCO and QUAST — FIXED (as contiguity + compleasm, 2026-08-02)
 
-**Unblocked 2026-08-02**: assembly shipped. Design:
-`docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md`.
+Shipped 2026-08-02, same day as the design
+(`docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md`). Contiguity
+(`sequence_n50`/`n90`/`l50`/`auN`/`sequence_gap_count`/`sequence_gap_bases`) is
+computed in `backend/app/storage/parsers.py::_parse_fasta` -- no tool, no job,
+runs at ingest for every FASTA. Completeness is compleasm, built from source in
+`backend/Dockerfile` (`backend/scripts/install-compleasm.sh`), registered in
+`backend/app/pipelines/assembly_qc_registry.py`, run by the
+`assess_completeness` queue job (`backend/app/queue/assembly_qc_handlers.py`),
+launched through `pipeline_service.launch_completeness`, offered by
+`suggestion_service.build_completeness_card`, and reachable from the UI via a
+"Score completeness" button and `CompletenessDialog.tsx` alongside the
+Actions-tab card. `download_lineage` is its own job
+(`backend/app/queue/lineage_handlers.py`): a completeness run must not depend
+on the network partway through, the same rule Clair3's baked-in models follow.
 
-The design keeps this entry's diagnosis and changes both of its tools. Read the
-original below first -- it is still why this exists -- then the delta.
+The design keeps this entry's original diagnosis and changes both of its
+tools. Read the original below first -- it is still why this exists -- then
+the delta, then what shipped differently from the design.
 
 ### Original entry
 
@@ -414,14 +427,76 @@ contiguity work above.
   member; `PIPELINE_LABEL` is an exhaustive `Record<PipelineType, string>`,
   so the build fails until it is labelled.
 
-### Deferred, with reasons
+### Still open: what this entry does not close
 
-CRAQ, GCI and Merqury all need reads realigned to the assembly, which is the
-**Pilon** entry's blocker rather than this one -- they are not peers of
-completeness and contiguity, and building them means building that first.
-gfastats is superseded by computing contiguity here. Contamination screening is
-a real axis nothing here covers and is a named non-goal: FCS-GX's database is
-~470 GB.
+The heading above is `— FIXED` for contiguity and completeness specifically,
+not for post-assembly QC as a whole -- these are why the entry stays in this
+file rather than moving to `docs/TODO-done.md`.
+
+- **QUAST's reference-based misassembly detection.** Genuinely unreplaced by
+  anything here; deserves its own entry rather than being folded into this
+  one's closure.
+- **CRAQ, GCI and Merqury** all need reads realigned to the assembly, which is
+  the **Pilon** entry's blocker rather than this one -- they are not peers of
+  completeness and contiguity, and building them means building that first.
+- **gfastats** is superseded by computing contiguity here, not built.
+- **Contamination screening** is a real axis nothing here covers and is a
+  named non-goal: FCS-GX's database is ~470 GB.
+
+### What the implementation found that the design did not know yet
+
+All found by actually building and running the thing, not by re-reading the
+design -- each would have shipped a wrong number or a wrong claim silently.
+
+- **A lineage name's `_odb10`/`_odb12` suffix is decorative.** compleasm's own
+  `download_lineage` rewrites it to match whatever `--odb` the command line
+  carries (`"{}_{}".format(lineage.split("_")[0], odb)`), discarding any
+  suffix the caller wrote. Requesting `bacteria_odb10` with the default `--odb
+  odb12` actually downloads and scores `bacteria_odb12` -- verified against a
+  real run. `completeness_runner.CompletenessParams.lineage` is therefore
+  always a bare name (`bacteria`, not `bacteria_odb12`); the `odb` field is
+  the only thing that controls the version.
+- **compleasm's `run` subcommand writes an `I:` (interspaced) line
+  unconditionally**, contradicting what reading the source in isolation
+  suggested. The `analyze` subcommand's copy of the same print block has that
+  line commented out; `run` -- the one this application calls -- does not. A
+  parser written from the commented-out copy would have broken on the first
+  real summary.
+- **`Downloader.__init__` fetches `eukaryota_<odb>` and ~100MB of placement
+  files on every download, regardless of which lineage was requested.**
+  Verified: `compleasm download bacteria --odb odb12` also produced
+  `eukaryota_odb12` and `placement_files/` on disk. One-time cost per
+  `library_path`, not per lineage, but worth knowing before estimating how
+  long a first download takes.
+- **Lineage dataset size varies far more than expected.** `bacteria_odb12` is
+  ~65MB; `saccharomycetaceae_odb12` (family-level, used for yeast) is ~1.1GB
+  including the placement files, and took roughly 20 minutes to download and
+  extract in a moderately loaded container -- not the ~1 minute a small
+  bacterial lineage takes. The download dialog and the job's own lease
+  (`download_lineage`'s `extend_lease(1800)`, 30 minutes) were sized with this
+  in mind; a still-larger vertebrate lineage could plausibly need more.
+- **`PipelineType` needed a real backend-crossing member.** An earlier draft of
+  the design reused `PipelineType.ASSEMBLE` for compleasm, reasoning from a
+  backend-only `grep` that the enum only drives a Software-help-page heading.
+  It also crosses the API: `PipelineToolSelector.tsx` filters the user's tool
+  picker on it, so compleasm would have been offered under "an assembler",
+  beside Flye. Fixed with `PipelineType.ASSEMBLY_QC` before anything shipped.
+- **End-to-end, against the real seeded yeast genome
+  (`GCA_000146045.2_R64_genomic.fna`, organism "Saccharomyces cerevisiae
+  S288C"):** lineage inference correctly produced `saccharomycetaceae`, not
+  the `eukaryota` domain fallback. compleasm reported 99.94% complete
+  (99.91% single-copy, 0.03% duplicated, 0.06% fragmented, 0% missing, 3282
+  markers) -- plausible for a finished reference genome. Contiguity on the
+  same file: N50 924,431 bp across 6 sequences (L50=6, matching its 16
+  nuclear chromosomes plus mitochondrion), zero gaps. Re-enqueuing
+  `ingest_headers` on an object ingested before the contiguity change backfilled
+  `sequence_n50` and friends without disturbing the `assembly_completeness_*`
+  facts a separate job had already written -- confirming the merge-not-replace
+  behavior the design relied on but never ran.
+- Confirmed against the real `protein.faa` and `rna.fna` (transcript role) for
+  the same organism: `build_completeness_card` returns `None` for both, and
+  the genome FASTA gets a real card -- the role-exclusion trap the design
+  worried about inheriting from the align card does not reproduce here.
 
 ## Reference-guided assembly: Pilon, RagTag, iVar
 

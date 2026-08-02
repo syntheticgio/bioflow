@@ -4,6 +4,7 @@ interface Props {
   canCallVariants: boolean;
   canQuantify: boolean;
   canAssemble: boolean;
+  canScoreCompleteness: boolean;
   canDifferentialExpression: boolean;
   canQC: boolean;
   hasQc: boolean;
@@ -15,6 +16,7 @@ interface Props {
    * directly rather than going through the tool selector first. */
   onQuantify: () => void;
   onAssemble: () => void;
+  onScoreCompleteness: () => void;
   onDifferentialExpression: () => void;
   onRunQC: () => void;
   qcPending: boolean;
@@ -40,6 +42,7 @@ export function Computations({
   canCallVariants,
   canQuantify,
   canAssemble,
+  canScoreCompleteness,
   canDifferentialExpression,
   canQC,
   hasQc,
@@ -48,6 +51,7 @@ export function Computations({
   onStart,
   onQuantify,
   onAssemble,
+  onScoreCompleteness,
   onDifferentialExpression,
   onRunQC,
   qcPending,
@@ -115,6 +119,16 @@ export function Computations({
             title="Assemble these long reads into contigs, with no reference"
           >
             Assemble
+          </button>
+        )}
+        {canScoreCompleteness && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onScoreCompleteness}
+            title="Score what fraction of a lineage-specific ortholog set can be found in this assembly"
+          >
+            Score completeness
           </button>
         )}
         {canQuantify && (

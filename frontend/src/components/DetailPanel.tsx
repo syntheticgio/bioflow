@@ -43,6 +43,7 @@ import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
 import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
+import { CompletenessDialog } from "./CompletenessDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
@@ -354,6 +355,7 @@ function ObjectDetail({ id }: { id: string }) {
   // routing it through a selector would mean a screen offering one card.
   const [quantifyOpen, setQuantifyOpen] = useState(false);
   const [assembleOpen, setAssembleOpen] = useState(false);
+  const [completenessOpen, setCompletenessOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
@@ -577,6 +579,17 @@ function ObjectDetail({ id }: { id: string }) {
   // project-scoped dialog rather than a per-file operation in disguise.
   const canDifferentialExpression = obj.role === "counts";
 
+  // FASTA, excluding protein/transcript roles -- not gated on provenance, so
+  // an uploaded assembly is as eligible as one this application produced.
+  // Same rule the card and the launch path both apply server-side; mirrored
+  // here only so the button does not appear where the launch would refuse it
+  // anyway, the same reasoning canAssemble's own comment gives.
+  const canScoreCompleteness =
+    obj.status === "ready" &&
+    obj.format.kind === "fasta" &&
+    obj.role !== "protein" &&
+    obj.role !== "transcript";
+
   return (
     <div className="panel">
       <div className="panel-body detail">
@@ -728,6 +741,8 @@ function ObjectDetail({ id }: { id: string }) {
                   onQuantify={() => setQuantifyOpen(true)}
                   canAssemble={canAssemble}
                   onAssemble={() => setAssembleOpen(true)}
+                  canScoreCompleteness={canScoreCompleteness}
+                  onScoreCompleteness={() => setCompletenessOpen(true)}
                   canDifferentialExpression={canDifferentialExpression}
                   onDifferentialExpression={() => setDeOpen(true)}
                   canQC={canQC}
@@ -805,6 +820,12 @@ function ObjectDetail({ id }: { id: string }) {
       )}
       {assembleOpen && (
         <AssembleDialog object={obj} onClose={() => setAssembleOpen(false)} />
+      )}
+      {completenessOpen && (
+        <CompletenessDialog
+          object={obj}
+          onClose={() => setCompletenessOpen(false)}
+        />
       )}
       {deOpen && (
         <DifferentialExpressionDialog

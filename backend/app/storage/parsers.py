@@ -28,6 +28,11 @@ SAMPLE_BYTES_CAP = 8 * 1024 * 1024
 # assemblies). Store a bounded sample plus the true count.
 MAX_STORED_CONTIGS = 50
 MAX_STORED_SAMPLES = 100
+# A reference genome FASTA is a few GB; counting '>' lines and scanning bases
+# across that is cheap relative to a FASTQ scan, but not free. Cap it. Module
+# level rather than a local so a test can patch it down instead of writing a
+# 256 MB fixture to exercise the truncation path.
+FASTA_EXACT_LIMIT = 256 * 1024 * 1024
 
 
 def _check(cancel: threading.Event | None) -> None:
@@ -419,18 +424,60 @@ def _infer_pair_hint(filename: str, facts: dict) -> None:
             return
 
 
+def _contiguity_stats(lengths: list[int], gap_bases: int, gap_count: int) -> dict:
+    """N50/N90/L50/auN and gap counts, over every record's true length.
+
+    Genuinely absent from anywhere else now that `assembly_runner._n50` is
+    gone: Flye's own table gave an N50 for its own output, and nothing gave
+    one for an uploaded assembly. This is the one contiguity fact set that
+    applies to any FASTA regardless of what produced it.
+
+    Takes the full length list rather than the capped `sequence_lengths`
+    dict, deliberately -- N50 over 50 stored contigs of a 40,000-contig draft
+    is not an approximate N50, it is a different number computed from the
+    wrong population.
+    """
+    if not lengths:
+        return {}
+    ordered = sorted(lengths, reverse=True)
+    total = sum(ordered)
+    facts: dict = {}
+    for label, fraction in (("n50", 0.5), ("n90", 0.9)):
+        threshold = total * fraction
+        running = 0
+        for i, length in enumerate(ordered):
+            running += length
+            if running >= threshold:
+                facts[f"sequence_{label}"] = length
+                if label == "n50":
+                    facts["sequence_l50"] = i + 1
+                break
+    # auN: the area under the Nx curve, treating each base as weighted by the
+    # length of the contig it sits in. Unlike N50 it does not jump
+    # discontinuously when one contig crosses the halfway point, which is why
+    # two assemblies can share an N50 and still differ here.
+    facts["sequence_auN"] = round(sum(length * length for length in ordered) / total, 1)
+    facts["sequence_gap_count"] = gap_count
+    facts["sequence_gap_bases"] = gap_bases
+    return facts
+
+
 def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
     """Count sequences exactly for small files, estimate for large ones."""
     facts: dict = {}
     file_size = path.stat().st_size
-    # A reference genome FASTA is a few GB; counting '>' lines across that is
-    # cheap relative to a FASTQ scan, but not free. Cap it.
-    exact_limit = 256 * 1024 * 1024
 
     names: list[str] = []
     lengths: dict[str, int] = {}
+    # Every record's length, uncapped -- unlike `lengths` above, which is
+    # bounded to MAX_STORED_CONTIGS for the fact document. N50 needs the true
+    # population; a fragmented draft is a few hundred thousand ints, which is
+    # bounded and cheap for the duration of one parse.
+    all_lengths: list[int] = []
     count = 0
     total_bases = 0
+    total_gap_bases = 0
+    total_gap_count = 0
     read_bytes = 0
     truncated = False
 
@@ -439,6 +486,7 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
     # never reported at a truncated length.
     current_name: str | None = None
     current_len = 0
+    in_gap = False
     longest: tuple[str, int] | None = None
     shortest: tuple[str, int] | None = None
 
@@ -448,6 +496,7 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
             return
         if len(lengths) < MAX_STORED_CONTIGS:
             lengths[current_name] = current_len
+        all_lengths.append(current_len)
         # Extremes track every record, not just the stored window: capping them
         # would report the wrong longest contig for most real assemblies.
         if longest is None or current_len > longest[1]:
@@ -466,13 +515,27 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
                     names.append(name)
                 current_name = name
                 current_len = 0
+                in_gap = False
             else:
-                n = len(line.rstrip("\n"))
+                seq = line.rstrip("\n")
+                n = len(seq)
                 total_bases += n
                 current_len += n
+                # N/n runs are gaps -- scaffolded contigs use them to mark
+                # unresolved joins. Counted per-run, not per-base, so a
+                # 10,000-N spacer is one gap and not ten thousand. A run can
+                # span a line boundary, which is why this is a running
+                # per-record flag rather than reset each line.
+                for base in seq:
+                    is_n = base == "N" or base == "n"
+                    if is_n:
+                        total_gap_bases += 1
+                        if not in_gap:
+                            total_gap_count += 1
+                    in_gap = is_n
             if count % 500 == 0:
                 _check(cancel)
-            if compression is Compression.NONE and read_bytes > exact_limit:
+            if compression is Compression.NONE and read_bytes > FASTA_EXACT_LIMIT:
                 truncated = True
                 break
 
@@ -487,6 +550,12 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
         facts["sequence_count"] = count
         facts["sequence_count_exact"] = True
         facts["total_bases"] = total_bases
+        # Contiguity is never extrapolated, for the same reason the extremes
+        # below never are: there is no sound way to guess an N50 from a byte
+        # ratio, and a flagged-partial contiguity fact is still the wrong
+        # number computed from the wrong population, not an estimate of the
+        # right one.
+        facts.update(_contiguity_stats(all_lengths, total_gap_bases, total_gap_count))
 
     if names:
         facts["sequence_names"] = names
