@@ -247,6 +247,13 @@ right after:
   sentence in the entry.
 - **Record measurements if the entry claimed a number.** "6-15s" becoming
   "0.025s" is what makes the fix checkable later.
+- **Move the whole entry to `docs/TODO-done.md`.** `docs/TODO.md` holds only
+  open entries; a closed one moves there in full (heading, note, and original
+  body intact) rather than staying in place, so the active backlog doesn't
+  grow to carry every finished entry's context on every read. An entry that
+  is only partially resolved (one aligner shipped, a sibling didn't; the core
+  fix landed but a named follow-up didn't) stays in `docs/TODO.md` -- moving
+  it would bury the still-open part.
 
 Delete an entry outright only when it was wrong to begin with -- not merely
 done. A `— FIXED` entry is a record; a deleted one is a question someone will
