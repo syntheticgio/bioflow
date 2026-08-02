@@ -3564,7 +3564,10 @@ table.software-matrix thead th.software-matrix-corner {
   overflow-x: auto;
 }
 
-.workflow-diagrams-frame svg {
+/* Scoped to > div, not a bare descendant selector, so it sizes only the
+   diagram itself and doesn't also stretch the download buttons' icon svgs
+   sharing this frame. */
+.workflow-diagrams-frame > div > svg {
   display: block;
   width: 100%;
   height: auto;
