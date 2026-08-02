@@ -2599,7 +2599,9 @@ async def infer_genome_size(obj: DataObject) -> tuple[int | None, str | None]:
     organism = (obj.metadata or {}).get("organism")
     if not organism or not str(organism).strip():
         return None, None
-    target = str(organism).strip().lower()
+    target = _organism_key(organism)
+    if not target:
+        return None, None
 
     candidates = await object_service.list_objects(
         obj.project_id, owner=obj.owner, limit=500, status=ObjectStatus.READY
@@ -2610,19 +2612,57 @@ async def infer_genome_size(obj: DataObject) -> tuple[int | None, str | None]:
         if candidate.role is not ObjectRole.REFERENCE:
             continue
         candidate_organism = (candidate.metadata or {}).get("organism")
-        if not candidate_organism:
+        if not candidate_organism or _organism_key(candidate_organism) != target:
             continue
-        if str(candidate_organism).strip().lower() != target:
-            continue
+
         facts = candidate.facts or {}
-        # `ncbi_total_length` is NCBI's figure for a downloaded assembly;
-        # `total_bases` is what _parse_fasta counted. Prefer NCBI's: it
-        # describes the whole assembly, while total_bases is absent entirely
-        # for a FASTA above the parser's 256MB exact-count limit.
-        size = facts.get("ncbi_total_length") or facts.get("total_bases")
+        # Only NCBI's assembly-level figure, never the file's own base count.
+        #
+        # Found against the real library: a project holds `protein.faa` and
+        # `cds_from_genomic.fna` roled `reference`. The component table gets
+        # this right today (protein -> PROTEIN, cds -> TRANSCRIPT), so those
+        # rows are legacy data from before that fix -- but they exist, and a
+        # role check alone therefore does not keep them out. Their
+        # `total_bases` is the protein or CDS length: 2.9 Mb against a 12.1 Mb
+        # yeast genome, which would silently under-estimate the memory a real
+        # assembly needs.
+        #
+        # `ncbi_total_length` is safe from any of them, because it describes
+        # the *assembly* rather than the file, and every component of one
+        # download carries the same value. Dropping the `total_bases` fallback
+        # costs inference on a hand-uploaded genome with no NCBI metadata,
+        # which is the right trade: no estimate is a stated non-opinion, and a
+        # wrong one is a number the user would reasonably act on.
+        size = facts.get("ncbi_total_length")
         if size:
-            return int(size), candidate.name
+            # Name the assembly, not the file. The number describes the
+            # assembly and every component of a download carries it, so
+            # whichever component happens to sort first would otherwise get
+            # the credit -- against the real library that is
+            # `cds_from_genomic.fna`, and "genome size inferred from
+            # cds_from_genomic.fna" invites exactly the doubt the label exists
+            # to remove.
+            assembly = facts.get("ncbi_assembly_name")
+            accession = facts.get("ncbi_assembly_accession")
+            if assembly and accession:
+                return int(size), f"{assembly} ({accession})"
+            return int(size), assembly or accession or candidate.name
     return None, None
+
+
+def _organism_key(name) -> str:
+    """Genus and species, for comparing two organism strings.
+
+    Strain suffixes are why this exists rather than an equality check: SRA
+    labels a run `Saccharomyces cerevisiae` while the assembly it came from is
+    `Saccharomyces cerevisiae S288C`, and an exact match rejects the one
+    reference in the project that could answer. Genome size does not vary
+    meaningfully between strains of a species, so the first two words are the
+    right granularity -- and stopping there also avoids matching two different
+    species that share a genus, whose genomes can differ severalfold.
+    """
+    parts = str(name).strip().lower().split()
+    return " ".join(parts[:2]) if len(parts) >= 2 else ""
 
 
 async def default_assembly_params(obj: DataObject) -> dict:
