@@ -266,6 +266,16 @@ async def get_qc_report(
       facts rather than from this page.
     - The frontend opens it in a new tab rather than an inline iframe, so the
       report never shares a document with the application.
+
+    NanoPlot is the deliberate exception to the "no scripting" rule above.
+    Its report has no static-image fallback at all -- every plot is a Plotly
+    figure rendered by a `<script src="https://cdn.plot.ly/...">` -- so under
+    the FastQC/fastp policy it does not degrade to a blank chart the way
+    fastp's does, it renders as a near-empty page. `sandbox` disables
+    scripting outright regardless of `script-src`, so there is no way to
+    allow just the CDN script while keeping `sandbox`; NanoPlot reports drop
+    `sandbox` and add that one script source instead, same content-derived
+    XSS exposure fastp already accepts, just without the erasure.
     """
     # Rejected outright rather than resolved away. The ASGI layer collapses
     # `..` before routing, so a path that reaches here still containing one is
@@ -290,16 +300,27 @@ async def get_qc_report(
     if not target.is_relative_to(root) or not target.is_file():
         raise NotFoundError(f"No such QC report: {report_path}")
 
+    if parts[0] == "nanoplot":
+        # No `sandbox` here -- see the docstring above. The report itself
+        # pins the CDN script with a Subresource Integrity hash and
+        # `crossorigin="anonymous"`, so an attacker who compromises the CDN
+        # response but not the hash still can't execute; we don't duplicate
+        # that hash here because CSP has no equivalent of "require SRI",
+        # only "allow this origin".
+        csp = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; script-src https://cdn.plot.ly"
+    else:
+        csp = (
+            "sandbox; default-src 'none'; "
+            # FastQC's plots are inlined images and its layout is inline
+            # CSS, so the report is blank without these two. Neither can
+            # execute, which is what the sandbox is there to prevent.
+            "img-src 'self' data:; style-src 'unsafe-inline'"
+        )
+
     return FileResponse(
         target,
         headers={
-            "Content-Security-Policy": (
-                "sandbox; default-src 'none'; "
-                # FastQC's plots are inlined images and its layout is inline
-                # CSS, so the report is blank without these two. Neither can
-                # execute, which is what the sandbox is there to prevent.
-                "img-src 'self' data:; style-src 'unsafe-inline'"
-            ),
+            "Content-Security-Policy": csp,
             "X-Content-Type-Options": "nosniff",
         },
     )

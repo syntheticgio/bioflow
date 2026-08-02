@@ -44,6 +44,10 @@ def client(tmp_path, monkeypatch):
     (reports / OBJECT_ID / "fastqc").mkdir(parents=True)
     (reports / OBJECT_ID / "fastp.html").write_text("<html>fastp</html>")
     (reports / OBJECT_ID / "fastqc" / "reads_fastqc.html").write_text("<html>fastqc</html>")
+    (reports / OBJECT_ID / "nanoplot").mkdir(parents=True)
+    (reports / OBJECT_ID / "nanoplot" / "NanoPlot-report.html").write_text(
+        "<html>nanoplot</html>"
+    )
     (reports / OTHER_ID).mkdir(parents=True)
     (reports / OTHER_ID / "fastp.html").write_text("<html>someone else</html>")
 
@@ -107,6 +111,37 @@ class TestUntrustedContent:
 
     def test_content_type_is_not_sniffed(self, client):
         assert get(client, "fastp.html").headers["x-content-type-options"] == "nosniff"
+
+
+class TestNanoplotReport:
+    """NanoPlot's report has no static-image fallback: every plot is Plotly,
+    loaded from a CDN script. It cannot render under `sandbox`, which disables
+    scripting outright, so this report type gets its own, narrower policy."""
+
+    def test_serves_without_being_sandboxed(self, client):
+        r = get(client, "nanoplot/NanoPlot-report.html")
+        assert r.status_code == 200
+        assert "nanoplot" in r.text
+        assert "sandbox" not in r.headers["content-security-policy"]
+
+    def test_allows_the_plotly_cdn_script_only(self, client):
+        csp = get(client, "nanoplot/NanoPlot-report.html").headers[
+            "content-security-policy"
+        ]
+        assert "script-src https://cdn.plot.ly" in csp
+
+    def test_still_cannot_fetch_anything_else(self, client):
+        csp = get(client, "nanoplot/NanoPlot-report.html").headers[
+            "content-security-policy"
+        ]
+        assert "default-src 'none'" in csp
+
+    def test_other_reports_are_unaffected(self, client):
+        """The relaxed policy is keyed off the `nanoplot/` path segment, not a
+        global change -- FastQC/fastp keep the sandboxed policy."""
+        csp = get(client, "fastp.html").headers["content-security-policy"]
+        assert "sandbox" in csp
+        assert "script-src" not in csp
 
 
 class TestPathTraversal:
