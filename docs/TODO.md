@@ -1171,6 +1171,14 @@ contiguity work above.
 - **`assembly_runner.py` has no tests at all**, despite the assembly design's
   testing section listing them. `grep` for `parse_assembly_info` across
   `backend/tests/` returns nothing. The contiguity work edits that file.
+- **`PipelineType` is not backend-only, whatever `grep` says.** Every hit in
+  `backend/app/` is in `tools.py`, which reads as "a heading on the Software
+  help page". But the value crosses the API and `PipelineToolSelector.tsx`
+  filters the user's tool picker on it, so declaring a QC tool as `ASSEMBLE`
+  would offer it as something to assemble *with*. An earlier draft of the
+  design got this wrong on exactly that grep. The fix is a new `ASSEMBLY_QC`
+  member; `PIPELINE_LABEL` is an exhaustive `Record<PipelineType, string>`,
+  so the build fails until it is labelled.
 
 ### Deferred, with reasons
 

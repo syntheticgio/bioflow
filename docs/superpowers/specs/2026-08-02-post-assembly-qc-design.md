@@ -350,15 +350,33 @@ assembly is wasteful rather than wrong.
   source
 - `frontend/src/components/FactsTable.tsx` -- labels for the new keys
 - `frontend/src/components/AssemblyFacts.tsx` -- completeness display
+- `frontend/src/api/types.ts`,
+  `frontend/src/components/PipelineToolSelector.tsx`,
+  `frontend/src/components/HelpSoftware.tsx` (+ its test) -- the new
+  `PipelineType` member and its label
 - new dialog component for lineage selection
 
-`PipelineType` gets **no new member.** compleasm is declared
-`pipelines=(PipelineType.ASSEMBLE,)`. The enum is used in exactly one file --
-`tools.py` -- and drives nothing but the grouping on the Software help page,
-where `HelpSoftware.tsx` carries a hand-ordered list of the types and a test
-over it. "Assemble" holding both the assembler and the tools that judge its
-output is honest for a reference listing. Split out an `ASSEMBLY_QC` group when
-it would have a third member; adding it for one tool buys a heading.
+`PipelineType` gets a new member, `ASSEMBLY_QC`, and compleasm is declared
+`pipelines=(PipelineType.ASSEMBLY_QC,)`.
+
+This reverses what an earlier draft of this document said, and the reason it
+was wrong is worth more than the conclusion. `grep` for `PipelineType.` across
+`backend/app/` returns hits in exactly one file, `tools.py`, which reads as
+"this is a display grouping on the Software help page and nothing more". It is
+not: the value is serialized to the frontend, and `PipelineToolSelector.tsx`
+filters on it -- `tools.filter((t) => t.pipelines.includes(pipeline))` -- to
+build the picker a user actually chooses a tool from. A backend-only grep
+cannot see that, because the consumer is across the API boundary. Declaring
+compleasm as `ASSEMBLE` would have listed it in the picker headed "an
+assembler", beside Flye, as something to assemble *with*.
+
+The cost of the new member is small and self-announcing.
+`PipelineToolSelector`'s `PIPELINE_LABEL` is a `Record<PipelineType, string>`
+and is deliberately exhaustive -- its own comment says "the compile error is
+the feature", and records that it is what caught `expression` reaching the
+backend without reaching the frontend at all. So adding the member fails the
+build until a label exists. `HelpSoftware.tsx` carries a hand-ordered list of
+the types and a test over it, which needs the same one-line addition.
 
 ## Testing
 
