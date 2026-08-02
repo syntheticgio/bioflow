@@ -158,6 +158,80 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## QC report directories can vanish from disk while the object's facts still point at them
+
+Raised: 2026-08-02, found while investigating a user report of a 404 on the
+FastQC report link for a completed, successful QC job.
+
+`ERR17609896_1.fastq` and `ERR17609896_2.fastq` (both short-read Illumina,
+project `6a6e1120a384162f7205eb87`) had `qc_fastqc_report` /
+`qc_fastp_report` facts pointing at `fastqc/ERR17609896_1_fastqc.html` and
+`fastp.html` respectively -- correctly formatted, no double-`object_id`
+prefix, written by a `run_qc` job that Mongo shows as `succeeded` on
+2026-08-01. But `/data/qc_reports/<object_id>/` did not exist on disk at all
+for either object: not empty, not partially populated, just gone. Clicking
+either report link 404'd with `"No such QC report: fastqc/..."` even though
+the Quality tab showed a full 5/5 grade and 14 populated facts -- the facts
+that don't depend on the report file (grade, Q20/Q30, GC, duplication) were
+fine; only the two facts that point at now-missing files were stale.
+
+**What this is not:** the double-object_id-prefix bug fixed in `ccd0d74`
+(2026-07-28) -- that bug stored the path wrong from the start, and this job
+ran 2026-08-01, after the fix, with a correctly-formatted path. Re-running QC
+regenerated working reports immediately (`ERR17609896_1_fastqc.html`, 606KB,
+verified served at 200), which is itself evidence the write path is fine and
+something removed the output *after* a successful write.
+
+**What was ruled out, and why it isn't a clean explanation:**
+
+- `reap_report_dirs` (`backend/app/queue/handlers.py:700`) only deletes a
+  report directory when the parent object is **absent from Mongo** (an
+  `await DataObject.get(object_id) is None` check) *and* the directory's own
+  mtime is older than `max_age_hours` (default 1h, runs hourly). Both
+  `ERR17609896_1.fastq` and `_2.fastq` were confirmed present in Mongo with a
+  direct query -- `db.objects.find_one` returned the full document, name and
+  facts intact -- so this reaper's own guard should have skipped them.
+- `object_service.remove_report_dirs` is the only other caller, invoked
+  synchronously from `delete_object`. Neither object was deleted -- they were
+  visible and functioning in the UI throughout.
+
+Neither of the two known code paths that remove `qc_reports_dir` entries
+matches what happened, going by the state visible after the fact. That
+"going by" is the actual gap: worker logs only retain a short window, and by
+the time this was investigated (a day-plus after the QC job ran) there was
+nothing left to confirm which code path actually ran, or whether a third,
+unknown path exists. The forensic trail was already gone.
+
+**Why this is worth fixing rather than re-running QC and moving on:** this
+already happened at least twice silently (both mates of one pair), the user
+only noticed because they went looking for a specific report, and the same
+class of bug could be quietly affecting `bam_stats_dir` / `vcf_stats_dir`
+entries too (`reap_report_dirs` sweeps all three roots with the same logic).
+Without a log trail, every future occurrence is another dead end and another
+"just re-run it" -- which fixes the symptom but never explains whether the
+reaper's guard has a hole, whether `delete_object` is cascading somewhere
+unexpected, or whether it's something outside these two paths entirely (e.g.
+`ops/worktree-up.sh --down` or manual disk cleanup pointed at the wrong
+target, though neither is likely in a single-user local deployment).
+
+**What would help next time:** log a line whenever `reap_report_dirs` or
+`remove_report_dirs` actually removes a directory -- object_id, path, and
+which caller triggered it -- with enough retention (or a durable sink, not
+just container stdout that rotates) to survive at least a few days. Today
+`reap_report_dirs` only logs when `removed` is nonzero in aggregate
+(`handlers.py` around line 755, `report_dirs_reaped`), with no per-object_id
+detail and no record of *which* condition (Mongo-absent vs. mtime) fired.
+Also worth checking whether the mtime-based cutoff in `reap_report_dirs` is
+looking at the right timestamp -- FastQC/fastp write directly into
+`report_dir` (`pipeline_handlers.py:422-423`, `:501`, `:662`), so the
+directory's own mtime should track the last file written into it, but this
+was not verified against a real repro since the original directories were
+already gone by the time this was investigated.
+
+Touches: `backend/app/queue/handlers.py` (`reap_report_dirs`),
+`backend/app/services/object_service.py` (`remove_report_dirs`,
+`delete_object`).
+
 ## Aligners: STAR and DRAGMAP — STAR FIXED, DRAGMAP still open
 
 STAR shipped 2026-08-01 (`Merge STAR aligner support with directory-shaped
