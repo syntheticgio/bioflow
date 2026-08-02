@@ -13,9 +13,8 @@ import { RunLedger } from "./activity/RunLedger";
 const RUNNING = new Set(["running"]);
 const WAITING = new Set(["pending", "queued", "delayed"]);
 
-/** How many finished runs the ledger column carries. Five is what fits beside
- *  the lead story before the page starts scrolling on a normal window. */
-const LEDGER_LIMIT = 5;
+/** How many finished runs the ledger column carries. */
+const LEDGER_LIMIT = 10;
 
 /**
  * Everything the system is doing, and why it is not doing the rest.
