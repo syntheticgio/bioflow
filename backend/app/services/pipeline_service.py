@@ -41,10 +41,12 @@ from app.pipelines import (
     assembler_registry,
     assembly_params as assembly_params_module,
     assemblers,
+    assembly_qc_registry,
     counts_runner,
     cutadapt_runner,
     de_runner,
     fastp_runner,
+    lineage_inference,
     pairing,
     resource_estimator,
     tools,
@@ -2833,5 +2835,163 @@ async def launch_assembly(
         mode=getattr(parsed, "mode", None),
         genome_size=parsed.genome_size,
         estimate_mb=estimate,
+    )
+    return job
+
+
+# FASTA only, and not just any FASTA: `protein.faa` and
+# `cds_from_genomic.fna` are FormatKind.FASTA too, and would pass a "does
+# this look like a genome" sniff test. Excluded by role rather than
+# name -- CLAUDE.md records this exact trap already costing the align card a
+# green suite that shipped wrong.
+COMPLETENESS_EXCLUDED_ROLES = {ObjectRole.PROTEIN, ObjectRole.TRANSCRIPT}
+
+
+def _check_completeness_callable(obj: DataObject) -> None:
+    """Whether this object is an assembly-shaped FASTA compleasm can score.
+
+    Deliberately not gated on provenance: an uploaded assembly is as
+    eligible as one this application produced. `role` is what excludes a
+    protein or transcript FASTA, not `produced_by_job`.
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready for completeness scoring "
+            f"(status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind is not FormatKind.FASTA:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not a FASTA assembly",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+    if obj.role in COMPLETENESS_EXCLUDED_ROLES:
+        raise ValidationError(
+            f"{obj.name!r} is a {obj.role.value} FASTA, not a genome assembly",
+            details={"object_id": str(obj.id), "role": obj.role.value},
+        )
+
+
+async def launch_lineage_download(
+    *, lineage: str, odb: str | None = None, owner: str
+) -> Job:
+    """Queue fetching one compleasm lineage dataset.
+
+    A dependency of `launch_completeness`, not something it fetches inline --
+    a completeness job must not depend on the network partway through. Called
+    directly by the same name whether the caller is the completeness launch
+    path (chaining automatically) or a user picking a lineage explicitly in
+    the dialog.
+    """
+    from app.queue import queue
+
+    tools.require(tools.compleasm())
+
+    odb = odb or assembly_qc_registry.COMPLEASM_SPEC.odb
+
+    return await queue.enqueue(
+        "download_lineage",
+        owner=owner,
+        payload={"lineage": lineage, "odb": odb},
+        job_class=JobClass.USER_INTERACTIVE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=3,
+        # One download per lineage+odb pair at a time, project-agnostic:
+        # the dataset is shared across every project, so two projects
+        # requesting the same lineage should collapse into the same job
+        # rather than downloading it twice concurrently.
+        dedup_key=f"download_lineage:{lineage}:{odb}",
+    )
+
+
+async def launch_completeness(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    lineage: str | None = None,
+    odb: str | None = None,
+) -> Job:
+    """Queue compleasm against one assembly.
+
+    `lineage=None` infers from the object's `organism` metadata via
+    `lineage_inference.infer_lineage`; a caller-supplied lineage (the
+    dialog's override, once the user has changed it) always wins. Neither
+    path guesses when there is truly nothing to go on -- an uploaded
+    assembly with no organism metadata is a normal case, and the honest
+    response is to ask the user to pick a lineage, not to score against a
+    guessed domain.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    tool = tools.require(tools.compleasm())
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    _check_completeness_callable(obj)
+
+    odb = odb or assembly_qc_registry.COMPLEASM_SPEC.odb
+
+    if lineage is None:
+        organism = obj.metadata.get("organism") if obj.metadata else None
+        lineage = lineage_inference.infer_lineage(organism)
+        if lineage is None:
+            raise ValidationError(
+                f"{obj.name!r} has no organism metadata to infer a lineage "
+                "from. Choose one to score completeness against.",
+                details={"object_id": str(obj.id)},
+            )
+
+    from app.queue.lineage_handlers import lineage_present
+
+    if not lineage_present(settings.lineages_dir, lineage, odb):
+        raise ValidationError(
+            f"The {lineage}_{odb} lineage dataset is not downloaded yet. "
+            "Download it first, then score completeness.",
+            details={"lineage": lineage, "odb": odb},
+        )
+
+    digest, path = await _resolve_readable(obj)
+    if not digest and not path:
+        raise ValidationError(
+            f"{obj.name!r} has no stored content yet (status={obj.status.value})",
+            details={"object_id": str(obj.id)},
+        )
+
+    payload: dict = {
+        "object_id": str(obj.id),
+        "assembly_name": obj.name,
+        "lineage": lineage,
+        "odb": odb,
+    }
+    if digest:
+        payload["assembly_sha256"] = digest
+    if path:
+        payload["assembly_path"] = path
+
+    job = await queue.enqueue(
+        "assess_completeness",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=8, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"assess_completeness:{obj.id}:{lineage}:{odb}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Completeness scoring is already queued or running for this "
+            "assembly and lineage",
+            details={"object_id": str(obj.id), "lineage": lineage},
+        )
+
+    log.info(
+        "completeness_launched",
+        job_id=str(job.id),
+        object_id=str(obj.id),
+        lineage=lineage,
+        odb=odb,
+        tool_version=tool.version,
     )
     return job
