@@ -25,7 +25,7 @@ against the full app. What this file buys is that the fast filesystem tests
 keep testing what they were written to test.
 """
 
-from app.api.deps import get_current_owner
+from app.api.deps import get_current_owner, get_current_owner_linkable
 from app.errors import NotFoundError
 
 # The owner every stubbed lookup here answers to. Its value is arbitrary and
@@ -34,8 +34,13 @@ TEST_OWNER = "test-owner"
 
 
 def override_owner(app, owner: str = TEST_OWNER) -> None:
-    """Make `OwnerDep` resolve without a profiles collection to read."""
+    """Make `OwnerDep` and `LinkableOwnerDep` resolve without a profiles
+    collection to read. Both are overridden together: a route can be moved
+    between the two -- as several were, to accept `?profile=` for a plain
+    link -- without a fixture silently going back to hitting a real database
+    lookup for the one it forgot."""
     app.dependency_overrides[get_current_owner] = lambda: owner
+    app.dependency_overrides[get_current_owner_linkable] = lambda: owner
 
 
 def stub_get_object(monkeypatch, module, *, known: set[str], value=None):
