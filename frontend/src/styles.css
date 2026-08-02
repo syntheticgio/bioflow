@@ -3385,3 +3385,125 @@ table.software-matrix thead th.software-matrix-corner {
   font-weight: 400;
   color: var(--text-faint);
 }
+
+/* --- Workflow Diagrams help page --- */
+
+/* Wider than .help-page's 760px measure for the same reason as the Software
+   page: the content isn't prose, it's five wide SVG diagrams (viewBox up to
+   1760px) that would be squeezed into an unreadable strip at a prose measure. */
+.workflow-diagrams-page {
+  max-width: 1820px;
+}
+
+.workflow-diagrams-contract {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 0 0 32px;
+  max-width: 1100px;
+}
+
+.workflow-diagrams-contract h2 {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+
+.workflow-diagrams-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.workflow-diagrams-keys i {
+  display: inline-block;
+  width: 22px;
+  height: 13px;
+  border-radius: 3.5px;
+  border: 2px solid;
+  vertical-align: -2px;
+  margin-right: 7px;
+}
+
+.workflow-diagrams-keys .wfd-k1 { border-color: #3987e5; background: #152232; }
+.workflow-diagrams-keys .wfd-k2 { border-color: #d95926; background: #2b1d16; }
+.workflow-diagrams-keys .wfd-k3 { border-color: #199e70; background: #122622; }
+.workflow-diagrams-keys .wfd-k4 { border-color: #9c968b; background: #26251f; }
+.workflow-diagrams-keys .wfd-k5 { border-color: #9c968b; background: #26251f; border-style: dashed; }
+.workflow-diagrams-keys .wfd-k6 { border-color: #e66767; background: #2c1c1b; border-radius: 6.5px; }
+
+@media (prefers-color-scheme: light) {
+  .workflow-diagrams-keys .wfd-k1 { border-color: #2a78d6; background: #e8f1fc; }
+  .workflow-diagrams-keys .wfd-k2 { border-color: #eb6834; background: #fdeee7; }
+  .workflow-diagrams-keys .wfd-k3 { border-color: #1baf7a; background: #e4f6ef; }
+  .workflow-diagrams-keys .wfd-k4 { border-color: #6b6862; background: #f0efec; }
+  .workflow-diagrams-keys .wfd-k5 { border-color: #6b6862; background: #f0efec; border-style: dashed; }
+  .workflow-diagrams-keys .wfd-k6 { border-color: #e34948; background: #fceceb; }
+}
+
+.workflow-diagrams-contract-note {
+  margin: 14px 0 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.workflow-diagrams-figure {
+  margin: 0 0 48px;
+  scroll-margin-top: 20px;
+}
+
+.workflow-diagrams-figure figcaption {
+  margin: 0 0 12px;
+}
+
+.workflow-diagrams-figure-n {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.workflow-diagrams-figure h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 2px 0 2px;
+  color: var(--text);
+}
+
+.workflow-diagrams-figure-sub {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin: 0 0 6px;
+}
+
+.workflow-diagrams-figure figcaption > p:not(.workflow-diagrams-figure-sub) {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  max-width: 100ch;
+}
+
+/* The diagrams carry their own light/dark palette internally (keyed off
+   prefers-color-scheme within the SVG's own <style>), independent of
+   BioFlow's theme variables -- this frame is just a neutral mat around them. */
+.workflow-diagrams-frame {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  overflow-x: auto;
+}
+
+.workflow-diagrams-frame svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 1100px;
+}
