@@ -65,72 +65,92 @@ const DIAGRAMS: {
 export function HelpWorkflowDiagrams() {
   return (
     <div className="help-page workflow-diagrams-page">
-      <h1>Workflow Diagrams</h1>
-      <p className="help-intro">
-        Five views of the same genome assembly and downstream-analysis
-        project, drawn to show what actually runs at the same time and what
-        is secretly waiting on what. From{" "}
-        <em>
-          Beyond the Pipeline &mdash; A Verified Field Guide to Downstream
-          Genomic Analysis, 2nd Edition
-        </em>
-        .
-      </p>
+      <div className="workflow-diagrams-layout">
+        {/* Sticky, not fixed: the five diagrams run long enough that a
+            reader who scrolled past #1 needs a way back that doesn't require
+            scrolling all the way up, mirroring the source document's own
+            side nav. */}
+        <nav className="workflow-diagrams-nav" aria-label="Diagrams">
+          <div className="workflow-diagrams-nav-label">Diagrams</div>
+          {DIAGRAMS.map((d) => (
+            <a key={d.id} href={`#${d.id}`}>
+              <b>
+                {d.n.replace("Diagram ", "")} &middot; {d.title}
+              </b>
+              <span>{d.sub}</span>
+            </a>
+          ))}
+        </nav>
 
-      <div className="workflow-diagrams-contract">
-        <h2>Encoding contract &mdash; identical in all five diagrams</h2>
-        <div className="workflow-diagrams-keys">
-          <span>
-            <i className="wfd-k1" />
-            long-read DNA lineage
-          </span>
-          <span>
-            <i className="wfd-k2" />
-            Hi-C / proximity lineage
-          </span>
-          <span>
-            <i className="wfd-k3" />
-            RNA lineage
-          </span>
-          <span>
-            <i className="wfd-k4" />
-            derived / method step
-          </span>
-          <span>
-            <i className="wfd-k5" />
-            free byproduct of data already collected
-          </span>
-          <span>
-            <i className="wfd-k6" />
-            gate, blocker or failure edge
-          </span>
+        <div className="workflow-diagrams-content">
+          <h1>Workflow Diagrams</h1>
+          <p className="help-intro">
+            Five views of the same genome assembly and downstream-analysis
+            project, drawn to show what actually runs at the same time and
+            what is secretly waiting on what. From{" "}
+            <em>
+              Beyond the Pipeline &mdash; A Verified Field Guide to
+              Downstream Genomic Analysis, 2nd Edition
+            </em>
+            .
+          </p>
+
+          <div className="workflow-diagrams-contract">
+            <h2>Encoding contract &mdash; identical in all five diagrams</h2>
+            <div className="workflow-diagrams-keys">
+              <span>
+                <i className="wfd-k1" />
+                long-read DNA lineage
+              </span>
+              <span>
+                <i className="wfd-k2" />
+                Hi-C / proximity lineage
+              </span>
+              <span>
+                <i className="wfd-k3" />
+                RNA lineage
+              </span>
+              <span>
+                <i className="wfd-k4" />
+                derived / method step
+              </span>
+              <span>
+                <i className="wfd-k5" />
+                free byproduct of data already collected
+              </span>
+              <span>
+                <i className="wfd-k6" />
+                gate, blocker or failure edge
+              </span>
+            </div>
+            <p className="workflow-diagrams-contract-note">
+              Hue always means <em>source data type</em>, never rank or
+              importance. Every node is directly labelled, so identity is
+              never carried by colour alone. The three track hues were
+              validated for colour-vision deficiency across all pairs in both
+              light and dark mode; anything past three categories is encoded
+              by dash pattern and position instead of a fourth hue.
+            </p>
+          </div>
+
+          {DIAGRAMS.map((d) => (
+            <figure key={d.id} id={d.id} className="workflow-diagrams-figure">
+              <figcaption>
+                <div className="workflow-diagrams-figure-n">{d.n}</div>
+                <h3>{d.title}</h3>
+                <p className="workflow-diagrams-figure-sub">{d.sub}</p>
+                <p>{d.desc}</p>
+              </figcaption>
+              <div
+                className="workflow-diagrams-frame"
+                // eslint-disable-next-line react/no-danger -- static, locally
+                // authored SVG shipped alongside this component; no user input.
+                dangerouslySetInnerHTML={{ __html: d.svg }}
+              />
+            </figure>
+          ))}
         </div>
-        <p className="workflow-diagrams-contract-note">
-          Hue always means <em>source data type</em>, never rank or
-          importance. Every node is directly labelled, so identity is never
-          carried by colour alone. The three track hues were validated for
-          colour-vision deficiency across all pairs in both light and dark
-          mode; anything past three categories is encoded by dash pattern and
-          position instead of a fourth hue.
-        </p>
       </div>
-
-      {DIAGRAMS.map((d) => (
-        <figure key={d.id} id={d.id} className="workflow-diagrams-figure">
-          <figcaption>
-            <div className="workflow-diagrams-figure-n">{d.n}</div>
-            <h3>{d.title}</h3>
-            <p className="workflow-diagrams-figure-sub">{d.sub}</p>
-            <p>{d.desc}</p>
-          </figcaption>
-          <div
-            className="workflow-diagrams-frame"
-            // eslint-disable-next-line react/no-danger -- static, locally
-            // authored SVG shipped alongside this component; no user input.
-            dangerouslySetInnerHTML={{ __html: d.svg }}
-          />
-        </figure>
-      ))}
     </div>
   );
 }
