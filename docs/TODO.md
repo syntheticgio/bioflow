@@ -524,13 +524,14 @@ the coverage: `grep` found **no scheduler tests at all** before this, so
 `tick` and `run_now` were entirely unexercised. Plus three cases in
 `test_route_owner_scoping.py::TestJobsRouter`. Mutation-checked: reverting the
 route to `{"owner": owner}` and the scheduler to `"local"` fails exactly the
-four new tests and nothing else. Suite green at 2350 passed.
+four new tests and nothing else.
 
-One thing to know if this area is touched again: **`run-worktree-tests.sh`
-swallows pytest's final summary line**, so `tail` shows the progress dots and
-then the warnings block with no count between them. CLAUDE.md says to read the
-count rather than the exit code; here that means counting the progress
-characters, since the line that would state it never arrives.
+The count had to be obtained by counting progress characters, because
+`run-worktree-tests.sh` was swallowing pytest's summary line at the time --
+independently diagnosed and fixed on main the same evening in `8b7d530`
+(the appended `-q` landed on top of the caller's own, and `-qq` drops the
+"NNNN passed" line while still exiting 0). Worth knowing only as a reminder
+that "exit code 0" and "read the count" were briefly the same information.
 
 The trap specific to this fix, and why one test asserts three facts at once:
 `{"owner": {"$in": [owner, SYSTEM_OWNER]}}` has two mistypings -- swapping
