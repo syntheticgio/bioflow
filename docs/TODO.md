@@ -158,7 +158,51 @@ own rows, and B does not.
 Touches: `backend/app/api/v1/events.py`, `backend/app/api/v1/schedules.py`,
 `backend/app/queue/queue.py` (`publish_event` call sites).
 
-## Upload dedup never fires: the client never hashes
+## Upload dedup never fires: the client never hashes — FIXED
+
+Fixed 2026-08-02. `frontend/src/lib/upload.ts` now hashes the whole file
+before opening a session and sends the digest as `client_sha256` on
+`createUpload`; `upload_service.create_session` and the rest of the
+server-side and UI-consumer wiring this entry describes were already correct
+and needed no change.
+
+**What the fix needed that a naive read of this entry might miss.**
+`crypto.subtle.digest` -- already used in this file for per-chunk digests --
+is not incremental; it takes one complete buffer, which is unusable for a
+file this app's own upload module docstring sizes at 30 GB. There is no
+streaming/incremental option in Web Crypto, and nothing else in the frontend
+did incremental hashing, so `hash-wasm` was added (zero runtime
+dependencies of its own) and fed fixed-size slices of the file the same way
+chunks are already read for upload. Hashing runs in a Web Worker --
+`frontend/src/lib/hashWorker.ts`, the first worker in this codebase -- so a
+multi-gigabyte hash does not block the tab; Vite 6's built-in `?worker`
+import syntax needed no config changes.
+
+**The "cost more than it saves" question this entry left open was resolved
+by measuring, not guessing.** WASM SHA-256 hashes at roughly the same order
+of magnitude as this app's local network transfer speed or faster (a 1.5 GB
+in-memory synthetic file's hashing phase was observable but brief; smaller
+files raced through it too fast to catch mid-flight), so hashing does not
+become the bottleneck it might have been with a slower pure-JS
+implementation. The dead branch was worth keeping, not deleting.
+
+**Verified end to end in the running app**, not just by unit test: a 5 MB
+file uploaded normally with `client_sha256` now present on the session
+document (confirmed via the API's Mongo query log); re-uploading the
+identical bytes hit `upload_service._try_dedup`
+(`upload_dedup_preflight` logged with the matching digest), created a new
+`DataObject` immediately, and sent **zero** chunk `PUT` requests -- confirmed
+by absence in the request log, not just a passing assertion. The tray
+correctly distinguished "Complete" (first upload) from "Added to your
+library — already stored locally" (dedup hit). A `"hashing"` phase label
+("Checking for existing copy…") was added to `UploadTray.tsx` and confirmed
+to render during the hashing phase on a large-enough file. Cancelling
+mid-hash was handled cleanly via the existing `AbortSignal` plumbing, with
+no orphaned worker or unhandled rejection.
+
+Backend suite green throughout (2,315+ tests, no backend files touched).
+
+Original entry follows.
 
 Raised: 2026-08-01, while wiring the profiles frontend.
 
