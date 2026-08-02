@@ -526,6 +526,22 @@ the coverage: `grep` found **no scheduler tests at all** before this, so
 route to `{"owner": owner}` and the scheduler to `"local"` fails exactly the
 four new tests and nothing else.
 
+**Verified against the running stack**, not only the suite -- this file keeps
+collecting cases where a green suite hid the real behaviour. After
+`docker compose restart worker api`, the real `jobs` collection shows the
+cutover at the restart boundary:
+
+    verify_files | owner='system' | 13:04:58
+    verify_files | owner='system' | 13:03:58
+    reap_uploads | owner='local'  | 13:03:05
+    verify_files | owner='local'  | 13:02:55
+
+and `GET /api/v1/jobs?type=verify_files` with a real profile header returns
+both the `system` rows and the older `local` one -- so the union works, and
+the adopted profile keeps continuity across the cutover rather than watching
+its maintenance history disappear. The pre-existing `local` rows are the ones
+deliberately not migrated; they age out on the TTL index.
+
 The count had to be obtained by counting progress characters, because
 `run-worktree-tests.sh` was swallowing pytest's summary line at the time --
 independently diagnosed and fixed on main the same evening in `8b7d530`
