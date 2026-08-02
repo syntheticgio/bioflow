@@ -211,6 +211,12 @@ not have to know that RefSeq is where annotation lives.
 
 ## Assembly download
 
+> **Renamed 2026-08-01.** This handler now lives at
+> `backend/app/queue/ncbi_assembly_handlers.py`. The old path holds *de novo*
+> assembly, which is unrelated code -- so following the reference below would
+> land somewhere plausible and wrong. The rest of this section is unchanged and
+> still describes the download handler.
+
 New `backend/app/queue/assembly_handlers.py`, sibling to `sra_handlers.py` and
 following it closely: `HandlerMode.SUBPROCESS`, `JobClass.USER_INTERACTIVE`,
 `JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY)`, `max_attempts=3`, a fresh

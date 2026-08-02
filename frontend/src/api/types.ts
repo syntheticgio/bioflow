@@ -621,6 +621,38 @@ export interface ParamFieldMeta {
   choices: { value: string; label: string }[];
 }
 
+export type AssemblerName = "flye" | "hifiasm" | "spades";
+
+export interface AssemblerSchema {
+  assembler: AssemblerName;
+  available: boolean;
+  unavailable_reason: string;
+  layout: "single" | "paired";
+  fields: ParamFieldMeta[];
+}
+
+export interface AssemblyParams {
+  assembler: AssemblerName;
+  mode: string;
+  threads: number;
+  iterations: number;
+  /** Bases. Null when nothing in the project could say, which is the normal
+   *  case for de novo work rather than a misconfiguration. */
+  genome_size?: number | null;
+  /** Where the number came from. "inferred" is what the dialog labels, so a
+   *  guess is never shown as though it were measured. */
+  genome_size_source?: "unset" | "user" | "inferred";
+  /** The assembly the inferred size was read off, e.g. "R64 (GCF_000146045.2)".
+   *  Names the assembly rather than the file, since every component of one
+   *  download carries the same figure. */
+  genome_size_from?: string;
+}
+
+export interface AssembleRequest {
+  object_id: string;
+  params?: Partial<AssemblyParams>;
+}
+
 export interface AlignerSchema {
   aligner: AlignerName;
   fields: ParamFieldMeta[];

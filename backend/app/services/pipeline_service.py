@@ -2776,7 +2776,9 @@ async def launch_assembly(
         kind=RunKind.ASSEMBLY,
         project_id=reads.project_id,
         label=f"Assemble {reads.name}",
-        inputs=[RunInput(object_id=reads.id, role=RunInputRole.READS)],
+        inputs=[
+            RunInput(object_id=reads.id, name=reads.name, role=RunInputRole.READS)
+        ],
         params=parsed.as_dict(),
         owner=owner,
         tool=parsed.assembler.value,
