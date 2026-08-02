@@ -252,6 +252,15 @@ Delete an entry outright only when it was wrong to begin with -- not merely
 done. A `— FIXED` entry is a record; a deleted one is a question someone will
 ask again.
 
+**"Merged to `main` and tested to the best of your ability" is the bar for
+`— FIXED` -- don't hold an entry open waiting for the user's own later
+testing to bless it.** `main` is a dev trunk here, not a release
+([above](#working-on-this-repo)); nothing in this repo ships to users at
+merge time, so there is no "final testing" step downstream of you that a
+TODO entry should wait on. If testing after merge turns up a real problem,
+that is a new entry, not a reason the old one should have stayed open --
+the original diagnosis was still correct and the fix still shipped.
+
 **Do not trust a plan's checkboxes as a signal of completion.** Nothing ticks
 them. Both surviving plans in `docs/superpowers/plans/` show zero of their 66
 and 49 boxes checked while their code is demonstrably merged. Verify against

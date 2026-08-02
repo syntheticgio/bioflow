@@ -797,7 +797,22 @@ on whether a GTF was supplied. Verify by running genomeGenerate with a GTF and
 listing the directory rather than predicting it -- predicting it is what got
 the no-GTF file list wrong the first time.
 
-## STAR reports MAPQ 255, which the alignment stats present as a 0-60 score
+## STAR reports MAPQ 255, which the alignment stats present as a 0-60 score — FIXED
+
+Shipped 2026-08-01 in `43e1fb0` (`frontend/src/lib/mapq.ts`, plus
+`AlignmentReport.tsx`, `BamResults.tsx`, `ContigTable.tsx`,
+`FactsTable.tsx`). Labelled/bucketed as this entry asked, not rescaled --
+and went a step further than "label it": the mean itself is now suppressed
+for STAR rather than shown with a caveat, since an average over the ordinal
+codes `{0, 1, 3, 255}` isn't a quantity at all. `AlignmentReport.tsx` shows
+`uniquely_mapped_percent` in its place, which is what those codes actually
+assert. The histogram and the per-contig Mean MAPQ column keep STAR's raw
+numbers but gain the scale named in their heading.
+
+Detection (`isStarMapqScale` in `mapq.ts`) reads the ingest-recorded
+`mapq_scale: "star"` fact when present, falling back to spotting a `255` in
+the histogram for BAMs aligned before that fact existed, or re-ingested BAMs
+where a merge left the stale mean in place alongside it.
 
 Raised: 2026-08-01, observed on a real run. Also filed as a background task.
 
