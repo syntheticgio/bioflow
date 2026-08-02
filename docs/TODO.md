@@ -16,6 +16,41 @@ in `CLAUDE.md` for the move itself.
 
 # Planned features
 
+## Mobile-friendly view for select features
+
+A limited, mobile-optimized UI for small screens (phones and tablets) rather than
+a fully responsive redesign. The full interface is designed for desktop and
+maintaining both at feature parity is not viable; instead, offer a minimal mobile
+experience that covers the two workflows that matter on a phone.
+
+**In scope:** Two features that serve actual mobile use cases --
+
+1. **Activity progress view.** Check the status of a running pipeline job from your
+   phone -- what step is it on, has it finished, did it fail. This is read-only,
+   aligned with checking on a long-running task without re-running it.
+2. **Trigger NCBI downloads.** Start a `fetch_reads_via_sra` job remotely to
+   queue up a large download before leaving the office, or delegate a download to
+   run on the server rather than draining your laptop's bandwidth. No need to
+   monitor it from the phone, just dispatch it and walk away.
+
+**Out of scope:** Building UI for alignment, QC, or assembly on a phone. These
+require multi-step workflows, dense parameter selections, and real-time feedback
+that do not translate to mobile well. The mobile view is for checking progress
+and dispatching background jobs, not for orchestrating a full analysis.
+
+**Implementation notes:** Detection can be simple (screen width under ~600px,
+`window.matchMedia("(max-width: 600px)")`), and the view should be a separate
+mobile-only route or a conditional render, not a responsive breakpoint tacked onto
+the existing desktop UI. Starting from the Activity tab and the Downloads modal
+(or a simplified version of it) is a reasonable foundation.
+
+The risk that mobile-first design creates in a maintenance standpoint -- two
+parallel UIs that drift from one another -- is mitigated by scope. Only two
+screens exist, both read-heavy or dispatch-only; there is no complex state
+management to keep synchronized between mobile and desktop versions.
+
+Touches: `frontend/src/pages/`, routing layer, mobile-specific styling.
+
 ## Sharing between profiles
 
 Depends on profiles. Share a file with another profile without copying the
