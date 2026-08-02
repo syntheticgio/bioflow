@@ -9,7 +9,9 @@ interface Props {
   canQC: boolean;
   hasQc: boolean;
   hasTrim: boolean;
-  /** Named reference for the Align button, when the project has one. */
+  /** A trim job is already running or queued for this file. */
+  trimActive: boolean;
+  /** Named reference, used only for the button's tooltip -- see below. */
   alignTarget: string | null;
   onStart: (pipeline: "trim" | "align" | "variant") => void;
   /** Not part of `onStart`: counting has one tool, so it opens its dialog
@@ -47,6 +49,7 @@ export function Computations({
   canQC,
   hasQc,
   hasTrim,
+  trimActive,
   alignTarget,
   onStart,
   onQuantify,
@@ -72,13 +75,18 @@ export function Computations({
             type="button"
             className="btn primary"
             onClick={() => onStart("trim")}
-            title="Adapter-trim and quality-filter these reads"
+            disabled={trimActive}
+            title={
+              trimActive
+                ? "A trim job is already running for this file"
+                : "Adapter-trim and quality-filter these reads"
+            }
           >
             {/* "Preprocess", not "Trim": the operation also quality- and
                 length-filters, which the narrower name hides. The pipeline key
                 is still "trim". */}
-            Preprocess
-            {!hasTrim && (
+            {trimActive ? "Preprocessing…" : "Preprocess"}
+            {!hasTrim && !trimActive && (
               <span className="outstanding-badge" aria-label="Not yet run" />
             )}
           </button>
@@ -94,11 +102,11 @@ export function Computations({
                 : "Align these reads against a reference"
             }
           >
-            {/* Names the reference when the project has one, so the button
-                says what it will actually do. Falls back to the bare verb when
-                there is nothing to name -- the dialog then handles picking, or
-                explains that none exists. */}
-            {alignTarget ? `Align to ${alignTarget}` : "Align"}
+            {/* Generic on purpose: this row runs the pipeline with settings
+                the user still picks, unlike the suggestion cards below, which
+                bake in a specific reference. Naming one here would misstate
+                what this button does when the project holds more than one. */}
+            Align to reference
           </button>
         )}
         {canCallVariants && (
@@ -157,7 +165,11 @@ export function Computations({
             className="btn"
             onClick={onRunQC}
             disabled={qcPending}
-            title="Measure read quality with fastp and FastQC"
+            title={
+              qcPending
+                ? "A QC job is already running for this file"
+                : "Measure read quality with fastp and FastQC"
+            }
           >
             {qcPending ? "Running QC…" : "Run QC"}
             {!hasQc && !qcPending && (

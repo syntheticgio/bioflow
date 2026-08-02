@@ -416,6 +416,21 @@ function ObjectDetail({ id }: { id: string }) {
   });
   const references = refs?.references ?? [];
 
+  // Same query ActivePipelineJobs makes for this object, so the two share one
+  // poll rather than each running their own. Used to disable Run QC and
+  // Preprocess while a matching job is already in flight: unlike Align, there
+  // is no legitimate reason to run either of these twice at once on the same
+  // file, so disabling doubles as the "it's working" feedback a fire-and-forget
+  // button otherwise lacks.
+  const { data: activeJobs } = useQuery({
+    queryKey: ["jobs", "for-object", id],
+    queryFn: () => api.listJobs({ objectId: id, states: "active", limit: 20 }),
+    refetchInterval: 5_000,
+    enabled: !!id,
+  });
+  const qcActive = (activeJobs ?? []).some((j) => j.type === "run_qc");
+  const trimActive = (activeJobs ?? []).some((j) => j.type === "trim_reads");
+
   const reingest = useMutation({
     mutationFn: () => api.reingestObject(id),
     onSuccess: () => {
@@ -702,9 +717,9 @@ function ObjectDetail({ id }: { id: string }) {
                       className="btn primary"
                       style={{ flexShrink: 0 }}
                       onClick={() => runQC.mutate()}
-                      disabled={runQC.isPending}
+                      disabled={runQC.isPending || qcActive}
                     >
-                      {runQC.isPending ? "Running QC…" : "Run QC"}
+                      {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
                     </button>
                   </div>
                 ) : null
@@ -758,10 +773,11 @@ function ObjectDetail({ id }: { id: string }) {
                   canQC={canQC}
                   hasQc={hasQc}
                   hasTrim={hasTrim}
+                  trimActive={trimActive}
                   alignTarget={alignTarget}
                   onStart={startFlow}
                   onRunQC={() => runQC.mutate()}
-                  qcPending={runQC.isPending}
+                  qcPending={runQC.isPending || qcActive}
                   onReingest={() => reingest.mutate()}
                   reingestPending={reingest.isPending}
                   reingestDisabled={!obj.blob_sha256}
