@@ -1417,6 +1417,7 @@ def reset_cache() -> None:
     bcftools_csq.cache_clear()
     clair3.cache_clear()
     deepvariant.cache_clear()
+    flye.cache_clear()
     miniprot.cache_clear()
     compleasm.cache_clear()
     fasterq_dump.cache_clear()
