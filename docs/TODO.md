@@ -586,7 +586,19 @@ via `run-now`, which is precisely when they want to see it.
 Touches: `backend/app/queue/scheduler.py`, `backend/app/api/v1/jobs.py`,
 `backend/app/api/v1/schedules.py` (whose module docstring records this).
 
-## Results should be the first tab
+## Results should be the first tab — FIXED
+
+Shipped in `174223e` ("feat: open a produced file on its Results tab"), on
+`main` before this entry was ever picked up. `tabsFor` in
+`frontend/src/components/DetailPanel.tsx` pushes Results first for any object
+with `hasResults` true, and the docstring above it now argues for that order
+("Results leads wherever it exists...") instead of the superseded
+"is this file good?" rationale. Both provisos hold: the tab id is still a
+single `"results"` across BAM/VCF/BCF (and now also DE-results role) so a link
+survives the selection moving between them, and the fallback in
+`ObjectDetail` reads `tabs[0].id` rather than a hardcoded id, so reordering
+`tabsFor` alone changes what the panel opens on. Objects with no Results tab
+still open on Quality.
 
 Raised: 2026-07-31, requested.
 
