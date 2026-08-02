@@ -4,6 +4,7 @@ interface Props {
   canCallVariants: boolean;
   canQuantify: boolean;
   canAssemble: boolean;
+  canDifferentialExpression: boolean;
   canQC: boolean;
   hasQc: boolean;
   /** Named reference for the Align button, when the project has one. */
@@ -13,6 +14,7 @@ interface Props {
    * directly rather than going through the tool selector first. */
   onQuantify: () => void;
   onAssemble: () => void;
+  onDifferentialExpression: () => void;
   onRunQC: () => void;
   qcPending: boolean;
   onReingest: () => void;
@@ -37,12 +39,14 @@ export function Computations({
   canCallVariants,
   canQuantify,
   canAssemble,
+  canDifferentialExpression,
   canQC,
   hasQc,
   alignTarget,
   onStart,
   onQuantify,
   onAssemble,
+  onDifferentialExpression,
   onRunQC,
   qcPending,
   onReingest,
@@ -116,6 +120,16 @@ export function Computations({
             title="Count this alignment's reads against a gene annotation"
           >
             Count reads per gene
+          </button>
+        )}
+        {canDifferentialExpression && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onDifferentialExpression}
+            title="Compare gene expression between groups of samples"
+          >
+            Differential expression…
           </button>
         )}
         {canQC && (

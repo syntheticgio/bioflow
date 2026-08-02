@@ -44,6 +44,7 @@ import { ProjectDangerZone } from "./ProjectDangerZone";
 import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
+import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
@@ -353,6 +354,7 @@ function ObjectDetail({ id }: { id: string }) {
   // routing it through a selector would mean a screen offering one card.
   const [quantifyOpen, setQuantifyOpen] = useState(false);
   const [assembleOpen, setAssembleOpen] = useState(false);
+  const [deOpen, setDeOpen] = useState(false);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
     setPendingTool(null);
@@ -565,6 +567,10 @@ function ObjectDetail({ id }: { id: string }) {
     ["hifi", "clr", "ont_simplex", "ont_duplex"].includes(
       String(obj.facts?.qc_read_chemistry ?? ""),
     );
+  // Counts is the natural home: DE always needs a design across the
+  // project's counts files, so this is a shortcut into the same
+  // project-scoped dialog rather than a per-file operation in disguise.
+  const canDifferentialExpression = obj.role === "counts";
 
   return (
     <div className="panel">
@@ -717,6 +723,8 @@ function ObjectDetail({ id }: { id: string }) {
                   onQuantify={() => setQuantifyOpen(true)}
                   canAssemble={canAssemble}
                   onAssemble={() => setAssembleOpen(true)}
+                  canDifferentialExpression={canDifferentialExpression}
+                  onDifferentialExpression={() => setDeOpen(true)}
                   canQC={canQC}
                   hasQc={hasQc}
                   alignTarget={alignTarget}
@@ -791,6 +799,12 @@ function ObjectDetail({ id }: { id: string }) {
       )}
       {assembleOpen && (
         <AssembleDialog object={obj} onClose={() => setAssembleOpen(false)} />
+      )}
+      {deOpen && (
+        <DifferentialExpressionDialog
+          projectId={obj.project_id}
+          onClose={() => setDeOpen(false)}
+        />
       )}
     </div>
   );

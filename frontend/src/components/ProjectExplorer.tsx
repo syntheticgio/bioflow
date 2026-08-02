@@ -9,7 +9,6 @@ import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
-import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { groupPairs, orderWithPairs, type OrderedFile } from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
@@ -243,7 +242,6 @@ function ProjectView({ projectId }: { projectId: string }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [ncbiOpen, setNcbiOpen] = useState(false);
   const [uniprotOpen, setUniprotOpen] = useState(false);
-  const [deOpen, setDeOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<FileCategory>>(
     new Set(["reads", "references", "alignments"])
   );
@@ -287,11 +285,6 @@ function ProjectView({ projectId }: { projectId: string }) {
     );
   });
 
-  // Drives whether the Differential expression button is offered at all. Reads
-  // the unfiltered list on purpose: typing in the filter box should not make
-  // a project-level action disappear.
-  const hasCounts = objects?.some((o) => o.role === "counts") ?? false;
-
   const toggleCategory = (category: FileCategory) => {
     const next = new Set(expandedCategories);
     if (next.has(category)) {
@@ -326,25 +319,6 @@ function ProjectView({ projectId }: { projectId: string }) {
           </div>
 
           <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
-            {/* Differential expression lives here rather than in a file's
-                Actions tab, and this is the only project-scoped operation in
-                the app. That is not an inconsistency to tidy away: DE takes N
-                counts files and a design, so there is no single file to hang
-                it off, and attaching it to one would produce a button whose
-                result is identical whichever file you press it from.
-
-                Shown only once the project has counts, so it appears exactly
-                when it becomes usable rather than sitting disabled. */}
-            {hasCounts && (
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setDeOpen(true)}
-                title="Compare gene expression between groups of samples"
-              >
-                Differential expression…
-              </button>
-            )}
             {/* A split button: uploading is much the commoner action and keeps
                 the one-click path, while the chevron reaches the alternative
                 without turning every upload into a menu choice. */}
@@ -415,13 +389,6 @@ function ProjectView({ projectId }: { projectId: string }) {
         <UniProtDownloadDialog
           projectId={projectId}
           onClose={() => setUniprotOpen(false)}
-        />
-      )}
-
-      {deOpen && (
-        <DifferentialExpressionDialog
-          projectId={projectId}
-          onClose={() => setDeOpen(false)}
         />
       )}
 
