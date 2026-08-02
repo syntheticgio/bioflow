@@ -807,6 +807,7 @@ textarea:focus {
 }
 
 .btn {
+  position: relative; /* anchors .outstanding-badge */
   padding: 5px 11px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
@@ -2214,6 +2215,22 @@ a.btn {
   background: var(--error);
 }
 
+/* Outstanding-work badge ------------------------------------------------ */
+
+/* Corner dot on a Computations button, meaning "this hasn't been run yet".
+   Same shape as .q-badge but a fixed color (red is always "outstanding"
+   here, unlike the tiered read-quality score). */
+.outstanding-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--error);
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+}
+
 /* Help pages ---------------------------------------------------------- */
 
 .help-page {
@@ -2567,7 +2584,7 @@ table.software-matrix thead th.software-matrix-corner {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   gap: 0 32px;
-  align-items: start;
+  align-items: stretch;
 }
 
 /* Separated by a top border rather than a bottom one. With entries stacked a
@@ -2580,6 +2597,8 @@ table.software-matrix thead th.software-matrix-corner {
    entries a row, and the first row is the only one that must not have a rule
    above it. */
 .software-entry {
+  display: flex;
+  flex-direction: column;
   padding: 18px 0;
   border-top: 1px solid var(--border);
 }
@@ -2663,6 +2682,41 @@ table.software-matrix thead th.software-matrix-corner {
   gap: 12px 32px;
   align-items: start;
   margin-top: 10px;
+  flex: 1;
+}
+
+/* Pinned to the bottom of its column rather than following the prose, so two
+   entries seated side by side in the same grid row (fastqc/nanoplot) show
+   their cards flush with each other even when one tool's prose runs longer
+   than the other's. `.software-entry` stretches to the row's height and
+   `.software-entry-body` fills it -- but `align-items: start` there means the
+   facts grid cell is otherwise only as tall as its own content, giving
+   `margin-top: auto` no free space to push into. `align-self: stretch`
+   overrides that for this one cell so the card's cell fills the full row
+   height, which is what the auto margin needs to work with. */
+.software-facts {
+  align-self: stretch;
+  margin-top: auto;
+}
+
+/* A solo entry (odd tool out, no row-mate) has no neighbour to line its card
+   up with -- bottom-pinning it here would just strand it below empty space,
+   as flye's long prose demonstrated. Follow the prose instead, same as
+   before entries started stretching to a shared row height. */
+.software-entry.is-solo .software-facts {
+  align-self: start;
+  margin-top: 0;
+}
+
+/* Spans both columns rather than sitting narrow in column 1 with column 2
+   empty beside it. auto-fit still seats a solo entry into its own two-column
+   row -- it is only *alone*, not *wide* -- so trimmomatic (third of three in
+   Trimming) landed at half width next to blank space instead of using it.
+   Spanning turns that dead column into room for trimmomatic's own prose/facts
+   layout, same shape flye already had by virtue of being the only entry in
+   its section. */
+.software-entry.is-solo {
+  grid-column: 1 / -1;
 }
 
 .software-prose p {

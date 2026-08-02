@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 
 interface Props {
@@ -30,8 +31,7 @@ export function NewProjectModal({ parentId, onClose }: Props) {
   };
 
   return (
-    <div
-      className="modal-backdrop"
+    <ModalBackdrop
       onClick={onClose}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
@@ -70,6 +70,6 @@ export function NewProjectModal({ parentId, onClose }: Props) {
           </div>
         </form>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

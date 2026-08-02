@@ -305,9 +305,23 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function ToolEntry({ tool, alsoIn }: { tool: PipelineTool; alsoIn: string[] }) {
+function ToolEntry({
+  tool,
+  alsoIn,
+  solo,
+}: {
+  tool: PipelineTool;
+  alsoIn: string[];
+  // True when this entry has no row-mate in .software-group-entries -- an odd
+  // tool out at the end of its section, sitting alone in a two-column grid
+  // row. The facts card normally sinks to the bottom of the row to line up
+  // with a neighbour's shorter entry (see .software-facts), but with no
+  // neighbour to line up with, that just strands it below empty space. `solo`
+  // switches the card back to following the prose instead.
+  solo: boolean;
+}) {
   return (
-    <article className="software-entry">
+    <article className={`software-entry${solo ? " is-solo" : ""}`}>
       <div className="software-entry-head">
         <h3 className="software-name" id={`tool-${tool.name}`}>
           {tool.name}
@@ -495,7 +509,7 @@ export function HelpSoftware() {
                 starting at the left column instead of continuing next to the
                 previous section's last tool. */}
             <div className="software-group-entries">
-              {entries.map((tool) => (
+              {entries.map((tool, i) => (
                 <ToolEntry
                   key={tool.name}
                   tool={tool}
@@ -503,6 +517,7 @@ export function HelpSoftware() {
                     .slice(1)
                     .map((p) => GROUP_TITLES[p]?.toLowerCase())
                     .filter(Boolean)}
+                  solo={entries.length % 2 === 1 && i === entries.length - 1}
                 />
               ))}
             </div>

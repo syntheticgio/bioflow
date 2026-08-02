@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 import type { CountsParams, DataObject, Strandedness } from "../api/types";
 
@@ -87,7 +88,7 @@ export function QuantifyDialog({
     defaults != null && defaults.available && chosenAnnotationId != null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal trim-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           Count reads per gene
@@ -303,6 +304,6 @@ export function QuantifyDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

@@ -1677,31 +1677,16 @@
   color: var(--ink-70);
 }
 
-/* Separated by a rule rather than boxed. On a page with no other enclosed
-   surface, a panel here would look like a widget dropped into an article. The
-   rule sits to the left on a wide page and flips to a top rule once auto-fit
-   has stacked the rail under the prose, where a left border would point at
-   nothing. */
+/* Boxed like the app's other card surfaces (.suggestion-card): a filled
+   background, hairline border, and the theme's sharp radius, rather than a
+   bare rule above and below that read as two stray lines bracketing the
+   block instead of a single grouped fact panel. */
 .theme-broadsheet .software-facts {
   gap: var(--space-3);
-  border-top: 1px solid var(--color-divider);
-  padding-top: var(--space-3);
-}
-
-/* Sized off the entry, not the viewport. The grid is `auto-fit` with a 280px
-   minimum, so whether the rail gets its own column depends on the entry's
-   width -- which the left panel changes without the window moving at all. A
-   viewport query got this wrong in exactly that case, drawing the beside-the-
-   prose left border on a rail that had already stacked underneath it.
-   612px = the 280px rail + 280px prose + the 32px column gap: the width at
-   which auto-fit can actually seat two columns. */
-@container (min-width: 612px) {
-  .theme-broadsheet .software-facts {
-    border-top: none;
-    padding-top: 0;
-    border-left: 1px solid var(--color-divider);
-    padding-left: var(--space-4);
-  }
+  background: var(--color-neutral-200);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
 }
 
 .theme-broadsheet .software-fact-value {

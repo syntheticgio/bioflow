@@ -562,6 +562,12 @@ export const api = {
   references: (projectId: string) =>
     request<{ references: ReferenceOption[] }>(`/pipelines/references/${projectId}`),
 
+  /** A project's gene annotations, for the STAR annotated-index option. */
+  annotations: (projectId: string) =>
+    request<{ annotations: { object_id: string; name: string }[] }>(
+      `/pipelines/annotations/${projectId}`,
+    ),
+
   /** Which pipelines to offer for one file, each with the reason it can or
    * cannot run. Advisory: a failure here costs the Actions tab its cards, not
    * its manual controls. */
@@ -578,7 +584,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  buildIndex: (body: { reference_id: string; aligner: string }) =>
+  buildIndex: (body: {
+    reference_id: string;
+    aligner: string;
+    annotation_id?: string | null;
+  }) =>
     request<JobSummary>("/pipelines/index", {
       method: "POST",
       body: JSON.stringify(body),

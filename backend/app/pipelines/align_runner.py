@@ -232,6 +232,17 @@ def star_index_sizing(*, genome_length: int, contigs: int) -> tuple[int, int]:
     return sa_index_nbases, chr_bin_nbits
 
 
+# STAR's own default, and the value the TODO that asked for annotation-aware
+# indexing settled on rather than threading read length into index caching:
+# indexes here are cached per reference with no read-length dimension, and
+# 100 is correct for the common case (100-150bp Illumina). `--sjdbOverhang`
+# only tunes the splice-junction database's sensitivity at read ends; it does
+# not change the number or names of files written, so a build that turns out
+# to be tuned for the wrong read length is a resolution loss, not a broken
+# index.
+STAR_SJDB_OVERHANG = 100
+
+
 def build_star_index_command(
     *,
     tool_path: str,
@@ -241,6 +252,8 @@ def build_star_index_command(
     genome_length: int,
     contigs: int,
     scratch: Path,
+    gtf: Path | None = None,
+    sjdb_overhang: int = STAR_SJDB_OVERHANG,
 ) -> list[str]:
     """`STAR --runMode genomeGenerate`.
 
@@ -252,11 +265,19 @@ def build_star_index_command(
     `--outFileNamePrefix` is not cosmetic. STAR writes `Log.out` wherever it
     is pointed, and pointed at nothing it writes into the process's working
     directory -- which for a job here is not a directory anyone reaps.
+
+    `gtf` is optional: STAR finds junctions de novo without one (9,818 on a
+    real yeast alignment with none supplied), so an index without an
+    annotation is a real, useful thing to build, not a degraded version of
+    this one. Supplying it changes the file set the build produces -- see
+    `aligners.STAR_ANNOTATED_MEMBERS` -- so the caller must build the genome
+    directory under the matching layout (`aligners.layout_for(..., annotated=
+    gtf is not None)`), not just add the flag.
     """
     sa_index_nbases, chr_bin_nbits = star_index_sizing(
         genome_length=genome_length, contigs=contigs
     )
-    return [
+    cmd = [
         tool_path,
         "--runMode", "genomeGenerate",
         "--genomeDir", str(genome_dir),
@@ -269,6 +290,9 @@ def build_star_index_command(
         # logs land beside the directory as `star-buildLog.out`.
         "--outFileNamePrefix", f"{scratch}/",
     ]
+    if gtf is not None:
+        cmd += ["--sjdbGTFfile", str(gtf), "--sjdbOverhang", str(sjdb_overhang)]
+    return cmd
 
 
 def build_index_command(

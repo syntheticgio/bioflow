@@ -5,8 +5,10 @@ interface Props {
   canQuantify: boolean;
   canAssemble: boolean;
   canScoreCompleteness: boolean;
+  canDifferentialExpression: boolean;
   canQC: boolean;
   hasQc: boolean;
+  hasTrim: boolean;
   /** Named reference for the Align button, when the project has one. */
   alignTarget: string | null;
   onStart: (pipeline: "trim" | "align" | "variant") => void;
@@ -15,6 +17,7 @@ interface Props {
   onQuantify: () => void;
   onAssemble: () => void;
   onScoreCompleteness: () => void;
+  onDifferentialExpression: () => void;
   onRunQC: () => void;
   qcPending: boolean;
   onReingest: () => void;
@@ -40,13 +43,16 @@ export function Computations({
   canQuantify,
   canAssemble,
   canScoreCompleteness,
+  canDifferentialExpression,
   canQC,
   hasQc,
+  hasTrim,
   alignTarget,
   onStart,
   onQuantify,
   onAssemble,
   onScoreCompleteness,
+  onDifferentialExpression,
   onRunQC,
   qcPending,
   onReingest,
@@ -72,6 +78,9 @@ export function Computations({
                 length-filters, which the narrower name hides. The pipeline key
                 is still "trim". */}
             Preprocess
+            {!hasTrim && (
+              <span className="outstanding-badge" aria-label="Not yet run" />
+            )}
           </button>
         )}
         {canAlign && (
@@ -132,6 +141,16 @@ export function Computations({
             Count reads per gene
           </button>
         )}
+        {canDifferentialExpression && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onDifferentialExpression}
+            title="Compare gene expression between groups of samples"
+          >
+            Differential expression…
+          </button>
+        )}
         {canQC && (
           <button
             type="button"
@@ -140,7 +159,10 @@ export function Computations({
             disabled={qcPending}
             title="Measure read quality with fastp and FastQC"
           >
-            {qcPending ? "Running QC…" : hasQc ? "Re-run QC" : "Run QC"}
+            {qcPending ? "Running QC…" : "Run QC"}
+            {!hasQc && !qcPending && (
+              <span className="outstanding-badge" aria-label="Not yet run" />
+            )}
           </button>
         )}
         {/* Set as text -- it is a repair action, not one of the pipeline

@@ -147,6 +147,59 @@ class TestDirectoryLayout:
         log file forever as though it were part of the index."""
         assert "Log.out" not in aligners.STAR_MEMBERS
 
+    def test_the_annotated_members_are_the_fifteen_star_actually_writes(self):
+        """Verified by running STAR 2.7.11b genomeGenerate with
+        --sjdbGTFfile against the real yeast reference and GTF
+        (GCF_000146045.2_R64_genomic.gtf). The TODO that asked for this
+        predicted only four extra files -- exonInfo.tab, geneInfo.tab,
+        transcriptInfo.tab, sjdbList.out.tab -- from STAR's documentation.
+        The real build writes seven: the prediction missed exonGeTrInfo.tab,
+        sjdbInfo.txt and sjdbList.fromGTF.out.tab. Trusting the prediction
+        would have repeated the exact failure the base STAR_MEMBERS list's own
+        comment warns about -- requiring files a real build does not
+        produce, or (here) missing files a real build does."""
+        assert set(aligners.STAR_ANNOTATED_MEMBERS) == set(aligners.STAR_MEMBERS) | {
+            "exonGeTrInfo.tab",
+            "exonInfo.tab",
+            "geneInfo.tab",
+            "sjdbInfo.txt",
+            "sjdbList.fromGTF.out.tab",
+            "sjdbList.out.tab",
+            "transcriptInfo.tab",
+        }
+
+    def test_annotated_index_uses_a_separate_directory_from_the_plain_one(self):
+        """A reference should be able to carry both: one build from before a
+        GTF was available, one from after. Sharing STAR_DIR_SUFFIX would mean
+        the second build's files land beside (or overwrite) the first's."""
+        plain = aligners.index_filenames("genome.fna", Aligner.STAR)
+        annotated = aligners.index_filenames(
+            "genome.fna", Aligner.STAR, annotated=True
+        )
+        assert not set(plain) & set(annotated)
+        assert all(".STARindex.annotated." in name for name in annotated)
+
+    def test_index_suffixes_annotated_is_star_only(self):
+        for aligner in (Aligner.BWA_MEM2, Aligner.MINIMAP2, Aligner.BOWTIE2,
+                        Aligner.HISAT2):
+            with pytest.raises(ValueError):
+                aligners.index_suffixes(aligner, annotated=True)
+
+    def test_layout_for_annotated_is_star_only(self):
+        for aligner in (Aligner.BWA_MEM2, Aligner.MINIMAP2, Aligner.BOWTIE2,
+                        Aligner.HISAT2):
+            with pytest.raises(ValueError):
+                aligners.layout_for(aligner, annotated=True)
+
+    def test_index_role_annotated_is_a_distinct_role(self):
+        from app.models import SidecarRole
+
+        assert aligners.index_role(Aligner.STAR) == SidecarRole.STAR_INDEX
+        assert (
+            aligners.index_role(Aligner.STAR, annotated=True)
+            == SidecarRole.STAR_ANNOTATED_INDEX
+        )
+
     def test_workdir_path_puts_a_member_inside_the_directory(self):
         layout = aligners.layout_for(Aligner.STAR)
         assert (

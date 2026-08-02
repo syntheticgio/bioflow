@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { ModalBackdrop } from "./ModalBackdrop";
 import type { VariantStructure } from "../api/types";
 
 /** NCBI's own documented embed path. `?pdbid=` loads a PDB entry; the
@@ -114,7 +115,7 @@ export function StructureViewerModal({
   }, [pdbId]);
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <ModalBackdrop onClick={onClose}>
       <div className="modal sviewer-modal" onClick={(e) => e.stopPropagation()}>
         <h2>
           {gene}
@@ -225,6 +226,6 @@ export function StructureViewerModal({
           </button>
         </div>
       </div>
-    </div>
+    </ModalBackdrop>
   );
 }

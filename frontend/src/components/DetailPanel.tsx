@@ -45,6 +45,7 @@ import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { CompletenessDialog } from "./CompletenessDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
+import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
 import { QcReport } from "./QcReport";
 import { TrimReport } from "./TrimReport";
@@ -355,6 +356,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [quantifyOpen, setQuantifyOpen] = useState(false);
   const [assembleOpen, setAssembleOpen] = useState(false);
   const [completenessOpen, setCompletenessOpen] = useState(false);
+  const [deOpen, setDeOpen] = useState(false);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
     setPendingTool(null);
@@ -520,10 +522,15 @@ function ObjectDetail({ id }: { id: string }) {
 
   const stats = fileStats(obj);
 
-  // Distinguishes "Run QC" from "Re-run QC": qc_tool is written by whichever
-  // QC path actually ran, so its presence is the honest test of whether there
-  // is anything to re-run.
+  // Whether QC has already been run, for the outstanding-work badge on its
+  // button: qc_tool is written by whichever QC path actually ran, so its
+  // presence is the honest test.
   const hasQc = typeof obj.facts.qc_tool === "string";
+
+  // Same idea for Preprocess: trimmed_by is written after a trim job
+  // completes (backend/app/queue/results.py), so its presence is the honest
+  // test of whether preprocessing has run.
+  const hasTrim = typeof obj.facts.trimmed_by === "string";
 
   // Names the reference the Align button would default to, so it can say
   // "Align to ASM244v1" rather than just "Align". Only when the project holds
@@ -567,6 +574,10 @@ function ObjectDetail({ id }: { id: string }) {
     ["hifi", "clr", "ont_simplex", "ont_duplex"].includes(
       String(obj.facts?.qc_read_chemistry ?? ""),
     );
+  // Counts is the natural home: DE always needs a design across the
+  // project's counts files, so this is a shortcut into the same
+  // project-scoped dialog rather than a per-file operation in disguise.
+  const canDifferentialExpression = obj.role === "counts";
 
   // FASTA, excluding protein/transcript roles -- not gated on provenance, so
   // an uploaded assembly is as eligible as one this application produced.
@@ -732,8 +743,11 @@ function ObjectDetail({ id }: { id: string }) {
                   onAssemble={() => setAssembleOpen(true)}
                   canScoreCompleteness={canScoreCompleteness}
                   onScoreCompleteness={() => setCompletenessOpen(true)}
+                  canDifferentialExpression={canDifferentialExpression}
+                  onDifferentialExpression={() => setDeOpen(true)}
                   canQC={canQC}
                   hasQc={hasQc}
+                  hasTrim={hasTrim}
                   alignTarget={alignTarget}
                   onStart={startFlow}
                   onRunQC={() => runQC.mutate()}
@@ -811,6 +825,12 @@ function ObjectDetail({ id }: { id: string }) {
         <CompletenessDialog
           object={obj}
           onClose={() => setCompletenessOpen(false)}
+        />
+      )}
+      {deOpen && (
+        <DifferentialExpressionDialog
+          projectId={obj.project_id}
+          onClose={() => setDeOpen(false)}
         />
       )}
     </div>
