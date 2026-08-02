@@ -75,12 +75,21 @@ HISAT2_SUFFIXES: tuple[str, ...] = (
 # what keeps two genomes' indexes from colliding in one workdir.
 STAR_DIR_SUFFIX = ".STARindex"
 
+# A separate directory (and role) for an annotation-built index, rather than
+# reusing STAR_DIR_SUFFIX with a different member count: the two carry
+# different information and a project can want both, e.g. one alignment run
+# before a GTF was uploaded and one after. Sharing the directory name would
+# mean the second build overwrites sidecars the first is still using, or
+# `missing_index_for` seeing a mismatched file count and reporting the index
+# broken rather than absent.
+STAR_ANNOTATED_DIR_SUFFIX = ".STARindex.annotated"
+
 # What `STAR --runMode genomeGenerate` writes into that directory, verified by
 # running STAR 2.7.11b rather than recalled: a run *without* an annotation
 # produces exactly these eight files. Recollection said it also wrote
 # exonInfo.tab, geneInfo.tab and transcriptInfo.tab -- it does not, and
 # requiring them would have failed every index build. STAR writes those only
-# when given --sjdbGTFfile, which this application does not yet do.
+# when given --sjdbGTFfile.
 #
 # `Log.out` is also written into the directory and is deliberately absent from
 # this list: it is a build transcript, not something STAR reads back at
@@ -97,6 +106,25 @@ STAR_MEMBERS: tuple[str, ...] = (
     "genomeParameters.txt",
 )
 
+# Extra files an annotation-built index writes, again measured rather than
+# predicted: the TODO entry that asked for this guessed exonInfo.tab,
+# geneInfo.tab, transcriptInfo.tab and sjdbList.out.tab from STAR's docs, and
+# a real `--sjdbGTFfile` run against the yeast reference
+# (GCF_000146045.2_R64_genomic.gtf) wrote three more the guess missed --
+# exonGeTrInfo.tab, sjdbInfo.txt and sjdbList.fromGTF.out.tab -- seven in
+# total, not four. Trusting the guess would have left `build_index` reporting
+# success while silently dropping three sidecars, the exact failure mode
+# `_SIDECAR_ROLES` produced for the base STAR index the first time.
+STAR_ANNOTATED_MEMBERS: tuple[str, ...] = STAR_MEMBERS + (
+    "exonGeTrInfo.tab",
+    "exonInfo.tab",
+    "geneInfo.tab",
+    "sjdbInfo.txt",
+    "sjdbList.fromGTF.out.tab",
+    "sjdbList.out.tab",
+    "transcriptInfo.tab",
+)
+
 
 INDEX_ROLE: dict[Aligner, SidecarRole] = {
     Aligner.BWA_MEM2: SidecarRole.BWA_MEM2_INDEX,
@@ -105,6 +133,20 @@ INDEX_ROLE: dict[Aligner, SidecarRole] = {
     Aligner.HISAT2: SidecarRole.HISAT2_INDEX,
     Aligner.STAR: SidecarRole.STAR_INDEX,
 }
+
+
+def index_role(aligner: Aligner, *, annotated: bool = False) -> SidecarRole:
+    """Which sidecar role an index build's files are stored under.
+
+    A thin wrapper around `INDEX_ROLE` rather than a second dict, since
+    `annotated` only ever changes the answer for STAR -- every other aligner
+    has no annotation concept and the flag is meaningless for it.
+    """
+    if annotated:
+        if aligner is not Aligner.STAR:
+            raise ValueError(f"{aligner.value} has no annotated index")
+        return SidecarRole.STAR_ANNOTATED_INDEX
+    return INDEX_ROLE[aligner]
 
 
 # STAR's members become suffixes too -- `.STARindex.SA`, `.STARindex.Genome`.
@@ -117,9 +159,20 @@ STAR_SUFFIXES: tuple[str, ...] = tuple(
     f"{STAR_DIR_SUFFIX}.{member}" for member in STAR_MEMBERS
 )
 
+# The annotated index's fifteen files, flattened the same way, under the
+# separate directory name so they cannot collide with an unannotated build's
+# sidecars of the same aligner.
+STAR_ANNOTATED_SUFFIXES: tuple[str, ...] = tuple(
+    f"{STAR_ANNOTATED_DIR_SUFFIX}.{member}" for member in STAR_ANNOTATED_MEMBERS
+)
 
-def index_suffixes(aligner: Aligner) -> tuple[str, ...]:
+
+def index_suffixes(aligner: Aligner, *, annotated: bool = False) -> tuple[str, ...]:
     """Every suffix an aligner's index is made of, relative to the reference."""
+    if annotated:
+        if aligner is not Aligner.STAR:
+            raise ValueError(f"{aligner.value} has no annotated index")
+        return STAR_ANNOTATED_SUFFIXES
     if aligner is Aligner.BWA_MEM2:
         return BWA_MEM2_SUFFIXES
     if aligner is Aligner.BOWTIE2:
@@ -131,13 +184,18 @@ def index_suffixes(aligner: Aligner) -> tuple[str, ...]:
     return (MINIMAP2_SUFFIX,)
 
 
-def index_filenames(reference_name: str, aligner: Aligner) -> tuple[str, ...]:
+def index_filenames(
+    reference_name: str, aligner: Aligner, *, annotated: bool = False
+) -> tuple[str, ...]:
     """The filenames an aligner's index occupies beside `reference_name`.
 
     The reference's *own* name is the base, not the blob digest: these names are
     what the tool will look for, and it derives them from the path it was given.
     """
-    return tuple(f"{reference_name}{suffix}" for suffix in index_suffixes(aligner))
+    return tuple(
+        f"{reference_name}{suffix}"
+        for suffix in index_suffixes(aligner, annotated=annotated)
+    )
 
 
 @dataclass(frozen=True)
@@ -240,8 +298,21 @@ _LAYOUTS: dict[Aligner, IndexLayout] = {
     ),
 }
 
+# The annotated variant only exists for STAR, so it is a separate one-entry
+# table rather than a second dimension on `_LAYOUTS` that every other aligner
+# would carry a meaningless value for.
+_ANNOTATED_LAYOUTS: dict[Aligner, IndexLayout] = {
+    Aligner.STAR: IndexLayout(
+        suffixes=STAR_ANNOTATED_SUFFIXES, directory_suffix=STAR_ANNOTATED_DIR_SUFFIX
+    ),
+}
 
-def layout_for(aligner: Aligner) -> IndexLayout:
+
+def layout_for(aligner: Aligner, *, annotated: bool = False) -> IndexLayout:
+    if annotated:
+        if aligner not in _ANNOTATED_LAYOUTS:
+            raise ValueError(f"{aligner.value} has no annotated index")
+        return _ANNOTATED_LAYOUTS[aligner]
     return _LAYOUTS[aligner]
 
 

@@ -646,6 +646,22 @@ class TestStarIndexCommand:
         assert "--genomeSAindexNbases" in joined
         assert "--genomeSAindexNbases 14" not in joined
 
+    def test_no_gtf_omits_the_annotation_flags(self):
+        """The de novo path this application already ships -- 9,818 splices
+        found with no GTF on real yeast data -- must stay reachable."""
+        joined = " ".join(self.cmd())
+        assert "--sjdbGTFfile" not in joined
+        assert "--sjdbOverhang" not in joined
+
+    def test_a_gtf_adds_the_annotation_flags(self):
+        joined = " ".join(self.cmd(gtf=Path("/w/genes.gtf")))
+        assert "--sjdbGTFfile /w/genes.gtf" in joined
+        assert f"--sjdbOverhang {align_runner.STAR_SJDB_OVERHANG}" in joined
+
+    def test_sjdb_overhang_is_overridable(self):
+        joined = " ".join(self.cmd(gtf=Path("/w/genes.gtf"), sjdb_overhang=149))
+        assert "--sjdbOverhang 149" in joined
+
     def test_the_generic_builder_refuses_star(self):
         """Rather than falling through to bowtie2's two-positional shape,
         which would run STAR with a reference where a subcommand belongs."""

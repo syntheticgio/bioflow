@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { AlignerName, DataObject } from "../api/types";
@@ -6,9 +7,11 @@ import type { AlignerName, DataObject } from "../api/types";
 /**
  * Keys in a reference's index status that are not aligner indexes. The
  * samtools `.fai` rides along in the same map but has its own row below and
- * no "build" button, since every path that needs it makes one.
+ * no "build" button, since every path that needs it makes one. `star_annotated`
+ * rides along too, but gets its own row nested under STAR's rather than being
+ * dropped -- see the dedicated rendering below.
  */
-const NON_ALIGNER_INDEXES = new Set(["fai"]);
+const NON_ALIGNER_INDEXES = new Set(["fai", "star_annotated"]);
 
 /**
  * Which indexes a reference has, and a way to build the ones it does not.
@@ -20,6 +23,10 @@ const NON_ALIGNER_INDEXES = new Set(["fai"]);
  */
 export function IndexStatus({ object }: { object: DataObject }) {
   const qc = useQueryClient();
+  // Which annotation to build STAR's index with, chosen once a project has
+  // more than one and the ambiguity has to be resolved by hand -- mirrors
+  // the refusal `resolve_annotation` raises server-side for the same reason.
+  const [starAnnotationId, setStarAnnotationId] = useState<string>("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["pipelines", "references", object.project_id],
@@ -35,9 +42,23 @@ export function IndexStatus({ object }: { object: DataObject }) {
     staleTime: 60_000,
   });
 
+  // Only STAR has an annotated index, so this project-wide lookup is scoped
+  // to appear only once a STAR index (annotated or not) is actually offered
+  // below -- see `enabled`, set once `tools` has resolved.
+  const { data: annotations } = useQuery({
+    queryKey: ["pipelines", "annotations", object.project_id],
+    queryFn: () => api.annotations(object.project_id),
+    staleTime: 60_000,
+    enabled: tools?.tools.some((t) => t.name === "star" && t.available) ?? false,
+  });
+
   const build = useMutation({
-    mutationFn: (aligner: AlignerName) =>
-      api.buildIndex({ reference_id: object.id, aligner }),
+    mutationFn: (vars: { aligner: AlignerName; annotationId?: string }) =>
+      api.buildIndex({
+        reference_id: object.id,
+        aligner: vars.aligner,
+        annotation_id: vars.annotationId || null,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Building the index");
@@ -55,6 +76,9 @@ export function IndexStatus({ object }: { object: DataObject }) {
   const aligners = Object.keys(entry.indexes).filter(
     (name) => !NON_ALIGNER_INDEXES.has(name),
   ) as AlignerName[];
+
+  const annotationList = annotations?.annotations ?? [];
+  const starAnnotated = entry.indexes.star_annotated === true;
 
   return (
     <div className="section">
@@ -75,11 +99,65 @@ export function IndexStatus({ object }: { object: DataObject }) {
                   type="button"
                   className="btn"
                   style={{ padding: "1px 8px", fontSize: 11 }}
-                  onClick={() => build.mutate(name)}
+                  onClick={() => build.mutate({ aligner: name })}
                   disabled={build.isPending}
                 >
                   Build index
                 </button>
+              )}
+              {/* STAR only: an index built with --sjdbGTFfile improves
+                  splice-junction sensitivity over STAR's own de novo
+                  detection, and is a separate sidecar from the plain index
+                  above rather than a replacement for it -- see
+                  aligners.STAR_ANNOTATED_MEMBERS. Offered only once a GTF is
+                  actually available to build against. */}
+              {name === "star" && usable && annotationList.length > 0 && (
+                <div className="index-row" style={{ paddingLeft: 16 }}>
+                  <span className="index-name">star (annotated)</span>
+                  <span
+                    className={starAnnotated ? "index-built" : "index-missing"}
+                  >
+                    {starAnnotated ? "✓ built" : "not built"}
+                  </span>
+                  {!starAnnotated && (
+                    <>
+                      {annotationList.length > 1 && (
+                        <select
+                          value={starAnnotationId}
+                          onChange={(e) => setStarAnnotationId(e.target.value)}
+                          style={{ fontSize: 11 }}
+                        >
+                          <option value="">choose annotation…</option>
+                          {annotationList.map((a) => (
+                            <option key={a.object_id} value={a.object_id}>
+                              {a.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: "1px 8px", fontSize: 11 }}
+                        onClick={() =>
+                          build.mutate({
+                            aligner: "star",
+                            annotationId:
+                              annotationList.length === 1
+                                ? annotationList[0].object_id
+                                : starAnnotationId,
+                          })
+                        }
+                        disabled={
+                          build.isPending ||
+                          (annotationList.length > 1 && !starAnnotationId)
+                        }
+                      >
+                        Build index
+                      </button>
+                    </>
+                  )}
+                </div>
               )}
             </div>
           );
