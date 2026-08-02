@@ -271,6 +271,17 @@ textarea:focus {
   color: #fff;
 }
 
+.report-link-icon {
+  display: inline-block;
+  margin-left: 0.2em;
+  color: var(--text-dim);
+  font-size: 0.85em;
+}
+
+.report-link:hover .report-link-icon {
+  color: var(--text);
+}
+
 /* ---------- Breadcrumbs ---------- */
 .breadcrumbs {
   display: flex;
