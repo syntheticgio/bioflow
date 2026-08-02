@@ -2708,6 +2708,17 @@ table.software-matrix thead th.software-matrix-corner {
   margin-top: 0;
 }
 
+/* Spans both columns rather than sitting narrow in column 1 with column 2
+   empty beside it. auto-fit still seats a solo entry into its own two-column
+   row -- it is only *alone*, not *wide* -- so trimmomatic (third of three in
+   Trimming) landed at half width next to blank space instead of using it.
+   Spanning turns that dead column into room for trimmomatic's own prose/facts
+   layout, same shape flye already had by virtue of being the only entry in
+   its section. */
+.software-entry.is-solo {
+  grid-column: 1 / -1;
+}
+
 .software-prose p {
   line-height: 1.6;
   margin: 0 0 10px;
