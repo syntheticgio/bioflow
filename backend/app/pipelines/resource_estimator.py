@@ -62,6 +62,34 @@ def estimate_mb(
     return math.ceil(model.fixed_overhead_mb + index_mb + worker_mb + sort_mb)
 
 
+def estimate_assembly_mb(
+    *,
+    assembler,
+    genome_bases: int | None,
+    threads: int,
+) -> int | None:
+    """Peak resident memory for a de novo assembly, in MB. None if unknowable.
+
+    The genome dominates rather than the reads: a repeat graph is built over
+    the assembly, and coverage drives runtime far more than peak residency.
+
+    **None is a real answer, not a failure.** De novo assembly is what you do
+    when there is no reference, so a project that cannot supply a genome size
+    is the normal case rather than a misconfigured one. Callers must treat
+    None as "no opinion" and let the run proceed -- refusing to start because
+    we could not guess would be worse than starting and failing, which at
+    least produces a log.
+    """
+    if genome_bases is None or genome_bases <= 0:
+        return None
+
+    from app.pipelines.assembler_registry import spec_for as assembler_spec_for
+
+    model = assembler_spec_for(assembler).memory_model
+    graph_mb = (genome_bases * model.bytes_per_genome_base) / (1024 * 1024)
+    return math.ceil(model.fixed_overhead_mb + graph_mb + threads * model.mb_per_thread)
+
+
 def classify(
     *,
     # Named `estimated_mb` rather than `estimate_mb` so it does not shadow the

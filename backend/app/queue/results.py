@@ -1154,6 +1154,123 @@ async def _apply_align_reads(result: dict, *, owner: str) -> None:
             await run_service.link_job(run_id, index_job.id, RunJobRole.INDEX_BAM)
 
 
+def assembly_provenance(result: dict) -> dict:
+    """What an assembly's outputs record about how they were made.
+
+    The assembler and its version are half of what a methods section needs;
+    the input mode is the other half, since it is the claim about read
+    accuracy the whole assembly rests on.
+    """
+    params = result.get("params") or {}
+    provenance = {
+        "assembled_by": result.get("assembler"),
+        "assembler_version": result.get("tool_version"),
+    }
+    if params.get("mode"):
+        provenance["assembly_mode"] = params["mode"]
+    if params.get("genome_size"):
+        provenance["assembly_genome_size"] = params["genome_size"]
+        # Kept beside the number rather than dropped: a size BioFlow guessed
+        # and one the user typed are different claims, and only one of them is
+        # evidence about the genome.
+        provenance["assembly_genome_size_source"] = params.get(
+            "genome_size_source", "unset"
+        )
+    return provenance
+
+
+async def _apply_assemble_reads(result: dict, *, owner: str) -> None:
+    """Turn a finished assembly into its objects.
+
+    Two DataObjects from one job, which no other pipeline handler does --
+    `_apply_assembly_download` is the precedent, not `_apply_align_reads`. The
+    contigs become a reference you can align against; the graph is a result in
+    its own right.
+
+    The contigs are ingested first and independently: if the graph fails to
+    ingest, an assembly that took six hours still produced its FASTA, and
+    losing that because a secondary output tripped would be indefensible.
+    """
+    from app.services import object_service, run_service
+
+    contigs_out = result.get("contigs")
+    object_id = result.get("object_id")
+    if not contigs_out or not object_id:
+        return
+
+    reads = await DataObject.get(PydanticObjectId(object_id))
+    if reads is None:
+        log.warning("assemble_reads_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+    produced_by = PydanticObjectId(job_id) if job_id else None
+    provenance = assembly_provenance(result)
+    facts = {**provenance, **(result.get("assembly_facts") or {})}
+
+    try:
+        contigs = await object_service.ingest_local_file(
+            owner=reads.owner,
+            project_id=reads.project_id,
+            path=Path(contigs_out["tmp_path"]),
+            name=contigs_out["name"],
+            # REFERENCE, so the align card offers aligning these very reads
+            # back against their own assembly -- which is also the
+            # precondition a polisher needs. The ingest path would not assign
+            # it: should_assign_reference_role requires an NCBI accession, and
+            # a de novo assembly has none.
+            role=ObjectRole.REFERENCE,
+            derived_from=[reads.id],
+            produced_by_job=produced_by,
+            facts=facts,
+            metadata=dict(reads.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("assembly_contigs_ingest_failed", object_id=object_id, error=str(e))
+        return
+
+    produced = [contigs.id]
+
+    graph_out = result.get("graph")
+    if graph_out:
+        try:
+            graph = await object_service.ingest_local_file(
+                owner=reads.owner,
+                project_id=reads.project_id,
+                path=Path(graph_out["tmp_path"]),
+                name=graph_out["name"],
+                role=ObjectRole.ASSEMBLY_GRAPH,
+                # From the reads *and* the contigs: the graph describes the
+                # same assembly the FASTA flattens, so a user deleting the
+                # contigs should see the graph as descending from them.
+                derived_from=[reads.id, contigs.id],
+                produced_by_job=produced_by,
+                facts=dict(provenance),
+                metadata=dict(reads.metadata),
+            )
+            produced.append(graph.id)
+        except Exception as e:  # noqa: BLE001
+            # Logged and swallowed. The assembly succeeded; the graph is a
+            # bonus, and failing the whole apply here would strand the FASTA
+            # that cost the hours.
+            log.error(
+                "assembly_graph_ingest_failed", object_id=object_id, error=str(e)
+            )
+
+    log.info(
+        "assembly_applied",
+        object_id=object_id,
+        contigs_id=str(contigs.id),
+        outputs=len(produced),
+        contig_count=facts.get("assembly_contig_count"),
+        circular=facts.get("assembly_circular_count"),
+    )
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, produced, owner=contigs.owner)
+
+
 async def _apply_index_bam(result: dict, *, owner: str) -> None:
     """Attach a `.bai` to its BAM and record the flagstat numbers."""
     from app.services import object_service
@@ -1611,4 +1728,5 @@ _APPLIERS = {
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,
+    "assemble_reads": _apply_assemble_reads,
 }

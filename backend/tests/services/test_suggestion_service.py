@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from app.models import FormatKind, ObjectRole, ObjectStatus
-from app.pipelines import align_runner, aligner_registry
+from app.pipelines import align_runner, aligner_registry, assembler_registry
 from app.services import pipeline_service
 from app.services.suggestion_service import (
     CardStatus,
@@ -701,31 +701,102 @@ class TestVariantsCard:
 
 
 class TestAssembleCard:
+    """The card that was permanently unavailable until Flye landed.
+
+    Every case here patches `spec_for_chemistry` rather than `tools.flye`.
+    That is not incidental: AssemblerSpec is a frozen dataclass that captured
+    the probe as a function object at import time, so patching the module
+    attribute never reaches `spec.tool` -- a test that appears to control the
+    environment while silently reading the host's.
+    """
+
+    @staticmethod
+    def _installed():
+        class _Available:
+            available = True
+
+        return dataclasses.replace(
+            assembler_registry.FLYE_SPEC, tool=lambda: _Available()
+        )
+
+    @staticmethod
+    def _missing():
+        class _Absent:
+            available = False
+
+        return dataclasses.replace(
+            assembler_registry.FLYE_SPEC, tool=lambda: _Absent()
+        )
+
     def test_not_offered_for_a_bam(self):
         assert build_assemble_card(_fake_obj(kind=FormatKind.BAM)) is None
 
-    def test_offered_for_a_fastq_but_never_runnable(self):
-        """Shown rather than hidden so the card count stays stable across
-        files and the capability stays discoverable."""
-        card = build_assemble_card(_fake_obj())
-        assert card is not None
+    def test_available_for_long_reads_when_the_assembler_is_installed(self):
+        with patch.object(
+            assembler_registry, "spec_for_chemistry", return_value=self._installed()
+        ):
+            card = build_assemble_card(
+                _fake_obj(facts={"qc_read_chemistry": "ont_simplex"})
+            )
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/assemble"
+        # Object id only: genome-size inference walks the project, which is an
+        # async read, and every builder in this module is synchronous and pure.
+        assert card.launch["body"] == {"object_id": "abc123"}
+
+    def test_the_why_names_the_chemistry_and_the_mode(self):
+        """The mode is a claim about read accuracy, and it is the one thing a
+        user might want to override -- so the card says which one it picked."""
+        with patch.object(
+            assembler_registry, "spec_for_chemistry", return_value=self._installed()
+        ):
+            card = build_assemble_card(
+                _fake_obj(facts={"qc_read_chemistry": "ont_duplex"})
+            )
+        assert "duplex" in card.why.lower()
+        assert "nano-hq" in card.why
+
+    def test_it_flips_to_unavailable_when_the_assembler_is_absent(self):
+        """The direction that fails when the patch seam breaks.
+
+        Asserting *availability* would pass whether or not the patch worked,
+        because the image ships Flye -- which is exactly how a test ends up
+        reading the host machine while appearing to control it.
+        """
+        with patch.object(
+            assembler_registry, "spec_for_chemistry", return_value=self._missing()
+        ):
+            card = build_assemble_card(
+                _fake_obj(facts={"qc_read_chemistry": "hifi"})
+            )
         assert card.status is CardStatus.UNAVAILABLE
         assert card.launch is None
+        assert "flye" in card.reason.lower()
 
-    def test_the_reason_names_the_missing_assembler_not_the_dag(self):
-        """Both "no assembler" and "no pipeline system" are true, but the
-        absent binary is the blocking constraint and the honest one."""
-        card = build_assemble_card(_fake_obj())
-        assert card.reason == "No assembler is installed."
-        assert "pipeline" not in card.reason.lower()
-        assert "DAG" not in card.reason
+    def test_short_reads_are_refused_for_a_different_reason_than_unknown(self):
+        """Two refusals, deliberately distinct: one the user cannot act on
+        today, one they fix by pressing a button."""
+        short = build_assemble_card(_fake_obj(facts={"qc_read_chemistry": "short"}))
+        unknown = build_assemble_card(_fake_obj())
 
-    def test_it_stays_unavailable_whatever_the_chemistry(self):
-        for chem in ("short", "ont_simplex", "hifi", "clr", None):
+        assert short.status is CardStatus.UNAVAILABLE
+        assert "short-read" in short.reason.lower()
+
+        assert unknown.status is CardStatus.UNAVAILABLE
+        assert "qc" in unknown.reason.lower()
+        assert short.reason != unknown.reason
+
+    def test_the_old_no_assembler_sentence_is_gone(self):
+        """It was true while tools.py declared no assembler and became a lie
+        the day Flye was installed -- the failure CLAUDE.md predicts by name.
+        """
+        with patch.object(
+            assembler_registry, "spec_for_chemistry", return_value=self._installed()
+        ):
             card = build_assemble_card(
-                _fake_obj(facts={"qc_read_chemistry": chem} if chem else {})
+                _fake_obj(facts={"qc_read_chemistry": "clr"})
             )
-            assert card.status is CardStatus.UNAVAILABLE
+        assert card.reason is None
 
 
 def _vcf(obj_id="vcf789", kind=FormatKind.VCF):
