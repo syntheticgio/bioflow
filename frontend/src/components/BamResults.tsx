@@ -7,6 +7,7 @@ import type {
   MapqHistogramBucket,
   ObjectDetail as ObjectDetailData,
 } from "../api/types";
+import { isStarMapqScale, mapqBucketLabel, mapqScaleNote } from "../lib/mapq";
 import { AlignmentReport } from "./AlignmentReport";
 import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart";
 import { ContigTable } from "./ContigTable";
@@ -33,6 +34,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
     onError: (e: Error) => notify.error(e.message),
   });
 
+  const starScale = isStarMapqScale(obj.facts);
   const hasResults = f.bam_stats_status === "ok";
   const sortedCoordinate = obj.facts.sort_order === "coordinate";
   const hasIndex = obj.facts.has_index === true;
@@ -91,7 +93,11 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
           )}
 
           {f.bam_stats_report && (
-            <ContigTable objectId={obj.id} reportPath={f.bam_stats_report} />
+            <ContigTable
+              objectId={obj.id}
+              reportPath={f.bam_stats_report}
+              starMapqScale={starScale}
+            />
           )}
 
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
@@ -108,12 +114,27 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             )}
             {f.mapq_histogram && f.mapq_histogram.length > 0 && (
               <div className="section" style={{ flex: "1 1 300px" }}>
-                <div className="section-title">Mapping quality</div>
+                <div className="section-title">
+                  Mapping quality{starScale ? " (STAR scale)" : ""}
+                </div>
+                {/* Without this a reader has no way to see that these bars
+                    are locus counts and the next BAM's are phred scores. */}
+                {starScale && (
+                  <div
+                    style={{
+                      color: "var(--text-faint)",
+                      fontSize: 11,
+                      marginBottom: 6,
+                    }}
+                  >
+                    {mapqScaleNote(true)}
+                  </div>
+                )}
                 <Histogram
                   data={f.mapq_histogram}
                   xKey="mapq"
                   yKey="count"
-                  xLabel={(v) => `${v}`}
+                  xLabel={(v) => mapqBucketLabel(v, starScale)}
                 />
               </div>
             )}

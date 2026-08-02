@@ -812,6 +812,8 @@ export interface AlignmentFacts {
   properly_paired_pct?: number;
   duplicate_reads?: number;
   duplicate_pct?: number;
+  /** STAR only: the fraction its MAPQ 255 code marks. See lib/mapq. */
+  uniquely_mapped_percent?: number;
   aligned_by?: string;
   aligner_version?: string;
 }
@@ -872,6 +874,8 @@ export interface BamStatsFacts {
   bam_stats_contigs_top?: ContigCoverage[];
   bam_stats_report?: string;
   mapq_histogram?: MapqHistogramBucket[];
+  /** Present only when the values are STAR's locus codes, not phred scores. */
+  mapq_scale?: "star";
   insert_size_histogram?: InsertSizeHistogramBucket[];
 }
 

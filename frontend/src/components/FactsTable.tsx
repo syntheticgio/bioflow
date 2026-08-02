@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import { formatDate, isIsoTimestamp } from "../lib/format";
+import { isStarMapqScale } from "../lib/mapq";
 import { TruncatedValue } from "./TruncatedValue";
 
 /**
@@ -69,6 +70,8 @@ const LABELS: Record<string, string> = {
   mean_quality: "Mean quality",
   min_position_quality: "Lowest position quality",
   mean_mapping_quality: "Mean MAPQ",
+  uniquely_mapped_percent: "Uniquely mapped",
+  mapq_scale: "MAPQ scale",
   mapped_percent: "Mapped",
   duplicate_percent: "Duplicates",
 };
@@ -162,7 +165,8 @@ const GROUPS: FactGroup[] = [
     keys: [
       "quality_encoding", "mean_quality", "min_position_quality",
       "gc_content_percent", "gc_per_read_mean", "mapped_percent",
-      "duplicate_percent", "mean_mapping_quality",
+      "duplicate_percent", "mean_mapping_quality", "uniquely_mapped_percent",
+      "mapq_scale",
     ],
   },
   {
@@ -441,12 +445,17 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
  * thing, one of them worse. Anything QC writes that QcReport does not show
  * should be added there rather than un-suppressed here.
  */
-function isSuppressed(key: string): boolean {
+function isSuppressed(key: string, facts: Record<string, unknown>): boolean {
+  // A mean over STAR's MAPQ codes is not a quality -- it lands near 250 for a
+  // good run, against ~50 for the same reads through bwa-mem2. Ingest stopped
+  // writing it, but BAMs aligned before that still carry the number, and this
+  // table would print it beside every other aligner's as though comparable.
+  if (key === "mean_mapping_quality" && isStarMapqScale(facts)) return true;
   return SUPPRESSED.has(key) || key.startsWith("qc_");
 }
 
 export function countVisibleFacts(facts: Record<string, unknown>): number {
-  return Object.keys(facts).filter((k) => !isSuppressed(k)).length;
+  return Object.keys(facts).filter((k) => !isSuppressed(k, facts)).length;
 }
 
 export function FactsTable({
@@ -458,7 +467,7 @@ export function FactsTable({
    *  self-contained card, so they can flow into however many columns fit. */
   columns?: boolean;
 }) {
-  const keys = Object.keys(facts).filter((k) => !isSuppressed(k));
+  const keys = Object.keys(facts).filter((k) => !isSuppressed(k, facts));
   if (keys.length === 0 && !facts.parse_error && !facts.parse_warning) return null;
 
   const groups = groupKeys(keys);

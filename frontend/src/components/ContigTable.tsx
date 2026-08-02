@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { mapqScaleNote } from "../lib/mapq";
 
 const PAGE_SIZE = 25;
 
@@ -12,9 +13,14 @@ const PAGE_SIZE = 25;
 export function ContigTable({
   objectId,
   reportPath,
+  starMapqScale = false,
 }: {
   objectId: string;
   reportPath: string;
+  /** `samtools coverage` averages whatever MAPQ the aligner wrote, so this
+   * column inherits STAR's 255 codes and reads as ~250 per contig. The
+   * number is left alone and the scale named instead; see lib/mapq. */
+  starMapqScale?: boolean;
 }) {
   const [page, setPage] = useState(0);
 
@@ -52,7 +58,9 @@ export function ContigTable({
                 <th>Reads</th>
                 <th>Coverage</th>
                 <th>Mean depth</th>
-                <th>Mean MAPQ</th>
+                <th title={mapqScaleNote(starMapqScale) || undefined}>
+                  {starMapqScale ? "Mean MAPQ (STAR)" : "Mean MAPQ"}
+                </th>
               </tr>
             </thead>
             <tbody>

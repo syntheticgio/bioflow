@@ -51,6 +51,16 @@ export function AlignmentReport({ facts }: { facts: Record<string, unknown> }) {
               warn={f.properly_paired_pct != null && f.properly_paired_pct < 80}
             />
           )}
+          {/* STAR only. Its MAPQ codes carry this directly, and it is the
+              number a mean MAPQ was standing in for on that scale -- see
+              lib/mapq for why the mean itself is not shown. */}
+          {f.uniquely_mapped_percent != null && (
+            <Row
+              label="Uniquely mapped"
+              value="—"
+              pct={f.uniquely_mapped_percent}
+            />
+          )}
           {f.duplicate_reads != null && f.duplicate_reads > 0 && (
             <Row
               label="Duplicates"
