@@ -3551,8 +3551,12 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* The diagrams carry their own light/dark palette internally (keyed off
    prefers-color-scheme within the SVG's own <style>), independent of
-   BioFlow's theme variables -- this frame is just a neutral mat around them. */
+   BioFlow's theme variables -- this frame is just a neutral mat around them.
+   position: relative anchors the download buttons to this frame rather than
+   the page, so they sit in the diagram's own corner even as it scrolls
+   sideways on narrow viewports. */
 .workflow-diagrams-frame {
+  position: relative;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3565,4 +3569,50 @@ table.software-matrix thead th.software-matrix-corner {
   width: 100%;
   height: auto;
   min-width: 1100px;
+}
+
+/* Faded until hovered so the buttons don't compete with the diagram itself
+   -- these are a utility, not part of the content. Kept fully opaque on
+   touch devices (no hover), since a control that only appears on hover is
+   unreachable there. */
+.workflow-diagrams-downloads {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  gap: 6px;
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+
+.workflow-diagrams-frame:hover .workflow-diagrams-downloads {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .workflow-diagrams-downloads {
+    opacity: 0.85;
+  }
+}
+
+.workflow-diagrams-downloads a {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  text-decoration: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
+.workflow-diagrams-downloads a:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+  border-color: var(--accent-dim);
 }
