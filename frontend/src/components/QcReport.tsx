@@ -2,6 +2,25 @@ import { api } from "../api/client";
 import type { QcFacts } from "../api/types";
 
 /**
+ * A report name that opens the same new-tab, noopener, CSP-sandboxed link
+ * whether the click lands on the text or the trailing ↗ -- the icon is only
+ * there so the row reads as "leaves the app" at a glance, not a second,
+ * different destination. See the untrusted-content comment where this is
+ * used: these pages embed raw sequence data, so they stay out of an iframe
+ * in the app's own document.
+ */
+function ReportLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="report-link">
+      {children}
+      <span className="report-link-icon" aria-hidden="true">
+        ↗
+      </span>
+    </a>
+  );
+}
+
+/**
  * What QC measured about a file, as it is.
  *
  * Distinct from `TrimReport` in what it can say: a trim reports a before and
@@ -116,23 +135,11 @@ function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) 
                   application's own document. The server sandboxes them via
                   CSP; this is the second half of that. */}
               {fastqcPath && (
-                <a
-                  href={api.qcReportUrl(objectId, fastqcPath)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  FastQC
-                </a>
+                <ReportLink href={api.qcReportUrl(objectId, fastqcPath)}>FastQC</ReportLink>
               )}
               {fastqcPath && fastpPath && " · "}
               {fastpPath && (
-                <a
-                  href={api.qcReportUrl(objectId, fastpPath)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  fastp
-                </a>
+                <ReportLink href={api.qcReportUrl(objectId, fastpPath)}>fastp</ReportLink>
               )}
             </dd>
           </>
@@ -242,13 +249,7 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
             <dd>
               {/* Same untrusted-content treatment as the fastp/FastQC links:
                   new tab, noopener, CSP-sandboxed on the server. */}
-              <a
-                href={api.qcReportUrl(objectId, nanoplotPath)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                NanoPlot
-              </a>
+              <ReportLink href={api.qcReportUrl(objectId, nanoplotPath)}>NanoPlot</ReportLink>
             </dd>
           </>
         )}
