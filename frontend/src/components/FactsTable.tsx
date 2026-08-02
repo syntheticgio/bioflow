@@ -48,6 +48,15 @@ const LABELS: Record<string, string> = {
   header_lines: "Header lines",
   sequence_longest: "Longest sequence",
   sequence_shortest: "Shortest sequence",
+  // Contiguity: the numbers QUAST would report, computed here instead since
+  // QUAST is not packaged for this image. See docs/superpowers/specs/
+  // 2026-08-02-post-assembly-qc-design.md.
+  sequence_n50: "N50",
+  sequence_n90: "N90",
+  sequence_l50: "L50",
+  sequence_auN: "auN",
+  sequence_gap_count: "Gaps",
+  sequence_gap_bases: "Gap bases",
   // Within a group the heading already says which tool wrote these, so the
   // labels drop the redundant prefix: "BAM statistics / Tool", not
   // "BAM statistics / BAM stats tool version".
@@ -155,7 +164,9 @@ const GROUPS: FactGroup[] = [
       "sort_order", "paired", "paired_hint", "read_length", "read_length_min",
       "read_length_max", "read_count_estimate", "record_count", "sequence_count",
       "sequence_count_estimate", "total_bases", "sequence_longest",
-      "sequence_shortest", "sequence_names", "first_contig", "first_read_ids",
+      "sequence_shortest", "sequence_n50", "sequence_n90", "sequence_l50",
+      "sequence_auN", "sequence_gap_count", "sequence_gap_bases",
+      "sequence_names", "first_contig", "first_read_ids",
       "sampled_records", "column_counts", "header_lines",
     ],
   },
@@ -343,6 +354,20 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
         <span className="mono">{v.name}</span> · {formatNumber(v.length)} bp
       </span>
     );
+  }
+
+  // Lengths in bases, same unit as sequence_longest/shortest above -- N50,
+  // N90, auN and the gap-base total are all counts of bases, not of contigs
+  // (sequence_l50 and sequence_gap_count are, and fall through to the plain
+  // number case below).
+  if (
+    (key === "sequence_n50" ||
+      key === "sequence_n90" ||
+      key === "sequence_auN" ||
+      key === "sequence_gap_bases") &&
+    typeof value === "number"
+  ) {
+    return `${formatNumber(value)} bp`;
   }
 
   if (key === "read_count_estimate" || key === "sequence_count_estimate") {

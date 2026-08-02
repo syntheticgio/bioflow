@@ -171,32 +171,19 @@ def parse_assembly_info(text: str) -> dict:
             if total
             else 0.0
         ),
-        "assembly_n50": _n50([c["length"] for c in contigs]),
+        # No N50 here: `parsers._contiguity_stats` computes `sequence_n50` from
+        # the FASTA bytes on the same object, independent of which assembler
+        # (or none) produced the file. Two N50s on one object that are
+        # supposed to agree is a bug with a delay fuse, so this table keeps
+        # only what it uniquely knows -- coverage and circularity, which no
+        # FASTA parse can produce.
+        #
         # Capped for the same reason `parsers.MAX_STORED_CONTIGS` is: a
         # fragmented draft has tens of thousands of rows and the facts
         # document is not where they belong.
         "assembly_contigs": sorted(contigs, key=lambda c: -c["length"])[:50],
         "assembly_contigs_truncated": len(contigs) > 50,
     }
-
-
-def _n50(lengths: list[int]) -> int:
-    """The length at which half the assembly sits in contigs at least that long.
-
-    Genuinely absent from the generic FASTA parse -- `sequence_stats` computes
-    composition only -- so this is the one QUAST-shaped number that arrives
-    without QUAST.
-    """
-    if not lengths:
-        return 0
-    ordered = sorted(lengths, reverse=True)
-    half = sum(ordered) / 2
-    running = 0
-    for length in ordered:
-        running += length
-        if running >= half:
-            return length
-    return ordered[-1]
 
 
 def harvest(out_dir: Path, outputs) -> dict[OutputKind, Path]:
