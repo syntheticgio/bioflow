@@ -43,6 +43,30 @@ def _no_queue(monkeypatch):
     monkeypatch.setattr(object_service, "enqueue_ingest", _skip)
 
 
+_scratch_files: list[Path] = []
+
+
+@pytest.fixture(autouse=True)
+def _reclaim_scratch_files():
+    """Delete any scratch file ingest did not consume.
+
+    Not `tmp_path`: the placement below has to be a rename rather than a copy,
+    which means staying on tmp_dir's filesystem. So the file lands in real user
+    storage (`/data/tmp`, shared between the main stack and every worktree
+    stack) and this has to take it back by hand.
+
+    The happy path consumes the file itself, so what accumulates is the failure
+    path -- `test_ingest_refuses_a_project_owned_by_another_profile` raises on
+    the owner check *before* ingest reaches the rename, leaving one straggler
+    per run. 31 of them had piled up by 2026-08-01.
+    """
+    _scratch_files.clear()
+    yield
+    for path in _scratch_files:
+        path.unlink(missing_ok=True)
+    _scratch_files.clear()
+
+
 def _scratch_file(content: bytes) -> Path:
     """A file for ingest to consume, under tmp_dir.
 
@@ -51,11 +75,13 @@ def _scratch_file(content: bytes) -> Path:
 
     `ingest_local_file` consumes its argument -- it renames the file into the
     object store -- and tmp_dir shares a filesystem with objects/, which makes
-    that placement an atomic rename rather than a copy.
+    that placement an atomic rename rather than a copy. When it does not get
+    that far, `_reclaim_scratch_files` above removes what is left.
     """
     settings.tmp_dir.mkdir(parents=True, exist_ok=True)
     path = settings.tmp_dir / f"owner-test-{uuid.uuid4().hex}.txt"
     path.write_bytes(content)
+    _scratch_files.append(path)
     return path
 
 
