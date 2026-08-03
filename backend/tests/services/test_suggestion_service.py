@@ -902,7 +902,7 @@ class TestAnnotateCard:
 
 @contextmanager
 def stub_db(references=(), chemistry=None, annotation_inputs=None):
-    """Cut the three database seams `suggestions_for` reaches through.
+    """Cut the four database seams `suggestions_for` reaches through.
 
     `suggestions_for` is the one function in this module that is not pure: it
     lists a project's references (for the align card), walks a BAM's
@@ -929,6 +929,7 @@ def stub_db(references=(), chemistry=None, annotation_inputs=None):
               return_value=chemistry),
         patch("app.services.pipeline_service.resolve_annotation_inputs",
               return_value=annotation_inputs),
+        patch("app.services.prior_runs._runs_touching", return_value=[]),
     ):
         yield
 
@@ -951,7 +952,7 @@ def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
 
 CARD_KEYS = {
     "kind", "category", "title", "description",
-    "why", "status", "reason", "launch",
+    "why", "status", "reason", "launch", "prior_runs",
 }
 
 
@@ -1035,6 +1036,8 @@ class TestSuggestionsFor:
         ), patch(
             "app.services.suggestion_service.tools.fastp",
             return_value=_FakeTool(True),
+        ), patch(
+            "app.services.prior_runs._runs_touching", return_value=[]
         ):
             cards = await suggestions_for(
                 _fake_obj(
@@ -1095,7 +1098,10 @@ class TestSuggestionsFor:
                 "app.services.pipeline_service.read_chemistry_for_alignment",
                 return_value=align_runner.ReadChemistry.SHORT,
             ):
-                await suggestions_for(_bam())
+                with patch(
+                    "app.services.prior_runs._runs_touching", return_value=[]
+                ):
+                    await suggestions_for(_bam())
         assert listing.call_count == 1
 
     async def test_annotations_are_not_fetched_for_a_fastq(self):
@@ -1109,7 +1115,11 @@ class TestSuggestionsFor:
             ) as annotations:
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
-                    await suggestions_for(_fake_obj())
+                    with patch(
+                        "app.services.prior_runs._runs_touching",
+                        return_value=[],
+                    ):
+                        await suggestions_for(_fake_obj())
         annotations.assert_not_called()
 
     async def test_chemistry_is_not_resolved_for_a_fastq(self):
@@ -1124,7 +1134,11 @@ class TestSuggestionsFor:
                        return_value=_FakeTool(True)):
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
-                    await suggestions_for(_fake_obj())
+                    with patch(
+                        "app.services.prior_runs._runs_touching",
+                        return_value=[],
+                    ):
+                        await suggestions_for(_fake_obj())
         resolve.assert_not_called()
 
     async def test_annotation_inputs_are_not_resolved_for_a_bam(self):
@@ -1145,7 +1159,11 @@ class TestSuggestionsFor:
                 # asserting.
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
-                    await suggestions_for(_bam())
+                    with patch(
+                        "app.services.prior_runs._runs_touching",
+                        return_value=[],
+                    ):
+                        await suggestions_for(_bam())
         resolve.assert_not_called()
 
     async def test_the_ready_filter_is_pushed_into_the_listing_query(self):
@@ -1155,8 +1173,20 @@ class TestSuggestionsFor:
                    return_value=_FakeTool(True)):
             with patch("app.services.object_service.list_objects",
                        return_value=[]) as listing:
-                await suggestions_for(_fake_obj())
+                with patch(
+                    "app.services.prior_runs._runs_touching", return_value=[]
+                ):
+                    await suggestions_for(_fake_obj())
         assert listing.call_args.kwargs["status"] is ObjectStatus.READY
+
+    async def test_every_card_carries_a_prior_runs_list(self):
+        """Absent would make the frontend guard a field that is always sent;
+        empty is the honest answer for a file nothing has been run on."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db():
+            cards = await suggestions_for(_fake_obj())
+        assert cards
+        assert all(c["prior_runs"] == [] for c in cards)
 
 
 class TestSuggestionsEndpoint:
