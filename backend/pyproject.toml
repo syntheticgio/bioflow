@@ -18,6 +18,9 @@ dependencies = [
     "aiofiles>=24.1",
     "sse-starlette>=2.1",
     "pysam>=0.23",
+    # Fernet, for API keys at rest. See services/ai/crypto.py -- the threat
+    # model is a curious look at the Mongo collection, not shell access.
+    "cryptography>=44.0",
 ]
 
 [project.optional-dependencies]
