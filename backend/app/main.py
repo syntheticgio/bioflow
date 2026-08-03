@@ -49,6 +49,11 @@ async def lifespan(app: FastAPI):
         log.error("storage_unavailable_at_startup", detail=e.message)
 
     await connect_to_mongo()
+
+    from app.services.ai.migration import seed_legacy_provider
+
+    await seed_legacy_provider()
+
     await connect_to_redis()
 
     # Registers handlers so /jobs/types and enqueue validation know what exists.
