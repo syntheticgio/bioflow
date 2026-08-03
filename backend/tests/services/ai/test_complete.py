@@ -16,11 +16,14 @@ from app.services.ai.router import ResolvedProvider
 
 # `app.services.ai/__init__.py` re-exports a function named `complete`, which
 # shadows the submodule of the same name as an attribute on the package -- so
-# `from app.services.ai import complete` (or `import ...complete as x`)
-# resolves to the function, not the module `_run` lives on. Pull the real
-# submodule out of `sys.modules`, where `import` always registers it under
-# its full dotted path regardless of what the package's own `__init__.py`
-# rebinds its attribute to.
+# `import app.services.ai.complete as complete_mod` resolves to the function
+# too: that form still imports `app.services.ai` first (running its
+# `__init__.py`, which rebinds the `complete` attribute), then does the
+# equivalent of `complete_mod = app.services.ai.complete`, an attribute
+# lookup on the now-rebound package -- not a `sys.modules` lookup. Pull the
+# real submodule out of `sys.modules` instead, where `import` always
+# registers it under its full dotted path regardless of what `__init__.py`
+# does to the package's own attributes.
 import app.services.ai.complete  # noqa: F401,E402 - registers the submodule below
 
 complete_mod = sys.modules["app.services.ai.complete"]
@@ -149,3 +152,59 @@ class TestComplete:
         monkeypatch.setattr(complete_mod, "_run", capture)
         await complete_mod.complete(provider, system="s", user="u", max_tokens=250)
         assert seen["max_tokens"] == 250
+
+
+class TestCompleteSync:
+    async def test_returns_the_completion(self, monkeypatch):
+        provider = await _resolved()
+        monkeypatch.setattr(
+            complete_mod, "_run", lambda p, **kw: Completion("text", "m")
+        )
+        result = complete_mod.complete_sync(provider, system="s", user="u")
+        assert isinstance(result, Completion)
+        assert result.text == "text"
+
+    async def test_never_raises(self, monkeypatch):
+        """The invariant the whole package is built around -- this is the
+        function a worker-thread queue handler will call directly."""
+
+        def explode(p, **kw):
+            raise RuntimeError("adapter blew up")
+
+        provider = await _resolved()
+        monkeypatch.setattr(complete_mod, "_run", explode)
+        result = complete_mod.complete_sync(provider, system="s", user="u")
+        assert isinstance(result, Failure)
+        assert result.reason == FailureReason.BAD_RESPONSE
+
+    async def test_no_model_and_no_cache_is_model_not_found(self, monkeypatch):
+        provider = await _resolved(model="", cache=[])
+        result = complete_mod.complete_sync(provider, system="s", user="u")
+        assert isinstance(result, Failure)
+        assert result.reason == FailureReason.MODEL_NOT_FOUND
+
+    async def test_does_not_touch_the_database(self, monkeypatch):
+        """complete_sync() is meant to run off the event loop in a worker
+        thread, so it must never call the async DB-recording helpers --
+        doing so from a worker thread is exactly the kind of unhandled
+        failure this coverage exists to catch before Task 14 lands."""
+
+        def boom(*args, **kwargs):
+            raise AssertionError("complete_sync must not record to the database")
+
+        monkeypatch.setattr(provider_service, "record_failure", boom)
+        monkeypatch.setattr(provider_service, "record_success", boom)
+
+        provider = await _resolved()
+
+        monkeypatch.setattr(
+            complete_mod, "_run", lambda p, **kw: Completion("text", "m")
+        )
+        success_result = complete_mod.complete_sync(provider, system="s", user="u")
+        assert isinstance(success_result, Completion)
+
+        monkeypatch.setattr(
+            complete_mod, "_run", lambda p, **kw: Failure(FailureReason.INVALID_KEY)
+        )
+        failure_result = complete_mod.complete_sync(provider, system="s", user="u")
+        assert isinstance(failure_result, Failure)
