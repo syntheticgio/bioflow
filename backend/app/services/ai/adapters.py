@@ -81,7 +81,13 @@ class _BaseAdapter:
         )
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                return json.loads(response.read().decode())
+                parsed = json.loads(response.read().decode())
+            if not isinstance(parsed, dict):
+                log.warning(
+                    "ai_response_not_a_dict", url=url, type=type(parsed).__name__
+                )
+                return Failure(FailureReason.BAD_RESPONSE)
+            return parsed
         except urllib.error.HTTPError as e:
             detail = ""
             try:

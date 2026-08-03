@@ -190,3 +190,16 @@ class TestListModels:
             adapters.urllib.request, "urlopen", lambda *a, **k: _Response({"data": []})
         )
         assert adapter.list_models() == []
+
+    def test_non_dict_json_body_is_bad_response(self, adapter, monkeypatch):
+        """A malformed server -- e.g. a nonstandard local server returning a
+        bare JSON array from /v1/models -- must not raise AttributeError out
+        of list_models() when the code calls result.get("data")."""
+        monkeypatch.setattr(
+            adapters.urllib.request,
+            "urlopen",
+            lambda *a, **k: _Response(["not", "a", "dict"]),
+        )
+        result = adapter.list_models()
+        assert isinstance(result, Failure)
+        assert result.reason == FailureReason.BAD_RESPONSE
