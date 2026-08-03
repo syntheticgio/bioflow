@@ -26,8 +26,11 @@ from app.models.base import TimestampedDocument
 
 
 class RunOutcome:
-    """Why a run stopped. Not a StrEnum: these mirror JobState values and
-    importing JobState here would make the models package circular."""
+    """Why a run stopped. Not a StrEnum: these mirror a subset of JobState's
+    values, and staying a plain class keeps this schema's outcome vocabulary
+    decoupled from job lifecycle semantics -- the two are free to diverge
+    (e.g. this could later distinguish an OOM kill from a plain failure)
+    without touching JobState."""
 
     SUCCEEDED = "succeeded"
     FAILED = "failed"
