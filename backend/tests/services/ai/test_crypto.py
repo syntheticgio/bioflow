@@ -51,6 +51,11 @@ class TestRoundTrip:
         page -- it reads as a provider whose key needs re-entering."""
         assert crypto.decrypt(b"not-a-fernet-token") is None
 
+    def test_decrypt_returns_none_on_none(self, key_dir):
+        """`api_key_enc` being None (no key configured) is a realistic input
+        once this is wired into a Beanie model -- it must not raise TypeError."""
+        assert crypto.decrypt(None) is None
+
 
 class TestHint:
     def test_hint_masks_all_but_the_last_four(self):
@@ -62,3 +67,9 @@ class TestHint:
 
     def test_hint_of_empty_is_none(self):
         assert crypto.hint("") is None
+
+    def test_short_sk_prefixed_key_is_fully_masked(self):
+        """A 12-char 'sk-' key would show 11 of its 12 chars under a plain
+        length-12 boundary tuned for the 3-char generic prefix -- the 7-char
+        'sk-' prefix needs its own, larger floor."""
+        assert crypto.hint("sk-123456789") == "…"

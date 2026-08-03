@@ -65,7 +65,7 @@ def decrypt(token: bytes) -> str | None:
     """
     try:
         return _fernet().decrypt(token).decode()
-    except (InvalidToken, ValueError):
+    except (InvalidToken, ValueError, TypeError):
         log.warning("ai_key_undecryptable")
         return None
 
@@ -75,10 +75,17 @@ def hint(plaintext: str) -> str | None:
 
     Short strings are masked entirely. A key short enough that "all but the
     last four" would show most of it is a key this must not partially print.
+    The prefix length depends on the branch (7 for "sk-", 3 otherwise), so the
+    length floor below is computed from that prefix rather than a single fixed
+    constant -- otherwise a threshold tuned for the 3-char generic prefix would
+    let the 7-char "sk-" prefix through with barely anything actually masked.
     """
     if not plaintext:
         return None
-    if len(plaintext) < 12:
+    prefix_len = 7 if plaintext.startswith("sk-") else 3
+    # Require at least 4 genuinely-masked characters in the middle, on top of
+    # the prefix and the last-four suffix, before showing the partial form.
+    if len(plaintext) < prefix_len + 4 + 4:
         return "…"
-    prefix = plaintext[:7] if plaintext.startswith("sk-") else plaintext[:3]
+    prefix = plaintext[:prefix_len]
     return f"{prefix}…{plaintext[-4:]}"
