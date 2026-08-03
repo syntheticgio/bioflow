@@ -56,6 +56,11 @@ def _cpu_model() -> str:
 
 
 def _probe() -> dict:
+    # Imported qualified, not `from ... import _read_cgroup_cpu`: tests patch
+    # `app.queue.governor._read_cgroup_cpu` via monkeypatch, which only takes
+    # effect on a lookup through the module object. A bare-name import bound
+    # at call time would still work today, but hoisting it to module scope
+    # (an easy "cleanup") would silently stop seeing the patch.
     import app.queue.governor as governor
 
     return {
