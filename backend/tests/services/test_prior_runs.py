@@ -58,3 +58,66 @@ class TestAlignmentMatching:
             inputs=[_input("ref1", RunInputRole.REFERENCE)],
         )
         assert run_matches_card(run, _align_card(aligner="bwa-mem2")) is False
+
+    def test_a_different_reference_does_not_match(self):
+        """The reference is an *input* with a role, never a param.
+
+        A matcher that only walked `run.params` would pass this test's setup
+        as a match -- same aligner, same kind -- and show the user an
+        alignment against a completely different genome as a prior run of
+        this card.
+        """
+        run = _run(
+            params={"aligner": "bwa-mem2"},
+            inputs=[_input("OTHER_GENOME", RunInputRole.REFERENCE)],
+        )
+        assert run_matches_card(run, _align_card(reference_id="ref1")) is False
+
+    def test_a_run_with_no_reference_input_does_not_match(self):
+        """Absent is not equal to whatever the card asked for."""
+        run = _run(params={"aligner": "bwa-mem2"}, inputs=[])
+        assert run_matches_card(run, _align_card(reference_id="ref1")) is False
+
+    def test_read_group_differences_are_ignored(self):
+        """`params` holds more than parameters.
+
+        `read_group` is built partly from the object's own name, so a
+        wholesale `params ==` comparison would make almost nothing match.
+        """
+        run = _run(
+            params={"aligner": "bwa-mem2", "read_group": {"ID": "anything"}},
+            inputs=[_input("ref1", RunInputRole.REFERENCE)],
+        )
+        assert run_matches_card(run, _align_card()) is True
+
+
+class TestTrimMatching:
+    def _trim_card(self, tool="fastp"):
+        return {
+            "kind": "preprocess",
+            "launch": {
+                "endpoint": "/pipelines/trim",
+                "body": {"object_id": "obj1", "tool": tool, "params": {}},
+            },
+        }
+
+    def test_same_tool_matches(self):
+        run = _run(kind=RunKind.TRIM, tool="fastp")
+        assert run_matches_card(run, self._trim_card()) is True
+
+    def test_a_different_tool_does_not_match(self):
+        """A trim's tool lives in the run's own `tool` field, not `params`."""
+        run = _run(kind=RunKind.TRIM, tool="cutadapt")
+        assert run_matches_card(run, self._trim_card(tool="fastp")) is False
+
+
+class TestKindGating:
+    def test_a_trim_run_never_matches_an_align_card(self):
+        run = _run(kind=RunKind.TRIM, tool="fastp")
+        assert run_matches_card(run, _align_card()) is False
+
+    def test_a_card_with_no_corresponding_run_kind_never_matches(self):
+        """Assemble, variants and the rest have no entry yet, and a card that
+        cannot name a run kind must show nothing rather than everything."""
+        run = _run(kind=RunKind.ALIGNMENT)
+        assert run_matches_card(run, {"kind": "assemble", "launch": None}) is False
