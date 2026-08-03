@@ -1567,7 +1567,9 @@
 /* ── Footer ─────────────────────────────────────────────────────────────── */
 
 .theme-broadsheet .footer {
-  background: none;
+  position: sticky;
+  bottom: 0;
+  background: var(--color-bg);
   border-top: 1px solid var(--color-divider);
   margin-top: var(--space-8);
   padding: var(--space-3) 0;
