@@ -10,14 +10,17 @@ import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
 
+import psutil
 from beanie import PydanticObjectId
 
 from app.db.client import get_db
 from app.errors import JobCancelled, PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import Job, JobState
+from app.models.timing import RunOutcome
 from app.queue import queue
 from app.queue.registry import HandlerMode, HandlerSpec, JobContext
+from app.queue.resource_sampler import ResourceSampler
 
 log = get_logger(__name__)
 
@@ -32,6 +35,16 @@ PROGRESS_INTERVAL_SECONDS = 0.5
 
 # Grace period between SIGTERM and SIGKILL for subprocess handlers.
 SUBPROCESS_GRACE_SECONDS = 15
+
+# Resource sampling interval. Fine enough that a minute-long job yields ~60
+# readings, coarse enough that the poll costs nothing next to the work.
+SAMPLE_INTERVAL_SECONDS = 1.0
+
+# Below this, resource fields are left null rather than filled with a peak
+# derived from a handful of samples. Short jobs are not what this data is for
+# -- the question "will this fit on my machine" is only asked about work
+# measured in minutes -- so they are excluded rather than recorded unreliably.
+RESOURCE_FLOOR_MS = 60_000
 
 
 class JobExecutor:
@@ -69,6 +82,8 @@ class JobExecutor:
 
         log.info("job_started", job_id=job_id, type=job.type, mode=spec.mode.value)
 
+        sampler, sampler_task = self._start_sampler()
+        outcome = RunOutcome.SUCCEEDED
         try:
             result = await self._dispatch(spec, ctx)
             # Thread-mode handlers cannot touch the database (Beanie is async),
@@ -77,14 +92,15 @@ class JobExecutor:
             await queue.complete(
                 job_id, epoch, state=JobState.SUCCEEDED, result=result or {}
             )
-            await self._record_timing(job)
             log.info("job_succeeded", job_id=job_id, type=job.type)
 
         except JobCancelled:
+            outcome = RunOutcome.CANCELLED
             await queue.complete(job_id, epoch, state=JobState.CANCELLED)
             log.info("job_cancelled", job_id=job_id, type=job.type)
 
         except PermanentError as e:
+            outcome = RunOutcome.FAILED
             # Cannot succeed however many times we try, so do not burn retries.
             await queue.complete(
                 job_id,
@@ -111,23 +127,67 @@ class JobExecutor:
                 "traceback_tail": "".join(traceback.format_exc().splitlines(True)[-12:]),
             }
             if attempts >= job.max_attempts:
+                outcome = RunOutcome.DEAD
                 await queue.complete(job_id, epoch, state=JobState.DEAD, error=error)
                 log.error("job_dead", job_id=job_id, attempts=attempts, error=str(e))
             else:
+                outcome = RunOutcome.FAILED
                 await get_db().jobs.update_one(
                     {"_id": PydanticObjectId(job_id)}, {"$set": {"attempts": attempts}}
                 )
                 await queue.retry_later(job_id, epoch, attempts, error)
                 log.warning("job_failed_retrying", job_id=job_id, attempts=attempts)
         finally:
+            sampler_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sampler_task
+            await self._record_timing(job, outcome=outcome, sampler=sampler)
             self._last_progress.pop(job_id, None)
             self._last_phase.pop(job_id, None)
 
-    async def _record_timing(self, job: Job) -> None:
-        """Feed this run into the duration model.
+    async def _sample_resources(
+        self, sampler: ResourceSampler, proc: psutil.Process
+    ) -> None:
+        """Poll until cancelled. Never raises -- telemetry cannot fail a job."""
+        try:
+            while True:
+                sampler.observe(proc)
+                await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.debug("resource_sampling_failed", error=str(e))
 
-        Only successful runs: a job that failed after 200ms would otherwise
-        drag every future estimate down.
+    def _start_sampler(self) -> tuple[ResourceSampler, asyncio.Task]:
+        """Sample this worker's own process subtree.
+
+        The worker's baseline is included, which slightly overstates a job's
+        own footprint -- but subprocess tools are spawned as children of this
+        process, so the subtree is what captures them, and two concurrent jobs
+        remain separable because each tool tree is walked from its own root.
+
+        `psutil.Process(pid)` is constructed exactly once, here, and reused
+        for every poll. `cpu_percent(interval=None)` reports the percentage
+        *since the previous call on that same Process instance* -- it returns
+        0.0 unconditionally on an instance's first call. `ResourceSampler.observe()`
+        accepts a `proc` argument for exactly this reason: a caller that
+        constructed a fresh `psutil.Process(self.pid)` on every poll (as
+        `observe()`'s own default does when called with no argument) would
+        report 0.0 CPU forever, silently. This was caught in Task 1's code
+        review before it could reach a running job.
+        """
+        proc = psutil.Process(os.getpid())
+        sampler = ResourceSampler(pid=os.getpid())
+        return sampler, asyncio.create_task(self._sample_resources(sampler, proc))
+
+    async def _record_timing(
+        self, job: Job, *, outcome: str, sampler: ResourceSampler
+    ) -> None:
+        """Feed this run into the models and into provenance.
+
+        Failed runs are recorded now, tagged by outcome: a failure is the most
+        informative record a user can read, and an OOM kill is the best memory
+        signal available. `timing_service._samples` keeps them out of the fits.
         """
         try:
             started = job.timing.started_at
@@ -135,12 +195,16 @@ class JobExecutor:
                 return
             from datetime import UTC, datetime
 
-            from app.services import timing_service
+            from app.services import machine_profile, timing_service
+            from app.services.params_sanitizer import sanitize
 
-            duration_ms = int(
-                (datetime.now(UTC) - started).total_seconds() * 1000
-            )
-            # Payload size is what the model predicts against; a job without
+            now = datetime.now(UTC)
+            duration_ms = int((now - started).total_seconds() * 1000)
+            queued_ms = None
+            if job.timing.enqueued_at is not None:
+                queued_ms = int((started - job.timing.enqueued_at).total_seconds() * 1000)
+
+            # Payload size is what the models predict against; a job without
             # one (a schedule tick) has nothing to correlate.
             size = job.payload.get("size") or 0
             if not size and job.object_id:
@@ -151,10 +215,31 @@ class JobExecutor:
             if not size:
                 return
 
+            # Under the floor the peak comes from too few samples to mean
+            # anything, so the resource block stays empty rather than carrying
+            # a number nothing should fit against.
+            resources = {}
+            if duration_ms >= RESOURCE_FLOOR_MS:
+                resources = {
+                    "peak_rss_bytes": sampler.peak_rss_bytes,
+                    "peak_cpu_percent": sampler.peak_cpu_percent,
+                    "mean_cpu_percent": sampler.mean_cpu_percent,
+                    "sample_count": sampler.sample_count,
+                }
+
             await timing_service.record(
                 job_type=job.type,
                 input_bytes=size,
                 duration_ms=duration_ms,
+                outcome=outcome,
+                queued_ms=queued_ms,
+                threads=job.payload.get("threads"),
+                resources=resources,
+                machine=machine_profile.capture(),
+                params=sanitize(job.payload),
+                job_id=str(job.id),
+                object_id=str(job.object_id) if job.object_id else None,
+                project_id=str(job.project_id) if job.project_id else None,
                 worker_id=self.worker_id,
             )
         except Exception as e:  # noqa: BLE001 - telemetry never fails a job
