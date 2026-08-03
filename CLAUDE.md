@@ -344,8 +344,10 @@ filter and none had one.
 
 That invariant now lives in the read paths instead of the write path, which is
 the part that is easy to get wrong. **Do not query the collection directly to
-fit or summarize anything.** Go through `timing_service._samples()`, which
-applies the outcome filter once; provenance uses its own explicitly-named
+fit or summarize anything.** Go through `timing_service._modelled()` (the
+outcome-filtered accessor both `_samples()`, the duration model, and
+`estimate_memory()`/`stats()`, the memory model, are built on) or one of its
+callers; provenance uses `records_for_object()`, its own explicitly-named
 accessor that includes failures on purpose.
 
 The failure mode if you forget is silent and points the wrong way. A job that

@@ -193,6 +193,50 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## Neither model segments by thread count
+
+Raised: 2026-08-03, deferred while building computation records
+(`docs/superpowers/specs/2026-08-03-computation-records-design.md`,
+`docs/superpowers/plans/2026-08-03-computation-records.md`).
+
+`JobRunTiming.threads` is captured -- the executor reads it from
+`job.payload`, where the align/assembly/expression/assembly_qc handlers
+already put it -- but both `timing_service._fit` (duration) and its memory
+counterpart still regress against `input_bytes` alone. The design called for
+segmenting the duration fit by thread count with a bytes-only fallback.
+
+Deferred because no row carried a thread count until the recording shipped in
+this same work, so the segmentation could only have been tested against
+synthetic data and would have fallen back to today's behavior on every real
+row anyway -- there was nothing to segment yet.
+
+Revisit once several job types have accumulated runs at differing thread
+counts. Check against real rows, not fixtures -- per CLAUDE.md, hand-built
+objects that already look the way the code expects are how the suggestion
+rules passed green while being wrong.
+
+Touches: `backend/app/services/timing_service.py`.
+
+## No provenance panel for computation records
+
+Raised: 2026-08-03, deferred while building computation records (same specs
+as above).
+
+`timing_service.records_for_object()` returns every run that touched an
+object, failures included, and nothing renders it. The design listed
+per-object provenance as one of three read surfaces; the accessor shipped
+(and is covered by `backend/tests/queue/test_record_outcomes.py`), the UI and
+the route exposing it did not.
+
+Would show, per run: duration, peak RSS, thread count, tool and version, the
+machine it ran on, and outcome (a failed run is the most useful record here --
+it is the whole reason `records_for_object` includes failures when every other
+reader filters them out).
+
+Touches: `frontend/src/`, plus a new route in `backend/app/api/v1/jobs.py` (or
+wherever an object-scoped provenance list belongs) exposing
+`timing_service.records_for_object`.
+
 ## QC report directories can vanish from disk while the object's facts still point at them
 
 Raised: 2026-08-02, found while investigating a user report of a 404 on the
