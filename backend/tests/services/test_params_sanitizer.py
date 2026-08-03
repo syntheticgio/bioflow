@@ -50,3 +50,8 @@ class TestValueSafety:
     def test_long_strings_are_dropped(self):
         out = sanitize({"preset": "x" * 200})
         assert out == {}
+
+    def test_none_under_an_allowed_key_is_dropped(self):
+        """A key present but unset is not a usable predictor sample."""
+        out = sanitize({"threads": 4, "aligner": None})
+        assert out == {"threads": 4}
