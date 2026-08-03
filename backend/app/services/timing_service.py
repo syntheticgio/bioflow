@@ -18,7 +18,13 @@ Two properties matter more than accuracy:
 from datetime import UTC, datetime
 
 from app.logging import get_logger
-from app.models.timing import MODELLED_OUTCOMES, JobRunTiming
+from app.models.timing import (
+    MODELLED_OUTCOMES,
+    JobRunTiming,
+    RunMachine,
+    RunOutcome,
+    RunResources,
+)
 
 log = get_logger(__name__)
 
@@ -35,16 +41,45 @@ async def record(
     job_type: str,
     input_bytes: int,
     duration_ms: int,
+    outcome: str = RunOutcome.SUCCEEDED,
+    queued_ms: int | None = None,
+    threads: int | None = None,
+    resources: dict | None = None,
+    machine: dict | None = None,
+    tool: str | None = None,
+    tool_version: str | None = None,
+    params: dict | None = None,
+    features: dict | None = None,
+    job_id: str | None = None,
+    object_id: str | None = None,
+    project_id: str | None = None,
     format_kind: str | None = None,
     compression: str | None = None,
     worker_id: str | None = None,
 ) -> None:
-    """Store one completed run. Never raises -- telemetry must not fail a job."""
+    """Store one completed run. Never raises -- telemetry must not fail a job.
+
+    Failed runs are stored too, tagged by `outcome`, because a failure is the
+    most informative provenance a user can read and an OOM kill is the best
+    memory signal available. `_samples` is what keeps them out of the fits.
+    """
     try:
         await JobRunTiming(
             job_type=job_type,
             input_bytes=max(0, input_bytes),
             duration_ms=max(0, duration_ms),
+            outcome=outcome,
+            queued_ms=queued_ms,
+            threads=threads,
+            resources=RunResources(**(resources or {})),
+            machine=RunMachine(**(machine or {})),
+            tool=tool,
+            tool_version=tool_version,
+            params=params or {},
+            features=features or {},
+            job_id=job_id,
+            object_id=object_id,
+            project_id=project_id,
             format_kind=format_kind,
             compression=compression,
             worker_id=worker_id,
