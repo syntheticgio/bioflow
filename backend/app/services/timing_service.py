@@ -134,7 +134,7 @@ def _fit(samples: list[tuple[int, int]]) -> dict | None:
 
     # A negative slope means bigger files finish faster, which is noise rather
     # than signal. Fall back to the mean.
-    if slope < 0:
+    if slope <= 0:
         return {"slope": 0.0, "intercept": sum_y / n, "n": n, "flat": True}
 
     return {"slope": slope, "intercept": max(0.0, intercept), "n": n, "flat": False}
@@ -181,6 +181,64 @@ async def estimate(job_type: str, input_bytes: int) -> dict | None:
             if model["slope"] > 0
             else None
         ),
+    }
+
+
+def _memory_samples_from(records) -> list[tuple[int, int]]:
+    """(input_bytes, peak_rss) pairs from records that actually have a peak.
+
+    Runs under the sampling floor carry None rather than zero, and the
+    distinction is load-bearing: treating an unmeasured run as zero bytes of
+    memory would drag every prediction toward nothing.
+    """
+    out = []
+    for record in records:
+        peak = record.resources.peak_rss_bytes
+        if peak:
+            out.append((record.input_bytes, peak))
+    return out
+
+
+def _fit_memory(samples: list[tuple[int, int]]) -> dict | None:
+    """Least-squares fit of peak RSS against input size.
+
+    The same shape as `_fit`, and deliberately the same function underneath:
+    memory tends to be flatter in input size than duration is (the reference
+    or index usually dominates), which `_fit`'s existing flat-model fallback
+    already handles.
+    """
+    return _fit(samples)
+
+
+async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
+    """Predicted peak RSS in bytes for a run of this type and size.
+
+    **Modelled outcomes only** -- reads via `_modelled()`, the same
+    outcome-filtered accessor `_samples()` uses, so a failed/OOM-killed run's
+    peak RSS never enters the fit (that peak is the ceiling the run hit, not
+    what it needed, and folding it in would bias predictions toward the exact
+    number that caused the OOM).
+
+    Returns `known: False` rather than a guess when there is not enough
+    history. Only runs above the sampling floor carry a measured peak, so this
+    can stay silent long after the duration model has become confident.
+    """
+    records = await _modelled(job_type)
+    samples = _memory_samples_from(records)
+    model = _fit_memory(samples)
+    if model is None:
+        return {
+            "known": False,
+            "samples": len(samples),
+            "needed": max(0, MIN_SAMPLES - len(samples)),
+        }
+
+    predicted = model["intercept"] + model["slope"] * max(0, input_bytes)
+    return {
+        "known": True,
+        "estimate_bytes": int(max(0, predicted)),
+        "samples": model["n"],
+        "r_squared": round(_r_squared(samples, model), 3),
     }
 
 
