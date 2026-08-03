@@ -155,6 +155,41 @@ def _r_squared(samples: list[tuple[int, int]], model: dict) -> float:
     return max(0.0, min(1.0, 1 - ss_res / ss_tot))
 
 
+def _observed_range(samples: list[tuple[int, int]], input_bytes: int) -> dict:
+    """Whether `input_bytes` falls inside the sizes actually measured.
+
+    A linear fit is least trustworthy exactly where it is extrapolated, and
+    this app's whole history to date is test data -- so the first serious run
+    will be far outside the range. "Estimated 40 minutes, but this input is 8x
+    larger than anything measured" is a materially different claim from an
+    estimate inside the range, and costs one comparison to say.
+
+    Only upward extrapolation is flagged. Below the smallest sample the
+    intercept carries the prediction and the absolute error is small; above
+    the largest, the slope compounds.
+    """
+    if not samples:
+        return {
+            "extrapolating": False,
+            "factor_beyond": None,
+            "min_observed_bytes": None,
+            "max_observed_bytes": None,
+        }
+
+    sizes = [b for b, _ in samples]
+    smallest, largest = min(sizes), max(sizes)
+    beyond = input_bytes > largest
+
+    return {
+        "extrapolating": beyond,
+        # None rather than a number when every sample was zero-sized: there is
+        # no ratio to report, but the input is still outside what was seen.
+        "factor_beyond": round(input_bytes / largest, 1) if beyond and largest else None,
+        "min_observed_bytes": smallest,
+        "max_observed_bytes": largest,
+    }
+
+
 async def estimate(job_type: str, input_bytes: int) -> dict | None:
     """Predicted duration in ms for a run of this type and size.
 
@@ -181,6 +216,7 @@ async def estimate(job_type: str, input_bytes: int) -> dict | None:
             if model["slope"] > 0
             else None
         ),
+        "range": _observed_range(samples, input_bytes),
     }
 
 
