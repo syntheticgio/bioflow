@@ -99,7 +99,16 @@ async def _samples(job_type: str) -> list[tuple[int, int]]:
     that jobs are cheaper than they are.
     """
     docs = await _modelled(job_type)
-    return [(d.input_bytes, d.duration_ms) for d in docs if d.duration_ms > 0]
+    return _duration_samples_from(docs)
+
+
+def _duration_samples_from(records: list[JobRunTiming]) -> list[tuple[int, int]]:
+    """(input_bytes, duration_ms) pairs from records with a real duration.
+
+    Shared by `_samples` and `stats` so the two never drift: a zero-duration
+    row (a schedule tick, not real work) is excluded the same way in both.
+    """
+    return [(d.input_bytes, d.duration_ms) for d in records if d.duration_ms > 0]
 
 
 async def _modelled(job_type: str) -> list[JobRunTiming]:
@@ -320,9 +329,7 @@ async def stats() -> list[dict]:
     out = []
     for t in types:
         records = await _modelled(t)
-        samples = [
-            (d.input_bytes, d.duration_ms) for d in records if d.duration_ms > 0
-        ]
+        samples = _duration_samples_from(records)
         model = _fit(samples)
         memory_samples = _memory_samples_from(records)
         memory_model = _fit_memory(memory_samples)
