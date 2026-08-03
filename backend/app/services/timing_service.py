@@ -18,7 +18,7 @@ Two properties matter more than accuracy:
 from datetime import UTC, datetime
 
 from app.logging import get_logger
-from app.models.timing import JobRunTiming
+from app.models.timing import MODELLED_OUTCOMES, JobRunTiming
 
 log = get_logger(__name__)
 
@@ -55,13 +55,44 @@ async def record(
 
 
 async def _samples(job_type: str) -> list[tuple[int, int]]:
-    docs = (
-        await JobRunTiming.find(JobRunTiming.job_type == job_type)
+    """Duration samples for one job type. **Successes only.**
+
+    Every fit goes through here rather than querying the collection directly,
+    which is the one thing keeping the outcome filter correct. Failed runs
+    share this collection for provenance, and a failed run looks like a fast,
+    cheap one -- folding them in biases estimates downward, toward predicting
+    that jobs are cheaper than they are.
+    """
+    docs = await _modelled(job_type)
+    return [(d.input_bytes, d.duration_ms) for d in docs if d.duration_ms > 0]
+
+
+async def _modelled(job_type: str) -> list[JobRunTiming]:
+    """Recent records for one job type that a model may fit against."""
+    return (
+        await JobRunTiming.find(
+            JobRunTiming.job_type == job_type,
+            {"outcome": {"$in": list(MODELLED_OUTCOMES)}},
+        )
         .sort("-finished_at")
         .limit(MAX_SAMPLES)
         .to_list()
     )
-    return [(d.input_bytes, d.duration_ms) for d in docs if d.duration_ms > 0]
+
+
+async def records_for_object(object_id: str) -> list[JobRunTiming]:
+    """Every run that touched one object, **including failures**.
+
+    The deliberate counterpart to `_samples`: provenance is the one reader
+    that wants failed runs, since a failure is the most informative record a
+    user can read. Named explicitly so that opting out of the filter is a
+    visible choice rather than an omission.
+    """
+    return (
+        await JobRunTiming.find(JobRunTiming.object_id == object_id)
+        .sort("-finished_at")
+        .to_list()
+    )
 
 
 def _fit(samples: list[tuple[int, int]]) -> dict | None:
