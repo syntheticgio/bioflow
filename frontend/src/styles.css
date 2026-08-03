@@ -3385,6 +3385,84 @@ table.software-matrix thead th.software-matrix-corner {
   margin: 0;
 }
 
+/* The card's top row: category on the left, prior-run count on the right,
+   which is where the mockup puts it and where it stays out of the title's
+   way. */
+.suggestion-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.prior-runs-count {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* Hairlines above and below rather than a filled panel: this is a list
+   inside the card, not a second card. margin-top:auto is dropped here --
+   .suggestion-why above already owns pushing the block down. */
+.prior-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.prior-run {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.prior-run-date {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Takes the slack so the status stays hard right, and wraps rather than
+   overflowing when a paired trim lists two long filenames. */
+.prior-run-outputs {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.prior-run-link {
+  color: var(--accent);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.prior-run-link:hover {
+  text-decoration: underline;
+}
+
+.prior-run-gone {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.prior-run-status {
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+/* Only failure earns colour. A green "succeeded" on every row would spend
+   the card's one loud signal on its least surprising outcome. */
+.prior-run-status.is-failed {
+  color: var(--error);
+}
+
 /* The Manage section: a label/control grid rather than a stack of bordered
    sections, so five small unrelated controls stop reading as five weighty
    steps. align-items:start keeps a short label level with the top of a tall

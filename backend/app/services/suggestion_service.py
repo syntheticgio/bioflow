@@ -13,7 +13,7 @@ replace it rather than inherit it.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from app.config import settings
@@ -31,7 +31,7 @@ from app.pipelines import (
 )
 from app.pipelines.aligners import Aligner
 from app.pipelines.organism_taxonomy import is_eukaryotic
-from app.services import object_service, pipeline_service
+from app.services import object_service, pipeline_service, prior_runs
 
 log = get_logger(__name__)
 
@@ -72,6 +72,11 @@ class SuggestionCard:
     status: CardStatus = CardStatus.UNAVAILABLE
     reason: str | None = None
     launch: dict | None = None
+    # Runs that already did what this card offers. Filled by
+    # `attach_prior_runs` after the builders run, never by a builder -- it is
+    # a database question, and the builders are deliberately synchronous and
+    # pure.
+    prior_runs: list = field(default_factory=list)
 
     def as_dict(self) -> dict:
         return {
@@ -83,6 +88,7 @@ class SuggestionCard:
             "status": self.status.value,
             "reason": self.reason,
             "launch": self.launch,
+            "prior_runs": self.prior_runs,
         }
 
 
@@ -1000,4 +1006,8 @@ async def suggestions_for(obj) -> list[dict]:
             continue
         if card is not None:
             cards.append(card.as_dict())
+
+    # After the builders, not inside them: this is the one part of a card that
+    # is a database question rather than a rule about the file.
+    await prior_runs.attach_prior_runs(cards, obj, owner=obj.owner)
     return cards
