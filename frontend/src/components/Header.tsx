@@ -14,16 +14,18 @@ const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
 ];
 
-/** Help menu contents. Reference pages, in the order a user needs them:
- *  what the numbers mean, then what produced them, then where the inputs
- *  came from. */
-const HELP_ITEMS: { to: string; label: string }[] = [
-  { to: "/help/calculations", label: "BioFlow Calculations" },
-  { to: "/help/software", label: "Software" },
-  { to: "/help/sources", label: "Data Sources" },
-  { to: "/help/workflow-diagrams", label: "Workflow Diagrams" },
-  { to: "/help/genome-analysis-review", label: "Genome Analysis Review" },
-  { to: "/help/feedback", label: "Feedback" },
+/** Help menu contents, grouped so the dropdown stays scannable as it grows.
+ *  Within "Reference", pages are in the order a user needs them: what the
+ *  numbers mean, then what produced them, then where the inputs came from. */
+const HELP_ITEMS: { to: string; label: string; section: string }[] = [
+  { to: "/help/about", label: "About", section: "About" },
+  { to: "/help/calculations", label: "BioFlow Calculations", section: "Reference" },
+  { to: "/help/software", label: "Software", section: "Reference" },
+  { to: "/help/sources", label: "Data Sources", section: "Reference" },
+  { to: "/help/workflow-diagrams", label: "Workflow Diagrams", section: "Reference" },
+  { to: "/help/genome-analysis-review", label: "Genome Analysis Review", section: "Reference" },
+  { to: "/help/feedback", label: "Feedback", section: "Support" },
+  { to: "/help/placeholder", label: "Placeholder", section: "Support" },
 ];
 
 export function Header() {
@@ -83,6 +85,7 @@ export function Header() {
           label="Help"
           items={HELP_ITEMS.map((item) => ({
             label: item.label,
+            section: item.section,
             onSelect: () => navigate(item.to),
           }))}
         />

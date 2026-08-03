@@ -6,9 +6,11 @@ import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
+import { HelpAbout } from "./components/HelpAbout";
 import { HelpCalculations } from "./components/HelpCalculations";
 import { HelpFeedback } from "./components/HelpFeedback";
 import { HelpGenomeAnalysisReview } from "./components/HelpGenomeAnalysisReview";
+import { HelpPlaceholder } from "./components/HelpPlaceholder";
 import { HelpSoftware } from "./components/HelpSoftware";
 import { HelpSources } from "./components/HelpSources";
 import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
@@ -72,6 +74,7 @@ function Shell() {
           <Route path="/p/:projectId" element={<ProjectExplorer />} />
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
+          <Route path="/help/about" element={<HelpAbout />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
@@ -84,6 +87,7 @@ function Shell() {
             element={<HelpGenomeAnalysisReview />}
           />
           <Route path="/help/feedback" element={<HelpFeedback />} />
+          <Route path="/help/placeholder" element={<HelpPlaceholder />} />
         </Routes>
         {!singleColumn && <DetailPanel />}
       </div>
