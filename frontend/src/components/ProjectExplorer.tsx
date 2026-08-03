@@ -625,6 +625,24 @@ function StageRailCard({
     return stage === "trimmed" && trimmed ? trimmed : raw;
   });
 
+  // Switching stage swaps which objects are on screen, so a selected row's
+  // id goes stale -- it would keep pointing at the old stage's object until
+  // the user clicked a row again. Clicking Raw/Trimmed on this card always
+  // brings its selection along: if one of this card's reads was already
+  // selected, follow it to its counterpart at the same index in the new
+  // stage; otherwise default to this card's first read (the only one, for
+  // a single read).
+  const switchStage = (next: "raw" | "trimmed") => {
+    setStage(next);
+    const selectedIndex = entry.raw.findIndex(
+      (raw, i) => sel === `object:${raw.id}` || sel === `object:${entry.trimmed[i]?.id}`,
+    );
+    const index = selectedIndex === -1 ? 0 : selectedIndex;
+    const trimmed = entry.trimmed[index];
+    const target = next === "trimmed" && trimmed ? trimmed : entry.raw[index];
+    if (target) onSelect(`object:${target.id}`);
+  };
+
   return (
     <div className="pair-group stage-rail-card">
       <div className="pair-label stage-rail-header">
@@ -637,14 +655,14 @@ function StageRailCard({
           <button
             type="button"
             className={stage === "raw" ? "active" : ""}
-            onClick={() => setStage("raw")}
+            onClick={() => switchStage("raw")}
           >
             Raw
           </button>
           <button
             type="button"
             className={stage === "trimmed" ? "active" : ""}
-            onClick={() => setStage("trimmed")}
+            onClick={() => switchStage("trimmed")}
           >
             Trimmed
           </button>
