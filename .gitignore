@@ -16,3 +16,6 @@ backend/.venv/
 
 # Superpowers brainstorming scratch (mockups, session state)
 .superpowers/
+
+# Isolated feature worktrees
+.worktrees/
