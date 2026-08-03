@@ -327,3 +327,35 @@ silently read the host machine while appearing to control it:
   *available* passes whether or not its patch worked. Assert the card flips
   to unavailable when the probe is patched off -- that is the direction that
   fails when the seam breaks.
+
+## Querying computation records
+
+`job_timings` (`app/models/timing.py`) holds one row per completed job, read
+by three different consumers: the duration model, the memory model, and
+per-object provenance. **Failed runs are in there too**, and the difference
+between the consumers is whether they want them.
+
+This is a deliberate trade recorded in
+`docs/superpowers/specs/2026-08-03-computation-records-design.md`: provenance
+and OOM detection need failures, the predictive models must never see them.
+Before that design, the collection held successes only -- `executor.py`
+recorded on the success path and nowhere else -- so no query needed an outcome
+filter and none had one.
+
+That invariant now lives in the read paths instead of the write path, which is
+the part that is easy to get wrong. **Do not query the collection directly to
+fit or summarize anything.** Go through `timing_service._samples()`, which
+applies the outcome filter once; provenance uses its own explicitly-named
+accessor that includes failures on purpose.
+
+The failure mode if you forget is silent and points the wrong way. A job that
+OOM-killed at ninety seconds looks like a fast, cheap run, and its peak RSS is
+the ceiling it *hit* rather than what it needed. A few of those in a fit drag
+estimates downward -- predicting that jobs are cheaper than they are, which is
+exactly the direction that causes the next OOM. Nothing raises, no test fails
+on its own; the numbers are just quietly low.
+
+Resource fields (`peak_rss_bytes`, `peak_cpu_percent`) are null for runs under
+60 seconds, so anything fitting against them is working with a subset of rows
+rather than all of them. A row with a null peak is a short job, not a job whose
+sampling failed.

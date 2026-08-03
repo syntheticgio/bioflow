@@ -70,9 +70,21 @@ would drag every future estimate down. That reasoning is correct for the
 user can read, and an OOM kill is the single best memory signal available. So
 failures are recorded and tagged, and the predictors filter to successes.
 
-The cost of this is worth stating: the predictor's correctness now depends on
-that filter being applied rather than on the collection being clean by
-construction. Every query path into the models must filter on outcome.
+The cost of this is worth stating. Today the collection is clean by
+construction -- `executor.py` writes on the success path and nowhere else, so
+`_samples()` needs no outcome filter and has none. Merging failures in moves
+that invariant from one write path to every read path, and the failure mode is
+silent: a job that OOM-killed at ninety seconds reads as a fast, cheap run
+whose peak RSS is the ceiling it hit rather than what it needed. A few of those
+in a fit drag estimates downward, which is the direction that causes the next
+OOM. Nothing raises.
+
+The containment is to keep the invariant in one place rather than four:
+**callers do not query the collection directly.** `timing_service._samples()`
+applies the outcome filter once and every model fits through it; provenance,
+the one reader that wants failures, uses a separate explicitly-named accessor.
+This is also recorded in `CLAUDE.md` so a future change adding a fourth
+consumer gets the warning without having to find this document.
 
 ### Timing
 
@@ -170,6 +182,26 @@ resource data.
 Both keep the existing principle: below `MIN_SAMPLES`, report no estimate at
 all. A confidently wrong number is worse than an honest absence.
 
+### Extrapolation flagging
+
+Both models also report whether the input being asked about falls inside the
+range of sizes they have actually observed, by comparing against the min and
+max of their own samples.
+
+This matters more than it sounds, because of how this app has been used so far.
+Every existing row comes from test data -- small inputs, one machine, whatever
+thread counts happened to get tried. The first serious alignment or variant
+call will be one or two orders of magnitude larger than anything in the
+collection, and a linear fit extrapolated that far is precisely where it is
+least trustworthy. Existing rows are being kept rather than wiped, so the model
+will be extrapolating from toy inputs for a while.
+
+"Estimated 40 minutes, but this input is 8x larger than anything measured" is a
+materially different claim from an estimate inside the observed range, and the
+distinction costs one comparison. `r_squared` already tells the caller how well
+the fit describes its own samples; this tells them whether the question is even
+inside the fit's evidence.
+
 The predictors now select against a collection that grows without bound rather
 than one kept small by construction, so their queries need indexes on
 (`job_type`, `outcome`, `finished_at`).
@@ -199,6 +231,8 @@ Backend behavior is covered by pytest, run from a worktree via
 - The duration floor: a run under 60s writes a record with null resource
   fields, not a record with a handful-of-samples peak.
 - The outcome filter: a failed run is recorded and is excluded from both fits.
+- Extrapolation flagging: an input well above the largest observed sample is
+  reported as outside the measured range; one inside it is not.
 - Param sanitization: a payload containing file paths yields a `params` field
   containing none.
 - Subtree attribution: two concurrent jobs do not sum into each other's peak.
