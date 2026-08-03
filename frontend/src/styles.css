@@ -448,6 +448,50 @@ textarea:focus {
   opacity: 1;
 }
 
+/* ---------- Stage rail (raw/trimmed toggle) ---------- */
+
+/* Extra bottom padding: the toggle sits between the header and the rows, and
+   without it the card's spine (inherited from .pair-group) ends flush with
+   the last row instead of matching the breathing room every other card gets. */
+.stage-rail-card {
+  padding-bottom: 4px;
+}
+
+.stage-rail-header {
+  padding-bottom: 6px;
+}
+
+.stage-toggle {
+  display: inline-flex;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.stage-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.stage-toggle button + button {
+  border-left: 1px solid var(--border);
+}
+
+.stage-toggle button:hover {
+  background: var(--bg-hover);
+}
+
+.stage-toggle button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 .row-action:hover {
   color: var(--text);
 }

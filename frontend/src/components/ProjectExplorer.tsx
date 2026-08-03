@@ -9,7 +9,13 @@ import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
-import { groupPairs, orderWithPairs, type OrderedFile } from "../lib/pairing";
+import {
+  buildStageRail,
+  groupPairs,
+  orderWithPairs,
+  type OrderedFile,
+  type StageRailEntry,
+} from "../lib/pairing";
 import type { DataObject } from "../api/types";
 
 /**
@@ -460,77 +466,33 @@ function ProjectView({ projectId }: { projectId: string }) {
                   <span className="group-count">{categoryFiles.length}</span>
                 </button>
 
-                {isExpanded &&
+                {isExpanded && category.key === "reads" &&
+                  buildStageRail(categoryFiles).map((entry) => (
+                    <StageRailCard
+                      key={entry.key}
+                      entry={entry}
+                      sel={sel}
+                      onSelect={select}
+                      onDelete={(id, name) => {
+                        if (confirm(`Delete "${name}"?`)) delObject.mutate(id);
+                      }}
+                    />
+                  ))}
+
+                {isExpanded && category.key !== "reads" &&
                   groupPairs(displayFiles).map((group) => {
-                    const rows = group.files.map((o) => {
-                      const quality = readQuality(o);
-                      return (
-                      <div
+                    const rows = group.files.map((o) => (
+                      <FileRow
                         key={o.id}
-                        className={`row ${sel === `object:${o.id}` ? "selected" : ""}${
-                          group.pairLabel !== null ? " row-in-pair" : ""
-                        }`}
-                        onClick={() => select(`object:${o.id}`)}
-                      >
-                        {/* The read number leads the name inside a pair: it is
-                            what distinguishes the two rows, and the eye needs
-                            it before the filename, not after the metadata. */}
-                        {group.pairLabel !== null && o.read_number != null && (
-                          <span className="read-badge">R{o.read_number}</span>
-                        )}
-                        <div className="row-main">
-                          <div className="row-name">{o.name}</div>
-                          <div className="row-sub">
-                            <span>{formatBytes(o.size)}</span>
-                            {o.format.kind !== "unknown" && (
-                              <span>{formatKindLabel(o.format.kind)}</span>
-                            )}
-                            {/* After size and format, matching the detail
-                                panel's ordering. */}
-                            {quality && (
-                              <span title={quality.tooltip}>{quality.word}</span>
-                            )}
-                            {o.status !== "ready" && <span>{o.status}</span>}
-                            {/* Unpaired files can still carry a read number --
-                                a mate that was deleted, or lives elsewhere. It
-                                stays in the metadata line there, since there is
-                                no sibling row to tell apart. */}
-                            {group.pairLabel === null && o.read_number != null && (
-                              <span className="read-badge">R{o.read_number}</span>
-                            )}
-                          </div>
-                        </div>
-                        {/* An <a> rather than a button so the browser streams
-                            the file to disk itself; these run to gigabytes.
-                            stopPropagation keeps the click from also selecting
-                            the row behind it. Hidden until there are bytes to
-                            serve, which is the same gate the Actions tab uses. */}
-                        {o.blob_sha256 && (
-                          <a
-                            className="icon-btn row-action"
-                            href={api.objectDownloadUrl(o.id)}
-                            download={o.name}
-                            title={`Download ${o.name}`}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            ↓
-                          </a>
-                        )}
-                        <button
-                          type="button"
-                          className="icon-btn row-action row-action-danger"
-                          title="Delete file"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm(`Delete "${o.name}"?`))
-                              delObject.mutate(o.id);
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                      );
-                    });
+                        object={o}
+                        selected={sel === `object:${o.id}`}
+                        inPair={group.pairLabel !== null}
+                        onSelect={() => select(`object:${o.id}`)}
+                        onDelete={() => {
+                          if (confirm(`Delete "${o.name}"?`)) delObject.mutate(o.id);
+                        }}
+                      />
+                    ));
 
                     // An unpaired file is just its row. A pair is wrapped so
                     // the label and the spine can span both halves, rather
@@ -551,6 +513,155 @@ function ProjectView({ projectId }: { projectId: string }) {
             );
           })}
       </div>
+    </div>
+  );
+}
+
+/** One read file's row: name, size, format, quality, download/delete actions.
+ *  Shared by the plain (non-reads) list and the stage rail's per-mate rows. */
+function FileRow({
+  object,
+  selected,
+  inPair,
+  readBadge,
+  onSelect,
+  onDelete,
+}: {
+  object: DataObject;
+  selected: boolean;
+  inPair: boolean;
+  /** Read number badge to show, if any. Defaults to the object's own
+   *  read_number so the plain list keeps its existing behaviour. */
+  readBadge?: number | null;
+  onSelect: () => void;
+  onDelete: () => void;
+}) {
+  const quality = readQuality(object);
+  const badge = readBadge !== undefined ? readBadge : object.read_number;
+
+  return (
+    <div
+      className={`row ${selected ? "selected" : ""}${inPair ? " row-in-pair" : ""}`}
+      onClick={onSelect}
+    >
+      {/* The read number leads the name inside a pair: it is what
+          distinguishes the two rows, and the eye needs it before the
+          filename, not after the metadata. */}
+      {inPair && badge != null && <span className="read-badge">R{badge}</span>}
+      <div className="row-main">
+        <div className="row-name">{object.name}</div>
+        <div className="row-sub">
+          <span>{formatBytes(object.size)}</span>
+          {object.format.kind !== "unknown" && (
+            <span>{formatKindLabel(object.format.kind)}</span>
+          )}
+          {/* After size and format, matching the detail panel's ordering. */}
+          {quality && <span title={quality.tooltip}>{quality.word}</span>}
+          {object.status !== "ready" && <span>{object.status}</span>}
+          {/* Unpaired files can still carry a read number -- a mate that was
+              deleted, or lives elsewhere. It stays in the metadata line
+              there, since there is no sibling row to tell apart. */}
+          {!inPair && badge != null && <span className="read-badge">R{badge}</span>}
+        </div>
+      </div>
+      {/* An <a> rather than a button so the browser streams the file to disk
+          itself; these run to gigabytes. stopPropagation keeps the click
+          from also selecting the row behind it. Hidden until there are bytes
+          to serve, which is the same gate the Actions tab uses. */}
+      {object.blob_sha256 && (
+        <a
+          className="icon-btn row-action"
+          href={api.objectDownloadUrl(object.id)}
+          download={object.name}
+          title={`Download ${object.name}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          ↓
+        </a>
+      )}
+      <button
+        type="button"
+        className="icon-btn row-action row-action-danger"
+        title="Delete file"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+/**
+ * One accession's card: header with a RAW/TRIMMED toggle, and one row per
+ * mate (or the single read) showing whichever version is currently toggled.
+ *
+ * Defaults to TRIMMED when every mate has a trimmed version, since that is
+ * the file someone actually wants to work with once it exists -- matching
+ * the mockup, which shows TRIMMED selected. Falls back to RAW-only (no
+ * toggle) when nothing has been trimmed yet, so an untouched accession looks
+ * exactly like a plain row still does.
+ */
+function StageRailCard({
+  entry,
+  sel,
+  onSelect,
+  onDelete,
+}: {
+  entry: StageRailEntry;
+  sel: string | null;
+  onSelect: (value: string) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  const hasAnyTrimmed = entry.trimmed.some((t) => t !== null);
+  const [stage, setStage] = useState<"raw" | "trimmed">(
+    hasAnyTrimmed ? "trimmed" : "raw",
+  );
+
+  const displayed = entry.raw.map((raw, i) => {
+    const trimmed = entry.trimmed[i];
+    return stage === "trimmed" && trimmed ? trimmed : raw;
+  });
+
+  return (
+    <div className="pair-group stage-rail-card">
+      <div className="pair-label stage-rail-header">
+        <span>{entry.paired ? "Paired" : "Single"}</span>
+        {entry.label && <span className="pair-stem">{entry.label}</span>}
+      </div>
+
+      {hasAnyTrimmed && (
+        <div className="stage-toggle" role="group" aria-label="Read stage">
+          <button
+            type="button"
+            className={stage === "raw" ? "active" : ""}
+            onClick={() => setStage("raw")}
+          >
+            Raw
+          </button>
+          <button
+            type="button"
+            className={stage === "trimmed" ? "active" : ""}
+            onClick={() => setStage("trimmed")}
+          >
+            Trimmed
+          </button>
+        </div>
+      )}
+
+      {displayed.map((o, i) => (
+        <FileRow
+          key={o.id}
+          object={o}
+          selected={sel === `object:${o.id}`}
+          inPair={entry.paired}
+          readBadge={entry.raw[i].read_number}
+          onSelect={() => onSelect(`object:${o.id}`)}
+          onDelete={() => onDelete(o.id, o.name)}
+        />
+      ))}
     </div>
   );
 }
