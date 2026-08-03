@@ -14,12 +14,24 @@ returns an empty result and succeeds rather than failing the job and filling the
 activity view with red rows for a feature the user may not have opted into.
 """
 
+import importlib
+
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.services import summary_prompt
-from app.services.ai import complete as ai_complete
 from app.services.ai.adapters import Completion
+
+# NOT `from app.services.ai import complete as ai_complete`, and NOT
+# `import app.services.ai.complete as ai_complete` either: app/services/ai/
+# __init__.py does `from app.services.ai.complete import complete`, which
+# rebinds the *package attribute* `complete` to the function it re-exports,
+# shadowing the submodule of the same name. Both of those import forms
+# resolve through that attribute and would silently bind the function, not
+# the module -- so this goes through `sys.modules` via `importlib` instead,
+# which is the only form immune to the shadow, and gives tests a module to
+# monkeypatch `.complete_sync` on.
+ai_complete = importlib.import_module("app.services.ai.complete")
 
 log = get_logger(__name__)
 
