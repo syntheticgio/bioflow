@@ -1,7 +1,57 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
-import type { PipelineSuggestion } from "../api/types";
+import type { PipelineSuggestion, PriorRun } from "../api/types";
+
+/** What this card has already produced.
+ *
+ * Failed runs are listed deliberately. They have no output to link, so the
+ * status word carries the row -- and a user who cannot see that the last two
+ * launches failed is a user about to launch a third time.
+ */
+function PriorRuns({
+  runs,
+  projectId,
+}: {
+  runs: PriorRun[];
+  projectId: string;
+}) {
+  return (
+    <div className="prior-runs">
+      {runs.map((run) => (
+        <div key={run.run_id} className="prior-run">
+          <span className="prior-run-date">
+            {new Date(run.finished_at).toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+            })}
+          </span>
+          <span className="prior-run-outputs">
+            {run.outputs.map((out) =>
+              out.exists ? (
+                <Link
+                  key={out.object_id}
+                  to={`/p/${projectId}?sel=object:${out.object_id}`}
+                  className="prior-run-link"
+                >
+                  {out.name}
+                </Link>
+              ) : (
+                <span key={out.object_id} className="prior-run-gone">
+                  {out.name}
+                </span>
+              ),
+            )}
+          </span>
+          <span className={`prior-run-status is-${run.status}`}>
+            {run.status}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * What this file can be run through next, and why.
@@ -15,7 +65,13 @@ import type { PipelineSuggestion } from "../api/types";
  * a one-line note rather than an error box -- a broken advisory should not
  * make a healthy file look broken.
  */
-export function PipelineSuggestions({ objectId }: { objectId: string }) {
+export function PipelineSuggestions({
+  objectId,
+  projectId,
+}: {
+  objectId: string;
+  projectId: string;
+}) {
   const qc = useQueryClient();
 
   // No `enabled` guard: this component only mounts inside the Actions tab, so
@@ -65,11 +121,22 @@ export function PipelineSuggestions({ objectId }: { objectId: string }) {
         const available = card.status === "available";
         return (
           <div key={card.kind} className="suggestion-card">
-            <div className="suggestion-category">{card.category}</div>
+            <div className="suggestion-card-top">
+              <div className="suggestion-category">{card.category}</div>
+              {card.prior_runs.length > 0 && (
+                <div className="prior-runs-count">
+                  {card.prior_runs.length} prior run
+                  {card.prior_runs.length === 1 ? "" : "s"}
+                </div>
+              )}
+            </div>
             <div className="suggestion-title">{card.title}</div>
             <div className="suggestion-desc">{card.description}</div>
             {(card.why ?? card.reason) && (
               <div className="suggestion-why">{card.why ?? card.reason}</div>
+            )}
+            {card.prior_runs.length > 0 && (
+              <PriorRuns runs={card.prior_runs} projectId={projectId} />
             )}
             <button
               type="button"
@@ -77,7 +144,7 @@ export function PipelineSuggestions({ objectId }: { objectId: string }) {
               onClick={() => launch.mutate(card)}
               disabled={!available || launch.isPending}
             >
-              Launch
+              {card.prior_runs.length > 0 ? "Launch again" : "Launch"}
             </button>
           </div>
         );

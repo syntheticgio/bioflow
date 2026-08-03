@@ -1184,7 +1184,7 @@ function ActionsTab({
             component already has, is simpler than a prop that would only
             restate what the caller knows. */}
         {obj.status === "ready" ? (
-          <PipelineSuggestions objectId={obj.id} />
+          <PipelineSuggestions objectId={obj.id} projectId={obj.project_id} />
         ) : (
           <p className="suggestion-none">
             Suggestions appear once this file has finished ingesting.

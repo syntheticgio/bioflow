@@ -1266,6 +1266,25 @@ export interface DeletionPreview {
   blocked: boolean;
 }
 
+/** One output file of a prior run. `exists` is false once the file has been
+ *  deleted -- the run still happened, so the row keeps its recorded name and
+ *  renders as plain text rather than a dead link. */
+export interface PriorRunOutput {
+  object_id: string;
+  name: string;
+  exists: boolean;
+}
+
+/** A run that already did what a card offers. Failed runs are included and
+ *  carry no outputs: a card that hid its failures would invite the same
+ *  failed launch again. */
+export interface PriorRun {
+  run_id: string;
+  finished_at: string;
+  status: "succeeded" | "partial" | "failed";
+  outputs: PriorRunOutput[];
+}
+
 /**
  * One pipeline offer for a data file, as rendered in the Actions tab.
  *
@@ -1290,6 +1309,7 @@ export interface PipelineSuggestion {
   status: "available" | "unavailable";
   reason: string | null;
   launch: { endpoint: string; body: Record<string, unknown> } | null;
+  prior_runs: PriorRun[];
 }
 
 // --- Variant results (vcfstats) ---
