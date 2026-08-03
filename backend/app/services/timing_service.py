@@ -184,7 +184,7 @@ async def estimate(job_type: str, input_bytes: int) -> dict | None:
     }
 
 
-def _memory_samples_from(records) -> list[tuple[int, int]]:
+def _memory_samples_from(records: list[JobRunTiming]) -> list[tuple[int, int]]:
     """(input_bytes, peak_rss) pairs from records that actually have a peak.
 
     Runs under the sampling floor carry None rather than zero, and the
