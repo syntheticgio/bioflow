@@ -6,6 +6,7 @@ you would expect it (the reference is an input, not a param; a trim's tool is
 a run field, not a param).
 """
 
+from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -42,6 +43,10 @@ def _align_card(aligner="bwa-mem2", reference_id="ref1"):
             },
         },
     }
+
+
+def _fake_obj(obj_id="obj1", project_id="proj1"):
+    return SimpleNamespace(id=obj_id, project_id=project_id, owner="local")
 
 
 class TestAlignmentMatching:
@@ -154,4 +159,89 @@ class TestRowShape:
         row = row_for_run(run, RunStatus.SUCCEEDED, {})
         assert row["outputs"] == [
             {"object_id": "gone", "name": "(deleted)", "exists": False}
+        ]
+
+
+from unittest.mock import patch
+
+from app.services.prior_runs import attach_prior_runs
+
+
+@contextmanager
+def stub_runs(runs=(), statuses=None, names=None):
+    """Cut the three database seams `attach_prior_runs` reaches through."""
+    with (
+        patch("app.services.prior_runs._runs_touching",
+              return_value=list(runs)),
+        patch("app.services.prior_runs.run_service.status_for_many",
+              return_value=statuses or {}),
+        patch("app.services.prior_runs._output_names",
+              return_value=names or {}),
+    ):
+        yield
+
+
+class TestAttachPriorRuns:
+    async def test_a_matching_run_lands_on_its_card(self):
+        run = _run(
+            params={"aligner": "bwa-mem2"},
+            inputs=[_input("ref1", RunInputRole.REFERENCE)],
+        )
+        run.outputs = ["out1"]
+        cards = [_align_card()]
+        with stub_runs(
+            runs=[run],
+            statuses={"run1": RunStatus.SUCCEEDED},
+            names={"out1": "sample.bam"},
+        ):
+            await attach_prior_runs(cards, _fake_obj(), owner="local")
+        assert len(cards[0]["prior_runs"]) == 1
+        assert cards[0]["prior_runs"][0]["outputs"][0]["name"] == "sample.bam"
+
+    async def test_a_card_with_no_matching_run_gets_an_empty_list(self):
+        cards = [_align_card()]
+        with stub_runs():
+            await attach_prior_runs(cards, _fake_obj(), owner="local")
+        assert cards[0]["prior_runs"] == []
+
+    async def test_running_and_waiting_runs_are_omitted(self):
+        """The card records what has happened; Activity owns work in flight."""
+        for status in (RunStatus.RUNNING, RunStatus.WAITING):
+            run = _run(
+                params={"aligner": "bwa-mem2"},
+                inputs=[_input("ref1", RunInputRole.REFERENCE)],
+            )
+            cards = [_align_card()]
+            with stub_runs(runs=[run], statuses={"run1": status}):
+                await attach_prior_runs(cards, _fake_obj(), owner="local")
+            assert cards[0]["prior_runs"] == []
+
+    async def test_a_failed_run_is_kept(self):
+        run = _run(
+            params={"aligner": "bwa-mem2"},
+            inputs=[_input("ref1", RunInputRole.REFERENCE)],
+        )
+        cards = [_align_card()]
+        with stub_runs(runs=[run], statuses={"run1": RunStatus.FAILED}):
+            await attach_prior_runs(cards, _fake_obj(), owner="local")
+        assert [r["status"] for r in cards[0]["prior_runs"]] == ["failed"]
+
+    async def test_at_most_three_runs_newest_first(self):
+        runs = []
+        for n in range(5):
+            run = _run(
+                params={"aligner": "bwa-mem2"},
+                inputs=[_input("ref1", RunInputRole.REFERENCE)],
+            )
+            run.id = f"run{n}"
+            run.created_at = datetime(2026, 8, 1, 12, n)
+            runs.append(run)
+        cards = [_align_card()]
+        with stub_runs(
+            runs=runs,
+            statuses={f"run{n}": RunStatus.SUCCEEDED for n in range(5)},
+        ):
+            await attach_prior_runs(cards, _fake_obj(), owner="local")
+        assert [r["run_id"] for r in cards[0]["prior_runs"]] == [
+            "run4", "run3", "run2",
         ]

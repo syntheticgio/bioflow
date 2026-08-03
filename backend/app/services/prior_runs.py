@@ -12,7 +12,14 @@ signature hashed into the run at launch, was rejected because it would show
 would fail silently the first time a default moved in pipeline_service.
 """
 
-from app.models import RunInputRole, RunKind, RunStatus
+from app.models import (
+    DataObject,
+    PipelineRun,
+    RunInputRole,
+    RunKind,
+    RunStatus,
+)
+from app.services import run_service
 
 # The fields that distinguish two runs of the same kind. A kind absent from
 # this table matches on kind alone, which is the deliberate default: an
@@ -115,3 +122,80 @@ def row_for_run(run, status, names: dict) -> dict:
         "status": status.value,
         "outputs": outputs,
     }
+
+
+# Runs still in flight. The card is a record of what has happened, and the
+# Activity view already owns work in progress -- a card claiming a prior run
+# that has not produced anything yet would link to a file that is not there.
+_IN_FLIGHT = frozenset({RunStatus.WAITING, RunStatus.RUNNING})
+
+# Three, per the design. Enough to see a pattern, few enough that the card
+# stays a card.
+_MAX_ROWS = 3
+
+
+async def _runs_touching(obj) -> list:
+    """Every run in this project that took this object as an input."""
+    return await PipelineRun.find(
+        {
+            "owner": obj.owner,
+            "project_id": obj.project_id,
+            "inputs.object_id": obj.id,
+        }
+    ).to_list()
+
+
+async def _output_names(object_ids: list, *, owner: str) -> dict:
+    """Current name for each output id. A missing id has been deleted."""
+    if not object_ids:
+        return {}
+    objects = await DataObject.find(
+        {"owner": owner, "_id": {"$in": object_ids}}
+    ).to_list()
+    return {str(o.id): o.name for o in objects}
+
+
+async def attach_prior_runs(cards: list[dict], obj, *, owner: str) -> None:
+    """Give every card the runs that already did its work.
+
+    Mutates the cards in place -- `suggestions_for` has already converted them
+    to dicts by the time this runs, and returning a parallel list the caller
+    had to zip back up would be a second thing to keep in order.
+
+    Two queries plus one status derivation for the whole list, not per card:
+    the cost of this feature must not scale with how many cards a file has.
+    """
+    for card in cards:
+        card["prior_runs"] = []
+
+    runs = await _runs_touching(obj)
+    if not runs:
+        return
+
+    # `status_for_many` is already owner-scoped and already two queries rather
+    # than 2N -- the reason this does not derive status itself.
+    statuses = await run_service.status_for_many(
+        [run.id for run in runs], owner=owner
+    )
+
+    finished = [
+        run
+        for run in runs
+        if statuses.get(run.id) is not None
+        and statuses[run.id] not in _IN_FLIGHT
+    ]
+    if not finished:
+        return
+
+    names = await _output_names(
+        [oid for run in finished for oid in run.outputs], owner=owner
+    )
+
+    finished.sort(key=lambda r: r.created_at, reverse=True)
+
+    for card in cards:
+        card["prior_runs"] = [
+            row_for_run(run, statuses[run.id], names)
+            for run in finished
+            if run_matches_card(run, card)
+        ][:_MAX_ROWS]
