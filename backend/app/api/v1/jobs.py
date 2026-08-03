@@ -182,11 +182,16 @@ async def create_job(body: JobCreate, owner: OwnerDep) -> JobOut:
 
 @router.get("/timing-model")
 async def timing_model() -> dict:
-    """Per-job-type duration models, and how many samples back each one."""
+    """Per-job-type duration and memory models, and how many samples back each."""
+    from app.queue.executor import RESOURCE_FLOOR_MS
     from app.services import timing_service
 
     return {
         "min_samples": timing_service.MIN_SAMPLES,
+        # Imported rather than repeated: a client showing "no memory estimate
+        # for jobs under a minute" and an executor using a different floor
+        # would disagree silently.
+        "resource_floor_ms": RESOURCE_FLOOR_MS,
         "types": await timing_service.stats(),
     }
 
@@ -242,6 +247,7 @@ async def get_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
             size = obj.size if obj and obj.owner == owner else 0
         if size:
             out["timing_estimate"] = await timing_service.estimate(job.type, size)
+            out["memory_estimate"] = await timing_service.estimate_memory(job.type, size)
     return out
 
 

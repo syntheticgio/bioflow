@@ -319,8 +319,13 @@ async def stats() -> list[dict]:
     types = await JobRunTiming.distinct("job_type")
     out = []
     for t in types:
-        samples = await _samples(t)
+        records = await _modelled(t)
+        samples = [
+            (d.input_bytes, d.duration_ms) for d in records if d.duration_ms > 0
+        ]
         model = _fit(samples)
+        memory_samples = _memory_samples_from(records)
+        memory_model = _fit_memory(memory_samples)
         out.append(
             {
                 "job_type": t,
@@ -331,6 +336,16 @@ async def stats() -> list[dict]:
                     "slope_ms_per_byte": model["slope"],
                     "intercept_ms": round(model["intercept"]),
                     "r_squared": round(_r_squared(samples, model), 3),
+                },
+                # Separate sample count: only runs above the floor carry a
+                # peak, so this is legitimately smaller than `samples`.
+                "memory_samples": len(memory_samples),
+                "memory_model": None
+                if memory_model is None
+                else {
+                    "slope_bytes_per_byte": memory_model["slope"],
+                    "intercept_bytes": round(memory_model["intercept"]),
+                    "r_squared": round(_r_squared(memory_samples, memory_model), 3),
                 },
             }
         )
