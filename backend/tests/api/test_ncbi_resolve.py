@@ -248,6 +248,164 @@ class TestOrganismSearch:
         assert body["sra_runs"] == []
         assert body["error"]
 
+    async def test_initial_search_caps_each_section_to_five(
+        self, client, two_profiles, monkeypatch
+    ):
+        """`section` defaults to "both" -- the initial side-by-side search --
+        which must cap each list rather than fetch a full `page_size` page of
+        each, however large `page_size` is set."""
+        seen_page_sizes: dict[str, int] = {}
+
+        def fake_assemblies(tax_id, *, page_size, **k):
+            seen_page_sizes["assemblies"] = page_size
+            return ncbi_taxonomy.AssemblyPage()
+
+        def fake_sra(o, *, retmax, **k):
+            seen_page_sizes["sra"] = retmax
+            return ([], 0)
+
+        monkeypatch.setattr(ncbi_taxonomy, "search_assemblies_by_taxon", fake_assemblies)
+        monkeypatch.setattr(sra_resolver, "search_runs_by_organism", fake_sra)
+
+        r = await client.post(
+            "/api/v1/ncbi/organism-search",
+            json={"tax_id": 9606, "sci_name": "Homo sapiens", "page_size": 20},
+            headers=two_profiles["a_headers"],
+        )
+        assert r.status_code == 200
+        assert seen_page_sizes == {"assemblies": 5, "sra": 5}
+
+    async def test_narrowing_to_assemblies_section_skips_the_sra_fetch(
+        self, client, two_profiles, monkeypatch
+    ):
+        called = {"sra": False}
+
+        def fake_assemblies(tax_id, *, page_size, **k):
+            assert page_size == 20
+            return ncbi_taxonomy.AssemblyPage(
+                assemblies=[
+                    ncbi_assembly.AssemblyMetadata(accession="GCF_000002445.2")
+                ]
+            )
+
+        def fake_sra(o, **k):
+            called["sra"] = True
+            return ([], 0)
+
+        monkeypatch.setattr(ncbi_taxonomy, "search_assemblies_by_taxon", fake_assemblies)
+        monkeypatch.setattr(sra_resolver, "search_runs_by_organism", fake_sra)
+
+        r = await client.post(
+            "/api/v1/ncbi/organism-search",
+            json={
+                "tax_id": 9606,
+                "sci_name": "Homo sapiens",
+                "page_size": 20,
+                "section": "assemblies",
+            },
+            headers=two_profiles["a_headers"],
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert len(body["assemblies"]) == 1
+        assert body["sra_runs"] == []
+        assert body["sra_total_count"] == 0
+        assert called["sra"] is False
+
+    async def test_narrowing_to_sra_section_skips_the_assembly_fetch(
+        self, client, two_profiles, monkeypatch
+    ):
+        called = {"assemblies": False}
+
+        def fake_assemblies(tax_id, **k):
+            called["assemblies"] = True
+            return ncbi_taxonomy.AssemblyPage()
+
+        def fake_sra(o, *, retmax, **k):
+            assert retmax == 20
+            return (["1"], 1)
+
+        monkeypatch.setattr(ncbi_taxonomy, "search_assemblies_by_taxon", fake_assemblies)
+        monkeypatch.setattr(sra_resolver, "search_runs_by_organism", fake_sra)
+        monkeypatch.setattr(sra_resolver, "fetch_packages", lambda uids: ["<pkg>"])
+        monkeypatch.setattr(
+            sra_resolver,
+            "runs_from_package",
+            lambda package: [sra_resolver.RunInfo(accession="SRR1")],
+        )
+
+        r = await client.post(
+            "/api/v1/ncbi/organism-search",
+            json={
+                "tax_id": 9606,
+                "sci_name": "Homo sapiens",
+                "page_size": 20,
+                "section": "sra",
+            },
+            headers=two_profiles["a_headers"],
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["assemblies"] == []
+        assert body["assemblies_next_page_token"] is None
+        assert len(body["sra_runs"]) == 1
+        assert body["sra_total_count"] == 1
+        assert called["assemblies"] is False
+
+    async def test_platform_filter_is_passed_to_the_sra_organism_search(
+        self, client, two_profiles, monkeypatch
+    ):
+        seen = {}
+
+        def fake_sra(o, *, platform_filter, **k):
+            seen["platform_filter"] = platform_filter
+            return ([], 0)
+
+        monkeypatch.setattr(
+            ncbi_taxonomy,
+            "search_assemblies_by_taxon",
+            lambda tax_id, **k: ncbi_taxonomy.AssemblyPage(),
+        )
+        monkeypatch.setattr(sra_resolver, "search_runs_by_organism", fake_sra)
+
+        r = await client.post(
+            "/api/v1/ncbi/organism-search",
+            json={
+                "tax_id": 4932,
+                "sci_name": "Saccharomyces cerevisiae",
+                "platform_filter": "OXFORD_NANOPORE",
+            },
+            headers=two_profiles["a_headers"],
+        )
+        assert r.status_code == 200
+        assert seen["platform_filter"] == "OXFORD_NANOPORE"
+
+    async def test_assembly_level_filter_is_passed_to_the_taxon_search(
+        self, client, two_profiles, monkeypatch
+    ):
+        seen = {}
+
+        def fake_assemblies(tax_id, *, assembly_level, **k):
+            seen["assembly_level"] = assembly_level
+            return ncbi_taxonomy.AssemblyPage()
+
+        monkeypatch.setattr(ncbi_taxonomy, "search_assemblies_by_taxon", fake_assemblies)
+        monkeypatch.setattr(
+            sra_resolver, "search_runs_by_organism", lambda o, **k: ([], 0)
+        )
+
+        r = await client.post(
+            "/api/v1/ncbi/organism-search",
+            json={
+                "tax_id": 4932,
+                "sci_name": "Saccharomyces cerevisiae",
+                "assembly_level": "complete_genome",
+            },
+            headers=two_profiles["a_headers"],
+        )
+        assert r.status_code == 200
+        assert seen["assembly_level"] == "complete_genome"
+
 
 def _async(value):
     async def fake(*args, **kwargs):

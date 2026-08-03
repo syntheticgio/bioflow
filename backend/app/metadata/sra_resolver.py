@@ -211,7 +211,11 @@ def search_uids(accession: str, *, retmax: int = MAX_RUNS) -> tuple[list[str], i
 
 
 def search_runs_by_organism(
-    organism: str, *, retstart: int = 0, retmax: int = 20
+    organism: str,
+    *,
+    retstart: int = 0,
+    retmax: int = 20,
+    platform_filter: str | None = None,
 ) -> tuple[list[str], int]:
     """SRA UIDs for an organism name search, and NCBI's total count.
 
@@ -220,11 +224,21 @@ def search_runs_by_organism(
     thousands of runs, and `retstart`/`retmax` are esearch's own offset and
     page-size parameters, so the caller pages forward without ever pulling
     more than one page's worth of packages.
+
+    `platform_filter`, when given, is added to the query term itself
+    (`AND ILLUMINA[Platform]`) rather than applied as a post-fetch filter like
+    `resolve()` does: this search is offset-paginated over a result set that
+    can hold thousands of runs, and filtering after the page is fetched would
+    silently return fewer than `retmax` rows and make `total_count`/offset
+    math lie about what is actually being paged through.
     """
+    term = f"{organism}[Organism]"
+    if platform_filter:
+        term = f"{term} AND {platform_filter}[Platform]"
     params = urllib.parse.urlencode(
         {
             "db": "sra",
-            "term": f"{organism}[Organism]",
+            "term": term,
             "retmode": "json",
             "retstart": str(retstart),
             "retmax": str(retmax),

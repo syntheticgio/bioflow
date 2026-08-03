@@ -1210,6 +1210,15 @@ export interface OrganismSearchRequest {
   assembly_page_token?: string | null;
   sra_offset?: number;
   page_size?: number;
+  /** ILLUMINA | PACBIO_SMRT | OXFORD_NANOPORE, or null for everything. Only
+   *  applies to sequencing runs -- an assembly has no platform of its own. */
+  platform_filter?: string | null;
+  /** NCBI's own assembly_level vocabulary, e.g. "Complete Genome". Only
+   *  applies to the assembly list. */
+  assembly_level?: string | null;
+  /** Which table this request wants back. "both" is the initial search;
+   *  paging either table's own pager narrows to that table alone. */
+  section?: "both" | "assemblies" | "sra";
 }
 
 export interface OrganismSearchResponse {
