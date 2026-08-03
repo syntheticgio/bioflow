@@ -89,12 +89,18 @@ already exists to derive it.
 Sampled by a poller in the executor walking the job's process subtree at ~1s
 intervals, retaining the max.
 
-**Resource fields are null for runs under ~10 seconds.** Short jobs yield two
-or three samples, and a peak derived from that is noise. They are not
+**Resource fields are null for runs under 60 seconds.** Short jobs yield a
+handful of samples, and a peak derived from that is noise. They are not
 interesting for this feature -- the point is substantial work -- so they are
 excluded rather than recorded with an unreliable number. The record is still
 written; only the resource block is empty. This removes the failure mode
 instead of labeling it.
+
+A minute is a high floor deliberately. At a ~1s interval it guarantees roughly
+sixty samples behind every peak, which is enough that the number means
+something. It also sets the floor for what the memory model can ever speak
+about: estimates exist only for work measured in minutes, which is the only
+work where "will this fit on my machine" is a question worth asking.
 
 `sample_count` remains as the honesty field for runs above the floor.
 
@@ -190,8 +196,8 @@ pipeline run.
 Backend behavior is covered by pytest, run from a worktree via
 `./backend/run-worktree-tests.sh`. Worth testing specifically:
 
-- The duration floor: a run under the threshold writes a record with null
-  resource fields, not a record with a two-sample peak.
+- The duration floor: a run under 60s writes a record with null resource
+  fields, not a record with a handful-of-samples peak.
 - The outcome filter: a failed run is recorded and is excluded from both fits.
 - Param sanitization: a payload containing file paths yields a `params` field
   containing none.
