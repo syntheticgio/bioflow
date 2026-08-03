@@ -106,18 +106,26 @@ def search_assemblies_by_taxon(
     page_token: str | None = None,
     page_size: int = 20,
     reference_only: bool = False,
+    assembly_level: str | None = None,
 ) -> AssemblyPage:
     """One page of assemblies for a taxon ID.
 
     Uses NCBI's own `page_token` cursor rather than an offset: the Datasets
     API does not support arbitrary offsets into a taxon's assembly list, only
     forward paging via the token it hands back.
+
+    `assembly_level` maps straight to the Datasets API's own
+    `filters.assembly_level` param (`complete_genome` / `chromosome` /
+    `scaffold` / `contig`), confirmed live against `/genome/taxon/.../
+    dataset_report`.
     """
     params: dict[str, str] = {"page_size": str(page_size)}
     if page_token:
         params["page_token"] = page_token
     if reference_only:
         params["filters.reference_only"] = "true"
+    if assembly_level:
+        params["filters.assembly_level"] = assembly_level
 
     query = urllib.parse.urlencode(params)
     body = _get(f"{DATASETS}/genome/taxon/{tax_id}/dataset_report?{query}")

@@ -11,6 +11,7 @@ nothing already pointed at those paths breaks.
 """
 
 import asyncio
+from typing import Literal
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, status
@@ -19,6 +20,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import OwnerDep
 from app.logging import get_logger
 from app.metadata import ncbi_assembly, ncbi_assembly_components, ncbi_taxonomy, sra_resolver
+from app.metadata.ncbi_taxonomy import AssemblyPage
 from app.services import ncbi_assembly_service, sra_service
 
 log = get_logger(__name__)
@@ -188,6 +190,21 @@ class OrganismSearchRequest(BaseModel):
     assembly_page_token: str | None = None
     sra_offset: int = 0
     page_size: int = 20
+    # ILLUMINA | PACBIO_SMRT | OXFORD_NANOPORE, or None for everything. Applies
+    # only to sequencing runs -- a genome assembly has no sequencing platform
+    # of its own, it is downstream of whatever reads built it.
+    platform_filter: str | None = None
+    # NCBI's own assembly_level vocabulary: "Complete Genome" / "Chromosome" /
+    # "Scaffold" / "Contig". Applies only to the assembly list.
+    assembly_level: str | None = None
+    # Which table the caller actually wants back. "both" is the initial
+    # search -- a quick look at each list side by side, so each is capped to
+    # INITIAL_SECTION_LIMIT regardless of `page_size`. Clicking "Next" on
+    # either table's own pager switches to that table alone: the user has
+    # shown they only care about that list, and re-fetching (and re-rendering)
+    # the other one on every page turn would be wasted work and a shifting
+    # layout for no reason.
+    section: Literal["both", "assemblies", "sra"] = "both"
 
 
 class OrganismSearchResponse(BaseModel):
@@ -398,6 +415,13 @@ async def organism_suggest(q: str) -> OrganismSuggestResponse:
     )
 
 
+# How many rows each table shows on the initial combined search -- a quick
+# side-by-side look, not a full paginated browse. Clicking "Next" on either
+# table switches `section` to that table alone, at which point `page_size`
+# (not this) governs how many rows come back.
+INITIAL_SECTION_LIMIT = 5
+
+
 @router.post("/organism-search", response_model=OrganismSearchResponse)
 async def organism_search(
     body: OrganismSearchRequest, owner: OwnerDep
@@ -408,20 +432,35 @@ async def organism_search(
     page: assemblies page by NCBI's own `page_token` cursor, SRA runs page by
     `esearch` offset, and neither pagination scheme fits the other's result
     shape.
+
+    `section` decides which of the two lists is actually fetched: "both" is
+    the initial search (each capped to `INITIAL_SECTION_LIMIT`), while paging
+    either table's own pager narrows to that table alone so the other one
+    doesn't refetch and re-render on every page turn.
     """
+    want_assemblies = body.section in ("both", "assemblies")
+    want_sra = body.section in ("both", "sra")
+    page_size = INITIAL_SECTION_LIMIT if body.section == "both" else body.page_size
+
     assembly_page, (uids, sra_total) = await asyncio.gather(
         asyncio.to_thread(
             ncbi_taxonomy.search_assemblies_by_taxon,
             body.tax_id,
             page_token=body.assembly_page_token,
-            page_size=body.page_size,
-        ),
+            page_size=page_size,
+            assembly_level=body.assembly_level,
+        )
+        if want_assemblies
+        else _noop(AssemblyPage()),
         asyncio.to_thread(
             sra_resolver.search_runs_by_organism,
             body.sci_name,
             retstart=body.sra_offset,
-            retmax=body.page_size,
-        ),
+            retmax=page_size,
+            platform_filter=body.platform_filter,
+        )
+        if want_sra
+        else _noop(([], 0)),
     )
 
     assemblies: list[OrganismAssemblySummary] = []
@@ -471,7 +510,7 @@ async def organism_search(
 
     sra_next_offset = (
         body.sra_offset + len(uids)
-        if body.sra_offset + len(uids) < sra_total
+        if want_sra and body.sra_offset + len(uids) < sra_total
         else None
     )
 
@@ -479,11 +518,17 @@ async def organism_search(
         tax_id=body.tax_id,
         sci_name=body.sci_name,
         assemblies=assemblies,
-        assemblies_next_page_token=assembly_page.next_page_token,
+        assemblies_next_page_token=assembly_page.next_page_token if want_assemblies else None,
         sra_runs=sra_runs,
-        sra_total_count=sra_total,
+        sra_total_count=sra_total if want_sra else 0,
         sra_next_offset=sra_next_offset,
         error=None
         if (assemblies or sra_runs)
         else f"No assemblies or sequencing runs found for tax_id {body.tax_id}.",
     )
+
+
+async def _noop(value):
+    """An already-known value, wrapped so it can sit beside a real task in
+    `asyncio.gather` when the caller only wants one of the two sections."""
+    return value

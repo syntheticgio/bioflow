@@ -132,6 +132,34 @@ class TestSearchAssembliesByTaxon:
         assert "page_size=5" in seen["url"]
         assert "filters.reference_only=true" in seen["url"]
 
+    def test_assembly_level_reaches_the_request(self, monkeypatch):
+        """Confirmed live against the Datasets API: `filters.assembly_level`
+        narrows a taxon's dataset_report the same way `filters.reference_only`
+        does (42 complete genomes vs. 1754 total assemblies for S. cerevisiae
+        at tax_id 4932)."""
+        seen = {}
+
+        def fake_get(url):
+            seen["url"] = url
+            return json.dumps({"reports": []})
+
+        monkeypatch.setattr(ncbi_taxonomy, "_get", fake_get)
+        ncbi_taxonomy.search_assemblies_by_taxon(4932, assembly_level="complete_genome")
+
+        assert "filters.assembly_level=complete_genome" in seen["url"]
+
+    def test_no_assembly_level_omits_the_filter(self, monkeypatch):
+        seen = {}
+
+        def fake_get(url):
+            seen["url"] = url
+            return json.dumps({"reports": []})
+
+        monkeypatch.setattr(ncbi_taxonomy, "_get", fake_get)
+        ncbi_taxonomy.search_assemblies_by_taxon(4932)
+
+        assert "assembly_level" not in seen["url"]
+
     def test_network_failure_yields_an_empty_page(self, monkeypatch):
         monkeypatch.setattr(ncbi_taxonomy, "_get", lambda url: None)
         page = ncbi_taxonomy.search_assemblies_by_taxon(9606)

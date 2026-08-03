@@ -31,6 +31,14 @@ const PLATFORM_FILTERS = [
   { value: "OXFORD_NANOPORE", label: "Nanopore" },
 ];
 
+const ASSEMBLY_LEVEL_FILTERS = [
+  { value: "", label: "Any level" },
+  { value: "complete_genome", label: "Complete Genome" },
+  { value: "chromosome", label: "Chromosome" },
+  { value: "scaffold", label: "Scaffold" },
+  { value: "contig", label: "Contig" },
+];
+
 type SortKey = "accession" | "platform" | "library_strategy" | "spots" | "bytes";
 
 /**
@@ -79,6 +87,13 @@ export function NcbiDownloadDialog({
   const [highlighted, setHighlighted] = useState(0);
   const [assemblyPageToken, setAssemblyPageToken] = useState<string | null>(null);
   const [sraOffset, setSraOffset] = useState(0);
+  const [assemblyLevel, setAssemblyLevel] = useState("");
+  // Which table the organism-search results currently show: "both" on a
+  // fresh search, narrowed to one table once its own "Next" pager is used --
+  // paging one list is a sign the user only cares about that list now.
+  const [organismSection, setOrganismSection] = useState<"both" | "assemblies" | "sra">(
+    "both",
+  );
   // One page at a time per list: the prior page's token/offset is not kept,
   // so "Previous" on the organism results re-searches from the top rather
   // than a true back-page. Good enough for a first pass at what NCBI itself
@@ -102,7 +117,11 @@ export function NcbiDownloadDialog({
   const suggestions = suggestQuery.data?.suggestions.slice(0, SUGGESTION_LIMIT) ?? [];
 
   const organismSearch = useMutation({
-    mutationFn: (vars: { assemblyPageToken?: string | null; sraOffset?: number }) =>
+    mutationFn: (vars: {
+      assemblyPageToken?: string | null;
+      sraOffset?: number;
+      section?: "both" | "assemblies" | "sra";
+    }) =>
       api.ncbiOrganismSearch({
         tax_id: selectedOrganism!.tax_id,
         sci_name: selectedOrganism!.sci_name,
@@ -110,6 +129,9 @@ export function NcbiDownloadDialog({
         assembly_page_token: vars.assemblyPageToken ?? null,
         sra_offset: vars.sraOffset ?? 0,
         page_size: PAGE_SIZE,
+        platform_filter: platform || null,
+        assembly_level: assemblyLevel || null,
+        section: vars.section ?? "both",
       }),
     onSuccess: () => {
       // Same clearing rule as `resolve`: only one result view is shown at a
@@ -129,7 +151,8 @@ export function NcbiDownloadDialog({
     setShowSuggestions(false);
     setAssemblyPageToken(null);
     setSraOffset(0);
-    organismSearch.mutate({});
+    setOrganismSection("both");
+    organismSearch.mutate({ section: "both" });
   };
 
   const clearOrganism = () => {
@@ -346,7 +369,10 @@ export function NcbiDownloadDialog({
               return;
             }
             if (selectedOrganism) {
-              organismSearch.mutate({});
+              setAssemblyPageToken(null);
+              setSraOffset(0);
+              setOrganismSection("both");
+              organismSearch.mutate({ section: "both" });
               return;
             }
             if (accession.trim()) resolve.mutate();
@@ -404,13 +430,55 @@ export function NcbiDownloadDialog({
             )}
           </label>
 
-          {!assembly && !selectedOrganism && (
+          {!assembly && (
             <label className="sra-search-platform">
               <span>Platform</span>
-              <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
+              <select
+                value={platform}
+                onChange={(e) => {
+                  setPlatform(e.target.value);
+                  // A platform filter applies to sequencing runs only. If an
+                  // organism is already selected, changing it should refine
+                  // the current results rather than wait for another lookup.
+                  if (selectedOrganism) {
+                    setSraOffset(0);
+                    setOrganismSection("both");
+                    organismSearch.mutate({
+                      assemblyPageToken,
+                      sraOffset: 0,
+                      section: "both",
+                    });
+                  }
+                }}
+              >
                 {PLATFORM_FILTERS.map((p) => (
                   <option key={p.value} value={p.value}>
                     {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {!assembly && selectedOrganism && (
+            <label className="sra-search-platform">
+              <span>Level</span>
+              <select
+                value={assemblyLevel}
+                onChange={(e) => {
+                  setAssemblyLevel(e.target.value);
+                  setAssemblyPageToken(null);
+                  setOrganismSection("both");
+                  organismSearch.mutate({
+                    assemblyPageToken: null,
+                    sraOffset,
+                    section: "both",
+                  });
+                }}
+              >
+                {ASSEMBLY_LEVEL_FILTERS.map((l) => (
+                  <option key={l.value} value={l.value}>
+                    {l.label}
                   </option>
                 ))}
               </select>
@@ -470,14 +538,25 @@ export function NcbiDownloadDialog({
             }}
             onAssemblyPage={(token) => {
               setAssemblyPageToken(token);
-              organismSearch.mutate({ assemblyPageToken: token, sraOffset });
+              setOrganismSection("assemblies");
+              organismSearch.mutate({
+                assemblyPageToken: token,
+                sraOffset,
+                section: "assemblies",
+              });
             }}
             onSraPage={(offset) => {
               setSraOffset(offset);
-              organismSearch.mutate({ assemblyPageToken, sraOffset: offset });
+              setOrganismSection("sra");
+              organismSearch.mutate({
+                assemblyPageToken,
+                sraOffset: offset,
+                section: "sra",
+              });
             }}
             assemblyPageToken={assemblyPageToken}
             sraOffset={sraOffset}
+            section={organismSection}
             selected={selected}
             onToggleRun={toggle}
           />
@@ -721,6 +800,12 @@ export function NcbiDownloadDialog({
  * independent lists with two independent pagers -- NCBI's own assembly
  * search pages by cursor token and its SRA search pages by offset, so one
  * shared pager would have to fake one of the two schemes.
+ *
+ * On the initial search (`section === "both"`) both tables show side by
+ * side, capped to a handful of rows each. Using either table's own "Next"
+ * narrows `section` to that table alone -- paging one list is a sign the
+ * user is now only interested in it, so the other stops being fetched or
+ * shown until a fresh search starts over.
  */
 function OrganismResults({
   data,
@@ -729,6 +814,7 @@ function OrganismResults({
   onSraPage,
   assemblyPageToken,
   sraOffset,
+  section,
   selected,
   onToggleRun,
 }: {
@@ -738,23 +824,36 @@ function OrganismResults({
   onSraPage: (offset: number) => void;
   assemblyPageToken: string | null;
   sraOffset: number;
+  section: "both" | "assemblies" | "sra";
   selected: Set<string>;
   onToggleRun: (accession: string) => void;
 }) {
+  const showAssemblies = section !== "sra";
+  const showSra = section !== "assemblies";
+
   return (
     <>
       <div className="sra-summary">
         <div>
           <span style={{ fontStyle: "italic" }}>{data.sci_name}</span>
-          {" · "}
-          {data.assemblies.length} {data.assemblies.length === 1 ? "assembly" : "assemblies"}
-          {" · "}
-          {data.sra_total_count.toLocaleString()}{" "}
-          {data.sra_total_count === 1 ? "sequencing run" : "sequencing runs"}
+          {showAssemblies && (
+            <>
+              {" · "}
+              {data.assemblies.length}{" "}
+              {data.assemblies.length === 1 ? "assembly" : "assemblies"}
+            </>
+          )}
+          {showSra && (
+            <>
+              {" · "}
+              {data.sra_total_count.toLocaleString()}{" "}
+              {data.sra_total_count === 1 ? "sequencing run" : "sequencing runs"}
+            </>
+          )}
         </div>
       </div>
 
-      {data.assemblies.length > 0 && (
+      {showAssemblies && data.assemblies.length > 0 && (
         <>
           <h3 style={{ fontSize: 13, margin: "12px 0 4px" }}>Genome assemblies</h3>
           <div className="sra-table-wrap">
@@ -801,7 +900,7 @@ function OrganismResults({
         </>
       )}
 
-      {data.sra_runs.length > 0 && (
+      {showSra && data.sra_runs.length > 0 && (
         <>
           <h3 style={{ fontSize: 13, margin: "12px 0 4px" }}>Sequencing runs</h3>
           <div className="sra-table-wrap">

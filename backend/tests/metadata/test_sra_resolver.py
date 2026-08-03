@@ -427,3 +427,37 @@ class TestSearchRunsByOrganism:
         uids, total = sra_resolver.search_runs_by_organism("Homo sapiens")
         assert uids == []
         assert total == 0
+
+    def test_platform_filter_is_added_to_the_query_term(self, monkeypatch):
+        """Unlike `resolve()`'s post-fetch platform filter, this search is
+        offset-paginated over a result set that can hold thousands of runs --
+        filtering after the page is fetched would return fewer than `retmax`
+        rows and make the offset/count math lie. The filter has to be part of
+        the esearch term instead, confirmed live against NCBI's own esearch as
+        a real, working field (`oxford_nanopore[Platform]`)."""
+        seen = {}
+
+        def fake_get(url):
+            seen["url"] = url
+            return '{"esearchresult": {"idlist": [], "count": "0"}}'
+
+        monkeypatch.setattr(sra_resolver.sra, "_get", fake_get)
+        sra_resolver.search_runs_by_organism(
+            "Saccharomyces cerevisiae", platform_filter="OXFORD_NANOPORE"
+        )
+
+        assert "OXFORD_NANOPORE%5BPlatform%5D" in seen["url"] or (
+            "OXFORD_NANOPORE[Platform]" in seen["url"]
+        )
+
+    def test_no_platform_filter_omits_the_platform_term(self, monkeypatch):
+        seen = {}
+
+        def fake_get(url):
+            seen["url"] = url
+            return '{"esearchresult": {"idlist": [], "count": "0"}}'
+
+        monkeypatch.setattr(sra_resolver.sra, "_get", fake_get)
+        sra_resolver.search_runs_by_organism("Homo sapiens")
+
+        assert "Platform" not in seen["url"]
