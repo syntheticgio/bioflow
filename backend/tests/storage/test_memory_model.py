@@ -114,6 +114,26 @@ class TestEstimateMemory:
         assert result["samples"] == 8
         assert "r_squared" in result
 
+    async def test_flags_an_input_beyond_the_observed_range(self):
+        """Every row in this app's history so far is test data -- the first
+        real run will be far larger than anything measured, and the response
+        should say so rather than present a confident-looking number."""
+        for i in range(1, 9):
+            await JobRunTiming(
+                job_type="memory_range_test",
+                input_bytes=1_000_000 * i,
+                duration_ms=120_000,
+                outcome=RunOutcome.SUCCEEDED,
+                resources=RunResources(peak_rss_bytes=10_000_000 + 1_000_000 * i),
+            ).insert()
+
+        inside = await timing_service.estimate_memory("memory_range_test", 5_000_000)
+        assert inside["range"]["extrapolating"] is False
+
+        outside = await timing_service.estimate_memory("memory_range_test", 80_000_000)
+        assert outside["range"]["extrapolating"] is True
+        assert outside["range"]["max_observed_bytes"] == 8_000_000
+
     async def test_a_failed_run_is_excluded_from_the_memory_fit(self):
         """The whole reason estimate_memory reads via _modelled rather than
         querying JobRunTiming directly."""

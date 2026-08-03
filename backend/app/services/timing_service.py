@@ -275,6 +275,7 @@ async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
         "estimate_bytes": int(max(0, predicted)),
         "samples": model["n"],
         "r_squared": round(_r_squared(samples, model), 3),
+        "range": _observed_range(samples, input_bytes),
     }
 
 
