@@ -48,19 +48,21 @@ class ResourceSampler:
         try:
             proc = proc if proc is not None else psutil.Process(self.pid)
             rss, cpu = self._read(proc)
-        except Exception:  # noqa: BLE001 - the root is gone; no sample exists
+        except Exception as e:  # noqa: BLE001 - the root is gone; no sample exists
+            log.debug("resource_sample_root_gone", pid=self.pid, error=str(e))
             return
 
         try:
             for child in proc.children(recursive=True):
                 try:
                     child_rss, child_cpu = self._read(child)
-                except Exception:  # noqa: BLE001 - this child exited mid-walk
+                except Exception as e:  # noqa: BLE001 - this child exited mid-walk
+                    log.debug("resource_sample_child_gone", pid=self.pid, error=str(e))
                     continue
                 rss += child_rss
                 cpu += child_cpu
-        except Exception:  # noqa: BLE001 - the root exited during the walk
-            pass
+        except Exception as e:  # noqa: BLE001 - the root exited during the walk
+            log.debug("resource_sample_walk_interrupted", pid=self.pid, error=str(e))
 
         self.sample_count += 1
         self._cpu_total += cpu

@@ -1359,11 +1359,13 @@ RESOURCE_FLOOR_MS = 60_000
 Add these methods to `JobExecutor`:
 
 ```python
-    async def _sample_resources(self, sampler: ResourceSampler) -> None:
+    async def _sample_resources(
+        self, sampler: ResourceSampler, proc: psutil.Process
+    ) -> None:
         """Poll until cancelled. Never raises -- telemetry cannot fail a job."""
         try:
             while True:
-                sampler.observe()
+                sampler.observe(proc)
                 await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             raise
@@ -1377,10 +1379,23 @@ Add these methods to `JobExecutor`:
         own footprint -- but subprocess tools are spawned as children of this
         process, so the subtree is what captures them, and two concurrent jobs
         remain separable because each tool tree is walked from its own root.
+
+        `psutil.Process(pid)` is constructed exactly once, here, and reused
+        for every poll. `cpu_percent(interval=None)` reports the percentage
+        *since the previous call on that same Process instance* -- it returns
+        0.0 unconditionally on an instance's first call. `ResourceSampler.observe()`
+        accepts a `proc` argument for exactly this reason: a caller that
+        constructed a fresh `psutil.Process(self.pid)` on every poll (as
+        `observe()`'s own default does when called with no argument) would
+        report 0.0 CPU forever, silently. This was caught in Task 1's code
+        review before it could reach a running job.
         """
+        proc = psutil.Process(os.getpid())
         sampler = ResourceSampler(pid=os.getpid())
-        return sampler, asyncio.create_task(self._sample_resources(sampler))
+        return sampler, asyncio.create_task(self._sample_resources(sampler, proc))
 ```
+
+Add `import psutil` to the executor's imports alongside the existing standard-library ones.
 
 - [ ] **Step 2: Start and stop the sampler around dispatch**
 
