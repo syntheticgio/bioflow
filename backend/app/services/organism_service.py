@@ -13,11 +13,24 @@ know, or a server that is not running, simply means the panel shows a name and
 no paragraph, exactly as it did before this existed.
 """
 
-import asyncio
+import importlib
 
 from app.logging import get_logger
 from app.models import OrganismBlurb, normalize_organism
-from app.services import llm_client, summary_prompt
+from app.services import summary_prompt
+from app.services.ai import router as ai_router
+from app.services.ai.adapters import Completion
+
+# NOT `from app.services.ai import complete as ai_complete`, and NOT
+# `import app.services.ai.complete as ai_complete` either: app/services/ai/
+# __init__.py does `from app.services.ai.complete import complete`, which
+# rebinds the *package attribute* `complete` to the function it re-exports,
+# shadowing the submodule of the same name. Both of those import forms
+# resolve through that attribute and would silently bind the function, not
+# the module -- so this goes through `sys.modules` via `importlib` instead,
+# which is the only form immune to the shadow, and gives tests a module to
+# monkeypatch `.complete` on.
+ai_complete = importlib.import_module("app.services.ai.complete")
 
 log = get_logger(__name__)
 
@@ -96,23 +109,24 @@ async def get_or_generate(organism: str, *, force: bool = False) -> OrganismBlur
         if cached is not None:
             return cached
 
-    # Both calls are blocking sockets; this runs on the event loop, so neither
-    # may happen inline.
-    if not await asyncio.to_thread(llm_client.is_available):
+    from app.models.ai import TaskSlot
+
+    provider = await ai_router.resolve(TaskSlot.ORGANISM_BLURB)
+    if provider is None:
         return None
 
-    completion = await asyncio.to_thread(
-        llm_client.complete,
+    result = await ai_complete.complete(
+        provider,
         system=summary_prompt.ORGANISM_SYSTEM_PROMPT,
         user=summary_prompt.build_organism_prompt(organism.strip()),
         # Shorter than a file summary: this is two or three sentences, and the
         # cap is what stops a chatty model from writing an essay.
         max_tokens=250,
     )
-    if completion is None:
+    if not isinstance(result, Completion):
         return None
 
-    text, model = completion
+    text, model = result.text, result.model
     log.info("organism_blurb_generated", organism=key, model=model, chars=len(text))
 
     # Upsert rather than insert: two files of the same organism can reach here
