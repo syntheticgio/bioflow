@@ -7,38 +7,30 @@ body:
   - type: textarea
     id: problem
     attributes:
-      label: Problem
-      description: Describe the maintenance, verification, migration, or cleanup need.
+      label: Engineering problem
+      description: Describe the invariant, gap, or maintenance burden.
     validations:
       required: true
   - type: textarea
     id: evidence
     attributes:
       label: Evidence
-      description: Provide measurements, logs, links, or observations that support this task.
+      description: Include measurements, failing tests, code paths, or observed behavior.
     validations:
       required: true
   - type: textarea
     id: work
     attributes:
       label: Proposed work
-      description: Describe the engineering work needed to address the task.
-    validations:
-      required: true
-  - type: textarea
-    id: completion
-    attributes:
-      label: Completion criteria
-      description: List the verifiable conditions for considering this task complete.
-      placeholder: |
-        - ...
-        - ...
     validations:
       required: true
   - type: textarea
     id: risks
     attributes:
-      label: Risks and considerations
-      description: Note compatibility, operational, migration, or rollback concerns.
+      label: Risks and constraints
+  - type: textarea
+    id: completion
+    attributes:
+      label: Completion checks
     validations:
-      required: false
+      required: true

@@ -6,54 +6,47 @@ labels:
 body:
   - type: markdown
     attributes:
-      value: |
-        Thanks for taking the time to report this. Clear reproduction steps and safe evidence help us investigate quickly.
+      value: Thanks for reporting a BioFlow problem. Include concrete evidence where possible.
   - type: textarea
     id: observed
     attributes:
       label: What happened?
-      description: Describe the broken, missing, or inconsistent behavior you observed.
+      description: Describe the observed behavior and its impact.
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: How can we reproduce it?
-      description: List the smallest set of steps that reliably shows the problem.
+      description: List the smallest sequence of steps, inputs, and project state that reproduces the problem.
       placeholder: |
-        1. ...
-        2. ...
-        3. ...
+        1. Open ...
+        2. Run ...
+        3. Observe ...
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: What should have happened?
-      description: Describe the expected behavior or result.
     validations:
       required: true
   - type: input
     id: environment
     attributes:
       label: Environment
-      description: Include host OS, architecture, browser, and BioFlow commit or image version.
-      placeholder: "macOS 15, arm64, Firefox 140, commit abc123 or image tag"
-    validations:
-      required: false
+      description: Host OS, architecture, browser, and BioFlow commit or image if known.
   - type: textarea
     id: evidence
     attributes:
-      label: Evidence
-      description: Attach logs, screenshots, or other evidence. Remove secrets and personally identifiable information first.
-    validations:
-      required: false
+      label: Logs, screenshots, or other evidence
+      description: Remove secrets and personally identifying data before posting.
   - type: checkboxes
     id: checks
     attributes:
-      label: Before submitting
+      label: Reporter checks
       options:
-        - label: I searched existing issues and did not find a duplicate.
+        - label: I searched open issues for an existing report.
           required: true
-        - label: I removed sensitive data, including secrets and personally identifiable information.
+        - label: I removed secrets and sensitive data from the report.
           required: true
