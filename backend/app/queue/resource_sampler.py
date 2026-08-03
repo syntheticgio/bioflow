@@ -31,6 +31,15 @@ class ResourceSampler:
         self.peak_cpu_percent: float | None = None
         self.sample_count = 0
         self._cpu_total = 0.0
+        # `psutil.Process.children()` returns brand-new Process objects on
+        # every call, and `cpu_percent(interval=None)` reports the delta
+        # *since the previous call on that exact instance* -- unconditionally
+        # 0.0 on an instance's first call. Without persisting one Process per
+        # child pid across polls, every child's cpu_percent would read 0.0 on
+        # every single sample, forever, which is exactly where the real
+        # bioinformatics tool (bwa, minimap2, fastp, ...) runs: as a child of
+        # the worker, not as the root.
+        self._child_procs: dict[int, object] = {}
 
     @property
     def mean_cpu_percent(self) -> float | None:
@@ -53,14 +62,29 @@ class ResourceSampler:
             return
 
         try:
+            seen_pids = set()
             for child in proc.children(recursive=True):
+                child_pid = child.pid
+                seen_pids.add(child_pid)
+                # Reuse the persisted Process for this pid, if we have one,
+                # rather than the fresh object `children()` just handed us --
+                # otherwise cpu_percent() never has a "previous call" to
+                # diff against and reads 0.0 forever.
+                tracked = self._child_procs.get(child_pid, child)
                 try:
-                    child_rss, child_cpu = self._read(child)
+                    child_rss, child_cpu = self._read(tracked)
                 except Exception as e:  # noqa: BLE001 - this child exited mid-walk
                     log.debug("resource_sample_child_gone", pid=self.pid, error=str(e))
+                    self._child_procs.pop(child_pid, None)
                     continue
+                self._child_procs[child_pid] = tracked
                 rss += child_rss
                 cpu += child_cpu
+            # Drop persisted entries for pids that no longer appear under the
+            # root -- they exited (or were reaped) between polls, and holding
+            # onto them would just keep raising on every future observe().
+            for stale_pid in set(self._child_procs) - seen_pids:
+                self._child_procs.pop(stale_pid, None)
         except Exception as e:  # noqa: BLE001 - the root exited during the walk
             log.debug("resource_sample_walk_interrupted", pid=self.pid, error=str(e))
 

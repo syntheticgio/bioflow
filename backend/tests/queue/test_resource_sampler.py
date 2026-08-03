@@ -14,11 +14,16 @@ from app.queue.resource_sampler import ResourceSampler
 class FakeProcess:
     """Stands in for psutil.Process."""
 
-    def __init__(self, rss, cpu, children=None, gone=False):
+    def __init__(self, rss, cpu, children=None, gone=False, pid=None):
         self._rss = rss
         self._cpu = cpu
         self._children = children or []
         self._gone = gone
+        # Real psutil.Process objects always have a distinct .pid; default to
+        # object identity so fakes that don't care about pid collisions (most
+        # existing tests) don't accidentally alias each other under one key.
+        self.pid = pid if pid is not None else id(self)
+        self.cpu_percent_calls = 0
 
     def memory_info(self):
         if self._gone:
@@ -28,6 +33,7 @@ class FakeProcess:
     def cpu_percent(self, interval=None):
         if self._gone:
             raise ProcessLookupError("process is gone")
+        self.cpu_percent_calls += 1
         return self._cpu
 
     def children(self, recursive=True):
@@ -93,3 +99,85 @@ class TestEmptyState:
         assert sampler.peak_rss_bytes is None
         assert sampler.peak_cpu_percent is None
         assert sampler.mean_cpu_percent is None
+
+
+class TestChildCpuAcrossPolls:
+    """`psutil.Process.children()` hands back brand-new Process objects on
+    every call. `cpu_percent(interval=None)` reports the delta since the
+    *previous call on that exact instance* -- 0.0 unconditionally on an
+    instance's first call. If `observe()` read whichever fresh object
+    `children()` just returned, every child's cpu_percent would read 0.0 on
+    every poll, forever. These tests use a different `FakeProcess` instance
+    per poll (mirroring what psutil actually does) to prove `observe()`
+    persists and reuses one Process per child pid instead of trusting object
+    identity.
+    """
+
+    def test_reuses_the_persisted_process_for_a_child_seen_again_by_pid(self):
+        sampler = ResourceSampler(pid=1)
+
+        child_poll_1 = FakeProcess(rss=100, cpu=5.0, pid=42)
+        root_poll_1 = FakeProcess(rss=50, cpu=1.0, children=[child_poll_1])
+        sampler.observe(root_poll_1)
+
+        # A second poll: a DIFFERENT FakeProcess object represents the same
+        # OS process (same pid) -- exactly what psutil.children() does. Its
+        # own cpu value (40.0) must never be read: proving that is the whole
+        # point of this test, since the old code would have read exactly it.
+        child_poll_2 = FakeProcess(rss=110, cpu=40.0, pid=42)
+        root_poll_2 = FakeProcess(rss=55, cpu=1.0, children=[child_poll_2])
+        sampler.observe(root_poll_2)
+
+        # The old bug: cpu_percent would be read from child_poll_2 (a fresh
+        # object, first call in this fake's terms -- and in real psutil,
+        # unconditionally 0.0 on that instance's first call). The fix: the
+        # sampler must look up its own persisted Process for pid 42 --
+        # seeded from child_poll_1 -- and call cpu_percent on THAT object,
+        # never on child_poll_2 at all.
+        assert child_poll_2.cpu_percent_calls == 0
+        assert child_poll_1.cpu_percent_calls == 2
+        # Second-poll total is root(1.0) + persisted-child(5.0, from
+        # child_poll_1) == 6.0, NOT root(1.0) + child_poll_2's 40.0 -- if the
+        # sampler had read child_poll_2 instead, this would be 41.0.
+        assert sampler.peak_cpu_percent == pytest.approx(6.0)
+
+    def test_a_newly_seen_child_is_tracked_for_next_time(self):
+        """A child appearing for the first time still reads 0.0 on this poll
+        (unavoidable -- it just started) but must be persisted so the NEXT
+        poll reuses it rather than reading fresh-every-time forever."""
+        sampler = ResourceSampler(pid=1)
+
+        child = FakeProcess(rss=100, cpu=0.0, pid=7)
+        sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child]))
+        assert 7 in sampler._child_procs
+        assert sampler._child_procs[7] is child
+
+    def test_a_child_pid_no_longer_present_is_dropped_from_tracking(self):
+        """A child that exits between polls must not linger as a stale
+        entry that raises on every future observe() forever."""
+        sampler = ResourceSampler(pid=1)
+
+        child = FakeProcess(rss=100, cpu=5.0, pid=99)
+        sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child]))
+        assert 99 in sampler._child_procs
+
+        # Next poll: pid 99 no longer appears under the root at all (exited
+        # and reaped, not merely erroring on read).
+        sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[]))
+        assert 99 not in sampler._child_procs
+
+    def test_a_persisted_child_that_starts_raising_is_evicted(self):
+        """If the persisted Process itself starts raising (the child exited
+        but psutil still returned it in children() this one last time), it
+        must be dropped rather than kept around to raise again next time."""
+        sampler = ResourceSampler(pid=1)
+
+        child_poll_1 = FakeProcess(rss=100, cpu=5.0, pid=13)
+        sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child_poll_1]))
+        assert 13 in sampler._child_procs
+
+        # children() still lists pid 13 this poll, but reading it now fails.
+        child_poll_1._gone = True
+        child_poll_2 = FakeProcess(rss=1, cpu=1.0, pid=13)  # unused; read comes from the persisted one
+        sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child_poll_2]))
+        assert 13 not in sampler._child_procs
