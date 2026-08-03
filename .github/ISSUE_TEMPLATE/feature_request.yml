@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose a user-visible BioFlow capability or workflow.
+title: "[Feature]: "
+labels:
+  - "type: feature"
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What user or workflow problem should this solve?
+      description: Describe the affected user or workflow, not only a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What outcome should users have?
+      description: Describe the user-visible capability or workflow outcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Note workarounds, competing approaches, or why no alternative is adequate.
+    validations:
+      required: false
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and context
+      description: Add useful context, affected areas, or boundaries for this request.
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List the observable conditions that would make this request complete.
+      placeholder: |
+        - ...
+        - ...
+    validations:
+      required: true
