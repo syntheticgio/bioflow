@@ -2950,7 +2950,7 @@ table.software-matrix thead th.software-matrix-corner {
   top: 100%;
   left: 0;
   z-index: 50;
-  min-width: 190px;
+  min-width: 210px;
   padding: 4px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -2983,6 +2983,21 @@ table.software-matrix thead th.software-matrix-corner {
   padding: 6px 10px;
   color: var(--text-faint);
   font-size: 11px;
+}
+
+.menu-group + .menu-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.menu-section-label {
+  padding: 4px 10px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
 }
 
 /* A button that reads as a link: used where an action sits in a header or
