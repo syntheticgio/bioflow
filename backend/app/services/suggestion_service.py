@@ -31,7 +31,7 @@ from app.pipelines import (
 )
 from app.pipelines.aligners import Aligner
 from app.pipelines.organism_taxonomy import is_eukaryotic
-from app.services import object_service, pipeline_service
+from app.services import object_service, pipeline_service, prior_runs
 
 log = get_logger(__name__)
 
@@ -1007,9 +1007,7 @@ async def suggestions_for(obj) -> list[dict]:
         if card is not None:
             cards.append(card.as_dict())
 
-    from app.services.prior_runs import attach_prior_runs
-
     # After the builders, not inside them: this is the one part of a card that
     # is a database question rather than a rule about the file.
-    await attach_prior_runs(cards, obj, owner=obj.owner)
+    await prior_runs.attach_prior_runs(cards, obj, owner=obj.owner)
     return cards
