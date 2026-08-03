@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     events,
+    feedback,
     jobs,
     ncbi,
     objects,
@@ -36,5 +37,6 @@ api_router.include_router(uniprot.router)
 api_router.include_router(schedules.router)
 api_router.include_router(system.router)
 api_router.include_router(events.router)
+api_router.include_router(feedback.router)
 
 __all__ = ["api_router"]

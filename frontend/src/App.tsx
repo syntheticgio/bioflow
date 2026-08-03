@@ -7,6 +7,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
 import { HelpCalculations } from "./components/HelpCalculations";
+import { HelpFeedback } from "./components/HelpFeedback";
 import { HelpGenomeAnalysisReview } from "./components/HelpGenomeAnalysisReview";
 import { HelpSoftware } from "./components/HelpSoftware";
 import { HelpSources } from "./components/HelpSources";
@@ -82,6 +83,7 @@ function Shell() {
             path="/help/genome-analysis-review"
             element={<HelpGenomeAnalysisReview />}
           />
+          <Route path="/help/feedback" element={<HelpFeedback />} />
         </Routes>
         {!singleColumn && <DetailPanel />}
       </div>

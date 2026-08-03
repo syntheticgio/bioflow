@@ -2437,6 +2437,41 @@ a.btn {
   font-weight: 600;
 }
 
+/* --- Feedback help page --- */
+
+.feedback-form {
+  margin-bottom: 28px;
+}
+
+.feedback-form label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.feedback-form input,
+.feedback-form textarea {
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+.feedback-form textarea {
+  resize: vertical;
+}
+
+.feedback-char-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: right;
+  margin: 0 0 12px;
+}
+
+.feedback-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* --- Software and Sources help pages --- */
 
 /* Wider than .help-page's 760px measure because these entries are two

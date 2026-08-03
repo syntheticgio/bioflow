@@ -5,6 +5,7 @@ its indexes.
 """
 
 from app.models.blob import Blob, BlobState, BlobStorage
+from app.models.feedback import Feedback
 from app.models.job import (
     ACTIVE_STATES,
     TERMINAL_STATES,
@@ -62,6 +63,7 @@ ALL_MODELS = [
     OrganismBlurb,
     Profile,
     StructureLookup,
+    Feedback,
 ]
 
 __all__ = [
@@ -73,6 +75,7 @@ __all__ = [
     "BlobStorage",
     "Compression",
     "DataObject",
+    "Feedback",
     "FormatConfidence",
     "FormatInfo",
     "FormatKind",

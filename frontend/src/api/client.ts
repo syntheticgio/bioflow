@@ -20,6 +20,8 @@ import type {
   DeResultsPage,
   FacetValue,
   Facets,
+  Feedback,
+  FeedbackSubmission,
   JobLog,
   JobSummary,
   LineageDownloadRequest,
@@ -348,6 +350,11 @@ export const api = {
   systemLoad: () => request<SystemLoad>("/system/load"),
 
   sources: () => request<DataSources>("/system/sources"),
+
+  submitFeedback: (body: FeedbackSubmission) =>
+    request<Feedback>("/feedback", { method: "POST", body: JSON.stringify(body) }),
+
+  listFeedback: () => request<Feedback[]>("/feedback"),
 
   listSchedules: () => request<ScheduleInfo[]>("/schedules"),
 

@@ -23,6 +23,7 @@ const HELP_ITEMS: { to: string; label: string }[] = [
   { to: "/help/sources", label: "Data Sources" },
   { to: "/help/workflow-diagrams", label: "Workflow Diagrams" },
   { to: "/help/genome-analysis-review", label: "Genome Analysis Review" },
+  { to: "/help/feedback", label: "Feedback" },
 ];
 
 export function Header() {
