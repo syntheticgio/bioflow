@@ -7,6 +7,16 @@ where no providers exist, the old environment values become one.
 
 Runs on every startup and does nothing after the first: the collection is empty
 exactly once.
+
+The check-then-act below (list, then create) is a race if run concurrently --
+unlike `Profile`'s first-boot adoption, which defends against exactly this with
+a partial unique index (see `uniq_adopted_legacy_owner` in `app/models/profile.py`),
+there is no equivalent index here. Left undefended deliberately: `docker-
+compose.yml` runs the API as a single `uvicorn` process with no `--workers` and
+no replicas, and `worker` never calls this function, so there is exactly one
+caller of this at boot, ever -- not the concurrent-setup-request scenario
+`Profile` has to handle. If that deployment assumption ever changes, this needs
+the same treatment.
 """
 
 from app.config import settings
