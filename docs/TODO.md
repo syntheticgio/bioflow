@@ -16,6 +16,27 @@ in `CLAUDE.md` for the move itself.
 
 # Planned features
 
+## Notify on new feedback submissions
+
+The Feedback page under Help (`/help/feedback`,
+`frontend/src/components/HelpFeedback.tsx`) saves straight to the `feedback`
+collection (`backend/app/models/feedback.py`,
+`backend/app/api/v1/feedback.py`) and nothing else -- no one is notified when
+a submission comes in. The only way to see one today is opening the page or
+querying Mongo directly.
+
+Add a way to push new submissions to the user directly. Delivery mechanism is
+unspecified for now -- a Discord webhook is the leading candidate (simple,
+no OAuth, posts from a plain HTTP call), but email or another channel would
+also satisfy this. Whatever is chosen, the natural hook point is
+`submit_feedback` in `backend/app/api/v1/feedback.py`, right after the
+`Feedback` document is inserted.
+
+Worth deciding as part of the design: whether a delivery failure should ever
+affect the 201 response to the submitter (it shouldn't -- the record is
+already saved; notification is best-effort on top of it), and where the
+webhook URL / credential lives (`.env` / `settings`, not hardcoded).
+
 ## Mobile-friendly view for select features
 
 A limited, mobile-optimized UI for small screens (phones and tablets) rather than
