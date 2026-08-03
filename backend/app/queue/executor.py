@@ -99,6 +99,18 @@ class JobExecutor:
             await queue.complete(job_id, epoch, state=JobState.CANCELLED)
             log.info("job_cancelled", job_id=job_id, type=job.type)
 
+        except asyncio.CancelledError:
+            # BaseException, not Exception -- raised when the worker's own
+            # asyncio Task running this job is cancelled externally (e.g.
+            # worker shutdown). Not caught by any of the except clauses
+            # below, so without this branch it propagates straight through
+            # to `finally` with `outcome` still SUCCEEDED, recording a job
+            # that was killed mid-run as a fast success. Must re-raise: the
+            # worker's own shutdown/cancellation machinery expects
+            # CancelledError to keep propagating.
+            outcome = RunOutcome.CANCELLED
+            raise
+
         except PermanentError as e:
             outcome = RunOutcome.FAILED
             # Cannot succeed however many times we try, so do not burn retries.
