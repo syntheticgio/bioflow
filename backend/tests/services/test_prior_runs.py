@@ -132,7 +132,10 @@ class TestRowShape:
     def test_a_succeeded_run_carries_its_outputs(self):
         run = _run()
         run.outputs = ["out1", "out2"]
-        names = {"out1": "sample_R1.fastq.gz", "out2": "sample_R2.fastq.gz"}
+        names = {
+            "out1": {"name": "sample_R1.fastq.gz", "sidecar_of": None},
+            "out2": {"name": "sample_R2.fastq.gz", "sidecar_of": None},
+        }
         row = row_for_run(run, RunStatus.SUCCEEDED, names)
         assert row["status"] == "succeeded"
         assert row["run_id"] == "run1"
@@ -160,6 +163,27 @@ class TestRowShape:
         assert row["outputs"] == [
             {"object_id": "gone", "name": "(deleted)", "exists": False}
         ]
+
+    def test_a_sidecar_output_is_excluded(self):
+        """`record_outputs` attaches build_index's sidecars (.fai, .amb, ...)
+        to the same alignment run that reused the index, because RunJob is a
+        shared-job link, not a per-run copy. Listing them as if the alignment
+        produced them would show a BAM row with six index scaffolding files
+        beside it -- confirmed against a real project's align card, which
+        listed .fai/.0123/.amb/.ann/.bwt.2bit.64/.pac next to the one BAM.
+
+        `sidecar_of` is the existing field that marks exactly this: a file
+        that is scaffolding for another object, not a deliverable in its own
+        right, so a row's outputs are filtered to entries with no sidecar_of.
+        """
+        run = _run()
+        run.outputs = ["bam1", "fai1"]
+        names = {
+            "bam1": {"name": "sample.bam", "sidecar_of": None},
+            "fai1": {"name": "ref.fna.fai", "sidecar_of": "ref1"},
+        }
+        row = row_for_run(run, RunStatus.SUCCEEDED, names)
+        assert [o["name"] for o in row["outputs"]] == ["sample.bam"]
 
 
 from unittest.mock import patch
@@ -192,11 +216,32 @@ class TestAttachPriorRuns:
         with stub_runs(
             runs=[run],
             statuses={"run1": RunStatus.SUCCEEDED},
-            names={"out1": "sample.bam"},
+            names={"out1": {"name": "sample.bam", "sidecar_of": None}},
         ):
             await attach_prior_runs(cards, _fake_obj(), owner="local")
         assert len(cards[0]["prior_runs"]) == 1
         assert cards[0]["prior_runs"][0]["outputs"][0]["name"] == "sample.bam"
+
+    async def test_a_sidecar_output_never_reaches_a_row(self):
+        """End-to-end: a shared build_index's sidecars must not appear as if
+        the alignment run itself produced them."""
+        run = _run(
+            params={"aligner": "bwa-mem2"},
+            inputs=[_input("ref1", RunInputRole.REFERENCE)],
+        )
+        run.outputs = ["bam1", "fai1"]
+        cards = [_align_card()]
+        with stub_runs(
+            runs=[run],
+            statuses={"run1": RunStatus.SUCCEEDED},
+            names={
+                "bam1": {"name": "sample.bam", "sidecar_of": None},
+                "fai1": {"name": "ref.fna.fai", "sidecar_of": "ref1"},
+            },
+        ):
+            await attach_prior_runs(cards, _fake_obj(), owner="local")
+        outputs = cards[0]["prior_runs"][0]["outputs"]
+        assert [o["name"] for o in outputs] == ["sample.bam"]
 
     async def test_a_card_with_no_matching_run_gets_an_empty_list(self):
         cards = [_align_card()]

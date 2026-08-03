@@ -95,10 +95,19 @@ def run_matches_card(run, card: dict) -> bool:
 def row_for_run(run, status, names: dict) -> dict:
     """One run as the frontend renders it.
 
-    `names` maps output object id to its current name; an id missing from it
-    has been deleted. The row keeps the entry either way -- the run still
-    happened, and dropping it would make a real run look like it produced
-    nothing.
+    `names` maps output object id to `{"name": str, "sidecar_of": id | None}`;
+    an id missing from it has been deleted. The row keeps a deleted entry
+    rather than dropping it -- the run still happened, and dropping it would
+    make a real run look like it produced nothing.
+
+    Sidecars are dropped rather than kept-and-marked, unlike deleted outputs.
+    `record_outputs` attaches a shared `build_index` job's sidecar files
+    (.fai, .amb, ...) to every alignment run that reused that index, because
+    `RunJob` links a shared job to many runs rather than copying it -- so
+    `run.outputs` genuinely contains scaffolding this run did not produce.
+    Confirmed against a real project: an align card's one prior run listed
+    the BAM alongside six index files before this filter existed. `sidecar_of`
+    is the field that already marks exactly this distinction.
 
     No file size: it was considered and cut. An output whose size changed
     unexpectedly is a real signal, but a weak one beside knowing the run
@@ -108,11 +117,14 @@ def row_for_run(run, status, names: dict) -> dict:
     outputs = []
     for object_id in run.outputs:
         key = str(object_id)
+        info = names.get(key)
+        if info is not None and info["sidecar_of"] is not None:
+            continue
         outputs.append(
             {
                 "object_id": key,
-                "name": names.get(key, "(deleted)"),
-                "exists": key in names,
+                "name": info["name"] if info else "(deleted)",
+                "exists": info is not None,
             }
         )
 
@@ -146,13 +158,21 @@ async def _runs_touching(obj) -> list:
 
 
 async def _output_names(object_ids: list, *, owner: str) -> dict:
-    """Current name for each output id. A missing id has been deleted."""
+    """Current name and sidecar status for each output id.
+
+    A missing id has been deleted. `sidecar_of` rides along so `row_for_run`
+    can drop index scaffolding without a second query -- see its docstring
+    for why `run.outputs` contains sidecars in the first place.
+    """
     if not object_ids:
         return {}
     objects = await DataObject.find(
         {"owner": owner, "_id": {"$in": object_ids}}
     ).to_list()
-    return {str(o.id): o.name for o in objects}
+    return {
+        str(o.id): {"name": o.name, "sidecar_of": o.sidecar_of}
+        for o in objects
+    }
 
 
 async def attach_prior_runs(cards: list[dict], obj, *, owner: str) -> None:
