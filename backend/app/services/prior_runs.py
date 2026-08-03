@@ -12,7 +12,7 @@ signature hashed into the run at launch, was rejected because it would show
 would fail silently the first time a default moved in pipeline_service.
 """
 
-from app.models import RunInputRole, RunKind
+from app.models import RunInputRole, RunKind, RunStatus
 
 # The fields that distinguish two runs of the same kind. A kind absent from
 # this table matches on kind alone, which is the deliberate default: an
@@ -83,3 +83,35 @@ def run_matches_card(run, card: dict) -> bool:
         if _run_value(run, field) != _card_value(card, field):
             return False
     return True
+
+
+def row_for_run(run, status, names: dict) -> dict:
+    """One run as the frontend renders it.
+
+    `names` maps output object id to its current name; an id missing from it
+    has been deleted. The row keeps the entry either way -- the run still
+    happened, and dropping it would make a real run look like it produced
+    nothing.
+
+    No file size: it was considered and cut. An output whose size changed
+    unexpectedly is a real signal, but a weak one beside knowing the run
+    failed, and two numbers on a row whose job is to say "this already
+    happened" is one too many.
+    """
+    outputs = []
+    for object_id in run.outputs:
+        key = str(object_id)
+        outputs.append(
+            {
+                "object_id": key,
+                "name": names.get(key, "(deleted)"),
+                "exists": key in names,
+            }
+        )
+
+    return {
+        "run_id": str(run.id),
+        "finished_at": run.created_at,
+        "status": status.value,
+        "outputs": outputs,
+    }

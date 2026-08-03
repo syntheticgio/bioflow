@@ -10,7 +10,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from app.models import RunInputRole, RunKind, RunStatus
-from app.services.prior_runs import run_matches_card
+from app.services.prior_runs import row_for_run, run_matches_card
 
 
 def _run(kind=RunKind.ALIGNMENT, params=None, tool=None, inputs=()):
@@ -121,3 +121,37 @@ class TestKindGating:
         cannot name a run kind must show nothing rather than everything."""
         run = _run(kind=RunKind.ALIGNMENT)
         assert run_matches_card(run, {"kind": "assemble", "launch": None}) is False
+
+
+class TestRowShape:
+    def test_a_succeeded_run_carries_its_outputs(self):
+        run = _run()
+        run.outputs = ["out1", "out2"]
+        names = {"out1": "sample_R1.fastq.gz", "out2": "sample_R2.fastq.gz"}
+        row = row_for_run(run, RunStatus.SUCCEEDED, names)
+        assert row["status"] == "succeeded"
+        assert row["run_id"] == "run1"
+        assert [o["name"] for o in row["outputs"]] == [
+            "sample_R1.fastq.gz",
+            "sample_R2.fastq.gz",
+        ]
+        assert all(o["exists"] for o in row["outputs"])
+
+    def test_a_failed_run_has_no_outputs(self):
+        """The row that motivates the feature: no file to link, so the status
+        word carries it. Hiding these invites the same failed launch again."""
+        run = _run()
+        run.outputs = []
+        row = row_for_run(run, RunStatus.FAILED, {})
+        assert row["status"] == "failed"
+        assert row["outputs"] == []
+
+    def test_a_deleted_output_is_marked_rather_than_dropped(self):
+        """The run still happened; only the file is gone. A dropped row would
+        make a real run look like it produced nothing."""
+        run = _run()
+        run.outputs = ["gone"]
+        row = row_for_run(run, RunStatus.SUCCEEDED, {})
+        assert row["outputs"] == [
+            {"object_id": "gone", "name": "(deleted)", "exists": False}
+        ]
