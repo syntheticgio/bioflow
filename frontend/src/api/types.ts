@@ -1476,3 +1476,14 @@ export type UniProtAccepted = {
   run_id: string;
   job_ids: string[];
 };
+
+export interface FeedbackSubmission {
+  contact: string;
+  subject: string;
+  comment: string;
+}
+
+export interface Feedback extends FeedbackSubmission {
+  id: string;
+  created_at: string;
+}
