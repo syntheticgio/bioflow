@@ -1709,7 +1709,7 @@ a.btn {
 .queue-panel {
   position: fixed;
   right: 12px;
-  bottom: calc(var(--footer-h) + 6px);
+  bottom: 44px;
   width: 380px;
   max-width: calc(100vw - 24px);
   background: var(--bg-panel);
@@ -1719,13 +1719,13 @@ a.btn {
   z-index: 41;
   display: flex;
   flex-direction: column;
-  animation: queue-rise 0.12s ease-out;
+  animation: queue-rise 0.16s ease-out;
 }
 
 @keyframes queue-rise {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(24px);
   }
 }
 
