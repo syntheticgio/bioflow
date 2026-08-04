@@ -372,6 +372,7 @@ export type PipelineType =
   | "variant"
   | "expression"
   | "assemble"
+  | "reference_assembly"
   | "assembly_qc";
 
 export interface PipelineTool {
@@ -501,7 +502,9 @@ export type RunKind =
   | "assembly_download"
   | "uniprot_download"
   | "quantify"
-  | "differential_expression";
+  | "differential_expression"
+  | "assembly"
+  | "reference_assembly";
 
 /** Derived from member job states on the server, never stored. */
 export type RunStatus =
@@ -516,7 +519,9 @@ export type RunInputRole =
   | "reads"
   | "mate"
   | "reference"
+  | "draft_assembly"
   | "alignment"
+  | "primers"
   | "annotation"
   /** Appears many times in one run's inputs -- a DE run has one per sample. */
   | "counts";
