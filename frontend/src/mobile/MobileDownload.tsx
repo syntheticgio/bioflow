@@ -40,11 +40,17 @@ export function MobileDownload() {
     queryFn: () => api.listProjects(),
   });
 
+  const looksLikeAccession = /^(SRR|SRX|SRS|SRP|PRJ|GCF_|GCA_|ERR|DRR)/i.test(
+    query.trim(),
+  );
+
   const { data: suggestions } = useQuery({
     queryKey: ["organismSuggest", query],
     queryFn: () => api.ncbiOrganismSuggest(query),
-    // Two characters is not a search, it is every organism on earth.
-    enabled: query.trim().length >= 3 && !organism,
+    // Two characters is not a search, it is every organism on earth. And an
+    // accession-shaped query should never reach NCBI's suggest endpoint at
+    // all -- not just have its (wasted) result hidden from render.
+    enabled: query.trim().length >= 3 && !organism && !looksLikeAccession,
   });
 
   const search = useMutation({
@@ -112,10 +118,6 @@ export function MobileDownload() {
     setResults(null);
     setQuery("");
   };
-
-  const looksLikeAccession = /^(SRR|SRX|SRS|SRP|PRJ|GCF_|GCA_|ERR|DRR)/i.test(
-    query.trim(),
-  );
 
   return (
     <>
