@@ -5,7 +5,7 @@ object shape and provenance before a future tool-specific launch queues any
 long-running work.
 """
 
-from app.errors import ValidationError
+from app.errors import NotFoundError, ValidationError
 from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
 
 ASSEMBLY_EXCLUDED_ROLES = {ObjectRole.PROTEIN, ObjectRole.TRANSCRIPT}
@@ -129,10 +129,22 @@ async def resolve_alignment_target_for_bam(
     """Resolve an alignment target using the owner-scoped object service."""
     from app.services import object_service
 
+    parents = await _alignment_parent_lookup(
+        bam, owner=owner, get_object=object_service.get_object
+    )
+    return alignment_target_for_bam(bam, object_lookup=parents.get)
+
+
+async def _alignment_parent_lookup(
+    bam: DataObject, *, owner, get_object
+) -> dict:
     parents = {}
     for parent_id in bam.derived_from or []:
-        parents[parent_id] = await object_service.get_object(parent_id, owner=owner)
-    return alignment_target_for_bam(bam, object_lookup=parents.get)
+        try:
+            parents[parent_id] = await get_object(parent_id, owner=owner)
+        except NotFoundError:
+            parents[parent_id] = None
+    return parents
 
 
 def check_bam_aligned_to(

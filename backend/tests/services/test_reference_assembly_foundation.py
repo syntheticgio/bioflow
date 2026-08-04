@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from beanie import PydanticObjectId
 
-from app.errors import ValidationError
+from app.errors import NotFoundError, ValidationError
 from app.models import RunInputRole, RunKind
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines.tools import PipelineType
@@ -252,6 +252,62 @@ class TestOwnerScopedAlignmentValidation:
         async def _get_object(object_id, *, owner):
             assert owner == "local"
             return target
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            resolved = await reference_assembly.validate_bam_aligned_to(
+                bam, target, owner="local"
+            )
+
+        assert resolved is bam
+
+    async def test_resolve_alignment_target_ignores_missing_parent(self):
+        missing_id = PydanticObjectId()
+        target = _object(name="draft.fasta", role=ObjectRole.REFERENCE)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[missing_id, target.id],
+        )
+
+        async def _get_object(object_id, *, owner):
+            assert owner == "local"
+            if object_id == missing_id:
+                raise NotFoundError("Object not found")
+            if object_id == target.id:
+                return target
+            raise AssertionError(f"unexpected lookup: {object_id}")
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            resolved = await reference_assembly.resolve_alignment_target_for_bam(
+                bam, owner="local"
+            )
+
+        assert resolved is target
+
+    async def test_validate_bam_aligned_to_ignores_missing_parent(self):
+        missing_id = PydanticObjectId()
+        target = _object(name="draft.fasta", role=ObjectRole.REFERENCE)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[missing_id, target.id],
+        )
+
+        async def _get_object(object_id, *, owner):
+            assert owner == "local"
+            if object_id == missing_id:
+                raise NotFoundError("Object not found")
+            if object_id == target.id:
+                return target
+            raise AssertionError(f"unexpected lookup: {object_id}")
 
         with patch(
             "app.services.object_service.get_object",
