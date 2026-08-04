@@ -9,6 +9,7 @@ from app.errors import ValidationError
 from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
 
 ASSEMBLY_EXCLUDED_ROLES = {ObjectRole.PROTEIN, ObjectRole.TRANSCRIPT}
+ALIGNMENT_KINDS = {FormatKind.BAM, FormatKind.SAM, FormatKind.CRAM}
 
 
 def _role_name(obj: DataObject) -> str:
@@ -31,6 +32,13 @@ def _check_ready_fasta(obj: DataObject, *, purpose: str) -> None:
             f"{obj.name!r} is a {_role_name(obj)} FASTA, not a genome assembly",
             details={"object_id": str(obj.id), "role": obj.role.value},
         )
+
+
+def _is_assembly_like(obj: DataObject) -> bool:
+    return (
+        obj.format.kind is FormatKind.FASTA
+        and obj.role not in ASSEMBLY_EXCLUDED_ROLES
+    )
 
 
 def check_draft_assembly(obj: DataObject) -> DataObject:
@@ -58,3 +66,62 @@ def check_reference_assembly(obj: DataObject) -> DataObject:
             details={"object_id": str(obj.id), "role": _role_name(obj)},
         )
     return obj
+
+
+def alignment_target_for_bam(
+    bam: DataObject, *, object_lookup
+) -> DataObject:
+    """Return the single assembly/reference this alignment was made against.
+
+    `object_lookup` is injected so tests can use an in-memory mapping and
+    future service callers can pass an owner-scoped lookup. The function never
+    guesses from filenames.
+    """
+    if bam.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{bam.name!r} is not ready (status={bam.status.value})",
+            details={"object_id": str(bam.id), "status": bam.status.value},
+        )
+    if bam.format.kind not in ALIGNMENT_KINDS:
+        raise ValidationError(
+            f"{bam.name!r} is {bam.format.kind.value}, not an alignment",
+            details={"object_id": str(bam.id), "kind": bam.format.kind.value},
+        )
+
+    targets = []
+    for parent_id in bam.derived_from or []:
+        parent = object_lookup(parent_id)
+        if parent is not None and _is_assembly_like(parent):
+            targets.append(parent)
+
+    if not targets:
+        raise ValidationError(
+            f"{bam.name!r} has no recorded alignment target",
+            details={"object_id": str(bam.id)},
+        )
+    if len(targets) > 1:
+        raise ValidationError(
+            f"{bam.name!r} has an ambiguous alignment target",
+            details={
+                "object_id": str(bam.id),
+                "targets": [str(target.id) for target in targets],
+            },
+        )
+    return targets[0]
+
+
+def check_bam_aligned_to(
+    bam: DataObject, target: DataObject, *, object_lookup
+) -> DataObject:
+    """Validate that a BAM/CRAM was aligned to the selected assembly target."""
+    resolved = alignment_target_for_bam(bam, object_lookup=object_lookup)
+    if resolved.id != target.id:
+        raise ValidationError(
+            f"{bam.name!r} is aligned to {resolved.name!r}, not {target.name!r}",
+            details={
+                "bam_id": str(bam.id),
+                "target_id": str(target.id),
+                "resolved_target_id": str(resolved.id),
+            },
+        )
+    return bam
