@@ -12,7 +12,6 @@ import { Menu } from "./Menu";
 const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/search", label: "Search", title: "Search files by metadata" },
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
-  { to: "/settings", label: "Settings", title: "AI providers and task routing" },
 ];
 
 /** Reference menu contents: pages in the order a user needs them -- what the
@@ -106,12 +105,15 @@ export function Header() {
             which library you are working in without opening anything. Someone
             who switched an hour ago should not have to click to find out.
 
-            One item, not two: "Switch profile" and "Logout" would both call
-            logout() and both land on the picker, so offering both would be two
-            names for one action. Selecting a profile issues no token and sets
-            no cookie, so there is no session to end -- returning to the picker
-            is the entirety of what either would do, and "Switch profile" is
-            the honest name for it.
+            Settings lives here rather than as a top-level nav entry because
+            it is profile-scoped (AI providers and task routing are per
+            profile), so it belongs with the other profile-scoped action.
+
+            "Switch profile" rather than "Logout": both would call logout()
+            and land on the picker, so offering both would be two names for
+            one action. Selecting a profile issues no token and sets no
+            cookie, so there is no session to end -- returning to the picker
+            is the entirety of what either would do.
 
             There is deliberately no "Edit details": the backend exposes only
             GET/POST/select/DELETE on /profiles, so an edit control would be
@@ -119,7 +121,10 @@ export function Header() {
         {profile && (
           <Menu
             label={`${profile.display.emoji} ${profile.username}`}
-            items={[{ label: "Switch profile", onSelect: logout }]}
+            items={[
+              { label: "Settings", onSelect: () => navigate("/settings") },
+              { label: "Switch profile", onSelect: logout },
+            ]}
           />
         )}
       </nav>
