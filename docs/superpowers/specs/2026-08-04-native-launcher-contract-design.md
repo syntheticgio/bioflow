@@ -216,10 +216,15 @@ All compose changes carry defaults that preserve current local behavior, with
 one deliberate exception noted below.
 
 - **`api`, `worker`, `web`: `build:` → `image:`**, pointing at
-  `ghcr.io/syntheticgio/bioflow-{api,worker,web}:${BIOFLOW_TAG:-latest}`.
-  Compose pulls `image:` services automatically but builds `build:` services
-  from a source tree the user does not have, which is why this conversion is a
+  `ghcr.io/syntheticgio/bioflow-{backend,web}:${BIOFLOW_TAG:-latest}`. Compose
+  pulls `image:` services automatically but builds `build:` services from a
+  source tree the user does not have, which is why this conversion is a
   prerequisite rather than a preference.
+
+  Two images, not three: `api` and `worker` share one build context and one
+  Dockerfile, differing only by `command:`, so both reference
+  `bioflow-backend`. They are the same 7.89GB image under two names, and
+  publishing them separately would push identical layers twice.
 - **The override file gains the `build:` directives the base file loses.** This
   is a real change to how the repository builds, not a no-op: `docker compose
   up -d --build` currently depends on the base file's build contexts. The

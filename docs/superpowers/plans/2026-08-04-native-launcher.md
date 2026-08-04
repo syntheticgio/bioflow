@@ -1829,7 +1829,7 @@ In `launcher/src-tauri/src/status.rs`, replace `update_available: false` with:
 ```rust
         update_available: {
             let image = format!(
-                "ghcr.io/syntheticgio/bioflow-api:{}",
+                "ghcr.io/syntheticgio/bioflow-backend:{}",
                 settings.as_ref().map(|s| s.tag.as_str()).unwrap_or("latest")
             );
             crate::update::update_available(
@@ -2070,7 +2070,7 @@ Append to the `tests` module in `docker.rs`:
 
     #[test]
     fn ordinary_output_is_not_disk_full() {
-        assert!(!is_disk_full("Pulling from syntheticgio/bioflow-api"));
+        assert!(!is_disk_full("Pulling from syntheticgio/bioflow-backend"));
     }
 ```
 
