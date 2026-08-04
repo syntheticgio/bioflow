@@ -1,4 +1,5 @@
 import type { AiProvider } from "../api/types";
+import { providerDisplayName } from "../lib/modelName";
 
 /** The left rail: providers, then the routing entry. Selection is lifted to
  *  SettingsView because the detail pane is its sibling, not its child. */
@@ -21,7 +22,7 @@ export function ProviderList({
           className={`settings-rail-item${selected === p.id ? " active" : ""}`}
           onClick={() => onSelect(p.id)}
         >
-          <span className="settings-rail-name">{p.name}</span>
+          <span className="settings-rail-name">{providerDisplayName(p.name, p.model)}</span>
           <StatusDot status={p.status} />
         </button>
       ))}
