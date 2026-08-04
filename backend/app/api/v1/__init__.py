@@ -14,6 +14,7 @@ from app.api.v1 import (
     runs,
     schedules,
     search,
+    settings,
     sra,
     system,
     uniprot,
@@ -38,5 +39,6 @@ api_router.include_router(schedules.router)
 api_router.include_router(system.router)
 api_router.include_router(events.router)
 api_router.include_router(feedback.router)
+api_router.include_router(settings.router)
 
 __all__ = ["api_router"]

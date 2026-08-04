@@ -1487,3 +1487,62 @@ export interface Feedback extends FeedbackSubmission {
   id: string;
   created_at: string;
 }
+
+/** A known provider, offered in the add-provider form. Picking one pre-fills
+ *  the base URL; it stays editable afterwards, which is how a mainland
+ *  DashScope account or a non-default local port gets configured. */
+export interface AiPreset {
+  id: string;
+  label: string;
+  kind: "openai_compat" | "anthropic";
+  base_url: string;
+  needs_key: boolean;
+}
+
+/** A configured provider. Note what is absent: there is no field carrying the
+ *  API key. `key_hint` is the masked form and `has_key` is the boolean the
+ *  form needs -- the real value never leaves the backend. */
+export interface AiProvider {
+  id: string;
+  name: string;
+  kind: "openai_compat" | "anthropic";
+  base_url: string;
+  model: string;
+  key_hint: string | null;
+  has_key: boolean;
+  models_cache: string[];
+  status: "ok" | "failed" | "untested";
+  status_reason: string | null;
+  checked_at: string | null;
+  /** Human labels of the task slots routed here, including "Default". */
+  used_by: string[];
+}
+
+export interface AiSlot {
+  name: string;
+  label: string;
+}
+
+export interface AiRouting {
+  default: string | null;
+  /** Only explicitly-overridden slots. An absent slot means "use default". */
+  slots: Record<string, string>;
+  catalog: AiSlot[];
+}
+
+export interface AiFetchModelsResult {
+  status: "ok" | "failed";
+  models: string[];
+  reason: string | null;
+  detail: string | null;
+}
+
+/** Create and update share a shape, but update omits `api_key` unless the user
+ *  typed a new one -- that omission is what preserves the stored key. */
+export interface AiProviderInput {
+  name?: string;
+  kind?: "openai_compat" | "anthropic";
+  base_url?: string;
+  model?: string;
+  api_key?: string | null;
+}

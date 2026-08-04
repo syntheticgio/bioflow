@@ -328,6 +328,53 @@ silently read the host machine while appearing to control it:
   to unavailable when the probe is patched off -- that is the direction that
   fails when the seam breaks.
 
+## Adding an AI-using feature
+
+AI calls go through `app/services/ai/`, never directly to an HTTP endpoint.
+The path is always the same two lines:
+
+```python
+provider = await ai.resolve(TaskSlot.YOUR_SLOT)   # None means nothing configured
+result = await ai.complete(provider, system=..., user=...)
+```
+
+Three things about that are easy to get wrong.
+
+**A new feature needs a new `TaskSlot` member** in `app/models/ai.py`, plus a
+label in `_SLOT_LABELS`. The settings page renders one row per member, so the
+enum is what makes a feature routable -- a call site that reuses
+`FILE_SUMMARY` because it is already there silently ties two unrelated
+features to one provider, and the user has no way to separate them.
+
+**`complete()` never raises and never returns None.** It returns `Completion`
+or `Failure`. Checking `if result is None` -- the shape the old `llm_client`
+had -- passes type-checking, reads as correct, and treats every failure as a
+success. Check `isinstance(result, Completion)`.
+
+**Thread handlers must not call `asyncio.run()` to reach an async AI helper.**
+`HandlerMode.THREAD` handlers run in a worker-pool thread with no event loop,
+and `asyncio.run()` looks like the obvious way to get one -- but this
+process's Mongo client is a module-level `AsyncIOMotorClient` bound to the
+loop `connect_to_mongo()` ran on, and a second, unrelated loop makes Motor
+raise "attached to a different loop" the instant a query touches it. This
+is not hypothetical: it is exactly what broke `summarize_object` the first
+time it ran against a real configured provider, with every unit test green,
+because every test mocks the seam that made the call and never exercises the
+real event-loop plumbing underneath it. Use `app.db.client.run_from_thread`
+instead -- it schedules the coroutine onto the stored connect-time loop via
+`asyncio.run_coroutine_threadsafe` and blocks the calling thread for the
+result, the same pattern `queue/executor.py`'s `_schedule_lease_extension`
+already uses for the identical problem. `summary_handlers.py`'s
+`_resolve_sync()` is the worked example. Thread handlers also get no
+automatic failure recording from `complete()` (that write needs the loop
+too) -- use `complete_sync()`, which skips it, and return the failure reason
+in the handler's own result payload instead.
+
+Failures are recorded on the provider document, which is what the settings
+badge reads. That means a provider can go red from a real job rather than only
+from pressing "Fetch models" -- deliberate, and the reason an expired key is
+visible rather than silently stopping summaries.
+
 ## Querying computation records
 
 `job_timings` (`app/models/timing.py`) holds one row per completed job, read

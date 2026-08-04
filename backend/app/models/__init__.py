@@ -4,6 +4,7 @@ ALL_MODELS is what init_beanie registers; adding a model here is what creates
 its indexes.
 """
 
+from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.feedback import Feedback
 from app.models.job import (
@@ -51,6 +52,8 @@ from app.models.timing import JobRunTiming
 from app.models.upload_session import UploadSession, UploadState
 
 ALL_MODELS = [
+    AiProvider,
+    AiRouting,
     Project,
     Blob,
     DataObject,
@@ -69,12 +72,15 @@ ALL_MODELS = [
 __all__ = [
     "ACTIVE_STATES",
     "ALL_MODELS",
+    "AiProvider",
+    "AiRouting",
     "TERMINAL_STATES",
     "Blob",
     "BlobState",
     "BlobStorage",
     "Compression",
     "DataObject",
+    "FailureReason",
     "Feedback",
     "FormatConfidence",
     "FormatInfo",
@@ -99,6 +105,7 @@ __all__ = [
     "ProfileDisplay",
     "Project",
     "ProjectCounters",
+    "ProviderKind",
     "RunInput",
     "RunInputRole",
     "RunJob",
@@ -110,6 +117,7 @@ __all__ = [
     "SourceInfo",
     "SourceMode",
     "StructureLookup",
+    "TaskSlot",
     "UploadSession",
     "UploadState",
     "normalize_organism",

@@ -1,5 +1,7 @@
 """MongoDB connection, Beanie initialization, and the replica-set assertion."""
 
+import asyncio
+
 from beanie import init_beanie
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
@@ -9,6 +11,14 @@ from app.logging import get_logger
 log = get_logger(__name__)
 
 _client: AsyncIOMotorClient | None = None
+# The event loop `connect_to_mongo` ran on -- the one Motor's internals are
+# bound to. A `HandlerMode.THREAD` handler runs in a worker-pool thread with no
+# loop of its own; calling `asyncio.run()` there spins up a *new* loop, and
+# Motor's client raises "attached to a different loop" the moment it touches
+# that new loop's futures. `run_coroutine_threadsafe` against this stored loop
+# is the fix -- the same pattern `queue/executor.py`'s
+# `_schedule_lease_extension` already uses for the identical problem.
+_loop: asyncio.AbstractEventLoop | None = None
 
 
 def get_client() -> AsyncIOMotorClient:
@@ -21,10 +31,26 @@ def get_db() -> AsyncIOMotorDatabase:
     return get_client()[settings.mongo_db]
 
 
+def run_from_thread(coro):
+    """Run a Mongo-touching coroutine from a worker thread, blocking it.
+
+    For `HandlerMode.THREAD` handlers, which have no event loop of their own.
+    `asyncio.run(coro)` looks like the obvious escape but is wrong here: it
+    creates a fresh loop, and this process's Mongo client is bound to the loop
+    `connect_to_mongo` ran on, not to whatever loop happens to exist on this
+    thread. Scheduling the coroutine onto the real loop and blocking this
+    thread for the result is what actually works.
+    """
+    if _loop is None:
+        raise RuntimeError("Mongo client not initialized; call connect_to_mongo() first")
+    return asyncio.run_coroutine_threadsafe(coro, _loop).result()
+
+
 async def connect_to_mongo() -> AsyncIOMotorClient:
-    global _client
+    global _client, _loop
     if _client is not None:
         return _client
+    _loop = asyncio.get_running_loop()
     _client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
     await _assert_replica_set(_client)
     await _init_models(_client)
@@ -68,10 +94,11 @@ async def _init_models(client: AsyncIOMotorClient) -> None:
 
 
 async def close_mongo() -> None:
-    global _client
+    global _client, _loop
     if _client is not None:
         _client.close()
         _client = None
+        _loop = None
         log.info("mongo_closed")
 
 
