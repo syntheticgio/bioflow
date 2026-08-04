@@ -1,4 +1,4 @@
-import type { RunStatus, RunSummary } from "../api/types";
+import type { JobSummary, RunStatus, RunSummary, SystemLoad } from "../api/types";
 
 /**
  * The shared vocabulary for describing a run to a person.
@@ -87,4 +87,52 @@ export function runFacts(run: RunSummary): RunFact[] {
   if (run.tool) facts.push({ k: "Engine", v: run.tool });
 
   return facts;
+}
+
+/**
+ * What counts as in flight, split three ways because the three mean
+ * different things to a person.
+ *
+ * `BLOCKED` is separate rather than folded into `WAITING` because the answer
+ * to "why isn't this running" differs: a waiting job is queued behind the
+ * machine, a blocked one is queued behind another job. The activity page can
+ * derive "recent" by negating running and waiting because a blocked job is
+ * shown inside its run's card there; a flat list has no such grouping, so it
+ * must claim blocked positively or show it as though it had finished.
+ */
+export const RUNNING = new Set(["running"]);
+export const WAITING = new Set(["pending", "queued", "delayed"]);
+export const BLOCKED = new Set(["blocked"]);
+
+/** True for any job that has not reached a terminal state. */
+export function isInFlight(state: string): boolean {
+  return RUNNING.has(state) || WAITING.has(state) || BLOCKED.has(state);
+}
+
+/**
+ * A spinner says "wait"; this says what for. The governor's admitted_classes
+ * is authoritative about whether this job's class can start at all.
+ */
+export function waitingReason(job: JobSummary, load?: SystemLoad): string {
+  if (job.cancel_requested) return "cancelling";
+  if (job.state === "delayed") return "retrying after a failure";
+  if (job.state === "blocked") return "waiting on an earlier step";
+  if (!load) return "waiting";
+  if (!load.admitted_classes.includes(job.job_class)) {
+    return load.state === "CLOSED"
+      ? "waiting: system loaded"
+      : "waiting: system busy";
+  }
+  return "waiting for a free slot";
+}
+
+/** The file a job is about, falling back to its type. */
+export function jobLabel(job: JobSummary): string {
+  const payload = job.payload as Record<string, unknown>;
+  const name = payload.r1_name ?? payload.name;
+  if (typeof name === "string" && name) {
+    const mate = payload.r2_name;
+    return typeof mate === "string" && mate ? `${name} + ${mate}` : name;
+  }
+  return job.type;
 }

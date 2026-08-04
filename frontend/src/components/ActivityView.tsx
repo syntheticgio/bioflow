@@ -9,9 +9,7 @@ import { JobLogView } from "./JobLogView";
 import { ActivityDesk } from "./activity/ActivityDesk";
 import { ActivityLead } from "./activity/ActivityLead";
 import { RunLedger } from "./activity/RunLedger";
-
-const RUNNING = new Set(["running"]);
-const WAITING = new Set(["pending", "queued", "delayed"]);
+import { RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
 
 /** How many finished runs the ledger column carries. */
 const LEDGER_LIMIT = 10;
@@ -375,31 +373,4 @@ function JobRow({
       {logOpen && <JobLogView jobId={job.id} live={job.state === "running"} />}
     </div>
   );
-}
-
-/**
- * A spinner says "wait"; this says what for. The governor's admitted_classes
- * is authoritative about whether this job's class can start at all.
- */
-function waitingReason(job: JobSummary, load?: SystemLoad): string {
-  if (job.cancel_requested) return "cancelling";
-  if (job.state === "delayed") return "retrying after a failure";
-  if (!load) return "waiting";
-  if (!load.admitted_classes.includes(job.job_class)) {
-    return load.state === "CLOSED"
-      ? "waiting: system loaded"
-      : "waiting: system busy";
-  }
-  return "waiting for a free slot";
-}
-
-/** The file a job is about, falling back to its type. */
-function jobLabel(job: JobSummary): string {
-  const payload = job.payload as Record<string, unknown>;
-  const name = payload.r1_name ?? payload.name;
-  if (typeof name === "string" && name) {
-    const mate = payload.r2_name;
-    return typeof mate === "string" && mate ? `${name} + ${mate}` : name;
-  }
-  return job.type;
 }
