@@ -340,6 +340,112 @@ their roles — a QC filter that hid samtools would be lying about the toolchain
 And availability is deliberately absent from the predicate, so an uninstalled
 tool is still listed for the job it would do.
 
+## Mobile-friendly view for select features — FIXED
+
+Shipped 2026-08-03. Design:
+`docs/superpowers/specs/2026-08-03-mobile-view-design.md`, plan:
+`docs/superpowers/plans/2026-08-03-mobile-view.md`.
+
+Where the code lives: `frontend/src/mobile/` (`MobileShell`,
+`MobileActivity`, `MobileDownload`, `MobileConfirm`, `useIsMobile`,
+`downloadStore`), `frontend/src/styles/mobile.css`, plus the `/m/*` routes
+and the redirect in `App.tsx`.
+
+**What the implementation did differently from this entry.**
+
+- **The redirect is one-directional, which this entry does not consider.**
+  It proposes detection at ~600px and stops there. Redirecting a wide
+  viewport back off `/m/*` would make the "use desktop version" escape
+  hatch impossible to use -- the moment it navigates to `/`, a
+  still-narrow window bounces it straight back -- and would throw a tablet
+  user out of the screen they are reading the instant they rotate. Narrow
+  viewports are sent to `/m/activity`; wide ones are never sent back.
+- **The activity feed is flat, not a port of the Activity tab.** This entry
+  names the Activity tab as "a reasonable foundation". Its structure is the
+  expensive part: `ActivityView` fans `useQueries` out across every run to
+  learn job membership, up to 50 parallel requests, purely to nest jobs
+  under runs. A flat feed answers "what is it doing" with one `listJobs`
+  and one `systemLoad` call.
+- **`systemLoad` was not anticipated and is required.** A job does not
+  carry its own waiting reason: `waitingReason` derives it by checking the
+  job's class against the governor's `admitted_classes`. Without that call
+  it degrades to a bare "waiting", which is the uninformative state the
+  section exists to avoid. Code review during implementation caught a
+  subtler version of this same gap: the `systemLoad` query's poll interval
+  was initially a static boolean recomputed only on render rather than a
+  function evaluated fresh per tick, giving it a one-interval lag behind
+  the `jobs` query when the last active job finished. Fixed by reading the
+  jobs query's own cache inside a `refetchInterval` callback, matching how
+  the `jobs` query already worked.
+- **A `blocked` job would have shown as finished.** The desktop view
+  derives "recent" by negating running and waiting, which is safe there
+  because blocked jobs render inside their run's card. A flat list has no
+  such grouping, so `blocked` would have landed under "Recent" looking
+  successful. `lib/runFormat.ts` now carries a `BLOCKED` set and
+  `waitingReason` answers "waiting on an earlier step" rather than blaming
+  system load for a dependency wait.
+- **The download flow needed a project picker this entry does not mention.**
+  Both download endpoints require a `project_id`, and the desktop dialog
+  gets it ambiently by opening from inside a project. A phone has no
+  explorer to have been in, so project selection became the first field,
+  remembered in `localStorage` between visits.
+- **Four helpers were extracted, not written twice.** `RUNNING`, `WAITING`,
+  `waitingReason` and `jobLabel` moved from `ActivityView.tsx` to
+  `lib/runFormat.ts`. `jobLabel` is the one that most needed it: it reads
+  untyped payload keys (`r1_name`, `r2_name`, `name`), so a second copy
+  would have stopped matching silently the day a handler renamed one. This
+  is the concrete answer to the two-parallel-UIs drift risk the entry
+  raises.
+- **The mobile download screen initially allowed two things the desktop
+  dialog deliberately prevents, both caught by code review before merge.**
+  An assembly's `genome` component could be unchecked while annotation
+  components stayed selected -- an incoherent download, since desktop
+  forces `genome` on with a disabled, "always included" checkbox. And an
+  already-downloaded SRA run was hard-disabled from re-selection, while
+  desktop deliberately allows re-download (a corrupted file, a deleted
+  object) and only defaults such a run to unchecked rather than forbidding
+  it. Both were fixed to match desktop's exact conditions before this
+  shipped.
+- **Deliberately dropped from the desktop download dialog:** platform
+  filter, assembly-level filter, run-table sorting, and multi-select
+  spanning pages. Those interrogate a large study; the mobile case is
+  queueing something you already came for. A truncated study says so and
+  points at the desktop view.
+- **No backend changes.** All seven endpoints already existed.
+
+A limited, mobile-optimized UI for small screens (phones and tablets) rather than
+a fully responsive redesign. The full interface is designed for desktop and
+maintaining both at feature parity is not viable; instead, offer a minimal mobile
+experience that covers the two workflows that matter on a phone.
+
+**In scope:** Two features that serve actual mobile use cases --
+
+1. **Activity progress view.** Check the status of a running pipeline job from your
+   phone -- what step is it on, has it finished, did it fail. This is read-only,
+   aligned with checking on a long-running task without re-running it.
+2. **Trigger NCBI downloads.** Start a `fetch_reads_via_sra` job remotely to
+   queue up a large download before leaving the office, or delegate a download to
+   run on the server rather than draining your laptop's bandwidth. No need to
+   monitor it from the phone, just dispatch it and walk away.
+
+**Out of scope:** Building UI for alignment, QC, or assembly on a phone. These
+require multi-step workflows, dense parameter selections, and real-time feedback
+that do not translate to mobile well. The mobile view is for checking progress
+and dispatching background jobs, not for orchestrating a full analysis.
+
+**Implementation notes:** Detection can be simple (screen width under ~600px,
+`window.matchMedia("(max-width: 600px)")`), and the view should be a separate
+mobile-only route or a conditional render, not a responsive breakpoint tacked onto
+the existing desktop UI. Starting from the Activity tab and the Downloads modal
+(or a simplified version of it) is a reasonable foundation.
+
+The risk that mobile-first design creates in a maintenance standpoint -- two
+parallel UIs that drift from one another -- is mitigated by scope. Only two
+screens exist, both read-heavy or dispatch-only; there is no complex state
+management to keep synchronized between mobile and desktop versions.
+
+Touches: `frontend/src/pages/`, routing layer, mobile-specific styling.
+
 # Deferred findings
 
 See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
