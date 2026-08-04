@@ -159,6 +159,15 @@ textarea:focus {
   color: var(--accent);
 }
 
+.header-mobile-link {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .header-right {
   margin-left: auto;
   display: flex;
