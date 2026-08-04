@@ -2540,6 +2540,51 @@ a.btn {
   margin: 0 0 20px;
 }
 
+/* --- Database Index page --- */
+
+.db-tools {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.db-tools input[type="search"] {
+  flex: 1;
+}
+
+.db-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.db-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+}
+
+.db-card-name {
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+
+.db-card-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+.db-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 /* --- The tool/pipeline matrix at the top of the Software page --- */
 
 .software-matrix-wrap {
