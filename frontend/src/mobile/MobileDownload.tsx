@@ -211,9 +211,9 @@ export function MobileDownload() {
               {results.assemblies.length === 0 && (
                 <div className="m-empty">No assemblies for this organism.</div>
               )}
-              {results.assemblies.map((a) => (
+              {results.assemblies.map((a, i) => (
                 <AssemblyRow
-                  key={a.accession ?? Math.random()}
+                  key={a.accession ?? `assembly-${i}`}
                   a={a}
                   disabled={!projectId || resolve.isPending}
                   onPick={() => a.accession && resolve.mutate(a.accession)}
