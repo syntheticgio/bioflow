@@ -81,9 +81,6 @@ function EmptyDetail() {
 
   return (
     <div className="panel">
-      <div className="panel-header">
-        <span className="panel-title">BioFlow</span>
-      </div>
       <div className="panel-body">
         <div className="splash">
           <div className="splash-title">BioFlow</div>
