@@ -48,10 +48,15 @@ function Shell() {
     window.addEventListener("mouseup", up);
   };
 
-  // Both are single full-width views with no left-hand tree to sit beside:
-  // /activity is one long list, and the help pages are prose.
+  // All three are single full-width views with no left-hand tree to sit
+  // beside: /activity is one long list, the help pages are prose, and
+  // /settings has its own master-detail layout that a stray DetailPanel and
+  // splitter would only crowd.
   const pathname = useLocation().pathname;
-  const singleColumn = pathname === "/activity" || pathname.startsWith("/help/");
+  const singleColumn =
+    pathname === "/activity" ||
+    pathname.startsWith("/help/") ||
+    pathname.startsWith("/settings");
 
   // Themes that scroll the window rather than the panes (Broadsheet) would
   // otherwise land mid-page on every route change, carrying the previous
