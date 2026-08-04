@@ -1,0 +1,4 @@
+Bugs or odd behavior that is noted in the UX primarily
+- [ ] Switching between Raw and Trimmed under reads doesn't automatically switch to the new selected - you need to click on the read again.  Behavior - when clicking on Raw, should show raw of the one selected or if neither of the two mates are selected, should default to the first one.  Same with trimmed.  
+- [ ] Are QC reports vanishing?  I think I've had to re-run QC a couple times on the same file - but needs to be tested.  Might be after another computation is run with that file.
+- [ ] Looks like it is possible some of the previous computations are not showing in the Launch buttons - seems to work for Trimmed, but so far the others have been inconsistent.  Need a thourough test.
