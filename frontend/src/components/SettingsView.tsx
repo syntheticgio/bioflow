@@ -122,7 +122,7 @@ function AddProviderModal({
   });
 
   return (
-    <ModalBackdrop onClick={onClose}>
+    <ModalBackdrop onClick={onClose} onKeyDown={(e) => e.key === "Escape" && onClose()}>
       <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
         <h2>Add provider</h2>
 
