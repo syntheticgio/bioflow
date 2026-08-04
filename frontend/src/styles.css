@@ -1708,13 +1708,14 @@ a.btn {
 
 .queue-panel {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
+  right: 12px;
+  bottom: 44px;
+  width: 380px;
+  max-width: calc(100vw - 24px);
   background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  box-shadow: 0 -8px 28px rgb(0 0 0 / 35%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
   z-index: 41;
   display: flex;
   flex-direction: column;
@@ -1724,7 +1725,7 @@ a.btn {
 @keyframes queue-rise {
   from {
     opacity: 0;
-    transform: translateY(100%);
+    transform: translateY(24px);
   }
 }
 
