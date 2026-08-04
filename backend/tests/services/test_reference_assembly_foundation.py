@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from beanie import PydanticObjectId
@@ -131,6 +132,56 @@ class TestAlignmentTargetProvenance:
                 bam, object_lookup=objects.get
             )
 
+    def test_alignment_target_prefers_explicit_reference_over_fallback(self):
+        target = _object(name="reference.fasta", role=ObjectRole.REFERENCE)
+        fallback = _object(name="assembly.fasta", role=None)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[target.id, fallback.id],
+        )
+        objects = {target.id: target, fallback.id: fallback}
+
+        assert reference_assembly.alignment_target_for_bam(
+            bam, object_lookup=objects.get
+        ) is target
+
+    def test_alignment_target_rejects_multiple_explicit_references(self):
+        target_a = _object(name="a.fasta", role=ObjectRole.REFERENCE)
+        target_b = _object(name="b.fasta", role=ObjectRole.REFERENCE)
+        fallback = _object(name="assembly.fasta", role=None)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[target_a.id, target_b.id, fallback.id],
+        )
+        objects = {
+            target_a.id: target_a,
+            target_b.id: target_b,
+            fallback.id: fallback,
+        }
+
+        with pytest.raises(ValidationError, match="ambiguous alignment target"):
+            reference_assembly.alignment_target_for_bam(
+                bam, object_lookup=objects.get
+            )
+
+    def test_alignment_target_falls_back_to_single_unassigned_fasta(self):
+        target = _object(name="assembly.fasta", role=None)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[target.id],
+        )
+        objects = {target.id: target}
+
+        assert reference_assembly.alignment_target_for_bam(
+            bam, object_lookup=objects.get
+        ) is target
+
     def test_check_bam_aligned_to_accepts_matching_target(self):
         target = _object(name="draft.fasta", role=ObjectRole.REFERENCE)
         bam = _object(
@@ -160,3 +211,54 @@ class TestAlignmentTargetProvenance:
             reference_assembly.check_bam_aligned_to(
                 bam, target, object_lookup=objects.get
             )
+
+
+class TestOwnerScopedAlignmentValidation:
+    pytestmark = pytest.mark.asyncio
+
+    async def test_resolve_alignment_target_uses_owner_scoped_get_object(self):
+        target = _object(name="draft.fasta", role=ObjectRole.REFERENCE)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[target.id],
+        )
+
+        async def _get_object(object_id, *, owner):
+            assert object_id == target.id
+            assert owner == "local"
+            return target
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            resolved = await reference_assembly.resolve_alignment_target_for_bam(
+                bam, owner="local"
+            )
+
+        assert resolved is target
+
+    async def test_validate_bam_aligned_to_uses_owner_scoped_lookup(self):
+        target = _object(name="draft.fasta", role=ObjectRole.REFERENCE)
+        bam = _object(
+            name="reads.bam",
+            kind=FormatKind.BAM,
+            role=ObjectRole.ALIGNMENT,
+            derived_from=[target.id],
+        )
+
+        async def _get_object(object_id, *, owner):
+            assert owner == "local"
+            return target
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            resolved = await reference_assembly.validate_bam_aligned_to(
+                bam, target, owner="local"
+            )
+
+        assert resolved is bam

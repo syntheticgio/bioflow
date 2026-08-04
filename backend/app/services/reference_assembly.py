@@ -41,6 +41,10 @@ def _is_assembly_like(obj: DataObject) -> bool:
     )
 
 
+def _is_unassigned_assembly_like(obj: DataObject) -> bool:
+    return _is_assembly_like(obj) and obj.role is None
+
+
 def check_draft_assembly(obj: DataObject) -> DataObject:
     """Validate an assembly that a tool will polish or scaffold.
 
@@ -88,11 +92,20 @@ def alignment_target_for_bam(
             details={"object_id": str(bam.id), "kind": bam.format.kind.value},
         )
 
-    targets = []
+    explicit_targets = []
+    fallback_targets = []
     for parent_id in bam.derived_from or []:
         parent = object_lookup(parent_id)
-        if parent is not None and _is_assembly_like(parent):
-            targets.append(parent)
+        if parent is None:
+            continue
+        if parent.format.kind is not FormatKind.FASTA:
+            continue
+        if parent.role is ObjectRole.REFERENCE:
+            explicit_targets.append(parent)
+        elif _is_unassigned_assembly_like(parent):
+            fallback_targets.append(parent)
+
+    targets = explicit_targets or fallback_targets
 
     if not targets:
         raise ValidationError(
@@ -110,11 +123,40 @@ def alignment_target_for_bam(
     return targets[0]
 
 
+async def resolve_alignment_target_for_bam(
+    bam: DataObject, *, owner
+) -> DataObject:
+    """Resolve an alignment target using the owner-scoped object service."""
+    from app.services import object_service
+
+    parents = {}
+    for parent_id in bam.derived_from or []:
+        parents[parent_id] = await object_service.get_object(parent_id, owner=owner)
+    return alignment_target_for_bam(bam, object_lookup=parents.get)
+
+
 def check_bam_aligned_to(
     bam: DataObject, target: DataObject, *, object_lookup
 ) -> DataObject:
     """Validate that a BAM/CRAM was aligned to the selected assembly target."""
     resolved = alignment_target_for_bam(bam, object_lookup=object_lookup)
+    if resolved.id != target.id:
+        raise ValidationError(
+            f"{bam.name!r} is aligned to {resolved.name!r}, not {target.name!r}",
+            details={
+                "bam_id": str(bam.id),
+                "target_id": str(target.id),
+                "resolved_target_id": str(resolved.id),
+            },
+        )
+    return bam
+
+
+async def validate_bam_aligned_to(
+    bam: DataObject, target: DataObject, *, owner
+) -> DataObject:
+    """Validate a BAM/CRAM target using the owner-scoped object service."""
+    resolved = await resolve_alignment_target_for_bam(bam, owner=owner)
     if resolved.id != target.id:
         raise ValidationError(
             f"{bam.name!r} is aligned to {resolved.name!r}, not {target.name!r}",
