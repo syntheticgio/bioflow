@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../api/client";
 import type { AiProvider, AiRouting } from "../api/types";
+import { providerDisplayName } from "../lib/modelName";
 import { notify } from "../stores/messageStore";
 
 /**
@@ -72,7 +73,7 @@ export function TaskRoutingPanel({
                   <option value="">Nothing — AI features off</option>
                   {providers.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name}
+                      {providerDisplayName(p.name, p.model)}
                     </option>
                   ))}
                 </select>
