@@ -760,9 +760,14 @@ means nothing without the version of the tool that applied it" (the module
 docstring in `tools.py`). What is missing is a walker that assembles the chain
 and a prompt that renders it.
 
-`backend/app/services/summary_prompt.py` is the existing pattern to follow, and
-the summary model runs on the *host* -- containers reach it via
-`host.docker.internal`, not `localhost`.
+`backend/app/services/summary_prompt.py` is the existing pattern to follow.
+As of the AI provider settings feature (2026-08-03,
+`docs/superpowers/specs/2026-08-03-ai-provider-settings-design.md`), the model
+is no longer a single hardcoded host process -- routing goes through
+`app/services/ai/router.resolve(TaskSlot)`, and the `host.docker.internal`
+address is now just the "Local / custom" preset's default, not a universal
+fact. This walker would want its own `TaskSlot` member (e.g.
+`PROVENANCE_NARRATIVE`) rather than assuming any particular provider.
 
 The hard constraint: this output will be pasted into papers. It must never
 invent a step or a version. Prefer a narrative assembled from facts with the

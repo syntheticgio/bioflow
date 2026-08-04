@@ -157,35 +157,83 @@ class SummaryRequest(BaseModel):
     force: bool = True
 
 
+def _is_local(base_url: str) -> bool:
+    """Whether this base URL points at something on this machine.
+
+    Governs whether availability is probed live or remembered. `host.docker.
+    internal` counts: from inside these containers that *is* the host.
+    """
+    return any(
+        h in base_url
+        for h in ("localhost", "127.0.0.1", "host.docker.internal", "0.0.0.0")
+    )
+
+
+def _probe_local(provider) -> bool:
+    """Cheap liveness check against a local server: can it list models?
+
+    `/v1/models` rather than the LM Studio-specific `/health` the old client
+    used -- one fewer non-standard dependency, and it is the same call the
+    settings page's fetch makes.
+    """
+    from app.services.ai.adapters import Failure, adapter_for
+
+    adapter = adapter_for(
+        provider.kind, base_url=provider.base_url, api_key=provider.api_key
+    )
+    return not isinstance(adapter.list_models(), Failure)
+
+
 @router.get("/summary/status")
 async def summary_status() -> dict:
     """Whether narrative summaries can be produced right now.
 
-    Exists so the UI can hide an affordance that would only fail. Probed live
-    rather than cached -- the model server is a process the user starts and
-    stops by hand, so a remembered answer is the one most likely to be wrong.
+    Exists so the UI can hide an affordance that would only fail. The
+    availability check differs by provider kind -- see the local/hosted split
+    below.
 
-    Deliberately *not* owner-scoped: this reports on a configuration flag and a
-    socket to the host's model server. There is one such server for the whole
-    machine, so the answer cannot differ by profile, and gating it behind a
-    header would hide the summarize button from a client that has not resolved
-    one rather than telling it the truth.
+    Deliberately *not* owner-scoped: this reports on a configuration flag and
+    the provider routed to FILE_SUMMARY. There is one such routing for the
+    whole machine, so the answer cannot differ by profile, and gating it
+    behind a header would hide the summarize button from a client that has
+    not resolved one rather than telling it the truth.
     """
     import asyncio
 
-    from app.services import llm_client
+    from app.models.ai import TaskSlot
+    from app.services.ai import provider_service
+    from app.services.ai import router as ai_router
 
     if not settings.llm_summaries_enabled:
         return {"available": False, "reason": "disabled"}
 
-    # Off the event loop: the probe is a blocking socket call, short-timeout but
-    # not instant when the host is unreachable rather than merely refusing.
-    available = await asyncio.to_thread(llm_client.is_available)
-    if not available:
-        return {"available": False, "reason": "server_unavailable"}
+    provider = await ai_router.resolve(TaskSlot.FILE_SUMMARY)
+    if provider is None:
+        return {"available": False, "reason": "no_provider"}
 
-    model = await asyncio.to_thread(llm_client.default_model)
-    return {"available": True, "model": model}
+    # Local servers are probed live; hosted ones are not. A local model server
+    # is a process the user starts and stops by hand, so a remembered answer is
+    # the one most likely to be wrong. A hosted provider does not go down --
+    # it rejects a stale key -- and that is not worth a network round trip on
+    # every page load, nor a billable request.
+    if _is_local(provider.base_url):
+        alive = await asyncio.to_thread(_probe_local, provider)
+        if not alive:
+            return {"available": False, "reason": "server_unavailable"}
+    else:
+        stored = await provider_service.get(provider.provider_id)
+        if stored is not None and stored.status == "failed":
+            return {
+                "available": False,
+                "reason": str(stored.status_reason) if stored.status_reason else "failed",
+                "provider_name": provider.name,
+            }
+
+    return {
+        "available": True,
+        "model": provider.model or (provider.models_cache[0] if provider.models_cache else None),
+        "provider_name": provider.name,
+    }
 
 
 @router.post("/summary", response_model=JobOut, status_code=status.HTTP_201_CREATED)

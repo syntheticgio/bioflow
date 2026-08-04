@@ -14,12 +14,51 @@ returns an empty result and succeeds rather than failing the job and filling the
 activity view with red rows for a feature the user may not have opted into.
 """
 
+import importlib
+
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.queue.registry import HandlerMode, JobContext, handler
-from app.services import llm_client, summary_prompt
+from app.services import summary_prompt
+from app.services.ai.adapters import Completion
+
+# NOT `from app.services.ai import complete as ai_complete`, and NOT
+# `import app.services.ai.complete as ai_complete` either: app/services/ai/
+# __init__.py does `from app.services.ai.complete import complete`, which
+# rebinds the *package attribute* `complete` to the function it re-exports,
+# shadowing the submodule of the same name. Both of those import forms
+# resolve through that attribute and would silently bind the function, not
+# the module -- so this goes through `sys.modules` via `importlib` instead,
+# which is the only form immune to the shadow, and gives tests a module to
+# monkeypatch `.complete_sync` on.
+ai_complete = importlib.import_module("app.services.ai.complete")
 
 log = get_logger(__name__)
+
+
+def _resolve_sync():
+    """Resolve the FILE_SUMMARY provider from a worker thread.
+
+    Thread handlers have no event loop, and `router.resolve` is async because
+    it reads Mongo. `asyncio.run()` on a fresh loop looks like the obvious
+    escape but is wrong: this process's Mongo client is bound to the loop
+    `connect_to_mongo` ran on, and a second, unrelated loop makes Motor raise
+    "attached to a different loop" the moment it touches that loop's futures
+    (reproduced live: a `summarize_object` job against a real provider). See
+    `db.client.run_from_thread`, which schedules onto the real loop instead --
+    the same pattern `queue/executor.py`'s `_schedule_lease_extension` already
+    uses for the identical problem.
+    """
+    from app.db.client import run_from_thread
+    from app.models.ai import TaskSlot
+    from app.services.ai import router
+
+    return run_from_thread(router.resolve(TaskSlot.FILE_SUMMARY))
+
+
+def _complete(provider, **kwargs):
+    """The model call. Separate so tests replace it without a socket."""
+    return ai_complete.complete_sync(provider, **kwargs)
 
 
 @handler(
@@ -52,9 +91,10 @@ def summarize_object(ctx: JobContext) -> dict:
 
     ctx.check_cancel()
 
-    if not llm_client.is_available():
-        log.info("summary_skipped_server_down", object_id=object_id)
-        return {"object_id": object_id, "skipped": "server_unavailable"}
+    provider = _resolve_sync()
+    if provider is None:
+        log.info("summary_skipped_no_provider", object_id=object_id)
+        return {"object_id": object_id, "skipped": "no_provider"}
 
     prompt = summary_prompt.build_user_prompt(
         name=ctx.payload.get("name") or "unnamed file",
@@ -75,12 +115,14 @@ def summarize_object(ctx: JobContext) -> dict:
     # cannot get this job reaped and re-run underneath itself.
     ctx.extend_lease(int(_timeout_seconds()) + 60)
 
-    completion = llm_client.complete(system=summary_prompt.SYSTEM_PROMPT, user=prompt)
-    if completion is None:
-        log.info("summary_not_generated", object_id=object_id)
-        return {"object_id": object_id, "skipped": "no_completion"}
+    result = _complete(provider, system=summary_prompt.SYSTEM_PROMPT, user=prompt)
+    if not isinstance(result, Completion):
+        # A typed reason rather than a bare "nothing happened": an expired key
+        # is a configuration problem the user can fix, and silence hides it.
+        log.info("summary_not_generated", object_id=object_id, reason=result.reason)
+        return {"object_id": object_id, "skipped": str(result.reason)}
 
-    text, model = completion
+    text, model = result.text, result.model
     log.info("summary_generated", object_id=object_id, model=model, chars=len(text))
     return {
         "object_id": object_id,

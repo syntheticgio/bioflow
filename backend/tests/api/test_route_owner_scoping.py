@@ -516,6 +516,14 @@ class TestPipelinesRouter:
             await client.get("/api/v1/pipelines/aligners/minimap2/schema")
         ).status_code == 200
 
+        # AI settings, unscoped for the same reason as /summary/status above:
+        # one machine, one set of providers, and a profile header cannot change
+        # which model writes a summary. Scoping them later would break the
+        # settings page for a client that has not resolved a profile.
+        assert (await client.get("/api/v1/settings/ai/presets")).status_code == 200
+        assert (await client.get("/api/v1/settings/ai/providers")).status_code == 200
+        assert (await client.get("/api/v1/settings/ai/routing")).status_code == 200
+
 
 class TestPipelineLaunchesAreScoped:
     """Launch routes, which are the ones worth the most care.

@@ -1,4 +1,9 @@
 import type {
+  AiFetchModelsResult,
+  AiPreset,
+  AiProvider,
+  AiProviderInput,
+  AiRouting,
   AlignDefaults,
   AlignEnvelope,
   AlignerSchema,
@@ -459,6 +464,50 @@ export const api = {
     request<{ available: boolean; reason?: string; model?: string | null }>(
       "/pipelines/summary/status",
     ),
+
+  /** The known-provider table. Static; safe to cache indefinitely. */
+  aiPresets: () => request<AiPreset[]>("/settings/ai/presets"),
+
+  aiProviders: () => request<AiProvider[]>("/settings/ai/providers"),
+
+  createAiProvider: (body: AiProviderInput) =>
+    request<AiProvider>("/settings/ai/providers", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  /**
+   * Update a provider. **Omit `api_key` to keep the stored key.**
+   *
+   * The backend distinguishes an absent field from an explicit null, so a form
+   * that always sent `api_key` -- even as an empty string -- would wipe the
+   * credential every time the user renamed a provider. Send the field only
+   * when the user typed something, and send `null` only to deliberately clear.
+   */
+  updateAiProvider: (id: string, body: AiProviderInput) =>
+    request<AiProvider>(`/settings/ai/providers/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  deleteAiProvider: (id: string) =>
+    request<void>(`/settings/ai/providers/${id}`, { method: "DELETE" }),
+
+  /** Fetch the model list, which is also the connection test. A provider
+   *  failure comes back as a 200 with `status: "failed"`, not a thrown error --
+   *  it renders as a badge, not a toast. */
+  fetchAiModels: (id: string) =>
+    request<AiFetchModelsResult>(`/settings/ai/providers/${id}/fetch-models`, {
+      method: "POST",
+    }),
+
+  aiRouting: () => request<AiRouting>("/settings/ai/routing"),
+
+  setAiRouting: (body: { default: string | null; slots: Record<string, string> }) =>
+    request<AiRouting>("/settings/ai/routing", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   /**
    * Background prose about a species. Null when there is nothing to say --

@@ -17,6 +17,7 @@ import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
+import { SettingsView } from "./components/SettingsView";
 import { UploadTray } from "./components/UploadTray";
 import { useEvents } from "./hooks/useEvents";
 import { useProfileStore } from "./stores/profileStore";
@@ -50,10 +51,15 @@ function Shell() {
     window.addEventListener("mouseup", up);
   };
 
-  // Both are single full-width views with no left-hand tree to sit beside:
-  // /activity is one long list, and the help pages are prose.
+  // All three are single full-width views with no left-hand tree to sit
+  // beside: /activity is one long list, the help pages are prose, and
+  // /settings has its own master-detail layout that a stray DetailPanel and
+  // splitter would only crowd.
   const pathname = useLocation().pathname;
-  const singleColumn = pathname === "/activity" || pathname.startsWith("/help/");
+  const singleColumn =
+    pathname === "/activity" ||
+    pathname.startsWith("/help/") ||
+    pathname.startsWith("/settings");
 
   // Themes that scroll the window rather than the panes (Broadsheet) would
   // otherwise land mid-page on every route change, carrying the previous
@@ -75,6 +81,8 @@ function Shell() {
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
           <Route path="/help/about" element={<HelpAbout />} />
+          <Route path="/settings" element={<SettingsView />} />
+          <Route path="/settings/ai" element={<SettingsView />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
