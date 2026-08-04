@@ -90,6 +90,16 @@ happen here. Run grouping, tap-to-expand, and a drill-in detail screen were
 all considered and deferred -- each requires that membership data, and the
 feed answers "what is it doing" without it.
 
+**A `blocked` job must be claimed positively.** `JobState` includes
+`"blocked"`, and it is in neither the `RUNNING` nor the `WAITING` set.
+`ActivityView` derives its "recent" list by negating both, which is safe
+there because a blocked job is rendered inside its run's card -- but a flat
+feed has no such grouping, so the same negation would file a blocked
+`align_reads` under "Recent" as though it had succeeded. The extracted
+helpers therefore carry a third `BLOCKED` set, and `waitingReason` answers
+"waiting on an earlier step" for it rather than blaming system load for what
+is a dependency wait.
+
 Two sections, flat, nothing tappable:
 
 - **Running** -- jobs in `running`, `pending`, `queued`, `delayed`. A running
@@ -194,7 +204,8 @@ Four things currently private to `ActivityView.tsx` move to
 `lib/runFormat.ts`, because the mobile feed needs all four and would
 otherwise reimplement them:
 
-- `RUNNING` and `WAITING` -- the state sets defining what counts as in-flight.
+- `RUNNING`, `WAITING` and a new `BLOCKED` -- the state sets defining what
+  counts as in-flight, plus an `isInFlight(state)` helper over the three.
 - `waitingReason(job, load)` -- why a queued job has not started. Reused
   rather than rewritten specifically because the governor's
   `admitted_classes` is authoritative, and a second hand-rolled copy would
@@ -223,6 +234,12 @@ this design is trying to keep separate.
 
 Single column, tap targets at least 44px, system font stack. The viewport
 meta tag in `index.html` is already correct and needs no change.
+
+Colours come from the variables `styles.css` already defines -- `--bg`,
+`--text`, `--text-dim`, `--border`, `--accent`, `--error` -- rather than
+literals, since that file redefines all of them inside a
+`prefers-color-scheme: light` block and hardcoding would break one theme.
+Inputs are 16px because iOS Safari zooms the page on focus below that.
 
 ## Backend
 
