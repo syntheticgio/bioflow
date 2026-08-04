@@ -12,6 +12,7 @@ import { Menu } from "./Menu";
 const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/search", label: "Search", title: "Search files by metadata" },
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
+  { to: "/settings", label: "Settings", title: "AI providers and task routing" },
 ];
 
 /** Help menu contents. Reference pages, in the order a user needs them:

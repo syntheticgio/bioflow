@@ -14,6 +14,7 @@ import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
+import { SettingsView } from "./components/SettingsView";
 import { UploadTray } from "./components/UploadTray";
 import { useEvents } from "./hooks/useEvents";
 import { useProfileStore } from "./stores/profileStore";
@@ -71,6 +72,8 @@ function Shell() {
           <Route path="/p/:projectId" element={<ProjectExplorer />} />
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
+          <Route path="/settings" element={<SettingsView />} />
+          <Route path="/settings/ai" element={<SettingsView />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
