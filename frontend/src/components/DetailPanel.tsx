@@ -65,16 +65,55 @@ export function DetailPanel() {
   return <EmptyDetail />;
 }
 
+/**
+ * Nothing is selected, which on this page is most of the time -- so rather
+ * than an empty "Details" panel, this is BioFlow's de facto splash screen: a
+ * one-line orientation plus whatever the library currently holds, pulled from
+ * the same `["system","stats"]` query the header and activity desk already
+ * poll, so this costs no request of its own.
+ */
 function EmptyDetail() {
+  const { data: stats } = useQuery({
+    queryKey: ["system", "stats"],
+    queryFn: api.systemStats,
+    refetchInterval: 15000,
+  });
+
   return (
     <div className="panel">
       <div className="panel-header">
-        <span className="panel-title">Details</span>
+        <span className="panel-title">BioFlow</span>
       </div>
       <div className="panel-body">
-        <div className="empty">
-          <div className="empty-title">Nothing selected</div>
-          <div>Select a project or file to see its details.</div>
+        <div className="splash">
+          <div className="splash-title">BioFlow</div>
+          <p className="splash-blurb">
+            A local bioinformatics pipeline tool: QC, trim, align, call
+            variants, quantify and assemble sequencing data, all run on this
+            machine.
+          </p>
+
+          {stats && (
+            <dl className="splash-stats">
+              <div className="splash-stat">
+                <dt>Projects</dt>
+                <dd>{stats.counts.projects}</dd>
+              </div>
+              <div className="splash-stat">
+                <dt>Files</dt>
+                <dd>{stats.counts.objects}</dd>
+              </div>
+              <div className="splash-stat">
+                <dt>Stored</dt>
+                <dd>{formatBytes(stats.storage.library_bytes)}</dd>
+              </div>
+            </dl>
+          )}
+
+          <p className="splash-prompt">
+            Select a project on the left to see its files, or create one to
+            get started.
+          </p>
         </div>
       </div>
     </div>
