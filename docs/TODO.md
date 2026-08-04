@@ -772,46 +772,6 @@ Other candidates worth considering under the same heading: explaining *why* a
 QC run failed a threshold, and suggesting the next pipeline step in prose
 alongside the Actions cards.
 
-## Changing an index definition is a hard startup failure
-
-Raised: 2026-07-27, during alignment. **The migration below has been applied to
-this machine's `biopipe` and `biopipe_test` databases; it is recorded because
-any other database predating the change still needs it.**
-
-The job dependency gate added a `blocked` state, and `uniq_active_dedup_key` --
-the durable guard against enqueueing the same logical work twice -- filters on
-an explicit list of non-terminal states. That list now includes `"blocked"`.
-
-`init_beanie` does not silently keep the old definition, which is what this
-entry originally claimed. It calls `createIndexes` with the new
-`partialFilterExpression` under a name that already exists, MongoDB rejects it
-with `IndexKeySpecsConflict` (code 86), and **the API exits during startup**.
-Not a quiet inconsistency: the container will not boot at all against a
-database that predates the change.
-
-A fresh database is unaffected -- the index is created correctly the first time
--- which is exactly why this does not show up until an existing deployment is
-upgraded.
-
-The fix is to drop the index so Beanie recreates it:
-
-```js
-db.jobs.dropIndex("uniq_active_dedup_key")
-```
-
-Note it must be run against **every** database carrying the collection, not
-just the application's. `biopipe_test` also had a copy, created by the
-`init_beanie` fixture in `tests/storage/test_object_role.py` and
-`test_sidecars.py` -- and because the app and the tests share one Mongo, the
-stale test-database index kept the API down after the real one was fixed.
-
-The general lesson is larger than this one index: **any** change to an index
-definition on a collection with existing data is a breaking deployment without
-a migration step, and this project has no migrations mechanism. Worth building
-one before the next schema change rather than after.
-
-Touches: `backend/app/models/job.py`, `backend/app/db/client.py`.
-
 ## Mate detection is filename-only
 
 Raised: 2026-07-27, during read preparation.

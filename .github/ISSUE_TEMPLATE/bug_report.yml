@@ -1,0 +1,52 @@
+name: Bug report
+description: Report behavior that is broken, missing, or inconsistent.
+title: "[Bug]: "
+labels:
+  - "type: bug"
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a BioFlow problem. Include concrete evidence where possible.
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and its impact.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How can we reproduce it?
+      description: List the smallest sequence of steps, inputs, and project state that reproduces the problem.
+      placeholder: |
+        1. Open ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should have happened?
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS, architecture, browser, and BioFlow commit or image if known.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or other evidence
+      description: Remove secrets and personally identifying data before posting.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Reporter checks
+      options:
+        - label: I searched open issues for an existing report.
+          required: true
+        - label: I removed secrets and sensitive data from the report.
+          required: true

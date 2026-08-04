@@ -346,6 +346,67 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## Changing an index definition is a hard startup failure — FIXED
+
+Fixed before 2026-08-03 by the startup reconciliation mechanism in
+`backend/app/db/index_reconcile.py`, wired through
+`backend/app/db/client.py::_init_models` before `init_beanie` creates declared
+indexes. On every startup it compares the live and declared key pattern,
+uniqueness, sparse flag, partial filter and TTL; conflicting named indexes are
+dropped and Beanie recreates them, while orphaned indexes are logged and left
+alone. `backend/tests/db/test_index_reconcile.py` covers the original
+`partialFilterExpression` failure and the other compared properties.
+
+**What shipped differently:** the original entry proposed a general migration
+mechanism. The implementation is deliberately narrower and automatic: it
+reconciles only conflicting declared indexes, because those are the schema
+changes that otherwise prevent startup, and avoids silently deleting orphaned
+indexes whose intent cannot be inferred.
+
+The original one-off migration was measured against both `biopipe` and
+`biopipe_test`; the reconciler now makes the same class of upgrade idempotent
+for any database initialized through `_init_models`.
+
+Original entry follows.
+
+Raised: 2026-07-27, during alignment. **The migration below has been applied to
+this machine's `biopipe` and `biopipe_test` databases; it is recorded because
+any other database predating the change still needs it.**
+
+The job dependency gate added a `blocked` state, and `uniq_active_dedup_key` --
+the durable guard against enqueueing the same logical work twice -- filters on
+an explicit list of non-terminal states. That list now includes `"blocked"`.
+
+`init_beanie` does not silently keep the old definition, which is what this
+entry originally claimed. It calls `createIndexes` with the new
+`partialFilterExpression` under a name that already exists, MongoDB rejects it
+with `IndexKeySpecsConflict` (code 86), and **the API exits during startup**.
+Not a quiet inconsistency: the container will not boot at all against a
+database that predates the change.
+
+A fresh database is unaffected -- the index is created correctly the first time
+-- which is exactly why this does not show up until an existing deployment is
+upgraded.
+
+The fix is to drop the index so Beanie recreates it:
+
+```js
+db.jobs.dropIndex("uniq_active_dedup_key")
+```
+
+Note it must be run against **every** database carrying the collection, not
+just the application's. `biopipe_test` also had a copy, created by the
+`init_beanie` fixture in `tests/storage/test_object_role.py` and
+`test_sidecars.py` -- and because the app and the tests share one Mongo, the
+stale test-database index kept the API down after the real one was fixed.
+
+The general lesson is larger than this one index: **any** change to an index
+definition on a collection with existing data is a breaking deployment without
+a migration step, and this project has no migrations mechanism. Worth building
+one before the next schema change rather than after.
+
+Touches: `backend/app/models/job.py`, `backend/app/db/client.py`.
+
 ## STAR: annotation-aware indexing (`--sjdbGTFfile`) — FIXED
 
 Fixed 2026-08-02. `StarParams` unaffected; the flag lives on the index build,

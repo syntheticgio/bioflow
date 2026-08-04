@@ -1,0 +1,36 @@
+name: Technical task
+description: Record maintenance, verification, migration, or engineering cleanup.
+title: "[Maintenance]: "
+labels:
+  - "type: maintenance"
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Engineering problem
+      description: Describe the invariant, gap, or maintenance burden.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Include measurements, failing tests, code paths, or observed behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: work
+    attributes:
+      label: Proposed work
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and constraints
+  - type: textarea
+    id: completion
+    attributes:
+      label: Completion checks
+    validations:
+      required: true
