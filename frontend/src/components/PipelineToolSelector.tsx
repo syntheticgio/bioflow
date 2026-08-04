@@ -56,6 +56,7 @@ const PIPELINE_LABEL: Record<PipelineType, string> = {
   variant: "a variant caller",
   expression: "an expression tool",
   assemble: "an assembler",
+  reference_assembly: "a reference assembly tool",
   assembly_qc: "an assembly QC tool",
 };
 

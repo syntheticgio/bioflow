@@ -49,6 +49,10 @@ class RunKind(StrEnum):
     # different means, and a run list that conflated them would claim credit
     # for a genome NCBI assembled.
     ASSEMBLY = "assembly"
+    # Reference-guided assembly work such as Pilon, RagTag, or iVar. Kept
+    # separate from de novo assembly and assembly QC because it improves,
+    # scaffolds, or derives an assembly from existing reference-like inputs.
+    REFERENCE_ASSEMBLY = "reference_assembly"
 
 
 class RunStatus(StrEnum):
@@ -74,8 +78,12 @@ class RunInputRole(StrEnum):
     READS = "reads"
     MATE = "mate"
     REFERENCE = "reference"
+    # A rough assembly that a reference-guided tool improves or scaffolds.
+    DRAFT_ASSEMBLY = "draft_assembly"
     # The BAM a quantification counted.
     ALIGNMENT = "alignment"
+    # Primer definitions for amplicon-aware reference assembly tools.
+    PRIMERS = "primers"
     # The GTF/GFF it counted against.
     ANNOTATION = "annotation"
     # A per-sample count file going into a differential expression run. The
