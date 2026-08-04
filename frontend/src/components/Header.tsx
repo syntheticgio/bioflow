@@ -14,19 +14,24 @@ const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
 ];
 
-/** Reference menu contents: pages in the order a user needs them -- what the
- *  numbers mean, then what produced them, then where the inputs came from. */
+/** Reference menu contents: standalone reference documents, not tied to what
+ *  BioFlow itself integrates with or computes. */
 const REFERENCE_ITEMS: { to: string; label: string; section: string }[] = [
-  { to: "/help/calculations", label: "BioFlow Calculations", section: "Reference" },
-  { to: "/help/software", label: "Software", section: "Reference" },
-  { to: "/help/sources", label: "Data Sources", section: "Reference" },
   { to: "/help/workflow-diagrams", label: "Workflow Diagrams", section: "Reference" },
   { to: "/help/genome-analysis-review", label: "Genome Analysis Review", section: "Reference" },
+  { to: "/help/databases", label: "Databases", section: "Reference" },
 ];
 
-/** Help menu contents, grouped so the dropdown stays scannable as it grows. */
+/** Help menu contents, grouped so the dropdown stays scannable as it grows.
+ *  "About BioFlow" groups the pages that describe what this software does
+ *  and integrates with -- calculations it runs, tools it wraps, sources it
+ *  reads from -- as distinct from the standalone reference documents in the
+ *  Reference menu. */
 const HELP_ITEMS: { to: string; label: string; section: string }[] = [
   { to: "/help/about", label: "About", section: "About" },
+  { to: "/help/calculations", label: "BioFlow Calculations", section: "About BioFlow" },
+  { to: "/help/software", label: "Software", section: "About BioFlow" },
+  { to: "/help/sources", label: "Data Sources", section: "About BioFlow" },
   { to: "/help/feedback", label: "Feedback", section: "Support" },
   { to: "/help/placeholder", label: "Placeholder", section: "Support" },
 ];
