@@ -522,6 +522,56 @@ textarea:focus {
   margin-bottom: 4px;
 }
 
+.splash {
+  padding: 48px 24px;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.splash-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.splash-blurb {
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 20px;
+}
+
+.splash-stats {
+  display: flex;
+  gap: 20px;
+  margin: 0 0 20px;
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.splash-stat dt {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+.splash-stat dd {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+}
+
+.splash-prompt {
+  color: var(--text-faint);
+  font-size: 13px;
+  margin: 0;
+}
+
 .spinner {
   display: inline-block;
   width: 13px;
