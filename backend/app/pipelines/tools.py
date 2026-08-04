@@ -594,6 +594,11 @@ class PipelineType(StrEnum):
     # headed "an assembler", beside Flye, as something to assemble *with*.
     # See docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md.
     ASSEMBLY_QC = "assembly_qc"
+    # Tools that improve, scaffold, polish, or produce an assembly using a
+    # reference, draft assembly, or alignment. Kept separate from ASSEMBLE and
+    # ASSEMBLY_QC so those picker families do not mix production, improvement,
+    # and judgement tools.
+    REFERENCE_ASSEMBLY = "reference_assembly"
 
 
 @dataclass(frozen=True)
