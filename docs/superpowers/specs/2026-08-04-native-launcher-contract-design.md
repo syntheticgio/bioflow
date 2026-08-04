@@ -256,9 +256,14 @@ The Docker-facing layer sits behind one interface — probe, up, down, ps, pull 
 so the state machine and its transitions are unit-testable against a fake with
 no Docker present. That covers the logic where the bugs will be.
 
-Everything else is manual verification on macOS, Windows, and Linux. This is
-consistent with the rest of the repository, where UI verification is manual and
-no component-testing setup exists.
+The launcher's own UI follows the pattern the frontend already uses: `vitest`
+is configured (`frontend/package.json`) and nine `.test.ts` files cover pure
+logic in `frontend/src/lib/`. There are no `.test.tsx` component tests and none
+are expected — the launcher's testable logic is state transitions and parsing,
+which is the same shape.
+
+Everything else is manual verification on macOS, Windows, and Linux, consistent
+with the rest of the repository.
 
 ## Open questions
 
