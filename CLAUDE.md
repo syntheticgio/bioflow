@@ -76,6 +76,38 @@ If a future change happens to break the override-based setup, that's an
 acceptable, fixable cost of this tradeoff -- not a reason to add process
 around it now.
 
+**After [#37](https://github.com/syntheticgio/bioflow/issues/37) lands, the
+build directives move to the override file -- keep using the same command.**
+`docker-compose.yml` currently declares `api`, `worker`, and `web` with
+`build:` contexts. #37 converts those to `image:` references at
+`ghcr.io/syntheticgio/bioflow-*`, because Compose *builds* a `build:` service
+rather than pulling it, and the native launcher's users have no source tree for
+it to build from. The `build:` directives move into
+`docker-compose.override.yml` in the same commit, so `docker compose up -d
+--build api web worker` keeps rebuilding from local source exactly as it does
+today -- the override always loads, and it is the only place that still knows
+how to build.
+
+What that means for an agent working here, since agents do nearly all of the
+starting and rebuilding in this repo:
+
+- **The rebuild command does not change.** Do not switch to `docker compose
+  pull`, and do not add `-f docker-compose.yml -f docker-compose.override.yml`
+  -- the override loads on its own.
+- **Never verify a local change against a published image.** After #37 the base
+  file names a registry tag, so anything that bypasses the override (`-f
+  docker-compose.yml` alone, or a `docker compose pull`) runs *the last
+  published build*, not the working tree. It starts cleanly and serves stale
+  code, with nothing in the output saying so. This is the same failure shape as
+  the worktree-mounts trap below, and it reads the same way: "my change isn't
+  in the app."
+- **`--build` is what ties the running stack to the checkout.** If a rebuild
+  ever seems not to take, check that the flag was actually passed before
+  looking for a cause in the code.
+
+Until #37 merges, none of the above applies and the base file still builds from
+source on its own.
+
 **`worker` does not hot-reload.** `api` runs `uvicorn --reload` and `web`
 runs `vite dev`, so editing their bind-mounted source takes effect on the
 next request with no restart needed. `worker` bind-mounts `./backend/app`
