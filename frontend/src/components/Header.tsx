@@ -15,16 +15,19 @@ const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/settings", label: "Settings", title: "AI providers and task routing" },
 ];
 
-/** Help menu contents, grouped so the dropdown stays scannable as it grows.
- *  Within "Reference", pages are in the order a user needs them: what the
+/** Reference menu contents: pages in the order a user needs them -- what the
  *  numbers mean, then what produced them, then where the inputs came from. */
-const HELP_ITEMS: { to: string; label: string; section: string }[] = [
-  { to: "/help/about", label: "About", section: "About" },
+const REFERENCE_ITEMS: { to: string; label: string; section: string }[] = [
   { to: "/help/calculations", label: "BioFlow Calculations", section: "Reference" },
   { to: "/help/software", label: "Software", section: "Reference" },
   { to: "/help/sources", label: "Data Sources", section: "Reference" },
   { to: "/help/workflow-diagrams", label: "Workflow Diagrams", section: "Reference" },
   { to: "/help/genome-analysis-review", label: "Genome Analysis Review", section: "Reference" },
+];
+
+/** Help menu contents, grouped so the dropdown stays scannable as it grows. */
+const HELP_ITEMS: { to: string; label: string; section: string }[] = [
+  { to: "/help/about", label: "About", section: "About" },
   { to: "/help/feedback", label: "Feedback", section: "Support" },
   { to: "/help/placeholder", label: "Placeholder", section: "Support" },
 ];
@@ -81,6 +84,14 @@ export function Header() {
               disabled: cleanUp.isPending,
             },
           ]}
+        />
+        <Menu
+          label="Reference"
+          items={REFERENCE_ITEMS.map((item) => ({
+            label: item.label,
+            section: item.section,
+            onSelect: () => navigate(item.to),
+          }))}
         />
         <Menu
           label="Help"
