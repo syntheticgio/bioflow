@@ -40,15 +40,20 @@ def _resolve_sync():
     """Resolve the FILE_SUMMARY provider from a worker thread.
 
     Thread handlers have no event loop, and `router.resolve` is async because
-    it reads Mongo. `asyncio.run` on a fresh loop is the standard escape here
-    and is cheap next to the model call that follows.
+    it reads Mongo. `asyncio.run()` on a fresh loop looks like the obvious
+    escape but is wrong: this process's Mongo client is bound to the loop
+    `connect_to_mongo` ran on, and a second, unrelated loop makes Motor raise
+    "attached to a different loop" the moment it touches that loop's futures
+    (reproduced live: a `summarize_object` job against a real provider). See
+    `db.client.run_from_thread`, which schedules onto the real loop instead --
+    the same pattern `queue/executor.py`'s `_schedule_lease_extension` already
+    uses for the identical problem.
     """
-    import asyncio
-
+    from app.db.client import run_from_thread
     from app.models.ai import TaskSlot
     from app.services.ai import router
 
-    return asyncio.run(router.resolve(TaskSlot.FILE_SUMMARY))
+    return run_from_thread(router.resolve(TaskSlot.FILE_SUMMARY))
 
 
 def _complete(provider, **kwargs):
