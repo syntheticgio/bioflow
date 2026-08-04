@@ -1,6 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { BrowserRouter, Route, Routes, useLocation } from "react-router-dom";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 import { api } from "./api/client";
 import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
@@ -20,6 +27,11 @@ import { SearchView } from "./components/SearchView";
 import { SettingsView } from "./components/SettingsView";
 import { UploadTray } from "./components/UploadTray";
 import { useEvents } from "./hooks/useEvents";
+import { MobileActivity } from "./mobile/MobileActivity";
+import { MobileConfirm } from "./mobile/MobileConfirm";
+import { MobileDownload } from "./mobile/MobileDownload";
+import { MobileShell } from "./mobile/MobileShell";
+import { forceDesktop, useIsMobile } from "./mobile/useIsMobile";
 import { useProfileStore } from "./stores/profileStore";
 import { useUiStore } from "./stores/uiStore";
 
@@ -174,6 +186,30 @@ function startupCheck(): Promise<void> {
  * and every user-data route 400s with no profile, so rendering it first would
  * produce a burst of failed requests before the picker ever appeared.
  */
+/**
+ * Sends a narrow viewport to the mobile routes, once.
+ *
+ * One-directional on purpose. Redirecting a wide viewport back off /m/*
+ * would make the "use desktop version" escape hatch impossible to use --
+ * the moment it navigated to /, a still-narrow window would bounce it
+ * straight back -- and would throw a tablet user out of the screen they
+ * were reading the instant they rotated.
+ */
+function MobileRedirect() {
+  const isMobile = useIsMobile();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isMobile) return;
+    if (forceDesktop()) return;
+    if (pathname.startsWith("/m/")) return;
+    navigate("/m/activity", { replace: true });
+  }, [isMobile, pathname, navigate]);
+
+  return null;
+}
+
 function Gate() {
   const current = useProfileStore((s) => s.current);
   const [ready, setReady] = useState(false);
@@ -195,7 +231,20 @@ function Gate() {
 
   if (!ready) return null;
   if (!current) return <ProfilePicker />;
-  return <Shell />;
+  return (
+    <>
+      <MobileRedirect />
+      <Routes>
+        <Route path="/m" element={<MobileShell />}>
+          <Route index element={<Navigate to="/m/activity" replace />} />
+          <Route path="activity" element={<MobileActivity />} />
+          <Route path="download" element={<MobileDownload />} />
+          <Route path="download/:accession" element={<MobileConfirm />} />
+        </Route>
+        <Route path="*" element={<Shell />} />
+      </Routes>
+    </>
+  );
 }
 
 export function App() {

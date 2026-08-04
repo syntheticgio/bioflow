@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
+import { setForceDesktop } from "../mobile/useIsMobile";
 import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
 import { LoadIndicator } from "./LoadIndicator";
@@ -90,6 +91,16 @@ export function Header() {
             onSelect: () => navigate(item.to),
           }))}
         />
+        <button
+          className="header-mobile-link"
+          onClick={() => {
+            setForceDesktop(false);
+            navigate("/m/activity");
+          }}
+          title="Switch to the phone view"
+        >
+          Mobile view
+        </button>
         {/* The label is the profile itself, not a generic "Profile", because
             the whole point of putting this in the header is that you can see
             which library you are working in without opening anything. Someone
