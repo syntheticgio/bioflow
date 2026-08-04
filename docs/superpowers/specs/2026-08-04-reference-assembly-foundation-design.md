@@ -229,6 +229,17 @@ No browser verification is required for this foundation-only slice unless it
 adds visible UI text. The first tool-specific card will require browser
 verification against the running app.
 
+## Implementation Delta
+
+The shipped foundation resolves BAM alignment targets in two tiers. It first
+looks for explicit `ObjectRole.REFERENCE` FASTA parents in `derived_from`; if
+none exist, it falls back to a single unassigned assembly-like FASTA parent.
+Multiple explicit references remain ambiguous, and multiple fallback targets
+remain ambiguous, but a single explicit reference is allowed to win over a
+single unassigned FASTA parent. That refinement preserves the spec's no-filename
+guessing rule while avoiding false ambiguity from older or partially annotated
+provenance.
+
 ## Implementation Note
 
 This design deliberately stops short of a launcher. A generic
