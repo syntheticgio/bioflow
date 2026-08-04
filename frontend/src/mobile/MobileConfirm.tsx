@@ -118,7 +118,7 @@ export function MobileConfirm() {
           <button
             key={c.key}
             className="m-check-row"
-            disabled={!c.available}
+            disabled={!c.available || c.key === "genome"}
             onClick={() => setComponents((s) => toggle(s, c.key))}
           >
             <span
@@ -127,11 +127,13 @@ export function MobileConfirm() {
             <div>
               <div className="m-row-title">{c.label}</div>
               <div className="m-row-sub">
-                {c.available
-                  ? c.size_bytes
-                    ? `${(c.size_bytes / 1e6).toFixed(1)} MB`
-                    : "available"
-                  : (c.reason ?? "not available")}
+                {c.key === "genome"
+                  ? "always included"
+                  : c.available
+                    ? c.size_bytes
+                      ? `${(c.size_bytes / 1e6).toFixed(1)} MB`
+                      : "available"
+                    : (c.reason ?? "not available")}
               </div>
             </div>
           </button>
@@ -169,7 +171,7 @@ export function MobileConfirm() {
         <button
           key={r.accession}
           className="m-check-row"
-          disabled={r.already_downloaded}
+          disabled={downloadRuns.isPending}
           onClick={() => setRuns((s) => toggle(s, r.accession))}
         >
           <span className={`m-check${runs.has(r.accession) ? " on" : ""}`} />
