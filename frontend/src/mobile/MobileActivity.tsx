@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { formatDate, formatDuration } from "../lib/format";
 import { RUNNING, isInFlight, jobLabel, waitingReason } from "../lib/runFormat";
@@ -19,6 +19,8 @@ const RECENT_LIMIT = 15;
  * retrying and log-reading all stay on the desktop.
  */
 export function MobileActivity() {
+  const qc = useQueryClient();
+
   const { data: jobs = [], isLoading } = useQuery({
     queryKey: ["jobs", "mobile"],
     queryFn: () => api.listJobs({ limit: 50 }),
@@ -37,7 +39,15 @@ export function MobileActivity() {
   const { data: load } = useQuery({
     queryKey: ["systemLoad", "mobile"],
     queryFn: api.systemLoad,
-    refetchInterval: jobs.some((j) => isInFlight(j.state)) ? 2000 : false,
+    // A function, matching the jobs query, so this stops in the same tick
+    // rather than lagging one interval behind a render. SystemLoad carries
+    // no job-state itself, so this reads the jobs query's own live cache
+    // rather than closing over the jobs variable, which would only be
+    // fresh as of the last render.
+    refetchInterval: () => {
+      const list = qc.getQueryData<JobSummary[]>(["jobs", "mobile"]);
+      return list?.some((j) => isInFlight(j.state)) ? 2000 : false;
+    },
   });
 
   const active = jobs.filter((j) => isInFlight(j.state));
