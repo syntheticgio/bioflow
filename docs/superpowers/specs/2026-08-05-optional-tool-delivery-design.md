@@ -87,12 +87,22 @@ plainly rather than discovering halfway through:
 
 | Tool | Verdict | Why |
 |---|---|---|
-| Clair3 | **Optional** | ~600 MB with models, the largest single Dockerfile addition; terminal (BAM + ref → VCF); selected by platform, with bcftools always available as the other route |
-| FastQC + JRE | Optional, marginal | ~200 MB, mostly the JRE; the Dockerfile already notes nothing on the default path needs it, since the numbers the UI shows come from fastp's JSON |
+| Clair3 | Optional *in principle, blocked in practice* | Terminal (BAM + ref → VCF), selected by platform, bcftools always available as the other route -- the shape is right. But no arm64 image exists anywhere: checked both `hkubal/clair3` (the tool's own maintainers, 1.50 GB compressed / 4.05 GB on disk, both confirmed with models) and biocontainers' rebuild (2.09 GB, also amd64-only) on 2026-08-06, and neither publishes one. Moving it would remove Clair3 -- the *preferred* long-read caller -- from arm64 entirely. See `docs/superpowers/plans/2026-08-05-optional-tool-delivery.md` task 8 for the full record and the options considered and rejected. |
+| FastQC + JRE | Optional, marginal, same blocker | ~200 MB, mostly the JRE; the Dockerfile already notes nothing on the default path needs it. Checked alongside Clair3: `biocontainers/fastqc` is also amd64-only. Not the deciding factor on its own -- it was already marginal -- but confirms the amd64-only gap is systemic to this ecosystem's published images, not particular to Clair3. |
 | NanoPlot | Core | Heavy (numpy/pandas/scipy/pyarrow/plotly) but it *is* the long-read QC default path |
 | PyDESeq2 | Core | Heavy, but in-process Python returning a DataFrame — there is no subprocess to move into a container |
 | samtools, bcftools, minimap2, bowtie2, hisat2, STAR, fastp | Core | Piped, depended-on, or small |
 | sra-toolkit, datasets | Core | The download paths depend on them unconditionally |
+
+**Consequence for this design:** DeepVariant remains the only `ON_DEMAND_IMAGE`
+tool in `TOOL_META` as of this writing. The mechanism (Tasks 1–7) was built
+generically -- `Delivery`, `_probe_on_demand_image(name, image)`,
+`tool_install_service.install`/`.uninstall`, and
+`pipeline_service._require_or_offer_install` all take a tool name and a
+`Tool`, none hardcode DeepVariant in their control flow -- so a second
+migration was intended to *validate* genericity already designed in, not to
+*add* it. That validation is deferred, not abandoned; it did not justify a
+real arm64 regression to force ahead of schedule.
 
 **The value of this epic is forward-looking, not reclaiming today's image.**
 It is what makes it possible to say yes to hifiasm, Kraken2, GATK, or a 5 GB

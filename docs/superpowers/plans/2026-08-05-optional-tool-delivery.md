@@ -222,17 +222,29 @@ Full backend suite: 2937 passed, 0 failed, including 5 new tests directly exerci
 
 ---
 
-## Task 8 — Move Clair3 out of the image
+## Task 8 — Move Clair3 out of the image — **researched, not done: blocked on a real arm64 gap**
 
 **This is not optional garnish.** An abstraction designed against a single example usually fits exactly that example. Clair3 has different mounts, a different output layout (it writes a fixed `merge_output.vcf.gz` that `_rename_output` already renames), and baked-in models. It is what proves the seam generalizes — and if it does not, the cost of finding out is lowest here.
 
-- [ ] Pick a pinned Clair3 image (bioconda/biocontainers publishes one; verify arm64 availability, since the Dockerfile comment notes bioconda is the only arm64-capable distribution and that is why it is installed the way it is).
-- [ ] Remove the Clair3 layer from `backend/Dockerfile`, keeping the comment's reasoning about why it was its own layer as the record of what changed.
-- [ ] Add a Clair3 runner path that builds a `docker run` command, mirroring `variant_runner.build_deepvariant_command`.
-- [ ] Flip its `ToolMeta` to `ON_DEMAND_IMAGE` with image and size; update `usage` to say it is downloaded on first use, as DeepVariant's entry already does.
-- [ ] Measure the image size change and record it — the entry claims ~600 MB with models, and a real number is what makes this checkable later.
+- [x] Picked a pinned Clair3 image and verified it hands-on rather than trusting the plan's own "bioconda/biocontainers publishes one; verify arm64 availability" line at face value. Result: **neither exists for arm64.**
+  - `hkubal/clair3:v2.0.2` (the tool's own maintainers, HKU-BAL) — `docker manifest inspect` + `docker pull --platform linux/arm64` confirms **linux/amd64 only**, no manifest list. 1.50 GB compressed pull (Docker Hub API `full_size`), 4.05 GB on disk. Carries all model directories at `/opt/models/{ont,hifi,...}` — the `--watch for` risk is cleared for this image.
+  - `quay.io/biocontainers/clair3:2.0.2--py311hbc58adc_0` — also **amd64 only** (`docker image inspect` reports `Architecture: amd64`), despite the Dockerfile's own comment believing bioconda is the arm64-capable distribution. That claim is true of the *conda package* (installable via micromamba, which is exactly how this image's own Dockerfile installs it today) but not of *any Docker image built from it* — biocontainers' CI does not multi-arch this recipe. 2.09 GB on disk, also carries models.
+- [ ] ~~Remove the Clair3 layer from `backend/Dockerfile`~~ — not done. See below.
+- [ ] ~~Add a Clair3 runner path~~ — not done, though the shape is now known: `run_clair3.sh`'s CLI is unchanged between the bioconda binary and `hkubal/clair3`'s entrypoint (confirmed via `docker run hkubal/clair3:v2.0.2 run_clair3.sh --help`, which lists `--bam_fn`/`--ref_fn`/`--threads`/`--platform`/`--model_path`/`--output`/`--include_all_ctgs` identically), so `build_clair3_command` would need only the same host-path/mount translation `build_deepvariant_command` already does — a `docker run` wrapper, not a rewrite of the argument list.
+- [ ] ~~Flip its `ToolMeta` to `ON_DEMAND_IMAGE`~~ — not done.
+- [ ] ~~Measure the image size change~~ — not applicable; no migration happened. The image-size figures above are recorded for whoever picks this back up.
 
-**Watch for:** the models. They are baked into the image today *"so a run does not depend on the network"* — confirm the chosen image carries them, or this trades one download for two.
+**Why this stops here rather than proceeding anyway.** Moving Clair3 to `ON_DEMAND_IMAGE` on every architecture would remove long-read variant calling from arm64 (Apple Silicon, Graviton) entirely — there is no image to pull, where today there is a working bundled binary. That is a real regression, not a rounding error: Clair3 is the *preferred* long-read caller (DeepVariant is only ever a fallback, per `build_variants_card`), so an arm64 user would lose their default caller outright, not fall back to a slower path.
+
+Raised explicitly rather than decided silently. Two other options were on the table and rejected:
+- **Migrate anyway, amd64-only, arm64 keeps the bundled binary** (`ToolMeta.delivery` branching by `is_arm64()`) — real code, real complexity (a delivery model that differs per architecture, which nothing else in `TOOL_META` does today), for a benefit limited to shrinking the amd64 image alone.
+- **Substitute a different second candidate** (checked FastQC, the spec's own other flagged candidate: also amd64-only on Docker Hub, `biocontainers/fastqc:v0.11.9_cv8`, ~340 MB, and marginal even if it did have arm64 per the spec's own "optional, marginal" verdict) — this turned out to be a *systemic* gap, not one specific to Clair3: widely-used bioinformatics tool images are routinely built amd64-only across the ecosystem. Forcing a new, larger tool (hifiasm, Kraken2) into `TOOL_META` from scratch just to have a second `ON_DEMAND_IMAGE` citizen is a materially bigger task than "migrate an existing one," answering a different question than task 8 was scoped to ask.
+
+**Chosen instead: task 8 stops here, and DeepVariant stands as the proof.** Tasks 1–7 were built generically from the start — `Delivery`, `_probe_on_demand_image(name, image)`, `tool_install_service.install`/`.uninstall`, and `_require_or_offer_install` all take a tool name and a `Tool`, none of them hardcode "deepvariant" in their control flow — rather than being retrofitted from DeepVariant-specific code after the fact. A second migration would *validate* that genericity, not *add* it, and is not worth trading a working arm64 caller to prove.
+
+**Revisit when:** an arm64-capable Clair3 image appears upstream (bioconda's own arm64 conda package means a maintainer-published multi-arch image is plausible, just not present today), or when a genuinely new large tool is added to the app and can be built `ON_DEMAND_IMAGE` from day one rather than migrated.
+
+**Watch for:** the models, if this is revisited. They are baked into the image today *"so a run does not depend on the network"* — both candidate images checked above do carry them, so that risk was cleared, but re-check for whatever image is chosen if the version pin moves.
 
 ---
 
