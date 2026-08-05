@@ -80,6 +80,22 @@ def detect_from_extension(filename: str) -> FormatKind | None:
     return None
 
 
+def strip_compression_suffix(filename: str) -> str:
+    """Drop a trailing compression suffix (`.gz`, `.bgz`, ...) if present.
+
+    Case-preserving, unlike `detect_from_extension`: this returns a name to
+    display or store, not a kind to classify. Used when a name's claimed
+    compression suffix disagrees with what the bytes actually are (see
+    storage/compress.py), so a fresh `.gz` is not appended on top of a stale,
+    incorrect one.
+    """
+    for ext in sorted(COMPRESSION_EXTENSIONS, key=len, reverse=True):
+        suffix = f".{ext}"
+        if filename.lower().endswith(suffix):
+            return filename[: -len(suffix)]
+    return filename
+
+
 def detect_compression(head: bytes) -> Compression:
     if head.startswith(GZIP_MAGIC):
         # BGZF is gzip with a specific extra-field subfield ("BC", length 2).

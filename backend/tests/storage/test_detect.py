@@ -12,6 +12,7 @@ from app.storage.detect import (
     detect,
     detect_from_extension,
     detect_from_magic,
+    strip_compression_suffix,
 )
 
 FASTQ = b"""@SEQ_ID_1
@@ -129,6 +130,23 @@ class TestExtension:
         built before it has a member tends to become a dumping ground.
         """
         assert set(EXTENSION_MAP.values()) == set(FormatKind) - {FormatKind.UNKNOWN}
+
+
+class TestStripCompressionSuffix:
+    @pytest.mark.parametrize(
+        "filename,expected",
+        [
+            ("reads.fastq.gz", "reads.fastq"),
+            ("ref.fa.bgz", "ref.fa"),
+            ("calls.vcf.bgzf", "calls.vcf"),
+            ("archive.tar.zst", "archive.tar"),
+            ("reads.fastq.bz2", "reads.fastq"),
+            ("reads.fastq", "reads.fastq"),  # no suffix to strip
+            ("Reads.FASTQ.GZ", "Reads.FASTQ"),  # case-insensitive match
+        ],
+    )
+    def test_strips_known_suffixes(self, filename, expected):
+        assert strip_compression_suffix(filename) == expected
 
 
 class TestMagic:
