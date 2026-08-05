@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 from app.models import Blob, DataObject, ObjectRole, Profile, Project, Share
 from app.models.profile import ProfileDisplay
 
+DELETED_PROFILE_PLACEHOLDER = "(deleted profile)"
+
 
 # --- Projects ---
 class ProjectCreate(BaseModel):
@@ -264,6 +266,34 @@ class ShareAccept(BaseModel):
     project_id: str | None = None
 
 
+class SharePartyOut(BaseModel):
+    """Just enough to name one side of a share in a list row.
+
+    Deliberately not `ProfileOut`: an inbox row does not need `email`,
+    `details`, or `has_password`, and sharing is not a reason to publish them.
+    """
+
+    owner: str
+    username: str
+    emoji: str
+    colour: str
+
+    @classmethod
+    def of(cls, owner: str, profile: Profile | None) -> "SharePartyOut":
+        # A missing profile (deleted between the offer and this read -- see
+        # #51) renders as a placeholder rather than raising: an inbox that
+        # 500s because one sender was deleted is worse than one odd-looking
+        # row.
+        if profile is None:
+            return cls(owner=owner, username=DELETED_PROFILE_PLACEHOLDER, emoji="", colour="")
+        return cls(
+            owner=owner,
+            username=profile.username,
+            emoji=profile.display.emoji,
+            colour=profile.display.colour,
+        )
+
+
 class ShareOut(BaseModel):
     """A share as either side of it sees it.
 
@@ -271,11 +301,19 @@ class ShareOut(BaseModel):
     from the denormalized snapshot on `Share` itself, not from resolving
     `source_object_id` -- that is what lets an offer whose source the sender
     has since deleted still render in the inbox.
+
+    `from_profile`/`to_profile` are resolved server-side rather than left for
+    the client to join against `/profiles`: the adopted profile's owner string
+    is the literal `"local"`, which matches no profile id, so a client-side
+    join silently renders a blank sender for exactly the profile holding the
+    pre-existing library. See `share_service.resolve_owner_profiles`.
     """
 
     id: str
     from_owner: str
     to_owner: str
+    from_profile: SharePartyOut
+    to_profile: SharePartyOut
     source_object_id: str
     name: str
     size: int
@@ -286,11 +324,14 @@ class ShareOut(BaseModel):
     updated_at: datetime
 
     @classmethod
-    def of(cls, s: Share) -> "ShareOut":
+    def of(cls, s: Share, parties: dict[str, Profile] | None = None) -> "ShareOut":
+        parties = parties or {}
         return cls(
             id=str(s.id),
             from_owner=s.from_owner,
             to_owner=s.to_owner,
+            from_profile=SharePartyOut.of(s.from_owner, parties.get(s.from_owner)),
+            to_profile=SharePartyOut.of(s.to_owner, parties.get(s.to_owner)),
             source_object_id=str(s.source_object_id),
             name=s.name,
             size=s.size,
