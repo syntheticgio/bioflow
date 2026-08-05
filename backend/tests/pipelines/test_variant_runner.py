@@ -210,38 +210,63 @@ class TestVariantParams:
 class TestVariantProgress:
     def test_reports_phase_changes(self):
         p = variant_runner.VariantProgress()
-        assert p.feed("[INFO] Calling variants in pileup mode") is True
+        assert p.feed("[INFO] 1/7 Call variants using pileup model") is True
         assert p.phase == "pileup"
 
     def test_repeated_phase_does_not_republish(self):
         """The callback writes to the database, so a banner repeated on every
         line must not mean an update on every line."""
         p = variant_runner.VariantProgress()
-        p.feed("running pileup model")
-        assert p.feed("pileup still going") is False
+        p.feed("[INFO] 1/7 Call variants using pileup model")
+        assert p.feed("[INFO] 1/7 Call variants using pileup model") is False
 
     def test_full_alignment_beats_pileup(self):
         """Clair3's full-alignment banner also contains the word 'pileup'; the
         more specific phase has to win or the bar sticks."""
         p = variant_runner.VariantProgress()
-        p.feed("[INFO] Calling variants in full-alignment mode from pileup input")
+        p.feed(
+            "[INFO] 6/7 Call low-quality variants using full-alignment model"
+        )
         assert p.phase == "full_alignment"
 
     def test_unrecognized_lines_are_ignored(self):
         p = variant_runner.VariantProgress()
         assert p.feed("some unrelated tool chatter") is False
 
+    def test_config_echo_does_not_trigger_full_alignment(self):
+        """Found via a real captured log: Clair3 echoes this config line long
+        before full-alignment work starts, and a loose 'full.?alignment'
+        substring match used to fire on it prematurely."""
+        p = variant_runner.VariantProgress()
+        assert (
+            p.feed("[INFO] ENABLE NO PHASING FOR FULL ALIGNMENT: False") is False
+        )
+
+    def test_per_contig_summary_lines_do_not_flip_phase(self):
+        """Found via a real captured log: these per-contig summary lines near
+        the end of a run used to match the loose 'pileup'/'full.?alignment'
+        substrings and flip the phase back and forth after the run was
+        effectively done."""
+        p = variant_runner.VariantProgress()
+        p.feed("[INFO] 6/7 Call low-quality variants using full-alignment model")
+        assert p.feed("[INFO] Pileup variants processed in NC_001147.6: 0") is False
+        assert (
+            p.feed("[INFO] Full-alignment variants processed in NC_001147.6: 0")
+            is False
+        )
+        assert p.phase == "full_alignment"
+
     def test_pct_is_always_none(self):
         """Neither caller reports measurable progress. None is honest; a
         fabricated fraction is not."""
         p = variant_runner.VariantProgress()
-        p.feed("full-alignment")
+        p.feed("[INFO] 6/7 Call low-quality variants using full-alignment model")
         assert p.pct is None
 
     def test_message_tracks_phase(self):
         p = variant_runner.VariantProgress()
         assert p.message() == "calling variants"
-        p.feed("merging outputs now")
+        p.feed("[INFO] 7/7 Merge pileup VCF and full-alignment VCF")
         assert p.message() == "merging outputs"
 
 

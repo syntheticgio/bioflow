@@ -414,11 +414,21 @@ def _quote(argv: list[str]) -> str:
 # Phase banners, most specific first: Clair3's full-alignment message also
 # contains "pileup", so a looser match would leave the bar stuck on the wrong
 # phase for the longest part of the run.
+#
+# Anchored on Clair3's actual numbered-stage banners (e.g. "1/7 Call variants
+# using pileup model") rather than loose substrings. A real captured run
+# (tests/fixtures/tool_logs/clair3-v2.0.2.log) showed why looser patterns
+# fail: "merging" never matches Clair3's real "Merge pileup VCF..." banner
+# (capitalized, different word); a bare "pileup"/"full.?alignment" substring
+# also matches per-contig summary lines near the end of a run ("Pileup
+# variants processed in <contig>: N") and flips the phase back and forth
+# repeatedly right as the job is finishing; and "full.?alignment" alone
+# matches an early config-echo line ("ENABLE NO PHASING FOR FULL ALIGNMENT")
+# before any full-alignment work has actually started.
 _PHASE_PATTERNS: tuple[tuple[str, str], ...] = (
-    (r"full.?alignment", "full_alignment"),
-    (r"merging", "merging"),
-    (r"pileup", "pileup"),
-    (r"calling variants", "calling"),
+    (r"call.*low-quality.*full-alignment model", "full_alignment"),
+    (r"merge pileup vcf", "merging"),
+    (r"call variants using pileup model", "pileup"),
 )
 
 _PHASE_MESSAGES = {

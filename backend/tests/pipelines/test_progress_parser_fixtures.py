@@ -129,13 +129,14 @@ class TestClair3Fixture:
     """clair3-v2.0.2.log: a real full run (pileup -> full-alignment -> merge)
     against a small reference with several contigs.
 
-    This replay exposes two live bugs in _PHASE_PATTERNS, found only because
-    this is a real log rather than a hand-built one: the "merging" phase never
-    fires (Clair3 logs "Merge", not "merging"), and the per-contig summary
-    lines near the end cause the phase to flip repeatedly between pileup and
-    full_alignment. These assertions pin the *current* (buggy) behaviour so a
-    fix is visible as a test change rather than a silent regex edit -- see the
-    follow-up filed against variant_runner.py's _PHASE_PATTERNS.
+    This replay originally exposed two live bugs in _PHASE_PATTERNS, found
+    only because this is a real log rather than a hand-built one: the
+    "merging" phase never fired (Clair3 logs "Merge", not "merging"), and the
+    per-contig summary lines near the end caused the phase to flip repeatedly
+    between pileup and full_alignment. _PHASE_PATTERNS now anchors on Clair3's
+    actual numbered-stage banners instead of loose substrings, and these
+    assertions pin the fixed sequence: pileup -> full_alignment -> merging,
+    exactly once each, with no flicker at the end.
     """
 
     def test_reaches_full_alignment(self):
@@ -143,20 +144,25 @@ class TestClair3Fixture:
         phases = _replay(parser, FIXTURES / "clair3-v2.0.2.log")
         assert "full_alignment" in phases
 
-    def test_merging_phase_does_not_fire(self):
-        """Known bug: Clair3's real merge banner is 'Merge', not 'merging'."""
+    def test_merging_phase_fires(self):
+        """Clair3's real merge banner is 'Merge pileup VCF...', not
+        'merging' -- the pattern must match the capitalized real banner."""
         parser = VariantProgress()
         phases = _replay(parser, FIXTURES / "clair3-v2.0.2.log")
-        assert "merging" not in phases
+        assert "merging" in phases
 
-    def test_phase_flickers_near_the_end(self):
-        """Known bug: per-contig summary lines re-trigger pileup/
-        full_alignment repeatedly in the final stretch of a run that is
-        otherwise complete."""
+    def test_phase_sequence_has_no_flicker(self):
+        """Per-contig summary lines near the end ('Pileup variants processed
+        in <contig>: N', 'Full-alignment variants processed in <contig>: N')
+        must not re-trigger pileup/full_alignment once the run has moved on
+        to merging."""
         parser = VariantProgress()
         phases = _replay(parser, FIXTURES / "clair3-v2.0.2.log")
-        tail = phases[-10:]
-        assert len(set(tail)) > 1, (
-            "expected the known end-of-run flicker; if this now holds a "
-            "single phase, the _PHASE_PATTERNS fix landed -- update this test"
-        )
+        assert phases == ["pileup", "full_alignment", "merging"]
+
+    def test_config_echo_does_not_trigger_full_alignment_early(self):
+        """The early config line 'ENABLE NO PHASING FOR FULL ALIGNMENT: False'
+        must not be mistaken for the start of full-alignment work."""
+        parser = VariantProgress()
+        phases = _replay(parser, FIXTURES / "clair3-v2.0.2.log")
+        assert phases[0] == "pileup"
