@@ -563,7 +563,8 @@ export type RunJobRole =
   | "quantify"
   | "test"
   | "consensus"
-  | "polish";
+  | "polish"
+  | "scaffold";
 
 export interface RunInput {
   object_id: string;
@@ -708,6 +709,12 @@ export interface CompletenessRequest {
 export interface LineageDownloadRequest {
   lineage: string;
   odb?: string | null;
+}
+
+export interface ScaffoldRequest {
+  draft_object_id: string;
+  reference_object_id?: string | null;
+  divergence?: string | null;
 }
 
 export interface LineageStatus {
