@@ -540,12 +540,14 @@ async def _apply_sra_download(result: dict, *, owner: str) -> None:
 
     # Linked from what fasterq-dump reported rather than inferred from the
     # filenames. `_link_mate` runs at ingest and would usually reach the same
-    # answer, but here the pairing is known exactly -- there is nothing to
-    # guess, and `<acc>_1.fastq` is not a shape its R1/R2 convention detects.
+    # answer -- `<acc>_1.fastq` parses fine under the `_1`/`_2` convention --
+    # but here the pairing is known exactly, from fasterq-dump's own labelling,
+    # which is more authoritative than an inference and should not be
+    # overridden by one.
     r1, r2 = created.get("R1"), created.get("R2")
     if r1 is not None and r2 is not None:
-        await r1.set({DataObject.mate_object_id: r2.id})
-        await r2.set({DataObject.mate_object_id: r1.id})
+        await r1.set({DataObject.mate_object_id: r2.id, DataObject.read_number: 1})
+        await r2.set({DataObject.mate_object_id: r1.id, DataObject.read_number: 2})
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:

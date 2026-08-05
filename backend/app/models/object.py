@@ -233,7 +233,10 @@ class DataObject(TimestampedDocument):
     # that does not exist. When inferred, it comes from the same
     # `pairing.split_mate` call that establishes `mate_object_id`, so the two
     # can never disagree; a manual pairing sets both explicitly instead.
-    # Nullable for single-end files, and for pairs predating this field.
+    # Nullable for single-end files. Also nullable for every pair the SRA
+    # download path created before it started setting this alongside
+    # mate_object_id (see queue/results._apply_sra_download); "predating this
+    # field" undersells it -- it was a gap in that one path, not the field's age.
     #
     # A plain int rather than an enum: the domain is closed by biology at
     # {1, 2}, and an enum whose members are ONE and TWO reads worse at every
