@@ -52,12 +52,41 @@ impl Default for LauncherApp {
     }
 }
 
+/// The one install location this launcher ever writes to or reads from --
+/// there is exactly one supported install per machine, so this is a fixed
+/// path rather than something the user chooses or the launcher persists
+/// elsewhere. `SetupDefaults::for_this_os().install_dir` already resolves to
+/// this (`~/.bioflow`); calling it out as a named function makes call sites
+/// read as "the install directory" rather than "today's default", which
+/// otherwise reads as something a user picked and might differ from.
+fn fixed_install_dir() -> PathBuf {
+    SetupDefaults::for_this_os().install_dir
+}
+
+/// Resolves the install directory for this call: the in-memory value if one
+/// is already known (set by a `run_first_setup` earlier this session), or --
+/// checked fresh on every call rather than cached, so a relaunch of the
+/// launcher after an install from a *previous* session still finds it -- the
+/// fixed default path if `setup::install_exists` finds a real install
+/// sitting there on disk. Populates `app.install_dir` when the disk check
+/// finds one, so later calls in the same session (`run_stack`,
+/// `apply_settings`, ...) don't need to repeat the disk check themselves.
 fn install_dir_str(app: &State<LauncherApp>) -> Option<String> {
-    app.install_dir
-        .lock()
-        .unwrap()
-        .as_ref()
-        .map(|p| p.to_string_lossy().into_owned())
+    {
+        let existing = app.install_dir.lock().unwrap();
+        if let Some(dir) = existing.as_ref() {
+            return Some(dir.to_string_lossy().into_owned());
+        }
+    }
+
+    let fixed = fixed_install_dir();
+    if setup::install_exists(&fixed) {
+        let dir_str = fixed.to_string_lossy().into_owned();
+        *app.install_dir.lock().unwrap() = Some(fixed);
+        return Some(dir_str);
+    }
+
+    None
 }
 
 /// `async`/`spawn_blocking` for the same reason as `run_stack` above --
@@ -213,8 +242,11 @@ pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
     }
 }
 
-/// Per-OS starting points for the three first-run questions -- always
-/// overridable in the wizard, never a forced choice.
+/// Per-OS starting points for the wizard's two editable questions (storage
+/// location, port -- always overridable, never a forced choice) plus
+/// `install_dir`, which is informational only: the launcher always installs
+/// to this fixed path (see `fixed_install_dir`), the wizard just shows it
+/// rather than asking.
 #[derive(Debug, Clone, Serialize)]
 pub struct SetupDefaultsDto {
     pub storage_location: String,
@@ -289,7 +321,6 @@ pub fn validate_setup_port(port: u16) -> PortValidationDto {
 #[derive(Debug, Deserialize)]
 pub struct FirstRunSetupArgs {
     pub storage_location: String,
-    pub install_dir: String,
     pub port: u16,
 }
 
@@ -297,6 +328,16 @@ pub struct FirstRunSetupArgs {
 /// `setup::install` ends with a `docker compose pull` and `up -d`, the exact
 /// button click that first surfaced the frozen-window symptom, since this is
 /// the command Install itself triggers.
+///
+/// The install directory is never a user input here -- only one install is
+/// supported per machine, so it is always `fixed_install_dir()`
+/// (`~/.bioflow`). A user-chosen install directory was tried first and
+/// caused a real bug: the launcher had no way to find that directory again
+/// on the *next* launch (nothing persisted it beyond the in-memory
+/// `LauncherApp.install_dir`, which starts `None` every process start), so
+/// a relaunch with a stack already running showed first-run setup again
+/// instead of the running/stopped screen. Fixing the path removes the
+/// unknown rather than adding a way to remember an arbitrary one.
 #[tauri::command]
 pub async fn run_first_setup(
     handle: tauri::AppHandle,
@@ -310,7 +351,7 @@ pub async fn run_first_setup(
 
     let inputs = InstallInputs {
         storage_location: PathBuf::from(args.storage_location),
-        install_dir: PathBuf::from(&args.install_dir),
+        install_dir: fixed_install_dir(),
         port: args.port,
     };
 

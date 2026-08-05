@@ -35,6 +35,19 @@ pub enum InstallError {
     UpFailed { output: String },
 }
 
+/// Whether a real install already sits at `dir` -- both files `install`
+/// writes, not just the directory, so an interrupted `create_dir_all` with
+/// nothing written into it does not count. This is how the launcher
+/// recognizes an install across a relaunch: `LauncherApp.install_dir` is
+/// in-memory only and starts empty every process start, so without this
+/// check a stack installed and left running in a *previous* session showed
+/// first-run setup again on the next launch instead of the running/stopped
+/// screen it should have -- the process had genuinely forgotten, even
+/// though the containers, compose file, and `.env` were all still there.
+pub fn install_exists(dir: &Path) -> bool {
+    dir.join("docker-compose.yml").is_file() && dir.join(".env").is_file()
+}
+
 /// `bundled_compose_path` is the path to the compose file the launcher
 /// shipped as a build resource (see `launcher/README.md` on why that must
 /// stay a reference to the repository's own `docker-compose.yml`, never a
@@ -97,6 +110,47 @@ mod tests {
         let path = dir.join("source-compose.yml");
         std::fs::write(&path, "name: biopipe\nservices: {}\n").unwrap();
         path
+    }
+
+    #[test]
+    fn install_exists_is_false_for_a_directory_that_was_never_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!install_exists(tmp.path()));
+    }
+
+    #[test]
+    fn install_exists_is_false_for_a_missing_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!install_exists(&tmp.path().join("never-created")));
+    }
+
+    #[test]
+    fn install_exists_is_false_with_only_the_compose_file_written() {
+        // Guards the "both files, not just the directory" contract: a
+        // partial write (e.g. create_dir_all succeeded, the compose copy
+        // succeeded, but .env failed) must not read as installed.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("docker-compose.yml"), "name: biopipe\n").unwrap();
+        assert!(!install_exists(tmp.path()));
+    }
+
+    #[test]
+    fn install_exists_is_true_once_a_clean_install_completed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundled = fixture_compose_file(tmp.path());
+        let install_dir = tmp.path().join("install");
+        let storage = tmp.path().join("storage");
+        std::fs::create_dir_all(&storage).unwrap();
+
+        let docker = FakeDocker::new();
+        let inputs = InstallInputs {
+            storage_location: storage,
+            install_dir: install_dir.clone(),
+            port: 5173,
+        };
+        install(&docker, &inputs, &bundled).unwrap();
+
+        assert!(install_exists(&install_dir));
     }
 
     #[test]

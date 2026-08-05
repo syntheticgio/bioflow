@@ -11,5 +11,5 @@ pub mod install;
 pub mod validate;
 
 pub use defaults::SetupDefaults;
-pub use install::{install, InstallError, InstallInputs};
+pub use install::{install, install_exists, InstallError, InstallInputs};
 pub use validate::{validate_port, validate_storage_path, PortValidation, StoragePathValidation};

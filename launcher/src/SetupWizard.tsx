@@ -29,6 +29,8 @@ export function SetupWizard({ onInstalled }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [dockerIsReady, setDockerIsReady] = useState(false);
   const [storageLocation, setStorageLocation] = useState("");
+  // Display-only: the launcher always installs to this fixed path, so
+  // there's nothing to edit here, unlike storage location and port.
   const [installDir, setInstallDir] = useState("");
   const [port, setPort] = useState(5173);
 
@@ -68,7 +70,6 @@ export function SetupWizard({ onInstalled }: Props) {
   const canInstall =
     loaded &&
     storageLocation.length > 0 &&
-    installDir.length > 0 &&
     storageValidation.kind === "Ok" &&
     portValidation.kind === "Ok";
 
@@ -80,7 +81,7 @@ export function SetupWizard({ onInstalled }: Props) {
     setInstalling(true);
     setInstallError(null);
     try {
-      await runFirstSetup({ storageLocation, installDir, port });
+      await runFirstSetup({ storageLocation, port });
       onInstalled({ storageLocation, port });
     } catch (e) {
       setInstallError(String(e));
@@ -152,14 +153,10 @@ export function SetupWizard({ onInstalled }: Props) {
           <div className="setup-fields-row">
             <div className="field">
               <span className="field-label">Install directory</span>
-              <input
-                className="field-value-input"
-                value={installDir}
-                onChange={(e) => setInstallDir(e.target.value)}
-                disabled={installing}
-                aria-label="Install directory"
-              />
-              <span className="field-hint">Holds the compose file and .env.</span>
+              <div className="field-value">{installDir}</div>
+              <span className="field-hint">
+                Fixed — holds the compose file and .env.
+              </span>
             </div>
             <div className="field">
               <span className={`field-label${portProblem ? " field-label-warn" : ""}`}>Port</span>

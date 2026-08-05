@@ -62,15 +62,17 @@ export function checkForUpdate(): Promise<boolean> {
   return invoke("check_for_update");
 }
 
+// No install_dir argument -- only one install is supported per machine, so
+// the launcher always installs to its fixed default path (~/.bioflow) rather
+// than a user-chosen one. See run_first_setup's own doc comment in
+// commands.rs for why a user-chosen path was tried first and reverted.
 export function runFirstSetup(args: {
   storageLocation: string;
-  installDir: string;
   port: number;
 }): Promise<void> {
   return invoke("run_first_setup", {
     args: {
       storage_location: args.storageLocation,
-      install_dir: args.installDir,
       port: args.port,
     },
   });
