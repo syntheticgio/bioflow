@@ -192,6 +192,42 @@ accession is recorded as a note and the file ingests normally.
 
 Set `SRA_ENRICHMENT_ENABLED=false` to disable all outbound lookups.
 
+## Feedback notifications
+
+When someone submits feedback from the **Help → Feedback** page, the submission
+is saved to the database and a Discord notification is fired to your
+configured channel. This requires a Discord webhook URL.
+
+**To set up:**
+
+1. In Discord, open your `#bug_reports` channel → **Edit Channel** →
+   **Integrations** → **Webhooks** → **New Webhook** (or use an existing one).
+2. Copy the **Webhook URL** (it looks like
+   `https://discord.com/api/webhooks/<id>/<token>`).
+3. Add it to your `.env`:
+
+   ```env
+   FEEDBACK_WEBHOOK_URL=https://discord.com/api/webhooks/<id>/<token>
+   ```
+
+4. Restart the stack:
+
+   ```bash
+   make up
+   ```
+
+**Settings reference:**
+
+| Variable | Default | Description |
+|---|---|---|
+| `FEEDBACK_ENABLED` | `true` | Master switch for the notification feature. |
+| `FEEDBACK_WEBHOOK_URL` | *(empty)* | Discord-compatible webhook URL. Empty = notifications off. |
+
+Delivery is best-effort: a webhook failure (timeout, 4xx/5xx, network error) is
+logged but never affects the 201 response or the saved feedback record. The
+notification fires in the background via `asyncio.create_task`, so even a slow
+Discord response does not delay the user's submission confirmation.
+
 ## Common commands
 
 ```bash
