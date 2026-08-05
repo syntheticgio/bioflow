@@ -380,16 +380,6 @@ def align_reads(ctx: JobContext) -> dict:
     progress = align_runner.AlignProgress(expected_reads=ctx.payload.get("expected_reads"))
     ctx.progress(phase="starting", pct=0.0, message=f"starting {aligner.value}")
 
-    def on_line(line: str) -> None:
-        if progress.feed(line):
-            ctx.progress(
-                pct=progress.pct,
-                phase=progress.phase,
-                message=progress.message(),
-                phase_index=progress.phase_index,
-                phase_total=len(align_runner.PHASE_ORDER),
-            )
-
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -401,7 +391,7 @@ def align_reads(ctx: JobContext) -> dict:
         threads=params.threads,
     )
 
-    code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
+    code = run_subprocess(ctx, cmd, log_path=str(log_path), parser=progress)
     if code != 0:
         # pipefail is what makes this reachable when the *aligner* fails: the
         # exit status of a pipe is otherwise samtools', which would report

@@ -239,6 +239,7 @@ class TrimProgress:
     100% and reported as a phase plus a bar, never as a precise figure.
     """
 
+    name: str = "fastp"
     expected_reads: int | None = None
     phase: str = "starting"
     reads_loaded: int = 0
@@ -287,6 +288,15 @@ class TrimProgress:
             return self.phase
         millions = self.reads_loaded / 1_000_000
         return f"{self.phase}: {millions:.0f}M reads read"
+
+    def snapshot(self) -> dict:
+        return {
+            "pct": self.pct,
+            "phase": self.phase,
+            "message": self.message(),
+            "phase_index": self.phase_index,
+            "phase_total": len(PHASE_ORDER),
+        }
 
 
 def parse_report(path: Path) -> dict:

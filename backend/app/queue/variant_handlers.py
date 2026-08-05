@@ -214,22 +214,6 @@ def _caller_version(caller: VariantCaller) -> str | None:
     return tool.version
 
 
-def _progress_reporter(ctx: JobContext) -> "callable":
-    """A line callback that publishes phase changes.
-
-    `VariantProgress.feed` returns False for a repeat of the current phase, so
-    a banner printed on every line does not mean a database write on every
-    line.
-    """
-    progress = variant_runner.VariantProgress()
-
-    def on_line(line: str) -> None:
-        if progress.feed(line):
-            ctx.progress(
-                pct=progress.pct, phase=progress.phase, message=progress.message()
-            )
-
-    return on_line
 
 
 def _run_clair3(
@@ -252,7 +236,7 @@ def _run_clair3(
     log.info("clair3_started", job_id=ctx.job_id, platform=params.platform)
 
     code = run_subprocess(
-        ctx, cmd, log_path=str(log_path), on_line=_progress_reporter(ctx)
+        ctx, cmd, log_path=str(log_path), parser=variant_runner.VariantProgress()
     )
     if code != 0:
         raise _failure(code, log_path, "clair3")
@@ -285,7 +269,7 @@ def _run_bcftools(
     log.info("bcftools_started", job_id=ctx.job_id)
 
     code = run_subprocess(
-        ctx, cmd, log_path=str(log_path), on_line=_progress_reporter(ctx)
+        ctx, cmd, log_path=str(log_path), parser=variant_runner.VariantProgress()
     )
     if code != 0:
         raise _failure(code, log_path, "bcftools")
@@ -321,7 +305,7 @@ def _run_deepvariant(
     log.info("deepvariant_started", job_id=ctx.job_id, model=params.model_type)
 
     code = run_subprocess(
-        ctx, cmd, log_path=str(log_path), on_line=_progress_reporter(ctx)
+        ctx, cmd, log_path=str(log_path), parser=variant_runner.VariantProgress()
     )
     if code != 0:
         raise _failure(code, log_path, "deepvariant")

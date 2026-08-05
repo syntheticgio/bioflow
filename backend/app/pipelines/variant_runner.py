@@ -439,6 +439,7 @@ class VariantProgress:
     more than a number that does not mean anything.
     """
 
+    name: str = "variant-caller"
     phase: str = "calling"
 
     def feed(self, line: str) -> bool:
@@ -463,3 +464,6 @@ class VariantProgress:
 
     def message(self) -> str:
         return _PHASE_MESSAGES.get(self.phase, "calling variants")
+
+    def snapshot(self) -> dict:
+        return {"pct": self.pct, "phase": self.phase, "message": self.message()}

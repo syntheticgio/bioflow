@@ -9,6 +9,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Protocol, runtime_checkable
 
 import psutil
 from beanie import PydanticObjectId
@@ -32,6 +33,43 @@ log = get_logger(__name__)
 # a phase, which changes rarely and then stands for minutes. A phase change is
 # therefore exempt; see `_schedule_progress`.
 PROGRESS_INTERVAL_SECONDS = 0.5
+
+# A run past this floor with a parser attached that never produced a single
+# update has almost certainly stopped matching the tool's actual output --
+# see ProgressParser and _run_streaming's silence check below. 120s is long
+# enough that a real tool has certainly printed something by then, short
+# enough to catch a broken parser on an ordinary test run rather than only on
+# a six-hour production job.
+PARSER_SILENCE_FLOOR_S = 120.0
+
+
+@runtime_checkable
+class ProgressParser(Protocol):
+    """Pure line-to-progress translation for a tool's stderr/stdout.
+
+    No ctx, no I/O: a parser is a dataclass that consumes lines and can be
+    asked what it currently knows. That is what makes golden-fixture tests
+    possible -- replay a captured log through `feed()` with nothing to mock.
+
+    `name` identifies the parser in the `progress_parser_silent` log line, so
+    it should name the tool ("fastp", "bwa-mem2"), not the class.
+    """
+
+    name: str
+
+    def feed(self, line: str) -> bool:
+        """Consume one line. True if the caller should publish an update."""
+        ...
+
+    def snapshot(self) -> dict:
+        """Current progress as kwargs for JobContext.progress().
+
+        Only includes keys this parser actually knows -- a parser with no
+        phase_total (assembly's open-ended stage list) simply omits the key,
+        rather than passing None and overwriting a value ctx.progress()
+        would otherwise leave unchanged.
+        """
+        ...
 
 # Grace period between SIGTERM and SIGKILL for subprocess handlers.
 SUBPROCESS_GRACE_SECONDS = 15
@@ -505,6 +543,7 @@ def run_subprocess(
     env: dict | None = None,
     log_path: str | None = None,
     on_line: Callable[[str], None] | None = None,
+    parser: ProgressParser | None = None,
 ) -> int:
     """Run a subprocess that dies with the job.
 
@@ -518,7 +557,19 @@ def run_subprocess(
     only way to turn a tool's own progress reporting into `ctx.progress()`.
     Lines are still written to `log_path`, so enabling it costs a pipe and a
     reader thread but loses nothing.
+
+    `parser` is sugar over `on_line` for the common case: feed each line to a
+    `ProgressParser` and forward its `snapshot()` to `ctx.progress()` whenever
+    `feed()` says something changed. It also gets update counting for the
+    silence check that a hand-written `on_line` closure would not. Passing
+    both is a caller error -- there is exactly one thing to observe lines for.
     """
+    if parser is not None:
+        if on_line is not None:
+            raise ValueError("run_subprocess: pass either on_line or parser, not both")
+        return _run_streaming(
+            ctx, cmd, cwd=cwd, env=env, log_path=log_path, on_line=None, parser=parser
+        )
     if on_line is not None:
         return _run_streaming(ctx, cmd, cwd=cwd, env=env, log_path=log_path, on_line=on_line)
 
@@ -548,7 +599,8 @@ def _run_streaming(
     cwd: str | None,
     env: dict | None,
     log_path: str | None,
-    on_line: Callable[[str], None],
+    on_line: Callable[[str], None] | None,
+    parser: ProgressParser | None = None,
 ) -> int:
     """run_subprocess with the output piped through a reader thread.
 
@@ -571,18 +623,34 @@ def _run_streaming(
 
     log_file = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
 
+    line_count = 0
+    update_count = 0
+    started = datetime.now(UTC)
+
+    def observe(line: str) -> None:
+        nonlocal update_count
+        if parser is not None:
+            if parser.feed(line):
+                update_count += 1
+                ctx.progress(**parser.snapshot())
+        elif on_line is not None:
+            on_line(line)
+
     def pump() -> None:
+        nonlocal line_count
         try:
             for line in proc.stdout:
                 line = line.rstrip("\n")
+                line_count += 1
                 if log_file is not None:
                     with contextlib.suppress(Exception):
                         log_file.write(line + "\n")
                         log_file.flush()
-                # A parser that raises must not kill the job: the work itself
-                # is still valid, and progress is advisory everywhere else too.
+                # An observer that raises must not kill the job: the work
+                # itself is still valid, and progress is advisory everywhere
+                # else too.
                 try:
-                    on_line(line)
+                    observe(line)
                 except Exception as e:  # noqa: BLE001
                     log.debug("on_line_failed", job_id=ctx.job_id, error=str(e))
         except Exception as e:  # noqa: BLE001 - the pipe dies when the child is killed
@@ -603,6 +671,15 @@ def _run_streaming(
         if log_file is not None:
             with contextlib.suppress(Exception):
                 log_file.close()
+        elapsed = (datetime.now(UTC) - started).total_seconds()
+        if parser is not None and update_count == 0 and elapsed >= PARSER_SILENCE_FLOOR_S:
+            log.warning(
+                "progress_parser_silent",
+                job_id=ctx.job_id,
+                parser=parser.name,
+                elapsed_s=round(elapsed, 1),
+                line_count=line_count,
+            )
 
 
 def _wait_cancellable(ctx: JobContext, proc: subprocess.Popen) -> int:
