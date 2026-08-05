@@ -26,8 +26,10 @@ log = get_logger(__name__)
 
 # Platforms whose reads NanoPlot describes and FastQC does not. Matched against
 # the SRA `PLATFORM` element's tag name, which is what the resolver records --
-# so these are NCBI's spellings, not free text.
-LONG_READ_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
+# so these are NCBI's spellings, not free text. `qc_stats.LONG_READ_PLATFORMS`
+# is the single source for this set; see its comment for why it used to be
+# three independent copies.
+LONG_READ_PLATFORMS = frozenset(qc_stats.LONG_READ_PLATFORMS)
 
 
 @handler(
@@ -514,15 +516,6 @@ def _run_short_read_qc(
     return facts
 
 
-#  qc_stats.infer_chemistry speaks sam_platform's short vocabulary (ONT,
-#  PACBIO), not SRA's PLATFORM tag names (OXFORD_NANOPORE, PACBIO_SMRT) that
-#  LONG_READ_PLATFORMS is keyed on -- this is the translation between them.
-_QC_STATS_PLATFORM: dict[str, str] = {
-    "OXFORD_NANOPORE": "ONT",
-    "PACBIO_SMRT": "PACBIO",
-}
-
-
 def _run_long_read_qc(
     ctx: JobContext,
     reads_in: Path,
@@ -581,8 +574,15 @@ def _run_long_read_qc(
         # qc_fastp_report/qc_fastqc_report -- see the comment there.
         facts["qc_nanoplot_report"] = f"nanoplot/{report.name}"
 
+    # This function is only reached when `platform in LONG_READ_PLATFORMS`
+    # (checked by the caller), so the lookup below cannot legitimately miss.
+    # Indexing rather than `.get(platform, platform)` is deliberate: the old
+    # fall-through passed an unmapped SRA tag straight through as if it were
+    # already in qc_stats' short vocabulary, and infer_chemistry silently
+    # read that as UNKNOWN chemistry with a plausible-looking reason instead
+    # of surfacing a real bug. A KeyError here means that invariant broke.
     chemistry, reason = qc_stats.infer_chemistry(
-        platform=_QC_STATS_PLATFORM.get(platform, platform),
+        platform=qc_stats.LONG_READ_PLATFORMS[platform],
         mean_read_length=facts.get("qc_mean_read_length"),
         mean_quality=facts.get("qc_mean_quality"),
     )

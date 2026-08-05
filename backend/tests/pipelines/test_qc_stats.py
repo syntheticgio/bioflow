@@ -9,6 +9,7 @@ platform default rather than presenting a guess as fact.
 
 import pytest
 
+from app.pipelines import qc_stats
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.qc_stats import infer_chemistry
 
@@ -147,3 +148,75 @@ class TestMissingOrUnrecognizedInputs:
                 platform=platform, mean_read_length=length, mean_quality=quality
             )
             assert reason and reason.strip()
+
+
+class TestPlatformVocabulary:
+    """LONG_READ_PLATFORMS used to be an SRA-tag frozenset written out three
+    times under three names (pipeline_handlers.py, reference_assembly.py,
+    pipeline_service.py's _LONG_READ_QC_PLATFORMS), and _SAM_TO_SRA_PLATFORM
+    in pipeline_service.py was an independently maintained inverse of this
+    module's translation. Adding a long-read platform meant editing five
+    places by hand with no error if you missed four. These lock the
+    consumers to this module's copy so that class of drift fails a test
+    instead of shipping silently.
+    """
+
+    def test_long_read_platforms_names_the_two_sra_tags(self):
+        """Pins the dict's own content, not just its consumers' agreement
+        with it -- a coverage test that only checks cross-file agreement
+        would pass even if this dict itself silently lost a platform, since
+        every consumer derives from it and would shrink in lockstep."""
+        assert qc_stats.LONG_READ_PLATFORMS == {
+            "OXFORD_NANOPORE": "ONT",
+            "PACBIO_SMRT": "PACBIO",
+        }
+
+    def test_every_long_read_platform_has_a_chemistry_translation(self):
+        """Every key qc_stats.LONG_READ_PLATFORMS defines must resolve to a
+        value infer_chemistry actually recognizes -- the fall-through bug
+        this dict replaced passed an unmapped platform straight through and
+        infer_chemistry silently read that as UNKNOWN with a plausible
+        reason rather than surfacing the miss."""
+        for sra_tag, short_name in qc_stats.LONG_READ_PLATFORMS.items():
+            chemistry, reason = infer_chemistry(
+                platform=short_name, mean_read_length=15000, mean_quality=25
+            )
+            assert chemistry is not ReadChemistry.UNKNOWN, sra_tag
+            assert reason
+
+    def test_short_to_sra_is_the_exact_inverse(self):
+        """Derived, not hand-written, so the two directions cannot drift
+        relative to each other the way _SAM_TO_SRA_PLATFORM once could."""
+        assert qc_stats.SHORT_TO_SRA_PLATFORM == {
+            v: k for k, v in qc_stats.LONG_READ_PLATFORMS.items()
+        }
+
+    def test_pipeline_handlers_uses_this_modules_platform_set(self):
+        from app.queue import pipeline_handlers
+
+        assert pipeline_handlers.LONG_READ_PLATFORMS == frozenset(
+            qc_stats.LONG_READ_PLATFORMS
+        )
+
+    def test_reference_assembly_uses_this_modules_platform_sets(self):
+        from app.services import reference_assembly
+
+        assert reference_assembly.LONG_READ_PLATFORMS == frozenset(
+            qc_stats.LONG_READ_PLATFORMS
+        )
+        assert reference_assembly.SHORT_READ_PLATFORMS == qc_stats.SHORT_READ_PLATFORMS
+
+    def test_pipeline_service_uses_this_modules_platform_sets(self):
+        from app.services import pipeline_service
+
+        assert pipeline_service._LONG_READ_QC_PLATFORMS == frozenset(
+            qc_stats.LONG_READ_PLATFORMS
+        )
+        assert pipeline_service._SAM_TO_SRA_PLATFORM == qc_stats.SHORT_TO_SRA_PLATFORM
+
+    def test_long_and_short_read_platforms_are_disjoint(self):
+        """A platform cannot be both -- overlap would make is_short_read's
+        platform-first branch order ambiguous."""
+        assert not (
+            set(qc_stats.LONG_READ_PLATFORMS) & qc_stats.SHORT_READ_PLATFORMS
+        )

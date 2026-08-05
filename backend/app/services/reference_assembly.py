@@ -11,6 +11,7 @@ needed no change for the swap, but its own comments named the wrong tool.)
 
 from app.errors import NotFoundError, ValidationError
 from app.models import DataObject, FormatKind, ObjectRole, ObjectStatus
+from app.pipelines import qc_stats
 
 ASSEMBLY_EXCLUDED_ROLES = {ObjectRole.PROTEIN, ObjectRole.TRANSCRIPT}
 ALIGNMENT_KINDS = {FormatKind.BAM, FormatKind.SAM, FormatKind.CRAM}
@@ -244,10 +245,11 @@ async def validate_bam_aligned_to(
 # meaningless. So unlike the assembly validators above, which check shape,
 # these have to reason about chemistry.
 
-LONG_READ_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
-SHORT_READ_PLATFORMS = frozenset(
-    {"ILLUMINA", "BGISEQ", "DNBSEQ", "ELEMENT", "ULTIMA", "SINGULAR", "ION_TORRENT"}
-)
+# qc_stats.LONG_READ_PLATFORMS / SHORT_READ_PLATFORMS are the single source
+# for these sets -- see qc_stats.py's comment for why they used to be
+# independent copies in three files.
+LONG_READ_PLATFORMS = frozenset(qc_stats.LONG_READ_PLATFORMS)
+SHORT_READ_PLATFORMS = qc_stats.SHORT_READ_PLATFORMS
 
 
 def is_short_read(obj: DataObject) -> bool:
