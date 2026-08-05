@@ -44,6 +44,15 @@ only. A merge that stays unpushed is a merge someone still has to remember to
 push later, and there is no other workflow here (no PR review gate, no CI)
 that does it instead.
 
+## Update issue when a task is completed or there is significant progress
+You should update the issue that we are tracking a task with in Github with any
+significant progress.  Specifically when the spec is done or the implementation is done
+or the entire task is done.  The appropriate tags should be used - status:specification document
+means that the spec needs to be written, status:implementation plan means
+that the implementation plan needs to be written and status: ready means it
+is ready to implement.  The other labels are self explanatory and should be
+used when appropriate.
+
 ## Running the app: one instance, not dev/prod
 
 Don't build or reason about a dev vs. production split for this repo. `docker
