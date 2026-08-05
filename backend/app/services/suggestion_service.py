@@ -604,6 +604,15 @@ def build_variants_card(obj, chemistry) -> SuggestionCard | None:
                         "params": {
                             "caller": variant_runner.VariantCaller.DEEPVARIANT.value
                         },
+                        # The card already states the download size in
+                        # `requires_install` before anyone can click it, so
+                        # pressing this card's button *is* the consent
+                        # `_require_or_offer_install` (pipeline_service.py)
+                        # asks for -- the frontend posts this body verbatim
+                        # and stays ignorant of the three launch endpoints'
+                        # shapes, so the flag belongs here rather than as a
+                        # special case in PipelineSuggestions.tsx.
+                        "install_optional": True,
                     },
                 },
             )

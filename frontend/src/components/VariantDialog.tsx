@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
+import { formatBytes } from "../lib/format";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { notify } from "../stores/messageStore";
 import type {
@@ -63,6 +64,15 @@ export function VariantDialog({
   const [referenceId, setReferenceId] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Partial<VariantParams>>({});
   const [advanced, setAdvanced] = useState(false);
+  // Set from the server's refusal, not chosen up front: the backend is what
+  // knows the tool is on-demand and not yet pulled (details.needs ===
+  // "install_tool"), and re-deriving that client-side would be a second
+  // place this fact could go stale. Cleared on close/tool change so a stale
+  // offer never survives past the refusal that produced it.
+  const [installOffer, setInstallOffer] = useState<{
+    tool: string;
+    downloadBytes: number | null;
+  } | null>(null);
 
   // `selectedTool` wins over the server default, for the same reason it does
   // in AlignDialog: `callerInfo` below is derived from it synchronously, and
@@ -90,20 +100,42 @@ export function VariantDialog({
   const referenceResolved = !defaults?.needs_reference || chosenReferenceId != null;
 
   const launch = useMutation({
-    mutationFn: () =>
+    mutationFn: (consent: boolean) =>
       api.launchVariantCalling({
         bam_id: object.id,
         reference_id: chosenReferenceId,
         caller,
         params: overrides,
+        install_optional: consent,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.success("Variant calling started");
+      notify.success(
+        installOffer
+          ? `Installing ${installOffer.tool} and calling variants once it finishes`
+          : "Variant calling started",
+      );
       onClose();
       navigate("/activity");
     },
-    onError: (e: Error) => notify.error(e.message),
+    onError: (e: Error) => {
+      // details.needs === "install_tool" is launch_variant_calling's own
+      // refusal shape for an on-demand caller that has not been pulled yet
+      // (pipeline_service._require_or_offer_install) -- the same
+      // details.needs vocabulary the .bai/.fai refusals already use for
+      // "run index_bam first". Anything else is a real error.
+      if (e instanceof ApiRequestError && e.details.needs === "install_tool") {
+        setInstallOffer({
+          tool: String(e.details.tool ?? caller),
+          downloadBytes:
+            typeof e.details.download_bytes === "number"
+              ? e.details.download_bytes
+              : null,
+        });
+        return;
+      }
+      notify.error(e.message);
+    },
   });
 
   const ready =
@@ -270,6 +302,17 @@ export function VariantDialog({
               </label>
             </div>
           )}
+          {installOffer && (
+            <div className="warn-box" style={{ marginBottom: 12 }}>
+              {installOffer.tool} is not installed. It runs as a separate
+              container image and is downloaded on first use
+              {installOffer.downloadBytes
+                ? ` (about ${formatBytes(installOffer.downloadBytes)})`
+                : ""}
+              . Press "Install and call" to download it and start calling
+              variants once it finishes.
+            </div>
+          )}
         </div>
 
         <div className="modal-actions">
@@ -279,10 +322,14 @@ export function VariantDialog({
           <button
             type="button"
             className="btn primary"
-            onClick={() => launch.mutate()}
+            onClick={() => launch.mutate(installOffer != null)}
             disabled={!ready || launch.isPending}
           >
-            {launch.isPending ? "Starting…" : "Call variants"}
+            {launch.isPending
+              ? "Starting…"
+              : installOffer
+                ? "Install and call"
+                : "Call variants"}
           </button>
         </div>
       </div>
