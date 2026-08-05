@@ -255,6 +255,15 @@ have `mate_object_id` set and `read_number: None`. `object.py:240` explains
 nulls as "pairs predating this field"; for these objects that explanation is
 wrong, and every paired run downloaded through the app has the same gap.
 
+**What it costs is small, and worth stating so the fix is not oversold.** The
+frontend already handles the null: `lib/pairing.ts:120` falls back to name
+ordering when either side lacks a read number, which for `_1`/`_2` names sorts
+correctly anyway, and the `R1`/`R2` chip in `ProjectExplorer` and
+`DerivedFiles` simply does not render. Nothing in the backend reads
+`read_number` for a pipeline decision. So this is a cosmetic gap and a
+correctness-of-record one, not a pipeline risk -- which is part of why #17 stays
+`priority:low`.
+
 ## Scope
 
 In scope:
