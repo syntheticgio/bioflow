@@ -12,7 +12,7 @@ use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome};
-use crate::docker::ShellDocker;
+use crate::docker::{DockerBackend, DockerPresence, ShellDocker};
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
 use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefaults, StoragePathValidation};
 use crate::state::{self, InstallInfo, LauncherState};
@@ -81,6 +81,22 @@ pub async fn status(app: State<'_, LauncherApp>) -> Result<LauncherStateDto, ()>
     .unwrap_or(LauncherState::NotInstalled);
 
     Ok(state.into())
+}
+
+/// Whether Docker is installed and its daemon reachable, independent of
+/// whether the stack is installed. `status`'s underlying `state::evaluate`
+/// short-circuits to `NotInstalled` without ever probing Docker when there
+/// is no install directory yet, so the setup wizard has no other way to know
+/// Docker's real state while it's showing -- this is a thin, direct probe
+/// for exactly that screen. `async`/`spawn_blocking` for the same reason as
+/// every other Docker-touching command.
+#[tauri::command]
+pub async fn docker_ready() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        ShellDocker::new().probe() == DockerPresence::InstalledDaemonUp
+    })
+    .await
+    .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

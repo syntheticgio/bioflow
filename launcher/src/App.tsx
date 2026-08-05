@@ -97,79 +97,177 @@ export function App() {
     }
   }
 
+  if (state.kind === "NotInstalled") {
+    return <SetupWizard
+      onInstalled={({ storageLocation, port }) => {
+        setSettings((prev) => ({ ...prev, storageLocation, port }));
+        // run_first_setup already brought the stack up (setup::install's
+        // last step); what's left is exactly Run's health-gated wait and
+        // browser handoff, so reuse handleRun rather than landing on
+        // Stopped and asking for a second click.
+        setState({ kind: "Stopped" });
+        handleRun();
+      }}
+    />;
+  }
+
+  const showFooter = state.kind === "Stopped" || state.kind === "Running";
+
   return (
-    <main>
-      <h1>BioFlow</h1>
-
-      {state.kind === "NotInstalled" && (
-        <SetupWizard
-          onInstalled={({ storageLocation, port }) => {
-            setSettings((prev) => ({ ...prev, storageLocation, port }));
-            // run_first_setup already brought the stack up (setup::install's
-            // last step); what's left is exactly Run's health-gated wait and
-            // browser handoff, so reuse handleRun rather than landing on
-            // Stopped and asking for a second click.
-            setState({ kind: "Stopped" });
-            handleRun();
-          }}
-        />
-      )}
-
-      {state.kind === "DockerUnavailable" && !state.installed && (
-        <div>
-          <p>Docker is not installed.</p>
-          <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noreferrer">
-            Download Docker Desktop
-          </a>
-          <button onClick={() => status().then(setState)}>Check again</button>
-        </div>
-      )}
-
-      {state.kind === "DockerUnavailable" && state.installed && (
-        <div>
-          <p>Waiting for Docker…</p>
-        </div>
-      )}
-
-      {state.kind === "Stopped" && (
-        <div>
-          <p>Stopped.</p>
-          <button onClick={handleRun} disabled={busy}>
-            {busy ? "Starting…" : "Run"}
-          </button>
-        </div>
-      )}
-
-      {state.kind === "Running" && (
-        <div>
-          <p>Running.</p>
-          <button onClick={() => window.open(`http://localhost:${settings.port}`)}>
-            Open Browser
-          </button>
-          <button onClick={handleStop} disabled={busy}>
-            {busy ? "Stopping…" : "Stop"}
-          </button>
-          {updateAvailable && (
-            <button onClick={handleUpdate} disabled={busy}>
-              {busy ? "Updating…" : "Update"}
-            </button>
+    <div className="launcher-page">
+      <header className="masthead">
+        <div className="masthead-row">
+          <div className="masthead-brand">
+            <span className="masthead-word">BioFlow</span>
+            <span className="masthead-kicker">Genomics pipeline desk</span>
+          </div>
+          {state.kind !== "DockerUnavailable" && (
+            <a
+              href="#settings"
+              className="masthead-settings-link"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowSettings(true);
+              }}
+            >
+              Settings
+            </a>
           )}
         </div>
-      )}
+        <div className="masthead-rule-thick" />
 
-      {state.kind !== "NotInstalled" && (
-        <button onClick={() => setShowSettings(true)}>Settings</button>
-      )}
+        {state.kind === "DockerUnavailable" && (
+          <div className="status-line status-line-warn">
+            <span>Docker unavailable</span>
+            <span>Launcher 0.1.0</span>
+          </div>
+        )}
+        {state.kind === "Stopped" && (
+          <div className="status-line">
+            <span>Stopped</span>
+            <span>Launcher 0.1.0</span>
+          </div>
+        )}
+        {state.kind === "Running" && (
+          <div className="status-line">
+            <span>
+              <span className="status-dot" />
+              Running · localhost:{settings.port}
+            </span>
+            <span>API healthy</span>
+          </div>
+        )}
+        <div className="masthead-rule-thin" />
+      </header>
 
-      <p role="note">
-        Closing this window leaves the stack running. Reopen the launcher and
-        click Stop if you want to stop it.
-      </p>
+      <div className="state-body">
+        {state.kind === "DockerUnavailable" && !state.installed && (
+          <div className="state-columns">
+            <div>
+              <h2 className="state-heading state-heading-standalone">Docker is not installed.</h2>
+              <p className="state-body-text">
+                BioFlow runs its services as containers, so Docker Desktop has to be
+                installed and running before the stack can start.
+              </p>
+              <div className="state-actions">
+                <a
+                  className="btn btn-primary"
+                  href="https://www.docker.com/products/docker-desktop/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Download Docker Desktop
+                </a>
+                <button className="btn btn-secondary" onClick={() => status().then(setState)}>
+                  Check again
+                </button>
+              </div>
+            </div>
+            <div className="sidebar">
+              <span className="sidebar-aside-label">On macOS, also</span>
+              <span className="sidebar-aside-text">
+                Share your storage drive under Settings → Resources → File Sharing, then
+                Apply &amp; Restart.
+              </span>
+            </div>
+          </div>
+        )}
 
-      {error && (
-        <pre role="alert" style={{ whiteSpace: "pre-wrap" }}>
-          {error}
-        </pre>
+        {state.kind === "DockerUnavailable" && state.installed && (
+          <div className="state-columns">
+            <div>
+              <h2 className="state-heading state-heading-standalone">Waiting for Docker…</h2>
+              <p className="state-body-text">
+                Docker is installed but its daemon isn't reachable yet. The launcher checks
+                again every few seconds — no action needed if it's still starting up.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {state.kind === "Stopped" && (
+          <div className="state-columns">
+            <div>
+              <div className="state-kicker">Ready when you are</div>
+              <h2 className="state-heading">BioFlow is stopped</h2>
+              <p className="state-body-text">
+                Start the stack to begin working — a cold start pulls nothing new, but
+                waits for the API to report healthy before handing off to your browser.
+              </p>
+              <div className="state-actions">
+                <button className="btn btn-primary" onClick={handleRun} disabled={busy}>
+                  {busy ? "Starting…" : "Run"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {state.kind === "Running" && (
+          <div className="state-columns">
+            <div>
+              <div className="state-kicker">The stack is up</div>
+              <h2 className="state-heading">Serving on port {settings.port}</h2>
+              <p className="state-body-text">
+                The API is reporting healthy. Open the desk in your browser to get to
+                work.
+              </p>
+              <div className="state-actions">
+                <button
+                  className="btn btn-primary"
+                  onClick={() => window.open(`http://localhost:${settings.port}`)}
+                >
+                  Open BioFlow
+                </button>
+                <button className="btn btn-secondary" onClick={handleStop} disabled={busy}>
+                  {busy ? "Stopping…" : "Stop"}
+                </button>
+                {updateAvailable && (
+                  <button className="btn btn-warn" onClick={handleUpdate} disabled={busy}>
+                    {busy ? "Updating…" : "Update available"}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="sidebar">
+              <span className="sidebar-aside-label">Storage location</span>
+              <span className="sidebar-path">{settings.storageLocation}</span>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <pre role="alert" className="launcher-error" style={{ margin: "20px 0" }}>
+            {error}
+          </pre>
+        )}
+      </div>
+
+      {showFooter && (
+        <div className="launcher-footer">
+          Closing this window leaves the stack running. Reopen the launcher and click Stop
+          if you want to stop it.
+        </div>
       )}
 
       {showSettings && (
@@ -182,6 +280,6 @@ export function App() {
           }}
         />
       )}
-    </main>
+    </div>
   );
 }

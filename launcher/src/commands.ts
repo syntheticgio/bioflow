@@ -5,6 +5,14 @@ export function status(): Promise<LauncherState> {
   return invoke("status");
 }
 
+// Direct Docker probe, independent of whether the stack is installed --
+// status()'s underlying state machine never checks Docker before an install
+// directory exists, so the setup wizard has no other way to show a real
+// "Docker ready" indicator.
+export function dockerReady(): Promise<boolean> {
+  return invoke("docker_ready");
+}
+
 export interface SetupDefaults {
   storageLocation: string;
   installDir: string;
