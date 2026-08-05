@@ -351,8 +351,28 @@ function JobRow({
         <span className="mono">{job.type}</span>
         <span>{job.job_class}</span>
         {job.progress.message && <span>{job.progress.message}</span>}
+        {job.progress.phase_index != null && job.progress.phase_total != null && (
+          <span>
+            step {job.progress.phase_index}/{job.progress.phase_total}
+          </span>
+        )}
+        {job.state === "running" &&
+          job.progress.units_done != null &&
+          job.progress.units_total != null && (
+            <span>
+              {job.progress.units_done.toLocaleString()} /{" "}
+              {job.progress.units_total.toLocaleString()}
+              {job.progress.unit_label && ` ${job.progress.unit_label}`}
+            </span>
+          )}
         {job.state === "running" && job.progress.rss_bytes != null && (
           <span>{formatBytes(job.progress.rss_bytes)}</span>
+        )}
+        {job.state === "running" && job.progress.cpu_percent != null && (
+          <span>{job.progress.cpu_percent.toFixed(0)}% CPU</span>
+        )}
+        {job.state === "running" && job.progress.peak_rss_bytes != null && (
+          <span>peak {formatBytes(job.progress.peak_rss_bytes)}</span>
         )}
         {job.attempts > 1 && (
           <span>
