@@ -93,12 +93,28 @@ The amd64 backend built in minutes, not hours, exactly as
 [#46](https://github.com/syntheticgio/bioflow/issues/46) predicted — the
 `TARGETARCH` guard in `backend/Dockerfile` skips the sse2neon source compile
 and takes upstream's prebuilt `x64-linux` bwa-mem2 tarball instead.
-#46 nonetheless stays open on its third acceptance criterion: no amd64
-machine has run the launcher's *install flow* end to end. What was verified
-is the images, not the launcher — the five tool probes (`fastp`,
+The images themselves were verified with five tool probes (`fastp`,
 `bwa-mem2`, `run_clair3.sh`, `compleasm`, `datasets`), an import check of
-the baked-in `app` package, `nginx` as the web image's `Cmd` rather than the
-dev stage's `npm run dev`, and anonymous pull of both tags.
+the baked-in `app` package, and `nginx` as the web image's `Cmd` rather than
+the dev stage's `npm run dev`.
+The *stack* contract was then verified on amd64 the same way #37 verified it
+on arm64: a scratch directory holding only `docker-compose.yml` and a `.env`
+(isolated `COMPOSE_PROJECT_NAME`, `API_PORT`, `WEB_PORT`, `BIOINFO_HOME`,
+no override file, Docker logged out of ghcr.io so the pull was anonymous)
+pulled `:latest`, resolved it to the amd64 manifests, and brought all five
+services up. `/healthz` 200; the web container served the real nginx build
+with zero `/@vite/client`; nginx proxied real routes to `api` with status
+codes identical to hitting it directly and BioFlow's own `profile_unresolved`
+body rather than an SPA fallback; both workers logged `handlers_loaded` with
+all 31 handlers. Port isolation via `.env` alone kept the 5173 stack
+untouched throughout.
+#46 nonetheless stays open on its third acceptance criterion, because that
+criterion names the *launcher's* install flow and no launcher binary was
+involved — this exercised the compose contract the launcher drives, not the
+launcher. Building it here would also conflate two variables: this machine
+is amd64 **Linux**, and the launcher has only ever been built on macOS, so a
+failure would most likely be the untested Linux port rather than anything
+about amd64. That verification belongs with #28's cross-platform criterion.
 One regression to be aware of: `docker buildx imagetools create` rebuilds an
 index from only the sources named, so the `unknown/unknown` provenance
 attestation the arm64-only indexes carried is gone. Nothing depends on it;
