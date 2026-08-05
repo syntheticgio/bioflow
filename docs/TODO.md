@@ -641,7 +641,9 @@ new dependencies beyond what samtools/bcftools already pull in. It is a
 one-line `apt-get install` addition to `backend/Dockerfile`, not a source build.
 
 **Update 2026-08-05: iVar and Polypolish have both shipped; only RagTag
-(#52) is left.** iVar is installed, dispatched, and carded (#47, closed).
+(#52) is left, and its spec is now written
+(`docs/superpowers/specs/2026-08-05-ragtag-scaffolding-design.md`).** iVar is
+installed, dispatched, and carded (#47, closed).
 Polypolish shipped the same day (#23, design
 `docs/superpowers/specs/2026-08-05-polypolish-design.md`) -- install script,
 `tools.polypolish()`, `polypolish_runner`, a `polish_assembly` handler,
