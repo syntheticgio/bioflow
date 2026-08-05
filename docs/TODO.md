@@ -733,25 +733,3 @@ Other candidates worth considering under the same heading: explaining *why* a
 QC run failed a threshold, and suggesting the next pipeline step in prose
 alongside the Actions cards.
 
-## Mate detection is filename-only
-
-Raised: 2026-07-27, during read preparation.
-
-`app/pipelines/pairing.py` matches paired-end files by stripping an R1/R2 token
-from the end of the name. Read IDs inside the files would be authoritative, but
-checking them means decompressing two files to compare their first records, and
-the naming convention is near-universal.
-
-Two consequences. Files named outside the convention (`foo_fwd.fastq.gz` /
-`foo_rev.fastq.gz`, or a sample whose mate marker sits mid-name) never pair, and
-the user has to link them by hand. And two genuinely unrelated files could in
-principle pair if their names collide after the token is removed -- guarded
-against by requiring the naming *scheme* to match and by refusing an ambiguous
-match, but not impossible.
-
-Worth revisiting only if a real dataset trips it. The launch dialog already
-shows the detected mate and allows overriding it, and `mate_object_id` is never
-overwritten once set, so a wrong guess is visible and correctable rather than
-silent.
-
-Touches: `backend/app/pipelines/pairing.py`, `backend/app/queue/results.py`.

@@ -2004,4 +2004,100 @@ Touches: `backend/app/pipelines/aligners.py`,
 `backend/app/pipelines/align_runner.py`, `backend/app/pipelines/tools.py`,
 `backend/app/services/suggestion_service.py`, `backend/Dockerfile`.
 
+## Mate detection is filename-only — FIXED
+
+Shipped 2026-08-05 for [#17](https://github.com/syntheticgio/bioflow/issues/17).
+Spec: `docs/superpowers/specs/2026-08-05-paired-read-detection-design.md`.
+Plan: `docs/superpowers/plans/2026-08-05-paired-read-detection.md`.
+
+Raised: 2026-07-27, during read preparation.
+
+`app/pipelines/pairing.py` matches paired-end files by stripping an R1/R2 token
+from the end of the name. Read IDs inside the files would be authoritative, but
+checking them means decompressing two files to compare their first records, and
+the naming convention is near-universal.
+
+Two consequences. Files named outside the convention (`foo_fwd.fastq.gz` /
+`foo_rev.fastq.gz`, or a sample whose mate marker sits mid-name) never pair, and
+the user has to link them by hand. And two genuinely unrelated files could in
+principle pair if their names collide after the token is removed -- guarded
+against by requiring the naming *scheme* to match and by refusing an ambiguous
+match, but not impossible.
+
+Worth revisiting only if a real dataset trips it. The launch dialog already
+shows the detected mate and allows overriding it, and `mate_object_id` is never
+overwritten once set, so a wrong guess is visible and correctable rather than
+silent.
+
+Touches: `backend/app/pipelines/pairing.py`, `backend/app/queue/results.py`.
+
+**What shipped, and what the implementation did differently.** The entry's own
+framing -- "checking read IDs means decompressing two files" -- turned out to
+be false by the time this was picked up: `storage/parsers._parse_fastq`
+already captured the first three read IDs of every FASTQ at ingest into
+`facts.first_read_ids`, and `metadata/sra.py` already persisted NCBI's
+`LIBRARY_LAYOUT` as `read_type`. Both signals existed and were written to
+every real object; nothing read either for a pairing decision. So the fix
+opened **no new files** -- it read two fields that were already on the
+document.
+
+Querying the real database before designing turned up three findings that
+would have broken a naive implementation:
+
+- Real mates' stored headers differ after the first token
+  (`length=150`/`length=149` -- different read lengths), so comparing the
+  whole header would reject genuine pairs. Comparison has to tokenize on
+  first whitespace.
+- A file and its own trimmed derivative have byte-identical first read IDs.
+  Read-ID equality is necessary but not sufficient for a pair, so IDs can only
+  **confirm or veto** a filename-proposed candidate -- they can never
+  originate one.
+- Filtering moves the first record forward (`ERR16145610.1` vs
+  `ERR16145610.588` after trimming dropped 587 reads), so "first IDs differ"
+  cannot be treated as proof of non-mateship. The veto only fires on a
+  differing *leading structural field* (the accession before the first `.`,
+  or the instrument before the first `:`), which stays stable across a
+  filtered run; a difference elsewhere falls through to today's filename-only
+  behavior rather than rejecting.
+
+`pairing.verdict()` (`backend/app/pipelines/pairing.py`) implements this as a
+pure function over plain `PairInput` dicts, keeping `pairing.py` ignorant of
+`DataObject`/Motor/the filesystem. Both call sites that propose a pairing --
+`queue/results._link_mate` (ingest) and `services/pipeline_service.suggest_mate`
+(the launch dialog) -- now filter candidates through it, so a veto at ingest
+isn't silently re-proposed by the dialog afterward; the manual
+`POST /objects/{id}/pair` override is untouched. Rejections are logged as
+`mate_rejected` with the verdict and both names.
+
+Two unrelated defects turned up while specifying this and were fixed
+alongside it, both on the SRA download path (`queue/results._apply_sra_download`):
+the comment claiming `<acc>_1.fastq` "is not a shape its R1/R2 convention
+detects" was false (the tokens were added twelve hours before the comment was
+written and do detect it -- the bypass itself is still correct, since
+fasterq-dump's own labelling is more authoritative than an inference); and
+the SRA path set `mate_object_id` on both sides of a pair but never set
+`read_number`, unlike the generic ingest path which always sets both
+together. Every paired run ever downloaded through the app had this gap.
+Fixed at the source plus a one-off backfill script
+(`backend/scripts/backfill_sra_mate_read_numbers.py`) that re-derives
+`read_number` from `pairing.split_mate(name)` -- the same function that
+determined the link -- for already-linked rows.
+
+The vocabulary extension (`_fwd`/`_rev`, `_forward`/`_reverse`) landed too,
+as its own scheme so it cannot cross-pair with the `R` or numeric schemes.
+This is the one part of the change with no real-data backstop: no file in the
+database currently fails to pair for this reason.
+
+**Verified against the running app**, not just unit tests: uploaded a real
+`.fastq.gz` pair through `worktree-up.sh` and confirmed `first_read_ids`
+landed and the pair linked with `mate_linked read_number=1`; confirmed two
+single-end files renamed to collide as `x_1.fastq`/`x_2.fastq` were rejected
+with `mate_rejected verdict=rejected_layout` and stayed unlinked; confirmed
+`suggest_mate` returns `None` for the vetoed pair rather than re-proposing it.
+
+Full backend suite: 2193 passed. (A pre-existing, unrelated gap in the test
+image -- `ModuleNotFoundError: No module named 'cryptography'` -- blocks
+collection of `tests/api`, `tests/services/ai`, and a few modules that import
+through them; confirmed pre-existing and untouched by this change.)
+
 ---
