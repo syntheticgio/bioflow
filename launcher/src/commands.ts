@@ -49,6 +49,12 @@ export function updateStack(): Promise<void> {
   return invoke("update_stack");
 }
 
+// Cheap, non-blocking registry manifest check -- decides only whether the
+// Update button should render. Never triggers a pull on its own.
+export function checkForUpdate(): Promise<boolean> {
+  return invoke("check_for_update");
+}
+
 export function runFirstSetup(args: {
   storageLocation: string;
   installDir: string;

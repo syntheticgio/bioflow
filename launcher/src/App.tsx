@@ -1,16 +1,22 @@
 import { useEffect, useState } from "react";
-import { runStack, status, stopStack, updateStack } from "./commands";
+import { checkForUpdate, runStack, status, stopStack, updateStack } from "./commands";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
 import type { LauncherState, Settings as SettingsValues } from "./types";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
+// The manifest check is a network call (bounded by GhcrClient's own
+// timeout), so it polls far less often than status -- there is no reason to
+// hit the registry every 3 seconds for a button that changes at most a few
+// times a year.
+const UPDATE_CHECK_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 export function App() {
   const [state, setState] = useState<LauncherState>({ kind: "NotInstalled" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   // Populated once first-run setup completes (or, on a relaunch of an
   // already-installed stack, left at these placeholders -- there is no
   // command yet to read .env back out, since nothing before this needed
@@ -34,6 +40,24 @@ export function App() {
       clearInterval(id);
     };
   }, []);
+
+  useEffect(() => {
+    if (state.kind !== "Running") {
+      setUpdateAvailable(false);
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      const available = await checkForUpdate();
+      if (!cancelled) setUpdateAvailable(available);
+    }
+    poll();
+    const id = setInterval(poll, UPDATE_CHECK_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [state.kind]);
 
   async function handleRun() {
     setBusy(true);
@@ -125,9 +149,11 @@ export function App() {
           <button onClick={handleStop} disabled={busy}>
             {busy ? "Stopping…" : "Stop"}
           </button>
-          <button onClick={handleUpdate} disabled={busy}>
-            Update
-          </button>
+          {updateAvailable && (
+            <button onClick={handleUpdate} disabled={busy}>
+              {busy ? "Updating…" : "Update"}
+            </button>
+          )}
         </div>
       )}
 

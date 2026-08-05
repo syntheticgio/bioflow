@@ -4,6 +4,7 @@ pub mod docker;
 pub mod settings;
 pub mod setup;
 pub mod state;
+pub mod update_check;
 
 use commands::LauncherApp;
 
@@ -22,6 +23,7 @@ pub fn run() {
       commands::validate_setup_port,
       commands::run_first_setup,
       commands::apply_settings,
+      commands::check_for_update,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

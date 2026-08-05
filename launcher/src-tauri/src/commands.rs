@@ -16,6 +16,12 @@ use crate::docker::ShellDocker;
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
 use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefaults, StoragePathValidation};
 use crate::state::{self, InstallInfo, LauncherState};
+use crate::update_check::{self, DockerImageInspector, GhcrClient};
+
+/// The two images the design spec's "Changes required in this repository"
+/// section names -- api and worker share bioflow-backend, so there are only
+/// two distinct images to check, not three services.
+const CHECKABLE_IMAGES: &[&str] = &["syntheticgio/bioflow-backend", "syntheticgio/bioflow-web"];
 
 /// The name the launcher's bundled compose resource is registered under --
 /// see `tauri.conf.json`'s `bundle.resources` mapping
@@ -279,4 +285,26 @@ pub fn apply_settings(app: State<LauncherApp>, args: ApplySettingsArgs) -> Resul
 
     *app.port.lock().unwrap() = Some(args.port);
     Ok(())
+}
+
+/// Whether the Update button should appear -- a cheap registry manifest
+/// check, never a pull. `async` and run on Tauri's blocking-task pool via
+/// `spawn_blocking` so a slow or hung registry (bounded by `GhcrClient`'s own
+/// timeout, but a real network call all the same) cannot stall the IPC
+/// thread or delay anything else the UI is doing. Failing silently is the
+/// point: this returns `false` for "no update to offer" whether that's
+/// because the machine is offline or because there is genuinely nothing
+/// newer -- per the spec, the UI is not supposed to be able to tell those
+/// apart.
+#[tauri::command]
+pub async fn check_for_update() -> bool {
+    tauri::async_runtime::spawn_blocking(|| {
+        let registry = GhcrClient::default();
+        let local = DockerImageInspector;
+        CHECKABLE_IMAGES.iter().any(|image| {
+            update_check::update_available(&registry, &local, image, "latest") == Some(true)
+        })
+    })
+    .await
+    .unwrap_or(false)
 }
