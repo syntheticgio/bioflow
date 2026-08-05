@@ -128,6 +128,10 @@ class Settings(BaseSettings):
     # after apt-get update -- checking without it always reports no
     # candidate regardless of what the repo actually carries).
     ivar_path: str = "ivar"
+    # Short-read polishing of long-read assemblies. Not in Debian; installed
+    # from upstream's musl-static release binary, and absent on arm64 by
+    # design -- see backend/scripts/install-polypolish.sh.
+    polypolish_path: str = "polypolish"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

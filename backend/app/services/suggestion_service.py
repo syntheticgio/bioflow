@@ -907,6 +907,92 @@ def build_consensus_card(obj, reference) -> SuggestionCard | None:
     )
 
 
+def build_polish_card(obj, read_sets) -> SuggestionCard | None:
+    """Short-read polishing of a draft assembly, by Polypolish.
+
+    Anchored on the assembly, since that is what gets improved. `read_sets`
+    is the project's eligible short-read sets, resolved by the orchestrator
+    (an async project listing, kept out of this synchronous builder the same
+    way `chemistry` and `alignment_target` are).
+
+    Two gating decisions worth stating, because the tempting version of each
+    is wrong:
+
+    **Gated on the reads being short, not on the draft being long-read.**
+    "Only offer polishing for ONT assemblies" is the `protein.faa` mistake
+    again -- BioFlow often cannot know how an imported assembly was made, and
+    polishing a hybrid or short-read assembly is unusual rather than
+    incorrect. The rule that *is* safe is about the reads, because Polypolish
+    on long reads is meaningless rather than merely unusual.
+
+    **Ambiguity is unavailable, not a guess.** Cards launch directly with the
+    body they carry -- there is no dialog between the button and the queue --
+    so a card that picked one of several read sets would silently polish with
+    whichever it chose. Polishing an assembly with the wrong sample's reads
+    produces a plausible assembly that is quietly wrong, so the ambiguous
+    case says so instead.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Polish assembly"
+    description = (
+        "Correct residual base errors in this assembly using short reads, "
+        "with Polypolish."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="polish",
+            category="REFERENCE_ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.polypolish()
+    if not tool.available:
+        return unavailable(tool.error or "Polypolish is not installed.")
+
+    aligner = tools.bwa_mem2()
+    if not aligner.available:
+        # Not a detail: Polypolish needs all-alignment input, which is what
+        # bwa-mem2 provides here. Without it there is nothing to polish from,
+        # and "Polypolish is installed" would be a misleading thing to say.
+        return unavailable(
+            aligner.error or "bwa-mem2 is not installed, and polishing needs it."
+        )
+
+    if not read_sets:
+        return unavailable(
+            "Polishing needs short reads, and this project has none."
+        )
+    if len(read_sets) > 1:
+        return unavailable(
+            f"This project has {len(read_sets)} short-read sets. Polishing "
+            "needs a specific one, and picking for you could correct this "
+            "assembly with the wrong sample's reads."
+        )
+
+    chosen = read_sets[0]
+    body = {"draft_object_id": str(obj.id), "reads_object_id": str(chosen[0].id)}
+    if len(chosen) > 1:
+        body["mate_object_id"] = str(chosen[1].id)
+
+    return SuggestionCard(
+        kind="polish",
+        category="REFERENCE_ASSEMBLY",
+        title=title,
+        description=description,
+        why=f"Short reads: {', '.join(o.name for o in chosen)}.",
+        status=CardStatus.AVAILABLE,
+        launch={"endpoint": "/pipelines/polish", "body": body},
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -1059,6 +1145,21 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a resolution failure loses one card, not the grid
             alignment_target = None
 
+    read_sets = None
+    if reference_assembly._is_assembly_like(obj):
+        # Same reasoning as chemistry and alignment_target above: an async
+        # project listing, kept out of the synchronous polish card. Only for
+        # assembly-like FASTA, so a project listing is not paid for on every
+        # FASTQ's Actions tab.
+        try:
+            read_sets = reference_assembly.short_read_sets(
+                await object_service.list_objects(
+                    obj.project_id, owner=obj.owner, status=ObjectStatus.READY
+                )
+            )
+        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            read_sets = None
+
     builders = (
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
@@ -1068,6 +1169,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("assemble", lambda: build_assemble_card(obj)),
         ("completeness", lambda: build_completeness_card(obj)),
         ("consensus", lambda: build_consensus_card(obj, alignment_target)),
+        ("polish", lambda: build_polish_card(obj, read_sets)),
     )
 
     cards: list[dict] = []
