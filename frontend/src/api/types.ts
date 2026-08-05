@@ -536,7 +536,8 @@ export type RunJobRole =
   | "qc"
   | "call_variants"
   | "quantify"
-  | "test";
+  | "test"
+  | "consensus";
 
 export interface RunInput {
   object_id: string;

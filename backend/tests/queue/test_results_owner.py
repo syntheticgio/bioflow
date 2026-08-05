@@ -182,6 +182,62 @@ class TestDerivedOutputsInheritTheirParentsOwner:
         assert [t.sidecar_role for t in tbi] == [SidecarRole.TBI]
         assert tbi[0].owner == owner
 
+    async def test_consensus_writes_the_fasta_under_the_bams_owner(self):
+        """Same reasoning test_call_variants_writes_the_vcf_under_the_bams_owner
+        gives: a consensus FASTA ingested as "local" against a profile-owned
+        BAM would not be mislabelled, it would be refused outright and the
+        applier would lose the run entirely after logging."""
+        owner = "results-consensus-a"
+        bam = await _parent(owner, "aln.bam", role=ObjectRole.ALIGNMENT)
+        reference = await _parent(owner, "ref.fasta", role=ObjectRole.REFERENCE)
+        output = _scratch_file()
+
+        await results._apply_consensus_from_alignment(
+            {
+                "bam_object_id": str(bam.id),
+                "reference_object_id": str(reference.id),
+                "output": {"tmp_path": str(output), "name": "consensus.fasta"},
+                "facts": {
+                    "consensus_tool_version": "1.4.4",
+                    "consensus_primers_trimmed": False,
+                },
+            },
+            owner="someone-else",
+        )
+
+        produced = await DataObject.find(
+            DataObject.derived_from == bam.id, DataObject.owner == owner
+        ).to_list()
+        assert [p.name for p in produced] == ["consensus.fasta"]
+        consensus = produced[0]
+        assert consensus.role == ObjectRole.REFERENCE
+        assert reference.id in consensus.derived_from
+        assert consensus.facts["consensus_tool_version"] == "1.4.4"
+
+    async def test_consensus_derives_from_both_bam_and_reference(self):
+        """Mirrors call_variants: a consensus is a claim about a reference
+        made from an alignment, so deleting either parent should show the
+        consensus as descending from it."""
+        owner = "results-consensus-b"
+        bam = await _parent(owner, "aln.bam", role=ObjectRole.ALIGNMENT)
+        reference = await _parent(owner, "ref.fasta", role=ObjectRole.REFERENCE)
+        output = _scratch_file()
+
+        await results._apply_consensus_from_alignment(
+            {
+                "bam_object_id": str(bam.id),
+                "reference_object_id": str(reference.id),
+                "output": {"tmp_path": str(output), "name": "consensus.fasta"},
+                "facts": {},
+            },
+            owner=owner,
+        )
+
+        [consensus] = await DataObject.find(
+            DataObject.derived_from == bam.id
+        ).to_list()
+        assert set(consensus.derived_from) == {bam.id, reference.id}
+
     async def test_trim_outputs_carry_the_reads_owner(self):
         """The multi-output applier: each trimmed FASTQ is ingested in its own
         try/except, so a wrong owner loses them one at a time rather than

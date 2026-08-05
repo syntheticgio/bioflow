@@ -31,7 +31,7 @@ from app.pipelines import (
 )
 from app.pipelines.aligners import Aligner
 from app.pipelines.organism_taxonomy import is_eukaryotic
-from app.services import object_service, pipeline_service, prior_runs
+from app.services import object_service, pipeline_service, prior_runs, reference_assembly
 
 log = get_logger(__name__)
 
@@ -838,6 +838,75 @@ def build_completeness_card(obj) -> SuggestionCard | None:
     )
 
 
+def build_consensus_card(obj, reference) -> SuggestionCard | None:
+    """Amplicon/viral consensus calling, by iVar.
+
+    Anchored on the BAM rather than the reference -- the reverse would be
+    one-to-many (a reference has many alignments, the card cannot pick) and
+    the foundation (#21) left this choice open for exactly that reason.
+
+    `reference` is the BAM's alignment target, already resolved by the
+    orchestrator via `reference_assembly.resolve_alignment_target_for_bam`
+    -- an async provenance walk, kept out of this synchronous builder the
+    same way `chemistry` is resolved once and passed into
+    `build_variants_card`. `reference=None` means that walk raised: no
+    recorded target, or an ambiguous one.
+
+    Deliberately not gated on the reference looking viral (genome size,
+    organism). That is the `protein.faa` mistake in a new costume -- right
+    about the common case, wrong about a legitimate one. Consensus against
+    a bacterial or plasmid reference is unusual, not wrong.
+    """
+    if obj.format.kind not in reference_assembly.ALIGNMENT_KINDS:
+        return None
+
+    title = "Consensus sequence"
+    description = (
+        "Trim amplicon primers (if a scheme is supplied) and call a "
+        "consensus sequence from this alignment, using iVar."
+    )
+
+    tool = tools.ivar()
+    if not tool.available:
+        return SuggestionCard(
+            kind="consensus",
+            category="REFERENCE_ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=tool.error or "iVar is not installed.",
+        )
+
+    if reference is None:
+        return SuggestionCard(
+            kind="consensus",
+            category="REFERENCE_ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=(
+                "This alignment has no recorded reference, so its consensus "
+                "could not be checked against one."
+            ),
+        )
+
+    return SuggestionCard(
+        kind="consensus",
+        category="REFERENCE_ASSEMBLY",
+        title=title,
+        description=description,
+        why=f"Reference: {reference.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/consensus",
+            # Primers are opt-in from the dialog, the same way completeness's
+            # lineage override is -- the card offers the tool, not a guess at
+            # which primer BED (if any) belongs to it.
+            "body": {"bam_object_id": str(obj.id)},
+        },
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -977,6 +1046,19 @@ async def suggestions_for(obj) -> list[dict]:
         # keeps the builders uniformly synchronous.
         annotation_inputs = await pipeline_service.resolve_annotation_inputs(obj)
 
+    alignment_target = None
+    if obj.format.kind in reference_assembly.ALIGNMENT_KINDS:
+        # Same reasoning as chemistry above: an async provenance walk, kept
+        # out of the synchronous consensus card. None means the walk raised
+        # -- no recorded target, or an ambiguous one -- which the card
+        # reports as unavailable rather than crashing.
+        try:
+            alignment_target = await reference_assembly.resolve_alignment_target_for_bam(
+                obj, owner=obj.owner
+            )
+        except Exception:  # noqa: BLE001 - a resolution failure loses one card, not the grid
+            alignment_target = None
+
     builders = (
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
@@ -985,6 +1067,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("annotate", lambda: build_annotate_card(obj, annotation_inputs)),
         ("assemble", lambda: build_assemble_card(obj)),
         ("completeness", lambda: build_completeness_card(obj)),
+        ("consensus", lambda: build_consensus_card(obj, alignment_target)),
     )
 
     cards: list[dict] = []

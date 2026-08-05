@@ -264,12 +264,50 @@ class TestSerialization:
             "prefetch",
             "datasets",
             "featurecounts",
+            "ivar",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that
             # result's provenance, and the panel is where a user reads it.
             "pydeseq2",
         }
+
+
+class TestIvarProbe:
+    def test_ivar_probes(self):
+        tool = tools.ivar()
+        assert tool.name == "ivar"
+        assert isinstance(tool.available, bool)
+
+    def test_probes_with_the_subcommand_not_a_flag(self, tmp_path, monkeypatch):
+        """iVar uses `ivar version`, not `ivar --version` -- a probe passing
+        --version gets a non-zero exit and reads a working binary as absent.
+        Verified against a real installed 1.4.4 binary on 2026-08-05."""
+        script = tmp_path / "fakeivar"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "version" ]; then\n'
+            '  echo "iVar version 1.4.4"\n'
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        tool = tools._probe("ivar", "fakeivar", ["version"])
+
+        assert tool.available
+        assert tool.version == "1.4.4"
+
+    def test_ivar_is_a_reference_assembly_tool(self):
+        assert tools.PipelineType.REFERENCE_ASSEMBLY in tools.TOOL_META["ivar"].pipelines
+
+    def test_ivar_is_runnable(self):
+        assert tools.TOOL_META["ivar"].runnable
+
+    def test_ivar_is_in_all_tools(self):
+        assert "ivar" in {t.name for t in tools.all_tools()}
 
 
 class TestToolMeta:

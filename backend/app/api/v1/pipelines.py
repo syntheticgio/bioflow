@@ -836,6 +836,33 @@ async def lineage_status(lineage: str, odb: str | None = None) -> dict:
     return {"lineage": lineage, "odb": odb, "present": present}
 
 
+class ConsensusRequest(BaseModel):
+    bam_object_id: PydanticObjectId
+    # Optional: consensus without primer trimming is a legitimate workflow
+    # for non-amplicon viral alignments (metagenomic, bait-capture). The
+    # reference is never supplied here -- launch_consensus resolves it from
+    # the BAM's own provenance, the foundation's (#21) explicit rule.
+    primer_bed_object_id: PydanticObjectId | None = None
+    min_quality: int | None = None
+    min_freq: float | None = None
+    min_depth: int | None = None
+
+
+@router.post("/consensus", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_consensus_route(body: ConsensusRequest, owner: OwnerDep) -> JobOut:
+    """Queue an iVar consensus run: primer trimming (if a BED is supplied)
+    then consensus calling, against the reference the BAM was aligned to."""
+    job = await pipeline_service.launch_consensus(
+        bam_object_id=body.bam_object_id,
+        primer_bed_object_id=body.primer_bed_object_id,
+        owner=owner,
+        min_quality=body.min_quality,
+        min_freq=body.min_freq,
+        min_depth=body.min_depth,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep

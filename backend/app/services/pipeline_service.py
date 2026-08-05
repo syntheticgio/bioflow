@@ -3055,3 +3055,107 @@ async def launch_completeness(
         tool_version=tool.version,
     )
     return job
+
+
+async def launch_consensus(
+    *,
+    bam_object_id: PydanticObjectId,
+    owner: str,
+    primer_bed_object_id: PydanticObjectId | None = None,
+    min_quality: int | None = None,
+    min_freq: float | None = None,
+    min_depth: int | None = None,
+) -> Job:
+    """Queue an iVar consensus run against one alignment.
+
+    The reference is never a caller-supplied argument -- it is resolved from
+    the BAM's own provenance via `reference_assembly.resolve_alignment_target_for_bam`,
+    the same rule the foundation (#21) built for exactly this: a BAM aligned
+    to one sequence must not be treated as evidence about a different one,
+    however plausible the pairing looks. `primer_bed_object_id` is the only
+    optional input; when it is absent, the job skips primer trimming rather
+    than refusing to run, since a non-amplicon viral alignment (metagenomic,
+    bait-capture) is a legitimate consensus target with no primer scheme.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tool = tools.require(tools.ivar())
+
+    bam = await object_service.get_object(bam_object_id, owner=owner)
+    reference = await reference_assembly.resolve_alignment_target_for_bam(
+        bam, owner=owner
+    )
+
+    bam_digest, bam_path = await _resolve_readable(bam)
+    ref_digest, ref_path = await _resolve_readable(reference)
+
+    payload: dict = {
+        "bam_object_id": str(bam.id),
+        "bam_name": bam.name,
+        "reference_object_id": str(reference.id),
+        "reference_name": reference.name,
+        "min_quality": min_quality if min_quality is not None else 20,
+        "min_freq": min_freq if min_freq is not None else 0.0,
+        "min_depth": min_depth if min_depth is not None else 10,
+    }
+    if bam_digest:
+        payload["bam_sha256"] = bam_digest
+    if bam_path:
+        payload["bam_path"] = bam_path
+    if ref_digest:
+        payload["reference_sha256"] = ref_digest
+    if ref_path:
+        payload["reference_path"] = ref_path
+
+    if primer_bed_object_id is not None:
+        primer_bed = await object_service.get_object(
+            primer_bed_object_id, owner=owner
+        )
+        # Checked here, before enqueue, rather than left for the handler:
+        # iVar's own behaviour on a mismatched primer scheme is to trim
+        # nothing and exit 0, producing an untrimmed consensus that looks
+        # like a successful trimmed one (see reference_assembly.check_primer_bed
+        # and GitHub #48).
+        reference_assembly.check_primer_bed(primer_bed, reference)
+        bed_digest, bed_path = await _resolve_readable(primer_bed)
+        payload["primer_bed_object_id"] = str(primer_bed.id)
+        payload["primer_bed_name"] = primer_bed.name
+        if bed_digest:
+            payload["primer_bed_sha256"] = bed_digest
+        if bed_path:
+            payload["primer_bed_path"] = bed_path
+
+    job = await queue.enqueue(
+        "consensus_from_alignment",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # Single-threaded pileup walk -- iVar does not parallelize, so more
+        # CPU would idle. mem_mb matches the handler's own budget (see
+        # reference_assembly_handlers.consensus_from_alignment): 8192, not
+        # 4096, after a real run against a 26Mb T. brucei reference
+        # OOM-killed at the lower number. io=HEAVY: I/O against a
+        # high-coverage amplicon BAM is the other real cost.
+        resources=JobResources(cpu=2, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"consensus:{bam.id}:{primer_bed_object_id or 'noprimers'}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Consensus calling is already queued or running for this "
+            "alignment",
+            details={"object_id": str(bam.id)},
+        )
+
+    log.info(
+        "consensus_launched",
+        job_id=str(job.id),
+        bam_id=str(bam.id),
+        reference_id=str(reference.id),
+        primers=bool(primer_bed_object_id),
+        tool_version=tool.version,
+    )
+    return job
