@@ -46,6 +46,14 @@ GFF = b"""##gff-version 3
 chr1\tsrc\tgene\t100\t200\t.\t+\t.\tID=gene1
 """
 
+# samtools FASTA index: name, length, offset, linebases, linewidth. Column 1
+# (offset) is not ordered relative to column 2 (length) the way BED's
+# chromStart < chromEnd is, which is exactly what used to make this
+# misdetect as BED (#48).
+FAI = b"""chr1\t230218\t6\t60\t61
+chr2\t1000\t230300\t60\t61
+"""
+
 
 def write(tmp_path: Path, name: str, data: bytes) -> Path:
     p = tmp_path / name
@@ -94,6 +102,7 @@ class TestExtension:
             ("calls.vcf.gz", FormatKind.VCF),
             ("regions.bed", FormatKind.BED),
             ("genes.gff3", FormatKind.GFF),
+            ("ref.fna.fai", FormatKind.FAI),
             ("mystery", None),
             ("archive.gz", None),
         ],
@@ -124,6 +133,15 @@ class TestMagic:
 
     def test_bed(self, tmp_path):
         assert detect(write(tmp_path, "x.bed", BED)).kind is FormatKind.BED
+
+    def test_fai_not_misdetected_as_bed(self, tmp_path):
+        """Regression for #48: a .fai's (length, offset) columns are both
+        int but not ordered like BED's (chromStart, chromEnd), so the
+        tabular sniffer must not call it BED. The .fai extension carries
+        the answer instead."""
+        r = detect(write(tmp_path, "ref.fna.fai", FAI))
+        assert r.kind is FormatKind.FAI
+        assert r.magic_says is None
 
     def test_gzipped_fastq(self, tmp_path):
         r = detect(write(tmp_path, "x.fastq.gz", gzip.compress(FASTQ)))

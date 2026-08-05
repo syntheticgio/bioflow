@@ -40,6 +40,13 @@ class FormatKind(StrEnum):
     # explorer showing "Text" beside a FASTA and a BAM says nothing, and
     # because a GFA has a viewer (Bandage) the way a .txt does not.
     GFA = "gfa"
+    # samtools FASTA index (`.fai`): name, length, offset, linebases, linewidth.
+    # Its own kind rather than BED or TEXT because it shares BED's shape
+    # (text, name, two ints) closely enough that the tabular sniffer used to
+    # mistake one for the other -- see the ordering check in
+    # `_sniff_tabular`. A wrong-file primer-BED picker is exactly the failure
+    # that mistake enabled (#48).
+    FAI = "fai"
     TEXT = "text"
     UNKNOWN = "unknown"
 

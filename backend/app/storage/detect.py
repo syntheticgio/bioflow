@@ -44,6 +44,7 @@ EXTENSION_MAP: dict[str, FormatKind] = {
     "gff3": FormatKind.GFF,
     "gtf": FormatKind.GTF,
     "gfa": FormatKind.GFA,
+    "fai": FormatKind.FAI,
     "txt": FormatKind.TEXT,
     "tsv": FormatKind.TEXT,
 }
@@ -245,7 +246,15 @@ def _is_sequence_field(value: str) -> bool:
 
 def _sniff_tabular(lines: list[str]) -> FormatKind | None:
     """Distinguish BED from GTF/GFF. Neither has magic bytes, so this is weak
-    evidence by design -- the extension gets a vote for these formats."""
+    evidence by design -- the extension gets a vote for these formats.
+
+    Column count and "two ints" alone are not enough: a samtools `.fai` index
+    (`name, length, offset, linebases, linewidth`) has 5 tab-separated columns
+    with both columns 1 and 2 numeric, purely by coincidence (#48). BED's
+    columns 1 and 2 are chromStart < chromEnd -- an ordered interval -- while a
+    `.fai`'s length and offset have no such relationship, so requiring the
+    ordering is a real positive signal rather than only a shape check.
+    """
     sample = lines[: min(5, len(lines))]
     for line in sample:
         cols = line.split("\t")
@@ -254,8 +263,8 @@ def _sniff_tabular(lines: list[str]) -> FormatKind | None:
         # GFF/GTF: 9 columns with numeric coordinates in 4 and 5.
         if len(cols) >= 8 and _is_int(cols[3]) and _is_int(cols[4]):
             return FormatKind.GFF
-        # BED: chrom, chromStart, chromEnd.
-        if not (_is_int(cols[1]) and _is_int(cols[2])):
+        # BED: chrom, chromStart, chromEnd, with chromStart < chromEnd.
+        if not (_is_int(cols[1]) and _is_int(cols[2]) and int(cols[1]) < int(cols[2])):
             return None
     return FormatKind.BED
 
