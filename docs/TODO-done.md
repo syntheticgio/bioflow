@@ -2474,3 +2474,101 @@ and reverting cleanly on cancel); the launcher's `StackToolsClient` and
 `pull_image` were each confirmed against the real main-stack API and a real
 (if harmless) image pull.
 
+
+## Observability in tools: progress reporting and resource transparency -- FIXED
+
+Raised: 2026-08-01, requested. Epic: [#6](https://github.com/syntheticgio/bioflow/issues/6), closed 2026-08-05.
+
+**2026-08-05: the model, transport, and persistence questions this entry
+raised are resolved.** Shipped in
+[#24](https://github.com/syntheticgio/bioflow/issues/24) (spec:
+`docs/superpowers/specs/2026-08-05-job-progress-model-design.md`, plan:
+`docs/superpowers/plans/2026-08-05-job-progress-model.md`). `JobProgress`
+(`app/models/job.py`) now carries a nullable `pct` (unknown vs. zero are
+distinct states), generic countable units (`units_done`/`units_total`/
+`unit_label`, for "N of M chunks" -- the exact question this entry asked),
+live current + running-peak CPU/RSS sampled at 1Hz
+(`queue/resource_sampler.py`, driven onto the progress path even for
+phase-only jobs, not merged into handler ticks), a derived `eta_seconds`
+(never persisted -- computed from `elapsed/pct` above a 5% floor, falling
+back to the prior-runs duration model), and optional `phase_index`/
+`phase_total` for tools with a closed phase list. Progress resets on
+requeue but keeps the previous attempt's high-water mark
+(`Job.last_attempt_progress`), so a job that dies repeatedly at the same
+phase says so. Transport is the `job.progress` SSE event
+(`api/v1/events.py`) plus the `GET /jobs`/`GET /jobs/{id}` API -- both of
+which already existed and needed widening, not inventing.
+
+**The architecture sketch above -- a separate observability container
+running its own pub/sub broker -- was rejected, not built.** Redis pub/sub
+plus the job document already is that broker: `queue/executor.py`'s
+throttled writer was already publishing progress before this entry was
+written up, the sketch simply predated it. A second broker would have been
+a container to run, a restart story to invent, and a failure mode to
+handle, to arrive at what was already running.
+
+**2026-08-05: per-tool instrumentation, this entry's other open half, also
+shipped** as four more children of epic #6, spec:
+`docs/superpowers/specs/2026-08-05-tool-progress-instrumentation-design.md`.
+
+- [#56](https://github.com/syntheticgio/bioflow/issues/56) -- a
+  `ProgressParser` protocol (`feed()`/`snapshot()`) plus `parser=` on
+  `run_subprocess`, replacing five duplicated, already-drifted `on_line`
+  closures. Added silence detection (`progress_parser_silent`, warned when
+  a run exceeds 120s with a parser attached that never published an
+  update) and a golden-log-fixture test convention
+  (`backend/tests/fixtures/tool_logs/`), captured from real jobs on this
+  stack rather than hand-written. Replaying a real Clair3 log through this
+  convention found and fixed a live bug in `VariantProgress`'s phase
+  patterns (the "merging" phase never matched Clair3's actual banner, and
+  per-contig summary lines caused end-of-run phase flicker) -- exactly the
+  class of bug the fixture convention exists to catch.
+- [#57](https://github.com/syntheticgio/bioflow/issues/57) -- minimap2
+  stderr parsing, the tool this entry named by name. Verifying against a
+  real captured log (per #56's convention) found the existing code comment
+  was wrong: it claimed minimap2 "says nothing comparable per-batch" to
+  bwa-mem2, which is itself the failure this entry's whole instrumentation
+  effort exists to prevent -- an unverified claim about tool output. minimap2
+  does emit a per-batch `mapped N sequences` line via the same logging
+  library bwa-mem2 uses, just at an internally-decided batch size.
+- [#58](https://github.com/syntheticgio/bioflow/issues/58) -- a derived,
+  never-persisted `pct_estimated` from the duration model
+  (`timing_service.pct_estimated()`), for tools with no countable unit at
+  all (Flye, bcftools, BUSCO). Answers this entry's "some have seconds-left
+  estimates, others only have bytes processed" directly: those with
+  nothing now get an elapsed/predicted estimate instead of a bare
+  indeterminate bar, capped below 100% and never fed back into
+  `job_timings`.
+- [#59](https://github.com/syntheticgio/bioflow/issues/59) -- rendered the
+  model across all three job-display surfaces (step N/M, units, live
+  CPU/peak resources), and fixed a real bug found in the process:
+  `ActivePipelineJobs.tsx` did `pct ?? 0`, collapsing "unknown progress"
+  into the same display as a measured zero.
+
+One narrow follow-up remains open and does not block this entry closing,
+since per-tool instrumentation is inherently open-ended rather than a
+closed set: `assembly_runner.py`'s Flye progress deliberately has no
+`phase_index`/`phase_total`, because Flye's own stage list is not closed --
+tracked as [#55](https://github.com/syntheticgio/bioflow/issues/55). Clair3
+chunk-level units and the remaining uninstrumented tools (standalone
+samtools, featureCounts, BUSCO/CheckM, `prefetch`) are tracked as
+[#60](https://github.com/syntheticgio/bioflow/issues/60).
+
+Original text follows, for context on what "N of M chunks" and "seconds-left
+estimates" referred to before the model existed to hold them.
+
+When a long-running job executes, the user sees "running" but not progress
+within it. For some tools we can parse output (`minimap2`, `bwa-mem2` write
+progress to stderr); others we would need to instrument the source or intercept
+signals. The goal is to answer questions like "% complete" or "N of M chunks
+processed" and surface that in the UI during job execution.
+
+**Architecture sketch:** A central observability server (in a container), running
+a pub/sub broker, where tools report their progress and the API queries it on
+demand. Tools could push to it either natively (if instrumented) or via wrapper
+scripts that parse output and emit metrics. This is a needs-brainstorming-and-spec
+decision; the pub/sub model is one option but may not be the right one.
+
+Consider what metadata each tool can realistically report (some have seconds-left
+estimates, others only have bytes processed), and whether the server should be
+persistent (survives container restart) or ephemeral.
