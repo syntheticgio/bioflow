@@ -178,6 +178,20 @@ class TestMagic:
         assert r.kind is FormatKind.BAM
         assert r.compression is Compression.BGZF
 
+    def test_bgzf_multi_member_fastq_sniffs_from_magic(self, tmp_path):
+        """Regression: a real bgzip'd file is many small BGZF members back to
+        back, and its first member alone (as real `bgzip` emits it) is far
+        short of a full FASTQ record. Decoding only the first member used to
+        leave too little for `_sniff_text` to recognize, silently downgrading
+        confidence from MAGIC to EXTENSION for every bgzip'd upload."""
+        record = FASTQ * 50  # several BGZF members once each is capped small
+        stream = b"".join(make_bgzf(record[i : i + 200]) for i in range(0, len(record), 200))
+        r = detect(write(tmp_path, "x.fastq.gz", stream))
+        assert r.kind is FormatKind.FASTQ
+        assert r.compression is Compression.BGZF
+        assert r.confidence is FormatConfidence.MAGIC
+        assert r.magic_says is FormatKind.FASTQ
+
 
 class TestDisagreement:
     def test_contents_win_but_extension_is_recorded(self, tmp_path):

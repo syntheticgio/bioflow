@@ -5,7 +5,6 @@ Both signals are recorded rather than merged into one answer. A file named
 the user is better served by seeing the disagreement than by a silent guess.
 """
 
-import gzip
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -119,17 +118,33 @@ def _decompress_head(head: bytes, compression: Compression) -> bytes:
     failure. Note zlib.error is not an OSError subclass -- catching only OSError
     lets a corrupt stream escape and turns an unreadable file into a retrying,
     never-succeeding ingest job.
+
+    BGZF (and any multi-member gzip stream) packs many independent members back
+    to back -- a real bgzip'd file's first member is a ~66-byte header block,
+    far short of one line of sniffable text. Decoding only the first member (as
+    a single `gzip.decompress` or `zlib.decompressobj` call does) yields too
+    little for `_sniff_text` to recognize anything, so every member available
+    within `head` is decoded and concatenated.
     """
     import zlib
 
     if compression in (Compression.GZIP, Compression.BGZF):
-        try:
-            return gzip.decompress(head)
-        except (OSError, EOFError, zlib.error):
+        out = bytearray()
+        data = head
+        while data:
+            decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
             try:
-                return zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(head)
-            except (zlib.error, OSError, EOFError):
-                return b""
+                out += decompressor.decompress(data)
+            except zlib.error:
+                break
+            if not decompressor.eof:
+                # Final member truncated mid-stream -- expected for a prefix.
+                break
+            remaining = decompressor.unused_data
+            if not remaining or remaining == data:
+                break
+            data = remaining
+        return bytes(out)
     if compression is Compression.NONE:
         return head
     return b""  # zstd/bzip2 heads are not sniffed in this phase
