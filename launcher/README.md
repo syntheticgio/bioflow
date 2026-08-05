@@ -21,6 +21,40 @@ avoid.
 `docker-compose.override.yml` is not bundled — it is the local hot-reload dev
 setup and is never shipped to installed users.
 
+## Prerequisites
+
+Node (any recent LTS) plus a Rust toolchain via [rustup](https://rustup.rs):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Tauri v2 also needs platform-specific system libraries to *build* against —
+having the runtime libraries already installed is not enough, since building
+needs their `-dev`/headers packages too.
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+  libayatana-appindicator3-dev librsvg2-dev build-essential
+```
+
+A GUI session (X11 or Wayland) is required to run the app, even in dev mode
+— there is no headless mode.
+
+**macOS:** Xcode Command Line Tools (`xcode-select --install`) — no extra
+system packages beyond that.
+
+**Windows:** the [Microsoft C++ Build
+Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and the
+WebView2 runtime (preinstalled on current Windows 10/11).
+
+See [Tauri's own prerequisites
+guide](https://v2.tauri.app/start/prerequisites/) if a package name above has
+moved on for a given distro version.
+
 ## Development
 
 ```bash
@@ -28,9 +62,48 @@ npm install
 npm run tauri dev
 ```
 
+## Building a distributable bundle by hand
+
+`npm run tauri dev` is enough to exercise the app, but does not produce an
+installable artifact. To build one for the platform you're running on:
+
+```bash
+npm install
+npm run tauri build
+```
+
+This runs the full release build (`cargo build --release` plus the Vite
+production build) and then bundles it per `src-tauri/tauri.conf.json`'s
+`bundle.targets: "all"` — an AppImage/`.deb` on Linux, a signed-or-not `.app`
+and `.dmg` on macOS, an NSIS/MSI installer on Windows. Artifacts land under
+`src-tauri/target/release/bundle/`.
+
+This is a **local, unsigned build for testing on the machine that built it**,
+not the distribution story: macOS notarization, Windows code signing, and
+hosting a download for end users are still open work, tracked in
+[#39](https://github.com/syntheticgio/bioflow/issues/39). There is also no
+CI job that does this automatically yet — every bundle today is built by a
+person, by hand, on their own machine.
+
+A hand-built bundle only reaches as far as its own OS and CPU architecture.
+It bundles `docker-compose.yml` verbatim (see above), so it needs the
+published container images for whatever architecture it runs on to actually
+start a stack — see the root `docker-compose.yml`'s `image:` references and
+[#46](https://github.com/syntheticgio/bioflow/issues/46) for which
+architectures are published.
+
 ## Tests
 
 ```bash
 npm test              # vitest, UI-side pure logic
 cargo test             # from src-tauri/, the Docker interface and state machine
 ```
+
+`npm test` currently reports "No test files found" — there are no UI-side
+unit tests yet, only the Rust-side coverage in `src-tauri/`. That command is
+listed for when UI tests are added, not because any exist today.
+
+`cargo test` includes one `#[ignore]`d test
+(`ghcr_client_reads_a_real_digest_from_a_public_image`) that hits the real
+GHCR registry over the network; run `cargo test -- --ignored` to include it
+deliberately, separately from the fast default run.
