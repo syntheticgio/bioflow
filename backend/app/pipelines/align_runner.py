@@ -41,9 +41,19 @@ AlignParams = Minimap2Params
 
 # bwa-mem2 reports throughput on stderr as it goes:
 #   [M::mem_process_seqs] Processed 80000 reads in 12.345 CPU sec
-# minimap2 says nothing comparable per-batch, so a minimap2 run reports phase
-# only. Better an honest indeterminate bar than an invented one.
 _PROCESSED_RE = re.compile(r"Processed\s+(\d+)\s+reads", re.IGNORECASE)
+
+# minimap2 reports the same shape under a different name and message, one
+# line per internal batch:
+#   [M::worker_pipeline::13.642*3.91] mapped 166776 sequences
+# Confirmed against a real 2.27 run (backend/tests/fixtures/tool_logs/
+# minimap2-2.27.log) rather than assumed from the format alone -- an earlier
+# version of this comment claimed minimap2 "says nothing comparable
+# per-batch", which turned out to be wrong: it does, just at a batch size
+# minimap2 decides internally (observed here as three batches for 400K
+# reads, not the fixed 80K bwa-mem2 uses), so the count is still a per-batch
+# figure to sum rather than a running total, exactly like _PROCESSED_RE.
+_MAPPED_RE = re.compile(r"worker_pipeline.*mapped\s+(\d+)\s+sequences", re.IGNORECASE)
 
 # samtools sort announces its merge phase, which is the tail of the run.
 _MERGING_RE = re.compile(r"merging from \d+ files", re.IGNORECASE)
@@ -713,11 +723,12 @@ class AlignProgress:
             self.phase = "sorting"
             return True
 
-        match = _PROCESSED_RE.search(line)
+        match = _PROCESSED_RE.search(line) or _MAPPED_RE.search(line)
         if not match:
             return False
 
-        # Cumulative, not a running total: bwa-mem2 reports per batch.
+        # Cumulative, not a running total: both bwa-mem2 and minimap2 report
+        # a per-batch count, not a running total.
         self.processed += int(match.group(1))
         return True
 

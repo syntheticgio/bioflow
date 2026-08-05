@@ -1,0 +1,13 @@
+[M::mm_idx_gen::0.032*1.02] collected minimizers
+[M::mm_idx_gen::0.040*1.57] sorted minimizers
+[M::main::0.040*1.57] loaded/built the index for 1 target sequence(s)
+[M::mm_mapopt_update::0.044*1.53] mid_occ = 10
+[M::mm_idx_stat] kmer size: 15; skip: 10; is_hpc: 0; #seq: 1
+[M::mm_idx_stat::0.047*1.49] distinct minimizers: 372762 (99.87% are singletons); average occurrences: 1.001; average spacing: 5.358; total length: 2000000
+[M::worker_pipeline::13.514*3.90] mapped 166776 sequences
+[M::worker_pipeline::26.460*3.97] mapped 166833 sequences
+[M::worker_pipeline::31.202*3.87] mapped 66391 sequences
+[M::main] Version: 2.27-r1193
+[M::main] CMD: minimap2 -a -x map-ont -t 4 -R @RG\tID:test\tSM:sample ref.fa reads_big.fq
+[M::main] Real time: 31.206 sec; CPU: 120.662 sec; Peak RSS: 1.948 GB
+[bam_sort_core] merging from 2 files and 3 in-memory blocks...
