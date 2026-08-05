@@ -11,6 +11,36 @@ presented as fact; the caller falls back to the platform default.
 
 from app.pipelines.align_runner import ReadChemistry
 
+# SRA `PLATFORM` tag name <-> the short vocabulary this module and
+# `sam_platform` speak (ONT/PACBIO). The single source for both directions --
+# previously `_QC_STATS_PLATFORM` and `_SAM_TO_SRA_PLATFORM` held each other's
+# inverse independently in two different files (pipeline_handlers.py and
+# pipeline_service.py), and a third file (reference_assembly.py) carried a
+# third copy of just the SRA-side keys. Adding a long-read platform meant
+# editing three places by hand with no error if you missed two of them; one of
+# those places also had a silent `.get(platform, platform)` fall-through that
+# passed an unmapped SRA tag straight into `infer_chemistry`, which returns
+# UNKNOWN with a plausible-looking reason rather than surfacing the miss.
+LONG_READ_PLATFORMS: dict[str, str] = {
+    "OXFORD_NANOPORE": "ONT",
+    "PACBIO_SMRT": "PACBIO",
+}
+
+# The inverse of LONG_READ_PLATFORMS, derived rather than hand-written so the
+# two directions cannot drift relative to each other.
+SHORT_TO_SRA_PLATFORM: dict[str, str] = {v: k for k, v in LONG_READ_PLATFORMS.items()}
+
+# SRA PLATFORM tags that take the short-read QC path by default -- i.e. never
+# reach LONG_READ_PLATFORMS. Inclusion rule: a tag belongs here if and only if
+# its instrument family always produces short reads; SRA's PLATFORM vocabulary
+# has further values (e.g. CAPILLARY) that are neither long- nor
+# short-read-affirming and are deliberately left off, falling to the
+# chemistry tie-break in `reference_assembly.is_short_read` instead of being
+# answered directly here.
+SHORT_READ_PLATFORMS: frozenset[str] = frozenset(
+    {"ILLUMINA", "BGISEQ", "DNBSEQ", "ELEMENT", "ULTIMA", "SINGULAR", "ION_TORRENT"}
+)
+
 # Below this, "long read" is not a credible read of the data regardless of
 # platform -- more likely a mislabelled short-read file than genuine PacBio
 # or ONT output at an unusual length.

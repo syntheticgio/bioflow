@@ -49,6 +49,7 @@ from app.pipelines import (
     lineage_inference,
     pairing,
     polypolish_runner,
+    qc_stats,
     ragtag_runner,
     resource_estimator,
     tools,
@@ -356,8 +357,12 @@ def _trim_inputs(reads: DataObject, mate: DataObject | None) -> list[RunInput]:
 
 # SAM platform codes to the SRA platform names run_qc dispatches on. Only the
 # long-read pair needs mapping; everything else takes the short-read path by
-# default, so listing it would add nothing.
-_SAM_TO_SRA_PLATFORM = {"ONT": "OXFORD_NANOPORE", "PACBIO": "PACBIO_SMRT"}
+# default, so listing it would add nothing. Derived from
+# qc_stats.LONG_READ_PLATFORMS rather than hand-written as its own inverse --
+# this dict and qc_stats._QC_STATS_PLATFORM (now qc_stats.LONG_READ_PLATFORMS
+# itself) used to be independently maintained inverses of each other in two
+# different files.
+_SAM_TO_SRA_PLATFORM = qc_stats.SHORT_TO_SRA_PLATFORM
 
 
 def _qc_platform(obj: DataObject) -> str:
@@ -379,7 +384,7 @@ def _qc_platform(obj: DataObject) -> str:
     return _SAM_TO_SRA_PLATFORM.get(sam, "ILLUMINA")
 
 
-_LONG_READ_QC_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
+_LONG_READ_QC_PLATFORMS = frozenset(qc_stats.LONG_READ_PLATFORMS)
 
 
 def is_long_read(obj: DataObject) -> bool:
