@@ -86,9 +86,24 @@ The image half of that blocker is now gone.
 rather than building from source, and a directory holding nothing but
 `docker-compose.yml` and `.env` was verified to start all five services and
 serve the built app. The launcher can therefore start a real stack on Apple
-Silicon; `linux/amd64` images remain
-[#46](https://github.com/syntheticgio/bioflow/issues/46), so other
-architectures still cannot.
+Silicon. As of 2026-08-05 `linux/amd64` is published too: both `:latest` and
+`:0.1.0` are multi-arch indexes carrying `linux/amd64` alongside the original
+`linux/arm64`, built natively on an amd64 Linux box rather than under QEMU.
+The amd64 backend built in minutes, not hours, exactly as
+[#46](https://github.com/syntheticgio/bioflow/issues/46) predicted — the
+`TARGETARCH` guard in `backend/Dockerfile` skips the sse2neon source compile
+and takes upstream's prebuilt `x64-linux` bwa-mem2 tarball instead.
+#46 nonetheless stays open on its third acceptance criterion: no amd64
+machine has run the launcher's *install flow* end to end. What was verified
+is the images, not the launcher — the five tool probes (`fastp`,
+`bwa-mem2`, `run_clair3.sh`, `compleasm`, `datasets`), an import check of
+the baked-in `app` package, `nginx` as the web image's `Cmd` rather than the
+dev stage's `npm run dev`, and anonymous pull of both tags.
+One regression to be aware of: `docker buildx imagetools create` rebuilds an
+index from only the sources named, so the `unknown/unknown` provenance
+attestation the arm64-only indexes carried is gone. Nothing depends on it;
+[#38](https://github.com/syntheticgio/bioflow/issues/38) should restore it
+with `--provenance=true` when CI takes over the build.
 Verification so far is macOS-only (`cargo test`, `cargo clippy
 --all-targets`, `npm run lint`, and a full `tauri build --bundles app`
 launching and staying alive) — #28's "builds and runs on macOS, Windows, and
