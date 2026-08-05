@@ -28,7 +28,12 @@ async def _db():
     client.close()
 
 
-async def _obj(name: str, project_id="507f1f77bcf86cd799439011") -> DataObject:
+async def _obj(
+    name: str,
+    project_id="507f1f77bcf86cd799439011",
+    facts: dict | None = None,
+    metadata: dict | None = None,
+) -> DataObject:
     """A ready FASTQ object carrying just enough to be linkable.
 
     `owner` is inherited from TimestampedDocument and defaults to "local", so it
@@ -39,6 +44,8 @@ async def _obj(name: str, project_id="507f1f77bcf86cd799439011") -> DataObject:
         name=name,
         size=1024,
         status=ObjectStatus.READY,
+        facts=facts or {},
+        metadata=metadata or {},
     )
     await o.insert()
     return o
@@ -91,3 +98,60 @@ class TestLinkMate:
         r1, r2 = await DataObject.get(r1.id), await DataObject.get(r2.id)
         assert r1.mate_object_id is not None
         assert {r1.read_number, r2.read_number} == {1, 2}
+
+
+class TestLinkMateVerdict:
+    async def test_single_end_layout_is_not_linked(self, _db):
+        a = await _obj("foo_1.fastq", metadata={"read_type": "single-end"})
+        b = await _obj("foo_2.fastq", metadata={"read_type": "single-end"})
+
+        await _link_mate(b)
+
+        a, b = await DataObject.get(a.id), await DataObject.get(b.id)
+        assert a.mate_object_id is None
+        assert b.mate_object_id is None
+
+    async def test_conflicting_read_ids_are_not_linked(self, _db):
+        a = await _obj("foo_1.fastq", facts={"first_read_ids": ["ERR1.1 length=150"]})
+        b = await _obj("foo_2.fastq", facts={"first_read_ids": ["SRR2.1 length=100"]})
+
+        await _link_mate(b)
+
+        a, b = await DataObject.get(a.id), await DataObject.get(b.id)
+        assert a.mate_object_id is None
+        assert b.mate_object_id is None
+
+    async def test_real_shaped_valid_pair_still_links(self, _db):
+        a = await _obj(
+            "ERR17609896_1.fastq",
+            facts={
+                "first_read_ids": [
+                    "ERR17609896.1 LH00201:115:22JLCTLT4:1:1101:22244:1112 length=150",
+                ]
+            },
+        )
+        b = await _obj(
+            "ERR17609896_2.fastq",
+            facts={
+                "first_read_ids": [
+                    "ERR17609896.1 LH00201:115:22JLCTLT4:1:1101:22244:1112 length=149",
+                ]
+            },
+        )
+
+        await _link_mate(b)
+
+        a, b = await DataObject.get(a.id), await DataObject.get(b.id)
+        assert a.mate_object_id == b.id
+        assert b.mate_object_id == a.id
+
+    async def test_both_signals_absent_still_links(self, _db):
+        """The fast path: unchanged behavior when neither signal exists."""
+        a = await _obj("sample_R1.fastq.gz")
+        b = await _obj("sample_R2.fastq.gz")
+
+        await _link_mate(b)
+
+        a, b = await DataObject.get(a.id), await DataObject.get(b.id)
+        assert a.mate_object_id == b.id
+        assert b.mate_object_id == a.id

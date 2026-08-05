@@ -269,7 +269,23 @@ async def _link_mate(obj: DataObject) -> None:
         {"user_touched": {"$ne": "mate"}},
     ).to_list()
 
-    matches = [c for c in candidates if pairing.is_mate_of(obj.name, c.name)]
+    obj_input = pairing.PairInput(name=obj.name, facts=obj.facts, metadata=obj.metadata)
+    matches = []
+    for c in candidates:
+        c_input = pairing.PairInput(name=c.name, facts=c.facts, metadata=c.metadata)
+        v = pairing.verdict(obj_input, c_input)
+        if v in (pairing.Verdict.CONFIRMED, pairing.Verdict.NAME_ONLY):
+            matches.append(c)
+        elif v in (pairing.Verdict.REJECTED_LAYOUT, pairing.Verdict.REJECTED_READ_IDS):
+            log.info(
+                "mate_rejected",
+                object_id=str(obj.id),
+                candidate_id=str(c.id),
+                name=obj.name,
+                candidate_name=c.name,
+                verdict=v.value,
+            )
+
     if len(matches) != 1:
         # Zero is the common case (the mate has not been uploaded, or the file
         # is single-end). More than one is genuinely ambiguous -- two files
