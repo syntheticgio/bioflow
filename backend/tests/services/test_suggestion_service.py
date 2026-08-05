@@ -123,6 +123,10 @@ def _fake_obj(
         status=status,
         project_id=project_id,
         owner="local",
+        # Read by resolve_alignment_target_for_bam's provenance walk, which
+        # suggestions_for now calls for every BAM/SAM/CRAM to build the
+        # consensus card's alignment_target.
+        derived_from=[],
     )
 
 
@@ -987,7 +991,13 @@ class TestSuggestionsFor:
     async def test_a_bam_gets_the_variants_and_quantify_cards(self):
         with stub_db(chemistry=align_runner.ReadChemistry.SHORT):
             cards = await suggestions_for(_bam())
-        assert [c["kind"] for c in cards] == ["variants", "quantify"]
+        # Also gets a consensus card (unavailable: _bam()'s derived_from is
+        # empty, so resolve_alignment_target_for_bam finds no target) --
+        # asserting the two named cards are present rather than an exact
+        # list, since a fixture BAM with no provenance is exactly the case
+        # the consensus card exists to report as unavailable, not omit.
+        assert "variants" in [c["kind"] for c in cards]
+        assert "quantify" in [c["kind"] for c in cards]
 
     async def test_a_vcf_gets_only_the_annotate_card(self):
         inputs = pipeline_service.AnnotationInputs(
@@ -1239,10 +1249,11 @@ class TestSuggestionsEndpoint:
                 "/pipelines/suggestions/000000000000000000000001"
             )
         assert resp.status_code == 200
-        assert [c["kind"] for c in resp.json()["suggestions"]] == [
-            "variants",
-            "quantify",
-        ]
+        # Not an exact list -- see test_a_bam_gets_the_variants_and_quantify_cards
+        # for why _bam() also yields an (unavailable) consensus card now.
+        kinds = [c["kind"] for c in resp.json()["suggestions"]]
+        assert "variants" in kinds
+        assert "quantify" in kinds
 
 
 @contextmanager

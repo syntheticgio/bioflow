@@ -70,6 +70,7 @@ RUN apt-get update \
         subread \
         flye \
         hmmer \
+        ivar \
     && rm -rf /var/lib/apt/lists/*
 # hmmer is compleasm's dependency, not a standalone BioFlow tool -- see the
 # compleasm install below and its own comment for why miniprot and compleasm

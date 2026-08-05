@@ -19,6 +19,7 @@ def _object(
     status=ObjectStatus.READY,
     project_id=None,
     derived_from=None,
+    facts=None,
 ):
     return SimpleNamespace(
         id=PydanticObjectId(),
@@ -28,6 +29,7 @@ def _object(
         status=status,
         project_id=project_id or PydanticObjectId(),
         derived_from=derived_from or [],
+        facts=facts or {},
     )
 
 
@@ -318,3 +320,76 @@ class TestOwnerScopedAlignmentValidation:
             )
 
         assert resolved is bam
+
+
+class TestPrimerBedValidation:
+    """check_primer_bed: iVar's own primer-scheme input.
+
+    Contigs are compared against reference_names, the fact both BED and FASTA
+    ingest already populate (storage/parsers.py's _parse_tabular and
+    _parse_fasta) -- so this check costs no new parsing.
+    """
+
+    def _reference(self, *, names=("MN908947.3",)):
+        return _object(
+            name="ref.fasta",
+            kind=FormatKind.FASTA,
+            role=ObjectRole.REFERENCE,
+            facts={"reference_names": list(names)},
+        )
+
+    def _primer_bed(self, *, names=("MN908947.3",), column_counts=(6,)):
+        return _object(
+            name="primers.bed",
+            kind=FormatKind.BED,
+            role=None,
+            facts={
+                "reference_names": list(names),
+                "column_counts": list(column_counts),
+            },
+        )
+
+    def test_accepts_bed_whose_contigs_intersect_the_reference(self):
+        reference = self._reference(names=("MN908947.3",))
+        bed = self._primer_bed(names=("MN908947.3",))
+        assert reference_assembly.check_primer_bed(bed, reference) is bed
+
+    def test_rejects_bed_whose_contigs_are_disjoint_from_the_reference(self):
+        reference = self._reference(names=("MN908947.3",))
+        bed = self._primer_bed(names=("NC_045512.2",))
+        with pytest.raises(ValidationError, match="no contigs in common"):
+            reference_assembly.check_primer_bed(bed, reference)
+
+    def test_rejects_non_bed(self):
+        reference = self._reference()
+        obj = _object(name="notes.txt", kind=FormatKind.TEXT, role=None)
+        with pytest.raises(ValidationError, match="not a BED"):
+            reference_assembly.check_primer_bed(obj, reference)
+
+    def test_rejects_a_fai_masquerading_as_bed(self):
+        """The bug found while scoping this slice (GitHub #48): a samtools
+        .fai index sniffs as BED (name + two integer columns) and its first
+        column literally *is* the reference's contig names, so it would pass
+        a contig-only check. Real BED has >= 3 columns per iVar's own primer
+        scheme spec (chrom, start, end, name, ...); a .fai has 5 columns but
+        they are name/length/offset/linebases/linewidth, not coordinates --
+        column count alone can't tell them apart from real BED, so this
+        assertion is about the shape check catching what it can, not a claim
+        that it disambiguates every case.
+        """
+        reference = self._reference(names=("chr1",))
+        fai_as_bed = self._primer_bed(names=("chr1",), column_counts=(2,))
+        with pytest.raises(ValidationError, match="not a valid BED"):
+            reference_assembly.check_primer_bed(fai_as_bed, reference)
+
+    def test_rejects_not_ready(self):
+        reference = self._reference()
+        bed = _object(
+            name="primers.bed",
+            kind=FormatKind.BED,
+            role=None,
+            status=ObjectStatus.HASHING,
+            facts={"reference_names": ["MN908947.3"], "column_counts": [6]},
+        )
+        with pytest.raises(ValidationError, match="not ready"):
+            reference_assembly.check_primer_bed(bed, reference)

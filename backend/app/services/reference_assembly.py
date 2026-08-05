@@ -147,6 +147,57 @@ async def _alignment_parent_lookup(
     return parents
 
 
+def check_primer_bed(obj: DataObject, reference: DataObject) -> DataObject:
+    """Validate a primer scheme BED against the reference it will trim.
+
+    Two checks, not one. Column shape catches files that are not BED at all
+    -- a samtools .fai index sniffs as BED (name plus two integers) and its
+    first column *is* a reference's contig names verbatim, so contig overlap
+    alone would pass it (see #48). Real BED carries at least 3 columns
+    (chrom, chromStart, chromEnd); iVar's own primer scheme format wants 6.
+    Requiring at least 3 here still rejects a bare 2-column .fai without
+    assuming callers always supply a full 6-column iVar-format BED.
+
+    Contig overlap catches the case shape alone cannot: a well-formed BED for
+    the wrong organism. iVar's own behaviour when primer contigs don't match
+    the reference is to trim nothing and exit 0, producing an untrimmed
+    consensus that looks like a successful trimmed one -- so this is rejected
+    outright rather than warned about.
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready (status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind is not FormatKind.BED:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not a BED primer scheme",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+    column_counts = (obj.facts or {}).get("column_counts") or []
+    if column_counts and max(column_counts) < 3:
+        raise ValidationError(
+            f"{obj.name!r} is not a valid BED primer scheme "
+            f"({max(column_counts)} columns; BED needs at least 3)",
+            details={"object_id": str(obj.id), "column_counts": column_counts},
+        )
+
+    bed_contigs = set((obj.facts or {}).get("reference_names") or [])
+    ref_contigs = set((reference.facts or {}).get("reference_names") or [])
+    if bed_contigs and ref_contigs and bed_contigs.isdisjoint(ref_contigs):
+        raise ValidationError(
+            f"{obj.name!r} has no contigs in common with {reference.name!r}",
+            details={
+                "object_id": str(obj.id),
+                "reference_id": str(reference.id),
+                "bed_contigs": sorted(bed_contigs)[:10],
+                "reference_contigs": sorted(ref_contigs)[:10],
+            },
+        )
+    return obj
+
+
 def check_bam_aligned_to(
     bam: DataObject, target: DataObject, *, object_lookup
 ) -> DataObject:

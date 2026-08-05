@@ -491,6 +491,14 @@ def compleasm() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def ivar() -> Tool:
+    # `version`, not `--version`: iVar takes it as a subcommand. Verified
+    # against a real installed 1.4.4 binary on 2026-08-05 -- passing
+    # --version exits non-zero and would read a working binary as absent.
+    return _probe("ivar", settings.ivar_path, ["version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -555,6 +563,7 @@ def all_tools() -> list[Tool]:
         flye(),
         miniprot(),
         compleasm(),
+        ivar(),
         fasterq_dump(),
         prefetch(),
         datasets(),
@@ -1261,6 +1270,49 @@ TOOL_META: dict[str, ToolMeta] = {
             "from one version is not comparable to a score from another."
         ),
     ),
+    "ivar": ToolMeta(
+        pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
+        one_liner="Amplicon primer trimming and viral consensus calling",
+        summary=(
+            "Trims amplicon primer sequences from aligned reads and calls a "
+            "consensus sequence from the resulting pileup. Built for viral "
+            "amplicon protocols such as ARTIC/PrimalSeq, where primer bases "
+            "are synthetic rather than sample sequence and would otherwise "
+            "manufacture false reference-matching calls at amplicon overlaps."
+        ),
+        strengths=(
+            "Primer-aware trimming from a BED scheme, not just adapter trimming",
+            "Consensus calling with explicit quality, frequency and depth "
+            "thresholds recorded per run",
+            "Purpose-built for viral/amplicon data rather than adapted "
+            "general-purpose variant-caller output",
+        ),
+        homepage="https://andersen-lab.github.io/ivar/html/",
+        repository="https://github.com/andersen-lab/ivar",
+        citation=(
+            "Grubaugh ND, Gangavarapu K, Quick J, et al. An amplicon-based "
+            "sequencing framework for accurately measuring intrahost virus "
+            "diversity using PrimalSeq and iVar. Genome Biology. "
+            "2019;20:8."
+        ),
+        citation_url="https://doi.org/10.1186/s13059-018-1618-7",
+        # From Debian's /usr/share/doc/ivar/copyright for ivar
+        # 1.4.4+dfsg-1, the build actually in this image (verified
+        # 2026-08-05): "Copyright: 2018-2020 Nathan D. Grubaugh, Karthik
+        # Gangavarapu / License: GPL-3".
+        license="GPL-3.0",
+        usage=(
+            "Trims primer sequences from a BAM aligned against a viral or "
+            "amplicon reference using a user-supplied primer BED, then calls "
+            "a consensus sequence from the trimmed, sorted pileup. Primer "
+            "trimming is skipped -- not refused -- when no primer BED is "
+            "supplied, for non-amplicon viral alignments such as "
+            "metagenomic or bait-capture data. The consensus is stored as a "
+            "new reference object, with the quality/frequency/depth "
+            "thresholds and N-count recorded as facts, since a consensus is "
+            "meaningless without knowing what thresholds produced it."
+        ),
+    ),
     "featurecounts": ToolMeta(
         pipelines=(PipelineType.EXPRESSION,),
         one_liner="Counts reads per gene from an aligned BAM",
@@ -1425,6 +1477,7 @@ def reset_cache() -> None:
     flye.cache_clear()
     miniprot.cache_clear()
     compleasm.cache_clear()
+    ivar.cache_clear()
     fasterq_dump.cache_clear()
     prefetch.cache_clear()
     datasets.cache_clear()

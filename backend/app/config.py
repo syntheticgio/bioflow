@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # exact name rather than needing a second setting passed through to it.
     compleasm_path: str = "compleasm"
     miniprot_path: str = "miniprot"
+    # Amplicon/viral primer trimming and consensus calling. A Debian trixie
+    # package (verified 2026-08-05: apt-cache policy ivar -> 1.4.4+dfsg-1,
+    # after apt-get update -- checking without it always reports no
+    # candidate regardless of what the repo actually carries).
+    ivar_path: str = "ivar"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

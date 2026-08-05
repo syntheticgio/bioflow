@@ -1431,6 +1431,67 @@ async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
+    """Turn a finished iVar consensus run into a new reference object.
+
+    Mirrors `_apply_call_variants`: the consensus descends from both the
+    BAM and the reference it was called against, since a consensus is a
+    claim about a specific reference and means nothing without knowing
+    which one. Role REFERENCE, not a new role, for the same reason the
+    foundation (#21) gives Pilon and RagTag's outputs: a consensus is a
+    sequence others will align against, addressable and auditable through
+    the same object model de novo assembly already uses.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    bam_id = result.get("bam_object_id")
+    reference_id = result.get("reference_object_id")
+    if not output or not bam_id:
+        return
+
+    bam = await DataObject.get(PydanticObjectId(bam_id))
+    if bam is None:
+        log.warning("consensus_parent_missing", object_id=bam_id)
+        return
+
+    parents = [bam.id]
+    if reference_id:
+        parents.append(PydanticObjectId(reference_id))
+
+    job_id = result.get("job_id")
+    facts = result.get("facts") or {}
+    try:
+        consensus = await object_service.ingest_local_file(
+            owner=bam.owner,
+            project_id=bam.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.REFERENCE,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=facts,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("consensus_ingest_failed", object_id=bam_id, error=str(e))
+        return
+
+    log.info(
+        "consensus_applied",
+        bam_id=bam_id,
+        consensus_id=str(consensus.id),
+        n_count=facts.get("consensus_n_count"),
+        primers_trimmed=facts.get("consensus_primers_trimmed"),
+    )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(
+                run_id, [consensus.id], owner=consensus.owner
+            )
+
+
 def variant_provenance(result: dict) -> dict:
     """The facts a variant calling run stamps onto the VCF it produced.
 
@@ -1764,4 +1825,5 @@ _APPLIERS = {
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
+    "consensus_from_alignment": _apply_consensus_from_alignment,
 }

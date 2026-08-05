@@ -146,6 +146,12 @@ class RunJobRole(StrEnum):
     # Likewise not optional: an assembly run whose assembly failed produced
     # nothing.
     ASSEMBLE = "assemble"
+    # Named for the action (consensus calling), not the pipeline family
+    # (reference_assembly) -- matching how ALIGN and TRIM are named for
+    # actions rather than QC's or ASSEMBLE's own PipelineType. The whole
+    # point of its run, same reasoning as ASSEMBLE: a consensus run whose
+    # consensus failed produced nothing.
+    CONSENSUS = "consensus"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive
