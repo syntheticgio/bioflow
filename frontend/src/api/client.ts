@@ -433,6 +433,21 @@ export const api = {
 
   pipelineTools: () => request<PipelineTools>("/pipelines/tools"),
 
+  /** Queue a pull of an on-demand tool's image. Returns the existing job,
+   *  not a duplicate, if one is already in flight for this tool. */
+  installTool: (name: string) =>
+    request<JobSummary>(`/pipelines/tools/${encodeURIComponent(name)}/install`, {
+      method: "POST",
+    }),
+
+  /** Queue removal of an on-demand tool's image. Refused server-side for a
+   *  bundled tool, one that was never installed, or one a running job is
+   *  currently using. */
+  uninstallTool: (name: string) =>
+    request<JobSummary>(`/pipelines/tools/${encodeURIComponent(name)}/install`, {
+      method: "DELETE",
+    }),
+
   trimDefaults: (tool: string = "fastp") =>
     request<TrimDefaults>(`/pipelines/defaults?tool=${encodeURIComponent(tool)}`),
 

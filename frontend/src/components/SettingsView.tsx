@@ -7,6 +7,7 @@ import { notify } from "../stores/messageStore";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { ProviderForm } from "./ProviderForm";
 import { ProviderList } from "./ProviderList";
+import { SettingsNav } from "./SettingsNav";
 import { TaskRoutingPanel } from "./TaskRoutingPanel";
 
 /**
@@ -16,6 +17,10 @@ import { TaskRoutingPanel } from "./TaskRoutingPanel";
  * shows whichever is selected. Because routing lives behind a click here, each
  * provider's detail carries a "Used by" line -- otherwise "what is actually
  * using Anthropic?" would be unanswerable while looking at Anthropic.
+ *
+ * `SettingsNav` sits above this rather than wrapping it, so `/settings/tools`
+ * (SettingsTools.tsx) can render beside the same section rail without also
+ * carrying this component's AI-specific queries and state.
  */
 export function SettingsView() {
   const [selected, setSelected] = useState<string>("routing");
@@ -25,10 +30,20 @@ export function SettingsView() {
   const routing = useQuery({ queryKey: ["ai", "routing"], queryFn: api.aiRouting });
 
   if (providers.isLoading || routing.isLoading) {
-    return <div className="settings-page">Loading…</div>;
+    return (
+      <div className="settings-page">
+        <SettingsNav />
+        <div>Loading…</div>
+      </div>
+    );
   }
   if (providers.isError || routing.isError) {
-    return <div className="settings-page">Could not load settings.</div>;
+    return (
+      <div className="settings-page">
+        <SettingsNav />
+        <div>Could not load settings.</div>
+      </div>
+    );
   }
 
   const list = providers.data ?? [];
@@ -36,6 +51,7 @@ export function SettingsView() {
 
   return (
     <div className="settings-page">
+      <SettingsNav />
       <h1>Settings · AI</h1>
 
       <div className="settings-body">
