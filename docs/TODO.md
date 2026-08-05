@@ -60,10 +60,21 @@ the recipient a working file.
 merge `2a855be`): a `Share` model, `share_service`, and `/api/v1/shares`,
 including the materialization cascade that re-points a copied sidecar's
 `sidecar_of` and a copied read pair's `mate_object_id` at the new copies
-rather than leaving them dangling into the sender's partition. Backend only —
-no UI yet. The entry stays open for the two remaining slices:
-[#50](https://github.com/syntheticgio/bioflow/issues/50) (recipient
-visibility — the "Shared with me" project and the offer/accept UI) and
+rather than leaving them dangling into the sender's partition.
+
+**Recipient visibility shipped** 2026-08-05 in
+[#50](https://github.com/syntheticgio/bioflow/issues/50) (commit `f0adef0`):
+the share dialog off `ManageFile`, the `/shares` inbox/outbox route, an
+unread-count badge on the header profile menu, and the two backend gaps that
+made the UI possible at all — `ShareOut` resolving `from_owner`/`to_owner`
+into a username server-side (the adopted profile's owner string is the
+literal `"local"`, which matches no profile id in a client-side join, so the
+resolver is keyed on `owner_id()` instead), and `share.accepted`/
+`share.declined` events so an outbox does not sit on "offered" after being
+answered. Verified end to end in a browser with two real profiles, including
+offering *as* the adopted profile to confirm the sender resolves correctly.
+
+The entry stays open for the last slice:
 [#51](https://github.com/syntheticgio/bioflow/issues/51) (delete/GC — mostly
 tests, plus copying report directories at share time since they are keyed by
 object id, not digest), under [epic #3](https://github.com/syntheticgio/bioflow/issues/3).
