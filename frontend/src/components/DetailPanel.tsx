@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { classifyChromosomes } from "../lib/chromosomes";
 import { useUploads } from "../hooks/useUploads";
@@ -57,8 +57,16 @@ import { TruncatedValue } from "./TruncatedValue";
 export function DetailPanel() {
   const [params] = useSearchParams();
   const sel = params.get("sel");
+  const { pathname } = useLocation();
 
-  if (!sel) return <EmptyDetail />;
+  if (!sel) {
+    // Inside an opened project (/p/:projectId) with nothing picked yet, the
+    // right panel should still be about that project -- not the app-wide
+    // splash, which belongs at the project list root (/).
+    const projectMatch = pathname.match(/^\/p\/([^/]+)/);
+    if (projectMatch) return <ProjectDetail id={projectMatch[1]} />;
+    return <EmptyDetail />;
+  }
   const [kind, id] = sel.split(":");
   if (kind === "project") return <ProjectDetail id={id} />;
   if (kind === "object") return <ObjectDetail id={id} />;
