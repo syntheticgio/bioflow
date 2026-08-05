@@ -108,18 +108,20 @@ Without this, optional tools work only in a source checkout, and DeepVariant is 
 
 ## Task 1 — `ToolMeta` carries the delivery manifest
 
-- [ ] Add to `tools.py`:
+- [x] Add to `tools.py`:
   ```python
   class Delivery(StrEnum):
       BUNDLED = "bundled"            # in the image; probe by PATH
       ON_DEMAND_IMAGE = "on_demand"  # pulled; probe by image presence
   ```
-- [ ] Add three fields to `ToolMeta`, all defaulted so existing entries stay constructible: `delivery: Delivery = Delivery.BUNDLED`, `image: str | None = None`, `download_bytes: int | None = None`.
-- [ ] Set `delivery=Delivery.ON_DEMAND_IMAGE` on the `deepvariant` entry, with `image` and `download_bytes` (~3 GB compressed; state which you measured, pulled or on-disk, in a comment — the button promises this number).
-- [ ] `image` must resolve per architecture the way `config.default_deepvariant_image()` already does. Do not add a second arch-dispatch mechanism; either reference the existing setting or factor the pattern so both use one.
-- [ ] Extend `test_every_tool_is_documented` in `tests/pipelines/test_tools.py`: a tool declaring `ON_DEMAND_IMAGE` must supply non-empty `image` and a positive `download_bytes`. A new optional tool that forgets either now fails the suite rather than shipping a button that cannot state its cost.
+- [x] Add three fields to `ToolMeta`, all defaulted so existing entries stay constructible: `delivery: Delivery = Delivery.BUNDLED`, `image: str | None = None`, `download_bytes: int | None = None`.
+- [x] Set `delivery=Delivery.ON_DEMAND_IMAGE` on the `deepvariant` entry, with `image` and `download_bytes`. Used the measured figure already on record in the sidecar spec: **2.99 GB compressed pull**, not the 8.83 GB on-disk figure also quoted there — `download_bytes` is documented as transfer size, and that's the number worth showing before a download starts.
+- [x] `image` resolves per architecture by reading `settings.deepvariant_image` directly at `TOOL_META` construction time (which already runs `default_deepvariant_image()`'s x86-64/arm64 dispatch) rather than adding a second one.
+- [x] Extended `test_every_tool_is_documented`'s file with two new tests rather than folding into it: `test_on_demand_tools_declare_image_and_size` (the required check) and its inverse, `test_bundled_tools_have_no_image_or_size`, which catches a tool whose `delivery` reverted to `BUNDLED` but left a stale `image`/`download_bytes` behind — a failure mode the plan hadn't named. Kept separate from the original four-field check so a `BUNDLED` tool's failure message never claims it needs an image it will never have.
 
-**No second edit needed in `tool_with_meta`** — it builds the payload with `asdict(meta)` precisely so a new `ToolMeta` field reaches the API automatically. Check that `Delivery` serializes as its string value; it is a `StrEnum`, so it will, but `pipelines` needed explicit handling and this is the same class of problem.
+**Correction to this task's own note:** `Delivery` does **not** serialize as its string value for free through `asdict(meta)` — `asdict` recurses into dataclass fields but leaves plain enum members as enum instances, which is exactly the `pipelines` problem the note below already flagged for tuples of `PipelineType`. `tool_with_meta` needed an explicit `"delivery": meta_dict["delivery"].value` line, the same treatment `pipelines` gets. Caught by `test_delivery_reaches_the_api_payload_as_its_string_value`, which asserts `isinstance(payload["delivery"], str)` rather than only checking the value compares equal (a raw `Delivery.ON_DEMAND_IMAGE` would still `== "on_demand"` and pass a weaker assertion).
+
+Also updated `tool_with_meta`'s fallback dict (for a tool with no `TOOL_META` entry at all) to include the three new keys defaulting to `BUNDLED`/`None`/`None`, and added `frontend/src/api/types.ts`'s `PipelineTool` interface with the same three fields — not in this task's original file list, but the endpoint's response shape changed and the type should say so. `tsc -b --noEmit` passes.
 
 ---
 

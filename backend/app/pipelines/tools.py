@@ -610,6 +610,23 @@ class PipelineType(StrEnum):
     REFERENCE_ASSEMBLY = "reference_assembly"
 
 
+class Delivery(StrEnum):
+    """How a tool reaches this application, per
+    docs/superpowers/specs/2026-08-05-optional-tool-delivery-design.md.
+
+    BUNDLED tools are in the backend image and probed by PATH, same as every
+    tool here today. ON_DEMAND_IMAGE tools are pinned OCI images, pulled on
+    first use and run as sibling containers -- the shape DeepVariant already
+    uses, generalized rather than special-cased per tool. There is
+    deliberately no third option for installing into a mutable volume: if a
+    tool cannot be a pinned image, it stays BUNDLED, trading coverage for one
+    delivery mechanism that is atomic, versioned, and reversible.
+    """
+
+    BUNDLED = "bundled"
+    ON_DEMAND_IMAGE = "on_demand"
+
+
 @dataclass(frozen=True)
 class ToolMeta:
     # Plural, and a tuple, because membership is genuinely many-to-many: fastp
@@ -661,6 +678,19 @@ class ToolMeta:
     # mechanically: describe behaviour, not flags, so it survives a
     # parameter change in the runner.
     usage: str = ""
+
+    # --- Optional-tool delivery. ---
+    # See Delivery's docstring. `image` and `download_bytes` are required
+    # together whenever delivery is ON_DEMAND_IMAGE -- enforced by
+    # test_every_tool_is_documented, not by the type, so a tool can still be
+    # constructed while its entry is being filled in.
+    delivery: Delivery = Delivery.BUNDLED
+    image: str | None = None  # pinned tag, arch-resolved where relevant
+    # What the Install button promises to download. Compressed transfer size,
+    # not on-disk size after decompression -- that is the number a user
+    # weighing "is my connection up for this" actually wants, and it is what
+    # `docker pull`'s own progress output reports against.
+    download_bytes: int | None = None
 
 
 TOOL_META: dict[str, ToolMeta] = {
@@ -1156,6 +1186,19 @@ TOOL_META: dict[str, ToolMeta] = {
             "instead. Neither image is multi-architecture."
         ),
         runnable=True,
+        delivery=Delivery.ON_DEMAND_IMAGE,
+        # Read at import time, same as every other module-level use of
+        # settings here (probes are cached too) -- this picks up
+        # settings.deepvariant_image's own x86-64/arm64 dispatch
+        # (default_deepvariant_image in config.py) rather than repeating it.
+        image=settings.deepvariant_image,
+        # Measured 2026-07-31 pulling google/deepvariant:1.9.0: 2.99 GB
+        # compressed transfer (docs/superpowers/specs/
+        # 2026-07-31-deepvariant-sidecar-design.md). That is what the Install
+        # button should promise, not the 8.83 GB the image occupies on disk
+        # once decompressed and unpacked -- a user weighing "is my connection
+        # up for this" is asking about the download, not the disk cost.
+        download_bytes=2_990_000_000,
     ),
     "flye": ToolMeta(
         pipelines=(PipelineType.ASSEMBLE,),
@@ -1425,6 +1468,12 @@ def tool_with_meta(tool: Tool) -> dict:
             "citation_url": "",
             "license": "",
             "usage": "",
+            # Same reasoning as `runnable` above: a tool with no entry here
+            # has no delivery story either, so it defaults to the same
+            # BUNDLED/absent shape `ToolMeta`'s own fields default to.
+            "delivery": Delivery.BUNDLED,
+            "image": None,
+            "download_bytes": None,
         }
     )
     return {
@@ -1432,6 +1481,7 @@ def tool_with_meta(tool: Tool) -> dict:
         **meta_dict,
         "pipelines": [p.value for p in meta_dict["pipelines"]],
         "strengths": list(meta_dict["strengths"]),
+        "delivery": meta_dict["delivery"].value,
     }
 
 
