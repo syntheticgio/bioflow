@@ -17,14 +17,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # The image to run the tests in.
 #
 # Mounting this worktree's source fixes half the problem; the other half is the
-# image, and it bites exactly when a change adds a dependency. `biopipe-api` is
-# built from *main's* Dockerfile, so a branch that installs a new tool runs its
-# tests in an image without that tool -- every probe reports it missing, every
+# image, and it bites exactly when a change adds a dependency. The main stack's
+# image is built from *main's* Dockerfile, so a branch that installs a new tool
+# runs its tests in an image without that tool -- every probe reports it missing, every
 # availability path is untested, and nothing says why. That is a nastier
 # version of the source problem this script exists to solve, because the
 # failures look like real ones.
 #
-# Measured while adding featureCounts and PyDESeq2: against `biopipe-api` the
+# Measured while adding featureCounts and PyDESeq2: against the main image the
 # tool-cache test failed with both tools unfingerprintable, because neither was
 # installed in the image being tested.
 #
@@ -32,29 +32,48 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # ops/worktree-up.sh), and fall back to main's otherwise -- a worktree that
 # changes no dependencies needs no stack of its own, and requiring one would
 # make the common case slower for a problem it does not have.
+#
+# Both halves of that read off the running stack rather than naming a tag,
+# because the tags moved once already and did it silently. Before #37 the api
+# service carried only `build:`, so Compose auto-tagged builds
+# `<project>-<service>` and the names here (`biopipe-api`,
+# `biopipe-wt-<slug>-api`) were the built images. #37 added
+# `image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}`, and a
+# service with both `image:` and `build:` still builds from source but tags the
+# result with the `image:` name -- so `biopipe-api` stopped being written to
+# and simply sat there, days old, with nothing to say so. Every run took the
+# fallback path (the stale tag still resolves), and on issue #25 that meant the
+# whole API layer failing at import on a missing `cryptography` -- a dependency
+# the actually-current build had. Read the fallback off `biopipe-api-1`
+# instead: it is by definition the image the stack is running, whatever
+# BIOFLOW_TAG says and whatever the tags are called next.
 BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || true)"
 [ -n "$BRANCH" ] || BRANCH="$(basename "$REPO_ROOT")"
 SLUG="$(printf '%s' "$BRANCH" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9_-' '-' | sed 's/^-*//; s/-*$//')"
-WT_IMAGE="biopipe-wt-${SLUG}-api"
+# Must match the BIOFLOW_TAG that ops/worktree-up.sh exports.
+WT_IMAGE="ghcr.io/syntheticgio/bioflow-backend:wt-${SLUG}"
+
+# One inspect for both the fallback image and the /data mount, so a stopped
+# stack is reported once rather than as two unrelated-looking failures.
+#
+# BIOINFO_HOME must be mounted the same way the real api container mounts it.
+# Without it, tests that touch /data (reap_report_dirs and friends) operate on
+# a tmpfs the assertions know nothing about and fail for the wrong reason.
+read -r STACK_IMAGE DATA_SOURCE <<<"$(docker inspect biopipe-api-1 \
+  --format '{{.Config.Image}} {{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}' \
+  2>/dev/null || true)"
+
+if [ -z "${DATA_SOURCE:-}" ] || [ -z "${STACK_IMAGE:-}" ]; then
+  echo "Could not resolve the image and /data mount from biopipe-api-1. Is the stack up?" >&2
+  exit 1
+fi
 
 if docker image inspect "$WT_IMAGE" >/dev/null 2>&1; then
   IMAGE="$WT_IMAGE"
 else
-  IMAGE="biopipe-api"
+  IMAGE="$STACK_IMAGE"
 fi
 echo "Testing in image: $IMAGE" >&2
-
-# BIOINFO_HOME must be mounted the same way the real api container mounts it.
-# Without it, tests that touch /data (reap_report_dirs and friends) operate on
-# a tmpfs the assertions know nothing about and fail for the wrong reason.
-# Read the source from the running container so the two can never drift.
-DATA_SOURCE="$(docker inspect biopipe-api-1 \
-  --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Source}}{{end}}{{end}}')"
-
-if [ -z "$DATA_SOURCE" ]; then
-  echo "Could not resolve the /data mount from biopipe-api-1. Is the stack up?" >&2
-  exit 1
-fi
 
 # A private Mongo, not the stack's.
 #

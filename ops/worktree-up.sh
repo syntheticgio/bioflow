@@ -71,6 +71,25 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 export COMPOSE_PROJECT_NAME="$PROJECT"
+
+# Tag this stack's images apart from the main stack's.
+#
+# COMPOSE_PROJECT_NAME used to be enough: before #37 the services carried only
+# `build:`, so Compose auto-tagged each built image `<project>-<service>` and a
+# distinct project name got distinct image tags for free. #37 added
+# `image: ghcr.io/syntheticgio/bioflow-*:${BIOFLOW_TAG:-latest}` to
+# docker-compose.yml, and when a merged service has both `image:` and `build:`
+# Compose builds from source but tags the result with the `image:` name --
+# which no longer contains the project name at all. Without this line a
+# worktree build would overwrite `:latest`, i.e. the tag the *main* stack
+# resolves, so the next `docker compose up -d api` on 5173 without `--build`
+# would quietly start serving this branch. That is the same failure this whole
+# script exists to prevent, arriving by a different route.
+#
+# Shell environment outranks --env-file in Compose, so this wins even if the
+# main checkout's .env pins BIOFLOW_TAG.
+export BIOFLOW_TAG="wt-${SLUG}"
+
 export WT_WEB_PORT="${WT_WEB_PORT:-5273}"
 export WT_API_PORT="${WT_API_PORT:-8100}"
 
