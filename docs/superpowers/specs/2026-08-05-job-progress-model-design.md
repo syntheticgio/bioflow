@@ -190,9 +190,15 @@ prior-runs model is the better of two poor options.
 
 Not persisted, because a stored ETA is wrong by exactly the time since it was
 stored. Deriving it costs one subtraction on a value the caller already has.
-The one real cost is that estimator (1) requires a `timing_service` call, so
-the SSE emit path takes a Mongo read it did not take before -- see the
-throttling note below for why that is bounded.
+
+Estimator (1) does require a `timing_service` call, which would put a Mongo
+read on a path that runs twice a second per job. It is therefore resolved
+**once per attempt** and cached on `JobContext`, exactly as `owner` and
+`run_ids` are and for the reason `registry.py:39` gives. The model's
+prediction cannot change during a run -- it is a function of job type and
+input size, both fixed at claim time -- so caching costs nothing in accuracy.
+With it cached, both the SSE path and the API route derive an ETA with no
+reads at all.
 
 ### Restart
 
