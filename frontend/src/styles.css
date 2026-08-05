@@ -1122,6 +1122,22 @@ a.btn {
   }
 }
 
+/* pct_estimated: a modelled fraction, not a measured one -- must be visually
+   distinct from progress-bar's solid fill at a glance, not just a different
+   shade, or the estimate reads as fact. Diagonal hatching rather than a
+   different color: color alone survives neither colorblindness nor a quick
+   glance the way a different *texture* does. */
+.progress-bar.estimated {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--accent),
+    var(--accent) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+  background-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
 .tray-item-meta {
   display: flex;
   justify-content: space-between;

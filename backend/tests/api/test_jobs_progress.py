@@ -166,3 +166,109 @@ class TestEtaSecondsOnJobDetail:
         )
 
         assert "eta_seconds" not in r.json()
+
+
+class TestPctEstimatedOnJobDetail:
+    """pct_estimated shares eta_seconds' derived-at-read-time shape (see the
+    class above) but appears in the opposite case: no measured pct, model
+    known. Monkeypatching timing_service.estimate rather than seeding real
+    job_timings rows keeps this at the same level of setup as the eta tests
+    above, which lean on extrapolation and never exercise a real model
+    either."""
+
+    async def test_estimates_from_elapsed_and_a_known_model(
+        self, client, two_profiles, monkeypatch
+    ):
+        from app.services import timing_service
+
+        async def _fake_estimate(job_type, input_bytes):
+            return {"known": True, "estimate_ms": 60_000, "samples": 10}
+
+        monkeypatch.setattr(timing_service, "estimate", _fake_estimate)
+
+        owner = two_profiles["a"].owner_id()
+        job = await _make_job(
+            owner,
+            state=JobState.RUNNING,
+            progress=JobProgress(pct=None, phase="assembling"),
+        )
+        job.payload["size"] = 1000
+        job.timing.started_at = datetime.now(UTC) - timedelta(seconds=30)
+        await job.save()
+
+        r = await client.get(
+            f"/api/v1/jobs/{job.id}", headers=two_profiles["a_headers"]
+        )
+
+        assert r.json()["pct_estimated"] == pytest.approx(0.5, rel=0.05)
+
+    async def test_is_absent_when_pct_is_already_measured(
+        self, client, two_profiles, monkeypatch
+    ):
+        from app.services import timing_service
+
+        async def _fake_estimate(job_type, input_bytes):
+            return {"known": True, "estimate_ms": 60_000, "samples": 10}
+
+        monkeypatch.setattr(timing_service, "estimate", _fake_estimate)
+
+        owner = two_profiles["a"].owner_id()
+        job = await _make_job(
+            owner,
+            state=JobState.RUNNING,
+            progress=JobProgress(pct=0.3),
+        )
+        job.payload["size"] = 1000
+        job.timing.started_at = datetime.now(UTC) - timedelta(seconds=30)
+        await job.save()
+
+        r = await client.get(
+            f"/api/v1/jobs/{job.id}", headers=two_profiles["a_headers"]
+        )
+
+        assert "pct_estimated" not in r.json()
+
+    async def test_no_pct_estimated_key_when_no_model_is_known(
+        self, client, two_profiles
+    ):
+        owner = two_profiles["a"].owner_id()
+        job = await _make_job(
+            owner,
+            state=JobState.RUNNING,
+            progress=JobProgress(pct=None, phase="starting"),
+        )
+        job.payload["size"] = 1000
+        job.timing.started_at = datetime.now(UTC)
+        await job.save()
+
+        r = await client.get(
+            f"/api/v1/jobs/{job.id}", headers=two_profiles["a_headers"]
+        )
+
+        assert "pct_estimated" not in r.json()
+
+    async def test_no_pct_estimated_for_a_terminal_job(
+        self, client, two_profiles, monkeypatch
+    ):
+        from app.services import timing_service
+
+        async def _fake_estimate(job_type, input_bytes):
+            return {"known": True, "estimate_ms": 60_000, "samples": 10}
+
+        monkeypatch.setattr(timing_service, "estimate", _fake_estimate)
+
+        owner = two_profiles["a"].owner_id()
+        job = await _make_job(
+            owner,
+            state=JobState.SUCCEEDED,
+            progress=JobProgress(pct=None),
+        )
+        job.payload["size"] = 1000
+        job.timing.started_at = datetime.now(UTC) - timedelta(seconds=100)
+        await job.save()
+
+        r = await client.get(
+            f"/api/v1/jobs/{job.id}", headers=two_profiles["a_headers"]
+        )
+
+        assert "pct_estimated" not in r.json()

@@ -272,6 +272,11 @@ async def get_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
             )
             if eta is not None:
                 out["eta_seconds"] = eta
+            estimated = timing_service.pct_estimated(
+                pct=job.progress.pct, elapsed_s=elapsed_s, model_ms=model_ms
+            )
+            if estimated is not None:
+                out["pct_estimated"] = estimated
     return out
 
 

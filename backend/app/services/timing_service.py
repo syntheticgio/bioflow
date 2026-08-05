@@ -42,6 +42,12 @@ OUTLIER_FACTOR = 3.0
 # back to the prior-runs model instead.
 ETA_PCT_FLOOR = 0.05
 
+# Same ceiling TrimProgress/AlignProgress use for a measured-but-unverifiable
+# fraction, applied here to a modelled one: an estimate must never claim
+# completion, because pct_estimated's whole purpose is being visibly distinct
+# from a real 100%.
+MAX_ESTIMATED_PCT = 0.95
+
 
 def eta_seconds(*, pct: float | None, elapsed_s: float, model_ms: int | None) -> float | None:
     """Seconds remaining, derived fresh on every call and never persisted.
@@ -66,6 +72,38 @@ def eta_seconds(*, pct: float | None, elapsed_s: float, model_ms: int | None) ->
         remaining = model_ms / 1000 - elapsed_s
         return max(0.0, remaining)
     return None
+
+
+def pct_estimated(*, pct: float | None, elapsed_s: float, model_ms: int | None) -> float | None:
+    """A modelled fraction complete, for a job with no measured `pct` at all.
+
+    Deliberately a different field from `JobProgress.pct`, never persisted,
+    and never fed back into `job_timings`: `pct` means "measured, or
+    explicitly unknown", and every consumer of that collection -- the
+    duration model itself, per-object provenance -- must never see a
+    fabricated number written back in as if it were real. This is computed
+    fresh at read/emit time exactly like `eta_seconds`, for the same reason:
+    a stored value would be wrong by the time since it was stored.
+
+    Returns None whenever a real `pct` already exists (a parser that later
+    learns to measure something makes this yield to it with no caller
+    change) or when there is no history yet (`model_ms` is None below
+    `MIN_SAMPLES`) -- both cases where the bar should stay indeterminate
+    exactly as it does today, not show a number nothing backs.
+
+    Once elapsed time passes the model's prediction, this returns
+    `MAX_ESTIMATED_PCT` rather than a fraction that keeps climbing toward or
+    past 1.0. A bar parked at 99% is indistinguishable from a bar that has
+    quietly stalled -- the exact ambiguity nullable `pct` exists to avoid --
+    so the caller is expected to pair a pinned `MAX_ESTIMATED_PCT` with a
+    "longer than expected" label rather than let it read as near-complete.
+    """
+    if pct is not None or model_ms is None:
+        return None
+    predicted_s = model_ms / 1000
+    if predicted_s <= 0:
+        return MAX_ESTIMATED_PCT
+    return min(elapsed_s / predicted_s, MAX_ESTIMATED_PCT)
 
 
 async def record(
