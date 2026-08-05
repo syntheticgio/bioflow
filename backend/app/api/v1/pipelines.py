@@ -77,6 +77,42 @@ async def list_tools() -> dict:
     }
 
 
+@router.post(
+    "/tools/{name}/install", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def install_tool(name: str, owner: OwnerDep) -> JobOut:
+    """Queue a pull of an on-demand tool's image.
+
+    Owner-scoped, unlike `/tools` above: the job this creates is visible on
+    someone's Activity tab, and enqueue's dedup key folds the owner in the
+    same way every other launch endpoint's does. The tool itself is not
+    profile-scoped -- an install performed by one profile is visible to
+    every other, since the image lands in the one Docker daemon they all
+    share -- only the job record is.
+    """
+    from app.services import tool_install_service
+
+    job = await tool_install_service.install(tool_name=name, owner=owner)
+    return JobOut.of(job)
+
+
+@router.delete(
+    "/tools/{name}/install", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def uninstall_tool(name: str, owner: OwnerDep) -> JobOut:
+    """Queue removal of an on-demand tool's image.
+
+    Offered by the UI wherever Install was, per the design doc's symmetry
+    rule -- enforced here, not just in the frontend, so a client cannot
+    uninstall a bundled tool or one that was never pulled by calling the
+    endpoint directly.
+    """
+    from app.services import tool_install_service
+
+    job = await tool_install_service.uninstall(tool_name=name, owner=owner)
+    return JobOut.of(job)
+
+
 @router.get("/suggestions/{object_id}")
 async def list_suggestions(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
     """Pipelines worth offering for this file, with the reason for each.
