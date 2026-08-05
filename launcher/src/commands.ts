@@ -23,7 +23,6 @@ export function setupDefaults(): Promise<SetupDefaults> {
 
 export type StoragePathValidation =
   | { kind: "Ok" }
-  | { kind: "DoesNotExist" }
   | { kind: "NotWritable" }
   | { kind: "NotDockerShared" };
 

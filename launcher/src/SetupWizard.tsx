@@ -14,8 +14,7 @@ interface Props {
 
 const STORAGE_MESSAGES: Record<StoragePathValidation["kind"], string | null> = {
   Ok: null,
-  DoesNotExist: "This folder does not exist.",
-  NotWritable: "BioFlow cannot write to this folder.",
+  NotWritable: "BioFlow cannot create or write to this folder.",
   NotDockerShared:
     "On macOS this folder must be shared with Docker Desktop (Settings > Resources > File Sharing), or BioFlow will start with no data visible.",
 };

@@ -9,7 +9,6 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoragePathValidation {
     Ok,
-    DoesNotExist,
     NotWritable,
     /// macOS only: the path is outside the user's home directory or any
     /// explicitly shared root, so Docker Desktop will not file-share it.
@@ -20,13 +19,24 @@ pub enum StoragePathValidation {
     NotDockerShared,
 }
 
-/// Validates a storage path by attempting to write into it, not by
-/// `stat`-ing permission bits -- a path can be readable-looking and still
-/// reject a write (e.g. a read-only network mount), and the failure the
-/// user actually hits is a failed write.
+/// Validates a storage path by creating it if missing and then attempting to
+/// write into it, not by `stat`-ing permission bits -- a path can be
+/// readable-looking and still reject a write (e.g. a read-only network
+/// mount), and the failure the user actually hits is a failed write.
+///
+/// A nonexistent path is not an error here: this is a first-run setup
+/// screen, and both defaults it proposes (`SetupDefaults`) are paths that by
+/// definition don't exist yet on a fresh machine. Asking a non-technical
+/// user to go create a folder in a terminal before the installer will let
+/// them proceed defeats the point of an installer, so this creates it
+/// instead -- mirroring what `setup::install` already does for the install
+/// directory. A path that can't be created (e.g. no permission on its
+/// parent) falls through to the same `NotWritable` outcome as one that
+/// exists but rejects a write; the user-facing symptom and remedy are the
+/// same either way.
 pub fn validate_storage_path(path: &Path, shared_roots: &[std::path::PathBuf]) -> StoragePathValidation {
-    if !path.exists() {
-        return StoragePathValidation::DoesNotExist;
+    if !path.exists() && std::fs::create_dir_all(path).is_err() {
+        return StoragePathValidation::NotWritable;
     }
 
     let probe_file = path.join(".bioflow-write-probe");
@@ -72,11 +82,28 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn nonexistent_path_does_not_exist() {
-        let path = PathBuf::from("/this/path/should/not/exist/anywhere");
+    fn a_missing_folder_under_an_existing_parent_is_created_and_ok() {
+        let parent = tempfile::tempdir().unwrap();
+        let path = parent.path().join("BioFlow");
+        assert!(!path.exists());
+
+        let shared_roots = vec![parent.path().to_path_buf()];
+        assert_eq!(
+            validate_storage_path(&path, &shared_roots),
+            StoragePathValidation::Ok
+        );
+        assert!(path.is_dir(), "the folder should have been created");
+    }
+
+    #[test]
+    fn a_path_whose_parent_does_not_exist_and_cannot_be_created_is_not_writable() {
+        // No real filesystem lets you create a directory under a path that
+        // doesn't exist and never will -- /proc is not a writable mountpoint
+        // on Linux, so a child under it can never be created.
+        let path = PathBuf::from("/proc/this-cannot-be-created/BioFlow");
         assert_eq!(
             validate_storage_path(&path, &[]),
-            StoragePathValidation::DoesNotExist
+            StoragePathValidation::NotWritable
         );
     }
 

@@ -168,7 +168,6 @@ pub fn setup_defaults() -> SetupDefaultsDto {
 #[serde(tag = "kind")]
 pub enum StoragePathValidationDto {
     Ok,
-    DoesNotExist,
     NotWritable,
     NotDockerShared,
 }
@@ -177,7 +176,6 @@ impl From<StoragePathValidation> for StoragePathValidationDto {
     fn from(v: StoragePathValidation) -> Self {
         match v {
             StoragePathValidation::Ok => Self::Ok,
-            StoragePathValidation::DoesNotExist => Self::DoesNotExist,
             StoragePathValidation::NotWritable => Self::NotWritable,
             StoragePathValidation::NotDockerShared => Self::NotDockerShared,
         }
