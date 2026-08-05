@@ -810,6 +810,11 @@ export interface VariantRequest {
   reference_id?: string | null;
   caller?: VariantCallerName | null;
   params?: Partial<VariantParams>;
+  /** Consent to a multi-gigabyte on-demand-tool download. Without it, a
+   *  request against a not-yet-installed optional caller (DeepVariant) is
+   *  refused with a 422 naming the download size, in `details.download_bytes`
+   *  -- re-post with this set once the user has actually agreed to it. */
+  install_optional?: boolean;
 }
 
 /* --- Expression: counting and differential testing ----------------------- */

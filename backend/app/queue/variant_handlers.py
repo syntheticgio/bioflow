@@ -333,12 +333,22 @@ def _run_deepvariant(
 
 
 def _require_image(ctx: JobContext, docker_path: str, image: str) -> None:
-    """Fail early and actionably when the image is absent.
+    """A guard against a bug, not a first-run instruction.
 
-    Pulled on demand rather than baked in -- the image is 8.83GB, larger than
-    the rest of this stack -- so absence is expected on a first run and must
-    read as an instruction rather than a crash. When `pull_image` exists as its
-    own job this becomes a dependency instead of a message.
+    Before `install_tool` (queue/tool_handlers.py) and the confirm-then-chain
+    consent flow (pipeline_service._require_or_offer_install), an absent
+    image was the expected first-run state and this function's job was to
+    turn that into an actionable "run `docker pull` yourself" message.
+
+    It no longer is. `launch_variant_calling` now refuses to enqueue this job
+    at all for a not-yet-installed DeepVariant unless the caller consented,
+    in which case it chains `call_variants` behind an `install_tool` job via
+    `depends_on` -- so by the time this handler runs, the image is either
+    present or the dependency itself already failed and this job was never
+    dispatched (see `queue._failed_dependencies`). Reaching this branch with
+    the image still absent is therefore a bug in that chain, not a state a
+    user is expected to hit or recover from by opening a terminal -- the
+    message reflects that.
     """
     import subprocess as _sp
 
@@ -349,8 +359,9 @@ def _require_image(ctx: JobContext, docker_path: str, image: str) -> None:
     )
     if probe.returncode != 0:
         raise PermanentError(
-            f"The DeepVariant image {image} is not present. Pull it once with "
-            f"`docker pull {image}` (about 3 GB), then run this again.",
+            f"The DeepVariant image {image} is not present, even though this "
+            f"job was launched as though it were. This points at a bug in "
+            f"the install-then-launch chain, not something to fix by hand.",
             details={"image": image},
         )
 

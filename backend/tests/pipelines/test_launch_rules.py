@@ -4,10 +4,13 @@ These cover the pure decisions -- what may be trimmed, which file leads a pair,
 what makes two runs identical -- without a database or HTTP.
 """
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
-from app.errors import ValidationError
+from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectStatus
+from app.pipelines import tools
 from app.pipelines.align_runner import ReadChemistry
 from app.services import pipeline_service
 
@@ -283,3 +286,103 @@ class TestVariantDedupKey:
 
     def test_a_different_thread_count_differs(self):
         assert self._key() != self._key(params={"threads": 8})
+
+
+def _fake_dv_tool(*, available: bool, install_state=None, name="deepvariant"):
+    """A Tool matching real probe shapes, not just the `available` flag in
+    isolation -- `Tool.available` is derived from `path`/`error`/
+    `install_state` together, and a fake that sets `available` without also
+    setting the fields it is derived from can report the opposite of what it
+    claims. (Caught exactly this way: an early version of this helper set
+    `path` whenever `install_state` was truthy regardless of `available`,
+    which made `available=False, install_state=None` -- the BUNDLED-tool-
+    genuinely-missing case -- silently report as available.)
+    """
+    if available:
+        assert install_state in (None, tools.InstallState.INSTALLED)
+        return tools.Tool(
+            name=name, path="/usr/bin/docker", version="1.9.0", install_state=install_state
+        )
+    if install_state is tools.InstallState.NOT_INSTALLED:
+        # A real not-installed probe still resolves the docker client itself.
+        return tools.Tool(
+            name=name, path="/usr/bin/docker", version=None, install_state=install_state
+        )
+    # UNKNOWN (no client, or daemon unreachable) or plain missing (every
+    # BUNDLED tool's genuine absence): no path, no install_state distinction
+    # to offer.
+    return tools.Tool(name=name, path=None, version=None, install_state=install_state)
+
+
+class TestRequireOrOfferInstall:
+    """The confirm-then-chain decision: refuse-with-size, install-with-
+    consent, or pass straight through, depending on install_state and
+    whether the caller has agreed to the download.
+
+    async pipeline_service._require_or_offer_install directly, rather than
+    through the full launch_variant_calling -- it is the one piece of new
+    logic this task adds, and it needs no BAM, reference, or database to
+    exercise on its own.
+    """
+
+    async def test_an_available_tool_passes_straight_through(self):
+        tool = _fake_dv_tool(available=True)
+        job_id = await pipeline_service._require_or_offer_install(
+            tool, owner="local", install_optional=False
+        )
+        assert job_id is None
+
+    async def test_not_installed_without_consent_refuses_naming_the_size(self):
+        tool = _fake_dv_tool(
+            available=False, install_state=tools.InstallState.NOT_INSTALLED
+        )
+        with pytest.raises(ValidationError) as excinfo:
+            await pipeline_service._require_or_offer_install(
+                tool, owner="local", install_optional=False
+            )
+        exc = excinfo.value
+        assert exc.details["tool"] == "deepvariant"
+        assert exc.details["needs"] == "install_tool"
+        assert exc.details["download_bytes"] == tools.TOOL_META["deepvariant"].download_bytes
+        # The size belongs in the message too -- the dialog's refusal text
+        # comes straight from this, and "about X GB" is the whole point of
+        # asking rather than silently downloading.
+        assert "GB" in exc.message
+
+    async def test_not_installed_with_consent_enqueues_and_returns_the_job_id(self):
+        tool = _fake_dv_tool(
+            available=False, install_state=tools.InstallState.NOT_INSTALLED
+        )
+        fake_job = type("J", (), {"id": "install-job-1"})()
+        with patch(
+            "app.services.tool_install_service.install",
+            new=AsyncMock(return_value=fake_job),
+        ) as mock_install:
+            job_id = await pipeline_service._require_or_offer_install(
+                tool, owner="local", install_optional=True
+            )
+        mock_install.assert_awaited_once_with(tool_name="deepvariant", owner="local")
+        assert job_id == "install-job-1"
+
+    async def test_unknown_install_state_still_refuses_even_with_consent(self):
+        """UNKNOWN means the daemon could not be reached -- consent to a
+        download cannot fix that, so this must not silently attempt an
+        install that would only fail the same way _docker_client already
+        does inside the handler."""
+        tool = _fake_dv_tool(
+            available=False, install_state=tools.InstallState.UNKNOWN
+        )
+        with pytest.raises(PermanentError):
+            await pipeline_service._require_or_offer_install(
+                tool, owner="local", install_optional=True
+            )
+
+    async def test_a_bundled_tools_plain_unavailability_still_raises_permanent(self):
+        """No install_state at all (every BUNDLED tool's default) must not be
+        mistaken for an offer -- consent to install a tool that has no
+        install path at all would dangle."""
+        tool = _fake_dv_tool(available=False, install_state=None, name="clair3")
+        with pytest.raises(PermanentError):
+            await pipeline_service._require_or_offer_install(
+                tool, owner="local", install_optional=True
+            )

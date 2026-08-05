@@ -705,6 +705,12 @@ class VariantRequest(BaseModel):
     reference_id: PydanticObjectId | None = None
     caller: str | None = None
     params: dict = Field(default_factory=dict)
+    # Consent to a multi-gigabyte on-demand-tool download. False by default,
+    # so a first request against a not-yet-installed optional caller refuses
+    # naming the size rather than silently starting a pull nobody agreed to
+    # pay for; the dialog re-posts with this set once the user has actually
+    # seen and accepted that number.
+    install_optional: bool = False
 
 
 @router.get("/align/defaults/{object_id}")
@@ -1070,6 +1076,7 @@ async def launch_variant_calling(body: VariantRequest, owner: OwnerDep) -> JobOu
         reference_id=body.reference_id,
         caller=body.caller,
         params=body.params,
+        install_optional=body.install_optional,
     )
     return JobOut.of(job)
 

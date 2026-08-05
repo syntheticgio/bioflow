@@ -725,6 +725,12 @@ class TestVariantsCard:
         assert card.launch is not None
         assert card.launch["body"]["params"]["caller"] == "deepvariant"
         assert card.launch["body"]["bam_id"] == "bam456"
+        # The card already states the download size in requires_install
+        # before it can be clicked, so pressing it *is* the consent
+        # _require_or_offer_install (task 7) asks for -- without this flag
+        # in the posted body, clicking the card would hit the refusal
+        # instead of the install-and-chain path.
+        assert card.launch["body"]["install_optional"] is True
 
     def test_needs_install_names_the_tool_and_its_size(self):
         with installed_callers(

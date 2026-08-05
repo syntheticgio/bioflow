@@ -1680,6 +1680,68 @@ async def _sidecar_of_role(obj: DataObject, role: SidecarRole) -> DataObject | N
     return None
 
 
+async def _require_or_offer_install(
+    tool, *, owner: str, install_optional: bool
+) -> PydanticObjectId | None:
+    """Assert a caller is usable, or -- for an on-demand tool that simply has
+    not been pulled yet -- offer to install it instead of refusing outright.
+
+    Returns the id of an install job the launch should `depends_on`, or
+    `None` when nothing needs to be queued (the tool was already available).
+
+    Three outcomes, matching `tools.InstallState`:
+
+    - `INSTALLED` (or any BUNDLED tool, whose `install_state` is always
+      `None`): nothing to do, `tools.require` passes it straight through.
+    - `NOT_INSTALLED`, no consent: raise `ValidationError` naming the tool
+      and its download size, in the same `details={"needs": ...}` shape the
+      `.bai`/`.fai` refusals above already use -- the dialog reads `needs`
+      to decide what to offer, and "install this tool" belongs in the same
+      vocabulary as "index this BAM first" rather than a new one.
+    - `NOT_INSTALLED`, with consent: enqueue the install job
+      (`tool_install_service.install`, which already deduplicates an
+      in-flight install for the same tool) and return its id, so the caller
+      can chain `call_variants` behind it with `depends_on`. Genuinely
+      broken (`UNKNOWN`, or unavailable with no install_state at all) still
+      raises the ordinary `require()` error -- pressing "install" cannot fix
+      an unreachable daemon, so that path must not pretend it can.
+    """
+    if tool.available:
+        tools.require(tool)
+        return None
+
+    if tool.install_state is tools.InstallState.NOT_INSTALLED:
+        meta = tools.TOOL_META.get(tool.name)
+        if not install_optional:
+            raise ValidationError(
+                f"{tool.name} is not installed. It runs as a separate "
+                f"container image and is downloaded on first use "
+                f"(about {_format_gb(meta.download_bytes) if meta else '?'}).",
+                details={
+                    "tool": tool.name,
+                    "needs": "install_tool",
+                    "download_bytes": meta.download_bytes if meta else None,
+                },
+            )
+
+        from app.services import tool_install_service
+
+        job = await tool_install_service.install(tool_name=tool.name, owner=owner)
+        return job.id
+
+    # UNKNOWN, or unavailable with no install_state at all (every BUNDLED
+    # tool that is simply missing/broken) -- a genuine fault. require()
+    # raises PermanentError with the probe's own reason.
+    tools.require(tool)
+    return None
+
+
+def _format_gb(download_bytes: int | None) -> str:
+    if not download_bytes:
+        return "a few GB"
+    return f"{download_bytes / 1_000_000_000:.1f} GB"
+
+
 async def launch_variant_calling(
     *,
     bam_id: PydanticObjectId,
@@ -1687,6 +1749,13 @@ async def launch_variant_calling(
     reference_id: PydanticObjectId | None = None,
     caller: str | None = None,
     params: dict | None = None,
+    # Consent to a multi-gigabyte download. Distinct from every other launch
+    # parameter here because it is not a choice about *what* to run -- it is
+    # permission to spend bandwidth the user has not yet agreed to. Without
+    # it, launch_variant_calling refuses naming the size (see
+    # _require_or_offer_install); the dialog re-posts with this set once the
+    # user has actually seen and accepted that number.
+    install_optional: bool = False,
 ):
     """Queue a variant calling run over an aligned BAM.
 
@@ -1732,10 +1801,13 @@ async def launch_variant_calling(
             **(params or {}),
         }
     )
+    install_job_id = None
     if merged.caller is variant_runner.VariantCaller.CLAIR3:
         tools.require(tools.clair3())
     elif merged.caller is variant_runner.VariantCaller.DEEPVARIANT:
-        tools.require(tools.deepvariant())
+        install_job_id = await _require_or_offer_install(
+            tools.deepvariant(), owner=owner, install_optional=install_optional
+        )
     else:
         tools.require(tools.bcftools())
     tools.require(tools.bcftools())  # always: it writes the .tbi
@@ -1776,8 +1848,13 @@ async def launch_variant_calling(
         dedup_key=_variant_dedup_key(bam_id=bam.id, params=merged.as_dict()),
         project_id=bam.project_id,
         object_id=bam.id,
-        # No depends_on: the .bai and .fai are required above, so there is
-        # nothing left to wait for.
+        # The .bai and .fai are required above, so ordinarily there is
+        # nothing left to wait for -- except when _require_or_offer_install
+        # queued a pull for an on-demand caller (DeepVariant, with consent).
+        # A failed install fails this job too rather than leaving it blocked
+        # forever: queue.py's _failed_dependencies already covers that, the
+        # same mechanism launch_alignment's index-build dependency relies on.
+        depends_on=[install_job_id] if install_job_id is not None else [],
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)
