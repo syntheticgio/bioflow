@@ -20,9 +20,18 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-# Ordered longest-first: `_R1` must be tried before `_1` so that
-# `sample_R1.fastq.gz` reduces on the more specific token.
+# Ordered longest-first: `_forward` before `_fwd` before `_R1` before `_1`, so
+# each name reduces on the most specific token it ends with. (`_f` does not
+# exist as a token, so `_fwd` before `_f` is not a concern here.)
 _MATE_TOKENS: tuple[tuple[str, str], ...] = (
+    ("_forward", "R1"),
+    ("_reverse", "R2"),
+    (".forward", "R1"),
+    (".reverse", "R2"),
+    ("_fwd", "R1"),
+    ("_rev", "R2"),
+    (".fwd", "R1"),
+    (".rev", "R2"),
     ("_R1", "R1"),
     ("_R2", "R2"),
     (".R1", "R1"),
@@ -50,10 +59,14 @@ OPPOSITE = {"R1": "R2", "R2": "R1"}
 
 # Which naming scheme a token belongs to. `sample_R1` and `sample_2` reduce to
 # the same key but come from different conventions, and pairing them would be a
-# guess -- the launch dialog can simply ask instead.
+# guess -- the launch dialog can simply ask instead. `_fwd`/`_rev` and
+# `_forward`/`_reverse` get their own scheme "F" for the same reason: nothing
+# here should let `sample_fwd` cross-pair with `sample_R1` or `sample_2`.
 _SCHEME = {"_R1": "R", "_R2": "R", ".R1": "R", ".R2": "R",
            "_r1": "R", "_r2": "R", ".r1": "R", ".r2": "R",
-           "_1": "N", "_2": "N"}
+           "_1": "N", "_2": "N",
+           "_forward": "F", "_reverse": "F", ".forward": "F", ".reverse": "F",
+           "_fwd": "F", "_rev": "F", ".fwd": "F", ".rev": "F"}
 
 
 def split_mate(name: str) -> tuple[str, str, str] | None:

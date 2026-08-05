@@ -55,6 +55,24 @@ class TestSplitMate:
         assert pairing.split_mate("sample_R1.trimmed.fastq.gz")[:2] == ("sample", "R1")
 
 
+class TestFwdRevVocabulary:
+    def test_fwd_rev_pair(self):
+        assert pairing.is_mate_of("foo_fwd.fastq.gz", "foo_rev.fastq.gz")
+
+    def test_forward_reverse_pair(self):
+        assert pairing.is_mate_of("foo_forward.fastq.gz", "foo_reverse.fastq.gz")
+
+    def test_fwd_does_not_cross_pair_with_numeric_scheme(self):
+        """`_fwd` and `_2` reduce to different schemes even if the key
+        happened to line up -- guessing across conventions is what the scheme
+        guard exists to prevent."""
+        assert not pairing.is_mate_of("foo_fwd.fastq.gz", "foo_2.fastq.gz")
+
+    def test_a_name_merely_containing_fwd_is_not_mangled(self):
+        """The token has to be trailing, same as every other scheme."""
+        assert pairing.split_mate("refwd.fastq") is None
+
+
 class TestIsMateOf:
     def test_matches_opposite_halves(self):
         assert pairing.is_mate_of("sample_R1.fastq.gz", "sample_R2.fastq.gz")
