@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.models import Compression, FormatConfidence, FormatKind
-from app.storage.detect import detect, detect_from_extension, detect_from_magic
+from app.storage.detect import (
+    detect,
+    detect_from_extension,
+    detect_from_magic,
+    strip_compression_suffix,
+)
 
 FASTQ = b"""@SEQ_ID_1
 GATTTGGGGTTCAAAGCAGTATCGATCAAATAGTAAATCCATTTGTTCAA
@@ -109,6 +114,23 @@ class TestExtension:
     )
     def test_extension(self, filename, expected):
         assert detect_from_extension(filename) == expected
+
+
+class TestStripCompressionSuffix:
+    @pytest.mark.parametrize(
+        "filename,expected",
+        [
+            ("reads.fastq.gz", "reads.fastq"),
+            ("ref.fa.bgz", "ref.fa"),
+            ("calls.vcf.bgzf", "calls.vcf"),
+            ("archive.tar.zst", "archive.tar"),
+            ("reads.fastq.bz2", "reads.fastq"),
+            ("reads.fastq", "reads.fastq"),  # no suffix to strip
+            ("Reads.FASTQ.GZ", "Reads.FASTQ"),  # case-insensitive match
+        ],
+    )
+    def test_strips_known_suffixes(self, filename, expected):
+        assert strip_compression_suffix(filename) == expected
 
 
 class TestMagic:

@@ -208,7 +208,10 @@ class TestDerivedOutputsInheritTheirParentsOwner:
         produced = await DataObject.find(
             DataObject.derived_from == bam.id, DataObject.owner == owner
         ).to_list()
-        assert [p.name for p in produced] == ["consensus.fasta"]
+        # .gz: the scratch fixture's bytes are not actually gzip, so FASTA's
+        # entry in compress.COMPRESSIBLE_KINDS compresses it at ingest -- see
+        # docs/superpowers/specs/2026-08-05-object-compression-design.md.
+        assert [p.name for p in produced] == ["consensus.fasta.gz"]
         consensus = produced[0]
         assert consensus.role == ObjectRole.REFERENCE
         assert reference.id in consensus.derived_from
@@ -301,7 +304,9 @@ class TestDownloadsTakeTheOwnerFromTheJob:
         )
 
         produced = await DataObject.find(DataObject.project_id == project.id).to_list()
-        assert [p.name for p in produced] == ["SRR000001.fastq"]
+        # .gz: FASTQ compresses at ingest -- see docs/superpowers/specs/
+        # 2026-08-05-object-compression-design.md.
+        assert [p.name for p in produced] == ["SRR000001.fastq.gz"]
         assert produced[0].owner == owner
 
     async def test_an_assembly_download_lands_under_the_jobs_owner(self):
@@ -322,7 +327,9 @@ class TestDownloadsTakeTheOwnerFromTheJob:
         )
 
         produced = await DataObject.find(DataObject.project_id == project.id).to_list()
-        assert [p.name for p in produced] == ["genome.fna"]
+        # .gz: FASTA compresses at ingest -- see docs/superpowers/specs/
+        # 2026-08-05-object-compression-design.md.
+        assert [p.name for p in produced] == ["genome.fna.gz"]
         assert produced[0].owner == owner
         # The role still comes from the component map -- threading the owner
         # must not disturb what the applier already decided about the file.

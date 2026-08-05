@@ -78,8 +78,17 @@ class TestSraDownloadSetsReadNumber:
 
         await _apply_sra_download(result, owner="local")
 
-        r1 = await DataObject.find_one(DataObject.project_id == project.id, DataObject.name == "acc_1.fastq")
-        r2 = await DataObject.find_one(DataObject.project_id == project.id, DataObject.name == "acc_2.fastq")
+        # .gz: FASTQ compresses at ingest -- see docs/superpowers/specs/
+        # 2026-08-05-object-compression-design.md. Each mate keeps its own
+        # DataObject even though the two fixtures' identical bytes compress
+        # to one shared Blob underneath (same as pre-compression dedup on
+        # identical raw content -- one record per file, one blob for both).
+        r1 = await DataObject.find_one(
+            DataObject.project_id == project.id, DataObject.name == "acc_1.fastq.gz"
+        )
+        r2 = await DataObject.find_one(
+            DataObject.project_id == project.id, DataObject.name == "acc_2.fastq.gz"
+        )
 
         assert r1.mate_object_id == r2.id
         assert r2.mate_object_id == r1.id

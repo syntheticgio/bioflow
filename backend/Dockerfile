@@ -88,7 +88,11 @@ RUN apt-get update \
 # bcftools and tabix are separate packages from samtools -- installing samtools
 # does not bring htslib's command-line tools along. bcftools does the
 # short-read calling and writes every .tbi index; the tabix package is here for
-# bgzip, which is worth having in the image even though no code path calls it.
+# bgzip, which object_service.py's ingest path calls directly to compress
+# FASTQ/FASTA/VCF/etc at ingest time -- see docs/superpowers/specs/
+# 2026-08-05-object-compression-design.md. A missing bgzip degrades to
+# Python's stdlib gzip rather than failing an ingest, so this package is a
+# performance and seekability dependency, not a hard one.
 
 # bwa-mem2 is the exception: it is not packaged for Debian, so it comes from
 # the project's own release. On x86-64 the upstream prebuilt binary is the

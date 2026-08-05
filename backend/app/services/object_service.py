@@ -2,6 +2,7 @@
 
 import asyncio
 import shutil
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from app.models import (
     SourceMode,
 )
 from app.services import blob_service, project_service
-from app.storage import cas, detect
+from app.storage import cas, compress, detect
 from app.storage.home import require_home
 
 log = get_logger(__name__)
@@ -135,16 +136,36 @@ async def ingest_stream(
     try:
         await obj.set({DataObject.status: ObjectStatus.HASHING, DataObject.size: size})
 
-        existing = await blob_service.find_present_blob(digest)
+        # Compression happens here, before dedup and placement, so both the
+        # digest checked below and the bytes placed are already final -- see
+        # docs/superpowers/specs/2026-08-05-object-compression-design.md.
+        # `digest`/`size` shadow the plaintext values above: everything from
+        # here on refers to what is actually going into the store.
+        staged = await _stage_for_placement(tmp_path, name)
+        tmp_path, digest, size = staged.path, staged.digest, staged.size
+
+        dedup_hit = (
+            await blob_service.find_present_blob_by_content(staged.content_sha256)
+            if staged.content_sha256
+            else None
+        )
+        existing = dedup_hit or await blob_service.find_present_blob(digest)
         if existing is not None and _blob_bytes_present(existing):
             # Identical content already stored; discard the copy we just made.
             tmp_path.unlink(missing_ok=True)
+            digest, size = existing.id, existing.size
             log.info("upload_deduplicated", digest=digest, name=name)
         else:
             await asyncio.to_thread(cas.place_blob, tmp_path, digest, size)
 
+        if staged.name != name:
+            await obj.set({DataObject.name: staged.name})
         await blob_service.attach_blob_to_object(
-            object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+            object_id=obj.id,
+            digest=digest,
+            size=size,
+            storage=BlobStorage.MANAGED,
+            content_sha256=staged.content_sha256,
         )
         await project_service.bump_counters(project_id, objects=1, total_bytes=size)
         await enqueue_ingest(obj, owner=owner, digest=digest)
@@ -222,21 +243,40 @@ async def ingest_local_file(
     await obj.insert()
 
     try:
-        digest, size = await asyncio.to_thread(cas.hash_file, path)
+        # Compression happens here, before dedup and placement -- see
+        # docs/superpowers/specs/2026-08-05-object-compression-design.md.
+        # `path` is reassigned to the compressed copy when compression ran;
+        # the plaintext `path` handed in by the caller no longer exists past
+        # this point in that case (_stage_for_placement discards it).
+        staged = await _stage_for_placement(path, safe_name)
+        path, digest, size = staged.path, staged.digest, staged.size
         await obj.set({DataObject.size: size})
 
-        existing = await blob_service.find_present_blob(digest)
+        dedup_hit = (
+            await blob_service.find_present_blob_by_content(staged.content_sha256)
+            if staged.content_sha256
+            else None
+        )
+        existing = dedup_hit or await blob_service.find_present_blob(digest)
         if existing is not None and _blob_bytes_present(existing):
             # A trim run that produced byte-identical output to something
             # already stored -- re-running the same job on the same input, most
             # likely. Keep the record, drop the duplicate bytes.
             await _discard(path)
+            digest, size = existing.id, existing.size
             log.info("produced_file_deduplicated", digest=digest, name=safe_name)
         else:
             await asyncio.to_thread(cas.place_blob, path, digest, size)
 
+        if staged.name != safe_name:
+            safe_name = staged.name
+            await obj.set({DataObject.name: safe_name})
         await blob_service.attach_blob_to_object(
-            object_id=obj.id, digest=digest, size=size, storage=BlobStorage.MANAGED
+            object_id=obj.id,
+            digest=digest,
+            size=size,
+            storage=BlobStorage.MANAGED,
+            content_sha256=staged.content_sha256,
         )
         await project_service.bump_counters(project_id, objects=1, total_bytes=size)
         ingest_job_id = await enqueue_ingest(obj, owner=owner, digest=digest)
@@ -265,6 +305,58 @@ async def ingest_local_file(
         raise
 
     return await get_object(obj.id, owner=owner)
+
+
+@dataclass
+class _StagedContent:
+    """What to place, after the compression decision has been made.
+
+    `digest`/`size` describe the bytes `path` actually holds -- the CAS key
+    they will be placed under. `content_sha256` is set only when compression
+    ran, and is what dedup looks up by instead (see
+    blob_service.find_present_blob_by_content) so two ingests of the same
+    plaintext converge on one blob even if a different compressor wrote each.
+    """
+
+    path: Path
+    digest: str
+    size: int
+    name: str
+    content_sha256: str | None
+
+
+async def _stage_for_placement(path: Path, name: str) -> _StagedContent:
+    """Detect the format, compress if the design's allowlist says so, and
+    return what to place -- fused into one pass per compress.compress_and_hash
+    so this costs no extra read of a large file.
+
+    `path` is consumed on the compress branch: the plaintext temp file is
+    removed once the compressed copy exists, since only one of the two is
+    going into the store. The uncompressed branch leaves `path` exactly as
+    handed in, so a caller's existing cleanup-on-error path keeps working
+    unchanged for every format that is not compressed.
+    """
+    detection = await asyncio.to_thread(detect.detect, path, name)
+
+    if not compress.should_compress(detection.kind, detection.compression):
+        digest, size = await asyncio.to_thread(cas.hash_file, path)
+        return _StagedContent(path=path, digest=digest, size=size, name=name, content_sha256=None)
+
+    result = await asyncio.to_thread(compress.compress_and_hash, path)
+    await _discard(path)
+    # should_compress already required Compression.NONE from the sniffed
+    # bytes, so a name still carrying a compression suffix here means the
+    # extension disagreed with the content -- a mislabeled or corrupt `.gz`
+    # whose bytes were not actually gzip. Stripping it before appending avoids
+    # a cosmetic `name.gz.gz` in that case rather than trusting the name.
+    bare_name = detect.strip_compression_suffix(name)
+    return _StagedContent(
+        path=result.path,
+        digest=result.compressed_sha256,
+        size=result.compressed_size,
+        name=f"{bare_name}.gz",
+        content_sha256=result.content_sha256,
+    )
 
 
 async def _discard(path: Path) -> None:
