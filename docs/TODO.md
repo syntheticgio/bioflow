@@ -619,6 +619,29 @@ file rather than moving to `docs/TODO-done.md`.
 - **Contamination screening** is a real axis nothing here covers and is a
   named non-goal: FCS-GX's database is ~470 GB.
 
+**Two of those bullets went stale and were corrected 2026-08-05** by the epic
+design note (`docs/superpowers/specs/2026-08-05-remaining-post-assembly-qc-
+design.md`, GitHub #13). Left in place above rather than rewritten, because
+each was correctly reasoned from what it checked and the *way* they went wrong
+is the useful part.
+
+- **QUAST costs far less than "not in apt" implied.** The apt verdict still
+  holds -- re-verified, no candidate in trixie -- but it was allowed to imply
+  a source build, and there is none. QUAST prefers a `PATH` minimap2 over its
+  bundled copy (`min_version='2.19'`), the 400 MB tarball trims to 8.6 MB with
+  everything a reference run never touches removed, and a 12 Mb yeast assembly
+  runs in 3-4 s. The real install cost is a GitHub tarball (PyPI stops at
+  5.2.0) plus a two-line `distutils` patch for Python 3.12. Now GitHub #62.
+- **CRAQ and GCI were never blocked on Pilon, and Merqury needs no alignment
+  at all.** Pilon is out permanently (#23 swapped it for Polypolish). Reads
+  can already be realigned to a user's own assembly: `results.py:1246` roles an
+  assembly FASTA `REFERENCE` on ingest, and `_check_reference` requires only
+  READY plus a FASTA kind, so the ordinary align pipeline has covered this
+  since the assembly work itself landed -- discharged as a side effect, with
+  nobody going back to say so. Merqury was in the group by mistake: it is
+  k-mer based, and its actual blocker is Marbl meryl (the Debian-meryl trap
+  recorded above, re-confirmed). Now GitHub #63, #64, #65.
+
 ### What the implementation found that the design did not know yet
 
 All found by actually building and running the thing, not by re-reading the
