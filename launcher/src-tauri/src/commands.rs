@@ -32,8 +32,13 @@ const BUNDLED_COMPOSE_RESOURCE: &str = "docker-compose.yml";
 /// Tracks the state that isn't a Docker fact: where (if anywhere) the stack
 /// is installed, and which port it's configured to serve on. Both are
 /// `None`/absent before first-run setup completes.
+///
+/// No `ShellDocker` field: every command below constructs one fresh inside
+/// its own `spawn_blocking` closure instead, since `ShellDocker` is a
+/// zero-sized unit struct with no state of its own to share, and a borrowed
+/// `State<'_, LauncherApp>` cannot be moved into a `'static` blocking
+/// closure anyway.
 pub struct LauncherApp {
-    pub docker: ShellDocker,
     pub install_dir: Mutex<Option<PathBuf>>,
     pub port: Mutex<Option<u16>>,
 }
@@ -41,7 +46,6 @@ pub struct LauncherApp {
 impl Default for LauncherApp {
     fn default() -> Self {
         Self {
-            docker: ShellDocker::new(),
             install_dir: Mutex::new(None),
             port: Mutex::new(None),
         }
@@ -56,13 +60,27 @@ fn install_dir_str(app: &State<LauncherApp>) -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
+/// `async`/`spawn_blocking` for the same reason as `run_stack` above --
+/// `evaluate` shells out to `docker` (`probe`, and on the happy path `ps`
+/// and `health` too), and the frontend polls this every
+/// `STATUS_POLL_INTERVAL_MS` (3s), so even an occasionally slow or
+/// momentarily unresponsive daemon would otherwise stall the UI thread on a
+/// steady cadence rather than just during Run/Stop/Update.
 #[tauri::command]
-pub fn status(app: State<LauncherApp>) -> LauncherStateDto {
-    let install_dir = app.install_dir.lock().unwrap();
-    let info = InstallInfo {
-        install_dir: install_dir.as_ref().and_then(|p| p.to_str()),
-    };
-    state::evaluate(&app.docker, &info).into()
+pub async fn status(app: State<'_, LauncherApp>) -> Result<LauncherStateDto, ()> {
+    let install_dir = install_dir_str(&app);
+
+    let state = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        let info = InstallInfo {
+            install_dir: install_dir.as_deref(),
+        };
+        state::evaluate(&docker, &info)
+    })
+    .await
+    .unwrap_or(LauncherState::NotInstalled);
+
+    Ok(state.into())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,14 +117,32 @@ const RUN_HEALTH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_
 /// per the spec: a cold start against an empty Mongo volume takes
 /// substantially longer than a warm one, and opening too early shows a
 /// connection error that reads as a broken install.
+///
+/// `async` and run on Tauri's blocking-task pool via `spawn_blocking`, the
+/// same reason `check_for_update` already needed it: `docker compose up`
+/// plus up to a minute of health polling (`RUN_HEALTH_MAX_ATTEMPTS` *
+/// `RUN_HEALTH_POLL_INTERVAL`) both block the calling thread for real, and a
+/// plain synchronous `#[tauri::command]` dispatches on the same thread that
+/// pumps the webview's event loop. A user hit exactly this: the window
+/// stopped responding to input for the duration of Run/Stop/Update and the
+/// OS offered to force-quit it, even though nothing had actually hung.
 #[tauri::command]
-pub fn run_stack(app: tauri::AppHandle, state: State<LauncherApp>) -> Result<(), String> {
+pub async fn run_stack(app: tauri::AppHandle, state: State<'_, LauncherApp>) -> Result<(), String> {
     let install_dir = install_dir_str(&state).ok_or("not installed")?;
-    match actions::run(&state.docker, &install_dir, RUN_HEALTH_MAX_ATTEMPTS, || {
-        std::thread::sleep(RUN_HEALTH_POLL_INTERVAL)
-    }) {
+    let port = *state.port.lock().unwrap();
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::run(&docker, &install_dir, RUN_HEALTH_MAX_ATTEMPTS, || {
+            std::thread::sleep(RUN_HEALTH_POLL_INTERVAL)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
         RunOutcome::Running => {
-            if let Some(port) = *state.port.lock().unwrap() {
+            if let Some(port) = port {
                 let _ = app
                     .opener()
                     .open_url(format!("http://localhost:{port}"), None::<&str>);
@@ -120,19 +156,40 @@ pub fn run_stack(app: tauri::AppHandle, state: State<LauncherApp>) -> Result<(),
     }
 }
 
+/// `async`/`spawn_blocking` for the same reason as `run_stack` above --
+/// `docker compose down` is a real blocking subprocess call.
 #[tauri::command]
-pub fn stop_stack(app: State<LauncherApp>) -> Result<(), String> {
+pub async fn stop_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
     let install_dir = install_dir_str(&app).ok_or("not installed")?;
-    match actions::stop(&app.docker, &install_dir) {
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::stop(&docker, &install_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
         StopOutcome::Stopped => Ok(()),
         StopOutcome::Failed { output } => Err(output),
     }
 }
 
+/// `async`/`spawn_blocking` for the same reason as `run_stack` above --
+/// `docker compose pull` plus `up -d` are both real blocking subprocess
+/// calls, and a pull in particular can run long on a slow connection.
 #[tauri::command]
-pub fn update_stack(app: State<LauncherApp>) -> Result<(), String> {
+pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
     let install_dir = install_dir_str(&app).ok_or("not installed")?;
-    match actions::update(&app.docker, &install_dir) {
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::update(&docker, &install_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
         UpdateOutcome::Updated => Ok(()),
         UpdateOutcome::PullFailed { output } | UpdateOutcome::RecreateFailed { output } => {
             Err(output)
@@ -220,10 +277,14 @@ pub struct FirstRunSetupArgs {
     pub port: u16,
 }
 
+/// `async`/`spawn_blocking` for the same reason as `run_stack` above --
+/// `setup::install` ends with a `docker compose pull` and `up -d`, the exact
+/// button click that first surfaced the frozen-window symptom, since this is
+/// the command Install itself triggers.
 #[tauri::command]
-pub fn run_first_setup(
+pub async fn run_first_setup(
     handle: tauri::AppHandle,
-    app: State<LauncherApp>,
+    app: State<'_, LauncherApp>,
     args: FirstRunSetupArgs,
 ) -> Result<(), String> {
     let bundled_compose_path = handle
@@ -237,7 +298,17 @@ pub fn run_first_setup(
         port: args.port,
     };
 
-    setup::install(&app.docker, &inputs, &bundled_compose_path).map_err(|e| match e {
+    let install_result = {
+        let inputs = inputs.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let docker = ShellDocker::new();
+            setup::install(&docker, &inputs, &bundled_compose_path)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    install_result.map_err(|e| match e {
         InstallError::CouldNotCreateInstallDir { reason } => {
             format!("could not create the install directory: {reason}")
         }
@@ -261,8 +332,11 @@ pub struct ApplySettingsArgs {
     pub network_exposed: bool,
 }
 
+/// `async`/`spawn_blocking` for the same reason as `run_stack` above --
+/// `settings::apply` ends with a `docker compose up -d` to recreate
+/// containers against the rewritten `.env`.
 #[tauri::command]
-pub fn apply_settings(app: State<LauncherApp>, args: ApplySettingsArgs) -> Result<(), String> {
+pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs) -> Result<(), String> {
     let install_dir = app
         .install_dir
         .lock()
@@ -276,7 +350,13 @@ pub fn apply_settings(app: State<LauncherApp>, args: ApplySettingsArgs) -> Resul
         network_exposed: args.network_exposed,
     };
 
-    settings::apply(&app.docker, &install_dir, &settings, &[]).map_err(|e| match e {
+    tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        settings::apply(&docker, &install_dir, &settings, &[])
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| match e {
         SettingsUpdateError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
         SettingsUpdateError::RecreateFailed { output } => output,
     })?;
