@@ -327,16 +327,44 @@ the reference resolves as expected. This is the step CLAUDE.md records as having
 caught two rule bugs that a full green suite missed, and the provenance walk
 here is exactly the kind of rule that looks right against hand-built fixtures.
 
-End-to-end, in the browser at localhost:5173 (or 5273 from a worktree):
+End-to-end, in the browser at localhost:5173 (or 5273 from a worktree), in two
+tiers. The existing projects cover the provenance and no-primer paths; only the
+primer path needs new data.
 
-A SARS-CoV-2 ARTIC dataset is the representative path -- small, public, and the
-case the workflow is designed for. Align reads to the reference in the app,
-supply the matching ARTIC primer BED, run the consensus, and confirm the output
-FASTA appears with its `consensus_n_count` and threshold facts. Then run it
-again *without* the primer BED and confirm the two differ: if trimmed and
-untrimmed consensus sequences are identical, primer trimming did not happen, and
-the most likely cause is a BED whose contig names do not match the reference --
-the failure `check_primer_bed` exists to prevent, verified from the other side.
+**Tier 1 -- what the current database already supports.** Checked 2026-08-05:
+four projects (yeast x3, *T. brucei*), seven ready BAMs with role `alignment`
+and 2-3 provenance parents each, and reference FASTA in every project. That is
+enough to exercise everything except primer trimming:
+
+- The consensus card appears on a real BAM and resolves the right reference.
+- A no-primer consensus runs to completion against `ERR17609896.bam` or
+  `DRR1066343.bam` and produces a FASTA with its threshold and `n_count` facts.
+- The provenance refusal fires: the *T. brucei* and yeast BAMs are aligned to
+  different references, so pairing one project's BAM with another's reference is
+  a real mismatched-target case rather than a constructed one.
+
+Note this is whole-genome DNA rather than viral data, so the consensus itself is
+biologically uninteresting -- a 12Mb yeast consensus is not something anyone
+wants. It is still the right tier-1 test: what is being verified is the runner,
+the provenance walk, the object write, and the facts, none of which care about
+genome size. Expect it to be slower than a viral run and to record real
+`peak_rss_bytes` where a 30kb virus would record null.
+
+**Tier 2 -- primer trimming, which needs a SARS-CoV-2 ARTIC dataset.** There is
+no local amplicon data and no local primer scheme: the eight BED-kind objects in
+the database are all `.fna.fai` samtools index files that `detect.py` sniffed as
+BED, not primer schemes. So the primer half of this workflow cannot be verified
+against anything currently in the app, and ARTIC is the path.
+
+Align ARTIC reads to the reference in the app, supply the matching primer BED,
+run the consensus, then run it again *without* the BED and confirm the two
+differ. If trimmed and untrimmed consensus sequences are identical, primer
+trimming did not happen, and the most likely cause is a BED whose contig names
+do not match the reference -- the failure `check_primer_bed` exists to prevent,
+verified from the other side.
+
+Tier 1 is worth running first even though tier 2 is the real case: it fails
+faster, and every failure it catches is in code tier 2 also depends on.
 
 Restart the worker before testing (`docker compose restart worker`): the handler
 is new, and `worker` does not hot-reload. A new handler that never loaded reads
@@ -355,6 +383,18 @@ it produced nothing useful, including the disjoint-primer case above. The
 handler should verify the consensus FASTA exists and is non-empty rather than
 trusting the return code -- the same check `assess_completeness` makes for a
 missing `summary.txt`, and for the same reason.
+
+**`.fai` index files are already misdetected as BED.** Every BED-kind object in
+the current database (eight of them) is a samtools `.fna.fai` index, not a BED
+file -- `detect.py` sniffs BED by column shape with no magic bytes, and a `.fai`
+is tab-separated with a name and numbers. That matters here because a primer
+picker filtering on `FormatKind.BED` will offer `.fai` files as primer schemes.
+`check_primer_bed`'s contig-intersection rule catches it -- a `.fai`'s first
+column *is* the reference's contig names, so it would intersect perfectly and
+pass. The column-count and coordinate checks are what actually reject it, which
+is an argument for `check_primer_bed` validating BED structure rather than
+relying on the contig rule alone. Worth a separate detection fix, but this slice
+should not depend on one.
 
 **A consensus is mostly `N` more often than users expect.** Low-coverage
 amplicon dropout is common and produces a technically successful run whose
