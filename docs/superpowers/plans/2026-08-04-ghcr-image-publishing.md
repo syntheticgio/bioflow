@@ -38,7 +38,7 @@ The `gh` token currently carries `admin:public_key, gist, read:org, repo`. GHCR 
 
 **Files:** none — this is machine setup.
 
-- [ ] **Step 1: Confirm the scope is missing**
+- [x] **Step 1: Confirm the scope is missing**
 
 ```bash
 gh auth status 2>&1 | grep -i "token scopes"
@@ -46,7 +46,7 @@ gh auth status 2>&1 | grep -i "token scopes"
 
 Expected: a list that does *not* include `write:packages`.
 
-- [ ] **Step 2: Add the scope**
+- [x] **Step 2: Add the scope**
 
 ```bash
 gh auth refresh -h github.com -s write:packages -s read:packages
@@ -54,7 +54,7 @@ gh auth refresh -h github.com -s write:packages -s read:packages
 
 This opens a browser for confirmation. If the environment cannot open one, it prints a one-time code and URL to use manually.
 
-- [ ] **Step 3: Verify**
+- [x] **Step 3: Verify**
 
 ```bash
 gh auth status 2>&1 | grep -i "token scopes"
@@ -62,7 +62,7 @@ gh auth status 2>&1 | grep -i "token scopes"
 
 Expected: the list now includes `write:packages`.
 
-- [ ] **Step 4: Log Docker in to GHCR**
+- [x] **Step 4: Log Docker in to GHCR**
 
 ```bash
 gh auth token | docker login ghcr.io -u syntheticgio --password-stdin
@@ -76,7 +76,7 @@ Expected: `Login Succeeded`.
 
 **Files:** none — this task produces registry artifacts.
 
-- [ ] **Step 1: Choose the version tag**
+- [x] **Step 1: Choose the version tag**
 
 Read the current backend version so the published tag matches the code:
 
@@ -88,7 +88,7 @@ Expected: `version = "0.1.0"` as of this writing. Use that value wherever `<VERS
 
 The `^` anchor matters: `pyproject.toml` also contains `target-version = "py312"` for ruff, and an unanchored match can pick that up depending on ordering.
 
-- [ ] **Step 2: Build for arm64 and push**
+- [x] **Step 2: Build for arm64 and push**
 
 From the repository root:
 
@@ -98,7 +98,7 @@ docker buildx build --platform linux/arm64 --tag ghcr.io/syntheticgio/bioflow-ba
 
 Expected: a long build (the bwa-mem2 arm64 source compile and Clair3 install dominate), then a push of several gigabytes. Most layers come from the local cache if the stack was built recently.
 
-- [ ] **Step 3: Verify the image is in the registry**
+- [x] **Step 3: Verify the image is in the registry**
 
 ```bash
 docker manifest inspect ghcr.io/syntheticgio/bioflow-backend:latest | grep -A2 platform
@@ -106,7 +106,7 @@ docker manifest inspect ghcr.io/syntheticgio/bioflow-backend:latest | grep -A2 p
 
 Expected: `"architecture": "arm64"`, `"os": "linux"`.
 
-- [ ] **Step 4: Verify the tools survived the round trip**
+- [x] **Step 4: Verify the tools survived the round trip**
 
 The image is only useful if its bioinformatics tools work. Pull it fresh and probe a representative sample — one Debian package, one source-built binary, one script-installed tool:
 
@@ -122,7 +122,7 @@ Expected: each prints a version. `bwa-mem2` is the one to watch — it is the ar
 
 **Files:** none.
 
-- [ ] **Step 1: Build the prod target and push**
+- [x] **Step 1: Build the prod target and push**
 
 The frontend Dockerfile has three stages; only `prod` is published. `dev` exists for the override file and must not be shipped.
 
@@ -132,21 +132,39 @@ docker buildx build --platform linux/arm64 --target prod --tag ghcr.io/synthetic
 
 Expected: a much faster build than the backend, then a push of roughly 660MB.
 
-- [ ] **Step 2: Verify it serves the built app**
+- [x] **Step 2: Verify the right stage was published**
+
+**Do not try to serve this image standalone.** `nginx.conf` proxies `/api/` to an
+upstream named `api`, which only resolves on the compose network, so a lone
+container exits at startup with `host not found in upstream "api"`. That is
+correct behaviour, not a broken build -- an earlier version of this step ran
+`docker run ... curl localhost` and expected `200`, which can never pass.
+
+Check the image's *metadata and contents* instead. Both halves matter, and the
+second is the one that actually caught a bad publish:
 
 ```bash
-docker run --rm -d --name bioflow-web-check -p 18080:80 ghcr.io/syntheticgio/bioflow-web:latest && sleep 3 && curl -s -o /dev/null -w "%{http_code}\n" http://localhost:18080/ && docker stop bioflow-web-check
+docker image inspect ghcr.io/syntheticgio/bioflow-web:latest --format 'Cmd: {{json .Config.Cmd}}'
+docker run --rm --entrypoint sh ghcr.io/syntheticgio/bioflow-web:latest -c "ls /usr/share/nginx/html/assets/ | head -3"
 ```
 
-Expected: `200`. A `404` means the `--target prod` flag was omitted and the wrong stage was published.
+Expected: `Cmd: ["nginx","-g","daemon off;"]`, and Vite-hashed bundles under
+`assets/`.
 
-- [ ] **Step 3: Make both packages public**
+If `Cmd` is `["npm","run","dev",...]` the published image is the **dev** stage's
+command on the prod stage's filesystem. This really happened on the first push
+here: the files were right, so a contents-only check passed, but every container
+started Vite instead of nginx and served the dev-server HTML. Rebuild with
+`--no-cache` and repush. Real serving is proved on a compose network in Task 7,
+which is where a wrong `Cmd` shows up as `/@vite/client` in the response body.
+
+- [x] **Step 3: Make both packages public**
 
 New GHCR packages default to private, and the launcher's users are anonymous.
 
 Visit `https://github.com/users/syntheticgio/packages`, open each of `bioflow-backend` and `bioflow-web`, then Package settings → Change visibility → Public.
 
-- [ ] **Step 4: Verify anonymous pull works**
+- [x] **Step 4: Verify anonymous pull works**
 
 This is the check that matters — it fails if visibility is still private, and it is exactly what an end user's machine does:
 
@@ -166,7 +184,7 @@ This is the change that lets a machine with no source tree start the stack, and 
 - Modify: `docker-compose.yml`
 - Modify: `docker-compose.override.yml`
 
-- [ ] **Step 1: Point the three services at images**
+- [x] **Step 1: Point the three services at images**
 
 In `docker-compose.yml`, replace the `api` service's build block:
 
@@ -217,7 +235,7 @@ with:
     image: ghcr.io/syntheticgio/bioflow-web:${BIOFLOW_TAG:-latest}
 ```
 
-- [ ] **Step 2: Move the build directives to the override**
+- [x] **Step 2: Move the build directives to the override**
 
 In `docker-compose.override.yml`, add a `build:` block to each of the three services alongside what is already there. The `api` service becomes:
 
@@ -249,7 +267,7 @@ And to the `web` service, replacing its existing `build:` block (which currently
       target: dev
 ```
 
-- [ ] **Step 3: Verify the local build path still works**
+- [x] **Step 3: Verify the local build path still works**
 
 From the main checkout root:
 
@@ -259,7 +277,7 @@ docker compose config --services && docker compose build api 2>&1 | tail -5
 
 Expected: the service list prints, and `api` builds from source rather than reporting a missing build context.
 
-- [ ] **Step 4: Verify the shipped path resolves to images**
+- [x] **Step 4: Verify the shipped path resolves to images**
 
 This is what the launcher will run — base file only, no override:
 
@@ -269,7 +287,7 @@ docker compose -f docker-compose.yml config | grep -E "^\s+image:"
 
 Expected: five image lines — mongo, redis, and the three BioFlow services pointing at `ghcr.io/syntheticgio/*`. No `build:` keys appear anywhere in that output.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docker-compose.yml docker-compose.override.yml
@@ -286,7 +304,7 @@ The launcher sets the port and the bind address through `.env`. Both are hardcod
 - Modify: `docker-compose.yml`
 - Modify: `.env.example`
 
-- [ ] **Step 1: Parameterize the published ports**
+- [x] **Step 1: Parameterize the published ports**
 
 In `docker-compose.yml`, replace the `api` service's ports block:
 
@@ -320,7 +338,7 @@ with:
       - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-5173}:80"
 ```
 
-- [ ] **Step 2: Document the variables**
+- [x] **Step 2: Document the variables**
 
 Add to `.env.example`, after the `BIOINFO_HOME` block:
 
@@ -338,7 +356,7 @@ BIND_ADDRESS=127.0.0.1
 BIOFLOW_TAG=latest
 ```
 
-- [ ] **Step 3: Verify the default is loopback**
+- [x] **Step 3: Verify the default is loopback**
 
 ```bash
 docker compose config | grep -A4 "published"
@@ -346,7 +364,7 @@ docker compose config | grep -A4 "published"
 
 Expected: `host_ip: 127.0.0.1` on the published port entries.
 
-- [ ] **Step 4: Verify the toggle opens it**
+- [x] **Step 4: Verify the toggle opens it**
 
 ```bash
 BIND_ADDRESS=0.0.0.0 docker compose config | grep -A4 "published" | grep host_ip
@@ -354,7 +372,7 @@ BIND_ADDRESS=0.0.0.0 docker compose config | grep -A4 "published" | grep host_ip
 
 Expected: `host_ip: 0.0.0.0`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docker-compose.yml .env.example
@@ -367,7 +385,7 @@ git commit -m "feat: parameterize published ports and bind address"
 
 The stack the user actually runs must come back healthy on the changed compose files. Do this from the main checkout with the queue idle.
 
-- [ ] **Step 1: Rebuild and restart**
+- [x] **Step 1: Rebuild and restart**
 
 ```bash
 docker compose up -d --build api web worker
@@ -375,7 +393,7 @@ docker compose up -d --build api web worker
 
 Expected: all three build from source (via the override) and start. If any reports a missing build context, Task 4 Step 2 was incomplete.
 
-- [ ] **Step 2: Confirm the stack is serving**
+- [x] **Step 2: Confirm the stack is serving**
 
 ```bash
 curl -s -o /dev/null -w "web %{http_code}\n" http://localhost:5173/ && curl -s -o /dev/null -w "api %{http_code}\n" http://localhost:8000/healthz
@@ -383,7 +401,7 @@ curl -s -o /dev/null -w "web %{http_code}\n" http://localhost:5173/ && curl -s -
 
 Expected: `web 200` and `api 200`.
 
-- [ ] **Step 3: Confirm the stack is on the main checkout, not a worktree**
+- [x] **Step 3: Confirm the stack is on the main checkout, not a worktree**
 
 ```bash
 docker inspect biopipe-worker-1 --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}' | grep -v "^$"
@@ -391,7 +409,7 @@ docker inspect biopipe-worker-1 --format '{{range .Mounts}}{{.Source}}{{"\n"}}{{
 
 Expected: paths under the main checkout. Anything under `.claude/worktrees/` means the stack was started from the wrong directory — rerun Step 1 from the main checkout root.
 
-- [ ] **Step 4: Run the backend suite**
+- [x] **Step 4: Run the backend suite**
 
 ```bash
 docker compose exec api python -m pytest tests/ -q 2>&1 | tail -5
@@ -399,7 +417,7 @@ docker compose exec api python -m pytest tests/ -q 2>&1 | tail -5
 
 Expected: all tests pass. Read the count, not just the exit code. This command is correct only from the main checkout; from a worktree it silently tests main's code.
 
-- [ ] **Step 5: Confirm loopback binding took effect**
+- [x] **Step 5: Confirm loopback binding took effect**
 
 ```bash
 docker inspect biopipe-web-1 --format '{{json .NetworkSettings.Ports}}'
@@ -409,7 +427,7 @@ Expected: `"HostIp":"127.0.0.1"` for port 80.
 
 Note this is a real behavior change for local use: the stack is no longer reachable from other devices on the network unless `BIND_ADDRESS=0.0.0.0` is set in `.env`. If the user has been reaching BioFlow from a phone or another machine, that stops working until they set it — mention this when reporting the task complete.
 
-- [ ] **Step 6: Verify a pipeline job still runs**
+- [x] **Step 6: Verify a pipeline job still runs**
 
 Image changes that break a tool do not show up in the API healthcheck. Restart the worker so it reloads handlers, then run one QC job through the UI at localhost:5173 against an existing project and confirm it completes.
 
@@ -417,7 +435,7 @@ Image changes that break a tool do not show up in the API healthcheck. Restart t
 docker compose restart worker
 ```
 
-- [ ] **Step 7: Commit nothing, or fix and commit**
+- [x] **Step 7: Commit nothing, or fix and commit**
 
 This task changes no files. If it exposed a problem, fix it, rerun the suite, and commit the fix on its own.
 
@@ -427,7 +445,7 @@ This task changes no files. If it exposed a problem, fix it, rerun the suite, an
 
 Everything up to here proves the compose file *parses* as image references. This proves the thing the issue exists for: a machine with no source tree can start BioFlow. Skipping it would leave the central claim untested.
 
-- [ ] **Step 1: Build a source-free install directory**
+- [x] **Step 1: Build a source-free install directory**
 
 ```bash
 mkdir -p /tmp/bioflow-nosrc && cd "$(git rev-parse --show-toplevel)" && cp docker-compose.yml /tmp/bioflow-nosrc/ && ls /tmp/bioflow-nosrc/
@@ -435,7 +453,7 @@ mkdir -p /tmp/bioflow-nosrc && cd "$(git rev-parse --show-toplevel)" && cp docke
 
 Expected: `docker-compose.yml` alone. No `backend/`, no `frontend/`, no override file — exactly what the launcher writes.
 
-- [ ] **Step 2: Write an `.env` like the launcher's**
+- [x] **Step 2: Write an `.env` like the launcher's**
 
 ```bash
 printf 'BIOINFO_HOME=/tmp/bioflow-nosrc-data\nWEB_PORT=5273\nAPI_PORT=8100\nBIND_ADDRESS=127.0.0.1\nBIOFLOW_TAG=latest\n' > /tmp/bioflow-nosrc/.env && mkdir -p /tmp/bioflow-nosrc-data && cat /tmp/bioflow-nosrc/.env
@@ -443,17 +461,32 @@ printf 'BIOINFO_HOME=/tmp/bioflow-nosrc-data\nWEB_PORT=5273\nAPI_PORT=8100\nBIND
 
 Ports differ from the main stack's so both can run at once.
 
-- [ ] **Step 3: Start it under its own project name**
+- [x] **Step 3: Start it under its own project name**
 
 The distinct project name is what keeps this from colliding with the real stack — the same mechanism `ops/worktree-up.sh` uses.
 
+**`cd` into the install directory first.** `--project-directory` alone is not
+enough: Compose discovers `docker-compose.override.yml` relative to the
+*invoking* directory, so running this from the repo root loads the repo's
+override on top of the source-free file. The stack comes up looking healthy
+while `web` runs the override's `npm run dev` command -- which is exactly the
+false pass this step exists to prevent.
+
 ```bash
-docker compose --project-directory /tmp/bioflow-nosrc --project-name bioflow-nosrc up -d
+cd /tmp/bioflow-nosrc && docker compose --project-name bioflow-nosrc up -d
 ```
 
 Expected: images are pulled from ghcr.io if not cached, then all five services start. A "context path does not exist" error means the base compose file still has a `build:` key.
 
-- [ ] **Step 4: Confirm it serves**
+Confirm no override leaked in before trusting the result:
+
+```bash
+cd /tmp/bioflow-nosrc && docker compose --project-name bioflow-nosrc config | grep -c npm
+```
+
+Expected: `0`.
+
+- [x] **Step 4: Confirm it serves**
 
 ```bash
 sleep 20 && curl -s -o /dev/null -w "web %{http_code}\n" http://localhost:5273/ && curl -s -o /dev/null -w "api %{http_code}\n" http://localhost:8100/healthz
@@ -461,7 +494,7 @@ sleep 20 && curl -s -o /dev/null -w "web %{http_code}\n" http://localhost:5273/ 
 
 Expected: `web 200` and `api 200`. This is the proof that the launcher's approach works.
 
-- [ ] **Step 5: Tear it down**
+- [x] **Step 5: Tear it down**
 
 ```bash
 docker compose --project-directory /tmp/bioflow-nosrc --project-name bioflow-nosrc down -v && rm -rf /tmp/bioflow-nosrc /tmp/bioflow-nosrc-data
@@ -469,7 +502,7 @@ docker compose --project-directory /tmp/bioflow-nosrc --project-name bioflow-nos
 
 Expected: containers and volumes removed. `-v` matters — this test created its own mongo and redis volumes.
 
-- [ ] **Step 6: Confirm the main stack is unaffected**
+- [x] **Step 6: Confirm the main stack is unaffected**
 
 ```bash
 curl -s -o /dev/null -w "main web %{http_code}\n" http://localhost:5173/
@@ -481,15 +514,15 @@ Expected: `200`. The project-name isolation should have kept the real stack unto
 
 ## Task 8: Close out
 
-- [ ] **Step 1: Record what shipped on the issue**
+- [x] **Step 1: Record what shipped on the issue**
 
 Comment on [#37](https://github.com/syntheticgio/bioflow/issues/37) with the published tags, the verified digests, and the result of the Task 7 source-free run. Note explicitly that only `linux/arm64` was published and that #46 covers amd64.
 
-- [ ] **Step 2: Unblock the launcher issue**
+- [x] **Step 2: Unblock the launcher issue**
 
 Comment on [#28](https://github.com/syntheticgio/bioflow/issues/28) that its image prerequisite is satisfied for arm64, so Tasks 1–15 of the launcher plan can proceed and Task 16's verification is possible on Apple Silicon.
 
-- [ ] **Step 3: Update `docs/TODO.md` if it names this work**
+- [x] **Step 3: Update `docs/TODO.md` if it names this work**
 
 Check whether any open entry describes the build-context problem. If one does and this closed it, append ` — FIXED` with a note saying what shipped and where, and move the entry to `docs/TODO-done.md` per `CLAUDE.md`. If none does, change nothing.
 
@@ -497,7 +530,7 @@ Check whether any open entry describes the build-context problem. If one does an
 grep -n -i "image\|registry\|ghcr\|build context" docs/TODO.md
 ```
 
-- [ ] **Step 4: Merge and push**
+- [x] **Step 4: Merge and push**
 
 The suite passed in Task 6 and the source-free install worked in Task 7, which is the bar for merging here.
 

@@ -76,11 +76,19 @@ fake-backed unit test passed regardless of whether the auth step was there.
 to `docs/TODO-done.md`:** the "full install" pre-pull-optional-tools checkbox
 described below is explicitly **not** part of what shipped — it is deferred
 to [#40](https://github.com/syntheticgio/bioflow/issues/40), blocked on epic
-#5 settling which tools are optional. The launcher also cannot yet start a
-real stack for an end user: `docker-compose.yml`'s `api`/`worker`/`web`
-services still `build:` from source rather than reference published
-`ghcr.io` images, which is [#37](https://github.com/syntheticgio/bioflow/issues/37)'s
-job, and packaging/signing/distribution is [#39](https://github.com/syntheticgio/bioflow/issues/39)'s.
+#5 settling which tools are optional. Packaging, signing, and distribution is
+[#39](https://github.com/syntheticgio/bioflow/issues/39)'s job and has not
+shipped, so there is still no binary an end user can download.
+
+The image half of that blocker is now gone.
+[#37](https://github.com/syntheticgio/bioflow/issues/37) shipped 2026-08-05:
+`api`/`worker`/`web` reference `ghcr.io/syntheticgio/bioflow-{backend,web}`
+rather than building from source, and a directory holding nothing but
+`docker-compose.yml` and `.env` was verified to start all five services and
+serve the built app. The launcher can therefore start a real stack on Apple
+Silicon; `linux/amd64` images remain
+[#46](https://github.com/syntheticgio/bioflow/issues/46), so other
+architectures still cannot.
 Verification so far is macOS-only (`cargo test`, `cargo clippy
 --all-targets`, `npm run lint`, and a full `tauri build --bundles app`
 launching and staying alive) — #28's "builds and runs on macOS, Windows, and
