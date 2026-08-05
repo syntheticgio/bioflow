@@ -124,7 +124,12 @@ Verification so far is macOS-only (`cargo test`, `cargo clippy
 --all-targets`, `npm run lint`, and a full `tauri build --bundles app`
 launching and staying alive) — #28's "builds and runs on macOS, Windows, and
 Linux" acceptance criterion stays unchecked until Windows and Linux are
-actually exercised, not assumed.
+actually exercised, not assumed. The Linux half is tracked separately as
+[#49](https://github.com/syntheticgio/bioflow/issues/49), opened 2026-08-05
+specifically so it isn't conflated with #46's amd64-image verification above
+— #46 exercised the compose contract on amd64 Linux, not the launcher binary,
+and a launcher build on that same machine would test the untested Linux port
+and the architecture at once.
 
 A native executable that removes `docker compose` from the user's vocabulary.
 On launch it checks whether Docker is installed and running, then whether
