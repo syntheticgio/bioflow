@@ -369,6 +369,58 @@ silently read the host machine while appearing to control it:
   to unavailable when the probe is patched off -- that is the direction that
   fails when the seam breaks.
 
+## Hand-maintained registries keyed by an enum
+
+`suggestion_service.py`'s rules and `TOOL_META` above are one instance of a
+wider shape: a module-level dict keyed by something an enum already
+enumerates, where a member the dict has no entry for is simply skipped rather
+than raised. Adding STAR found this in `results._SIDECAR_ROLES` and cost a
+`build_index` job that reported success while storing none of its eight index
+files -- the full test suite stayed green throughout, because every fixture
+fed the appliers roles already in the allowlist.
+
+[`docs/superpowers/specs/2026-08-05-registry-audit-design.md`](docs/superpowers/specs/2026-08-05-registry-audit-design.md)
+walked every registry named in
+[#11](https://github.com/syntheticgio/bioflow/issues/11) and found the shape
+splits three ways, which matters because only one of the three should be
+"fixed" the same way:
+
+- **Genuinely derivable.** `results._SIDECAR_ROLES` (`{role.value: role for
+  role in SidecarRole}`) and `schemas.ROLE_FIELDS` /
+  `schemas.FORMAT_FIELDS` -- the last two are dicts holding real per-role or
+  per-format data, so a full derivation is wrong, but each has a companion
+  `frozenset` (`FORMAT_DERIVED_ROLES`, `FORMAT_COMMON_ONLY`) covering every
+  enum member the main dict doesn't, with a comment on each member saying
+  why. `set(TheEnum) == set(main_dict) | companion_set` is the exhaustiveness
+  test both carry. **This is the pattern to copy.**
+- **Intentionally partial, and the wrong instinct is to force coverage.**
+  `enrich._TOKEN_SEQUENCE_TYPES` maps an open vocabulary of filename tokens
+  to `SequenceType` values; `detect_sequence_type`'s contract is to return
+  `None` when a filename doesn't say, and forcing every enum member to be
+  reachable by construction would turn "the name doesn't say" into a wrong
+  guess -- worse than the STAR failure, not a fix for it. What these need
+  instead is a written inclusion rule (why a token belongs) and, where
+  checkable, a *reachability* test the other direction: every enum member
+  detectable by at least one entry (`test_every_option_is_reachable_by_some_token`
+  in `tests/metadata/test_sequence_type.py`).
+- **Cannot be derived because the keys belong to something outside this
+  repo.** `ncbi_assembly_components.COMPONENTS` is keyed by NCBI's
+  `--include` names; a key NCBI doesn't accept fails loudly at the `datasets`
+  command line, so there's no silent-skip risk on the key side. The risk is
+  internal: `COMPONENT_ORDER`, a hand-written tuple parallel to `COMPONENTS`
+  reached by iteration in every function that walks the components, had zero
+  tests tying it to the dict
+  -- a component added to one and not the other would be invisible in the
+  download dialog with no error anywhere, which is the closest structural
+  match to the STAR failure of anything the audit found. The fix there was
+  `set(COMPONENT_ORDER) == set(COMPONENTS)`, plus uniqueness assertions on
+  the fields two different call sites key dicts by (`file_type`,
+  `preview_key`).
+
+Before adding a case to a dict shaped like this, check which of the three it
+is. Forcing the middle case into the first case's pattern is not more
+correct, it's a detector that starts guessing.
+
 ## Adding an AI-using feature
 
 AI calls go through `app/services/ai/`, never directly to an HTTP endpoint.
