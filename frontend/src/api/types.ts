@@ -134,6 +134,46 @@ export interface ObjectDetail extends DataObject {
   summary_fingerprint?: string | null;
 }
 
+/** One completed run, as shown in an object's History tab. Every resource
+ *  field is null for a run under the 60s sampling floor -- render that as an
+ *  em-dash, never as 0, since a null is the absence of a measurement rather
+ *  than a measurement of zero. */
+export interface ComputationRecord {
+  job_type: string;
+  outcome: "succeeded" | "failed" | "dead" | "cancelled";
+  finished_at: string | null;
+  duration_ms: number;
+  queued_ms: number | null;
+  threads: number | null;
+  tool: string | null;
+  tool_version: string | null;
+  peak_rss_bytes: number | null;
+  peak_cpu_percent: number | null;
+  machine_cpu_model: string | null;
+  machine_logical_cores: number | null;
+  machine_total_ram_bytes: number | null;
+  machine_platform: string | null;
+  job_id: string | null;
+  input_bytes: number;
+}
+
+/**
+ * `produced_by` and `records` answer different questions -- "what made this
+ * file" vs. "what has run on it" -- and stay separate rather than merging
+ * into one list.
+ *
+ * `produced_by_job` is present even when `produced_by` is null: that
+ * combination means the object's `produced_by_job` names a run that predates
+ * computation records (2026-08-03), which reads differently from "nothing
+ * ever ran" and the UI must say so.
+ */
+export interface ObjectComputations {
+  produced_by: ComputationRecord | null;
+  produced_by_job: string | null;
+  records: ComputationRecord[];
+  has_more: boolean;
+}
+
 export interface SystemStats {
   storage: {
     ok: boolean;

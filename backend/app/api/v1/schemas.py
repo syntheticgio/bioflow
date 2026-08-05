@@ -9,7 +9,7 @@ from datetime import datetime
 from beanie import PydanticObjectId
 from pydantic import BaseModel, Field
 
-from app.models import Blob, DataObject, ObjectRole, Profile, Project, Share
+from app.models import Blob, DataObject, JobRunTiming, ObjectRole, Profile, Project, Share
 from app.models.profile import ProfileDisplay
 
 DELETED_PROFILE_PLACEHOLDER = "(deleted profile)"
@@ -174,6 +174,73 @@ class ObjectDetail(ObjectOut):
     # describes the file from one written before the last QC or trim run.
     # Detail-only: the listing has no use for it and it costs a hash per row.
     summary_fingerprint: str | None = None
+
+
+# --- Computation provenance ---
+class ComputationRecord(BaseModel):
+    """One completed run, as shown in an object's History tab.
+
+    A deliberate subset of JobRunTiming: `params`, `features`, `worker_id`,
+    `project_id`, `format_kind` and `compression` are recorded but not
+    rendered here. `machine_id` is dropped too -- it identifies the
+    installation rather than telling a user anything about the run.
+    """
+
+    job_type: str
+    outcome: str
+    finished_at: datetime | None
+    duration_ms: int
+    queued_ms: int | None
+    threads: int | None
+    tool: str | None
+    tool_version: str | None
+    peak_rss_bytes: int | None
+    peak_cpu_percent: float | None
+    machine_cpu_model: str | None
+    machine_logical_cores: int | None
+    machine_total_ram_bytes: int | None
+    machine_platform: str | None
+    job_id: str | None
+    input_bytes: int
+
+    @classmethod
+    def of(cls, t: JobRunTiming) -> "ComputationRecord":
+        return cls(
+            job_type=t.job_type,
+            outcome=t.outcome,
+            finished_at=t.finished_at,
+            duration_ms=t.duration_ms,
+            queued_ms=t.queued_ms,
+            threads=t.threads,
+            tool=t.tool,
+            tool_version=t.tool_version,
+            peak_rss_bytes=t.resources.peak_rss_bytes,
+            peak_cpu_percent=t.resources.peak_cpu_percent,
+            machine_cpu_model=t.machine.cpu_model,
+            machine_logical_cores=t.machine.logical_cores,
+            machine_total_ram_bytes=t.machine.total_ram_bytes,
+            machine_platform=t.machine.platform,
+            job_id=t.job_id,
+            input_bytes=t.input_bytes,
+        )
+
+
+class ObjectComputationsOut(BaseModel):
+    """`produced_by` and `records` answer different questions -- "what made
+    this file" versus "what has been run on it" -- and stay separate rather
+    than merging into one list with a discriminator.
+
+    `produced_by_job` is carried alongside `produced_by` even when the latter
+    is null: it is what lets the UI tell "nothing ever ran" from "the run
+    that made this predates computation records (2026-08-03)", the same way
+    DataObject.produced_by_job can be set while no JobRunTiming names that
+    job_id.
+    """
+
+    produced_by: ComputationRecord | None
+    produced_by_job: str | None
+    records: list[ComputationRecord]
+    has_more: bool
 
 
 # --- System ---
