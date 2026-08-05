@@ -122,6 +122,12 @@ textarea:focus {
   color: #fff;
 }
 
+.header-masthead-img {
+  height: 20px;
+  width: auto;
+  display: block;
+}
+
 .header-menu {
   display: flex;
   gap: 2px;
