@@ -62,7 +62,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8000:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
       mongo:
         condition: service_healthy
@@ -103,7 +103,7 @@ services:
       context: ./frontend
       target: prod
     ports:
-      - "5173:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-5173}:80"
     depends_on:
       api:
         condition: service_healthy
