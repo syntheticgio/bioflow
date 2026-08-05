@@ -2542,47 +2542,331 @@ a.btn {
 
 /* --- Database Index page --- */
 
+.db-index-doc h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+.db-intro {
+  color: var(--text-dim);
+  margin: 0 0 8px;
+}
+.db-stats {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 4px 0 20px;
+}
+.db-stats b {
+  color: var(--accent);
+}
+.db-index-doc a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.db-index-doc a:hover {
+  text-decoration: underline;
+}
+
+/* --- tools (search / access filter / surprise) --- */
 .db-tools {
   display: flex;
   gap: 8px;
-  margin: 0 0 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
 }
-
 .db-tools input[type="search"] {
   flex: 1;
-}
-
-.db-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 10px;
-}
-
-.db-card {
+  min-width: 220px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 6px 10px;
+  outline: none;
+}
+.db-tools input[type="search"]:focus {
+  border-color: var(--accent);
+}
+.db-tools select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  cursor: pointer;
+  outline: none;
+  max-width: 240px;
+}
+.db-tools select:focus {
+  border-color: var(--accent);
+}
+.db-btn {
+  padding: 5px 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.db-btn:hover {
+  background: var(--bg-hover);
+}
+
+/* --- category chips (collapsible, multi-select OR) --- */
+.db-chips-details {
+  margin: 0 0 14px;
+}
+.db-chips-details summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
   background: var(--bg-elevated);
 }
-
-.db-card-name {
+.db-chips-details summary:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.db-chips-details summary::-webkit-details-marker {
+  display: none;
+}
+.db-arrow {
+  display: inline-block;
+  transition: transform 0.15s;
+  font-size: 11px;
+  color: var(--accent);
+}
+.db-chips-details[open] .db-arrow {
+  transform: rotate(90deg);
+}
+.db-active {
+  color: var(--accent);
+  font-weight: 600;
+}
+.db-chips-details[open] .db-chips {
+  margin-top: 8px;
+}
+.db-chips-details:not([open]) .db-chips {
+  display: none;
+}
+.db-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.db-chip-divider {
+  align-self: center;
+  margin: 0 4px 0 2px;
+  color: var(--text-faint);
+  opacity: 0.6;
+  user-select: none;
   font-size: 13px;
-  margin: 0 0 4px;
 }
-
-.db-card-desc {
-  font-size: 12px;
+.db-chip {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
   color: var(--text-dim);
-  margin: 0 0 8px;
-  line-height: 1.5;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.15s;
+}
+.db-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.db-chip-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.db-chip-count {
+  opacity: 0.75;
+  font-size: 11px;
 }
 
-.db-card-meta {
+/* --- results --- */
+.db-meta {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin: 0 0 14px;
+}
+.db-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+.db-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+  transition: border-color 0.15s;
+}
+.db-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.db-card-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.db-card-name {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--text);
+  margin: 0;
+}
+.db-card-name a {
+  color: var(--text);
+}
+.db-card-name a:hover {
+  color: var(--accent);
+  text-decoration: none;
+}
+.db-card-cat {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+.db-card-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0;
+}
+.db-acc {
+  font-size: 11px;
+  border-radius: 5px;
+  padding: 2px 9px;
+  width: max-content;
+  margin-top: 3px;
+  font-weight: 500;
+}
+.db-acc-api {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+}
+.db-acc-dl {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.db-acc-ct {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+}
+.db-acc-web {
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+}
+.db-card-tags {
   font-size: 11px;
   color: var(--text-faint);
+  margin: 0;
+}
+.db-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* --- surprise toast --- */
+.db-surprise-toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  max-width: 320px;
+  padding: 14px 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  z-index: 1000;
+}
+.db-surprise-toast h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+.db-surprise-toast p {
+  margin: 4px 0 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.db-surprise-toast a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+/* --- footer (how to go deeper / data access notes) --- */
+.db-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 36px;
+  padding-top: 20px;
+}
+.db-footer h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+.db-footer h3 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 24px 0 8px;
+}
+.db-footer p,
+.db-footer li {
+  line-height: 1.6;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.db-footer ul {
+  padding-left: 20px;
+}
+.db-footer li {
+  margin-bottom: 6px;
+}
+.db-footer b {
+  color: var(--text);
+  font-weight: 600;
+}
+.db-footer kbd {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  color: var(--text-dim);
+}
+@media (max-width: 640px) {
+  .db-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* --- The tool/pipeline matrix at the top of the Software page --- */
