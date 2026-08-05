@@ -678,6 +678,31 @@ design -- each would have shipped a wrong number or a wrong claim silently.
 
 Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
 
+**Partially resolved 2026-08-04: the shared foundation shipped, no tool has.**
+`services/reference_assembly.py` now carries the validators and the provenance
+rule the Pilon bullet below asked to have "checked against before building" --
+`alignment_target_for_bam` walks `derived_from` to find what a BAM was aligned
+to, refusing missing or ambiguous targets rather than guessing from filenames,
+and `check_bam_aligned_to` requires that target to equal the selected assembly.
+`PipelineType.REFERENCE_ASSEMBLY`, `RunKind.REFERENCE_ASSEMBLY`, and the
+`DRAFT_ASSEMBLY`/`ALIGNMENT`/`PRIMERS` input roles exist, with frontend enum
+mirrors. Design:
+`docs/superpowers/specs/2026-08-04-reference-assembly-foundation-design.md`
+(GitHub #21, closed). The entry stays open because none of the three tools is
+installed or dispatched to, which is the part that was actually requested.
+
+iVar is the first tool slice rather than Pilon (GitHub #47, design
+`docs/superpowers/specs/2026-08-05-ivar-consensus-design.md`): it is the lighter
+runner, it exercises the unused `PRIMERS` role, and this repo's own
+genome-analysis review argues Pilon is effectively obsolete for HiFi and worth
+keeping only for legacy ONT-only work. **Correction, 2026-08-05: iVar *is* in
+Debian trixie** (`ivar 1.4.4+dfsg-1`) -- the original "not in Debian" note came
+from running `apt-cache policy ivar` without an `apt-get update` first, which
+reports `Candidate: (none)` for anything regardless of what the repository
+carries. Installed and smoke-tested clean against the running image with no
+new dependencies beyond what samtools/bcftools already pull in. It is a
+one-line `apt-get install` addition to `backend/Dockerfile`, not a source build.
+
 De-novo assembly first; these three all take an existing assembly plus
 something else and improve it.
 

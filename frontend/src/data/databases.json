@@ -1,0 +1,3802 @@
+[
+  {
+    "n": "NAR Molecular Biology Database Collection",
+    "u": "https://www.oxfordjournals.org/nar/database/c/",
+    "d": "Canonical catalog of ~1,800 biological databases; updated each year with the NAR Database Issue.",
+    "c": "Catalogs & Registries",
+    "t": "catalog,index,nar,database issue",
+    "a": "Web UI only"
+  },
+  {
+    "n": "FAIRsharing",
+    "u": "https://fairsharing.org/",
+    "d": "Registry of data resources, metadata standards and policies, with community curation.",
+    "c": "Catalogs & Registries",
+    "t": "registry,standards,metadata",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "re3data",
+    "u": "https://www.re3data.org/",
+    "d": "Registry of research data repositories across all disciplines.",
+    "c": "Catalogs & Registries",
+    "t": "registry,repositories,data",
+    "a": "REST API"
+  },
+  {
+    "n": "bio.tools",
+    "u": "https://bio.tools/",
+    "d": "ELIXIR registry of bioinformatics software, tools and services.",
+    "c": "Catalogs & Registries",
+    "t": "software,registry,elixir,tools",
+    "a": "REST API"
+  },
+  {
+    "n": "OMICtools",
+    "u": "https://omictools.com/",
+    "d": "Searchable catalog of omics tools and databases.",
+    "c": "Catalogs & Registries",
+    "t": "tools,omics,catalog",
+    "a": "Web UI"
+  },
+  {
+    "n": "ELIXIR",
+    "u": "https://elixir-europe.org/",
+    "d": "European life-science data infrastructure coordinating national bioinformatics resources.",
+    "c": "Catalogs & Registries",
+    "t": "infrastructure,services,eu",
+    "a": "Web UI"
+  },
+  {
+    "n": "EMBL-EBI Services",
+    "u": "https://www.ebi.ac.uk/services",
+    "d": "Index of every EMBL-EBI database and tool in one place.",
+    "c": "Catalogs & Registries",
+    "t": "index,ebi,services",
+    "a": "Web UI"
+  },
+  {
+    "n": "NIG/NGDC (China National Genomics Data Center)",
+    "u": "https://ngdc.cncb.ac.cn/",
+    "d": "Chinese national omics data center hosting GSA, GWH, MethBank, EWAS and many more.",
+    "c": "Catalogs & Registries",
+    "t": "ngdc,china,portal,omics",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "NCBI",
+    "u": "https://www.ncbi.nlm.nih.gov/",
+    "d": "National Center for Biotechnology Information: GenBank, PubMed, SRA, GEO, dbSNP, ClinVar, BLAST and more.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "genbank,nih,portal,sequences",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "Ensembl",
+    "u": "https://www.ensembl.org/",
+    "d": "Genome browser and annotation resource for vertebrate genomes.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "genome browser,vertebrate,annotation",
+    "a": "REST API + BioMart + FTP"
+  },
+  {
+    "n": "Ensembl Genomes",
+    "u": "https://ensemblgenomes.org/",
+    "d": "Non-vertebrate genomes: plants, fungi, protists, bacteria and metazoa (split portals).",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "plants,fungi,bacteria,protists,metazoa",
+    "a": "REST API + BioMart + FTP"
+  },
+  {
+    "n": "UCSC Genome Browser",
+    "u": "https://genome.ucsc.edu/",
+    "d": "The classic genome browser; also hosts thousands of public bigWig/bigBed track hubs.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "genome browser,tracks,hubs",
+    "a": "FTP + API"
+  },
+  {
+    "n": "GenBank",
+    "u": "https://www.ncbi.nlm.nih.gov/genbank/",
+    "d": "NIH genetic sequence database; part of the international INSDC trio with ENA and DDBJ.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "sequences,insdc,archive",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "RefSeq",
+    "u": "https://www.ncbi.nlm.nih.gov/refseq/",
+    "d": "NCBI's curated, non-redundant reference sequence collection.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "reference,curated,sequences",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "ENA (European Nucleotide Archive)",
+    "u": "https://www.ebi.ac.uk/ena/",
+    "d": "Europe's primary nucleotide sequence archive (INSDC member).",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "archive,insdc,sequences",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "DDBJ",
+    "u": "https://www.ddbj.nig.ac.jp/",
+    "d": "DNA Data Bank of Japan; the Asian INSDC archive.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "archive,insdc,japan",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "SRA (Sequence Read Archive)",
+    "u": "https://www.ncbi.nlm.nih.gov/sra",
+    "d": "Raw high-throughput sequencing reads from NCBI.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "reads,sequencing,archive",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "GEO (Gene Expression Omnibus)",
+    "u": "https://www.ncbi.nlm.nih.gov/geo/",
+    "d": "Public functional genomics data: microarray and RNA-seq studies.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "expression,microarray,rna-seq",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "ArrayExpress / BioStudies",
+    "u": "https://www.ebi.ac.uk/biostudies/arrayexpress",
+    "d": "EBI functional genomics data repository (now part of BioStudies).",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "expression,array,ebi",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "BioProject",
+    "u": "https://www.ncbi.nlm.nih.gov/bioproject",
+    "d": "NCBI registry of research projects and their data submissions.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "projects,registry",
+    "a": "E-utilities API"
+  },
+  {
+    "n": "BioSample",
+    "u": "https://www.ncbi.nlm.nih.gov/biosample",
+    "d": "Metadata registry for the biological samples behind archived data.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "samples,metadata",
+    "a": "E-utilities API"
+  },
+  {
+    "n": "dbGaP",
+    "u": "https://www.ncbi.nlm.nih.gov/gap/",
+    "d": "Database of Genotypes and Phenotypes; controlled-access human studies.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "genotypes,phenotypes,controlled access",
+    "a": "Controlled access"
+  },
+  {
+    "n": "EGA (European Genome-phenome Archive)",
+    "u": "https://ega-archive.org/",
+    "d": "Controlled-access archive for human genetic and phenotypic data.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "human,controlled access,archive",
+    "a": "Controlled access"
+  },
+  {
+    "n": "EVA (European Variation Archive)",
+    "u": "https://www.ebi.ac.uk/eva/",
+    "d": "Open archive of genetic variation (SNPs, indels, SVs) supporting VCF submission.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "variation,vcf,archive",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "dbSNP",
+    "u": "https://www.ncbi.nlm.nih.gov/snp/",
+    "d": "NCBI database of short genetic variants.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "snp,variants",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "GSA (Genome Sequence Archive, NGDC)",
+    "u": "https://ngdc.cncb.ac.cn/gsa/",
+    "d": "Chinese raw-sequence archive; many non-Western genome projects live here first.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "reads,china,ngdc",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "GWH (Genome Warehouse, NGDC)",
+    "u": "https://ngdc.cncb.ac.cn/gwh/",
+    "d": "Public genome assemblies from the Chinese National Genomics Data Center.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "assemblies,genomes,ngdc",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "GenomeArk (VGP)",
+    "u": "https://vgp.github.io/genomeark/",
+    "d": "Vertebrate Genomes Project assemblies — high-quality reference genomes for vertebrates.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "vertebrate,assemblies,vgp",
+    "a": "S3 bucket + FTP"
+  },
+  {
+    "n": "NCBI Virus",
+    "u": "https://www.ncbi.nlm.nih.gov/labs/virus/",
+    "d": "Curated viral genome, protein and taxonomy portal.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "virus,genomes,portal",
+    "a": "REST API"
+  },
+  {
+    "n": "InterMine instances",
+    "u": "https://intermine.org/",
+    "d": "Federated data-warehouse platform; FlyMine, HumanMine, MouseMine, YeastMine and many more.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "datawarehouse,query,integrated",
+    "a": "REST API"
+  },
+  {
+    "n": "BioMart",
+    "u": "https://www.biomart.org/",
+    "d": "Query interface to Ensembl and many other annotation databases.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "query,ensembl,export",
+    "a": "BioMart API"
+  },
+  {
+    "n": "MyGene.info / MyVariant.info",
+    "u": "https://mygene.info/",
+    "d": "High-throughput REST APIs that aggregate gene and variant annotations.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "api,gene,variant,annotation",
+    "a": "REST API"
+  },
+  {
+    "n": "BioThings SDK",
+    "u": "https://biothings.io/",
+    "d": "Framework and API hub powering MyGene, MyVariant and other aggregator endpoints.",
+    "c": "Primary Archives & Genome Browsers",
+    "t": "api,aggregator,framework",
+    "a": "REST API"
+  },
+  {
+    "n": "GnpIS (URGI, INRAE)",
+    "u": "https://urgi.versailles.inrae.fr/gnpis/",
+    "d": "Plant genetic resources information system — wheat, barley, rapeseed, poplar: markers, sequences, phenotypes, QTLs.",
+    "c": "Plant & Crop Genomics",
+    "t": "wheat,barley,phenotypes,qtl,markers,inrae",
+    "a": "Web UI + FTP"
+  },
+  {
+    "n": "WheatIS",
+    "u": "https://wheatis.org/",
+    "d": "Federated search across wheat data: genomes, sequences, markers, QTLs, phenotypes.",
+    "c": "Plant & Crop Genomics",
+    "t": "wheat,federation,search",
+    "a": "Web UI (federated)"
+  },
+  {
+    "n": "IWGSC (International Wheat Genome Sequencing Consortium)",
+    "u": "https://wheat-urgi.versailles.inrae.fr/Seq-Repository/",
+    "d": "Reference wheat genome (Chinese Spring) sequence repository and annotations.",
+    "c": "Plant & Crop Genomics",
+    "t": "wheat,reference genome,iwgsc",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GrainGenes",
+    "u": "https://wheat.pw.usda.gov/GG3/",
+    "d": "USDA genetic, genomic and phenotype data for wheat, barley, oats, rye and relatives.",
+    "c": "Plant & Crop Genomics",
+    "t": "wheat,barley,cereals,usda",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "TriticeaeToolbox",
+    "u": "https://triticeaetoolbox.org/",
+    "d": "Genotype and phenotype databases for wheat and barley breeding germplasm.",
+    "c": "Plant & Crop Genomics",
+    "t": "wheat,barley,breeding,genotype",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "Barleymap",
+    "u": "https://barleymap.ips2.univ-lyon1.fr/",
+    "d": "Genetic and physical maps of barley with sequence anchoring.",
+    "c": "Plant & Crop Genomics",
+    "t": "barley,genetic map,physical map",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "Phytozome (JGI)",
+    "u": "https://phytozome-next.jgi.doe.gov/",
+    "d": "DOE JGI plant comparative genomics portal — 300+ plant and algal genomes.",
+    "c": "Plant & Crop Genomics",
+    "t": "plant genomes,comparative,jgi",
+    "a": "Bulk download + JGI API"
+  },
+  {
+    "n": "PLAZA",
+    "u": "https://bioinformatics.psb.ugent.be/plaza/",
+    "d": "Plant comparative genomics workbench (dicots, monocots, gymnosperms, algae).",
+    "c": "Plant & Crop Genomics",
+    "t": "comparative,genomes,synteny",
+    "a": "FTP + web"
+  },
+  {
+    "n": "Gramene",
+    "u": "https://www.gramene.org/",
+    "d": "Comparative plant genomics + pathways: rice-centric, with genome browsers and Reactome plants.",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,comparative,pathways",
+    "a": "FTP + BioMart"
+  },
+  {
+    "n": "Ensembl Plants",
+    "u": "https://plants.ensembl.org/",
+    "d": "Ensembl genome browser for plant species.",
+    "c": "Plant & Crop Genomics",
+    "t": "plants,genome browser,ensembl",
+    "a": "REST API + BioMart + FTP"
+  },
+  {
+    "n": "TAIR",
+    "u": "https://www.arabidopsis.org/",
+    "d": "The Arabidopsis Information Resource — the model-plant gold standard.",
+    "c": "Plant & Crop Genomics",
+    "t": "arabidopsis,model plant,annotation",
+    "a": "FTP + web"
+  },
+  {
+    "n": "SGN (Sol Genomics Network)",
+    "u": "https://solgenomics.net/",
+    "d": "Tomato, potato, pepper and other solanaceous genomes and breeding data.",
+    "c": "Plant & Crop Genomics",
+    "t": "tomato,potato,solanaceae",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "GDR (Genome Database for Rosaceae)",
+    "u": "https://www.rosaceae.org/",
+    "d": "Apple, peach, strawberry, rose, pear genomes and traits.",
+    "c": "Plant & Crop Genomics",
+    "t": "rosaceae,apple,peach,strawberry",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "MaizeGDB",
+    "u": "https://www.maizegdb.org/",
+    "d": "Maize genetics, genomics and phenotypes.",
+    "c": "Plant & Crop Genomics",
+    "t": "maize,corn,genetics",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "SorghumBase",
+    "u": "https://www.sorghumbase.org/",
+    "d": "Sorghum genomics and genetics portal.",
+    "c": "Plant & Crop Genomics",
+    "t": "sorghum,genomics",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "SoyBase",
+    "u": "https://soybase.org/",
+    "d": "Soybean genetics, genomes and breeder tools.",
+    "c": "Plant & Crop Genomics",
+    "t": "soybean,breeding,genetics",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "CottonGen",
+    "u": "https://www.cottongen.org/",
+    "d": "Cotton genomics, genetics and breeding database.",
+    "c": "Plant & Crop Genomics",
+    "t": "cotton,breeding,genomics",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "Cucurbit Genomics Database",
+    "u": "http://cucurbitgenomics.org/",
+    "d": "Cucumber, melon, watermelon and other cucurbit genomes.",
+    "c": "Plant & Crop Genomics",
+    "t": "cucurbit,cucumber,melon",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "BRAD (Brassica Database)",
+    "u": "http://brassicadb.org/",
+    "d": "Brassica genomes: rapeseed, cabbage, mustard and relatives.",
+    "c": "Plant & Crop Genomics",
+    "t": "brassica,rapeseed,cabbage",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "MSU Rice Genome (RGAP)",
+    "u": "http://rice.plantbiology.msu.edu/",
+    "d": "The classic MSU rice genome annotation (Nipponbare).",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,annotation,msu",
+    "a": "Bulk download"
+  },
+  {
+    "n": "RAP-DB",
+    "u": "https://rapdb.dna.affrc.go.jp/",
+    "d": "Rice Annotation Project Database — official IRGSP rice annotations.",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,annotation,irgsp",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Oryzabase",
+    "u": "https://shigen.nig.ac.jp/rice/oryzabase/",
+    "d": "Rice genetic resource database: strains, mutants, genetic maps (NIG Japan).",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,germplasm,mutants",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "SNP-Seek",
+    "u": "https://snp-seek.irri.org/",
+    "d": "Rice 3K-genome SNP/variation database. ⚠ Temporarily offline (funding); mirrors at snpseekv3.duckdns.org and brs-snpseek.duckdns.org.",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,3k genome,snp,variation",
+    "a": "Web UI (temporarily offline)"
+  },
+  {
+    "n": "RiceVarMap",
+    "u": "http://ricevarmap.ncpgr.cn/",
+    "d": "Rice variation map v3.0 — multi-reference variants, GWAS results, functional annotation.",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,variation,gwas,variants",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "IC4R (Information Commons for Rice)",
+    "u": "https://ic4r.org/",
+    "d": "Integrated rice genome knowledgebase.",
+    "c": "Plant & Crop Genomics",
+    "t": "rice,integrated,knowledgebase",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "PGSB Plant Genome Database",
+    "u": "http://pgsb.helmholtz-muenchen.de/plant/",
+    "d": "Plant genome browsers and repeat databases (Helmholtz Munich).",
+    "c": "Plant & Crop Genomics",
+    "t": "genome browser,repeats",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CoGe",
+    "u": "https://genomevolution.org/",
+    "d": "Comparative genomics platform with thousands of plant genomes; synteny and homology analysis.",
+    "c": "Plant & Crop Genomics",
+    "t": "comparative,synteny,genomes",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GreenPhylDB",
+    "u": "https://www.greenphyl.org/",
+    "d": "Green plant gene families and phylogenies.",
+    "c": "Plant & Crop Genomics",
+    "t": "gene families,phylogeny,plants",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PlantDive",
+    "u": "https://www.plantdive.de/",
+    "d": "Plant diversity genomics — gene family evolution across Viridiplantae.",
+    "c": "Plant & Crop Genomics",
+    "t": "gene families,evolution,plants",
+    "a": "Bulk download"
+  },
+  {
+    "n": "TreeGenes",
+    "u": "https://treegenesdb.org/",
+    "d": "Forest tree genomics and phenomics: pine, spruce, poplar, eucalyptus.",
+    "c": "Plant & Crop Genomics",
+    "t": "forest,forestry,trees",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "Kew Plant DNA C-values Database",
+    "u": "https://cvalues.science.kew.org/",
+    "d": "Genome size (C-value) estimates for thousands of plant species.",
+    "c": "Plant & Crop Genomics",
+    "t": "genome size,c-value,kew",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Animal Genome Size Database",
+    "u": "http://www.genomesize.com/",
+    "d": "Genome size estimates across the animal kingdom.",
+    "c": "Plant & Crop Genomics",
+    "t": "genome size,c-value,animals",
+    "a": "Web UI"
+  },
+  {
+    "n": "Genesys",
+    "u": "https://www.genesys-pgr.org/",
+    "d": "Global gateway to plant genetic resources held in genebanks worldwide.",
+    "c": "Plant & Crop Genomics",
+    "t": "germplasm,genebank,passport",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "GRIN-Global (USDA NPGS)",
+    "u": "https://npgsweb.ars-grin.gov/",
+    "d": "US National Plant Germplasm System accessions and trait data.",
+    "c": "Plant & Crop Genomics",
+    "t": "germplasm,usda,accessions",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "EURISCO",
+    "u": "https://eurisco.ipk-gatersleben.de/",
+    "d": "European genebank catalogue of plant genetic resources.",
+    "c": "Plant & Crop Genomics",
+    "t": "germplasm,europe,genebank",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Plant Metabolic Network (PlantCyc)",
+    "u": "https://www.plantcyc.org/",
+    "d": "Curated plant metabolic pathways and enzymes.",
+    "c": "Plant & Crop Genomics",
+    "t": "metabolism,pathways,plantcyc",
+    "a": "License required"
+  },
+  {
+    "n": "PlantTFDB",
+    "u": "https://planttfdb.gao-lab.org/",
+    "d": "Plant transcription factor database, 165 species, v5.0.",
+    "c": "Plant & Crop Genomics",
+    "t": "transcription factors,regulation,plants",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PlantRegMap",
+    "u": "https://plantregmap.gao-lab.org/",
+    "d": "Plant regulatory maps: TF binding, regulatory elements, annotations (companion to PlantTFDB).",
+    "c": "Plant & Crop Genomics",
+    "t": "regulation,transcription factors,plants",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PlantPAN",
+    "u": "http://plantpan.itps.ncku.edu.tw/",
+    "d": "Plant promoter analysis and TF regulatory network database.",
+    "c": "Plant & Crop Genomics",
+    "t": "promoters,regulation,plants",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "Grassius",
+    "u": "http://grassius.org/",
+    "d": "Grass transcription factor and regulation database (rice, maize, sorghum).",
+    "c": "Plant & Crop Genomics",
+    "t": "grasses,transcription factors",
+    "a": "Web UI"
+  },
+  {
+    "n": "PRGdb",
+    "u": "http://prgdb.org/",
+    "d": "Plant Resistance Gene database v4.0 — R genes, NLRs, avirulence genes, 182 species.",
+    "c": "Plant & Crop Genomics",
+    "t": "resistance genes,r genes,nlr,pathogens",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "GreeNC",
+    "u": "http://greenc.sequencing.es/",
+    "d": "Green non-coding RNA database. ⚠ Availability unstable at check time — search for mirrors.",
+    "c": "Plant & Crop Genomics",
+    "t": "lncrna,ncrna,plants",
+    "a": "Bulk download (unstable)"
+  },
+  {
+    "n": "PLncDB",
+    "u": "https://plncdb.tobaccodb.org/",
+    "d": "Plant long noncoding RNA database v2.0 — 1.2M lncRNAs in 80 species with expression and epigenetics.",
+    "c": "Plant & Crop Genomics",
+    "t": "lncrna,expression,plants",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "CANTATAdb",
+    "u": "http://cantata.amu.edu.pl/",
+    "d": "CANTATAdb 3.0 — 570k lncRNAs across 108 plant species, conserved and organ-specific sets.",
+    "c": "Plant & Crop Genomics",
+    "t": "lncrna,conservation,plants",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "ERISdb",
+    "u": "http://lemur.amu.edu.pl/share/ERISdb/home.html",
+    "d": "Plant splice sites and splicing signals database (from the CANTATAdb group).",
+    "c": "Plant & Crop Genomics",
+    "t": "splicing,splice sites,plants",
+    "a": "Web UI"
+  },
+  {
+    "n": "PlantcircBase",
+    "u": "http://www.plantcircbase.org/",
+    "d": "Plant circular RNA database.",
+    "c": "Plant & Crop Genomics",
+    "t": "circrna,plants",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "ATTED-II",
+    "u": "https://atted.jp/",
+    "d": "Plant co-expression gene network database (Arabidopsis, rice, etc.).",
+    "c": "Plant & Crop Genomics",
+    "t": "coexpression,networks,plants",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Crop Ontology",
+    "u": "https://cropontology.org/",
+    "d": "Standardized trait ontologies for major crops — useful for phenotyping data.",
+    "c": "Plant & Crop Genomics",
+    "t": "ontology,traits,phenotypes,crops",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Plant Cell Atlas",
+    "u": "https://www.plantcellatlas.org/",
+    "d": "Community initiative mapping plant cells at single-cell resolution.",
+    "c": "Plant & Crop Genomics",
+    "t": "single cell,atlas,plants",
+    "a": "Web UI"
+  },
+  {
+    "n": "SGD (Saccharomyces Genome Database)",
+    "u": "https://www.yeastgenome.org/",
+    "d": "The budding yeast model-organism database.",
+    "c": "Model Organisms",
+    "t": "yeast,saccharomyces,model organism",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "PomBase",
+    "u": "https://www.pombase.org/",
+    "d": "Fission yeast (Schizosaccharomyces pombe) genome database.",
+    "c": "Model Organisms",
+    "t": "fission yeast,pombe",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "WormBase",
+    "u": "https://wormbase.org/",
+    "d": "C. elegans and other nematode biology and genomes.",
+    "c": "Model Organisms",
+    "t": "c.elegans,nematode,model organism",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "WormBase ParaSite",
+    "u": "https://parasite.wormbase.org/",
+    "d": "Helminth genomes: parasitic worms and their genes.",
+    "c": "Model Organisms",
+    "t": "parasites,helminths,genomes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "FlyBase",
+    "u": "https://flybase.org/",
+    "d": "Drosophila genetics and molecular biology.",
+    "c": "Model Organisms",
+    "t": "drosophila,fly,genetics",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "MGI (Mouse Genome Informatics)",
+    "u": "https://www.informatics.jax.org/",
+    "d": "Mouse genetics, phenotypes and genome annotations.",
+    "c": "Model Organisms",
+    "t": "mouse,mgi,genetics",
+    "a": "Bulk download"
+  },
+  {
+    "n": "IMSR",
+    "u": "https://www.findmice.org/",
+    "d": "International Mouse Strain Resource — find and order mouse strains/lines.",
+    "c": "Model Organisms",
+    "t": "mouse,strains,resource",
+    "a": "Web UI"
+  },
+  {
+    "n": "RGD (Rat Genome Database)",
+    "u": "https://rgd.mcw.edu/",
+    "d": "Rat genetics, phenotypes and disease models.",
+    "c": "Model Organisms",
+    "t": "rat,genetics,phenotypes",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "ZFIN",
+    "u": "https://zfin.org/",
+    "d": "Zebrafish model organism database.",
+    "c": "Model Organisms",
+    "t": "zebrafish,fish,model organism",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Xenbase",
+    "u": "https://www.xenbase.org/",
+    "d": "Xenopus frog genomics and development.",
+    "c": "Model Organisms",
+    "t": "xenopus,frog,development",
+    "a": "Bulk download"
+  },
+  {
+    "n": "dictyBase",
+    "u": "https://dictybase.org/",
+    "d": "Dictyostelium slime-mold genome and community database.",
+    "c": "Model Organisms",
+    "t": "dictyostelium,slime mold",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CGD (Candida Genome Database)",
+    "u": "https://www.candidagenome.org/",
+    "d": "Candida albicans and related fungal pathogens.",
+    "c": "Model Organisms",
+    "t": "candida,fungi,pathogen",
+    "a": "Bulk download"
+  },
+  {
+    "n": "AspGD",
+    "u": "http://www.aspergillusgenome.org/",
+    "d": "Aspergillus genome database — aspergilli and related species.",
+    "c": "Model Organisms",
+    "t": "aspergillus,fungi",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Nematode.net",
+    "u": "http://nematode.net/",
+    "d": "Parasitic nematode genomes and transcripts.",
+    "c": "Model Organisms",
+    "t": "nematodes,parasites,genomes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "VectorBase",
+    "u": "https://vectorbase.org/",
+    "d": "Genomic and phenotypic data for invertebrate disease vectors (mosquitoes, ticks, etc.).",
+    "c": "Model Organisms",
+    "t": "vectors,mosquito,tick,genomes",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "EuPathDB family",
+    "u": "https://eupathdb.org/",
+    "d": "Eukaryotic pathogen databases: PlasmoDB, ToxoDB, TriTrypDB, GiardiaDB, CryptoDB, FungiDB and more.",
+    "c": "Model Organisms",
+    "t": "pathogens,plasmodium,toxoplasma,trypanosome,protozoa",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "MycoCosm (JGI)",
+    "u": "https://mycocosm.jgi.doe.gov/",
+    "d": "DOE JGI fungal genomics portal — thousands of fungal genomes.",
+    "c": "Model Organisms",
+    "t": "fungi,genomes,jgi",
+    "a": "Bulk download"
+  },
+  {
+    "n": "i5k Workspace@NAL",
+    "u": "https://i5k.nal.usda.gov/",
+    "d": "Arthropod genomes: 5,000 insect and arthropod species initiative.",
+    "c": "Model Organisms",
+    "t": "arthropods,insects,genomes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BeeBase / HGD",
+    "u": "https://hymenoptera-genome.hc.insdc.org/",
+    "d": "Hymenopteran Genome Database — honeybee and allies.",
+    "c": "Model Organisms",
+    "t": "honeybee,hymenoptera,genome",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SilkDB",
+    "u": "https://silkdb.org/",
+    "d": "Silkworm (Bombyx mori) genome and biology.",
+    "c": "Model Organisms",
+    "t": "silkworm,bombyx,genome",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "wFleaBase",
+    "u": "http://wfleabase.org/",
+    "d": "Daphnia water-flea genomics and ecology.",
+    "c": "Model Organisms",
+    "t": "daphnia,crustacean,ecology",
+    "a": "Web UI"
+  },
+  {
+    "n": "SpBase",
+    "u": "http://spbase.org/",
+    "d": "Sea urchin genome database.",
+    "c": "Model Organisms",
+    "t": "sea urchin,echinoderm,genome",
+    "a": "Web UI"
+  },
+  {
+    "n": "TGD (Tetrahymena Genome Database)",
+    "u": "http://ciliate.org/",
+    "d": "Tetrahymena and other ciliate genomes.",
+    "c": "Model Organisms",
+    "t": "tetrahymena,ciliate,protozoa",
+    "a": "Web UI"
+  },
+  {
+    "n": "gnomAD",
+    "u": "https://gnomad.broadinstitute.org/",
+    "d": "Genome Aggregation Database — population variants (SNVs, indels, SVs, CNVs) from 150k+ genomes/exomes.",
+    "c": "Human Variation & Disease",
+    "t": "variants,population,gnomad,snv,sv",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "ClinVar",
+    "u": "https://www.ncbi.nlm.nih.gov/clinvar/",
+    "d": "Curated human variants and their clinical significance.",
+    "c": "Human Variation & Disease",
+    "t": "clinical,variants,pathogenicity",
+    "a": "FTP + E-utilities API"
+  },
+  {
+    "n": "ClinGen",
+    "u": "https://www.clinicalgenome.org/",
+    "d": "Clinical Genome Resource — gene-disease validity, dosage sensitivity, expert curation.",
+    "c": "Human Variation & Disease",
+    "t": "gene-disease,curation,clinical",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "DECIPHER",
+    "u": "https://www.deciphergenomics.org/",
+    "d": "Database of genomic variation and phenotype in humans with developmental disorders.",
+    "c": "Human Variation & Disease",
+    "t": "developmental,cnv,phenotype",
+    "a": "Web UI + controlled"
+  },
+  {
+    "n": "LOVD",
+    "u": "https://www.lovd.nl/",
+    "d": "Leiden Open Variation Database — gene-centered variant databases (many loci).",
+    "c": "Human Variation & Disease",
+    "t": "variants,locus specific,curated",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "HGMD",
+    "u": "http://www.hgmd.cf.ac.uk/",
+    "d": "Human Gene Mutation Database — curated disease-causing mutations (subscription for full).",
+    "c": "Human Variation & Disease",
+    "t": "mutations,disease,curated",
+    "a": "License required"
+  },
+  {
+    "n": "OMIM",
+    "u": "https://www.omim.org/",
+    "d": "Online Mendelian Inheritance in Man — the encyclopedia of human genes and genetic disorders.",
+    "c": "Human Variation & Disease",
+    "t": "mendelian,disorders,genes",
+    "a": "License (API)"
+  },
+  {
+    "n": "Orphanet",
+    "u": "https://www.orpha.net/",
+    "d": "Reference portal for rare diseases and orphan drugs.",
+    "c": "Human Variation & Disease",
+    "t": "rare disease,registry,orphan drugs",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GeneReviews",
+    "u": "https://www.ncbi.nlm.nih.gov/books/NBK1116/",
+    "d": "Expert-authored reviews of genetic conditions and testing.",
+    "c": "Human Variation & Disease",
+    "t": "reviews,genetic testing,clinical",
+    "a": "Web UI"
+  },
+  {
+    "n": "PanelApp",
+    "u": "https://panelapp.genomicsengland.co.uk/",
+    "d": "Curated gene panels for diagnostic testing (Genomics England).",
+    "c": "Human Variation & Disease",
+    "t": "panels,diagnostics,genes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GenCC",
+    "u": "https://thegencc.org/",
+    "d": "Gene Curation Coalition — consensus gene-disease validity classifications.",
+    "c": "Human Variation & Disease",
+    "t": "gene-disease,consensus,curation",
+    "a": "Bulk download"
+  },
+  {
+    "n": "HPO (Human Phenotype Ontology)",
+    "u": "https://hpo.jax.org/",
+    "d": "Standardized vocabulary of human phenotypic abnormalities.",
+    "c": "Human Variation & Disease",
+    "t": "phenotype,ontology,clinical",
+    "a": "Bulk download + REST API"
+  },
+  {
+    "n": "MONDO Disease Ontology",
+    "u": "https://mondo.monarchinitiative.org/",
+    "d": "Merged disease ontology integrating OMIM, Orphanet, DO and others.",
+    "c": "Human Variation & Disease",
+    "t": "disease,ontology,merged",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Monarch Initiative",
+    "u": "https://monarchinitiative.org/",
+    "d": "Cross-species phenotype-disease-gene integration engine.",
+    "c": "Human Variation & Disease",
+    "t": "phenotype,disease,integration,model organisms",
+    "a": "REST API"
+  },
+  {
+    "n": "DisGeNET",
+    "u": "https://www.disgenet.org/",
+    "d": "Gene-disease association database mined from literature and curated sources.",
+    "c": "Human Variation & Disease",
+    "t": "gene-disease,associations,literature",
+    "a": "License / download"
+  },
+  {
+    "n": "MalaCards",
+    "u": "https://www.malacards.org/",
+    "d": "Integrated human disease knowledgebase with gene associations.",
+    "c": "Human Variation & Disease",
+    "t": "disease,knowledgebase,genes",
+    "a": "Web UI"
+  },
+  {
+    "n": "GeneCards",
+    "u": "https://www.genecards.org/",
+    "d": "Integrated gene-centric knowledgebase for human genes.",
+    "c": "Human Variation & Disease",
+    "t": "gene,integrated,knowledgebase",
+    "a": "License (API)"
+  },
+  {
+    "n": "Pharos / TCRD",
+    "u": "https://pharos.nih.gov/",
+    "d": "Target Central Resource Database — druggable human proteome targets.",
+    "c": "Human Variation & Disease",
+    "t": "drug targets,proteome,illuminating",
+    "a": "REST API"
+  },
+  {
+    "n": "Open Targets Platform",
+    "u": "https://platform.opentargets.org/",
+    "d": "Target-disease associations integrating genetics, drugs and literature.",
+    "c": "Human Variation & Disease",
+    "t": "targets,disease,genetics,drugs",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "ALFA",
+    "u": "https://www.ncbi.nlm.nih.gov/snp/docs/gsr/alfa/",
+    "d": "Allele Frequency Aggregator across dbSNP submissions.",
+    "c": "Human Variation & Disease",
+    "t": "allele frequency,population",
+    "a": "REST API"
+  },
+  {
+    "n": "TOPMed / Bravo",
+    "u": "https://bravo.sph.umich.edu/",
+    "d": "NHLBI Trans-Omics for Precision Medicine — deeply sequenced diverse populations.",
+    "c": "Human Variation & Disease",
+    "t": "population,sequencing,topmed,bravo",
+    "a": "REST API + controlled (dbGaP)"
+  },
+  {
+    "n": "1000 Genomes",
+    "u": "https://www.internationalgenome.org/",
+    "d": "The classic 2,500-sample human variation reference.",
+    "c": "Human Variation & Disease",
+    "t": "variation,population,reference",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "HGDP (Human Genome Diversity Project)",
+    "u": "https://www.hgdp.uchicago.edu/",
+    "d": "Genome diversity of indigenous populations worldwide.",
+    "c": "Human Variation & Disease",
+    "t": "diversity,populations,genomes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SGDP (Simons Genome Diversity Project)",
+    "u": "https://www.simonsfoundation.org/simons-genome-diversity-project/",
+    "d": "High-coverage genomes from diverse global populations.",
+    "c": "Human Variation & Disease",
+    "t": "diversity,populations,high coverage",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GenomeAsia 100K",
+    "u": "https://www.genomeasia100k.org/",
+    "d": "Whole-genome sequencing of Asian populations.",
+    "c": "Human Variation & Disease",
+    "t": "asia,populations,genomes",
+    "a": "Bulk download + controlled"
+  },
+  {
+    "n": "AADR (Allen Ancient DNA Resource)",
+    "u": "https://reich.hms.harvard.edu/ancient-genomes",
+    "d": "Curated ancient human genomes — 10,000+ samples with context (Reich lab).",
+    "c": "Human Variation & Disease",
+    "t": "ancient dna,archaeogenetics,humans",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PhyloTree (mtDNA)",
+    "u": "https://www.phylotree.org/",
+    "d": "Comprehensive human mitochondrial DNA phylogenetic tree.",
+    "c": "Human Variation & Disease",
+    "t": "mtdna,haplogroups,phylogeny",
+    "a": "Web UI"
+  },
+  {
+    "n": "YFull",
+    "u": "https://www.yfull.com/",
+    "d": "Y-chromosome phylogenetic tree and variant catalog.",
+    "c": "Human Variation & Disease",
+    "t": "y chromosome,haplogroups",
+    "a": "Web UI"
+  },
+  {
+    "n": "MITOMAP",
+    "u": "https://www.mitomap.org/",
+    "d": "Human mitochondrial genome database of variants and diseases.",
+    "c": "Human Variation & Disease",
+    "t": "mitochondria,variants,disease",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "HmtVar",
+    "u": "https://www.hmtvar.uniba.it/",
+    "d": "Human mitochondrial DNA variants with pathogenicity predictions.",
+    "c": "Human Variation & Disease",
+    "t": "mitochondria,variants,pathogenicity",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GWAS Catalog",
+    "u": "https://www.ebi.ac.uk/gwas/",
+    "d": "The curated NHGRI-EBI catalog of published GWAS associations.",
+    "c": "GWAS & QTL",
+    "t": "gwas,associations,curated",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GWAS Central",
+    "u": "https://www.gwascentral.org/",
+    "d": "GWAS data repository and visualization for multiple species.",
+    "c": "GWAS & QTL",
+    "t": "gwas,data repository,multi-species",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PheWAS Catalog",
+    "u": "http://phewascatalog.org/",
+    "d": "Phenome-wide association results from EHR-linked biobanks.",
+    "c": "GWAS & QTL",
+    "t": "phewas,biobank,phenotypes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PGS Catalog",
+    "u": "https://www.pgscatalog.org/",
+    "d": "Polygenic Score catalog — scores, variants and evaluation metrics.",
+    "c": "GWAS & QTL",
+    "t": "polygenic scores,prs,catalog",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "MR-Base",
+    "u": "http://www.mrbase.org/",
+    "d": "Mendelian randomization platform with GWAS summary data for causal inference.",
+    "c": "GWAS & QTL",
+    "t": "mendelian randomization,causality,summary stats",
+    "a": "REST API"
+  },
+  {
+    "n": "LDlink",
+    "u": "https://ldlink.nci.nih.gov/",
+    "d": "LD calculation and variant annotation across populations.",
+    "c": "GWAS & QTL",
+    "t": "linkage disequilibrium,ld,populations",
+    "a": "REST API"
+  },
+  {
+    "n": "EBI eQTL Catalogue",
+    "u": "https://www.ebi.ac.uk/eqtl/",
+    "d": "Uniformly processed eQTL and sQTL maps from many studies — user's find.",
+    "c": "GWAS & QTL",
+    "t": "eqtl,expression,qtl,processed",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "eQTLGen",
+    "u": "https://www.eqtlgen.org/",
+    "d": "Blood eQTL meta-analysis across 31,000+ individuals.",
+    "c": "GWAS & QTL",
+    "t": "eqtl,blood,meta-analysis",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GTEx Portal",
+    "u": "https://gtexportal.org/",
+    "d": "Genotype-Tissue Expression: eQTLs, sQTLs and expression across 50+ tissues.",
+    "c": "GWAS & QTL",
+    "t": "eqtl,expression,tissues,gtx",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Braineac",
+    "u": "http://www.braineac.org/",
+    "d": "Brain eQTLs across 10 brain regions (UK Brain Expression Consortium).",
+    "c": "GWAS & QTL",
+    "t": "eqtl,brain,neuro",
+    "a": "Bulk download"
+  },
+  {
+    "n": "MetaBrain",
+    "u": "https://www.metabrain.nl/",
+    "d": "Meta-analysis brain eQTLs and methylQTLs.",
+    "c": "GWAS & QTL",
+    "t": "eqtl,brain,meta-analysis",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PsychENCODE",
+    "u": "https://psychencode.org/",
+    "d": "Psychiatric disorder genomics and regulatory data: brain eQTLs, enhancers, chromatin.",
+    "c": "GWAS & QTL",
+    "t": "psychiatric,brain,regulation,eqtl",
+    "a": "Controlled (Synapse)"
+  },
+  {
+    "n": "DICE",
+    "u": "https://dice-database.org/",
+    "d": "Database of Immune Cell Expression, eQTLs and Epigenomics across immune cell types.",
+    "c": "GWAS & QTL",
+    "t": "immune cells,eqtl,expression",
+    "a": "Bulk download"
+  },
+  {
+    "n": "OneK1K",
+    "u": "https://onek1k.org/",
+    "d": "Single-cell eQTLs from 1,000+ individuals — scRNA-seq genotype-expression links.",
+    "c": "GWAS & QTL",
+    "t": "single cell,eqtl,immune",
+    "a": "Bulk download"
+  },
+  {
+    "n": "xQTL Map",
+    "u": "https://www.xqtl.org/",
+    "d": "Multi-omics QTLs (molecular traits) in human tissues.",
+    "c": "GWAS & QTL",
+    "t": "qtl,multiomics,molecular traits",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Expression Atlas",
+    "u": "https://www.ebi.ac.uk/gxa/",
+    "d": "Curated baseline and differential gene expression across species.",
+    "c": "Gene Expression",
+    "t": "expression,curated,differential",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Single Cell Expression Atlas",
+    "u": "https://www.ebi.ac.uk/gxa/sc/",
+    "d": "Curated single-cell RNA-seq experiments with cell-type annotations.",
+    "c": "Gene Expression",
+    "t": "single cell,expression,curated",
+    "a": "REST API"
+  },
+  {
+    "n": "Bgee",
+    "u": "https://www.bgee.org/",
+    "d": "Gene expression evolution across species — expression calls by anatomical entity.",
+    "c": "Gene Expression",
+    "t": "expression,evolution,anatomy",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "ARCHS4",
+    "u": "https://maayanlab.cloud/archs4/",
+    "d": "Harmonized RNA-seq from 1M+ human and mouse samples (Ma'ayan lab).",
+    "c": "Gene Expression",
+    "t": "rna-seq,harmonized,maayan",
+    "a": "Bulk download"
+  },
+  {
+    "n": "HumanBase",
+    "u": "https://hb.flatironinstitute.org/",
+    "d": "Tissue-specific human gene networks from expression data.",
+    "c": "Gene Expression",
+    "t": "networks,expression,tissues",
+    "a": "Bulk download"
+  },
+  {
+    "n": "FANTOM5",
+    "u": "https://fantom.gsc.riken.jp/5/",
+    "d": "Promoter-level expression atlas: CAGE across thousands of human/mouse samples.",
+    "c": "Gene Expression",
+    "t": "promoters,cage,atlas",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BioGPS",
+    "u": "https://biogps.org/",
+    "d": "Gene expression and annotation portal with plugin ecosystem.",
+    "c": "Gene Expression",
+    "t": "expression,portal,annotations",
+    "a": "Web UI"
+  },
+  {
+    "n": "Genevestigator",
+    "u": "https://genevestigator.com/",
+    "d": "Curated expression atlas with intuitive biology-centric queries.",
+    "c": "Gene Expression",
+    "t": "expression,atlas,curated",
+    "a": "Subscription"
+  },
+  {
+    "n": "COXPRESdb",
+    "u": "https://coxpresdb.jp/",
+    "d": "Gene coexpression database for multiple species.",
+    "c": "Gene Expression",
+    "t": "coexpression,networks",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GeneFriends",
+    "u": "https://www.genefriends.org/",
+    "d": "Coexpression-based gene friends across species.",
+    "c": "Gene Expression",
+    "t": "coexpression,friends",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "Human Protein Atlas",
+    "u": "https://www.proteinatlas.org/",
+    "d": "Cell/tissue/organelle-level protein expression with antibody imaging (RNA + protein).",
+    "c": "Gene Expression",
+    "t": "protein,expression,tissues,antibodies",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "LINCS / CMap (CLUE)",
+    "u": "https://clue.io/",
+    "d": "Connectivity Map — perturbational signatures (gene expression responses to drugs/knockdowns).",
+    "c": "Gene Expression",
+    "t": "perturbations,drugs,signatures",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SigCom LINCS",
+    "u": "https://maayanlab.cloud/sigcom-lincs/",
+    "d": "Query interface over LINCS L1000 perturbation signatures.",
+    "c": "Gene Expression",
+    "t": "lincs,perturbations,query",
+    "a": "REST API"
+  },
+  {
+    "n": "Harmonizome",
+    "u": "https://maayanlab.cloud/Harmonizome/",
+    "d": "Integrated knowledgebase of gene sets from 100+ resources.",
+    "c": "Gene Expression",
+    "t": "gene sets,integrated,maayan",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Enrichr",
+    "u": "https://maayanlab.cloud/Enrichr/",
+    "d": "Gene-set enrichment analysis with hundreds of libraries.",
+    "c": "Gene Expression",
+    "t": "enrichment,gene sets",
+    "a": "REST API"
+  },
+  {
+    "n": "MSigDB",
+    "u": "https://www.gsea-msigdb.org/gsea/msigdb/",
+    "d": "Molecular Signatures Database — curated gene sets for GSEA (incl. Hallmark).",
+    "c": "Gene Expression",
+    "t": "gene sets,gsea,hallmark",
+    "a": "License / bulk"
+  },
+  {
+    "n": "g:Profiler",
+    "u": "https://biit.cs.ut.ee/gprofiler/",
+    "d": "Functional enrichment and ID mapping across many organisms.",
+    "c": "Gene Expression",
+    "t": "enrichment,mapping,orthology",
+    "a": "REST API"
+  },
+  {
+    "n": "DAVID",
+    "u": "https://david.ncifcrf.gov/",
+    "d": "The classic functional annotation and enrichment tool.",
+    "c": "Gene Expression",
+    "t": "enrichment,annotation,classic",
+    "a": "Web UI"
+  },
+  {
+    "n": "WebGestalt",
+    "u": "https://www.webgestalt.org/",
+    "d": "WEB-based GEne SeT AnaLysis Toolkit.",
+    "c": "Gene Expression",
+    "t": "enrichment,gene sets",
+    "a": "Web UI"
+  },
+  {
+    "n": "RNAcentral",
+    "u": "https://rnacentral.org/",
+    "d": "Aggregated non-coding RNA sequence database across 40+ resources.",
+    "c": "lncRNA & ncRNA",
+    "t": "ncrna,aggregated,sequences",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "Rfam",
+    "u": "https://rfam.org/",
+    "d": "RNA families database — structural and functional RNA families.",
+    "c": "lncRNA & ncRNA",
+    "t": "rna families,structure,alignment",
+    "a": "FTP + REST API"
+  },
+  {
+    "n": "NONCODE",
+    "u": "http://www.noncode.org/",
+    "d": "Comprehensive ncRNA database (lncRNA focus) for multiple species.",
+    "c": "lncRNA & ncRNA",
+    "t": "ncrna,lncrna,multi-species",
+    "a": "Bulk download"
+  },
+  {
+    "n": "LNCipedia",
+    "u": "https://lncipedia.org/",
+    "d": "Human lncRNA transcripts and annotation.",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,human,transcripts",
+    "a": "Bulk download"
+  },
+  {
+    "n": "LncBook",
+    "u": "https://ngdc.cncb.ac.cn/lncbook/",
+    "d": "Curated human lncRNA knowledgebase (NGDC).",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,human,curated",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "EVLncRNAs",
+    "u": "https://www.ngdc.cncb.ac.cn/evlncrnas/",
+    "d": "Experimentally validated lncRNAs with disease associations.",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,validated,disease",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "lncRNAdb",
+    "u": "https://lncrnadb.org/",
+    "d": "Reference database of functional lncRNAs (curated).",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,reference,curated",
+    "a": "Web UI"
+  },
+  {
+    "n": "Lnc2Cancer",
+    "u": "http://www.bio-bigdata.com/lnc2cancer/",
+    "d": "lncRNA-cancer associations and drug resistance data.",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,cancer,associations",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "LncRNADisease",
+    "u": "http://www.rnanut.net/lncrnadisease/",
+    "d": "lncRNA-disease associations.",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,disease",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "circBase",
+    "u": "http://circbase.org/",
+    "d": "Circular RNA database — sequences, expression, orthologs.",
+    "c": "lncRNA & ncRNA",
+    "t": "circrna,sequences,expression",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CircAtlas",
+    "u": "http://circatlas.biols.ac.cn/",
+    "d": "Circular RNA atlas across tissues and species.",
+    "c": "lncRNA & ncRNA",
+    "t": "circrna,atlas,multi-species",
+    "a": "Bulk download"
+  },
+  {
+    "n": "circBank",
+    "u": "http://www.circbank.cn/",
+    "d": "Human circRNA database with annotation.",
+    "c": "lncRNA & ncRNA",
+    "t": "circrna,human",
+    "a": "Web UI"
+  },
+  {
+    "n": "CircInteractome",
+    "u": "https://circinteractome.nia.nih.gov/",
+    "d": "Circular RNA interactome and miRNA binding prediction.",
+    "c": "lncRNA & ncRNA",
+    "t": "circrna,interactions,mirna",
+    "a": "Web UI"
+  },
+  {
+    "n": "RBPdb",
+    "u": "http://rbpdb.ccbr.utoronto.ca/",
+    "d": "RNA-binding protein database — experimental interactions.",
+    "c": "lncRNA & ncRNA",
+    "t": "rbp,rna binding proteins,interactions",
+    "a": "Web UI"
+  },
+  {
+    "n": "RNALocate",
+    "u": "http://www.rna-society.org/rnalocate/",
+    "d": "RNA subcellular localization database.",
+    "c": "lncRNA & ncRNA",
+    "t": "rna localization,subcellular",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "LncATLAS",
+    "u": "https://lncatlas.crg.eu/",
+    "d": "Human lncRNA subcellular localization from RNA-seq.",
+    "c": "lncRNA & ncRNA",
+    "t": "lncrna,localization,expression",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PhaSepDB",
+    "u": "http://db.phasep.pro/",
+    "d": "RNA/protein phase-separation-associated bodies and condensates.",
+    "c": "lncRNA & ncRNA",
+    "t": "phase separation,condensates,rna",
+    "a": "Web UI"
+  },
+  {
+    "n": "MODOMICS",
+    "u": "https://iimcb.genesilico.pl/modomics/",
+    "d": "RNA modification database — modified nucleosides and pathways.",
+    "c": "lncRNA & ncRNA",
+    "t": "rna modifications,nucleosides",
+    "a": "Bulk download"
+  },
+  {
+    "n": "RMBase",
+    "u": "https://ngdc.cncb.ac.cn/rmbase/",
+    "d": "RNA modification database integrating m6A and other epitranscriptomic marks.",
+    "c": "lncRNA & ncRNA",
+    "t": "m6a,epitranscriptomics,modifications",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "REDIportal",
+    "u": "http://srv00.recas.ba.infn.it/atlas/",
+    "d": "A-to-I RNA editing atlas in humans.",
+    "c": "lncRNA & ncRNA",
+    "t": "rna editing,a-to-i,atlas",
+    "a": "Bulk download"
+  },
+  {
+    "n": "RADAR",
+    "u": "http://rnaedit.com/",
+    "d": "RNA ADAR editing database.",
+    "c": "lncRNA & ncRNA",
+    "t": "rna editing,adar",
+    "a": "Bulk download"
+  },
+  {
+    "n": "DARNED",
+    "u": "http://darned.ucc.ie/",
+    "d": "DAtabase of RNA EDiting in humans.",
+    "c": "lncRNA & ncRNA",
+    "t": "rna editing,human",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GWIPS-viz",
+    "u": "https://gwips.ucc.ie/",
+    "d": "Genome browser for ribosome profiling (translation) data.",
+    "c": "lncRNA & ncRNA",
+    "t": "ribosome profiling,translation,browser",
+    "a": "Bulk download"
+  },
+  {
+    "n": "RPFdb",
+    "u": "https://www.rpfdb.org/",
+    "d": "Ribosome-protected fragment (Ribo-seq) database. ⚠ Domain may have moved; search name if dead.",
+    "c": "lncRNA & ncRNA",
+    "t": "ribo-seq,translation,ribosome",
+    "a": "Web UI"
+  },
+  {
+    "n": "polyA_DB",
+    "u": "https://exon.apps.wistar.org/polya_db/",
+    "d": "Polyadenylation site database — 3'UTR isoforms.",
+    "c": "lncRNA & ncRNA",
+    "t": "polya,apa,3utr",
+    "a": "Bulk download"
+  },
+  {
+    "n": "APAtlas",
+    "u": "http://www.ap-atlas.org/",
+    "d": "Alternative polyadenylation atlas across human tissues.",
+    "c": "lncRNA & ncRNA",
+    "t": "apa,polya,atlas",
+    "a": "Bulk download"
+  },
+  {
+    "n": "miRBase",
+    "u": "https://www.mirbase.org/",
+    "d": "The canonical microRNA sequence database.",
+    "c": "miRNA & Small RNA",
+    "t": "mirna,sequences,canonical",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "miRTarBase",
+    "u": "https://mirtarbase.cuhk.edu.cn/",
+    "d": "Experimentally validated miRNA-target interactions.",
+    "c": "miRNA & Small RNA",
+    "t": "mirna,targets,validated",
+    "a": "Bulk download"
+  },
+  {
+    "n": "TargetScan",
+    "u": "https://www.targetscan.org/",
+    "d": "Predicted mammalian miRNA target sites.",
+    "c": "miRNA & Small RNA",
+    "t": "mirna,targets,prediction",
+    "a": "Bulk download"
+  },
+  {
+    "n": "ENCORI / starBase",
+    "u": "https://rnasysu.com/encori/",
+    "d": "RNA-RNA and RNA-protein interaction networks (miRNA, lncRNA, circRNA, RBP).",
+    "c": "miRNA & Small RNA",
+    "t": "interactions,ceRNA,mirna,lncrna",
+    "a": "Web UI"
+  },
+  {
+    "n": "miRWalk",
+    "u": "http://mirwalk.umm.uni-heidelberg.de/",
+    "d": "miRNA-target prediction and validation aggregation.",
+    "c": "miRNA & Small RNA",
+    "t": "mirna,targets,prediction",
+    "a": "Bulk download"
+  },
+  {
+    "n": "HMDD",
+    "u": "http://www.cuilab.cn/hmdd",
+    "d": "Human microRNA disease database.",
+    "c": "miRNA & Small RNA",
+    "t": "mirna,disease",
+    "a": "Bulk download"
+  },
+  {
+    "n": "piRBase",
+    "u": "http://bigdata.ibp.ac.cn/piRBase/",
+    "d": "piRNA (PIWI-interacting RNA) database.",
+    "c": "miRNA & Small RNA",
+    "t": "pirna,piwi,small rna",
+    "a": "Bulk download"
+  },
+  {
+    "n": "piRNABank",
+    "u": "http://pirnabank.irp.nia.nih.gov/",
+    "d": "piRNA sequence and expression database.",
+    "c": "miRNA & Small RNA",
+    "t": "pirna,sequences",
+    "a": "Web UI"
+  },
+  {
+    "n": "tRFdb",
+    "u": "http://genome.bioch.virginia.edu/trfdb/",
+    "d": "tRNA-derived fragment database.",
+    "c": "miRNA & Small RNA",
+    "t": "trna fragments,trf",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GtRNAdb",
+    "u": "http://gtrnadb.ucsc.edu/",
+    "d": "Genomic tRNA database — tRNA genes across genomes.",
+    "c": "miRNA & Small RNA",
+    "t": "trna,genes,genomic",
+    "a": "Bulk download"
+  },
+  {
+    "n": "tRNAdb",
+    "u": "http://trnadb.bioinf.uni-leipzig.de/",
+    "d": "Compiled tRNA sequences and modifications.",
+    "c": "miRNA & Small RNA",
+    "t": "trna,sequences",
+    "a": "Bulk download"
+  },
+  {
+    "n": "snoRNABase",
+    "u": "https://www-snorna.biotoul.fr/",
+    "d": "Human and archaeal C/D box snoRNA database.",
+    "c": "miRNA & Small RNA",
+    "t": "snorna,sno",
+    "a": "Web UI"
+  },
+  {
+    "n": "snoDB",
+    "u": "https://sno.ucc.ie/",
+    "d": "C/D and H/ACA box snoRNA database.",
+    "c": "miRNA & Small RNA",
+    "t": "snorna",
+    "a": "Bulk download"
+  },
+  {
+    "n": "miRNEST",
+    "u": "http://rhesus.amu.edu.pl/mirnest/copy/",
+    "d": "Integrative collection of animal, plant and virus microRNA data (from the CANTATAdb group).",
+    "c": "miRNA & Small RNA",
+    "t": "mirna,plants,animals,viruses,integrated",
+    "a": "Web UI"
+  },
+  {
+    "n": "ENCODE",
+    "u": "https://www.encodeproject.org/",
+    "d": "The Encyclopedia of DNA Elements — functional elements, ChIP-seq, chromatin, RNA.",
+    "c": "Epigenomics & Regulation",
+    "t": "chipseq,chromatin,functional elements",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Roadmap Epigenomics",
+    "u": "http://www.roadmapepigenomics.org/",
+    "d": "Reference epigenomes — histone marks, methylation, chromatin state across cell types.",
+    "c": "Epigenomics & Regulation",
+    "t": "epigenome,histone,methylation,chromatin",
+    "a": "Bulk download"
+  },
+  {
+    "n": "IHEC",
+    "u": "https://ihec-epigenomes.org/",
+    "d": "International Human Epigenome Consortium data portal.",
+    "c": "Epigenomics & Regulation",
+    "t": "epigenome,consortium,portal",
+    "a": "REST API"
+  },
+  {
+    "n": "BLUEPRINT",
+    "u": "http://www.blueprint-epigenome.eu/",
+    "d": "Blood-cell epigenomes: hematopoiesis and disease.",
+    "c": "Epigenomics & Regulation",
+    "t": "blood,epigenome,hematopoiesis",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Cistrome DB",
+    "u": "http://cistrome.org/db/",
+    "d": "ChIP-seq, ATAC-seq, DNase-seq peak collections for human and mouse.",
+    "c": "Epigenomics & Regulation",
+    "t": "chipseq,atac,peaks,tf",
+    "a": "Bulk download"
+  },
+  {
+    "n": "ChIP-Atlas",
+    "u": "https://chip-atlas.org/",
+    "d": "ChIP-seq and ATAC-seq peak database across cell types and factors.",
+    "c": "Epigenomics & Regulation",
+    "t": "chipseq,atac,peaks",
+    "a": "Bulk download"
+  },
+  {
+    "n": "ReMap",
+    "u": "https://remap.univ-amu.fr/",
+    "d": "Curated encyclopedia of transcription factor binding sites from ChIP-seq.",
+    "c": "Epigenomics & Regulation",
+    "t": "tf binding,chipseq,curated",
+    "a": "Bulk download"
+  },
+  {
+    "n": "JASPAR",
+    "u": "https://jaspar.elixir.no/",
+    "d": "Open-access transcription factor binding profiles (position weight matrices).",
+    "c": "Epigenomics & Regulation",
+    "t": "tf,pwm,position weight matrix",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "TRANSFAC",
+    "u": "https://genexplain.com/transfac/",
+    "d": "Commercial TF binding site database (free subset available).",
+    "c": "Epigenomics & Regulation",
+    "t": "tf,binding sites,commercial",
+    "a": "License required"
+  },
+  {
+    "n": "AnimalTFDB",
+    "u": "https://guolab.wchscu.cn/AnimalTFDB/",
+    "d": "Animal transcription factor database.",
+    "c": "Epigenomics & Regulation",
+    "t": "transcription factors,animals",
+    "a": "Bulk download"
+  },
+  {
+    "n": "EPD / EPDnew",
+    "u": "https://epd.expasy.org/",
+    "d": "Eukaryotic Promoter Database — experimentally validated promoters.",
+    "c": "Epigenomics & Regulation",
+    "t": "promoters,validation,epd",
+    "a": "Bulk download"
+  },
+  {
+    "n": "VISTA Enhancer Browser",
+    "u": "https://enhancer.lbl.gov/",
+    "d": "Curated enhancers with in vivo transgenic validation.",
+    "c": "Epigenomics & Regulation",
+    "t": "enhancers,validation,transgenic",
+    "a": "Web UI"
+  },
+  {
+    "n": "EnhancerAtlas",
+    "u": "http://www.enhanceratlas.org/",
+    "d": "Enhancer and enhancer-TF interaction database.",
+    "c": "Epigenomics & Regulation",
+    "t": "enhancers,tf interactions",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SCREEN (ENCODE cCREs)",
+    "u": "https://screen.encodeproject.org/",
+    "d": "Registry of candidate cis-regulatory elements from ENCODE.",
+    "c": "Epigenomics & Regulation",
+    "t": "cre,regulatory elements,encode",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "MethBank",
+    "u": "https://ngdc.cncb.ac.cn/methbank/",
+    "d": "Methylome database — single-base resolution methylomes across species. ⚠ Slow at check time.",
+    "c": "Epigenomics & Regulation",
+    "t": "methylation,methylome,ngdc",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "EWAS Open Platform",
+    "u": "https://ngdc.cncb.ac.cn/ewas/",
+    "d": "Epigenome-wide association studies: EWAS Atlas + DataHub + toolkit (NGDC).",
+    "c": "Epigenomics & Regulation",
+    "t": "ewas,methylation,associations,ngdc",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "DiseaseMeth",
+    "u": "http://diseasemeth.edbc.org/",
+    "d": "Disease-related methylation database.",
+    "c": "Epigenomics & Regulation",
+    "t": "methylation,disease",
+    "a": "Web UI"
+  },
+  {
+    "n": "MethHC",
+    "u": "http://methhc.mbc.nctu.edu.tw/",
+    "d": "DNA methylation and gene expression in human cancers.",
+    "c": "Epigenomics & Regulation",
+    "t": "methylation,cancer,expression",
+    "a": "Web UI"
+  },
+  {
+    "n": "MethSurv",
+    "u": "https://biit.cs.ut.ee/methsurv/",
+    "d": "Methylation-based survival analysis for cancers.",
+    "c": "Epigenomics & Regulation",
+    "t": "methylation,survival,cancer",
+    "a": "Web UI"
+  },
+  {
+    "n": "NGSmethDB",
+    "u": "http://bioinfo2.ugr.es/NGSmethDB/",
+    "d": "NGS methylation database with tissue-specific contexts.",
+    "c": "Epigenomics & Regulation",
+    "t": "methylation,ngs,tissues",
+    "a": "Bulk download"
+  },
+  {
+    "n": "MethylomeDB",
+    "u": "http://www.neuroepigenomics.org/methylomedb/",
+    "d": "Brain methylome database (human and mouse).",
+    "c": "Epigenomics & Regulation",
+    "t": "methylation,brain",
+    "a": "Web UI"
+  },
+  {
+    "n": "4D Nucleome Data Portal",
+    "u": "https://data.4dnucleome.org/",
+    "d": "Hi-C, micro-C, and imaging datasets for 3D genome organization.",
+    "c": "3D Genome & Chromatin",
+    "t": "hic,3d genome,4dn,chromatin",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "3DIV",
+    "u": "https://www.3div.kr/",
+    "d": "3D-genome Interaction Viewer — Hi-C interactions with annotations. ⚠ Blocked at check time; search name if dead.",
+    "c": "3D Genome & Chromatin",
+    "t": "hic,interactions,viewer",
+    "a": "Web UI (unstable)"
+  },
+  {
+    "n": "WashU Epigenome Browser",
+    "u": "https://epigenomegateway.wustl.edu/",
+    "d": "Browser optimized for epigenomic and 3D chromatin tracks.",
+    "c": "3D Genome & Chromatin",
+    "t": "browser,epigenome,hic",
+    "a": "Web UI"
+  },
+  {
+    "n": "Juicebox (Aiden Lab)",
+    "u": "https://www.aidenlab.org/juicebox/",
+    "d": "Hi-C data visualization and analysis tools + public datasets.",
+    "c": "3D Genome & Chromatin",
+    "t": "hic,visualization,aiden",
+    "a": "Bulk download"
+  },
+  {
+    "n": "DGV (Database of Genomic Variants)",
+    "u": "http://dgv.tcag.ca/",
+    "d": "Structural variation (CNV, inversion) in healthy human genomes.",
+    "c": "Structural Variants & Repeats",
+    "t": "cnv,structural variation,controls",
+    "a": "Bulk download"
+  },
+  {
+    "n": "dbVar",
+    "u": "https://www.ncbi.nlm.nih.gov/dbvar/",
+    "d": "NCBI archive of structural variation.",
+    "c": "Structural Variants & Repeats",
+    "t": "structural variation,archive,sv",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "Dfam",
+    "u": "https://www.dfam.org/",
+    "d": "Transposable element and repeat family profiles (HMMs).",
+    "c": "Structural Variants & Repeats",
+    "t": "transposons,repeats,hmm,te",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "RepBase",
+    "u": "https://www.girinst.org/repbase/",
+    "d": "The reference repeat sequence database (subscription for most).",
+    "c": "Structural Variants & Repeats",
+    "t": "repeats,transposons,reference",
+    "a": "License required"
+  },
+  {
+    "n": "RepeatMasker",
+    "u": "https://www.repeatmasker.org/",
+    "d": "Repeat masking tool and repeat libraries.",
+    "c": "Structural Variants & Repeats",
+    "t": "repeats,masking,te",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "Mitelman Database",
+    "u": "https://mitelmandatabase.isb-cgc.org/",
+    "d": "Chromosome aberrations and gene fusions in cancer.",
+    "c": "Structural Variants & Repeats",
+    "t": "cytogenetics,fusions,cancer",
+    "a": "Web UI"
+  },
+  {
+    "n": "GDC / TCGA",
+    "u": "https://portal.gdc.cancer.gov/",
+    "d": "NCI Genomic Data Commons — TCGA and other cancer genomic programs.",
+    "c": "Cancer Genomics",
+    "t": "tcga,cancer,genomics,gdc",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "ICGC ARGO",
+    "u": "https://platform.icgc-argo.org/",
+    "d": "International Cancer Genome Consortium — pan-cancer genomes incl. PCAWG.",
+    "c": "Cancer Genomics",
+    "t": "cancer,pan-cancer,icgc,pawg",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "PCAWG",
+    "u": "https://dcc.icgc.org/releases/PCAWG",
+    "d": "Pan-cancer Analysis of Whole Genomes — 2,600+ tumor whole genomes.",
+    "c": "Cancer Genomics",
+    "t": "whole genome,pan-cancer,mutations",
+    "a": "Bulk download"
+  },
+  {
+    "n": "COSMIC",
+    "u": "https://cancer.sanger.ac.uk/cosmic",
+    "d": "Catalogue of Somatic Mutations in Cancer — curated, with signatures and drug data.",
+    "c": "Cancer Genomics",
+    "t": "somatic mutations,signatures,cancer",
+    "a": "License required"
+  },
+  {
+    "n": "cBioPortal",
+    "u": "https://www.cbioportal.org/",
+    "d": "Interactive exploration of cancer genomics datasets (TCGA + studies).",
+    "c": "Cancer Genomics",
+    "t": "cancer,visualization,exploration",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "CCLE (Cancer Cell Line Encyclopedia)",
+    "u": "https://sites.broadinstitute.org/ccle/",
+    "d": "Genomic and pharmacologic profiles of 1,000+ cancer cell lines.",
+    "c": "Cancer Genomics",
+    "t": "cell lines,genomics,pharmacology",
+    "a": "Bulk download"
+  },
+  {
+    "n": "DepMap",
+    "u": "https://depmap.org/",
+    "d": "Cancer Dependency Map — CRISPR/RNAi screens, cell-line dependencies.",
+    "c": "Cancer Genomics",
+    "t": "dependencies,crispr screens,cell lines",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GDSC",
+    "u": "https://www.cancerrxgene.org/",
+    "d": "Genomics of Drug Sensitivity in Cancer — drug response vs. genotype.",
+    "c": "Cancer Genomics",
+    "t": "drug sensitivity,cell lines,genomics",
+    "a": "Bulk download"
+  },
+  {
+    "n": "NCI-60 / DTP",
+    "u": "https://dtp.cancer.gov/discovery_development/nci-60/",
+    "d": "The classic 60-cell-line drug screening panel with molecular profiles.",
+    "c": "Cancer Genomics",
+    "t": "drug screening,cell lines,nci60",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CPTAC",
+    "u": "https://proteomics.cancer.gov/",
+    "d": "Clinical Proteomic Tumor Analysis Consortium — proteogenomics of tumors.",
+    "c": "Cancer Genomics",
+    "t": "proteogenomics,proteomics,cancer",
+    "a": "Bulk download + controlled"
+  },
+  {
+    "n": "OncoKB",
+    "u": "https://www.oncokb.org/",
+    "d": "Precision oncology knowledge base of cancer gene alterations.",
+    "c": "Cancer Genomics",
+    "t": "oncogenes,precision oncology,curated",
+    "a": "REST API (license)"
+  },
+  {
+    "n": "CIViC",
+    "u": "https://civicdb.org/",
+    "d": "Clinical Interpretations of Variants in Cancer — community curated.",
+    "c": "Cancer Genomics",
+    "t": "variants,clinical,community",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "AACR Project GENIE",
+    "u": "https://www.aacr.org/professionals/research/aacr-project-genie/",
+    "d": "Clinical-grade genomic data from 100k+ cancer patients.",
+    "c": "Cancer Genomics",
+    "t": "clinical,real world,pan-cancer",
+    "a": "Controlled access"
+  },
+  {
+    "n": "CellMiner",
+    "u": "https://discover.nci.nih.gov/cellminer/",
+    "d": "Molecular profiling and drug response of NCI-60 cell lines.",
+    "c": "Cancer Genomics",
+    "t": "cell lines,drug response,nci60",
+    "a": "Bulk download"
+  },
+  {
+    "n": "IntOGen",
+    "u": "https://www.intogen.org/",
+    "d": "Cancer driver gene discovery across thousands of tumors.",
+    "c": "Cancer Genomics",
+    "t": "driver genes,mutations,cancer",
+    "a": "Bulk download"
+  },
+  {
+    "n": "LinkedOmics",
+    "u": "http://linkedomics.org/",
+    "d": "Multi-omics analysis portal for TCGA cancer data.",
+    "c": "Cancer Genomics",
+    "t": "multiomics,tcga,portal",
+    "a": "Web UI"
+  },
+  {
+    "n": "UALCAN",
+    "u": "https://ualcan.path.uab.edu/",
+    "d": "TCGA data analysis: expression, methylation, survival by subtype.",
+    "c": "Cancer Genomics",
+    "t": "tcga,expression,survival",
+    "a": "Web UI"
+  },
+  {
+    "n": "GEPIA",
+    "u": "http://gepia.cancer-pku.cn/",
+    "d": "Gene expression profiling interactive analysis of TCGA+GTEx.",
+    "c": "Cancer Genomics",
+    "t": "expression,tcga,gtex",
+    "a": "Web UI"
+  },
+  {
+    "n": "TIMER2.0",
+    "u": "http://timer.comp-genomics.org/",
+    "d": "Tumor immune estimation resource — immune infiltration vs. expression.",
+    "c": "Cancer Genomics",
+    "t": "immunity,infiltration,tumor",
+    "a": "Web UI"
+  },
+  {
+    "n": "TISIDB",
+    "u": "http://cis.hku.hk/TISIDB/",
+    "d": "Tumor-immune system interactions database.",
+    "c": "Cancer Genomics",
+    "t": "immunity,tumor,interactions",
+    "a": "Web UI"
+  },
+  {
+    "n": "TCIA",
+    "u": "https://tcia.at/",
+    "d": "The Cancer Immunome Atlas — immune profiles of tumors.",
+    "c": "Cancer Genomics",
+    "t": "immunome,immunity,cancer",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "TISCH",
+    "u": "http://tisch.comp-genomics.org/",
+    "d": "Tumor immune single-cell hub — scRNA-seq of tumor microenvironments.",
+    "c": "Cancer Genomics",
+    "t": "single cell,immune,tumor",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "Human Cell Atlas Data Portal",
+    "u": "https://data.humancellatlas.org/",
+    "d": "The global single-cell reference atlas initiative.",
+    "c": "Single-Cell & Spatial",
+    "t": "single cell,atlas,hca",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "CELLxGENE Discover",
+    "u": "https://cellxgene.cziscience.com/",
+    "d": "CZI-curated single-cell datasets with a powerful explorer.",
+    "c": "Single-Cell & Spatial",
+    "t": "single cell,explorer,czi",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Single Cell Portal (Broad)",
+    "u": "https://singlecell.broadinstitute.org/",
+    "d": "Broad Institute single-cell studies and exploration.",
+    "c": "Single-Cell & Spatial",
+    "t": "single cell,portal,broad",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "PanglaoDB",
+    "u": "https://panglaodb.se/",
+    "d": "Single-cell RNA-seq with cell-type marker genes for many tissues.",
+    "c": "Single-Cell & Spatial",
+    "t": "markers,single cell,cell types",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CellMarker 2.0",
+    "u": "http://bio-bigdata.hrbmu.edu.cn/CellMarker/",
+    "d": "Curated cell markers for human and mouse cell types.",
+    "c": "Single-Cell & Spatial",
+    "t": "markers,cell types,curated",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Tabula Muris",
+    "u": "https://tabula-muris.ds.czbiohub.org/",
+    "d": "Cell atlas of the mouse — 100k+ cells across organs.",
+    "c": "Single-Cell & Spatial",
+    "t": "mouse,atlas,single cell",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Tabula Sapiens",
+    "u": "https://tabula-sapiens.ds.czbiohub.org/",
+    "d": "Human whole-body single-cell atlas.",
+    "c": "Single-Cell & Spatial",
+    "t": "human,atlas,single cell",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Mouse Cell Atlas",
+    "u": "http://bis.zju.edu.cn/MCA/",
+    "d": "Single-cell transcriptomic atlas of the mouse.",
+    "c": "Single-Cell & Spatial",
+    "t": "mouse,atlas,single cell",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Fly Cell Atlas",
+    "u": "https://flycellatlas.org/",
+    "d": "Single-cell atlas of Drosophila.",
+    "c": "Single-Cell & Spatial",
+    "t": "fly,atlas,single cell",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Azimuth",
+    "u": "https://azimuth.hubmapconsortium.org/",
+    "d": "Reference-based single-cell annotation (HCA/HuBMAP).",
+    "c": "Single-Cell & Spatial",
+    "t": "annotation,references,single cell",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "CellTypist",
+    "u": "https://www.celltypist.org/",
+    "d": "Automated immune cell-type annotation from scRNA-seq.",
+    "c": "Single-Cell & Spatial",
+    "t": "annotation,immune,single cell",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "SpatialDB",
+    "u": "https://www.spatialomics.org/SpatialDB/",
+    "d": "Spatially resolved transcriptomics database.",
+    "c": "Single-Cell & Spatial",
+    "t": "spatial,transcriptomics,st",
+    "a": "Bulk download"
+  },
+  {
+    "n": "STOmicsDB",
+    "u": "https://db.cngb.org/stomics/",
+    "d": "Spatial transcriptomics database (CNGB).",
+    "c": "Single-Cell & Spatial",
+    "t": "spatial,transcriptomics,cngb",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "scRNA-tools",
+    "u": "https://www.scrna-tools.org/",
+    "d": "Registry of 1,500+ single-cell analysis tools.",
+    "c": "Single-Cell & Spatial",
+    "t": "tools,registry,single cell",
+    "a": "Web UI"
+  },
+  {
+    "n": "10x Genomics Public Datasets",
+    "u": "https://www.10xgenomics.com/resources/datasets",
+    "d": "Official 10x datasets: scRNA, scATAC, Visium spatial, multiome.",
+    "c": "Single-Cell & Spatial",
+    "t": "10x,visium,spatial,single cell",
+    "a": "Bulk download"
+  },
+  {
+    "n": "RCSB PDB",
+    "u": "https://www.rcsb.org/",
+    "d": "Protein Data Bank — experimentally determined macromolecular structures.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "structure,pdb,3d",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "PDBe",
+    "u": "https://www.ebi.ac.uk/pdbe/",
+    "d": "EMBL-EBI mirror of PDB with added annotations.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "structure,ebi,pdb",
+    "a": "REST API"
+  },
+  {
+    "n": "AlphaFold DB",
+    "u": "https://alphafold.ebi.ac.uk/",
+    "d": "Predicted protein structures for 200M+ proteins.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "alphafold,predicted structures",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "EMDB",
+    "u": "https://www.ebi.ac.uk/pdbe/emdb/",
+    "d": "Electron Microscopy Data Bank — cryo-EM maps.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "cryoem,emdb,maps",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "SASBDB",
+    "u": "https://www.sasbdb.org/",
+    "d": "Small-angle scattering data bank (SAXS/SANS).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "saxs,sans,scattering",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SWISS-MODEL Repository",
+    "u": "https://swissmodel.expasy.org/",
+    "d": "Homology models of proteins, generated and curated.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "homology models,swissmodel",
+    "a": "Bulk download"
+  },
+  {
+    "n": "InterPro",
+    "u": "https://www.ebi.ac.uk/interpro/",
+    "d": "Protein families, domains and functional sites (integrates Pfam etc.).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "domains,families,functional sites",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Pfam (via InterPro)",
+    "u": "https://www.ebi.ac.uk/interpro/entry/pfam/",
+    "d": "Protein family HMM database — now served through InterPro.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "pfam,domains,hmm",
+    "a": "FTP + REST API"
+  },
+  {
+    "n": "PROSITE",
+    "u": "https://prosite.expasy.org/",
+    "d": "Protein domains, families and functional sites (signatures).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "signatures,domains,expasy",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SMART",
+    "u": "http://smart.embl-heidelberg.de/",
+    "d": "Simple Modular Architecture Research Tool — domain annotation.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "domains,architecture",
+    "a": "Web UI"
+  },
+  {
+    "n": "CDD",
+    "u": "https://www.ncbi.nlm.nih.gov/Structure/cdd/cdd.shtml",
+    "d": "NCBI Conserved Domain Database.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "conserved domains,ncbi",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "PANTHER",
+    "u": "http://www.pantherdb.org/",
+    "d": "Protein families, function and pathways (also GO enrichment).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "families,pathways,go",
+    "a": "Bulk download"
+  },
+  {
+    "n": "MEROPS",
+    "u": "https://www.ebi.ac.uk/merops/",
+    "d": "Peptidase database — proteases, inhibitors, substrates.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "proteases,peptidases,inhibitors",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CAZy",
+    "u": "http://www.cazy.org/",
+    "d": "Carbohydrate-Active enZymes — glycosyltransferases, glycosidases, etc.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "carbohydrate enzymes,glycosylation,cazy",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "TCDB",
+    "u": "https://www.tcdb.org/",
+    "d": "Transporter Classification Database.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "transporters,classification,membrane",
+    "a": "Web UI"
+  },
+  {
+    "n": "GPCRdb",
+    "u": "https://gpcrdb.org/",
+    "d": "G protein-coupled receptor structures, mutations and ligands.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "gpcr,receptors,structures",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "IUPHAR/BPS Guide to Pharmacology",
+    "u": "https://www.guidetopharmacology.org/",
+    "d": "Curated pharmacology: receptors, ion channels, ligands, targets.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "pharmacology,receptors,ligands,channels",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PhosphoSitePlus",
+    "u": "https://www.phosphosite.org/",
+    "d": "Curated post-translational modifications — phosphorylation and more.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "phosphorylation,ptm,curated",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "dbPTM",
+    "u": "https://dbptm.mbc.nctu.edu.tw/",
+    "d": "Post-translational modification database (20+ modification types).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "ptm,modifications,phosphorylation",
+    "a": "Bulk download"
+  },
+  {
+    "n": "iPTMnet",
+    "u": "https://research.bioinformatics.udel.edu/iptmnet/",
+    "d": "PTM networks and enzyme-substrate relations.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "ptm,networks,kinase-substrate",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BioPlex",
+    "u": "https://bioplex.hms.harvard.edu/",
+    "d": "Biophysical interactions of the proteome — co-fractionation interactome.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "interactome,protein complexes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "HURI (Human Reference Interactome)",
+    "u": "http://www.interactome-atlas.org/",
+    "d": "Human protein interactome mapping (Vidal lab).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "interactome,human,ppis",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CORUM",
+    "u": "https://mips.helmholtz-muenchen.de/corum/",
+    "d": "Curated mammalian protein complex database.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "protein complexes,curated",
+    "a": "Bulk download"
+  },
+  {
+    "n": "DisProt",
+    "u": "https://disprot.org/",
+    "d": "Database of experimentally validated intrinsically disordered proteins.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "disordered proteins,idp",
+    "a": "Bulk download"
+  },
+  {
+    "n": "MobiDB",
+    "u": "https://mobidb.org/",
+    "d": "Intrinsic disorder annotations (experimental + predicted).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "disorder,prediction,annotation",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "MatrisomeDB",
+    "u": "https://matrisomedb.org/",
+    "d": "Extracellular matrix protein composition across tissues.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "ecm,extracellular matrix,tissues",
+    "a": "Bulk download"
+  },
+  {
+    "n": "OPM (Orientations of Proteins in Membranes)",
+    "u": "https://opm.phar.umich.edu/",
+    "d": "Membrane protein structures with lipid bilayer positioning.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "membrane proteins,bilayer",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PDBTM",
+    "u": "https://pdbtm.uni-graz.at/",
+    "d": "Transmembrane proteins from the PDB.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "transmembrane,structure",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PeptideAtlas",
+    "u": "https://peptideatlas.org/",
+    "d": "Mass-spec peptide identifications across tissues and species.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "mass spectrometry,peptides",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PRIDE",
+    "u": "https://www.ebi.ac.uk/pride/",
+    "d": "Proteomics identifications archive (mass spec).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "proteomics,mass spec,archive",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "MassIVE",
+    "u": "https://massive.ucsd.edu/",
+    "d": "Mass spectrometry interactive virtual environment (UCSD).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "mass spec,proteomics",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "ProteomeXchange",
+    "u": "https://www.proteomexchange.org/",
+    "d": "Consortium umbrella for mass-spec proteomics archives (PRIDE, MassIVE, jPOST, iProX).",
+    "c": "Proteins, Structure & PTMs",
+    "t": "proteomics,consortium,archive",
+    "a": "REST API"
+  },
+  {
+    "n": "jPOST",
+    "u": "https://jpostdb.org/",
+    "d": "Japanese proteome and post-translational modification database.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "proteomics,japan,ptm",
+    "a": "Bulk download"
+  },
+  {
+    "n": "iProX",
+    "u": "https://www.iprox.cn/",
+    "d": "Chinese proteome data center.",
+    "c": "Proteins, Structure & PTMs",
+    "t": "proteomics,china",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BioGRID",
+    "u": "https://thebiogrid.org/",
+    "d": "Curated protein/genetic interactions from literature and screens.",
+    "c": "Interactions & Networks",
+    "t": "interactions,ppi,genetic screens",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "BioGRID ORCS",
+    "u": "https://orcs.thebiogrid.org/",
+    "d": "Open Repository of CRISPR Screens — screen results with gene-level hits.",
+    "c": "Interactions & Networks",
+    "t": "crispr screens,screening,orcs",
+    "a": "Bulk download"
+  },
+  {
+    "n": "IntAct",
+    "u": "https://www.ebi.ac.uk/intact/",
+    "d": "Molecular interaction database (EBI).",
+    "c": "Interactions & Networks",
+    "t": "interactions,ppi,ebi",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "STRING",
+    "u": "https://string-db.org/",
+    "d": "Protein-protein association networks from evidence integration.",
+    "c": "Interactions & Networks",
+    "t": "ppi,networks,evidence",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GeneMANIA",
+    "u": "https://genemania.org/",
+    "d": "Gene function prediction via interaction networks.",
+    "c": "Interactions & Networks",
+    "t": "networks,prediction,functions",
+    "a": "REST API"
+  },
+  {
+    "n": "NDEx",
+    "u": "https://www.ndexbio.org/",
+    "d": "Network data exchange — share and publish biological networks.",
+    "c": "Interactions & Networks",
+    "t": "networks,exchange,publishing",
+    "a": "REST API"
+  },
+  {
+    "n": "Pathway Commons",
+    "u": "https://www.pathwaycommons.org/",
+    "d": "Aggregated pathway and interaction data in standard formats.",
+    "c": "Interactions & Networks",
+    "t": "pathways,interactions,aggregated",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "SIGNOR",
+    "u": "https://signor.uniroma2.it/",
+    "d": "Signaling network open resource — causal signed interactions.",
+    "c": "Interactions & Networks",
+    "t": "signaling,causal,interactions",
+    "a": "Bulk download"
+  },
+  {
+    "n": "OmniPath",
+    "u": "https://omnipathdb.org/",
+    "d": "Literature-curated signaling network resource (integrates many DBs).",
+    "c": "Interactions & Networks",
+    "t": "signaling,networks,curated",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "TRRUST",
+    "u": "https://www.grnpedia.org/trrust/",
+    "d": "Transcriptional regulatory relationships — TF-target (human/mouse).",
+    "c": "Interactions & Networks",
+    "t": "tf,regulatory,human,mouse",
+    "a": "Bulk download"
+  },
+  {
+    "n": "RegNetwork",
+    "u": "http://www.regnetworkweb.org/",
+    "d": "Human/mouse regulatory network of TF and miRNA targets.",
+    "c": "Interactions & Networks",
+    "t": "regulation,tf,mirna",
+    "a": "Bulk download"
+  },
+  {
+    "n": "DoRothEA",
+    "u": "https://saezlab.github.io/dorothea/",
+    "d": "TF activity inference reference regulons.",
+    "c": "Interactions & Networks",
+    "t": "tf activity,regulons,inference",
+    "a": "Bulk download"
+  },
+  {
+    "n": "KEGG",
+    "u": "https://www.kegg.jp/",
+    "d": "Kyoto Encyclopedia of Genes and Genomes — pathways, orthology, compounds, diseases.",
+    "c": "Pathways & Metabolism",
+    "t": "pathways,orthology,kegg",
+    "a": "License (API)"
+  },
+  {
+    "n": "Reactome",
+    "u": "https://reactome.org/",
+    "d": "Curated, peer-reviewed pathway knowledgebase (many species).",
+    "c": "Pathways & Metabolism",
+    "t": "pathways,curated,reactions",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "WikiPathways",
+    "u": "https://www.wikipathways.org/",
+    "d": "Community-edited biological pathway database.",
+    "c": "Pathways & Metabolism",
+    "t": "pathways,wiki,community",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "BioCyc",
+    "u": "https://biocyc.org/",
+    "d": "Pathway/genome database collection (EcoCyc, HumanCyc, PlantCyc…).",
+    "c": "Pathways & Metabolism",
+    "t": "pathways,genomes,biocyc",
+    "a": "License required"
+  },
+  {
+    "n": "MetaCyc",
+    "u": "https://metacyc.org/",
+    "d": "Curated metabolic pathways from all domains of life.",
+    "c": "Pathways & Metabolism",
+    "t": "metabolism,pathways,curated",
+    "a": "License required"
+  },
+  {
+    "n": "EcoCyc",
+    "u": "https://ecocyc.org/",
+    "d": "E. coli model organism database — genome + pathways.",
+    "c": "Pathways & Metabolism",
+    "t": "ecoli,pathways,genome",
+    "a": "License required"
+  },
+  {
+    "n": "SMPDB",
+    "u": "https://smpdb.ca/",
+    "d": "Small Molecule Pathway Database — human metabolic and disease pathways.",
+    "c": "Pathways & Metabolism",
+    "t": "small molecules,pathways,human",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Virtual Metabolic Human (Recon3D)",
+    "u": "https://www.vmh.life/",
+    "d": "Genome-scale reconstruction of human metabolism with microbiome links.",
+    "c": "Pathways & Metabolism",
+    "t": "recon3d,metabolism,human,microbiome",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BiGG Models",
+    "u": "http://bigg.ucsd.edu/",
+    "d": "Genome-scale metabolic models repository (standard format).",
+    "c": "Pathways & Metabolism",
+    "t": "metabolic models,gsm,bigg",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "BioModels",
+    "u": "https://www.ebi.ac.uk/biomodels/",
+    "d": "Curated quantitative models of biological systems (SBML).",
+    "c": "Pathways & Metabolism",
+    "t": "sbml,models,quantitative",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "SABIO-RK",
+    "u": "https://sabiork.h-its.org/",
+    "d": "Biochemical reaction kinetics database.",
+    "c": "Pathways & Metabolism",
+    "t": "kinetics,reactions,enzymes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BRENDA",
+    "u": "https://www.brenda-enzymes.org/",
+    "d": "The comprehensive enzyme functional data database.",
+    "c": "Pathways & Metabolism",
+    "t": "enzymes,kinetics,functions",
+    "a": "License / API"
+  },
+  {
+    "n": "HMDB",
+    "u": "https://hmdb.ca/",
+    "d": "Human Metabolome Database — metabolites, concentrations, disease links.",
+    "c": "Metabolomics & Glycomics",
+    "t": "metabolomics,human,metabolites",
+    "a": "Bulk download"
+  },
+  {
+    "n": "LIPID MAPS",
+    "u": "https://www.lipidmaps.org/",
+    "d": "Lipidomics database and classification system.",
+    "c": "Metabolomics & Glycomics",
+    "t": "lipids,lipidomics,classification",
+    "a": "Bulk download + API"
+  },
+  {
+    "n": "SwissLipids",
+    "u": "https://www.swisslipids.org/",
+    "d": "Curated lipid knowledgebase with structures.",
+    "c": "Metabolomics & Glycomics",
+    "t": "lipids,curated,structures",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GlyGen",
+    "u": "https://www.glygen.org/",
+    "d": "Glycomics and glycoproteomics data integration.",
+    "c": "Metabolomics & Glycomics",
+    "t": "glycomics,glycoproteins,glycans",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GlyTouCan",
+    "u": "https://glytoucan.org/",
+    "d": "Glycan structure repository with unique IDs.",
+    "c": "Metabolomics & Glycomics",
+    "t": "glycans,structures,repository",
+    "a": "REST API"
+  },
+  {
+    "n": "MetaboLights",
+    "u": "https://www.ebi.ac.uk/metabolights/",
+    "d": "Metabolomics experiments and spectra repository (EBI).",
+    "c": "Metabolomics & Glycomics",
+    "t": "metabolomics,spectra,repository",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "Metabolomics Workbench",
+    "u": "https://www.metabolomicsworkbench.org/",
+    "d": "US national metabolomics data repository and tools.",
+    "c": "Metabolomics & Glycomics",
+    "t": "metabolomics,us,repository",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GNPS",
+    "u": "https://gnps.ucsd.edu/",
+    "d": "Global Natural Products Social Molecular Networking — MS/MS spectra.",
+    "c": "Metabolomics & Glycomics",
+    "t": "mass spec,natural products,networking",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "MassBank",
+    "u": "https://massbank.eu/",
+    "d": "Open mass spectral database for metabolites.",
+    "c": "Metabolomics & Glycomics",
+    "t": "mass spectra,metabolites",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "KNApSAcK",
+    "u": "http://www.knapsackfamily.com/",
+    "d": "Plant secondary metabolite and species relationships.",
+    "c": "Metabolomics & Glycomics",
+    "t": "secondary metabolites,plants,species",
+    "a": "Web UI"
+  },
+  {
+    "n": "FooDB",
+    "u": "https://foodb.ca/",
+    "d": "Food compounds and their biology — food metabolome.",
+    "c": "Metabolomics & Glycomics",
+    "t": "food,compounds,nutrition",
+    "a": "Bulk download"
+  },
+  {
+    "n": "ChEBI",
+    "u": "https://www.ebi.ac.uk/chebi/",
+    "d": "Chemical Entities of Biological Interest — ontology of small molecules.",
+    "c": "Metabolomics & Glycomics",
+    "t": "chemicals,ontology,small molecules",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "DrugBank",
+    "u": "https://go.drugbank.com/",
+    "d": "The drug knowledgebase — targets, interactions, mechanisms.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "drugs,targets,interactions",
+    "a": "License required"
+  },
+  {
+    "n": "ChEMBL",
+    "u": "https://www.ebi.ac.uk/chembl/",
+    "d": "Bioactive molecules with drug-like properties and assay data.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "bioactivity,compounds,assays",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "PubChem",
+    "u": "https://pubchem.ncbi.nlm.nih.gov/",
+    "d": "Chemical compounds, substances, bioassays (NCBI).",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "chemicals,compounds,bioassays",
+    "a": "REST API + FTP"
+  },
+  {
+    "n": "ZINC",
+    "u": "https://zinc.docking.org/",
+    "d": "Ready-to-dock compound libraries for virtual screening.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "docking,compounds,virtual screening",
+    "a": "Bulk download"
+  },
+  {
+    "n": "COCONUT",
+    "u": "https://coconut.naturalproducts.net/",
+    "d": "Collection of Open Natural products — the largest open NP database.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "natural products,open,compounds",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "NP Atlas",
+    "u": "https://www.npatlas.org/",
+    "d": "Natural Product Atlas of microbial natural products.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "natural products,microbial",
+    "a": "Bulk download"
+  },
+  {
+    "n": "MIBiG",
+    "u": "https://mibig.secondarymetabolites.org/",
+    "d": "Minimum Information about a Biosynthetic Gene cluster — curated BGCs.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "biosynthetic gene clusters,bgc",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "antiSMASH-DB",
+    "u": "https://antismash-db.secondarymetabolites.org/",
+    "d": "Predicted biosynthetic gene clusters from sequenced genomes.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "bgc,secondary metabolites,prediction",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BindingDB",
+    "u": "https://www.bindingdb.org/",
+    "d": "Measured protein-ligand binding affinities.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "binding affinity,ligands,measured",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PDBbind",
+    "u": "http://www.pdbbind.org.cn/",
+    "d": "Binding affinity data for PDB complexes.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "binding affinity,pdb complexes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PharmGKB",
+    "u": "https://www.pharmgkb.org/",
+    "d": "Pharmacogenomics knowledgebase — drug-gene, drug-pathway, dosing.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "pharmacogenomics,drug-gene,dosing",
+    "a": "Bulk download + API"
+  },
+  {
+    "n": "CPIC",
+    "u": "https://cpicpgx.org/",
+    "d": "Clinical Pharmacogenetics Implementation Consortium guidelines.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "pharmacogenetics,guidelines,clinical",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "DGIdb",
+    "u": "https://www.dgidb.org/",
+    "d": "Drug-Gene Interaction Database.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "drug-gene,interactions",
+    "a": "REST API"
+  },
+  {
+    "n": "SIDER",
+    "u": "http://sideeffects.embl.de/",
+    "d": "Side effect resource — drug adverse reactions.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "side effects,adverse reactions",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CTD (Comparative Toxicogenomics Database)",
+    "u": "https://ctdbase.org/",
+    "d": "Chemical-gene-disease relationships and toxicology.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "toxicogenomics,chemical-gene,disease",
+    "a": "Bulk download"
+  },
+  {
+    "n": "TTD (Therapeutic Target Database)",
+    "u": "https://db.idrblab.net/ttd/",
+    "d": "Therapeutic targets, drugs and their relationships.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "targets,therapeutics,drugs",
+    "a": "Web UI"
+  },
+  {
+    "n": "DDInter",
+    "u": "http://ddinter.scbdd.com/",
+    "d": "Drug-drug interaction database.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "drug-drug,interactions",
+    "a": "Bulk download"
+  },
+  {
+    "n": "EPA CompTox Chemicals Dashboard",
+    "u": "https://comptox.epa.gov/",
+    "d": "Environmental chemistry and toxicology data (incl. ToxCast).",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "environmental,toxicity,epa",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "IEDB",
+    "u": "https://www.iedb.org/",
+    "d": "Immune Epitope Database — epitopes, assays, MHC binding.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "epitopes,immune,assays",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "AllergenOnline",
+    "u": "http://www.allergenonline.org/",
+    "d": "Peer-reviewed allergen sequence database.",
+    "c": "Drugs, Chemicals & Tox",
+    "t": "allergens,sequences",
+    "a": "Web UI"
+  },
+  {
+    "n": "BV-BRC",
+    "u": "https://www.bv-brc.org/",
+    "d": "Bacterial and Viral Bioinformatics Resource Center (PATRIC successor).",
+    "c": "Microbiome & AMR",
+    "t": "bacteria,viruses,pathogens,bvbrc",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "IMG/M (JGI)",
+    "u": "https://img.jgi.doe.gov/",
+    "d": "Integrated Microbial Genomes & Metagenomes — comparative analysis.",
+    "c": "Microbiome & AMR",
+    "t": "metagenomes,genomes,jgi,comparative",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "GOLD",
+    "u": "https://gold.jgi.doe.gov/",
+    "d": "Genomes OnLine Database — metadata registry of genome/metagenome projects.",
+    "c": "Microbiome & AMR",
+    "t": "metadata,projects,genomes,registry",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "MGnify",
+    "u": "https://www.ebi.ac.uk/metagenomics/",
+    "d": "EBI metagenomics analysis and archive.",
+    "c": "Microbiome & AMR",
+    "t": "metagenomics,ebi,analysis",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Qiita",
+    "u": "https://qiita.ucsd.edu/",
+    "d": "Open-source microbiome study platform (Knight lab).",
+    "c": "Microbiome & AMR",
+    "t": "microbiome,platform,amplicon",
+    "a": "REST API"
+  },
+  {
+    "n": "Earth Microbiome Project",
+    "u": "https://earthmicrobiome.org/",
+    "d": "Global environmental microbiome samples and protocols.",
+    "c": "Microbiome & AMR",
+    "t": "microbiome,environmental,global",
+    "a": "Bulk download"
+  },
+  {
+    "n": "HMP / iHMP",
+    "u": "https://www.hmpdacc.org/",
+    "d": "Human Microbiome Project and integrative HMP data.",
+    "c": "Microbiome & AMR",
+    "t": "human microbiome,data,hmp",
+    "a": "Bulk download"
+  },
+  {
+    "n": "GMrepo",
+    "u": "https://gmrepo.humangut.info/",
+    "d": "Curated human gut microbiome database with phenotypes.",
+    "c": "Microbiome & AMR",
+    "t": "gut microbiome,curated,phenotypes",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "MicrobiomeDB",
+    "u": "https://microbiomedb.org/",
+    "d": "Integrated microbiome data with analysis tools.",
+    "c": "Microbiome & AMR",
+    "t": "microbiome,integrated,tools",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "NMDC",
+    "u": "https://microbiomedata.org/",
+    "d": "National Microbiome Data Collaborative — FAIR microbiome data.",
+    "c": "Microbiome & AMR",
+    "t": "microbiome,fair,data",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "KBase",
+    "u": "https://www.kbase.us/",
+    "d": "DOE systems biology knowledgebase — analyze genomes/metagenomes in the cloud.",
+    "c": "Microbiome & AMR",
+    "t": "knowledgebase,analysis,cloud,doe",
+    "a": "REST API"
+  },
+  {
+    "n": "GTDB",
+    "u": "https://gtdb.ecogenomic.org/",
+    "d": "Genome Taxonomy Database — standardized prokaryotic taxonomy from genomes.",
+    "c": "Microbiome & AMR",
+    "t": "taxonomy,genomes,prokaryotes",
+    "a": "Bulk download"
+  },
+  {
+    "n": "CARD",
+    "u": "https://card.mcmaster.ca/",
+    "d": "Comprehensive Antibiotic Resistance Database — AMR genes and ontology.",
+    "c": "Microbiome & AMR",
+    "t": "amr,antibiotic resistance,ontology",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "ResFinder",
+    "u": "https://cge.food.dtu.dk/services/ResFinder/",
+    "d": "Antimicrobial resistance gene finder (DTU CGE).",
+    "c": "Microbiome & AMR",
+    "t": "amr,resistance genes,dtu",
+    "a": "REST API"
+  },
+  {
+    "n": "MEGARes",
+    "u": "https://megares.meglab.org/",
+    "d": "AMR database with sequence data for resistome analysis.",
+    "c": "Microbiome & AMR",
+    "t": "amr,resistome,sequences",
+    "a": "Bulk download"
+  },
+  {
+    "n": "VFDB",
+    "u": "http://www.mgc.ac.cn/VFs/",
+    "d": "Virulence Factor Database for bacterial pathogens.",
+    "c": "Microbiome & AMR",
+    "t": "virulence factors,bacteria",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Victors",
+    "u": "http://www.phidias.us/victors/",
+    "d": "Virulence factor database with experimental evidence.",
+    "c": "Microbiome & AMR",
+    "t": "virulence factors,evidence",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PHI-base",
+    "u": "http://www.phi-base.org/",
+    "d": "Pathogen-Host Interactions — genes affecting pathogenicity and virulence.",
+    "c": "Microbiome & AMR",
+    "t": "pathogen-host,virulence,interactions",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PubMLST",
+    "u": "https://pubmlst.org/",
+    "d": "Public MLST schemes and isolate databases for bacteria.",
+    "c": "Microbiome & AMR",
+    "t": "mlst,typing,isolates",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "EnteroBase",
+    "u": "https://enterobase.warwick.ac.uk/",
+    "d": "Bacterial isolate genomes (Enterobacteriaceae, Helicobacter, etc.).",
+    "c": "Microbiome & AMR",
+    "t": "isolates,genomes,enterobacteriaceae",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "PhagesDB",
+    "u": "https://phagesdb.org/",
+    "d": "Actinobacteriophage database — sequenced phages and clusters.",
+    "c": "Microbiome & AMR",
+    "t": "phages,bacteriophage,genomes",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "ISfinder",
+    "u": "https://www-is.biotoul.fr/",
+    "d": "Insertion sequence element database.",
+    "c": "Microbiome & AMR",
+    "t": "insertion sequences,transposons,is elements",
+    "a": "Web UI"
+  },
+  {
+    "n": "REBASE",
+    "u": "http://rebase.neb.com/",
+    "d": "Restriction enzyme and methyltransferase database.",
+    "c": "Microbiome & AMR",
+    "t": "restriction enzymes,methyltransferases",
+    "a": "License required"
+  },
+  {
+    "n": "BacDive",
+    "u": "https://bacdive.dsmz.de/",
+    "d": "Bacterial diversity metadatabase — strain properties, culture conditions.",
+    "c": "Microbiome & AMR",
+    "t": "strains,diversity,metadata",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "LPSN",
+    "u": "https://lpsn.dsmz.de/",
+    "d": "List of Prokaryotic names with Standing in Nomenclature.",
+    "c": "Microbiome & AMR",
+    "t": "nomenclature,prokaryotes,names",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "NCBI Pathogen Detection",
+    "u": "https://www.ncbi.nlm.nih.gov/pathogens/",
+    "d": "Pathogen genome clustering, AMR and outbreak detection.",
+    "c": "Microbiome & AMR",
+    "t": "pathogens,outbreaks,amr,ncbi",
+    "a": "E-utilities API + FTP"
+  },
+  {
+    "n": "ViralZone",
+    "u": "https://viralzone.expasy.org/",
+    "d": "Virus taxonomy, structure and molecular biology (Expasy).",
+    "c": "Microbiome & AMR",
+    "t": "viruses,taxonomy,expasy",
+    "a": "Web UI"
+  },
+  {
+    "n": "ICTV",
+    "u": "https://ictv.global/",
+    "d": "International Committee on Taxonomy of Viruses — official taxonomy.",
+    "c": "Microbiome & AMR",
+    "t": "virus taxonomy,official",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "GISAID",
+    "u": "https://gisaid.org/",
+    "d": "Influenza and SARS-CoV-2 genome sharing (registration required).",
+    "c": "Microbiome & AMR",
+    "t": "influenza,covid,genomes,sharing",
+    "a": "Controlled access"
+  },
+  {
+    "n": "GBIF",
+    "u": "https://www.gbif.org/",
+    "d": "Global Biodiversity Information Facility — species occurrence records.",
+    "c": "Species & Biodiversity",
+    "t": "biodiversity,occurrences,species",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "OBIS",
+    "u": "https://obis.org/",
+    "d": "Ocean Biodiversity Information System — marine species occurrences.",
+    "c": "Species & Biodiversity",
+    "t": "marine,biodiversity,occurrences",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "iNaturalist",
+    "u": "https://www.inaturalist.org/",
+    "d": "Citizen-science species observations (research-grade data).",
+    "c": "Species & Biodiversity",
+    "t": "observations,citizen science,species",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "BOLD",
+    "u": "https://www.boldsystems.org/",
+    "d": "Barcode of Life Data System — DNA barcodes for species identification.",
+    "c": "Species & Biodiversity",
+    "t": "dna barcoding,species identification",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Catalogue of Life",
+    "u": "https://www.catalogueoflife.org/",
+    "d": "Global species checklist — authoritative taxonomy.",
+    "c": "Species & Biodiversity",
+    "t": "taxonomy,checklist,species",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "WoRMS",
+    "u": "https://www.marinespecies.org/",
+    "d": "World Register of Marine Species.",
+    "c": "Species & Biodiversity",
+    "t": "marine,taxonomy,species",
+    "a": "REST API"
+  },
+  {
+    "n": "MycoBank",
+    "u": "https://www.mycobank.org/",
+    "d": "Fungal nomenclature and species data.",
+    "c": "Species & Biodiversity",
+    "t": "fungi,nomenclature,taxonomy",
+    "a": "Web UI"
+  },
+  {
+    "n": "Index Fungorum",
+    "u": "http://www.indexfungorum.org/",
+    "d": "Fungal names database.",
+    "c": "Species & Biodiversity",
+    "t": "fungi,names,taxonomy",
+    "a": "Web UI"
+  },
+  {
+    "n": "AlgaeBase",
+    "u": "https://www.algaebase.org/",
+    "d": "Algal species database — taxonomy, distribution, images.",
+    "c": "Species & Biodiversity",
+    "t": "algae,taxonomy,distribution",
+    "a": "Web UI"
+  },
+  {
+    "n": "FishBase",
+    "u": "https://www.fishbase.se/",
+    "d": "The encyclopedia of fishes — biology, ecology, genetics.",
+    "c": "Species & Biodiversity",
+    "t": "fish,biology,species",
+    "a": "Web UI"
+  },
+  {
+    "n": "SeaLifeBase",
+    "u": "https://www.sealifebase.se/",
+    "d": "Marine life encyclopedia (non-fish).",
+    "c": "Species & Biodiversity",
+    "t": "marine life,species",
+    "a": "Web UI"
+  },
+  {
+    "n": "iDigBio",
+    "u": "https://www.idigbio.org/",
+    "d": "US digitized museum specimen aggregator.",
+    "c": "Species & Biodiversity",
+    "t": "specimens,museums,digitized",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Allen Brain Atlas",
+    "u": "https://portal.brain-map.org/",
+    "d": "Gene expression atlases of the brain (human, mouse, non-human primate).",
+    "c": "Neuroscience",
+    "t": "brain,expression,atlas,allen",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "BrainSpan",
+    "u": "https://www.brainspan.org/",
+    "d": "Developing human brain transcriptome atlas.",
+    "c": "Neuroscience",
+    "t": "brain,development,transcriptome",
+    "a": "Bulk download"
+  },
+  {
+    "n": "NeuroVault",
+    "u": "https://neurovault.org/",
+    "d": "Repository of statistical brain maps (fMRI).",
+    "c": "Neuroscience",
+    "t": "fmri,brain maps,neuroimaging",
+    "a": "REST API"
+  },
+  {
+    "n": "NeuroMorpho",
+    "u": "https://neuromorpho.org/",
+    "d": "Reconstructed neuronal morphology database.",
+    "c": "Neuroscience",
+    "t": "neurons,morphology,reconstruction",
+    "a": "Bulk download"
+  },
+  {
+    "n": "OpenNeuro",
+    "u": "https://openneuro.org/",
+    "d": "Open neuroimaging datasets (MRI, EEG, MEG).",
+    "c": "Neuroscience",
+    "t": "neuroimaging,open,mri,eeg",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "NeuroElectro",
+    "u": "https://neuroelectro.org/",
+    "d": "Electrophysiological properties of neurons from literature.",
+    "c": "Neuroscience",
+    "t": "electrophysiology,neurons",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "ModelDB",
+    "u": "https://modeldb.science/",
+    "d": "Computational neuroscience model repository.",
+    "c": "Neuroscience",
+    "t": "models,computational,neuroscience",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SynGO",
+    "u": "https://www.syngoportal.org/",
+    "d": "Synaptic gene ontology — curated synaptic protein annotations.",
+    "c": "Neuroscience",
+    "t": "synapse,ontology,proteins",
+    "a": "Bulk download"
+  },
+  {
+    "n": "EBRAINS",
+    "u": "https://ebrains.eu/",
+    "d": "European brain research infrastructure (Human Brain Project).",
+    "c": "Neuroscience",
+    "t": "brain,infrastructure,hbp",
+    "a": "Controlled access"
+  },
+  {
+    "n": "Human Connectome Project",
+    "u": "https://www.humanconnectome.org/",
+    "d": "Human brain connectivity and neuroimaging data.",
+    "c": "Neuroscience",
+    "t": "connectome,neuroimaging,connectivity",
+    "a": "Controlled access"
+  },
+  {
+    "n": "IMGT",
+    "u": "https://www.imgt.org/",
+    "d": "The international ImMunoGeneTics information system — immunoglobulins, TCRs, MHC.",
+    "c": "Immunogenomics",
+    "t": "immunoglobulins,tcr,mhc,imgt",
+    "a": "Web UI + FTP"
+  },
+  {
+    "n": "IPD-IMGT/HLA",
+    "u": "https://www.ebi.ac.uk/ipd/imgt/hla/",
+    "d": "The HLA allele sequence database.",
+    "c": "Immunogenomics",
+    "t": "hla,alleles,sequences",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "IPD-KIR",
+    "u": "https://www.ebi.ac.uk/ipd/kir/",
+    "d": "Killer-cell immunoglobulin-like receptor sequences.",
+    "c": "Immunogenomics",
+    "t": "kir,nk cells,alleles",
+    "a": "FTP bulk"
+  },
+  {
+    "n": "VDJdb",
+    "u": "https://vdjdb.cdr3.net/",
+    "d": "T-cell receptor sequences with antigen specificity.",
+    "c": "Immunogenomics",
+    "t": "tcr,antigen,repertoire",
+    "a": "Bulk download"
+  },
+  {
+    "n": "McPAS-TCR",
+    "u": "http://friedmanlab.weizmann.ac.il/McPAS-TCR/",
+    "d": "TCR sequences associated with pathologies and antigens.",
+    "c": "Immunogenomics",
+    "t": "tcr,pathologies,antigens",
+    "a": "Bulk download"
+  },
+  {
+    "n": "VDJbase",
+    "u": "https://www.vdjbase.org/",
+    "d": "Population-level immunoglobulin/TCR gene allele frequencies.",
+    "c": "Immunogenomics",
+    "t": "ig,tcr,population,alleles",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Observed Antibody Space",
+    "u": "https://opig.stats.ox.ac.uk/webapps/oas/",
+    "d": "Huge database of antibody repertoires from sequencing studies.",
+    "c": "Immunogenomics",
+    "t": "antibodies,repertoires,sequences",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SAbDab",
+    "u": "https://opig.stats.ox.ac.uk/webapps/sabdab/",
+    "d": "Structural antibody database — antibody structures.",
+    "c": "Immunogenomics",
+    "t": "antibodies,structures,sabdab",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "ImmGen",
+    "u": "https://www.immgen.org/",
+    "d": "Immunological Genome Project — gene expression across immune cells.",
+    "c": "Immunogenomics",
+    "t": "immune cells,expression,atlas",
+    "a": "Bulk download"
+  },
+  {
+    "n": "SysteMHC Atlas",
+    "u": "https://systemeatlas.org/",
+    "d": "Human and mouse MHC class I immunopeptidomes. ⚠ Verify availability.",
+    "c": "Immunogenomics",
+    "t": "mhc,immunopeptidome,peptides",
+    "a": "Bulk download"
+  },
+  {
+    "n": "ClinicalTrials.gov",
+    "u": "https://clinicaltrials.gov/",
+    "d": "US registry of clinical trials.",
+    "c": "Biobanks & Clinical",
+    "t": "clinical trials,registry",
+    "a": "REST API"
+  },
+  {
+    "n": "EU Clinical Trials Register",
+    "u": "https://www.clinicaltrialsregister.eu/",
+    "d": "European clinical trials registry.",
+    "c": "Biobanks & Clinical",
+    "t": "clinical trials,europe",
+    "a": "Bulk download"
+  },
+  {
+    "n": "WHO ICTRP",
+    "u": "https://trialsearch.who.int/",
+    "d": "WHO International Clinical Trials Registry Platform search.",
+    "c": "Biobanks & Clinical",
+    "t": "clinical trials,who,search",
+    "a": "Web UI + API"
+  },
+  {
+    "n": "UK Biobank",
+    "u": "https://www.ukbiobank.ac.uk/",
+    "d": "500k-participant cohort with genotypes, imaging, and deep phenotyping.",
+    "c": "Biobanks & Clinical",
+    "t": "biobank,cohort,uk,genotypes",
+    "a": "Controlled access"
+  },
+  {
+    "n": "FinnGen",
+    "u": "https://www.finngen.fi/",
+    "d": "Finnish biobank genomics — 500k+ individuals linked to EHR phenotypes.",
+    "c": "Biobanks & Clinical",
+    "t": "biobank,finland,genomics,phenotypes",
+    "a": "Controlled access"
+  },
+  {
+    "n": "All of Us Research Program",
+    "u": "https://allofus.nih.gov/",
+    "d": "US precision-medicine cohort of 1M+ diverse participants.",
+    "c": "Biobanks & Clinical",
+    "t": "cohort,precision medicine,us,diversity",
+    "a": "Controlled access"
+  },
+  {
+    "n": "Million Veteran Program",
+    "u": "https://www.mvp.va.gov/",
+    "d": "VA genomics cohort with EHR-linked phenotypes.",
+    "c": "Biobanks & Clinical",
+    "t": "veterans,cohort,ehr",
+    "a": "Controlled access"
+  },
+  {
+    "n": "BioData Catalyst",
+    "u": "https://biodatacatalyst.nhlbi.nih.gov/",
+    "d": "NHLBI cloud platform for TOPMed and other datasets.",
+    "c": "Biobanks & Clinical",
+    "t": "cloud,topmed,nhlbi,analysis",
+    "a": "Controlled access"
+  },
+  {
+    "n": "Kids First Data Resource",
+    "u": "https://kidsfirstdrc.org/",
+    "d": "Childhood cancer and structural birth defects genomics.",
+    "c": "Biobanks & Clinical",
+    "t": "pediatric,cancer,birth defects",
+    "a": "Controlled access"
+  },
+  {
+    "n": "AnVIL",
+    "u": "https://anvilproject.org/",
+    "d": "NHGRI Analysis Visualization and Informatics Lab-space (Genomic Data Science).",
+    "c": "Biobanks & Clinical",
+    "t": "cloud,nhgri,genomics,analysis",
+    "a": "Controlled access"
+  },
+  {
+    "n": "Terra",
+    "u": "https://terra.bio/",
+    "d": "Cloud workbench for genomic analysis at scale (Broad/Verily).",
+    "c": "Biobanks & Clinical",
+    "t": "cloud,workbench,broad,analysis",
+    "a": "Controlled access"
+  },
+  {
+    "n": "Genomics England",
+    "u": "https://www.genomicsengland.co.uk/",
+    "d": "100,000 Genomes Project and the National Genomic Research Library.",
+    "c": "Biobanks & Clinical",
+    "t": "100k genomes,nhs,research library",
+    "a": "Controlled access"
+  },
+  {
+    "n": "RD-Connect",
+    "u": "https://rd-connect.eu/",
+    "d": "Rare disease research platform linking registries, biobanks and omics.",
+    "c": "Biobanks & Clinical",
+    "t": "rare disease,registries,biobanks",
+    "a": "Web UI + controlled"
+  },
+  {
+    "n": "Matchmaker Exchange",
+    "u": "https://www.matchmakerexchange.org/",
+    "d": "Federated matching of rare-disease patients with similar genotypes.",
+    "c": "Biobanks & Clinical",
+    "t": "rare disease,matching,genotypes",
+    "a": "Controlled access"
+  },
+  {
+    "n": "GA4GH",
+    "u": "https://www.ga4gh.org/",
+    "d": "Global Alliance for Genomics and Health — interoperability standards (Beacon, Phenopackets).",
+    "c": "Biobanks & Clinical",
+    "t": "standards,interoperability,beacon,ga4gh",
+    "a": "Standards (no data)"
+  },
+  {
+    "n": "MarkerDB",
+    "u": "https://markerdb.ca/",
+    "d": "Clinical biomarkers — molecular, cellular and imaging.",
+    "c": "Biobanks & Clinical",
+    "t": "biomarkers,clinical,diagnostics",
+    "a": "Bulk download + web"
+  },
+  {
+    "n": "OBO Foundry",
+    "u": "https://obofoundry.org/",
+    "d": "Open Biological and Biomedical Ontologies — the ontology family registry.",
+    "c": "Ontologies",
+    "t": "ontology,obo,registry",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "BioPortal",
+    "u": "https://bioportal.bioontology.org/",
+    "d": "Ontology repository and annotation service.",
+    "c": "Ontologies",
+    "t": "ontology,repository,annotations",
+    "a": "REST API"
+  },
+  {
+    "n": "Ontobee",
+    "u": "http://www.ontobee.org/",
+    "d": "Ontology browser and lookup service.",
+    "c": "Ontologies",
+    "t": "ontology,browser,lookup",
+    "a": "Web UI"
+  },
+  {
+    "n": "Gene Ontology",
+    "u": "http://geneontology.org/",
+    "d": "The GO: molecular function, biological process, cellular component.",
+    "c": "Ontologies",
+    "t": "go,ontology,functions,processes",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Uberon",
+    "u": "https://www.ebi.ac.uk/ols/ontologies/uberon",
+    "d": "Cross-species anatomical structure ontology.",
+    "c": "Ontologies",
+    "t": "anatomy,ontology,cross-species",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Cell Ontology",
+    "u": "https://www.ebi.ac.uk/ols/ontologies/cl",
+    "d": "Cell type ontology.",
+    "c": "Ontologies",
+    "t": "cell types,ontology",
+    "a": "Bulk download"
+  },
+  {
+    "n": "Plant Ontology",
+    "u": "https://www.ebi.ac.uk/ols/ontologies/po",
+    "d": "Plant anatomy and development stages ontology.",
+    "c": "Ontologies",
+    "t": "plants,anatomy,ontology",
+    "a": "Bulk download"
+  },
+  {
+    "n": "EDAM",
+    "u": "https://edamontology.org/",
+    "d": "Ontology of bioinformatics operations, data types and topics.",
+    "c": "Ontologies",
+    "t": "bioinformatics,ontology,data types",
+    "a": "Bulk download"
+  },
+  {
+    "n": "BioSchemas",
+    "u": "https://bioschemas.org/",
+    "d": "Schema.org extensions for life sciences data.",
+    "c": "Ontologies",
+    "t": "schema,metadata,web",
+    "a": "Web UI (spec)"
+  },
+  {
+    "n": "MeSH",
+    "u": "https://www.ncbi.nlm.nih.gov/mesh/",
+    "d": "Medical Subject Headings — controlled vocabulary.",
+    "c": "Ontologies",
+    "t": "vocabulary,medical,ncbi",
+    "a": "Bulk download"
+  },
+  {
+    "n": "PubMed",
+    "u": "https://pubmed.ncbi.nlm.nih.gov/",
+    "d": "The biomedical literature index (NCBI).",
+    "c": "Literature, Data & Software",
+    "t": "literature,pubmed,papers",
+    "a": "E-utilities API"
+  },
+  {
+    "n": "Europe PMC",
+    "u": "https://europepmc.org/",
+    "d": "Full-text biomedical literature with preprint and patent integration.",
+    "c": "Literature, Data & Software",
+    "t": "literature,full text,preprints",
+    "a": "REST API"
+  },
+  {
+    "n": "bioRxiv",
+    "u": "https://www.biorxiv.org/",
+    "d": "The biology preprint server.",
+    "c": "Literature, Data & Software",
+    "t": "preprints,papers,bio",
+    "a": "REST API"
+  },
+  {
+    "n": "medRxiv",
+    "u": "https://www.medrxiv.org/",
+    "d": "Health sciences preprint server.",
+    "c": "Literature, Data & Software",
+    "t": "preprints,medicine",
+    "a": "REST API"
+  },
+  {
+    "n": "OpenAlex",
+    "u": "https://openalex.org/",
+    "d": "Open scholarly metadata catalog — papers, authors, institutions.",
+    "c": "Literature, Data & Software",
+    "t": "scholarly,metadata,open",
+    "a": "REST API"
+  },
+  {
+    "n": "Semantic Scholar",
+    "u": "https://www.semanticscholar.org/",
+    "d": "AI-powered literature search and research graph.",
+    "c": "Literature, Data & Software",
+    "t": "literature,ai,search",
+    "a": "REST API"
+  },
+  {
+    "n": "Zenodo",
+    "u": "https://zenodo.org/",
+    "d": "General-purpose open research data repository (CERN).",
+    "c": "Literature, Data & Software",
+    "t": "data repository,zenodo,open",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "Figshare",
+    "u": "https://figshare.com/",
+    "d": "General-purpose research data and figure repository.",
+    "c": "Literature, Data & Software",
+    "t": "data repository,figures",
+    "a": "REST API"
+  },
+  {
+    "n": "Dryad",
+    "u": "https://datadryad.org/",
+    "d": "Curated data repository for scientific publications.",
+    "c": "Literature, Data & Software",
+    "t": "data repository,curated",
+    "a": "REST API"
+  },
+  {
+    "n": "GigaDB",
+    "u": "http://gigadb.org/",
+    "d": "GigaScience data repository — large genomics datasets.",
+    "c": "Literature, Data & Software",
+    "t": "data repository,genomics,big data",
+    "a": "REST API + bulk"
+  },
+  {
+    "n": "OSF",
+    "u": "https://osf.io/",
+    "d": "Open Science Framework — project and data management.",
+    "c": "Literature, Data & Software",
+    "t": "projects,open science,data",
+    "a": "REST API"
+  },
+  {
+    "n": "protocols.io",
+    "u": "https://www.protocols.io/",
+    "d": "Open repository of research protocols.",
+    "c": "Literature, Data & Software",
+    "t": "protocols,methods",
+    "a": "REST API"
+  },
+  {
+    "n": "Galaxy",
+    "u": "https://usegalaxy.org/",
+    "d": "Open web-based bioinformatics workbench with thousands of tools.",
+    "c": "Literature, Data & Software",
+    "t": "workflow,web,analysis,tools",
+    "a": "REST API"
+  },
+  {
+    "n": "nf-core",
+    "u": "https://nf-co.re/",
+    "d": "Community-curated Nextflow bioinformatics pipelines.",
+    "c": "Literature, Data & Software",
+    "t": "pipelines,nextflow,community",
+    "a": "Bulk download (pipelines)"
+  },
+  {
+    "n": "BioContainers",
+    "u": "https://biocontainers.pro/",
+    "d": "Containerized bioinformatics software.",
+    "c": "Literature, Data & Software",
+    "t": "containers,docker,software",
+    "a": "REST API"
+  },
+  {
+    "n": "Bioconda",
+    "u": "https://bioconda.github.io/",
+    "d": "Conda packages for bioinformatics.",
+    "c": "Literature, Data & Software",
+    "t": "conda,packages,software",
+    "a": "REST API"
+  },
+  {
+    "n": "Dockstore",
+    "u": "https://dockstore.org/",
+    "d": "Registry of containerized analysis workflows (GA4GH).",
+    "c": "Literature, Data & Software",
+    "t": "workflows,containers,registry",
+    "a": "REST API"
+  },
+  {
+    "n": "Bioconductor",
+    "u": "https://www.bioconductor.org/",
+    "d": "R packages for omics analysis.",
+    "c": "Literature, Data & Software",
+    "t": "r,packages,omics",
+    "a": "REST API"
+  },
+  {
+    "n": "Addgene",
+    "u": "https://www.addgene.org/",
+    "d": "Plasmid and viral vector repository for sharing.",
+    "c": "Literature, Data & Software",
+    "t": "plasmids,vectors,sharing",
+    "a": "REST API"
+  },
+  {
+    "n": "iGEM Registry of Standard Biological Parts",
+    "u": "https://parts.igem.org/",
+    "d": "Registry of characterized biological parts.",
+    "c": "Literature, Data & Software",
+    "t": "synbio,biobricks,parts",
+    "a": "Web UI + bulk"
+  },
+  {
+    "n": "Wikidata",
+    "u": "https://www.wikidata.org/",
+    "d": "Linked open knowledge graph — genes, proteins, diseases, species.",
+    "c": "Literature, Data & Software",
+    "t": "knowledge graph,wikidata,linked data",
+    "a": "REST API (SPARQL)"
+  }
+]
