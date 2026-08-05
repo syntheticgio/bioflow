@@ -258,6 +258,29 @@ own homepage, and every asset is inlined. They belong under
 already are. `icarus_viewers/` is a subdirectory of further HTML and the route
 already serves relative paths beneath the report dir.
 
+**Corrected 2026-08-05, while writing the implementation plan
+(`docs/superpowers/plans/2026-08-05-quast-misassembly-qc.md`): "served by the
+existing route, the same way" is not true, and the gap is a stored XSS.**
+Two findings, both verified by doing them rather than by reading:
+
+- **QUAST's report renders nothing without JavaScript.** Every value lives in
+  a JSON blob inside `<div id='total-report-json'>`, rendered into tables by
+  inline script. The route's default CSP is `sandbox`, which disables
+  scripting -- so the page arrives blank. QUAST has to join NanoPlot as a
+  scripting exception, which means giving up `sandbox` for it.
+- **QUAST does not escape the assembly label, and the label is the filename.**
+  `qutils.correct_name` sanitizes *contig* names (`[^\w\._\-]` -> `_`,
+  confirmed), but `correct_asm_label` only strips and truncates. An input file
+  named `ev<img src=x onerror=alert(7)>.fasta` puts that tag verbatim and
+  unescaped into `report.html`. Since `assess_completeness` links its input
+  under the user's object name, copying that pattern here would be a real
+  stored XSS the moment `sandbox` came off.
+
+The fix is at BioFlow's seam, not QUAST's: link the input under a fixed name
+and pass `-l assembly`, verified to leave no trace of a hostile filename in
+the output. The plan puts that in the handler phase, before the phase that
+serves the HTML, so the two never land out of order.
+
 ### Inputs, validation, and where it hangs off the code
 
 Inputs are a draft assembly and a reference assembly -- the identical shape
