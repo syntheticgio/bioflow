@@ -119,6 +119,24 @@ through apt or conda cannot be made optional.
 This also gives uninstall for free, which is the subject of its own decision
 below.
 
+### Prerequisite: the daemon socket is dev-only today
+
+The Docker socket is mounted in `docker-compose.override.yml` and **nowhere
+else** — both the `api` and `worker` mounts are there. The launcher ships
+`docker-compose.yml` alone (`launcher/src-tauri/src/setup/install.rs`, and
+`BUNDLED_COMPOSE_RESOURCE` in `commands.rs`) and never the override, which
+exists to build from local source.
+
+So a launcher-installed user has no socket, and **DeepVariant does not work for
+them today** — not as a consequence of this design, but already. Every optional
+tool would inherit that. Moving the socket mount (and `BIOINFO_HOME_HOST`, for
+the same sibling-container reason) into the base compose file is therefore a
+prerequisite for this epic rather than a detail of it, and it makes the
+privilege increase the override's comment describes apply to the shipped stack.
+That is the right trade for a single-user local application, and it should be
+stated in the launcher's own documentation rather than only in a compose
+comment.
+
 ## `ToolMeta` carries the manifest
 
 `ToolMeta` in `pipelines/tools.py` already describes every tool and already
