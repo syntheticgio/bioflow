@@ -33,8 +33,15 @@ async def attach_blob_to_object(
     external_path: str | None = None,
     observed_mtime: float | None = None,
     status: ObjectStatus = ObjectStatus.INGESTING,
+    content_sha256: str | None = None,
 ) -> Blob:
-    """Increment the blob refcount and point the object at it, atomically."""
+    """Increment the blob refcount and point the object at it, atomically.
+
+    `content_sha256` is set only on first insert (`$setOnInsert`), never
+    updated on an existing blob: the field describes what the stored bytes
+    decompress to, which cannot change for a digest that already names one
+    immutable set of bytes.
+    """
     now = datetime.now(UTC)
     db = get_db()
 
@@ -49,6 +56,7 @@ async def attach_blob_to_object(
         "created_at": now,
         "schema_version": 1,
         "verify_mode": "stat",
+        "content_sha256": content_sha256,
     }
     if storage is BlobStorage.MANAGED:
         set_on_insert["rel_path"] = blob_rel_path(digest)
@@ -220,7 +228,7 @@ async def detach_blob_from_object(object_id: PydanticObjectId) -> None:
 
 
 async def find_present_blob(digest: str) -> Blob | None:
-    """Look up a blob eligible for deduplication.
+    """Look up a blob eligible for deduplication, by the hash of its stored bytes.
 
     A record in any state other than PRESENT is treated as a miss: quarantined
     or missing content must be re-placed rather than trusted.
@@ -228,6 +236,27 @@ async def find_present_blob(digest: str) -> Blob | None:
     blob = await Blob.get(digest)
     if blob is None or blob.state is not BlobState.PRESENT:
         return None
+    return blob
+
+
+async def find_present_blob_by_content(content_sha256: str) -> Blob | None:
+    """Look up a blob eligible for dedup, by the hash of its *uncompressed* content.
+
+    Separate from `find_present_blob` on purpose: that function looks up the
+    primary key (the hash of the bytes actually on disk), which stays correct
+    for an uncompressed blob without any change. This one exists because a
+    compressible format's dedup key is the plaintext hash instead -- two
+    ingests of the same FASTQ must converge on one blob even if one was
+    written by bgzip and the other by the stdlib fallback, which produce
+    different compressed bytes (and so different `id`s) from identical input.
+
+    Ambiguous only in the window between a race's two placements; the
+    PRESENT-state filter and `find_first` (oldest first, by insertion order)
+    make that deterministic rather than a source of flaky dedup.
+    """
+    blob = await Blob.find_one(
+        Blob.content_sha256 == content_sha256, Blob.state == BlobState.PRESENT
+    )
     return blob
 
 

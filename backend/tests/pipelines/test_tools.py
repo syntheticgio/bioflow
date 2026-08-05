@@ -268,6 +268,7 @@ class TestSerialization:
             "star",
             "samtools",
             "bcftools",
+            "bgzip",
             "clair3",
             "deepvariant",
             "flye",
@@ -333,8 +334,14 @@ class TestToolMeta:
 
     def test_every_tool_belongs_to_at_least_one_pipeline(self):
         """`pipelines` is what the selector filters on: an empty tuple is a
-        tool that exists but appears on no screen."""
+        tool that exists but appears on no screen. bgzip is the one
+        deliberate exception -- it is dispatched internally by the storage
+        layer at ingest, never a user-selectable pipeline step, so it has no
+        card to appear on. See docs/superpowers/specs/
+        2026-08-05-object-compression-design.md."""
         for name, meta in tools.TOOL_META.items():
+            if name == "bgzip":
+                continue
             assert meta.pipelines, f"{name} belongs to no pipeline"
 
     def test_fastp_is_both_a_trimmer_and_a_qc_tool(self):
@@ -423,6 +430,33 @@ class TestVariantToolProbes:
         default for a tool with no handler, not the default for one with one."""
         enriched = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
         assert enriched["runnable"] is False
+
+
+class TestBgzipProbe:
+    def test_bgzip_probes(self):
+        """Runs against the real binary in the image."""
+        tool = tools.bgzip()
+        assert tool.name == "bgzip"
+        assert isinstance(tool.available, bool)
+
+    def test_bgzip_is_not_a_pipeline_card(self):
+        """No PipelineType: it is dispatched internally by the storage layer
+        at ingest, not offered on the tool selector or the Software help
+        page. See docs/superpowers/specs/2026-08-05-object-compression-design.md."""
+        assert tools.TOOL_META["bgzip"].pipelines == ()
+
+    def test_bgzip_is_not_runnable(self):
+        """No job handler branches on it -- cas/object_service call it
+        directly -- so it must not read as an actionable pipeline step."""
+        assert tools.TOOL_META["bgzip"].runnable is False
+
+    def test_bgzip_falls_back_gracefully_when_probe_fails(self, monkeypatch):
+        """Per CLAUDE.md: the image ships bgzip as installed, so asserting it
+        is *available* would pass whether or not a missing-binary code path
+        works. Assert the failure direction instead."""
+        monkeypatch.setattr(tools.shutil, "which", lambda name: None if name == "bgzip" else "/x")
+        tool = tools.bgzip()
+        assert tool.available is False
 
 
 class TestNewAlignerProbes:

@@ -34,6 +34,16 @@ class Blob(TimestampedDocument):
     state: BlobState = BlobState.PENDING
     storage: BlobStorage = BlobStorage.MANAGED
 
+    # Hash of the *uncompressed* stream, when this blob's stored bytes are
+    # compressed (see storage/compress.py). None for a blob whose id already
+    # is the plaintext hash -- an uncompressed blob, or one predating
+    # compression. Kept distinct from `id`, which stays the hash of the bytes
+    # actually on disk so the CAS invariant (id == sha256 of the stored file)
+    # never breaks: dedup for compressible formats looks up by this field
+    # instead, so two ingests of the same plaintext converge on one blob
+    # regardless of which compressor (or the stdlib fallback) wrote it.
+    content_sha256: str | None = None
+
     rel_path: str | None = None  # "ab/abcdef..." when managed
     external_path: str | None = None  # absolute path when external
 
@@ -75,5 +85,15 @@ class Blob(TimestampedDocument):
                 name="uniq_external_path",
                 unique=True,
                 partialFilterExpression={"external_path": {"$type": "string"}},
+            ),
+            # Dedup lookup for compressed blobs. Partial + non-unique: absent
+            # for every blob that predates compression or was never
+            # compressible, and two blobs can share a content_sha256 only in
+            # the window between a race's two placements, which
+            # find_present_blob's PRESENT-state check already tolerates.
+            IndexModel(
+                [("content_sha256", ASCENDING)],
+                name="content_sha256_lookup",
+                partialFilterExpression={"content_sha256": {"$type": "string"}},
             ),
         ]

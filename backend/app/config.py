@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     # variant calling besides Clair3 itself.
     bcftools_path: str = "bcftools"
     clair3_path: str = "run_clair3.sh"
+    # From the `tabix` package. Compresses FASTQ/FASTA/VCF at ingest -- see
+    # docs/superpowers/specs/2026-08-05-object-compression-design.md. Not a
+    # user-selectable pipeline step, so it has no PipelineType card; the
+    # storage layer dispatches to it directly and falls back to Python's
+    # stdlib gzip when it is absent.
+    bgzip_path: str = "bgzip"
     # From the `subread` package. featureCounts is the only binary in it this
     # application invokes.
     featurecounts_path: str = "featureCounts"
