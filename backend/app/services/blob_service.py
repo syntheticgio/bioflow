@@ -11,6 +11,7 @@ from beanie import PydanticObjectId
 from pymongo.errors import DuplicateKeyError
 
 from app.db.client import get_client, get_db
+from app.errors import NotFoundError
 from app.logging import get_logger
 from app.models import Blob, BlobState, BlobStorage, DataObject, ObjectStatus
 from app.storage.paths import blob_rel_path
@@ -111,6 +112,76 @@ async def attach_blob_to_object(
         blob = await Blob.get(digest)
 
     return blob  # type: ignore[return-value]
+
+
+async def attach_existing_blob_to_object(
+    *,
+    object_id: PydanticObjectId,
+    digest: str,
+    size: int,
+    session=None,
+) -> Blob:
+    """Point an object at a blob that already exists, and take a reference.
+
+    The share path's counterpart to `attach_blob_to_object`, and separate from
+    it on purpose. That function is for callers that just *placed bytes*, so it
+    writes `last_verified_at`, `observed_size`, `observed_mtime`, `state` and
+    `miss_count` -- verification facts it earned by touching the file. A share
+    touches no file and has earned none of them:
+
+    - Writing `observed_mtime=None` destroys the drift baseline an EXTERNAL
+      blob is checked against (`queue/handlers.py`), silently reducing drift
+      detection to size-only.
+    - Writing `last_verified_at=now` pushes the blob to the back of the
+      verifier's oldest-first rotation without anything having been verified.
+    - Writing `state=PRESENT` would heal a MISSING or QUARANTINED record on
+      the strength of a caller that looked at nothing.
+
+    So this touches `ref_count` and `updated_at` and nothing else on the blob.
+
+    The blob must exist and be PRESENT; a share of content we cannot vouch for
+    is refused rather than handed over. `session` is accepted so an acceptance
+    cascade -- parent, sidecars, mate -- lands as one transaction.
+    """
+    blob = await Blob.get(digest)
+    if blob is None or blob.state is not BlobState.PRESENT:
+        raise NotFoundError(
+            f"Content is no longer available for sharing (blob {digest[:12]}...)"
+        )
+
+    now = datetime.now(UTC)
+    db = get_db()
+
+    async def _apply(s):
+        await db.blobs.update_one(
+            {"_id": digest}, {"$inc": {"ref_count": 1}, "$set": {"updated_at": now}}, session=s
+        )
+        await db.objects.update_one(
+            {"_id": object_id},
+            {
+                "$set": {
+                    "blob_sha256": digest,
+                    "size": size,
+                    "status": ObjectStatus.READY.value,
+                    "updated_at": now,
+                }
+            },
+            session=s,
+        )
+
+    if session is not None:
+        await _apply(session)
+    else:
+        async with await get_client().start_session() as s:
+            async with s.start_transaction():
+                await _apply(s)
+
+    # Built from the blob already fetched above rather than re-read: inside a
+    # caller-supplied transaction the write is not yet visible to a fresh read
+    # anyway, and outside one this just saves a round-trip.
+    blob.ref_count += 1
+    blob.updated_at = now
+    return blob
 
 
 async def detach_blob_from_object(object_id: PydanticObjectId) -> None:

@@ -221,3 +221,10 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
 
     await profile.delete()
     log.info("profile_deleted", profile_id=str(profile.id), username=profile.username)
+
+    # Not built here: Share documents naming this profile as from_owner or
+    # to_owner are not cleaned up. A dangling offer either direction is inert
+    # (an inbox entry for a to_owner that no longer exists, or an outbox entry
+    # nobody can revoke) rather than unsafe, and this profile has just been
+    # proven empty above -- but see #51 (owner-delete/GC follow-on for
+    # sharing), which is where this belongs.

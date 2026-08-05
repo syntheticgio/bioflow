@@ -176,6 +176,25 @@ class ObjectError(BaseModel):
     at: datetime
 
 
+class SharedFrom(BaseModel):
+    """Where a shared copy came from.
+
+    A typed field rather than a `metadata` key, for the reason `derived_from`
+    gives: metadata is user-owned and user-editable, and provenance that can be
+    silently retyped is not provenance.
+
+    `object_id` and `owner` describe the source *at share time* and are not
+    kept live. The sender may delete their copy, rename it, or move it; none of
+    that reaches here, and the recipient's file keeps working regardless --
+    which is the whole point of the copy being an independent document.
+    """
+
+    object_id: PydanticObjectId
+    owner: str
+    share_id: PydanticObjectId
+    at: datetime
+
+
 class DataObject(TimestampedDocument):
     project_id: PydanticObjectId
     name: str  # human-facing, mutable, not unique
@@ -211,6 +230,12 @@ class DataObject(TimestampedDocument):
     # produces two outputs, each descending from both mates.
     derived_from: list[PydanticObjectId] = Field(default_factory=list)
     produced_by_job: PydanticObjectId | None = None
+
+    # Set only on a copy materialized by accepting a share. Mutually exclusive
+    # with `derived_from`/`produced_by_job` in practice: those are cleared on
+    # the copy because they name objects and jobs in the sender's partition,
+    # which the recipient's owner-scoped lookups can never resolve.
+    shared_from: SharedFrom | None = None
 
     # The file this one accompanies. Distinct from derived_from, and the
     # distinction is what keeps the explorer usable: a trimmed FASTQ is a

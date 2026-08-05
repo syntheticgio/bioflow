@@ -9,7 +9,7 @@ from datetime import datetime
 from beanie import PydanticObjectId
 from pydantic import BaseModel, Field
 
-from app.models import Blob, DataObject, ObjectRole, Profile, Project
+from app.models import Blob, DataObject, ObjectRole, Profile, Project, Share
 from app.models.profile import ProfileDisplay
 
 
@@ -249,4 +249,54 @@ class ProfileOut(BaseModel):
             last_used_at=p.last_used_at,
             created_at=p.created_at,
             updated_at=p.updated_at,
+        )
+
+
+# --- Shares ---
+class ShareCreate(BaseModel):
+    object_id: str
+    to_profile_id: str
+    message: str | None = None
+
+
+class ShareAccept(BaseModel):
+    # Omitted: land in the lazily created "Shared with me" project.
+    project_id: str | None = None
+
+
+class ShareOut(BaseModel):
+    """A share as either side of it sees it.
+
+    Hand-enumerated like every other response model here. `name`/`size` come
+    from the denormalized snapshot on `Share` itself, not from resolving
+    `source_object_id` -- that is what lets an offer whose source the sender
+    has since deleted still render in the inbox.
+    """
+
+    id: str
+    from_owner: str
+    to_owner: str
+    source_object_id: str
+    name: str
+    size: int
+    state: str
+    accepted_object_id: str | None
+    message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, s: Share) -> "ShareOut":
+        return cls(
+            id=str(s.id),
+            from_owner=s.from_owner,
+            to_owner=s.to_owner,
+            source_object_id=str(s.source_object_id),
+            name=s.name,
+            size=s.size,
+            state=s.state.value,
+            accepted_object_id=str(s.accepted_object_id) if s.accepted_object_id else None,
+            message=s.message,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
         )
