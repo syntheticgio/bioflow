@@ -15,6 +15,7 @@ from app.api.v1 import (
     schedules,
     search,
     settings,
+    shares,
     sra,
     system,
     uniprot,
@@ -26,6 +27,7 @@ api_router = APIRouter(prefix="/api/v1")
 # /objects/{object_id} path parameter in the objects router.
 api_router.include_router(search.router)
 api_router.include_router(profiles.router)
+api_router.include_router(shares.router)
 api_router.include_router(projects.router)
 api_router.include_router(objects.router)
 api_router.include_router(uploads.router)

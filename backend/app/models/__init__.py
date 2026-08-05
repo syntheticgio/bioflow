@@ -29,6 +29,7 @@ from app.models.object import (
     ObjectError,
     ObjectRole,
     ObjectStatus,
+    SharedFrom,
     SidecarRole,
     SourceInfo,
     SourceMode,
@@ -36,6 +37,7 @@ from app.models.object import (
 from app.models.organism import OrganismBlurb, normalize_organism
 from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
+from app.models.share import Share, ShareState
 from app.models.run import (
     OPTIONAL_ROLES,
     PipelineRun,
@@ -67,6 +69,7 @@ ALL_MODELS = [
     Profile,
     StructureLookup,
     Feedback,
+    Share,
 ]
 
 __all__ = [
@@ -113,6 +116,9 @@ __all__ = [
     "RunKind",
     "RunStatus",
     "Schedule",
+    "Share",
+    "SharedFrom",
+    "ShareState",
     "SidecarRole",
     "SourceInfo",
     "SourceMode",
