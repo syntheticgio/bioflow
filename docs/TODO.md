@@ -640,12 +640,57 @@ carries. Installed and smoke-tested clean against the running image with no
 new dependencies beyond what samtools/bcftools already pull in. It is a
 one-line `apt-get install` addition to `backend/Dockerfile`, not a source build.
 
-**Update 2026-08-05: iVar shipped, and the polishing slice is now Polypolish
-rather than Pilon.** iVar is installed, dispatched, and carded (#47, closed).
-The remaining two slices are Polypolish (#23, spec written,
-`docs/superpowers/specs/2026-08-05-polypolish-design.md`) and RagTag (#52, spec
-needed) -- #52 was created that day because the epic required a linked child
-issue per tool and RagTag was the one that never had one.
+**Update 2026-08-05: iVar and Polypolish have both shipped; only RagTag
+(#52) is left.** iVar is installed, dispatched, and carded (#47, closed).
+Polypolish shipped the same day (#23, design
+`docs/superpowers/specs/2026-08-05-polypolish-design.md`) -- install script,
+`tools.polypolish()`, `polypolish_runner`, a `polish_assembly` handler,
+`launch_polish`, `/pipelines/polish`, a results applier, and an Actions card.
+#52 was created that day because the epic required a linked child issue per
+tool and RagTag was the one that never had one.
+
+**The polishing slice is Polypolish, not Pilon** -- swapped before any code
+was written, because Pilon consumes best-alignment BAM and so mis-corrects
+repeats, which is the one place a long-read assembly needs polishing to be
+trustworthy. Pilon is out permanently.
+
+Two things the implementation found that the design did not predict, both
+worth keeping because both are the silent-wrong-answer shape:
+
+- **Polypolish's stderr summary repeats per contig.** A real 0.7.1 run on a
+  20kb synthetic draft with 20 planted errors printed "20 positions changed";
+  the same draft split into two contigs printed 11 and 9. The first parser
+  took the first match, so it would have reported 11 for a run that made 20
+  and nothing would have said so. The parser sums across blocks and the test
+  fixtures are verbatim from those two runs. (That run also corrected all 20
+  planted errors with zero remaining mismatches, which is what verified the
+  five-stage pipeline shape.)
+- **`qc_read_chemistry` cannot decide what counts as short reads.**
+  `ERR16145610.fastq` in the real database is a MinION run whose inferred
+  chemistry is `short` -- the inference reads read *lengths*, so a nanopore
+  run carrying short reads infers short. Gating on chemistry would have fed
+  ONT reads to a short-read polisher, which does not error and quietly
+  degrades the assembly. `reference_assembly.is_short_read` is platform-first
+  and a known long-read platform disqualifies regardless of chemistry.
+
+Also different from the design: the input shape. The design said inputs were
+`DRAFT_ASSEMBLY` + `READS`, which held, but the reason matters more than the
+list -- Polypolish *cannot* consume an existing BAM, so the job aligns the
+reads to the draft itself with `bwa-mem2 mem -a` and the epic's provenance
+requirement is true by construction rather than by validation. arm64 is
+declared unsupported rather than built from source, as the design
+recommended: upstream ships no linux-aarch64 binary and bwa-mem2 has its own
+arm64 gap here, so a built Polypolish would have no aligner to pair with.
+
+**Not yet verified: a polish job run end to end through the app.** Everything
+below the queue is verified -- the real binary against real data, the card
+against real database objects in both directions, 2879 tests green, and the
+rebuilt stack has `polypolish 0.7.1` in `api` with `polish_assembly`
+registered in `worker`. What has not happened is a launch from the Actions
+tab, because no project currently holds a draft assembly and short reads from
+the same sample with their blobs intact (every object in the database reads
+`status=missing`). That needs a small bacterial ONT+Illumina project, which
+is also the case Polypolish is built and benchmarked for.
 
 **Pilon is out, permanently.** The heading keeps its name because that is what
 the entry was raised as, but the tool was swapped after the review below was
