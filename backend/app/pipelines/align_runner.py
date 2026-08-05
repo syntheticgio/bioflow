@@ -52,6 +52,10 @@ _MERGING_RE = re.compile(r"merging from \d+ files", re.IGNORECASE)
 # bar driven by it must never claim completion.
 MAX_MEASURED_PCT = 0.95
 
+# aligning always precedes sorting; the run has no other phases, and unlike
+# Flye's open-ended stage list this one is fixed and known ahead of time.
+PHASE_ORDER: tuple[str, ...] = ("aligning", "sorting")
+
 
 class Preset:
     """minimap2 presets. Not cosmetic: the wrong preset for long reads produces
@@ -721,6 +725,13 @@ class AlignProgress:
         if not self.expected_reads:
             return None
         return min(self.processed / self.expected_reads, MAX_MEASURED_PCT)
+
+    @property
+    def phase_index(self) -> int | None:
+        """Position in PHASE_ORDER, 1-based for "step N of M" display."""
+        if self.phase not in PHASE_ORDER:
+            return None
+        return PHASE_ORDER.index(self.phase) + 1
 
     def message(self) -> str:
         if self.phase == "sorting":

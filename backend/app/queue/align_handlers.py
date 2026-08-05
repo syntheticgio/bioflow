@@ -382,7 +382,13 @@ def align_reads(ctx: JobContext) -> dict:
 
     def on_line(line: str) -> None:
         if progress.feed(line):
-            ctx.progress(pct=progress.pct, phase=progress.phase, message=progress.message())
+            ctx.progress(
+                pct=progress.pct,
+                phase=progress.phase,
+                message=progress.message(),
+                phase_index=progress.phase_index,
+                phase_total=len(align_runner.PHASE_ORDER),
+            )
 
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)

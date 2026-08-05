@@ -158,7 +158,13 @@ def _run_fastp_trim(ctx: JobContext, object_id: str) -> dict:
 
     def on_line(line: str) -> None:
         if progress.feed(line):
-            ctx.progress(pct=progress.pct, phase=progress.phase, message=progress.message())
+            ctx.progress(
+                pct=progress.pct,
+                phase=progress.phase,
+                message=progress.message(),
+                phase_index=progress.phase_index,
+                phase_total=len(fastp_runner.PHASE_ORDER),
+            )
 
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,7 +179,13 @@ def _run_fastp_trim(ctx: JobContext, object_id: str) -> dict:
         if not produced.exists() or produced.stat().st_size == 0:
             raise RetryableError(f"fastp exited 0 but produced no output at {produced.name}")
 
-    ctx.progress(phase="reporting", pct=fastp_runner.MAX_MEASURED_PCT, message="reading report")
+    ctx.progress(
+        phase="reporting",
+        pct=fastp_runner.MAX_MEASURED_PCT,
+        message="reading report",
+        phase_index=len(fastp_runner.PHASE_ORDER),
+        phase_total=len(fastp_runner.PHASE_ORDER),
+    )
     report = fastp_runner.parse_report(json_out)
 
     outputs = [{"tmp_path": str(r1_out), "name": r1_name, "mate": "R1" if paired else None}]
@@ -487,7 +499,13 @@ def _run_short_read_qc(
 
     def on_line(line: str) -> None:
         if progress.feed(line):
-            ctx.progress(pct=progress.pct, phase=progress.phase, message=progress.message())
+            ctx.progress(
+                pct=progress.pct,
+                phase=progress.phase,
+                message=progress.message(),
+                phase_index=progress.phase_index,
+                phase_total=len(fastp_runner.PHASE_ORDER),
+            )
 
     log.info("qc_started", job_id=ctx.job_id, object_id=object_id, cmd=" ".join(cmd))
 

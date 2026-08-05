@@ -29,6 +29,11 @@ class ResourceSampler:
         self.pid = pid
         self.peak_rss_bytes: int | None = None
         self.peak_cpu_percent: float | None = None
+        # The most recent reading, alongside the peak. A peak alone cannot
+        # answer "what is this job doing right now" once the job has passed
+        # its high point -- which is exactly the question live progress asks.
+        self.last_rss_bytes: int | None = None
+        self.last_cpu_percent: float | None = None
         self.sample_count = 0
         self._cpu_total = 0.0
         # `psutil.Process.children()` returns brand-new Process objects on
@@ -90,6 +95,8 @@ class ResourceSampler:
 
         self.sample_count += 1
         self._cpu_total += cpu
+        self.last_rss_bytes = rss
+        self.last_cpu_percent = cpu
         if self.peak_rss_bytes is None or rss > self.peak_rss_bytes:
             self.peak_rss_bytes = rss
         if self.peak_cpu_percent is None or cpu > self.peak_cpu_percent:

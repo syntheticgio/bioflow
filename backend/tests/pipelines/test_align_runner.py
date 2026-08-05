@@ -394,6 +394,15 @@ class TestProgress:
         assert not p.feed("[M::main] Real time: 12.3 sec")
         assert p.processed == 0
 
+    def test_phase_index_starts_at_aligning(self):
+        assert AlignProgress().phase_index == 1
+
+    def test_phase_index_advances_to_sorting(self):
+        p = AlignProgress()
+        p.feed("[bam_sort_core] merging from 4 files and 1 in-memory blocks...")
+        assert p.phase_index == 2
+        assert len(align_runner.PHASE_ORDER) == 2
+
 
 class TestBowtie2Command:
     def cmd(self, **kw):

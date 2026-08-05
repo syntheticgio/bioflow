@@ -72,9 +72,16 @@ class JobExecutor:
                 epoch=epoch,
                 attempts=job.attempts,
                 owner=job.owner,
+                started_at=job.timing.started_at,
             )
             ctx._progress_cb = lambda upd: self._schedule_progress(
-                job_id, epoch, upd, owner=job.owner
+                job_id,
+                epoch,
+                upd,
+                owner=job.owner,
+                run_ids=ctx.run_ids,
+                started_at=ctx.started_at,
+                eta_model_ms=ctx.eta_model_ms,
             )
             ctx._extend_cb = lambda seconds: self._schedule_lease_extension(
                 job_id, epoch, seconds
@@ -82,7 +89,14 @@ class JobExecutor:
 
         log.info("job_started", job_id=job_id, type=job.type, mode=spec.mode.value)
 
-        sampler, sampler_task = self._start_sampler()
+        sampler, sampler_task = self._start_sampler(
+            job_id,
+            epoch,
+            owner=job.owner,
+            run_ids=ctx.run_ids,
+            started_at=ctx.started_at,
+            eta_model_ms=ctx.eta_model_ms,
+        )
         outcome = RunOutcome.SUCCEEDED
         try:
             result = await self._dispatch(spec, ctx)
@@ -158,19 +172,61 @@ class JobExecutor:
             self._last_phase.pop(job_id, None)
 
     async def _sample_resources(
-        self, sampler: ResourceSampler, proc: psutil.Process
+        self,
+        sampler: ResourceSampler,
+        proc: psutil.Process,
+        *,
+        job_id: str,
+        epoch: int,
+        owner: str,
+        run_ids: list[str],
+        started_at: datetime | None,
+        eta_model_ms: int | None,
     ) -> None:
-        """Poll until cancelled. Never raises -- telemetry cannot fail a job."""
+        """Poll until cancelled. Never raises -- telemetry cannot fail a job.
+
+        Each observation also drives a progress tick carrying the current and
+        peak readings. This is deliberately the sampler's own tick, not a
+        merge into whatever a handler happens to report: a phase-only job
+        (Flye, Clair3) calls `ctx.progress()` a handful of times across a
+        run that lasts minutes, so merging into handler-driven ticks would
+        leave resource observations blank for exactly the jobs a user most
+        wants to watch. `_schedule_progress`'s existing 0.5s throttle still
+        applies, so a 1Hz sampler produces at most 1Hz of writes regardless.
+        """
         try:
             while True:
                 sampler.observe(proc)
+                self._schedule_progress(
+                    job_id,
+                    epoch,
+                    {
+                        "rss_bytes": sampler.last_rss_bytes,
+                        "cpu_percent": sampler.last_cpu_percent,
+                        "peak_rss_bytes": sampler.peak_rss_bytes,
+                        "peak_cpu_percent": sampler.peak_cpu_percent,
+                    },
+                    owner=owner,
+                    run_ids=run_ids,
+                    started_at=started_at,
+                    eta_model_ms=eta_model_ms,
+                )
                 await asyncio.sleep(SAMPLE_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
             log.debug("resource_sampling_failed", error=str(e))
 
-    def _start_sampler(self) -> tuple[ResourceSampler, asyncio.Task]:
+    def _start_sampler(
+        self,
+        job_id: str,
+        epoch: int,
+        *,
+        owner: str,
+        run_ids: list[str],
+        started_at: datetime | None = None,
+        eta_model_ms: int | None = None,
+    ) -> tuple[ResourceSampler, asyncio.Task]:
         """Sample this worker's own process subtree.
 
         The worker's baseline is included, which slightly overstates a job's
@@ -190,7 +246,19 @@ class JobExecutor:
         """
         proc = psutil.Process(os.getpid())
         sampler = ResourceSampler(pid=os.getpid())
-        return sampler, asyncio.create_task(self._sample_resources(sampler, proc))
+        task = asyncio.create_task(
+            self._sample_resources(
+                sampler,
+                proc,
+                job_id=job_id,
+                epoch=epoch,
+                owner=owner,
+                run_ids=run_ids,
+                started_at=started_at,
+                eta_model_ms=eta_model_ms,
+            )
+        )
+        return sampler, task
 
     async def _record_timing(
         self, job: Job, *, outcome: str, sampler: ResourceSampler
@@ -317,7 +385,15 @@ class JobExecutor:
             log.warning("lease_extension_failed", job_id=job_id, error=str(e))
 
     def _schedule_progress(
-        self, job_id: str, epoch: int, update: dict, *, owner: str
+        self,
+        job_id: str,
+        epoch: int,
+        update: dict,
+        *,
+        owner: str,
+        run_ids: list[str] | None = None,
+        started_at: datetime | None = None,
+        eta_model_ms: int | None = None,
     ) -> None:
         """Throttle and persist a progress update from any thread.
 
@@ -353,14 +429,41 @@ class JobExecutor:
             if loop is None:
                 return
             asyncio.run_coroutine_threadsafe(
-                self._write_progress(job_id, epoch, update, owner=owner), loop
+                self._write_progress(
+                    job_id,
+                    epoch,
+                    update,
+                    owner=owner,
+                    run_ids=run_ids,
+                    started_at=started_at,
+                    eta_model_ms=eta_model_ms,
+                ),
+                loop,
             )
             return
 
-        loop.create_task(self._write_progress(job_id, epoch, update, owner=owner))
+        loop.create_task(
+            self._write_progress(
+                job_id,
+                epoch,
+                update,
+                owner=owner,
+                run_ids=run_ids,
+                started_at=started_at,
+                eta_model_ms=eta_model_ms,
+            )
+        )
 
     async def _write_progress(
-        self, job_id: str, epoch: int, update: dict, *, owner: str
+        self,
+        job_id: str,
+        epoch: int,
+        update: dict,
+        *,
+        owner: str,
+        run_ids: list[str] | None = None,
+        started_at: datetime | None = None,
+        eta_model_ms: int | None = None,
     ) -> None:
         try:
             await get_db().jobs.update_one(
@@ -370,9 +473,23 @@ class JobExecutor:
             # The owner is passed down from the caller rather than read back off
             # the job document: this runs up to twice a second per running job,
             # and a lookup here would add a Mongo read to every progress tick.
-            await queue.publish_event(
-                "job.progress", {"job_id": job_id, **update}, owner=owner
-            )
+            # run_ids and eta_model_ms likewise -- resolved once at claim time
+            # and cached on the context, never re-queried here, for the same
+            # reason.
+            event = {"job_id": job_id, **update}
+            if run_ids:
+                event["run_ids"] = run_ids
+            if started_at is not None:
+                from app.services import timing_service
+
+                pct = update.get("pct")
+                elapsed_s = (datetime.now(UTC) - started_at).total_seconds()
+                eta = timing_service.eta_seconds(
+                    pct=pct, elapsed_s=elapsed_s, model_ms=eta_model_ms
+                )
+                if eta is not None:
+                    event["eta_seconds"] = eta
+            await queue.publish_event("job.progress", event, owner=owner)
         except Exception as e:  # noqa: BLE001 - progress is advisory
             log.debug("progress_write_failed", job_id=job_id, error=str(e))
 
