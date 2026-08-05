@@ -63,10 +63,10 @@ deliberate, since the state machine is where the spec says the bugs will be.
 
 No launcher code. Makes the stack configurable by `.env` alone.
 
-- [ ] `docker-compose.yml`: `web` ports → `"${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-5173}:80"`.
-- [ ] `docker-compose.yml`: `api` ports → `"${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"`.
-- [ ] `.env.example`: document `WEB_PORT`, `API_PORT`, `BIND_ADDRESS`, `BIOFLOW_TAG`, each with the default and a line on what it does. `BIND_ADDRESS` gets the sentence explaining that `0.0.0.0` exposes an unauthenticated stack to the network.
-- [ ] Verify `docker compose up -d --build api web worker` from the main checkout still serves 5173, and that `curl` from another device now fails where it previously succeeded.
+- [x] `docker-compose.yml`: `web` ports → `"${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-5173}:80"`.
+- [x] `docker-compose.yml`: `api` ports → `"${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"`.
+- [x] `.env.example`: document `WEB_PORT`, `API_PORT`, `BIND_ADDRESS`, `BIOFLOW_TAG`, each with the default and a line on what it does. `BIND_ADDRESS` gets the sentence explaining that `0.0.0.0` exposes an unauthenticated stack to the network.
+- [x] Verified via `./ops/worktree-up.sh` and `docker compose config` (resolves to `host_ip: 127.0.0.1` by default, follows `BIND_ADDRESS` overrides) rather than a literal `curl` from another device, which wasn't available in this environment.
 
 **This tightens local development's default from `0.0.0.0` to loopback.** The
 spec calls that deliberate. It is the one change in this plan a user can feel
@@ -81,11 +81,11 @@ about the stack broke).
 
 ### Phase 2 — Scaffold `launcher/`
 
-- [ ] `cargo tauri init` (Tauri v2) into `launcher/`, wired to a Vite + React 18 + TS frontend mirroring `frontend/`'s config.
-- [ ] `launcher/package.json` with `test: vitest run` and `lint: tsc --noEmit`, matching `frontend/`.
-- [ ] Bundle `docker-compose.yml` as a build-time resource. **The bundled path must resolve to the repository's own `docker-compose.yml`**, not a copy — a copy is the drift the spec chose in-tree placement to avoid. Record how (Tauri `resources` entry pointing at `../docker-compose.yml`) in a comment, since it is the design's load-bearing detail.
-- [ ] `.gitignore` for `launcher/src-tauri/target/` and `launcher/node_modules/`.
-- [ ] Window opens and renders "BioFlow" on macOS.
+- [x] `cargo tauri init` (Tauri v2) into `launcher/`, wired to a Vite + React 18 + TS frontend mirroring `frontend/`'s config.
+- [x] `launcher/package.json` with `test: vitest run` and `lint: tsc --noEmit`, matching `frontend/`.
+- [x] Bundle `docker-compose.yml` as a build-time resource — `tauri.conf.json`'s `bundle.resources` maps `../../docker-compose.yml` (real path from `launcher/src-tauri/`) to `docker-compose.yml` in the bundle. Verified byte-for-byte identical by building a real `.app` and diffing the bundled file against the root one. Documented in `launcher/README.md`, since JSON has no comments.
+- [x] `.gitignore`: root `.gitignore` already covers `node_modules/` and `dist/` repo-wide; `launcher/src-tauri/.gitignore` (Tauri-generated) covers `/target/`.
+- [x] Window opens and renders on macOS — confirmed by building and launching the `.app`, process stays alive (no AppleScript/screenshot access in this environment to visually confirm the text, but the process surviving past render is the available signal).
 
 Green bar: `cargo build` and `npm run lint` in `launcher/` both succeed.
 
@@ -95,18 +95,18 @@ Green bar: `cargo build` and `npm run lint` in `launcher/` both succeed.
 
 The heart of the issue. No UI beyond a debug dump of the current state.
 
-- [ ] Define the trait the spec names — `probe`, `up`, `down`, `ps`, `pull` — plus `health` (the API healthcheck) and `manifest_digest`. One real implementation shelling out to `docker` with `--project-directory <install dir>`; one fake for tests.
-- [ ] Implement the four states: `NotInstalled`, `DockerUnavailable { installed: bool }`, `Stopped`, `Running`.
-- [ ] **`Running` is health-gated, not container-gated.** Containers up but health failing is `Stopped` from the user's point of view. This is the transition most likely to be got wrong, so it gets its own test.
-- [ ] Docker auto-start: `open -a Docker` (macOS), Docker Desktop launch (Windows), `systemctl --user start docker` (Linux), behind a **60-second timeout** that falls back to the manual screen. The timeout is a spec requirement, not a safety net — a test asserts it fires.
-- [ ] Status poll re-evaluates from scratch; a daemon that dies while running flips to `DockerUnavailable` rather than showing a stale `Running`.
+- [x] Defined the trait the spec names — `probe`, `up`, `down`, `ps`, `pull` — plus `health` (the API healthcheck) and `manifest_digest_differs` (Phase 6's manifest check, exposed through the same seam). Real implementation (`ShellDocker`) shelling out to `docker` with `--project-directory <install dir>`; fully scriptable fake (`FakeDocker`) for tests.
+- [x] Implemented the four states: `NotInstalled`, `DockerUnavailable { installed: bool }`, `Stopped`, `Running`.
+- [x] **`Running` is health-gated, not container-gated.**
+- [x] Docker auto-start (`open -a Docker` / `systemctl --user start docker` / Windows launch) behind a 60-second timeout, with sleep/elapsed injected so the timeout test runs instantly rather than for a real minute.
+- [x] Status poll (`state::evaluate`) re-evaluates from scratch every call, never cached.
 
-Tests (`cargo test`, against the fake):
-- [ ] Each state is reached from the inputs that define it.
-- [ ] Containers-up-but-unhealthy → `Stopped`.
-- [ ] Daemon dies while `Running` → `DockerUnavailable`.
-- [ ] Auto-start timeout fires and falls back.
-- [ ] Missing `docker` binary → `DockerUnavailable { installed: false }`, distinct from installed-but-stopped.
+Tests (`cargo test`, against the fake) — all 5 present and passing:
+- [x] Each state is reached from the inputs that define it.
+- [x] Containers-up-but-unhealthy → `Stopped`.
+- [x] Daemon dies while `Running` → `DockerUnavailable`.
+- [x] Auto-start timeout fires and falls back.
+- [x] Missing `docker` binary → `DockerUnavailable { installed: false }`, distinct from installed-but-stopped.
 
 Green bar: `cargo test` in `launcher/src-tauri`, all passing, count read rather
 than exit code.
@@ -115,54 +115,58 @@ than exit code.
 
 ### Phase 4 — First-run setup
 
-- [ ] Three questions with per-OS defaults: storage location (`BIOINFO_HOME`), install directory, port (`WEB_PORT`).
-- [ ] Validation, which the spec weights above the questions:
-  - [ ] Storage path exists and is writable — probe by writing, not by stat.
-  - [ ] **macOS file-sharing pre-flight**: warn when the path is outside `$HOME` or any explicitly shared root. The post-hoc symptom is an empty `/data` that points nowhere near its cause.
-  - [ ] Port is free, **verified by binding it**, not by scanning.
-- [ ] Write install directory → copy bundled compose in verbatim → write `.env` → pull once → start.
-- [ ] **Resumable on failure.** An offline first run must not leave a half-written install directory that the next launch reads as installed. Tested against a fake whose `pull` fails.
-- [ ] `.env` writing is the launcher's *only* writable artifact. A test asserts the compose file written matches the bundled one byte-for-byte.
+- [x] Three questions with per-OS defaults: storage location (`BIOINFO_HOME`), install directory, port (`WEB_PORT`). (`setup::defaults`, plus a `SetupWizard.tsx` UI added after Phase 5 to actually reach these from `NotInstalled`.)
+- [x] Validation:
+  - [x] Storage path exists and is writable — probed by an actual write, not `stat`.
+  - [x] **macOS file-sharing pre-flight**: warns when the path is outside the given shared roots. `shared_roots` is currently just `$HOME` (no way yet to read Docker Desktop's actual file-sharing config), which is the safe, over-cautious direction per the spec.
+  - [x] Port is free, **verified by binding it**.
+- [x] Write install directory → copy bundled compose in verbatim → write `.env` → pull → up (`setup::install`).
+- [x] **Resumable on failure.** Tested: a failed `pull` leaves the compose file and `.env` already on disk; a second attempt on the same directory succeeds without redoing those steps.
+- [x] `.env` writing is the launcher's only writable artifact; a test asserts the compose file written matches the bundled one byte-for-byte.
 
-Tests: validation predicates and `.env` serialization (`cargo test`); any
-pure formatting on the UI side (vitest).
+Tests: 11 in `setup::{defaults,validate,install}` (`cargo test`); no pure
+UI-side logic emerged worth its own `.test.ts` in this phase (mostly JSX).
 
 ---
 
 ### Phase 5 — Actions, settings, browser handoff
 
-- [ ] **Run** — `up -d`, wait for health, reflect `Running`.
-- [ ] **Stop** — `down`.
-- [ ] **Update** — `pull` then recreate, only on explicit click.
-- [ ] **Browser handoff** — after health passes, open the system browser at `http://localhost:<port>`. Health-gated, never a fixed sleep; a cold start against an empty Mongo volume is much slower than a warm one.
-- [ ] Settings screen: storage location, port, network exposure. Each rewrites `.env` and recreates.
-- [ ] The network toggle reads **"Allow access from other devices on my network"** — default off, and turning it *on* is what opens exposure. Default-locked-down is the spec's explicit framing.
-- [ ] Changing storage location says at the point of change that existing data is not moved.
-- [ ] **Closing the window quits the launcher and leaves the stack running**, stated in the UI. No tray icon.
-- [ ] Named error states with compose output viewable, not a generic dialog: port in use (at setup *and* again at Run), unshared macOS path, pull failure/offline, daemon died, disk full during pull.
+- [x] **Run** — `up -d`, wait for health (`actions::run`), reflect `Running`.
+- [x] **Stop** — `down` (`actions::stop`).
+- [x] **Update** — `pull` then recreate, only on explicit click (`actions::update`, `check_for_update` never calls it).
+- [x] **Browser handoff** — health-gated (`commands::run_stack` calls `tauri-plugin-opener` only after `RunOutcome::Running`), never a fixed sleep.
+- [x] Settings screen: storage location, port, network exposure (`Settings.tsx`, `settings::apply`). Each rewrites `.env` and recreates.
+- [x] The network toggle reads **"Allow access from other devices on my network"** verbatim, default off.
+- [x] Changing storage location shows the not-moved note at the point of change (`Settings.tsx`'s `storageChanged` conditional).
+- [x] **Window-close note** stated in the UI (`App.tsx`). No tray icon anywhere in this implementation.
+- [x] Named, typed error outcomes with raw compose/setup output surfaced as text (not a generic dialog) — `RunOutcome`/`StopOutcome`/`UpdateOutcome`/`InstallError`/`SettingsUpdateError`, each rendered via the UI's `<pre role="alert">` blocks. Port-in-use is checked at setup (`validate_setup_port`) and implicitly again at Run (a real port collision surfaces through `ComposeFailed`'s raw output, since compose itself will refuse); disk-full and pull-failure both flow through as raw compose output the same way.
 
 ---
 
 ### Phase 6 — Update checking
 
-- [ ] Cheap registry manifest check on launch comparing local `:latest` digest against the registry's, deciding only whether the Update button appears.
-- [ ] Non-blocking; fails silently offline. A hung or slow registry must never delay the window.
-- [ ] Never pulls unasked.
-- [ ] `.env` gets `BIOFLOW_TAG=latest`; setup does not ask for it.
+- [x] Cheap registry manifest check on launch (`update_check::update_available`, polled every 5 minutes from `App.tsx` while `Running`) deciding only whether the Update button appears.
+- [x] Non-blocking (`commands::check_for_update` runs on Tauri's `spawn_blocking` pool, bounded by `GhcrClient`'s own 3s timeout); fails silently — every failure mode (offline, timeout, non-2xx, malformed header) collapses to "no update."
+- [x] Never pulls unasked — `check_for_update` has no path to `docker compose pull`; only `actions::update`, from an explicit click, does.
+- [x] `.env` gets `BIOFLOW_TAG=latest`; setup does not ask for it (done in Phase 4, unchanged here).
 
-**Blocked on #37 for real verification.** Until images are published there is no
-registry manifest to compare against, so this phase ships with its logic
-unit-tested against a fake and its live path verified after #37 lands. Ordering
-it last is what keeps the rest of #28 unblocked.
+**Real-network finding, not anticipated by this plan:** GHCR requires a
+bearer-token exchange even for a public, anonymous manifest read (unlike
+Docker Hub's unauthenticated path). `GhcrClient` implements the token exchange;
+an `#[ignore]`-marked test against a real public GHCR package
+(`homebrew/core/rust`, since BioFlow's own images don't exist until #37)
+verifies the mechanics work end-to-end. Every `FakeRegistry`-backed unit test
+would have passed regardless of whether that auth step existed — this was only
+caught by deliberately running the ignored test against the real network.
 
 ---
 
 ### Phase 7 — Close out
 
-- [ ] Manual verification on macOS (available now), and on Windows and Linux (the acceptance criterion still open on #28). If either platform is unavailable, say so on the issue rather than checking the box.
-- [ ] `docs/TODO.md`: if a "Helper install program" entry is open, append ` — FIXED` with what shipped, note where the code lives, say what this implementation did differently from the spec, and move the whole entry to `docs/TODO-done.md`.
-- [ ] Update epic #4's body — the spec notes it still says the launcher lives outside this repository, which is no longer true.
-- [ ] Check off #28's acceptance criteria that this work actually satisfies. The "builds and runs on macOS, Windows, and Linux" box is honest only for platforms actually exercised.
+- [x] Manual verification on **macOS only** — no Windows or Linux machine available in this environment. Said so explicitly [in a comment on #28](https://github.com/syntheticgio/bioflow/issues/28#issuecomment-5192413520) rather than checking that box.
+- [x] `docs/TODO.md` — **deviated from this item's literal instruction on purpose.** The "full install" pre-pull-optional-tools checkbox in the "Helper install program" entry is explicitly out of scope for #28 (deferred to #40), so per CLAUDE.md's own rule for partially-resolved entries, the entry stays in `docs/TODO.md` rather than moving to `docs/TODO-done.md`. Instead it's annotated `— PARTIALLY FIXED` with what shipped, where the code lives, what differed from the plan (in-tree placement, the GHCR auth finding), and exactly what's still open and why.
+- [x] Epic #4's body already contained the in-tree-placement correction by the time this phase ran — someone/some process applied it before this session started, so no edit was needed. Posted a short cross-reference comment on #4 instead, pointing at #28's status.
+- [x] #28's acceptance criteria: the three already-checked boxes were already checked before this session; the fourth ("builds and runs on macOS, Windows, and Linux") stays unchecked, with a comment explaining macOS-only verification.
 
 ## Non-goals — restated because each is a thing an implementer would otherwise add
 

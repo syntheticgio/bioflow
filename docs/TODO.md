@@ -48,7 +48,44 @@ separate shared area, and what happens to a share when the owner deletes their
 copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
 refcount reaching zero and the bytes being unlinked).
 
-## Helper install program
+## Helper install program — PARTIALLY FIXED
+
+The core launcher (Docker detection/auto-start, first-run setup writing
+`.env` alongside a bundled `docker-compose.yml`, Run/Stop/Update/status,
+network-exposure toggle, health-gated browser handoff, a registry manifest
+check behind the Update button) shipped 2026-08-05 in
+[epic #4](https://github.com/syntheticgio/bioflow/issues/4), first slice
+[#28](https://github.com/syntheticgio/bioflow/issues/28), against
+[`docs/superpowers/specs/2026-08-04-native-launcher-contract-design.md`](superpowers/specs/2026-08-04-native-launcher-contract-design.md)
+and
+[`docs/superpowers/plans/2026-08-05-native-launcher-contract-implementation.md`](superpowers/plans/2026-08-05-native-launcher-contract-implementation.md).
+The code lives in `launcher/` (Tauri v2; Rust state machine in
+`launcher/src-tauri/src/`, React UI in `launcher/src/`).
+
+**What shipped differently from the plan:** the launcher lives *in this
+repository* rather than as a separate native-app repo, specifically so the
+compose file it bundles can be *the* `docker-compose.yml` rather than a copy
+— see the spec's "Where the launcher lives" section for why that reverses
+this entry's own closing note below. The update check required an extra step
+the spec didn't call out: GHCR requires a bearer-token exchange even for a
+public, anonymous manifest read (unlike Docker Hub's unauthenticated path),
+caught only by a real-network test against a live GHCR package, since every
+fake-backed unit test passed regardless of whether the auth step was there.
+
+**What's still open, and why this stays in `docs/TODO.md` rather than moving
+to `docs/TODO-done.md`:** the "full install" pre-pull-optional-tools checkbox
+described below is explicitly **not** part of what shipped — it is deferred
+to [#40](https://github.com/syntheticgio/bioflow/issues/40), blocked on epic
+#5 settling which tools are optional. The launcher also cannot yet start a
+real stack for an end user: `docker-compose.yml`'s `api`/`worker`/`web`
+services still `build:` from source rather than reference published
+`ghcr.io` images, which is [#37](https://github.com/syntheticgio/bioflow/issues/37)'s
+job, and packaging/signing/distribution is [#39](https://github.com/syntheticgio/bioflow/issues/39)'s.
+Verification so far is macOS-only (`cargo test`, `cargo clippy
+--all-targets`, `npm run lint`, and a full `tauri build --bundles app`
+launching and staying alive) — #28's "builds and runs on macOS, Windows, and
+Linux" acceptance criterion stays unchecked until Windows and Linux are
+actually exercised, not assumed.
 
 A native executable that removes `docker compose` from the user's vocabulary.
 On launch it checks whether Docker is installed and running, then whether
