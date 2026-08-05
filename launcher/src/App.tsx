@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import mastheadImg from "./assets/broadhead-masthead.png";
 import { checkForUpdate, runStack, status, stopStack, updateStack } from "./commands";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
@@ -118,8 +119,7 @@ export function App() {
       <header className="masthead">
         <div className="masthead-row">
           <div className="masthead-brand">
-            <span className="masthead-word">BioFlow</span>
-            <span className="masthead-kicker">Genomics pipeline desk</span>
+            <img src={mastheadImg} alt="BioFlow" className="masthead-logo" />
           </div>
           {state.kind !== "DockerUnavailable" && (
             <a
