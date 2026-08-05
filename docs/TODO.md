@@ -16,7 +16,37 @@ in `CLAUDE.md` for the move itself.
 
 # Planned features
 
-## Notify on new feedback submissions
+## Notify on new feedback submissions — FIXED
+
+Shipped 2026-08-05. New feedback submissions now push a Discord webhook embed
+to the `#bug_reports` channel after the database insert succeeds.
+
+**What shipped:** a `feedback_service.py` module (`backend/app/services/`)
+that POSTs a Discord embed (subject, contact, comment, submission id) to a
+configurable `FEEDBACK_WEBHOOK_URL` via stdlib `urllib` in a worker thread.
+The endpoint (`backend/app/api/v1/feedback.py`) fires it as
+`asyncio.create_task(notify_feedback_created(...))` so a slow or failing
+webhook never stalls the 201. `notify_feedback_created` catches every error
+internally -- a downed webhook only loses the notification, never the saved
+record or the 201 response. Two settings were added to
+`backend/app/config.py`: `FEEDBACK_ENABLED` (default true) and
+`FEEDBACK_WEBHOOK_URL` (default empty = off), each documented in `.env.example`.
+
+The frontend `HelpFeedback.tsx` was simplified: the previous-submissions list
+was removed (notifications now go to Discord, not an on-page log), and the
+intro text was updated to reflect the Discord delivery.
+
+**Design decisions that departed from the original plan:**
+- `asyncio.create_task` rather than inline `await`: an inline await would
+  hold the request open for up to 10s on a slow webhook. create_task keeps
+  the 201 instant; the task is unawaited because it never raises.
+- stdlib `urllib` rather than `httpx`: httpx is dev-only and not in the
+  runtime Docker image. This matches the pattern in `structure_lookup.py`
+  and `ai/adapters.py`.
+- No UI settings page for the webhook URL: configured via `.env` /
+  `docker-compose.yml`, matching the project's convention for infrastructure
+  secrets. A UI would be a follow-up if the user base grows beyond one
+  operator.
 
 The Feedback page under Help (`/help/feedback`,
 `frontend/src/components/HelpFeedback.tsx`) saves straight to the `feedback`

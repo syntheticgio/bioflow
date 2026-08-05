@@ -6,8 +6,12 @@ is meant to show everyone's submissions so a user can see theirs went through.
 
 Write-only otherwise -- there is no email or ticketing behind this. Reading
 the collection with a shell is the escape hatch until there is a reason to
-build more.
+build more. New submissions are also pushed to a Discord webhook (if
+configured) via `app.services.feedback_service` -- best-effort, never
+affecting the 201 response.
 """
+
+import asyncio
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -18,6 +22,7 @@ from app.models.feedback import (
     SUBJECT_MAX_LENGTH,
     Feedback,
 )
+from app.services.feedback_service import notify_feedback_created
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
@@ -50,6 +55,18 @@ class FeedbackOut(BaseModel):
 async def submit_feedback(body: FeedbackCreate) -> FeedbackOut:
     feedback = Feedback(contact=body.contact, subject=body.subject, comment=body.comment)
     await feedback.insert()
+    # Best-effort notification: fire-and-forget so a slow or failing webhook
+    # never stalls the 201 response. The insert above has already committed,
+    # so the feedback is never lost; notify_feedback_created catches every
+    # error internally and only loses the notification on failure.
+    asyncio.create_task(
+        notify_feedback_created(
+            feedback_id=str(feedback.id),
+            contact=feedback.contact,
+            subject=feedback.subject,
+            comment=feedback.comment,
+        )
+    )
     return FeedbackOut.of(feedback)
 
 
