@@ -10,6 +10,7 @@ from app.models.feedback import Feedback
 from app.models.job import (
     ACTIVE_STATES,
     TERMINAL_STATES,
+    AttemptProgress,
     IoClass,
     Job,
     JobClass,
@@ -77,6 +78,7 @@ __all__ = [
     "ALL_MODELS",
     "AiProvider",
     "AiRouting",
+    "AttemptProgress",
     "TERMINAL_STATES",
     "Blob",
     "BlobState",

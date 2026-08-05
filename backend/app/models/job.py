@@ -83,11 +83,66 @@ class JobLease(BaseModel):
 
 
 class JobProgress(BaseModel):
-    pct: float = 0.0
+    # None means indeterminate, not zero: a tool that cannot produce an honest
+    # fraction (Flye, Clair3, minimap2 -- see assembly_runner.py:83) reports
+    # phases only, and a bar rendered at 0% for its whole run is
+    # indistinguishable from a stalled job.
+    pct: float | None = None
     phase: str = ""
     bytes_done: int = 0
     bytes_total: int = 0
     message: str = ""
+    # Generic countable units -- reads, contigs, chunks, records -- for
+    # progress that bytes cannot express. bytes_done/bytes_total stay as they
+    # are (hashing, chunk assembly) since a size renders differently from a
+    # count; unit_label is free text because the vocabulary is per tool.
+    units_done: int | None = None
+    units_total: int | None = None
+    unit_label: str = ""
+    # Current and running-peak resource use, sampled once a second from the
+    # job's process subtree (queue/resource_sampler.py). Current answers "what
+    # is the machine doing now"; peak answers "did this already touch the
+    # ceiling", the question asked after an unexplained failure. Deliberately
+    # not gated by RESOURCE_FLOOR_MS -- that floor exists because job_timings
+    # feeds a model that a handful of samples would bias, and a number
+    # displayed live is not an input to anything.
+    rss_bytes: int | None = None
+    cpu_percent: float | None = None
+    peak_rss_bytes: int | None = None
+    peak_cpu_percent: float | None = None
+    # "Step 2 of 5" -- only where a runner can declare its phase list up
+    # front. Most can (fastp, align_runner); assembly_runner deliberately
+    # cannot, because Flye's own stage list is not closed and displaying an
+    # unrecognized stage raw is preferred there to a stale phase_total. Both
+    # null means "unstructured -- render the phase name alone", which is the
+    # correct representation for that case, not a placeholder.
+    phase_index: int | None = None
+    phase_total: int | None = None
+
+
+class AttemptProgress(BaseModel):
+    """The previous attempt's progress, kept as a high-water mark.
+
+    A job that died mid-run and got requeued must not come back claiming
+    whatever pct it last reported -- it is restarting from zero. But that
+    number is the most useful thing available about a job that keeps dying:
+    "attempt 2; attempt 1 reached 80% at 'assembly', peaking at 14.2 GB" is
+    the shape of a job hitting the same OOM every time. Only the previous
+    attempt is kept, not a history -- the comparison that matters is against
+    the last one, and an unbounded array on a hot document to answer a rarer
+    question is not the trade to make here.
+
+    Lives on `Job`, not nested inside `JobProgress`: `JobProgress` describes
+    the *current* attempt, and nesting the previous one inside it invites
+    code that reads a percentage without noticing which attempt it belongs
+    to.
+    """
+
+    attempt: int
+    pct: float | None = None
+    phase: str = ""
+    message: str = ""
+    peak_rss_bytes: int | None = None
 
 
 class JobError(BaseModel):
@@ -124,6 +179,11 @@ class Job(TimestampedDocument):
 
     lease: JobLease | None = None
     progress: JobProgress = Field(default_factory=JobProgress)
+    # Set once, in mark_running, when a job that already had progress starts
+    # a later attempt. None on a first attempt. A terminal failure leaves this
+    # untouched -- a failed job's own `progress` already shows what it was
+    # doing when it died, which is more useful than moving it here.
+    last_attempt_progress: AttemptProgress | None = None
     cancel_requested: bool = False
 
     result: dict | None = None

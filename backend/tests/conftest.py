@@ -83,6 +83,16 @@ async def beanie_models():
             # share_service opens its own `get_client().start_session()` for
             # the accept-cascade transaction, same reason blob_service is here.
             "app.services.share_service",
+            # executor._write_progress writes progress ticks through raw
+            # Motor rather than Beanie. Unpatched, any test that drives a real
+            # progress write through JobExecutor.run() silently updates the
+            # actual `mongo_db` database instead of `biopipe_test` -- the
+            # write succeeds, publishes no error, and the test's own read
+            # (which does go through Beanie, hence `biopipe_test`) simply
+            # never sees it. Found via test_executor_live_resources.py's
+            # sampler-driven progress ticks, which are the first tests to
+            # exercise this write path for real.
+            "app.queue.executor",
         ):
             module = importlib.import_module(module_name)
             if hasattr(module, "get_db"):
