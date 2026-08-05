@@ -377,7 +377,9 @@ def align_reads(ctx: JobContext) -> dict:
         scratch=star_scratch,
     )
 
-    progress = align_runner.AlignProgress(expected_reads=ctx.payload.get("expected_reads"))
+    progress = align_runner.AlignProgress(
+        name=aligner.value, expected_reads=ctx.payload.get("expected_reads")
+    )
     ctx.progress(phase="starting", pct=0.0, message=f"starting {aligner.value}")
 
     log_path = settings.logs_dir / f"{ctx.job_id}.log"

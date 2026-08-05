@@ -10,13 +10,19 @@ banners nobody had actually run -- is why: four of five patterns never fired,
 and the tests were green the whole time because they fed it hand-built lines
 that matched by construction.
 
-Fixtures live in tests/fixtures/tool_logs/{tool}-{version}.log, captured from
-real jobs on this stack. See docs/superpowers/specs/2026-08-05-tool-progress-
-instrumentation-design.md, "Golden log fixtures".
+Fixtures live in tests/fixtures/tool_logs/{tool}-{version}.log. Most are
+captured from real jobs on this stack; minimap2-2.27.log is the one
+exception -- captured by running the real minimap2/samtools binaries this
+image ships against generated (not project) FASTA/FASTQ input, because no
+minimap2 alignment existed in this stack's job history to pull from. The
+binary and its output are real; only the input sequences are synthetic. See
+docs/superpowers/specs/2026-08-05-tool-progress-instrumentation-design.md,
+"Golden log fixtures".
 """
 
 from pathlib import Path
 
+from app.pipelines.align_runner import AlignProgress
 from app.pipelines.assembly_runner import AssemblyProgress
 from app.pipelines.fastp_runner import TrimProgress
 from app.pipelines.variant_runner import VariantProgress
@@ -76,6 +82,47 @@ class TestFlyeFixture:
         parser = AssemblyProgress()
         phases = _replay(parser, FIXTURES / "flye-2.9.5.log")
         assert "starting" not in phases
+
+
+class TestMinimap2Fixture:
+    """minimap2-2.27.log: a real minimap2 | samtools sort pipeline over
+    400K generated long reads against a 2Mb generated reference (see the
+    module docstring for why the input is synthetic).
+
+    This replay is what settled a claim the code carried without ever having
+    checked it: a comment on _PROCESSED_RE used to say minimap2 "says nothing
+    comparable per-batch" to bwa-mem2. Running it showed that is wrong --
+    minimap2 does emit a per-batch `mapped N sequences` line via the same
+    logging library bwa-mem2 uses -- just at a batch size minimap2 decides
+    internally (166776, 166833, 66391 for this run) rather than a fixed
+    count. The old comment was itself unverified, which is the same failure
+    this fixture convention exists to prevent, just caught before it became a
+    bug rather than after.
+    """
+
+    def test_reaches_the_aligning_phase_with_measured_progress(self):
+        parser = AlignProgress(expected_reads=400_000)
+        phases = _replay(parser, FIXTURES / "minimap2-2.27.log")
+        assert "aligning" in phases
+        assert parser.processed == 166776 + 166833 + 66391
+
+    def test_batches_sum_rather_than_overwrite(self):
+        """Each worker_pipeline line is a distinct batch, not a running
+        total -- the same shape as bwa-mem2's Processed lines, and the same
+        mistake (treating it as cumulative already) that summing, not
+        assigning, exists to avoid."""
+        parser = AlignProgress(expected_reads=1_000_000)
+        parser.feed("[M::worker_pipeline::13.514*3.90] mapped 166776 sequences")
+        parser.feed("[M::worker_pipeline::26.460*3.97] mapped 166833 sequences")
+        assert parser.processed == 166776 + 166833
+
+    def test_reaches_the_sorting_phase(self):
+        """The fixture's pipeline is the real minimap2 | samtools sort shape
+        this repo actually runs, so the merge-phase transition applies to
+        minimap2 exactly as it does to bwa-mem2."""
+        parser = AlignProgress(expected_reads=400_000)
+        phases = _replay(parser, FIXTURES / "minimap2-2.27.log")
+        assert phases[-1] == "sorting"
 
 
 class TestClair3Fixture:
