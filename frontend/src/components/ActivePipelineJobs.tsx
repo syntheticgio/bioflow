@@ -57,10 +57,16 @@ function describe(job: JobSummary): string {
   const label = LABELS[job.type] ?? job.type;
 
   if (job.state === "running") {
-    const pct = Math.round((job.progress?.pct ?? 0) * 100);
-    // Only once there is something to show: "Aligning 0%" reads as stalled
-    // when it means "just started".
-    return pct > 0 ? `${label} ${pct}%` : label;
+    // pct === null means indeterminate (no honest fraction available), which
+    // must not render the same as a real 0% -- collapsing the two with `?? 0`
+    // was the bug here: an unstarted job and one with no measurable progress
+    // looked identical. Only show a number once it is a real, positive
+    // fraction; "Aligning 0%" reads as stalled when it means "just started".
+    const rawPct = job.progress?.pct;
+    if (rawPct != null && rawPct > 0) {
+      return `${label} ${Math.round(rawPct * 100)}%`;
+    }
+    return label;
   }
   // Blocked is worth naming rather than folding into "queued": it means the
   // job is waiting on another one (an index build) rather than on capacity,

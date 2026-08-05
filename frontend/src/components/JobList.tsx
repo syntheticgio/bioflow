@@ -67,6 +67,9 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
               <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
                 {job.job_class}
                 {job.progress.phase && ` · ${job.progress.phase}`}
+                {job.progress.phase_index != null && job.progress.phase_total != null && (
+                  ` (step ${job.progress.phase_index}/${job.progress.phase_total})`
+                )}
               </span>
               <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
                 {active && (
@@ -105,11 +108,27 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
               </div>
             )}
 
-            {job.state === "running" && job.progress.rss_bytes != null && (
-              <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
-                {formatBytes(job.progress.rss_bytes)}
-              </div>
-            )}
+            {job.state === "running" &&
+              job.progress.units_done != null &&
+              job.progress.units_total != null && (
+                <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
+                  {job.progress.units_done.toLocaleString()} /{" "}
+                  {job.progress.units_total.toLocaleString()}
+                  {job.progress.unit_label && ` ${job.progress.unit_label}`}
+                </div>
+              )}
+
+            {job.state === "running" &&
+              (job.progress.rss_bytes != null || job.progress.cpu_percent != null) && (
+                <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
+                  {job.progress.rss_bytes != null && formatBytes(job.progress.rss_bytes)}
+                  {job.progress.rss_bytes != null && job.progress.cpu_percent != null && " · "}
+                  {job.progress.cpu_percent != null &&
+                    `${job.progress.cpu_percent.toFixed(0)}% CPU`}
+                  {job.progress.peak_rss_bytes != null &&
+                    `, peaking at ${formatBytes(job.progress.peak_rss_bytes)}`}
+                </div>
+              )}
 
             {job.attempts > 1 && (
               <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
