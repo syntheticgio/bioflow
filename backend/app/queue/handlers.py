@@ -233,6 +233,14 @@ def _stat_or_none(path: Path):
         return None
 
 
+# verify_files' guard 3: below _BREAKER_MIN_MISSES, a 100% miss rate is
+# mundane (a tiny library where a few files really were deleted), so the
+# fraction check alone would false-positive on it. Above it, a fraction this
+# high in one sweep reads as a mount problem, not coincidental deletions.
+_BREAKER_MIN_MISSES = 10
+_BREAKER_MISS_FRACTION = 0.5
+
+
 @handler(
     "ingest_headers",
     mode=HandlerMode.THREAD,
@@ -444,6 +452,21 @@ async def verify_files(ctx: JobContext) -> dict:
 
       2. A single miss never marks a file missing. External drives disappear
          transiently; two consecutive misses at least 60s apart are required.
+
+      3. A whole-batch circuit breaker. Guard 1 only catches a *fully* empty
+         mount -- the sentinel itself living on a drive that partially
+         remounted, or a network share that serves an empty listing for some
+         paths and real content for others, would pass guard 1 and still miss
+         nearly everything. So misses are counted before anything is written:
+         if the batch's miss rate clears both an absolute floor and a
+         fraction of the batch (`_BREAKER_MIN_MISSES`,
+         `_BREAKER_MISS_FRACTION`), the whole batch is treated as one mount
+         event rather than N independent file deletions, and nothing is
+         written -- not even a miss_count bump, which would otherwise burn
+         through guard 2's two-strike budget on every affected blob in a
+         single bad sweep. `_BREAKER_MIN_MISSES` keeps a small library (a
+         handful of blobs, all genuinely deleted) from tripping the breaker
+         on a 100% miss rate that is completely mundane at that size.
     """
     import asyncio
     from datetime import UTC, datetime, timedelta
@@ -478,18 +501,51 @@ async def verify_files(ctx: JobContext) -> dict:
         .to_list()
     )
 
+    # --- Guard 3: stat everything before writing anything ---
+    def _path_for(blob) -> Path:
+        return (
+            Path(blob.external_path)
+            if blob.storage is BlobStorage.EXTERNAL and blob.external_path
+            else blob_path(blob.id)
+        )
+
+    stats: dict[str, object] = {}
+    for blob in blobs:
+        ctx.check_cancel()
+        stats[blob.id] = await asyncio.to_thread(_stat_or_none, _path_for(blob))
+
+    miss_total = sum(1 for s in stats.values() if s is None)
+    if (
+        blobs
+        and miss_total >= _BREAKER_MIN_MISSES
+        and miss_total / len(blobs) >= _BREAKER_MISS_FRACTION
+    ):
+        log.error(
+            "verify_aborted_mass_miss",
+            checked=len(blobs),
+            missed=miss_total,
+            path=home.path,
+        )
+        await queue_mod.publish_event(
+            "storage.mass_miss",
+            {"checked": len(blobs), "missed": miss_total, "path": home.path},
+            owner=keys.SYSTEM_OWNER,
+        )
+        return {
+            "skipped": True,
+            "reason": "mass_miss_circuit_breaker",
+            "checked": len(blobs),
+            "missed": miss_total,
+        }
+
     checked = present = newly_missing = confirmed_missing = drifted = 0
 
     for blob in blobs:
         ctx.check_cancel()
         checked += 1
 
-        path = (
-            Path(blob.external_path)
-            if blob.storage is BlobStorage.EXTERNAL and blob.external_path
-            else blob_path(blob.id)
-        )
-        stat = await asyncio.to_thread(_stat_or_none, path)
+        path = _path_for(blob)
+        stat = stats[blob.id]
 
         if stat is not None:
             present += 1
