@@ -75,42 +75,59 @@ Out of scope:
 
 ## Installing iVar
 
-**Finding:** `apt-cache policy ivar` in the running `api` container returns
-`Candidate: (none)`. iVar is not in Debian trixie at any version. samtools
-(1.21) and bcftools are both present at `/usr/bin`, which matters because iVar
-links htslib and shells out to samtools for sorting.
+**Correction, 2026-08-05: iVar is in Debian trixie.** The original scoping for
+this spec ran `apt-cache policy ivar` without first running `apt-get update`,
+which reports `Candidate: (none)` for every package regardless of what the
+repository actually carries -- a stale-cache false negative, not a real
+absence. Re-checked properly against the running `api` container:
 
-`backend/Dockerfile` documents a deliberate policy: bioinformatics tools come
-from Debian rather than bioconda, because trixie carries current versions and
-this avoids a conda installation for a handful of tools. iVar is the case that
-policy does not cover, so this slice needs an explicit exception. Three options:
+```
+ivar:
+  Candidate: 1.4.4+dfsg-1
+```
 
-1. **Build from source.** iVar is a small autotools C++ project; its only real
-   dependency is htslib, which is already in the image via samtools. Adds a
-   compile step and a `build-essential`/`autoconf` surface to the image.
-2. **Bioconda.** The Dockerfile's comment at line 178 notes bioconda is already
-   used for one arm64-capable install, so the precedent exists. Drags in a conda
-   environment for one tool, which is exactly what the stated policy avoids.
-3. **Declare it unavailable.** Ship the spec, the registry entry, the card, and
-   the "not installed in this build" reason -- the pattern `BUSCO_SPEC` and
-   `HIFIASM_SPEC` already establish -- and install it later.
+`apt-get install -y --no-install-recommends ivar` pulled one 211kB package with
+no new dependencies -- `libhts-dev` (1.21+ds-1) and the rest of iVar's build
+requirements are already satisfied by the image's existing samtools/bcftools
+stack, so nothing else moved. Verified working: `ivar version` reports `iVar
+version 1.4.4`, and both `ivar trim` and `ivar consensus` respond with their
+real usage text rather than a missing-library error. Uninstalled again after
+verification; the container this was tested against is not this slice's actual
+install site, `backend/Dockerfile` is.
 
-**Recommendation: build from source (1).** The existing bioconda precedent is
-for a tool with a harder dependency graph; iVar's is one library the image
-already has. Source-building keeps the single-toolchain property the Dockerfile
-argues for, and iVar's build is genuinely small. Pin the version explicitly, the
-way `install-compleasm.sh` does, rather than tracking a branch.
+This means the install question this section originally existed to answer is
+closed, and the source-build / bioconda / declared-unavailable options
+considered below did not need to be chosen between. It also invalidates part of
+the reasoning that had gone into #47 and the TODO note pointing at it -- both
+said no Debian candidate exists; that claim was wrong and both need a
+correction alongside this one.
 
-If the build turns out to be more than a few lines, fall back to (3) rather than
-(2): a declared-unavailable tool with an honest reason is a better outcome than
-a conda installation added under time pressure, and the rest of this slice --
-validators, card, provenance -- is testable without the binary.
+**Add to `backend/Dockerfile`, in the same `apt-get install` block as the other
+Debian-sourced tools** (near `flye`, per the comment at line 71): `ivar`. No
+new script is needed -- unlike compleasm, there is no install-time build step,
+so `scripts/install-ivar.sh` is unnecessary. Add `tools.ivar()` following the
+`_probe("ivar", settings.ivar_path, ["version"])` shape used by `samtools()`
+and `bcftools()`. Note `ivar version`, not `--version`: iVar uses a subcommand,
+and a probe passing `--version` gets a non-zero exit and reads as "not
+installed" on a working binary.
 
-Add a `scripts/install-ivar.sh` beside `install-compleasm.sh`, and a
-`tools.ivar()` probe following the `_probe("ivar", settings.ivar_path,
-["version"])` shape. Note `ivar version`, not `--version`: iVar uses a
-subcommand, and a probe passing `--version` gets a non-zero exit and reads as
-"not installed" on a working binary.
+The three options below are kept, struck through, for whoever next hits a tool
+with a genuine Debian gap -- the reasoning was sound in general even though it
+did not apply here, and the record of *why* iVar didn't need it is worth
+keeping next to a case that might.
+
+~~1. Build from source. iVar is a small autotools C++ project; its only real
+dependency is htslib.~~ Unneeded: `libhts-dev` is already a trixie package and
+already satisfied.
+
+~~2. Bioconda, following the one arm64-capable precedent in the Dockerfile.~~
+Unneeded, and would have been the wrong call here regardless -- it exists for
+tools with no Debian path at all.
+
+~~3. Declare it unavailable, following the `BUSCO_SPEC`/`HIFIASM_SPEC`
+pattern.~~ Unneeded. Keep this pattern in mind for the *next* tool in this
+family, though: RagTag is `pip`-only upstream with no Debian package as of this
+writing, so its own installing section should not assume this outcome repeats.
 
 ## Inputs and validation
 
@@ -372,11 +389,14 @@ as a job that silently does nothing.
 
 ## Risks
 
-**The install may not be as small as it looks.** Everything downstream of the
-binary -- validators, card, provenance, tests -- is independent of it, so the
-mitigation is to build in that order and fall back to a declared-unavailable
-tool if the Dockerfile work grows. Do not let an install problem block the
-slice.
+**~~The install may not be as small as it looks.~~ Resolved: it is a one-line
+`apt-get install ivar`,** verified 2026-08-05 against the running image. This
+risk existed only because of the stale-cache false negative corrected above;
+it is retired rather than mitigated. The general principle it argued for --
+build the validators, card, provenance, and tests before touching the
+Dockerfile, so an install snag can't block the rest -- is still good practice
+and is unaffected by this correction, even though this particular install
+turned out not to need it.
 
 **iVar's exit codes are unreliable.** It exits zero in several conditions where
 it produced nothing useful, including the disjoint-primer case above. The

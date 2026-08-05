@@ -658,10 +658,13 @@ iVar is the first tool slice rather than Pilon (GitHub #47, design
 `docs/superpowers/specs/2026-08-05-ivar-consensus-design.md`): it is the lighter
 runner, it exercises the unused `PRIMERS` role, and this repo's own
 genome-analysis review argues Pilon is effectively obsolete for HiFi and worth
-keeping only for legacy ONT-only work. Note for whoever picks it up -- **iVar is
-not in Debian** (`apt-cache policy ivar` returns `Candidate: (none)`), so it
-needs a source build or an explicit exception to the Dockerfile's
-Debian-not-bioconda policy.
+keeping only for legacy ONT-only work. **Correction, 2026-08-05: iVar *is* in
+Debian trixie** (`ivar 1.4.4+dfsg-1`) -- the original "not in Debian" note came
+from running `apt-cache policy ivar` without an `apt-get update` first, which
+reports `Candidate: (none)` for anything regardless of what the repository
+carries. Installed and smoke-tested clean against the running image with no
+new dependencies beyond what samtools/bcftools already pull in. It is a
+one-line `apt-get install` addition to `backend/Dockerfile`, not a source build.
 
 De-novo assembly first; these three all take an existing assembly plus
 something else and improve it.
