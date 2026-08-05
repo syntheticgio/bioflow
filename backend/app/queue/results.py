@@ -269,7 +269,23 @@ async def _link_mate(obj: DataObject) -> None:
         {"user_touched": {"$ne": "mate"}},
     ).to_list()
 
-    matches = [c for c in candidates if pairing.is_mate_of(obj.name, c.name)]
+    obj_input = pairing.PairInput(name=obj.name, facts=obj.facts, metadata=obj.metadata)
+    matches = []
+    for c in candidates:
+        c_input = pairing.PairInput(name=c.name, facts=c.facts, metadata=c.metadata)
+        v = pairing.verdict(obj_input, c_input)
+        if v in (pairing.Verdict.CONFIRMED, pairing.Verdict.NAME_ONLY):
+            matches.append(c)
+        elif v in (pairing.Verdict.REJECTED_LAYOUT, pairing.Verdict.REJECTED_READ_IDS):
+            log.info(
+                "mate_rejected",
+                object_id=str(obj.id),
+                candidate_id=str(c.id),
+                name=obj.name,
+                candidate_name=c.name,
+                verdict=v.value,
+            )
+
     if len(matches) != 1:
         # Zero is the common case (the mate has not been uploaded, or the file
         # is single-end). More than one is genuinely ambiguous -- two files
@@ -524,12 +540,14 @@ async def _apply_sra_download(result: dict, *, owner: str) -> None:
 
     # Linked from what fasterq-dump reported rather than inferred from the
     # filenames. `_link_mate` runs at ingest and would usually reach the same
-    # answer, but here the pairing is known exactly -- there is nothing to
-    # guess, and `<acc>_1.fastq` is not a shape its R1/R2 convention detects.
+    # answer -- `<acc>_1.fastq` parses fine under the `_1`/`_2` convention --
+    # but here the pairing is known exactly, from fasterq-dump's own labelling,
+    # which is more authoritative than an inference and should not be
+    # overridden by one.
     r1, r2 = created.get("R1"), created.get("R2")
     if r1 is not None and r2 is not None:
-        await r1.set({DataObject.mate_object_id: r2.id})
-        await r2.set({DataObject.mate_object_id: r1.id})
+        await r1.set({DataObject.mate_object_id: r2.id, DataObject.read_number: 1})
+        await r2.set({DataObject.mate_object_id: r1.id, DataObject.read_number: 2})
 
     run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
     if run_id is not None:

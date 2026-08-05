@@ -5,18 +5,33 @@ that alone does not say *which* R2 an R1 belongs to. This derives a pairing key
 by removing the mate token from the name: two files that reduce to the same key
 and carry opposite hints are mates.
 
-Filename convention is the only signal available. Read IDs inside the files
-would be more reliable, but checking them means decompressing two files to
-compare their first records, and the convention is near-universal in practice.
-The cost of being wrong is bounded: the launch dialog shows the detected mate
-and lets it be changed.
+Filename convention proposes a candidate pair; `verdict()` below confirms or
+vetoes it using two signals already captured at ingest and thrown away until
+now -- `facts.first_read_ids` and `metadata.read_type`. Neither signal can
+*originate* a pairing (a file and its own trimmed derivative share identical
+read IDs), so both only rule on what the filename already proposed. This
+module still imports nothing beyond `re` and stays ignorant of `DataObject`,
+Motor, or the filesystem -- callers pass plain dicts.
 """
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
 
-# Ordered longest-first: `_R1` must be tried before `_1` so that
-# `sample_R1.fastq.gz` reduces on the more specific token.
+# Ordered longest-first: `_forward` before `_fwd` before `_R1` before `_1`, so
+# each name reduces on the most specific token it ends with. (`_f` does not
+# exist as a token, so `_fwd` before `_f` is not a concern here.)
 _MATE_TOKENS: tuple[tuple[str, str], ...] = (
+    ("_forward", "R1"),
+    ("_reverse", "R2"),
+    (".forward", "R1"),
+    (".reverse", "R2"),
+    ("_fwd", "R1"),
+    ("_rev", "R2"),
+    (".fwd", "R1"),
+    (".rev", "R2"),
     ("_R1", "R1"),
     ("_R2", "R2"),
     (".R1", "R1"),
@@ -44,10 +59,14 @@ OPPOSITE = {"R1": "R2", "R2": "R1"}
 
 # Which naming scheme a token belongs to. `sample_R1` and `sample_2` reduce to
 # the same key but come from different conventions, and pairing them would be a
-# guess -- the launch dialog can simply ask instead.
+# guess -- the launch dialog can simply ask instead. `_fwd`/`_rev` and
+# `_forward`/`_reverse` get their own scheme "F" for the same reason: nothing
+# here should let `sample_fwd` cross-pair with `sample_R1` or `sample_2`.
 _SCHEME = {"_R1": "R", "_R2": "R", ".R1": "R", ".R2": "R",
            "_r1": "R", "_r2": "R", ".r1": "R", ".r2": "R",
-           "_1": "N", "_2": "N"}
+           "_1": "N", "_2": "N",
+           "_forward": "F", "_reverse": "F", ".forward": "F", ".reverse": "F",
+           "_fwd": "F", "_rev": "F", ".fwd": "F", ".rev": "F"}
 
 
 def split_mate(name: str) -> tuple[str, str, str] | None:
@@ -96,3 +115,95 @@ def is_mate_of(name: str, other: str) -> bool:
         and scheme_a == scheme_b
         and mate_b == OPPOSITE.get(mate_a)
     )
+
+
+@dataclass(frozen=True)
+class PairInput:
+    """Everything `verdict()` needs about one file, as plain data.
+
+    `facts` and `metadata` are already plain dict fields on `DataObject`, so a
+    caller that has loaded the object pays nothing extra to build this.
+    """
+
+    name: str
+    facts: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+class Verdict(StrEnum):
+    CONFIRMED = "confirmed"
+    NAME_ONLY = "name_only"
+    REJECTED_LAYOUT = "rejected_layout"
+    REJECTED_READ_IDS = "rejected_read_ids"
+    NO_MATCH = "no_match"
+
+
+def _first_token(read_id: str) -> str:
+    """The text up to the first whitespace.
+
+    Mates disagree past this point in the normal case, not the edge case:
+    `ERR17609896.1 ... length=150` vs `ERR17609896.1 ... length=149` -- the
+    reads are different lengths. Comparing the whole header would reject a
+    genuine pair; comparing this token would not.
+    """
+    return read_id.split(None, 1)[0] if read_id else ""
+
+
+def _run_field(read_id: str) -> str:
+    """The leading structural field, stable across every read in a run.
+
+    SRA-style IDs (`ERR17609896.1`) split on the first `.`; Illumina-style IDs
+    (`LH00201:115:...`) split on the first `:` -- the instrument. Used only to
+    veto, never to confirm, because it is coarse: it is the same for every read
+    in a run regardless of which record a filter left at the front.
+    """
+    token = _first_token(read_id)
+    for sep in (".", ":"):
+        if sep in token:
+            return token.split(sep, 1)[0]
+    return token
+
+
+def read_ids_agree(a: list[str], b: list[str]) -> bool:
+    """True when the two ID lists share at least one first token."""
+    tokens_a = {_first_token(i) for i in a}
+    tokens_b = {_first_token(i) for i in b}
+    return bool(tokens_a & tokens_b)
+
+
+def read_ids_conflict(a: list[str], b: list[str]) -> bool:
+    """True only on positive evidence of difference: no shared run field.
+
+    Deliberately not `not read_ids_agree(...)`. A file filtered independently
+    of its mate can have a completely different first token (its own first
+    surviving read) while still being the same run -- vetoing on that would
+    unpair legitimate mates. The run field is stable regardless of which
+    record ended up first, so it is what a veto can safely key on.
+    """
+    fields_a = {_run_field(i) for i in a}
+    fields_b = {_run_field(i) for i in b}
+    return bool(fields_a) and bool(fields_b) and not (fields_a & fields_b)
+
+
+def verdict(a: PairInput, b: PairInput) -> Verdict:
+    """Confirm, veto, or fall through on a filename-proposed pairing.
+
+    Order matters: `NO_MATCH` first because it is the overwhelmingly common
+    case and the cheapest to decide; the layout veto before the read-ID check
+    so a single-end file with no `first_read_ids` is still rejected rather than
+    falling through to `NAME_ONLY`.
+    """
+    if not is_mate_of(a.name, b.name):
+        return Verdict.NO_MATCH
+
+    if a.metadata.get("read_type") == "single-end" or b.metadata.get("read_type") == "single-end":
+        return Verdict.REJECTED_LAYOUT
+
+    ids_a, ids_b = a.facts.get("first_read_ids"), b.facts.get("first_read_ids")
+    if ids_a and ids_b:
+        if read_ids_conflict(ids_a, ids_b):
+            return Verdict.REJECTED_READ_IDS
+        if read_ids_agree(ids_a, ids_b):
+            return Verdict.CONFIRMED
+
+    return Verdict.NAME_ONLY

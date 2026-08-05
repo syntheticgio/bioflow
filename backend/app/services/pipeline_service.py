@@ -78,7 +78,13 @@ async def suggest_mate(obj: DataObject) -> DataObject | None:
         DataObject.project_id == obj.project_id,
         DataObject.id != obj.id,
     ).to_list()
-    matches = [c for c in candidates if pairing.is_mate_of(obj.name, c.name)]
+    obj_input = pairing.PairInput(name=obj.name, facts=obj.facts, metadata=obj.metadata)
+    matches = []
+    for c in candidates:
+        c_input = pairing.PairInput(name=c.name, facts=c.facts, metadata=c.metadata)
+        v = pairing.verdict(obj_input, c_input)
+        if v in (pairing.Verdict.CONFIRMED, pairing.Verdict.NAME_ONLY):
+            matches.append(c)
     return matches[0] if len(matches) == 1 else None
 
 
