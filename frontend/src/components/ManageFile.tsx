@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { api } from "../api/client";
 import { compressionLabel, formatBytes } from "../lib/format";
 import type { ObjectDetail as ObjectDetailData } from "../api/types";
 import { canPair, PairEditor } from "./PairEditor";
 import { canConvertRole, RoleConverter } from "./RoleConverter";
+import { ShareFileModal } from "./ShareFileModal";
 import { TagEditor } from "./TagEditor";
 
 interface Props {
@@ -42,6 +44,11 @@ export function ManageFile({
   // the label, so the pairing row asks the component's own question first.
   const showPairing = canPair(obj);
   const showRole = canConvertRole(obj);
+
+  // Mirrors the backend's own precondition (offer_share raises 409 on a
+  // non-READY object), so the button is absent rather than present-and-failing.
+  const shareable = obj.status === "ready" && Boolean(obj.blob_sha256);
+  const [sharing, setSharing] = useState(false);
 
   return (
     <div className="section">
@@ -102,6 +109,17 @@ export function ManageFile({
           <TagEditor objectId={obj.id} tags={obj.tags} onChanged={onTagsChanged} />
         </div>
 
+        {shareable && (
+          <>
+            <div className="manage-label">Share</div>
+            <div>
+              <button type="button" className="btn" onClick={() => setSharing(true)}>
+                Share with another profile
+              </button>
+            </div>
+          </>
+        )}
+
         <div className="manage-label">Delete</div>
         <div>
           {!confirmingDelete ? (
@@ -160,6 +178,15 @@ export function ManageFile({
           </>
         )}
       </div>
+
+      {sharing && (
+        <ShareFileModal
+          objectId={obj.id}
+          objectName={obj.name}
+          isExternal={obj.blob?.storage === "external"}
+          onClose={() => setSharing(false)}
+        />
+      )}
     </div>
   );
 }

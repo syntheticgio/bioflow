@@ -39,6 +39,15 @@ log = get_logger(__name__)
 class CardStatus(StrEnum):
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
+    # A tool the card would use is ON_DEMAND_IMAGE and simply has not been
+    # pulled yet -- a real, expected first-run state (tools.InstallState.
+    # NOT_INSTALLED), not a fault. Distinct from UNAVAILABLE because the two
+    # must render differently: UNAVAILABLE is a dead end with a reason,
+    # NEEDS_INSTALL is one click from working and the card keeps its launch
+    # payload to prove it. Rendering a not-yet-installed optional tool as
+    # UNAVAILABLE is the worse of the two wrong answers -- the card reads as
+    # permanently broken and the user never learns the tool exists at all.
+    NEEDS_INSTALL = "needs_install"
 
 
 # Re-exported from organism_taxonomy: `lineage_inference` needed the same
@@ -61,7 +70,11 @@ class SuggestionCard:
     the client had to merge in would be a shape it had to know about.
 
     `launch` and `status` must agree: an available card without a payload
-    would render as a button that does nothing.
+    would render as a button that does nothing. NEEDS_INSTALL is the one
+    exception to "unavailable means no payload" -- it is not blocked, it is
+    one click from working, so it keeps `launch` exactly like an AVAILABLE
+    card does. `requires_install` rides alongside it with what that click
+    actually costs.
     """
 
     kind: str
@@ -72,6 +85,10 @@ class SuggestionCard:
     status: CardStatus = CardStatus.UNAVAILABLE
     reason: str | None = None
     launch: dict | None = None
+    # Set only when status is NEEDS_INSTALL: {"tool": name, "download_bytes":
+    # n}. The frontend renders this as an offer -- "DeepVariant: 2.8 GB,
+    # install?" -- rather than the bare refusal an UNAVAILABLE reason implies.
+    requires_install: dict | None = None
     # Runs that already did what this card offers. Filled by
     # `attach_prior_runs` after the builders run, never by a builder -- it is
     # a database question, and the builders are deliberately synchronous and
@@ -88,6 +105,7 @@ class SuggestionCard:
             "status": self.status.value,
             "reason": self.reason,
             "launch": self.launch,
+            "requires_install": self.requires_install,
             "prior_runs": self.prior_runs,
         }
 
@@ -551,6 +569,43 @@ def build_variants_card(obj, chemistry) -> SuggestionCard | None:
             why = (
                 "Clair3 is not installed; DeepVariant covers this chemistry "
                 "too and is available as a fallback."
+            )
+        elif (
+            dv_tool is not None
+            and dv_tool.install_state is tools.InstallState.NOT_INSTALLED
+        ):
+            # An installable DeepVariant must not silently replace an
+            # uninstalled Clair3 with a ~3 GB download the user never asked
+            # for -- that is what the AVAILABLE-fallback branch above does,
+            # and it is only correct once the image is actually there. What
+            # this branch offers instead is the *choice*: the card keeps a
+            # real launch payload (caller=deepvariant), same as an AVAILABLE
+            # card, so accepting the offer is one click through the
+            # confirm-then-chain flow, not a dead end that sends the user to
+            # a Settings page to figure out what to do next.
+            return SuggestionCard(
+                kind="variants",
+                category="VARIANTS",
+                title="DeepVariant long-read calls",
+                description=description,
+                why=(
+                    "Clair3 is not installed; DeepVariant covers this "
+                    "chemistry too, but its image has not been pulled yet."
+                ),
+                status=CardStatus.NEEDS_INSTALL,
+                requires_install={
+                    "tool": dv_tool.name,
+                    "download_bytes": tools.TOOL_META["deepvariant"].download_bytes,
+                },
+                launch={
+                    "endpoint": "/pipelines/variants",
+                    "body": {
+                        "bam_id": str(obj.id),
+                        "params": {
+                            "caller": variant_runner.VariantCaller.DEEPVARIANT.value
+                        },
+                    },
+                },
             )
         else:
             return SuggestionCard(

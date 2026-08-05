@@ -53,6 +53,7 @@ import type {
   RunSummary,
   ScaffoldRequest,
   ScheduleInfo,
+  Share,
   SraAccepted,
   SraDownloadRequest,
   SraResolveResponse,
@@ -242,6 +243,24 @@ export const api = {
     request<DataObject>(`/objects/${id}/pair`, { method: "DELETE" }),
 
   deleteObject: (id: string) => request<void>(`/objects/${id}`, { method: "DELETE" }),
+
+  // --- Shares ---
+  offerShare: (body: { object_id: string; to_profile_id: string; message?: string }) =>
+    request<Share>("/shares", { method: "POST", body: JSON.stringify(body) }),
+
+  shareInbox: () => request<Share[]>("/shares/inbox"),
+
+  shareOutbox: () => request<Share[]>("/shares/outbox"),
+
+  acceptShare: (id: string, projectId?: string) =>
+    request<Share>(`/shares/${id}/accept`, {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId ?? null }),
+    }),
+
+  declineShare: (id: string) => request<Share>(`/shares/${id}/decline`, { method: "POST" }),
+
+  revokeShare: (id: string) => request<Share>(`/shares/${id}`, { method: "DELETE" }),
 
   reingestObject: (id: string) =>
     request<{ object_id: string; job_id: string }>(`/objects/${id}/reingest`, {
@@ -433,6 +452,21 @@ export const api = {
   // --- Pipelines ---
 
   pipelineTools: () => request<PipelineTools>("/pipelines/tools"),
+
+  /** Queue a pull of an on-demand tool's image. Returns the existing job,
+   *  not a duplicate, if one is already in flight for this tool. */
+  installTool: (name: string) =>
+    request<JobSummary>(`/pipelines/tools/${encodeURIComponent(name)}/install`, {
+      method: "POST",
+    }),
+
+  /** Queue removal of an on-demand tool's image. Refused server-side for a
+   *  bundled tool, one that was never installed, or one a running job is
+   *  currently using. */
+  uninstallTool: (name: string) =>
+    request<JobSummary>(`/pipelines/tools/${encodeURIComponent(name)}/install`, {
+      method: "DELETE",
+    }),
 
   trimDefaults: (tool: string = "fastp") =>
     request<TrimDefaults>(`/pipelines/defaults?tool=${encodeURIComponent(tool)}`),

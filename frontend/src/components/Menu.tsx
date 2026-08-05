@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
 export interface MenuItem {
@@ -20,7 +21,7 @@ export interface MenuItem {
  *  first-seen order, each rendered under its heading, with arrow-key
  *  navigation moving through the flattened list rather than per-group so
  *  Up/Down still just works. */
-export function Menu({ label, items }: { label: string; items: MenuItem[] }) {
+export function Menu({ label, items }: { label: ReactNode; items: MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const root = useRef<HTMLDivElement>(null);

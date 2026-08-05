@@ -156,19 +156,20 @@ Extended `frontend/src/api/types.ts`'s `PipelineTool` with `install_state`; `tsc
 
 ## Task 4 — Install and uninstall as jobs
 
-- [ ] `app/queue/tool_handlers.py` with `install_tool` (`HandlerMode.SUBPROCESS`, `JobClass.USER_INTERACTIVE`), payload `{"tool": name}`. Shell to `docker pull`, parse its progress lines into `ctx.progress()`.
-  - `USER_INTERACTIVE` deliberately, **not** `COMPUTE`: the user pressed a button and is watching. `COMPUTE` is documented as never promoted, so a download would sit behind a multi-hour alignment.
-  - `max_attempts`: 2 or 3. A pull failure is often transient (network), unlike a missing binary — but do not spend five attempts on an auth or manifest error.
-- [ ] `uninstall_tool` alongside it, shelling to `docker image rm`.
-- [ ] Import `tool_handlers` from `app/queue/handlers.py` for the registration side effect, the way `pipeline_handlers` is imported.
-- [ ] `app/services/tool_install_service.py`:
-  - **One install per tool at a time.** Find an in-flight install for that tool and return it rather than starting a second. `enqueue`'s `dedup_key` does this — note it folds `owner` in, which is right here.
-  - Refuse an install for a tool whose `delivery` is `BUNDLED`, and refuse an uninstall of anything not `ON_DEMAND_IMAGE` and currently installed. **This is the symmetry rule from the spec** — uninstall is offered exactly when install was.
-  - Refuse an uninstall while a running job uses that tool.
-- [ ] `POST /pipelines/tools/{name}/install` and `DELETE /pipelines/tools/{name}/install`, returning the job the way the other launch endpoints do (`JobOut`).
-- [ ] Publish the invalidation from Task 3 on success.
+- [x] `app/queue/tool_handlers.py` with `install_tool` (`HandlerMode.SUBPROCESS`, `JobClass.USER_INTERACTIVE`), payload `{"tool": name}`. Shells to `docker pull`, parsing its progress lines into `ctx.progress()` via a `_PullProgress` class (mirrors `variant_runner.VariantProgress`'s shape) that tracks `<layer-id>: <status>` lines and counts layers that reached `Pull complete`/`Already exists` against layers seen — confirmed against a real `docker pull nginx:latest` piped through a non-TTY stdout, not assumed: piped output collapses to one discrete line per layer-state-change with no byte counts, so a monotonic layer-fraction is what the output actually supports.
+  - `USER_INTERACTIVE`, not `COMPUTE`, as planned.
+  - `max_attempts=3` for install (transient pull failures), `max_attempts=2` for uninstall (`docker image rm` fails deterministically — image in use, image already gone — so retrying does not change the outcome).
+- [x] `uninstall_tool` alongside it, shelling to `docker image rm`.
+- [x] Imported `tool_handlers` from `app/queue/handlers.py`.
+- [x] `app/services/tool_install_service.py` — all three rules enforced, plus the eligibility checks (`ValidationError` for a `BUNDLED` tool, `NotFoundError` for an unknown one) that gate both `install` and `uninstall` before a job is ever created.
+- [x] `POST /pipelines/tools/{name}/install` and `DELETE /pipelines/tools/{name}/install`, both returning `JobOut`.
+- [x] `_invalidate()` calls `tool_cache.publish_invalidation` at the end of both handlers on success only (not on failure — a failed pull changed nothing worth invalidating), reached from the SUBPROCESS thread via `db.client.run_from_thread`, the same seam `summary_handlers._resolve_sync` uses for the identical thread-has-no-event-loop problem. Corrected that seam's own docstring while using it: nothing about `run_from_thread` is Mongo-specific despite the name and its original Mongo-only docstring — it reaches whatever the process's one real event loop is, and `connect_to_redis()` runs on that same loop in both `app/main.py` and `worker_main.py`.
 
-**Watch for:** `docker pull` progress output is layer-interleaved and not a clean percentage. Getting a monotonic overall percentage out of it is fiddly; a phase string plus a coarse percentage is enough, and a job that reports "pulling" with no number beats a bar that jumps backwards. Don't over-invest here.
+**A real bug found while writing tests, not by inspection.** `_active_install_query` (the fallback lookup used when `enqueue` reports a dedup collision) had no `owner` filter. `enqueue`'s stored dedup key *is* owner-scoped (`f"{owner}:{dedup_key}"`), so two different profiles installing the same tool correctly get two independent jobs -- but the unfiltered fallback lookup would then hand the *second* profile's caller back the *first* profile's job id, collapsing two independent requests into one shared job record. Caught by `test_a_second_install_returns_the_first_jobs_id` failing with two different owners' job ids compared equal, in a run where an *earlier* test's leftover job was the one actually matched. Fixed by adding `owner` to the query; the bug and the fix are documented in the query's own docstring so it isn't rediscovered as a mystery later. A second, unrelated test-isolation bug surfaced alongside it: `TestUninstallRefusesWhileRunning` inserted `Job` documents directly into the shared module-scoped test database and never retired them, so a RUNNING job with `payload.caller: "deepvariant"` outlived its own test and poisoned every later `uninstall()` call in the module — fixed by resetting each such job to `SUCCEEDED` in a `finally` block after use.
+
+**Verified live against the running worktree stack, not only against tests or mocks.** `curl -X POST /pipelines/tools/deepvariant/install` created a real job; `docker logs` on the worker showed it claimed, `state: running`, and `tool_install_started` logged with the correct image name; polling `/jobs/{id}` a few seconds later showed `state: "running"`, `phase: "pulling"`, `message: "pulling (20/96 layers)"` — a genuine fraction computed from real `docker pull` output, the same shape Task 5's UI will render. Cancelled the job afterward (via the existing `/jobs/{id}/cancel`, which worked without any code written for this task — `run_subprocess`'s cancellation plumbing is transparent to any SUBPROCESS handler) rather than let a ~3 GB download run to completion in a throwaway stack; `state` moved to `cancelled` immediately.
+
+Full backend suite: 2860 passed, 0 failed (2774 baseline + 86 net new, including the API/service/handler suites above). Frontend `tsc -b --noEmit` clean (no frontend changes this task, checked anyway since the stack was up).
 
 ---
 
@@ -176,31 +177,34 @@ Extended `frontend/src/api/types.ts`'s `PipelineTool` with `install_state`; `tsc
 
 Settings is a single page today (`SettingsView.tsx` renders `Settings · AI`, `App.tsx` routes `/settings` and `/settings/ai` to the same component), so this introduces the section nav a second page implies.
 
-- [ ] `SettingsNav.tsx` — a rail with AI and Tools. Keep `/settings` landing where it does today so no existing link breaks.
-- [ ] Route `/settings/tools` → `SettingsTools.tsx`. `App.tsx`'s `singleColumn` check already covers `/settings` by prefix, so nothing is needed there.
-- [ ] `SettingsTools.tsx` renders one row per tool from `GET /pipelines/tools` — **including bundled ones**:
-  - **Included** — bundled, with version, no button. Listing these is what makes the page the answer to "why is this card greyed out," and is the reason tools with no action attached still appear.
-  - **Installed** — with the image tag as version, and Uninstall.
-  - **Not installed** — with the download size and Install.
-  - **Installing** — the job's progress, and cancel.
-  - **Failed** — the job's error, and retry.
-- [ ] Confirm before uninstall, naming the space reclaimed.
-- [ ] Poll or invalidate the tools query while an install job is in flight, so the row advances without a manual refresh.
-- [ ] **Do not add a second list of tools.** Both this page and `HelpSoftware.tsx` read the same endpoint built from `TOOL_META`. `/help/software` stays documentation and gains no buttons.
+- [x] `SettingsNav.tsx` — a section rail (AI / Tools) driven by `useLocation()` rather than component state, since the two pages have no other shared state and routing already *is* the thing that decides which is active. `/settings` still lands on the AI page unchanged.
+- [x] Route `/settings/tools` → `SettingsTools.tsx`. `App.tsx`'s `singleColumn` prefix check needed no edit, confirmed.
+- [x] `SettingsTools.tsx` renders one row per tool from `GET /pipelines/tools`, sorted alphabetically, **including bundled ones** — all five states implemented (Included / Installed / Not installed / Installing with live progress and Cancel / Failed with Retry).
+- [x] Confirm before uninstall via the plain `confirm()` browser dialog, matching the existing pattern in `ProviderForm.tsx`/`ProjectExplorer.tsx` rather than introducing a modal component for this one page. Names the reclaimed size when `download_bytes` is known.
+- [x] Polling, not a bare invalidation: `installJobs`/`uninstallJobs` queries use the same conditional-`refetchInterval` shape `JobList.tsx` already established for the Activity tab (poll only while something is actually in flight, `false` otherwise) — chosen over a fixed interval because most of the time there is nothing installing and polling would be pure waste, and chosen over relying only on SSE because this page has no per-tool event channel to subscribe to.
+- [x] No second tool list: `SettingsTools.tsx` and `HelpSoftware.tsx` both read `api.pipelineTools()` fresh; `/help/software` untouched, no buttons added there.
 
-**Verify in the browser at localhost:5273** via `./ops/worktree-up.sh` — there is no headless component testing in this repo and none is expected.
+**Two API client methods added** (`installTool`/`uninstallTool` in `frontend/src/api/client.ts`) that were not in this task's original file list but are the obvious client-side pair to the task-4 endpoints — `cancelJob`/`retryJob` already existed and were reused as-is for the Installing/Failed states rather than duplicated.
+
+**Verified in the browser via `./ops/worktree-up.sh`, the full round trip, not just a static read.** Loaded `/settings/tools`: every bundled tool showed "Included — `<version>`" with no button, and DeepVariant showed "Not installed — 2.8 GB" (2.99 GB decimal, correctly rendered in `formatBytes`' binary GiB) with an Install button. Clicked Install: the row immediately became "pulling (0/96 layers)" with a Cancel button and the footer's running-job count incremented, with **zero code written for that job-count update** -- it is the existing global job-count indicator picking up the same job. Waited and re-read the page: progress advanced live to "pulling (20/96 layers)" with no manual refresh, confirming the poll loop. Clicked Cancel: the job stopped and the row reverted cleanly to "Not installed — 2.8 GB / Install". Navigated back to `/settings/ai` and confirmed the section nav and the existing AI page still render correctly with the new wrapper. Zero console errors across the entire sequence.
+
+`tsc -b --noEmit`: clean. Backend suite (unaffected by this frontend-only task, checked anyway since the stack was rebuilt): 2921 passed, 0 failed.
 
 ---
 
 ## Task 6 — `NEEDS_INSTALL` in the Actions tab
 
-- [ ] Add `NEEDS_INSTALL = "needs_install"` to `CardStatus` in `suggestion_service.py`.
-- [ ] Add a `requires_install: dict | None` field to `SuggestionCard` (`{"tool": name, "download_bytes": n}`) and include it in `as_dict()`.
-- [ ] A `NEEDS_INSTALL` card **keeps its launch payload** — it is not blocked, it is one click from working. The docstring's rule that *"`launch` and `status` must agree"* needs updating to cover the third status explicitly.
-- [ ] Update the variant card builder (`suggestion_service.py:~538`): when the chemistry's caller is an uninstalled optional tool, emit `NEEDS_INSTALL` rather than `UNAVAILABLE`. Note the existing DeepVariant-as-long-read-fallback branch just above — an *installable* DeepVariant should not silently replace an uninstalled Clair3 with a 3 GB download; prefer offering the install of the tool the chemistry actually indicates.
-- [ ] Frontend: render `needs_install` as an offer with the size, not a refusal. Rendering it as `UNAVAILABLE` is the worst outcome — the card reads as a permanent dead end and the user never learns the tool exists.
+- [x] Added `NEEDS_INSTALL = "needs_install"` to `CardStatus`.
+- [x] Added `requires_install: dict | None` to `SuggestionCard`, included in `as_dict()`.
+- [x] The docstring's `launch`/`status` agreement rule is updated to state `NEEDS_INSTALL` as the deliberate exception: it keeps `launch` exactly like `AVAILABLE` does.
+- [x] Updated the variant card builder's DeepVariant-fallback branch: `dv_tool.install_state is NOT_INSTALLED` now returns a `NEEDS_INSTALL` card with a real `caller=deepvariant` launch payload and `requires_install`, rather than falling into the plain `UNAVAILABLE` refusal. `UNKNOWN` (daemon unreachable) deliberately still falls through to `UNAVAILABLE` — pressing Install would just fail again for the same reason, so it is a fault, not an offer, and a test (`test_an_unknown_deepvariant_state_does_not_offer_install`) pins that the two states diverge.
+- [x] Frontend: `PipelineSuggestions.tsx` treats `needs_install` as runnable, the same as `available` — same enabled button, different label ("Install and launch") and an extra line showing the download size when `requires_install.download_bytes` is present. `PipelineSuggestion`'s TypeScript type gained the third status and the `requires_install` field to match.
 
-**Test:** patch `spec_for`/the probe so the tool reads not-installed, and assert the card is `NEEDS_INSTALL` **with** a launch payload and a `requires_install` block. Per CLAUDE.md, patch `spec_for` rather than the tool function where a frozen registry spec captured the function object at import time.
+**Correction to this task's own note:** the "patch `spec_for`, not the probe function" caveat is about `aligner_registry`'s frozen dataclass specs, which capture a tool *function object* at import time — it does not apply here. `installed_callers` (the existing test fixture) already patches `app.services.suggestion_service.tools.deepvariant` as a plain module-attribute lookup, which the file's own `test_the_caller_patch_actually_takes_effect` pins as reaching the call site. Extended it with a `deepvariant_install_state` parameter (`_FakeTool` gained an `install_state` attribute) rather than inventing a second fixture.
+
+**A deliberate scope boundary, confirmed with the user rather than assumed:** clicking a `NEEDS_INSTALL` card's button today posts the real launch payload straight to `/pipelines/variants`, which still bare-calls `tools.require(tools.deepvariant())` and will refuse a not-yet-installed tool with an error until task 7 builds the confirm-then-chain flow. Asked explicitly whether the button should (a) post directly and surface that error until task 7 lands, (b) redirect to Settings › Tools instead, or (c) render disabled in the meantime — chose (a): it matches "`NEEDS_INSTALL` keeps its launch payload, same as `AVAILABLE`" literally, and option (c) is exactly the UNAVAILABLE-shaped treatment this task exists to avoid. Nothing here needs to be undone once task 7 lands; the same click just starts succeeding.
+
+Full backend suite: 2932 passed, 0 failed (5 new tests in `TestVariantsCard`, plus the pre-existing `test_every_card_is_a_plain_dict_with_the_full_key_set` updated for the new field — exactly the kind of test that should catch an added field, and did). `tsc -b --noEmit` clean.
 
 ---
 

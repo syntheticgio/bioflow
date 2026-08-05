@@ -771,6 +771,7 @@ from app.queue import (  # noqa: E402, F401
     reference_assembly_handlers,
     sra_handlers,
     summary_handlers,
+    tool_handlers,
     uniprot_handlers,
     variant_handlers,
 )

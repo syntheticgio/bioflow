@@ -6,6 +6,7 @@ document plus, on acceptance, a second `DataObject` per shared file pointing at
 the same blob. See docs/superpowers/specs/2026-08-05-profile-sharing-design.md.
 """
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from beanie import PydanticObjectId
@@ -18,6 +19,7 @@ from app.logging import get_logger
 from app.models import (
     DataObject,
     ObjectStatus,
+    Profile,
     Project,
     Share,
     SharedFrom,
@@ -84,6 +86,26 @@ async def offer_share(
     return share
 
 
+async def resolve_owner_profiles(owners: Iterable[str]) -> dict[str, Profile]:
+    """Map owner strings to the profiles that answer for them.
+
+    Keyed by `owner_id()`, not by `str(profile.id)`. For every profile but one
+    those are the same string; for the adopted profile `owner_id()` is the
+    literal "local", and a map built from ids simply has no entry for the
+    profile holding the pre-existing library. Nothing raises here -- a share
+    naming a since-deleted profile just has no entry, and the caller decides
+    how to render that (see ShareOut.of).
+
+    One query for the whole set rather than one per share: callers use this to
+    render a list, and a per-row lookup would be an N+1.
+    """
+    wanted = set(owners)
+    if not wanted:
+        return {}
+    profiles = await Profile.find_all().to_list()
+    return {p.owner_id(): p for p in profiles if p.owner_id() in wanted}
+
+
 async def list_inbox(*, owner: str, state: ShareState | None = ShareState.OFFERED) -> list[Share]:
     """Shares offered *to* this profile. Never reads `Share.owner` -- that
     field is inherited from TimestampedDocument and meaningless here, since a
@@ -127,6 +149,12 @@ async def decline_share(*, owner: str, share_id: PydanticObjectId) -> Share:
         )
     share.state = ShareState.DECLINED
     await share.save()
+
+    await queue.publish_event(
+        "share.declined",
+        {"share_id": str(share.id), "to_owner": owner, "name": share.name},
+        owner=share.from_owner,
+    )
     return share
 
 
@@ -352,6 +380,15 @@ async def accept_share(
 
     await project_service.bump_counters(
         project.id, objects=len(copies), total_bytes=sum(c.size for c in copies)
+    )
+
+    # After the transaction commits, not inside it -- an event for a write that
+    # then rolled back would be a lie. publish_event swallows its own failures,
+    # so this cannot turn a successful accept into a reported failure.
+    await queue.publish_event(
+        "share.accepted",
+        {"share_id": str(share.id), "to_owner": owner, "name": share.name},
+        owner=share.from_owner,
     )
 
     # Not built here, deliberately -- see #51 (owner-delete/GC follow-on):

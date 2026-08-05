@@ -265,21 +265,13 @@
 }
 
 /* The rounded gradient chip is a product-UI device; the masthead wants the
-   kicker instead. Hidden rather than removed -- Classic still uses it. */
+   lockup image instead. Hidden rather than removed -- Classic still uses it. */
 .theme-broadsheet .header-logo {
   display: none;
 }
 
-/* "Genomics pipeline desk" -- set from CSS so Header.tsx stays shared. */
-.theme-broadsheet .header-brand::after {
-  content: "Genomics pipeline desk";
-  font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 400;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--ink-55);
-  white-space: nowrap;
+.theme-broadsheet .header-masthead-img {
+  height: 52px;
 }
 
 .theme-broadsheet .header-menu {

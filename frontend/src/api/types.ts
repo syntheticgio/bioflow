@@ -1345,9 +1345,19 @@ export interface PipelineSuggestion {
   title: string;
   description: string;
   why: string | null;
-  status: "available" | "unavailable";
+  /**
+   * "needs_install" is not blocked -- it is one click from working, and the
+   * card keeps a real `launch` payload just like "available" does. It exists
+   * so the UI can tell "one click from working" apart from "unavailable"
+   * (a dead end with a reason): rendering a not-yet-installed optional tool
+   * as unavailable would read as permanently broken and the user would never
+   * learn the tool exists at all.
+   */
+  status: "available" | "unavailable" | "needs_install";
   reason: string | null;
   launch: { endpoint: string; body: Record<string, unknown> } | null;
+  /** Set only when status is "needs_install": what pressing Launch costs. */
+  requires_install: { tool: string; download_bytes: number | null } | null;
   prior_runs: PriorRun[];
 }
 
@@ -1465,6 +1475,40 @@ export interface VariantQuery {
  * everything else, including the API layer, only ever passes it through.
  */
 export type { Profile } from "../stores/profileStore";
+
+// --- Shares ---
+
+/** Just enough to name one side of a share in a list row -- never the
+ *  profile's email, details, or password status. */
+export interface ShareParty {
+  owner: string;
+  username: string;
+  emoji: string;
+  colour: string;
+}
+
+export type ShareState = "offered" | "accepted" | "declined" | "withdrawn";
+
+export interface Share {
+  id: string;
+  from_owner: string;
+  to_owner: string;
+  /** Resolved server-side. Never join `from_owner`/`to_owner` against
+   *  `/profiles` on the client -- the adopted profile's owner string is the
+   *  literal "local", which matches no profile id, so that join silently
+   *  renders a blank sender for exactly the profile most likely to be
+   *  sharing. */
+  from_profile: ShareParty;
+  to_profile: ShareParty;
+  source_object_id: string;
+  name: string;
+  size: number;
+  state: ShareState;
+  accepted_object_id: string | null;
+  message: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 // --- UniProt ---
 

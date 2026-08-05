@@ -25,7 +25,9 @@ import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
+import { SettingsTools } from "./components/SettingsTools";
 import { SettingsView } from "./components/SettingsView";
+import { SharesView } from "./components/SharesView";
 import { UploadTray } from "./components/UploadTray";
 import { useEvents } from "./hooks/useEvents";
 import { MobileActivity } from "./mobile/MobileActivity";
@@ -71,6 +73,7 @@ function Shell() {
   const pathname = useLocation().pathname;
   const singleColumn =
     pathname === "/activity" ||
+    pathname === "/shares" ||
     pathname.startsWith("/help/") ||
     pathname.startsWith("/settings");
 
@@ -93,9 +96,11 @@ function Shell() {
           <Route path="/p/:projectId" element={<ProjectExplorer />} />
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
+          <Route path="/shares" element={<SharesView />} />
           <Route path="/help/about" element={<HelpAbout />} />
           <Route path="/settings" element={<SettingsView />} />
           <Route path="/settings/ai" element={<SettingsView />} />
+          <Route path="/settings/tools" element={<SettingsTools />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />

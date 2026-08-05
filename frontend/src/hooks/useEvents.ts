@@ -61,6 +61,8 @@ export function useEvents() {
           qc.invalidateQueries({ queryKey: ["object"] });
         }
         if (key === "stats") qc.invalidateQueries({ queryKey: ["system", "stats"] });
+        if (key === "shares") qc.invalidateQueries({ queryKey: ["shares"] });
+        if (key === "projects") qc.invalidateQueries({ queryKey: ["projects"] });
       }
     };
 
@@ -90,6 +92,18 @@ export function useEvents() {
         if (name !== "job.progress") schedule("objects");
       });
     }
+
+    source.addEventListener("share.offered", () => schedule("shares"));
+    source.addEventListener("share.declined", () => schedule("shares"));
+    // Accepting materializes new objects, and may lazily create the "Shared
+    // with me" project -- without invalidating those too, the accepted file
+    // is invisible in the explorer until a manual reload, which is exactly
+    // the symptom this whole feature exists to prevent.
+    source.addEventListener("share.accepted", () => {
+      schedule("shares");
+      schedule("objects");
+      schedule("projects");
+    });
 
     return () => {
       if (timer.current !== null) window.clearTimeout(timer.current);

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from app.models import FormatKind, ObjectRole, ObjectStatus
-from app.pipelines import align_runner, aligner_registry, assembler_registry
+from app.pipelines import align_runner, aligner_registry, assembler_registry, tools
 from app.services import pipeline_service
 from app.services.suggestion_service import (
     CardStatus,
@@ -86,12 +86,24 @@ class TestCardDefaults:
 
 
 class _FakeTool:
-    def __init__(self, available: bool, version: str = "0.23.4", name: str = "tool"):
+    def __init__(
+        self,
+        available: bool,
+        version: str = "0.23.4",
+        name: str = "tool",
+        install_state=None,
+    ):
         self.available = available
         self.version = version
         # The align card puts this in the reason, so it has to be the real
         # binary name rather than a placeholder.
         self.name = name
+        # None for every ordinary tool, matching the real Tool dataclass's
+        # default -- only an ON_DEMAND_IMAGE probe sets this. Tests of the
+        # NEEDS_INSTALL path pass tools.InstallState.NOT_INSTALLED or .UNKNOWN
+        # explicitly; every other test leaves it None, which is also what
+        # `not available` alone used to mean before this field existed.
+        self.install_state = install_state
 
 
 def _fake_obj(
@@ -525,7 +537,9 @@ class TestAlignCard:
 
 
 @contextmanager
-def installed_callers(clair3=True, bcftools=True, deepvariant=True):
+def installed_callers(
+    clair3=True, bcftools=True, deepvariant=True, deepvariant_install_state=None
+):
     """Pin the three variant-caller probes.
 
     Safe to patch this way -- unlike the aligners, which reach their probes
@@ -536,6 +550,15 @@ def installed_callers(clair3=True, bcftools=True, deepvariant=True):
     `test_the_caller_patch_actually_takes_effect` pins that rather than
     trusting it, because a patch that misses would leave every test below
     silently reading whatever this host has installed.
+
+    `deepvariant_install_state` is separate from `deepvariant` (available or
+    not) because NEEDS_INSTALL needs a *third* value the plain boolean cannot
+    express: not merely unavailable, but unavailable *because it has not been
+    pulled yet* (tools.InstallState.NOT_INSTALLED) rather than because the
+    daemon cannot be reached (.UNKNOWN) or is genuinely broken. Defaults to
+    None, matching every existing call site's assumption that DeepVariant's
+    unavailability carries no install-state distinction -- only the
+    NEEDS_INSTALL tests below pass it explicitly.
     """
     with (
         patch("app.services.suggestion_service.tools.clair3",
@@ -543,7 +566,9 @@ def installed_callers(clair3=True, bcftools=True, deepvariant=True):
         patch("app.services.suggestion_service.tools.bcftools",
               return_value=_FakeTool(bcftools, name="bcftools")),
         patch("app.services.suggestion_service.tools.deepvariant",
-              return_value=_FakeTool(deepvariant, name="deepvariant")),
+              return_value=_FakeTool(
+                  deepvariant, name="deepvariant", install_state=deepvariant_install_state
+              )),
     ):
         yield
 
@@ -682,6 +707,81 @@ class TestVariantsCard:
             )
         assert card.status is CardStatus.AVAILABLE
         assert card.launch["body"]["params"]["caller"] == "deepvariant"
+
+    def test_a_not_yet_installed_deepvariant_offers_needs_install(self):
+        """The regression this task exists to fix: an installable-but-not-
+        pulled DeepVariant must not be treated as unavailable *or* silently
+        substituted -- it must offer the install, with a real launch payload
+        the confirm-then-chain flow (task 7) can act on."""
+        with installed_callers(
+            clair3=False,
+            deepvariant=False,
+            deepvariant_install_state=tools.InstallState.NOT_INSTALLED,
+        ):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.status is CardStatus.NEEDS_INSTALL
+        assert card.launch is not None
+        assert card.launch["body"]["params"]["caller"] == "deepvariant"
+        assert card.launch["body"]["bam_id"] == "bam456"
+
+    def test_needs_install_names_the_tool_and_its_size(self):
+        with installed_callers(
+            clair3=False,
+            deepvariant=False,
+            deepvariant_install_state=tools.InstallState.NOT_INSTALLED,
+        ):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.requires_install == {
+            "tool": "deepvariant",
+            "download_bytes": tools.TOOL_META["deepvariant"].download_bytes,
+        }
+
+    def test_an_unknown_deepvariant_state_does_not_offer_install(self):
+        """UNKNOWN means the daemon could not be reached at all -- a fault,
+        not an offer. Pressing Install would just fail again for the same
+        reason, so this must fall through to the ordinary UNAVAILABLE gate
+        rather than dangling a button that cannot work."""
+        with installed_callers(
+            clair3=False,
+            deepvariant=False,
+            deepvariant_install_state=tools.InstallState.UNKNOWN,
+        ):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        assert card.status is CardStatus.UNAVAILABLE
+        assert card.launch is None
+
+    def test_needs_install_is_only_reachable_for_long_reads(self):
+        """Short reads have no DeepVariant fallback at all (see the branch's
+        own comment on why) -- a not-yet-installed DeepVariant must not leak
+        into the short-read gate."""
+        with installed_callers(
+            bcftools=False,
+            deepvariant_install_state=tools.InstallState.NOT_INSTALLED,
+        ):
+            card = build_variants_card(_bam(), align_runner.ReadChemistry.SHORT)
+        assert card.status is CardStatus.UNAVAILABLE
+
+    def test_needs_install_reaches_the_api_payload(self):
+        """The whole point of the field: it has to survive as_dict(), the
+        boundary the frontend actually reads."""
+        with installed_callers(
+            clair3=False,
+            deepvariant=False,
+            deepvariant_install_state=tools.InstallState.NOT_INSTALLED,
+        ):
+            card = build_variants_card(
+                _bam(), align_runner.ReadChemistry.ONT_SIMPLEX
+            )
+        payload = card.as_dict()
+        assert payload["status"] == "needs_install"
+        assert payload["launch"] is not None
+        assert payload["requires_install"]["tool"] == "deepvariant"
 
     def test_a_missing_bcftools_gates_a_short_read_card(self):
         with installed_callers(bcftools=False):
@@ -956,7 +1056,7 @@ def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
 
 CARD_KEYS = {
     "kind", "category", "title", "description",
-    "why", "status", "reason", "launch", "prior_runs",
+    "why", "status", "reason", "launch", "requires_install", "prior_runs",
 }
 
 

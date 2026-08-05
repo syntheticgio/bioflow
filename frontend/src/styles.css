@@ -122,6 +122,12 @@ textarea:focus {
   color: #fff;
 }
 
+.header-masthead-img {
+  height: 20px;
+  width: auto;
+  display: block;
+}
+
 .header-menu {
   display: flex;
   gap: 2px;
@@ -3808,6 +3814,15 @@ table.software-matrix thead th.software-matrix-corner {
   margin-top: auto;
 }
 
+/* Sits below .suggestion-why for a "needs_install" card. No margin-top:auto
+   of its own -- .suggestion-why already claims that when both are present,
+   and a needs_install card always has a `why` (see build_variants_card's
+   NEEDS_INSTALL branch), so this only ever needs to sit directly beneath it. */
+.suggestion-install-size {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 .suggestion-none {
   font-size: 12px;
   color: var(--text-faint);
@@ -4817,6 +4832,79 @@ table.software-matrix thead th.software-matrix-corner {
   border-bottom: none;
 }
 
+/* Settings section nav (AI / Tools), above the AI page's own rail-and-detail
+   body and the Tools page's table alike -- see SettingsNav.tsx. */
+.settings-section-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section-nav-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.settings-section-nav-item:hover {
+  color: var(--text);
+}
+
+.settings-section-nav-item.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* Settings > Tools table. A variant of .settings-table rather than a second
+   class on its cells: the AI routing table's first column is a narrow label,
+   this one's is a name plus a one-liner and needs room to wrap instead of
+   being clipped to content width. */
+.settings-tools-table th {
+  text-align: left;
+  font-weight: 400;
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.settings-tools-table tr:last-child th,
+.settings-tools-table tr:last-child td {
+  border-bottom: none;
+}
+
+.settings-tools-name {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.settings-tools-one-liner {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.settings-tools-state {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-tools-state-failed {
+  color: var(--error);
+}
+
+.settings-tools-action {
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
 .settings-security-note {
   margin-top: 28px;
   padding-top: 14px;
@@ -4838,4 +4926,112 @@ table.software-matrix thead th.software-matrix-corner {
 .settings-modal h2 {
   margin: 0 0 14px;
   font-size: 15px;
+}
+
+/* --- Sharing --- */
+
+/* The unread count on the profile menu label. Small enough to sit inline
+   after the emoji/username without pushing the menu button wider than its
+   neighbours. */
+.menu-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  min-width: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+}
+
+.shares-view {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.shares-view h1 {
+  margin: 0 0 20px;
+  font-size: 20px;
+}
+
+.shares-view section {
+  margin-bottom: 32px;
+}
+
+.shares-view h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.share-empty {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.share-row {
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.share-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.share-row-size {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.share-row-message {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.share-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.share-row-note {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.share-state {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 10px;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+}
+
+.share-state-accepted {
+  color: var(--success);
+}
+
+.share-state-declined,
+.share-state-withdrawn {
+  color: var(--text-faint);
 }
