@@ -601,6 +601,19 @@ def ivar() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def polypolish() -> Tool:
+    # `--version` (unlike iVar's subcommand form) -- verified against a real
+    # installed 0.7.1 binary on 2026-08-05, which prints "Polypolish 0.7.1"
+    # and exits zero.
+    #
+    # Absent on arm64 by design rather than by accident: upstream ships no
+    # linux-aarch64 build and the install script skips it there, so this
+    # probe reporting "not installed" on Apple Silicon is the intended
+    # outcome, not a broken image. See install-polypolish.sh.
+    return _probe("polypolish", settings.polypolish_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -1413,6 +1426,53 @@ TOOL_META: dict[str, ToolMeta] = {
             "minutes and a vertebrate one can be hours. Records lineage and "
             "OrthoDB version alongside the four percentages, since a score "
             "from one version is not comparable to a score from another."
+        ),
+    ),
+    "polypolish": ToolMeta(
+        pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
+        one_liner="Short-read polishing of long-read assemblies",
+        summary=(
+            "Corrects residual base errors in a long-read assembly using "
+            "high-accuracy short reads. Unlike older polishers it reads "
+            "alignments in which each read is mapped to every location it "
+            "matches, not just its best one, so it declines to change "
+            "positions where those locations disagree -- which is what makes "
+            "it safe to run on repetitive regions."
+        ),
+        strengths=(
+            "Uses all-alignment input, so repeats are not mis-corrected "
+            "toward whichever copy a best-alignment mapper happened to pick",
+            "Does not degrade an already-accurate assembly: the common "
+            "failure of naive short-read polishing is introducing errors, "
+            "not missing them",
+            "A single static binary with a predictable memory footprint",
+        ),
+        homepage="https://github.com/rrwick/Polypolish",
+        repository="https://github.com/rrwick/Polypolish",
+        citation=(
+            "Wick RR, Holt KE. Polypolish: Short-read polishing of long-read "
+            "bacterial genome assemblies. PLOS Computational Biology. "
+            "2022;18(1):e1009802."
+        ),
+        citation_url="https://doi.org/10.1371/journal.pcbi.1009802",
+        # From the repository's own LICENSE and its GitHub-reported SPDX id,
+        # checked 2026-08-05 rather than recalled.
+        license="GPL-3.0",
+        usage=(
+            "Corrects residual base errors in a draft assembly using short "
+            "reads. BioFlow aligns the reads to the draft itself with "
+            "bwa-mem2, reporting every location each read matches rather "
+            "than only its best one, because that all-alignment input is "
+            "what lets Polypolish leave ambiguous repeat positions alone. "
+            "Paired reads are additionally passed through Polypolish's own "
+            "insert-size filter. Below 25x estimated depth it runs in "
+            "careful mode, which stops it correcting repeats at all rather "
+            "than acting on thin evidence. The polished assembly is stored "
+            "as a new object beside the draft, never replacing it, since the "
+            "comparison between the two is the evidence that polishing "
+            "helped. Upstream also asks that users of 0.6.0 and later cite "
+            "Bouras et al., Microbial Genomics 2024 "
+            "(doi:10.1099/mgen.0.001254) alongside the paper above."
         ),
     ),
     "ivar": ToolMeta(

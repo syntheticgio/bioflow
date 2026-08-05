@@ -280,6 +280,18 @@ RUN chmod +x /srv/scripts/install-compleasm.sh \
        COMPLEASM_VERSION="${COMPLEASM_VERSION}" \
        /srv/scripts/install-compleasm.sh
 
+# --- Polypolish -------------------------------------------------------------
+#
+# Short-read polishing of long-read assemblies. Not in Debian; installed from
+# upstream's musl-static release binary, and deliberately skipped on arm64 --
+# see the install script's comments for both decisions.
+ARG POLYPOLISH_VERSION=0.7.1
+COPY scripts/install-polypolish.sh /srv/scripts/install-polypolish.sh
+RUN chmod +x /srv/scripts/install-polypolish.sh \
+    && POLYPOLISH_VERSION="${POLYPOLISH_VERSION}" \
+       TARGETARCH="${TARGETARCH}" \
+       /srv/scripts/install-polypolish.sh
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \

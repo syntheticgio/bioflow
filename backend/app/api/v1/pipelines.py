@@ -863,6 +863,32 @@ async def launch_consensus_route(body: ConsensusRequest, owner: OwnerDep) -> Job
     return JobOut.of(job)
 
 
+class PolishRequest(BaseModel):
+    draft_object_id: PydanticObjectId
+    # Optional: omitted, the launch resolves the project's one short-read set
+    # and refuses when there is more than one, rather than picking. Polishing
+    # with another sample's reads is a silent corruption, not a wrong-looking
+    # result, so the ambiguous case has to fail loudly.
+    reads_object_id: PydanticObjectId | None = None
+    mate_object_id: PydanticObjectId | None = None
+
+
+@router.post("/polish", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_polish_route(body: PolishRequest, owner: OwnerDep) -> JobOut:
+    """Queue a Polypolish run: short reads correcting a draft assembly.
+
+    No alignment is supplied. Polypolish needs every location each read maps
+    to, which `align_reads` does not produce, so the job aligns the reads to
+    the draft itself."""
+    job = await pipeline_service.launch_polish(
+        draft_object_id=body.draft_object_id,
+        reads_object_id=body.reads_object_id,
+        mate_object_id=body.mate_object_id,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep

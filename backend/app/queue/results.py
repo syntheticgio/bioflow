@@ -1510,6 +1510,76 @@ async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
             )
 
 
+async def _apply_polish_assembly(result: dict, *, owner: str) -> None:
+    """Turn a finished Polypolish run into a new assembly object.
+
+    The polished assembly sits *beside* the draft rather than replacing it.
+    That is deliberate: the comparison between draft and polished is the
+    evidence that polishing helped at all, and overwriting the input
+    destroys the only thing that could show it. `polish_changed_positions`
+    is the fact that makes the comparison cheap -- a polish that changed
+    nothing is either a clean assembly or a broken pipeline, and only that
+    number next to the measured depth tells them apart.
+
+    Role REFERENCE, matching the consensus applier and the foundation's rule
+    that every generated assembly is addressable, alignable and auditable
+    through the same object model.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    draft_id = result.get("draft_object_id")
+    if not output or not draft_id:
+        return
+
+    draft = await DataObject.get(PydanticObjectId(draft_id))
+    if draft is None:
+        log.warning("polish_parent_missing", object_id=draft_id)
+        return
+
+    # The reads are parents too, not just the draft. A polished assembly is a
+    # claim about which reads corrected it, and a provenance graph that
+    # showed only the draft would make two polishes of one draft with
+    # different samples indistinguishable.
+    parents = [draft.id]
+    for key in ("reads_object_id", "mate_object_id"):
+        value = result.get(key)
+        if value:
+            parents.append(PydanticObjectId(value))
+
+    job_id = result.get("job_id")
+    facts = result.get("facts") or {}
+    try:
+        polished = await object_service.ingest_local_file(
+            owner=draft.owner,
+            project_id=draft.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.REFERENCE,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=facts,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("polish_ingest_failed", object_id=draft_id, error=str(e))
+        return
+
+    log.info(
+        "polish_applied",
+        draft_id=draft_id,
+        polished_id=str(polished.id),
+        changed=facts.get("polish_changed_positions"),
+        careful=facts.get("polish_careful_mode"),
+    )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(
+                run_id, [polished.id], owner=polished.owner
+            )
+
+
 def variant_provenance(result: dict) -> dict:
     """The facts a variant calling run stamps onto the VCF it produced.
 
@@ -1844,4 +1914,5 @@ _APPLIERS = {
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
     "consensus_from_alignment": _apply_consensus_from_alignment,
+    "polish_assembly": _apply_polish_assembly,
 }

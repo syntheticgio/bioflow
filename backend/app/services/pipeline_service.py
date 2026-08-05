@@ -48,6 +48,7 @@ from app.pipelines import (
     fastp_runner,
     lineage_inference,
     pairing,
+    polypolish_runner,
     resource_estimator,
     tools,
     trimmomatic_runner,
@@ -3162,6 +3163,150 @@ async def launch_consensus(
         bam_id=str(bam.id),
         reference_id=str(reference.id),
         primers=bool(primer_bed_object_id),
+        tool_version=tool.version,
+    )
+    return job
+
+
+def _read_bases(obj: DataObject) -> int | None:
+    """Total bases in a FASTQ, from fastp's own count when QC has run.
+
+    None when it has not. That None propagates all the way to the
+    `--careful` decision, which deliberately takes the non-careful path on
+    unknown depth rather than guessing -- see
+    `polypolish_runner.params_for_depth`.
+    """
+    before = (obj.facts or {}).get("qc_before_filtering") or {}
+    total = before.get("total_bases")
+    return int(total) if total else None
+
+
+async def launch_polish(
+    *,
+    draft_object_id: PydanticObjectId,
+    owner: str,
+    reads_object_id: PydanticObjectId | None = None,
+    mate_object_id: PydanticObjectId | None = None,
+) -> Job:
+    """Queue a Polypolish run: short reads correcting a draft assembly.
+
+    Unlike `launch_consensus`, there is no BAM to validate a target against.
+    Polypolish requires all-alignment SAM, which `align_reads` does not
+    produce, so the handler aligns these reads to this draft itself -- which
+    makes the alignment target correct by construction rather than by check.
+    The epic's provenance requirement is discharged by recording the aligner
+    on the output object, not by refusing a mismatched input that cannot
+    exist here.
+
+    Reads are resolved from the project when not named explicitly, and only
+    when the choice is unambiguous: polishing an assembly with the wrong
+    sample's reads is a silent corruption, so one candidate set means launch
+    and several means refuse. `reference_assembly.short_read_sets` is what
+    decides which candidates are eligible, and it excludes long-read files
+    even when their inferred chemistry claims otherwise.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tool = tools.require(tools.polypolish())
+    tools.require(tools.bwa_mem2())
+
+    draft = await object_service.get_object(draft_object_id, owner=owner)
+    reference_assembly.check_draft_assembly(draft)
+
+    if reads_object_id is None:
+        candidates = reference_assembly.short_read_sets(
+            await object_service.list_objects(
+                draft.project_id, owner=owner, status=ObjectStatus.READY
+            )
+        )
+        if not candidates:
+            raise ValidationError(
+                "Polishing needs short reads, and this project has none",
+                details={"draft_id": str(draft.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several short-read sets; name the one to "
+                "polish with",
+                details={
+                    "draft_id": str(draft.id),
+                    "candidates": [
+                        [str(o.id) for o in group] for group in candidates
+                    ],
+                },
+            )
+        chosen = candidates[0]
+    else:
+        chosen = [await object_service.get_object(reads_object_id, owner=owner)]
+        if mate_object_id is not None:
+            chosen.append(
+                await object_service.get_object(mate_object_id, owner=owner)
+            )
+        for obj in chosen:
+            if not reference_assembly.is_short_read(obj):
+                raise ValidationError(
+                    f"{obj.name!r} is not short-read data; Polypolish "
+                    "corrects a draft using short reads and running it on "
+                    "long reads would degrade the assembly",
+                    details={"object_id": str(obj.id)},
+                )
+
+    draft_digest, draft_path = await _resolve_readable(draft)
+    payload: dict = {
+        "draft_object_id": str(draft.id),
+        "draft_name": draft.name,
+        "threads": 8,
+    }
+    if draft_digest:
+        payload["draft_sha256"] = draft_digest
+    if draft_path:
+        payload["draft_path"] = draft_path
+
+    for slot, obj in zip(("reads", "mate"), chosen):
+        digest, path = await _resolve_readable(obj)
+        payload[f"{slot}_object_id"] = str(obj.id)
+        payload[f"{slot}_name"] = obj.name
+        if digest:
+            payload[f"{slot}_sha256"] = digest
+        if path:
+            payload[f"{slot}_path"] = path
+
+    # Depth decides --careful, so it is computed here rather than in the
+    # handler: the handler sees paths, not the objects carrying the facts.
+    assembly_length = (draft.facts or {}).get("total_bases")
+    read_bases = [b for b in (_read_bases(o) for o in chosen) if b]
+    payload["depth"] = polypolish_runner.estimate_depth(
+        read_bases=sum(read_bases) if read_bases else None,
+        assembly_length=int(assembly_length) if assembly_length else None,
+    )
+
+    job = await queue.enqueue(
+        "polish_assembly",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # Sized for bwa-mem2, not for Polypolish -- see the handler's own
+        # note on why peak RSS here scales with the draft rather than the
+        # reads.
+        resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"polish:{draft.id}:{chosen[0].id}",
+        project_id=draft.project_id,
+        object_id=draft.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Polishing is already queued or running for this assembly",
+            details={"object_id": str(draft.id)},
+        )
+
+    log.info(
+        "polish_launched",
+        job_id=str(job.id),
+        draft_id=str(draft.id),
+        read_files=len(chosen),
+        depth=payload["depth"],
         tool_version=tool.version,
     )
     return job

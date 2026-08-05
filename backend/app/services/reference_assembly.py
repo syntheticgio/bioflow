@@ -1,8 +1,12 @@
 """Shared validation for reference-based assembly workflows.
 
-These helpers are foundation code for Pilon, RagTag and iVar. They validate
-object shape and provenance before a future tool-specific launch queues any
+These helpers are foundation code for Polypolish, RagTag and iVar. They
+validate object shape and provenance before a tool-specific launch queues any
 long-running work.
+
+(Written for Pilon rather than Polypolish; #23 swapped the tool in 2026-08-05
+because Pilon's best-alignment input mis-corrects repeats. The foundation
+needed no change for the swap, but its own comments named the wrong tool.)
 """
 
 from app.errors import NotFoundError, ValidationError
@@ -230,3 +234,120 @@ async def validate_bam_aligned_to(
             },
         )
     return bam
+
+
+# --- Short reads for polishing ---------------------------------------------
+#
+# Polishing is the first workflow here whose second input is *reads* rather
+# than another assembly or a BAM, and the reads must be short reads: running
+# a short-read polisher over ONT or PacBio data is not merely unusual, it is
+# meaningless. So unlike the assembly validators above, which check shape,
+# these have to reason about chemistry.
+
+LONG_READ_PLATFORMS = frozenset({"OXFORD_NANOPORE", "PACBIO_SMRT"})
+SHORT_READ_PLATFORMS = frozenset(
+    {"ILLUMINA", "BGISEQ", "DNBSEQ", "ELEMENT", "ULTIMA", "SINGULAR", "ION_TORRENT"}
+)
+
+
+def is_short_read(obj: DataObject) -> bool:
+    """Whether a FASTQ is short-read data.
+
+    **Platform first, chemistry only as a tie-break** -- and that order is
+    the whole point of this function, not an implementation detail.
+
+    The obvious rule is `qc_read_chemistry == "short"`, since QC already
+    infers chemistry and the enum has a SHORT member. Checked against the
+    real database on 2026-08-05, that rule is wrong: `ERR16145610.fastq` is
+    a MinION run whose `qc_platform` is OXFORD_NANOPORE and whose
+    `qc_read_chemistry` is `short`. The chemistry inference reads read
+    *lengths*, so a nanopore run that happens to carry short reads infers
+    short -- true about the reads, false about the data. Trusting it would
+    let a polish job run ONT reads through a short-read polisher, which does
+    not error and quietly degrades the assembly it was meant to improve.
+    No fixture would have caught this; the file did.
+
+    So a known long-read platform is disqualifying regardless of what
+    chemistry says, and chemistry only gets a vote when the platform is
+    unknown.
+
+    A file with *no* platform recorded counts as short, because
+    `_qc_platform` defaults to ILLUMINA -- this module does not second-guess
+    that default. It is the same call `sam_platform` documents ("the
+    overwhelmingly common case here"), and reversing it locally would mean
+    an uploaded Illumina FASTQ, which typically carries no metadata at all,
+    never gets a polish card. The residual risk is an uploaded long-read
+    file with no metadata; the launch path validates the same way, so the
+    user who names it explicitly gets the same answer, and this is a wrong
+    *offer* rather than a wrong run.
+    """
+    if obj.format.kind is not FormatKind.FASTQ:
+        return False
+
+    # Lazily imported: pipeline_service imports this module, so a top-level
+    # import here would be circular. `_qc_platform` is the one place that
+    # knows how to turn "PromethION" or "Illumina NovaSeq X Plus" into a
+    # platform name, and reimplementing that table here is how the two
+    # copies drift.
+    from app.services.pipeline_service import _qc_platform
+
+    platform = _qc_platform(obj)
+    if platform in LONG_READ_PLATFORMS:
+        return False
+    if platform in SHORT_READ_PLATFORMS:
+        return True
+
+    return (obj.facts or {}).get("qc_read_chemistry") == "short"
+
+
+def group_read_sets(reads: list[DataObject]) -> list[list[DataObject]]:
+    """Group FASTQ objects into read sets: mate-linked pairs, or singletons.
+
+    Returns each set with R1 first, so a caller can pass them to an aligner
+    positionally without re-deriving which is which. Ordering within a pair
+    comes from `read_number` when the mate detection (#17) recorded one, and
+    falls back to object id for a stable -- if arbitrary -- order when it did
+    not, since an unordered pair would make the run non-reproducible for no
+    reason.
+    """
+    by_id = {obj.id: obj for obj in reads}
+    seen: set = set()
+    sets: list[list[DataObject]] = []
+
+    for obj in reads:
+        if obj.id in seen:
+            continue
+        mate_id = getattr(obj, "mate_object_id", None)
+        mate = by_id.get(mate_id) if mate_id else None
+        if mate is None or mate.id in seen:
+            seen.add(obj.id)
+            sets.append([obj])
+            continue
+        seen.add(obj.id)
+        seen.add(mate.id)
+        pair = sorted(
+            [obj, mate],
+            key=lambda o: (
+                (o.facts or {}).get("read_number") or 0,
+                str(o.id),
+            ),
+        )
+        sets.append(pair)
+    return sets
+
+
+def short_read_sets(objects: list[DataObject]) -> list[list[DataObject]]:
+    """The ready short-read sets among a project's objects.
+
+    The unit a polish run consumes is a *set* -- one FASTQ, or a mate-linked
+    pair -- not an individual file, which is why this returns groups rather
+    than a flat list. A project with one paired Illumina sample has one set
+    here, not two candidates, and that distinction is what lets the polish
+    card offer an unambiguous launch instead of guessing.
+    """
+    ready = [
+        obj
+        for obj in objects
+        if obj.status is ObjectStatus.READY and is_short_read(obj)
+    ]
+    return group_read_sets(ready)

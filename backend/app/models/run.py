@@ -152,6 +152,17 @@ class RunJobRole(StrEnum):
     # point of its run, same reasoning as ASSEMBLE: a consensus run whose
     # consensus failed produced nothing.
     CONSENSUS = "consensus"
+    # Short-read polishing of a draft assembly. Named for the action, same
+    # reasoning as CONSENSUS above, and likewise the whole point of its run:
+    # a polish run whose polish failed produced nothing.
+    #
+    # Note both this and CONSENSUS are currently declared but never passed to
+    # `run_service.link_job` -- ASSEMBLE is the only reference-assembly-family
+    # role a launch actually links. That gap predates this member and is not
+    # something adding it creates; it is recorded on GitHub #23 rather than
+    # fixed here, because giving these two handlers Run records is its own
+    # change with its own verification.
+    POLISH = "polish"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive
