@@ -1,56 +1,20 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { api, ApiRequestError } from "../api/client";
-import type { Feedback } from "../api/types";
+import type { FeedbackSubmission } from "../api/types";
 
 const CONTACT_MAX_LENGTH = 200;
 const SUBJECT_MAX_LENGTH = 200;
 const COMMENT_MAX_LENGTH = 2000;
 
-function formatTimestamp(iso: string): string {
-  return new Date(iso).toLocaleString();
-}
-
-function FeedbackEntry({ item }: { item: Feedback }) {
-  return (
-    <article className="software-entry">
-      <div className="software-entry-head">
-        <h3 className="software-name">{item.subject}</h3>
-      </div>
-      <div className="software-entry-body">
-        <div className="software-prose">
-          <p>{item.comment}</p>
-        </div>
-        <div className="software-facts">
-          <div className="software-fact">
-            <span className="software-fact-label">From</span>
-            <span className="software-fact-value">{item.contact}</span>
-          </div>
-          <div className="software-fact">
-            <span className="software-fact-label">Submitted</span>
-            <span className="software-fact-value">{formatTimestamp(item.created_at)}</span>
-          </div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 /**
- * A feedback form under Help, and the list of what's already been submitted.
+ * A feedback form under Help.
  *
- * Write-only in the sense that nothing reads it back into a workflow -- there
- * is no email or ticketing behind this, just a `feedback` collection someone
- * can query directly. The list exists so the form isn't a hole things vanish
- * into: submitting shows your entry appear below, same as everyone else's.
+ * Submitting persists the feedback and pushes a Discord notification to the
+ * team. The form resets on success; there is no on-page list anymore --
+ * notifications go to the configured channel, not to a self-read log.
  */
 export function HelpFeedback() {
-  const queryClient = useQueryClient();
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["feedback"],
-    queryFn: api.listFeedback,
-  });
-
   const [contact, setContact] = useState("");
   const [subject, setSubject] = useState("");
   const [comment, setComment] = useState("");
@@ -62,28 +26,31 @@ export function HelpFeedback() {
         contact: contact.trim(),
         subject: subject.trim(),
         comment: comment.trim(),
-      }),
+      } as FeedbackSubmission),
     onSuccess: () => {
       setContact("");
       setSubject("");
       setComment("");
       setError(null);
-      queryClient.invalidateQueries({ queryKey: ["feedback"] });
     },
     onError: (err) => {
       setError(err instanceof ApiRequestError ? err.message : "Could not submit feedback");
     },
   });
 
-  const canSubmit = contact.trim() && subject.trim() && comment.trim() && !submit.isPending;
+  const canSubmit =
+    contact.trim().length > 0 &&
+    subject.trim().length > 0 &&
+    comment.trim().length > 0 &&
+    !submit.isPending;
 
   return (
     <div className="help-page">
       <h1>Feedback</h1>
       <p className="help-intro">
-        Report a bug, request something, or just say what's working. This
-        saves straight to BioFlow's database — there's no email or ticket
-        system behind it yet, so nobody is notified when you submit.
+        Report a bug, request something, or just say what's working. Your
+        submission is saved and forwarded to the team via Discord -- you should
+        hear back if you included a way to reach you.
       </p>
 
       <form
@@ -132,18 +99,6 @@ export function HelpFeedback() {
           </button>
         </div>
       </form>
-
-      <h2 className="software-group-title">Previous submissions</h2>
-
-      {isLoading && <p className="software-note">Loading feedback…</p>}
-      {isError && <p className="software-note">Could not reach the server to list feedback.</p>}
-      {data && data.length === 0 && (
-        <p className="software-note">Nothing submitted yet.</p>
-      )}
-
-      {data?.map((item) => (
-        <FeedbackEntry key={item.id} item={item} />
-      ))}
     </div>
   );
 }

@@ -187,6 +187,14 @@ class Settings(BaseSettings):
     ai_legacy_base_url: str = Field(default="", alias="LLM_BASE_URL")
     ai_legacy_model: str = Field(default="", alias="LLM_MODEL")
 
+    # --- Feedback notifications ---
+    # When true, new feedback submissions are pushed to feedback_webhook_url
+    # (a Discord-compatible webhook) after the database insert succeeds.
+    # Delivery is best-effort: a failure is logged but never affects the
+    # 201 response or the persisted record.
+    feedback_enabled: bool = True
+    feedback_webhook_url: str = ""
+
     log_level: str = "INFO"
     owner: str = "local"
 
