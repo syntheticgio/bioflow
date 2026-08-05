@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 
-from app.models import FormatKind, ObjectRole
+from app.models import FormatKind, ObjectRole, SequenceType
 
 
 class FieldType(StrEnum):
@@ -64,7 +64,7 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
         "sequence_type",
         "Sequence type",
         type=FieldType.ENUM,
-        options=("Genomic", "CDS", "Protein", "RNA"),
+        options=tuple(t.value for t in SequenceType),
         help="What kind of sequence this file holds. Detected from the name for "
              "references; set it here if that was absent or wrong.",
         group="Sequence",

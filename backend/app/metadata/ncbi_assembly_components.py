@@ -23,6 +23,7 @@ import json
 from dataclasses import dataclass
 
 from app.logging import get_logger
+from app.models import ObjectRole, SequenceType
 
 log = get_logger(__name__)
 
@@ -37,7 +38,7 @@ class ComponentSpec:
 
     key: str  # the `--include` name
     label: str
-    role: str  # the ObjectRole value its file lands as
+    role: ObjectRole
     # The `included_data_files` key `--preview` reports it under. These names
     # do not match the --include names (`gff3` is reported as `genome_gff`),
     # which is exactly why this mapping is written down.
@@ -49,7 +50,7 @@ class ComponentSpec:
     # component rather than guessed from the filename the way an uploaded FASTA
     # is: here we already know what NCBI was asked for, and knowing beats
     # inferring. None for components that are not sequence at all (GFF3).
-    sequence_type: str | None = None
+    sequence_type: SequenceType | None = None
     mandatory: bool = False
 
 
@@ -57,10 +58,10 @@ COMPONENTS: dict[str, ComponentSpec] = {
     "genome": ComponentSpec(
         key="genome",
         label="Genome FASTA",
-        role="reference",
+        role=ObjectRole.REFERENCE,
         preview_key="all_genomic_fasta",
         file_type="GENOMIC_NUCLEOTIDE_FASTA",
-        sequence_type="Genomic",
+        sequence_type=SequenceType.GENOMIC,
         # Not selectable-off: every other component describes coordinates or
         # products of this sequence.
         mandatory=True,
@@ -68,25 +69,25 @@ COMPONENTS: dict[str, ComponentSpec] = {
     "gff3": ComponentSpec(
         key="gff3",
         label="Annotation (GFF3)",
-        role="annotation",
+        role=ObjectRole.ANNOTATION,
         preview_key="genome_gff",
         file_type="GFF3",
     ),
     "protein": ComponentSpec(
         key="protein",
         label="Protein FASTA",
-        role="protein",
+        role=ObjectRole.PROTEIN,
         preview_key="prot_fasta",
         file_type="PROTEIN_FASTA",
-        sequence_type="Protein",
+        sequence_type=SequenceType.PROTEIN,
     ),
     "cds": ComponentSpec(
         key="cds",
         label="CDS FASTA",
-        role="transcript",
+        role=ObjectRole.TRANSCRIPT,
         preview_key="cds_fasta",
         file_type="CDS_NUCLEOTIDE_FASTA",
-        sequence_type="CDS",
+        sequence_type=SequenceType.CDS,
     ),
 }
 

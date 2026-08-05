@@ -171,14 +171,15 @@ class TestComponentTableIntegrity:
         assert len(set(preview_keys)) == len(preview_keys)
 
     def test_every_role_is_a_real_object_role(self):
-        """`ComponentSpec.role` is typed `str` with a comment saying it holds
-        an ObjectRole value, so a typo here produces a role no picker matches.
-        What that costs is on record: `fix_legacy_component_roles.py` exists
-        because rows roled wrong reach the aligner's reference picker as
-        though a protein FASTA were a genome.
+        """`ComponentSpec.role` is typed `ObjectRole`, which turns a typo here
+        into an import-time error rather than a role no picker matches. What
+        the untyped version cost is on record: `fix_legacy_component_roles.py`
+        exists because rows roled wrong reach the aligner's reference picker
+        as though a protein FASTA were a genome. This test is now a type
+        assertion rather than a value-membership check -- the dataclass field
+        itself is what does the enforcing.
         """
         from app.models import ObjectRole
 
-        valid = {role.value for role in ObjectRole}
         for spec in ac.COMPONENTS.values():
-            assert spec.role in valid
+            assert isinstance(spec.role, ObjectRole)

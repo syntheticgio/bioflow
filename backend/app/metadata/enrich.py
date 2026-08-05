@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 from app.logging import get_logger
 from app.metadata import ncbi_assembly, sra
-from app.models import FormatKind
+from app.models import FormatKind, SequenceType
 
 log = get_logger(__name__)
 
@@ -252,30 +252,37 @@ SEQUENCE_TYPE_ELIGIBLE_FORMATS = {FormatKind.FASTA}
 # bare token first would claim them both and label a CDS file a genome -- the
 # same confusion that once let a CDS FASTA be offered as an alignable
 # reference.
-_COMPOUND_SEQUENCE_TYPES: tuple[tuple[str, str], ...] = (
-    ("cds_from_genomic", "CDS"),
-    ("rna_from_genomic", "RNA"),
+# Inclusion rule: a token or compound needle belongs in the tables below if
+# and only if, appearing in a filename, it names the sequence type
+# unambiguously by long-standing convention. Ambiguity resolves to omission
+# (detect_sequence_type returns None), never to a best guess -- see that
+# function's docstring. This is why these are not derived from SequenceType:
+# the enum enumerates the four possible *answers*, not the open vocabulary of
+# filename conventions that imply one.
+_COMPOUND_SEQUENCE_TYPES: tuple[tuple[str, SequenceType], ...] = (
+    ("cds_from_genomic", SequenceType.CDS),
+    ("rna_from_genomic", SequenceType.RNA),
 )
 
 # Matched against whole `[._-]`-separated tokens, never as substrings.
 # Substring matching looks simpler and is wrong: "alternative" contains "rna",
 # so `alternative_contigs.fna` would come back as an RNA file.
-_TOKEN_SEQUENCE_TYPES: dict[str, str] = {
-    "genomic": "Genomic",
-    "genome": "Genomic",
-    "dna": "Genomic",
-    "cds": "CDS",
-    "protein": "Protein",
-    "proteins": "Protein",
-    "pep": "Protein",
-    "aa": "Protein",
-    "rna": "RNA",
-    "mrna": "RNA",
-    "rrna": "RNA",
-    "trna": "RNA",
-    "ncrna": "RNA",
-    "transcript": "RNA",
-    "transcripts": "RNA",
+_TOKEN_SEQUENCE_TYPES: dict[str, SequenceType] = {
+    "genomic": SequenceType.GENOMIC,
+    "genome": SequenceType.GENOMIC,
+    "dna": SequenceType.GENOMIC,
+    "cds": SequenceType.CDS,
+    "protein": SequenceType.PROTEIN,
+    "proteins": SequenceType.PROTEIN,
+    "pep": SequenceType.PROTEIN,
+    "aa": SequenceType.PROTEIN,
+    "rna": SequenceType.RNA,
+    "mrna": SequenceType.RNA,
+    "rrna": SequenceType.RNA,
+    "trna": SequenceType.RNA,
+    "ncrna": SequenceType.RNA,
+    "transcript": SequenceType.RNA,
+    "transcripts": SequenceType.RNA,
 }
 
 # Suffixes that say nothing about sequence type and would otherwise be read as
@@ -289,10 +296,10 @@ _UNINFORMATIVE_SUFFIXES = frozenset(
 # Extension conventions: the weakest signal, so consulted last. `.faa` is amino
 # acid FASTA, `.ffn` nucleotide coding regions and `.frn` non-coding RNA by
 # long-standing convention, so a name that says nothing else still resolves.
-_EXTENSION_SEQUENCE_TYPES: dict[str, str] = {
-    "faa": "Protein",
-    "ffn": "CDS",
-    "frn": "RNA",
+_EXTENSION_SEQUENCE_TYPES: dict[str, SequenceType] = {
+    "faa": SequenceType.PROTEIN,
+    "ffn": SequenceType.CDS,
+    "frn": SequenceType.RNA,
 }
 
 
@@ -301,7 +308,7 @@ def detect_sequence_type(
     filename: str,
     existing_metadata: dict | None = None,
     format_kind: FormatKind | str | None = None,
-) -> str | None:
+) -> SequenceType | None:
     """Guess Genomic/CDS/Protein/RNA from a reference's filename.
 
     Returns None rather than a guess whenever the name does not say. An absent
