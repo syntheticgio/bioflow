@@ -356,6 +356,19 @@ def bcftools() -> Tool:
     return _probe("bcftools", settings.bcftools_path, ["--version"])
 
 
+@lru_cache(maxsize=1)
+def bgzip() -> Tool:
+    """The compressor the storage layer uses at ingest, not a pipeline step.
+
+    Ships as part of the `tabix` package alongside htslib, already installed
+    for its indexing (`.tbi`) role. Probed the same way as every other tool so
+    a missing binary shows up as `available=False` rather than an ingest job
+    that fails thirty seconds in -- the storage layer checks this and falls
+    back to Python's stdlib gzip rather than failing the ingest outright.
+    """
+    return _probe("bgzip", settings.bgzip_path, ["--version"])
+
+
 # `bcftools csq` landed in 1.7. Older builds have the binary and not the
 # subcommand, which fails at run time rather than at probe time.
 CSQ_MIN_VERSION = (1, 7)
@@ -683,6 +696,7 @@ def all_tools() -> list[Tool]:
         star(),
         samtools(),
         bcftools(),
+        bgzip(),
         clair3(),
         deepvariant(),
         flye(),
@@ -1249,6 +1263,40 @@ TOOL_META: dict[str, ToolMeta] = {
             "is installed whichever caller ran."
         ),
     ),
+    # No `pipelines`: this is not a card on the tool selector or the Software
+    # help page, it is dispatched internally by the storage layer at ingest.
+    # `runnable=False` for the same reason -- no job handler branches on it,
+    # `cas`/`object_service` call it directly.
+    "bgzip": ToolMeta(
+        pipelines=(),
+        runnable=False,
+        one_liner="Block-compressed gzip for FASTQ/FASTA/VCF at ingest",
+        summary=(
+            "The htslib BGZF compressor. Every stored FASTQ, FASTA and VCF is "
+            "bgzip'd at ingest rather than left plain: BGZF is a valid gzip "
+            "stream (every reader that accepts .gz accepts it unchanged) but "
+            "is also block-seekable, which is what samtools faidx and tabix "
+            "need to index a reference or a VCF."
+        ),
+        strengths=(
+            "Ordinary gzip decoders read it unmodified",
+            "Block structure makes faidx/tabix indexing possible",
+            "Multi-threaded (-@), so compression does not serialize behind one core",
+        ),
+        homepage="https://www.htslib.org/",
+        repository="https://github.com/samtools/htslib",
+        citation="Danecek et al., GigaScience 2021",
+        citation_url="https://doi.org/10.1093/gigascience/giab008",
+        license="MIT",
+        usage=(
+            "Runs once per ingest on FASTQ, FASTA and VCF content, fused into "
+            "the same pass that hashes the file so it costs no extra read. "
+            "Falls back to Python's stdlib gzip when this binary is absent, "
+            "which trades away block-seekability rather than failing the "
+            "ingest -- see docs/superpowers/specs/"
+            "2026-08-05-object-compression-design.md."
+        ),
+    ),
     "clair3": ToolMeta(
         pipelines=(PipelineType.VARIANT,),
         one_liner="Deep-learning variant caller for long reads",
@@ -1739,6 +1787,7 @@ def reset_cache() -> None:
     samtools.cache_clear()
     bcftools.cache_clear()
     bcftools_csq.cache_clear()
+    bgzip.cache_clear()
     clair3.cache_clear()
     deepvariant.cache_clear()
     flye.cache_clear()
