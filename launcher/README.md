@@ -55,6 +55,27 @@ See [Tauri's own prerequisites
 guide](https://v2.tauri.app/start/prerequisites/) if a package name above has
 moved on for a given distro version.
 
+## The stack this launcher starts has access to the host's Docker daemon
+
+`docker-compose.yml` mounts `/var/run/docker.sock` into both the `api` and
+`worker` services. This is a real privilege increase — a container that can
+reach the daemon can start, stop, or inspect any container on the host, not
+only the ones this stack manages. It is accepted because BioFlow is a
+single-user, local application, not a hosted service with other tenants.
+
+The reason: some pipeline tools (DeepVariant today, more from
+[epic #5](https://github.com/syntheticgio/bioflow/issues/5) going forward) are
+too large to bundle into the backend image and instead run as sibling
+containers, pulled on demand and started through the host daemon. See
+`docs/superpowers/specs/2026-07-31-deepvariant-sidecar-design.md` and
+`docs/superpowers/specs/2026-08-05-optional-tool-delivery-design.md`.
+
+This mount used to live only in `docker-compose.override.yml`, which — per the
+section above — this launcher never bundles. That meant a launcher-installed
+user had no socket and any sibling-container tool silently could not run for
+them, with no error pointing at the cause. It now lives in the base file so
+every install this launcher produces has it.
+
 ## Development
 
 ```bash

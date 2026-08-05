@@ -14,6 +14,13 @@ x-backend-env: &backend-env
   # Settings.ncbi_settings_path, which derives the same path from BIOINFO_HOME.
   NCBI_SETTINGS: /data/tmp/ncbi/user-settings.mkfg
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # The *host* path behind /data. BIOINFO_HOME is already overloaded: it is
+  # the host path in the bind mount below, and this file sets it to /data
+  # inside the container. A sibling container (DeepVariant, and any future
+  # on-demand tool image) gets its mounts from the host, so it needs the host
+  # value under a name that cannot be confused with the container path the
+  # process already has.
+  BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}
 
 services:
   mongo:
@@ -55,6 +62,25 @@ services:
       <<: *backend-env
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      # The api never *runs* a sibling container -- the worker does -- but it
+      # still needs to answer "could this run?" at launch time.
+      # `tools.require()` in launch_variant_calling probes DeepVariant (and,
+      # from #26 on, any on-demand image) before enqueueing, so that an
+      # unavailable tool is a clear rejection in the dialog rather than a job
+      # that dies thirty seconds after the user walks away. Without the socket
+      # here that probe fails and no on-demand tool can ever be launched,
+      # however well the worker is set up.
+      #
+      # This mount used to live only in docker-compose.override.yml, which the
+      # native launcher never ships (it bundles this file alone) -- so a
+      # launcher-installed user had no socket and DeepVariant silently could
+      # not run for them. It belongs here so the shipped stack has it too.
+      #
+      # A real privilege increase: a container that can reach the daemon can
+      # start any container. Accepted because this app is single-user and
+      # local. See docs/superpowers/specs/2026-07-31-deepvariant-sidecar-design.md
+      # and docs/superpowers/specs/2026-08-05-optional-tool-delivery-design.md.
+      - /var/run/docker.sock:/var/run/docker.sock
     # The summary/LLM model runs on the *host*, and llm_base_url reaches it at
     # host.docker.internal (app/config.py). Docker Desktop provides that name
     # for free; Linux does not resolve it at all without this mapping, so the
@@ -86,6 +112,12 @@ services:
       WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      # The host's Docker socket, so the worker can start sibling containers
+      # for tools too large to vendor into this image. DeepVariant is 8.83GB,
+      # mostly TensorFlow on a Python 3.10 we do not otherwise ship. See the
+      # matching comment on the api service above for why this now lives here
+      # rather than only in the override.
+      - /var/run/docker.sock:/var/run/docker.sock
     # Same as api: summary_handlers runs in the worker and reaches the host
     # model by this name. See the note on the api service.
     extra_hosts:
