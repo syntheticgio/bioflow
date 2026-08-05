@@ -127,3 +127,58 @@ class TestComponentSequenceTypes:
         for spec in ac.COMPONENTS.values():
             if spec.sequence_type:
                 assert spec.sequence_type in options
+
+
+class TestComponentTableIntegrity:
+    """The table's own invariants, which nothing on the write path checks.
+
+    COMPONENTS is keyed by NCBI's `--include` names and so cannot be derived
+    from anything this repository owns -- a key NCBI does not accept fails at
+    the `datasets` command line, loudly. What can go wrong silently is the
+    table disagreeing with itself, which is what these cover.
+    """
+
+    def test_component_order_covers_every_component(self):
+        """The one that would fail the way STAR's missing sidecar role did.
+
+        COMPONENT_ORDER is a hand-written tuple parallel to COMPONENTS, and
+        `parse_preview`, `from_report` and `include_argument` reach components
+        by iterating it rather than COMPONENTS. A component added to the dict
+        and not the tuple is therefore never offered in the download dialog:
+        no error, no log line, just a checkbox that does not exist.
+        """
+        assert set(ac.COMPONENT_ORDER) == set(ac.COMPONENTS)
+
+    def test_each_spec_is_filed_under_its_own_key(self):
+        """`ComponentSpec.key` is what gets passed to `datasets --include`, so
+        a spec filed under a different key than it carries would download the
+        wrong component under the right label."""
+        for key, spec in ac.COMPONENTS.items():
+            assert spec.key == key
+
+    def test_file_types_are_unique(self):
+        """`ncbi_assembly_handlers` builds `{spec.file_type: spec}` to label
+        extracted files. A duplicate file_type does not raise there -- the
+        later spec wins and the earlier component is silently unlabelable."""
+        file_types = [spec.file_type for spec in ac.COMPONENTS.values()]
+        assert len(set(file_types)) == len(file_types)
+
+    def test_preview_keys_are_unique(self):
+        """Same exposure as file_type, on the availability path: two
+        components sharing a preview_key would read each other's file counts
+        out of `datasets --preview`."""
+        preview_keys = [spec.preview_key for spec in ac.COMPONENTS.values()]
+        assert len(set(preview_keys)) == len(preview_keys)
+
+    def test_every_role_is_a_real_object_role(self):
+        """`ComponentSpec.role` is typed `str` with a comment saying it holds
+        an ObjectRole value, so a typo here produces a role no picker matches.
+        What that costs is on record: `fix_legacy_component_roles.py` exists
+        because rows roled wrong reach the aligner's reference picker as
+        though a protein FASTA were a genome.
+        """
+        from app.models import ObjectRole
+
+        valid = {role.value for role in ObjectRole}
+        for spec in ac.COMPONENTS.values():
+            assert spec.role in valid
