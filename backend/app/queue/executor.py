@@ -527,6 +527,11 @@ class JobExecutor:
                 )
                 if eta is not None:
                     event["eta_seconds"] = eta
+                estimated = timing_service.pct_estimated(
+                    pct=pct, elapsed_s=elapsed_s, model_ms=eta_model_ms
+                )
+                if estimated is not None:
+                    event["pct_estimated"] = estimated
             await queue.publish_event("job.progress", event, owner=owner)
         except Exception as e:  # noqa: BLE001 - progress is advisory
             log.debug("progress_write_failed", job_id=job_id, error=str(e))

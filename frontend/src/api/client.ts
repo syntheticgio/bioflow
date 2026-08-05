@@ -438,9 +438,13 @@ export const api = {
     ),
 
   getJob: (id: string) =>
-    request<JobSummary & { timing_estimate?: TimingEstimate; eta_seconds?: number }>(
-      `/jobs/${id}`,
-    ),
+    request<
+      JobSummary & {
+        timing_estimate?: TimingEstimate;
+        eta_seconds?: number;
+        pct_estimated?: number;
+      }
+    >(`/jobs/${id}`),
 
   cancelJob: (id: string) =>
     request<{ job_id: string; outcome: string }>(`/jobs/${id}/cancel`, {

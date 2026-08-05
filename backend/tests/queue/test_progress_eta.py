@@ -124,3 +124,99 @@ class TestEtaOnThePublishedEvent:
         )
 
         assert "eta_seconds" not in published[0]
+
+
+class TestPctEstimatedOnThePublishedEvent:
+    """pct_estimated shares eta_seconds' derived-never-stored shape exactly --
+    see that class's docstring -- but is gated the opposite way: it only
+    appears when there is *no* measured pct for this tick to fall back on."""
+
+    async def test_appears_when_there_is_no_measured_pct_but_a_model_exists(
+        self, monkeypatch
+    ):
+        published = []
+
+        async def _fake_publish(event_type, data, *, owner):
+            published.append(data)
+
+        coll = _FakeColl()
+        monkeypatch.setattr("app.queue.executor.get_db", lambda: _FakeDb(coll))
+        monkeypatch.setattr("app.queue.queue.publish_event", _fake_publish)
+
+        started_at = datetime.now(UTC) - timedelta(seconds=30)
+        ex = JobExecutor("test-worker")
+        await ex._write_progress(
+            "6a0000000000000000000001",
+            0,
+            {"phase": "assembling"},
+            owner="local",
+            started_at=started_at,
+            eta_model_ms=60_000,
+        )
+
+        assert published[0]["pct_estimated"] == pytest.approx(0.5, rel=0.05)
+
+    async def test_is_absent_when_a_real_pct_is_reported_this_tick(self, monkeypatch):
+        """A parser that can measure something makes the estimate yield to
+        it -- the field simply stops appearing, no caller change needed."""
+        published = []
+
+        async def _fake_publish(event_type, data, *, owner):
+            published.append(data)
+
+        coll = _FakeColl()
+        monkeypatch.setattr("app.queue.executor.get_db", lambda: _FakeDb(coll))
+        monkeypatch.setattr("app.queue.queue.publish_event", _fake_publish)
+
+        started_at = datetime.now(UTC) - timedelta(seconds=30)
+        ex = JobExecutor("test-worker")
+        await ex._write_progress(
+            "6a0000000000000000000001",
+            0,
+            {"pct": 0.4},
+            owner="local",
+            started_at=started_at,
+            eta_model_ms=60_000,
+        )
+
+        assert "pct_estimated" not in published[0]
+
+    async def test_is_never_written_to_the_progress_document(self, monkeypatch):
+        published = []
+
+        async def _fake_publish(event_type, data, *, owner):
+            published.append(data)
+
+        coll = _FakeColl()
+        monkeypatch.setattr("app.queue.executor.get_db", lambda: _FakeDb(coll))
+        monkeypatch.setattr("app.queue.queue.publish_event", _fake_publish)
+
+        started_at = datetime.now(UTC) - timedelta(seconds=30)
+        ex = JobExecutor("test-worker")
+        await ex._write_progress(
+            "6a0000000000000000000001",
+            0,
+            {"phase": "assembling"},
+            owner="local",
+            started_at=started_at,
+            eta_model_ms=60_000,
+        )
+
+        assert not any(k.startswith("progress.pct_estimated") for k in coll.sets[0])
+
+    async def test_absent_without_a_model_or_started_at(self, monkeypatch):
+        published = []
+
+        async def _fake_publish(event_type, data, *, owner):
+            published.append(data)
+
+        coll = _FakeColl()
+        monkeypatch.setattr("app.queue.executor.get_db", lambda: _FakeDb(coll))
+        monkeypatch.setattr("app.queue.queue.publish_event", _fake_publish)
+
+        ex = JobExecutor("test-worker")
+        await ex._write_progress(
+            "6a0000000000000000000001", 0, {"phase": "assembling"}, owner="local"
+        )
+
+        assert "pct_estimated" not in published[0]

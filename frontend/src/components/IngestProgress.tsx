@@ -9,7 +9,10 @@ import { formatDuration } from "../lib/format";
  * There is no honest a-priori percentage: ingest phases have very different
  * throughput, so a byte-progress bar sprints to 90% then stalls. Instead the
  * bar is driven by elapsed time against a duration predicted from previous
- * runs of the same job type.
+ * runs of the same job type -- `pct_estimated`, computed server-side by
+ * timing_service.pct_estimated() from the same model `timing_estimate`
+ * exposes, so this component no longer reimplements that arithmetic
+ * client-side (elapsed/predicted, capped below 100%).
  *
  * Until enough runs have been recorded, no bar is shown at all -- it says how
  * many more are needed. A confidently wrong progress bar is worse than none.
@@ -52,21 +55,29 @@ export function IngestProgress({ objectId }: { objectId: string }) {
   const elapsedMs = startedAt ? Math.max(0, now - startedAt) : 0;
 
   // The handler's own phase reporting is more accurate than any prediction, so
-  // prefer it when the job publishes real progress.
+  // prefer it when the job publishes real progress. pct_estimated is already
+  // null server-side whenever a real pct exists (see pct_estimated's
+  // docstring), so hasReported only needs to check the measured value.
   const reportedPct = active.progress?.pct ?? 0;
   const hasReported = reportedPct > 0;
 
   let pct: number | null = null;
+  let isEstimated = false;
   let label = active.progress?.phase || active.state;
 
   if (hasReported) {
     pct = Math.min(100, reportedPct * 100);
-  } else if (estimate?.known && estimate.estimate_ms && startedAt) {
-    // Cap at 95%: overshooting to 100% and then sitting there is exactly the
-    // failure mode this design avoids.
-    pct = Math.min(95, (elapsedMs / estimate.estimate_ms) * 100);
-    const remainMs = Math.max(0, estimate.estimate_ms - elapsedMs);
-    label = remainMs > 1000 ? `~${formatDuration(remainMs)} remaining` : "finishing…";
+  } else if (detail?.pct_estimated != null) {
+    pct = detail.pct_estimated * 100;
+    isEstimated = true;
+    const predictedMs = estimate?.known ? estimate.estimate_ms : null;
+    const remainMs = predictedMs != null ? Math.max(0, predictedMs - elapsedMs) : null;
+    label =
+      pct >= 95
+        ? "longer than expected"
+        : remainMs != null && remainMs > 1000
+          ? `~${formatDuration(remainMs)} remaining (estimated)`
+          : "finishing… (estimated)";
   }
 
   return (
@@ -95,7 +106,10 @@ export function IngestProgress({ objectId }: { objectId: string }) {
 
       {pct != null ? (
         <div className="progress">
-          <div className="progress-bar" style={{ width: `${pct}%` }} />
+          <div
+            className={`progress-bar${isEstimated ? " estimated" : ""}`}
+            style={{ width: `${pct}%` }}
+          />
         </div>
       ) : (
         // Indeterminate: we genuinely do not know, and say so.
