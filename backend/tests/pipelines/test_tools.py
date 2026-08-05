@@ -236,7 +236,20 @@ class TestSerialization:
             "version": "0.24.0",
             "available": True,
             "error": None,
+            "install_state": None,
         }
+
+    def test_as_dict_carries_install_state_when_set(self):
+        """A BUNDLED tool's install_state is always None, so this only shows
+        up for an ON_DEMAND_IMAGE tool -- serialized as its string value, the
+        same treatment `Delivery` needs in `tool_with_meta`."""
+        tool = tools.Tool(
+            name="deepvariant",
+            path="/usr/bin/docker",
+            version=None,
+            install_state=tools.InstallState.NOT_INSTALLED,
+        )
+        assert tool.as_dict()["install_state"] == "not_installed"
 
     def test_all_tools_covers_every_probed_binary(self):
         """`all_tools` drives the UI's tool-availability panel, so a binary
@@ -827,6 +840,26 @@ class TestSeeding:
         assert tool.version == "1.0.0"
 
 
+def _fake_run(*, daemon_returncode=0, daemon_stderr=b"", inspect_returncode=0):
+    """A `subprocess.run` stand-in for `_probe_on_demand_image`'s two calls:
+    `docker version` (daemon reachability) first, `docker image inspect`
+    (image presence) second. Dispatches on argv rather than call order, so a
+    test only needs to say which of the two should fail."""
+
+    def _run(cmd, **kwargs):
+        if "image" in cmd and "inspect" in cmd:
+            return type(
+                "R", (), {"returncode": inspect_returncode, "stdout": b"", "stderr": b""}
+            )()
+        return type(
+            "R",
+            (),
+            {"returncode": daemon_returncode, "stdout": b"27.3.1", "stderr": daemon_stderr},
+        )()
+
+    return _run
+
+
 class TestDeepVariantProbe:
     def test_unavailable_when_there_is_no_docker_client(self, monkeypatch):
         """The direction that fails when the seam breaks. The image ships most
@@ -838,23 +871,20 @@ class TestDeepVariantProbe:
         tool = tools.deepvariant()
         assert not tool.available
         assert "docker" in (tool.error or "").lower()
+        assert tool.install_state is tools.InstallState.UNKNOWN
 
-    def test_reports_the_image_reference_as_its_version(self, monkeypatch):
+    def test_available_and_versioned_when_the_image_is_present(self, monkeypatch):
         """There is no binary to ask for a version, and the image tag is the
         provenance that matters -- it is what a methods section would cite.
 
         Asserted against the *configured* image rather than a literal, because
-        the default is now architecture-dependent: this previously hardcoded
-        the arm64 port's name and so described the host it ran on rather than
-        the code. Pinning an image here also proves the version tracks the
+        the default is architecture-dependent: this previously hardcoded the
+        arm64 port's name and so described the host it ran on rather than the
+        code. Pinning an image here also proves the version tracks the
         setting instead of a constant that happens to match it.
         """
         monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
-        monkeypatch.setattr(
-            tools.subprocess,
-            "run",
-            lambda *a, **k: type("R", (), {"returncode": 0, "stdout": b"27.3.1", "stderr": b""})(),
-        )
+        monkeypatch.setattr(tools.subprocess, "run", _fake_run())
         monkeypatch.setattr(
             tools.settings, "deepvariant_image", "example.invalid/dv:v9.9.9-test"
         )
@@ -863,18 +893,58 @@ class TestDeepVariantProbe:
         tool = tools.deepvariant()
         assert tool.available
         assert tool.version == "dv:v9.9.9-test"
+        assert tool.install_state is tools.InstallState.INSTALLED
 
     def test_unavailable_when_the_daemon_is_unreachable(self, monkeypatch):
         """A mounted socket that answers nothing is the compose-misconfigured
-        case, and must not read as installed."""
+        case, and must not read as installed -- it is a fault (UNKNOWN), not
+        an offer to install."""
         monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
         monkeypatch.setattr(
             tools.subprocess,
             "run",
-            lambda *a, **k: type("R", (), {"returncode": 1, "stdout": b"", "stderr": b"Cannot connect to the Docker daemon"})(),
+            _fake_run(
+                daemon_returncode=1,
+                daemon_stderr=b"Cannot connect to the Docker daemon",
+            ),
         )
         tools.reset_cache()
 
         tool = tools.deepvariant()
         assert not tool.available
         assert "daemon" in (tool.error or "").lower()
+        assert tool.install_state is tools.InstallState.UNKNOWN
+
+    def test_unavailable_when_the_image_was_never_pulled(self, monkeypatch):
+        """The regression this task exists to fix: a reachable daemon used to
+        be enough to report `available=True`, whether or not the image had
+        ever been pulled. `docker image inspect` failing on an unreachable
+        image must read as NOT_INSTALLED -- an offer, not a fault -- and
+        `available` must actually be False for it, not merely for a daemon
+        that cannot be reached."""
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
+        monkeypatch.setattr(
+            tools.subprocess, "run", _fake_run(inspect_returncode=1)
+        )
+        tools.reset_cache()
+
+        tool = tools.deepvariant()
+        assert not tool.available
+        assert tool.install_state is tools.InstallState.NOT_INSTALLED
+        assert "not installed" in (tool.error or "").lower()
+        # Reads as an offer, not a fault: the old wording ("not found") is
+        # exactly what a not-yet-installed optional tool must not say.
+        assert "not found" not in (tool.error or "").lower()
+
+    def test_not_installed_still_reports_no_version(self, monkeypatch):
+        """A not-installed tool has no image to read a tag from, so version
+        must stay None rather than guessing at the configured image name --
+        that would claim a version for software that was never pulled."""
+        monkeypatch.setattr(tools.shutil, "which", lambda _: "/usr/local/bin/docker")
+        monkeypatch.setattr(
+            tools.subprocess, "run", _fake_run(inspect_returncode=1)
+        )
+        tools.reset_cache()
+
+        tool = tools.deepvariant()
+        assert tool.version is None

@@ -381,6 +381,14 @@ export interface PipelineTool {
   version: string | null;
   available: boolean;
   error: string | null;
+  /**
+   * Only set for an "on_demand" tool (see `delivery` below); null for every
+   * bundled one. Distinguishes "not installed" (an offer -- show Install)
+   * from "unknown" (a fault -- no docker client, or an unreachable daemon).
+   * `available` is already false in both cases, but the UI must not render
+   * them the same way: one is a button, the other is an error state.
+   */
+  install_state: "installed" | "not_installed" | "unknown" | null;
   /** Plural: fastp is both a trimmer and a QC tool. Mirrors TOOL_META. */
   pipelines: PipelineType[];
   summary: string;
