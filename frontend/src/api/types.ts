@@ -1338,9 +1338,19 @@ export interface PipelineSuggestion {
   title: string;
   description: string;
   why: string | null;
-  status: "available" | "unavailable";
+  /**
+   * "needs_install" is not blocked -- it is one click from working, and the
+   * card keeps a real `launch` payload just like "available" does. It exists
+   * so the UI can tell "one click from working" apart from "unavailable"
+   * (a dead end with a reason): rendering a not-yet-installed optional tool
+   * as unavailable would read as permanently broken and the user would never
+   * learn the tool exists at all.
+   */
+  status: "available" | "unavailable" | "needs_install";
   reason: string | null;
   launch: { endpoint: string; body: Record<string, unknown> } | null;
+  /** Set only when status is "needs_install": what pressing Launch costs. */
+  requires_install: { tool: string; download_bytes: number | null } | null;
   prior_runs: PriorRun[];
 }
 

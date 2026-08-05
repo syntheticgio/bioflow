@@ -194,13 +194,17 @@ Settings is a single page today (`SettingsView.tsx` renders `Settings · AI`, `A
 
 ## Task 6 — `NEEDS_INSTALL` in the Actions tab
 
-- [ ] Add `NEEDS_INSTALL = "needs_install"` to `CardStatus` in `suggestion_service.py`.
-- [ ] Add a `requires_install: dict | None` field to `SuggestionCard` (`{"tool": name, "download_bytes": n}`) and include it in `as_dict()`.
-- [ ] A `NEEDS_INSTALL` card **keeps its launch payload** — it is not blocked, it is one click from working. The docstring's rule that *"`launch` and `status` must agree"* needs updating to cover the third status explicitly.
-- [ ] Update the variant card builder (`suggestion_service.py:~538`): when the chemistry's caller is an uninstalled optional tool, emit `NEEDS_INSTALL` rather than `UNAVAILABLE`. Note the existing DeepVariant-as-long-read-fallback branch just above — an *installable* DeepVariant should not silently replace an uninstalled Clair3 with a 3 GB download; prefer offering the install of the tool the chemistry actually indicates.
-- [ ] Frontend: render `needs_install` as an offer with the size, not a refusal. Rendering it as `UNAVAILABLE` is the worst outcome — the card reads as a permanent dead end and the user never learns the tool exists.
+- [x] Added `NEEDS_INSTALL = "needs_install"` to `CardStatus`.
+- [x] Added `requires_install: dict | None` to `SuggestionCard`, included in `as_dict()`.
+- [x] The docstring's `launch`/`status` agreement rule is updated to state `NEEDS_INSTALL` as the deliberate exception: it keeps `launch` exactly like `AVAILABLE` does.
+- [x] Updated the variant card builder's DeepVariant-fallback branch: `dv_tool.install_state is NOT_INSTALLED` now returns a `NEEDS_INSTALL` card with a real `caller=deepvariant` launch payload and `requires_install`, rather than falling into the plain `UNAVAILABLE` refusal. `UNKNOWN` (daemon unreachable) deliberately still falls through to `UNAVAILABLE` — pressing Install would just fail again for the same reason, so it is a fault, not an offer, and a test (`test_an_unknown_deepvariant_state_does_not_offer_install`) pins that the two states diverge.
+- [x] Frontend: `PipelineSuggestions.tsx` treats `needs_install` as runnable, the same as `available` — same enabled button, different label ("Install and launch") and an extra line showing the download size when `requires_install.download_bytes` is present. `PipelineSuggestion`'s TypeScript type gained the third status and the `requires_install` field to match.
 
-**Test:** patch `spec_for`/the probe so the tool reads not-installed, and assert the card is `NEEDS_INSTALL` **with** a launch payload and a `requires_install` block. Per CLAUDE.md, patch `spec_for` rather than the tool function where a frozen registry spec captured the function object at import time.
+**Correction to this task's own note:** the "patch `spec_for`, not the probe function" caveat is about `aligner_registry`'s frozen dataclass specs, which capture a tool *function object* at import time — it does not apply here. `installed_callers` (the existing test fixture) already patches `app.services.suggestion_service.tools.deepvariant` as a plain module-attribute lookup, which the file's own `test_the_caller_patch_actually_takes_effect` pins as reaching the call site. Extended it with a `deepvariant_install_state` parameter (`_FakeTool` gained an `install_state` attribute) rather than inventing a second fixture.
+
+**A deliberate scope boundary, confirmed with the user rather than assumed:** clicking a `NEEDS_INSTALL` card's button today posts the real launch payload straight to `/pipelines/variants`, which still bare-calls `tools.require(tools.deepvariant())` and will refuse a not-yet-installed tool with an error until task 7 builds the confirm-then-chain flow. Asked explicitly whether the button should (a) post directly and surface that error until task 7 lands, (b) redirect to Settings › Tools instead, or (c) render disabled in the meantime — chose (a): it matches "`NEEDS_INSTALL` keeps its launch payload, same as `AVAILABLE`" literally, and option (c) is exactly the UNAVAILABLE-shaped treatment this task exists to avoid. Nothing here needs to be undone once task 7 lands; the same click just starts succeeding.
+
+Full backend suite: 2932 passed, 0 failed (5 new tests in `TestVariantsCard`, plus the pre-existing `test_every_card_is_a_plain_dict_with_the_full_key_set` updated for the new field — exactly the kind of test that should catch an added field, and did). `tsc -b --noEmit` clean.
 
 ---
 

@@ -3808,6 +3808,15 @@ table.software-matrix thead th.software-matrix-corner {
   margin-top: auto;
 }
 
+/* Sits below .suggestion-why for a "needs_install" card. No margin-top:auto
+   of its own -- .suggestion-why already claims that when both are present,
+   and a needs_install card always has a `why` (see build_variants_card's
+   NEEDS_INSTALL branch), so this only ever needs to sit directly beneath it. */
+.suggestion-install-size {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
 .suggestion-none {
   font-size: 12px;
   color: var(--text-faint);

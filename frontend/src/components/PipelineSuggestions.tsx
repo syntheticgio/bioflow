@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { PipelineSuggestion, PriorRun } from "../api/types";
 
@@ -118,7 +119,15 @@ export function PipelineSuggestions({
   return (
     <div className="suggestion-grid">
       {cards.map((card) => {
-        const available = card.status === "available";
+        // "needs_install" is not blocked -- it is one click from working,
+        // the same as "available", so it gets the same enabled button. The
+        // distinction from "available" is purely in what the button says and
+        // whether a size is shown, not in whether it can be pressed:
+        // rendering this as disabled (the "unavailable" treatment) would be
+        // the worst of the two wrong answers, since the card would then read
+        // as a permanent dead end and the user would never learn DeepVariant
+        // -- or whatever tool -- exists at all.
+        const runnable = card.status === "available" || card.status === "needs_install";
         return (
           <div key={card.kind} className="suggestion-card">
             <div className="suggestion-card-top">
@@ -135,6 +144,11 @@ export function PipelineSuggestions({
             {(card.why ?? card.reason) && (
               <div className="suggestion-why">{card.why ?? card.reason}</div>
             )}
+            {card.status === "needs_install" && card.requires_install?.download_bytes && (
+              <div className="suggestion-install-size">
+                Downloads {formatBytes(card.requires_install.download_bytes)} on first use
+              </div>
+            )}
             {card.prior_runs.length > 0 && (
               <PriorRuns runs={card.prior_runs} projectId={projectId} />
             )}
@@ -142,9 +156,13 @@ export function PipelineSuggestions({
               type="button"
               className={card === firstAvailable ? "btn primary" : "btn"}
               onClick={() => launch.mutate(card)}
-              disabled={!available || launch.isPending}
+              disabled={!runnable || launch.isPending}
             >
-              {card.prior_runs.length > 0 ? "Launch again" : "Launch"}
+              {card.status === "needs_install"
+                ? "Install and launch"
+                : card.prior_runs.length > 0
+                  ? "Launch again"
+                  : "Launch"}
             </button>
           </div>
         );
