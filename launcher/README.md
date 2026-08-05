@@ -95,9 +95,30 @@ npm run tauri build
 
 This runs the full release build (`cargo build --release` plus the Vite
 production build) and then bundles it per `src-tauri/tauri.conf.json`'s
-`bundle.targets: "all"` — an AppImage/`.deb` on Linux, a signed-or-not `.app`
-and `.dmg` on macOS, an NSIS/MSI installer on Windows. Artifacts land under
+`bundle.targets: "all"` — a signed-or-not `.app` and `.dmg` on macOS, an
+NSIS/MSI installer on Windows. Artifacts land under
 `src-tauri/target/release/bundle/`.
+
+**On Linux, `.deb` and `.rpm` only** — `src-tauri/tauri.linux.conf.json`
+overrides `bundle.targets` to just those two, dropping AppImage. Tauri v2
+auto-merges any `tauri.<platform>.conf.json` on top of the base config for
+that platform's build, so this needs no `--config` flag; it just takes
+effect. The reason: AppImage bundling shells out to a helper binary,
+`linuxdeploy-plugin-appimage.AppImage`, that Tauri expects to run silently
+as a subprocess -- but on a machine with **AppImageLauncher** installed (a
+common desktop-integration daemon on several distros), *every* AppImage
+execution is intercepted with a GUI "Integrate and run / Run once" prompt,
+including this one. `tauri build` then hangs waiting on input it never
+expected, and even answering the prompt is not enough: it still fails with
+`failed to run linuxdeploy`, because linuxdeploy also expects to be run
+from a real TTY/desktop session in a way the intercepted execution breaks.
+`.deb` and `.rpm` build and bundle cleanly either way, cover the common
+Linux install paths, and don't invoke linuxdeploy at all -- so this avoids
+the trap entirely rather than asking whoever builds next to fight
+AppImageLauncher's config. If AppImage output is ever needed again, the
+fix belongs in this file (either dropping "appimage" back out of a full
+target list per platform some other way, or configuring AppImageLauncher
+to exempt `~/.cache/tauri/`), not in re-discovering this from scratch.
 
 This is a **local, unsigned build for testing on the machine that built it**,
 not the distribution story: macOS notarization, Windows code signing, and

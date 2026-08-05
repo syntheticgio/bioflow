@@ -14,6 +14,7 @@ from app.config import settings
 from app.db.redis_client import get_redis
 from app.logging import get_logger
 from app.models import Job, JobClass, JobState
+from app.pipelines import tool_cache
 from app.queue import governor, keys, queue
 from app.queue.executor import JobExecutor
 from app.queue.registry import JobContext, get_handler, load_handlers
@@ -124,6 +125,7 @@ class Worker:
             asyncio.create_task(self._leader_loop(), name="leader"),
             asyncio.create_task(self._load_sampler_loop(), name="load-sampler"),
             asyncio.create_task(self._loop_watchdog(), name="watchdog"),
+            asyncio.create_task(self._tool_invalidation_loop(), name="tool-invalidation"),
         ]
 
         try:
@@ -460,6 +462,22 @@ class Worker:
             drift = datetime.now(UTC).timestamp() - before - 1.0
             if drift > LOOP_STALL_WARN_SECONDS:
                 log.warning("event_loop_stalled", drift_seconds=round(drift, 3))
+
+    # ---------- tool cache invalidation ----------
+
+    async def _tool_invalidation_loop(self) -> None:
+        """Keep this worker's tool probe cache in sync with installs and
+        uninstalls performed by any process, including itself.
+
+        Every worker replica and the api process each hold their own
+        `lru_cache` of probe results. Without this, an install completed here
+        (or by a sibling worker, or by the api) would leave the others serving
+        a stale "not installed" or "installed" verdict until they happened to
+        restart -- see `tool_cache.listen_for_invalidations` for the full
+        reasoning. Runs for the life of the process; cancelled alongside the
+        other background loops in `_drain`.
+        """
+        await tool_cache.listen_for_invalidations(get_redis())
 
     # ---------- shutdown ----------
 

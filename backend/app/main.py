@@ -65,11 +65,21 @@ async def lifespan(app: FastAPI):
     # mid-flight, which would cancel it silently.
     warm_task = asyncio.create_task(_warm_tools())
 
+    # Runs for the process lifetime: an install or uninstall of an
+    # ON_DEMAND_IMAGE tool (task 4) publishes on this channel from whichever
+    # process performed it, and this is what lets *this* process's probe
+    # cache learn about it instead of serving a stale result until it happens
+    # to restart. See the comment on tool_cache.NOT_FINGERPRINTABLE for why
+    # the fingerprint-based invalidation everything else here relies on
+    # cannot reach these tools.
+    invalidation_task = asyncio.create_task(tool_cache.listen_for_invalidations(get_redis()))
+
     log.info("started")
     try:
         yield
     finally:
         warm_task.cancel()
+        invalidation_task.cancel()
         await close_redis()
         await close_mongo()
         log.info("stopped")
