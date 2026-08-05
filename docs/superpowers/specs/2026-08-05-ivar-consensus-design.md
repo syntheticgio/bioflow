@@ -421,3 +421,37 @@ amplicon dropout is common and produces a technically successful run whose
 output is unusable. Recording `consensus_n_count` as a fact is what makes that
 visible rather than surprising; a future card could warn on it, but that is not
 this slice.
+
+**`samtools mpileup -A -d 0` can OOM-kill on a single pathological read,
+independent of true coverage.** Found running tier 1 against the real *T.
+brucei* project (`DRR1078403.bam`, 26Mb reference, 794 primary-mapped reads --
+genuinely sparse): the run OOM-killed at both `mem_mb=4096` and `mem_mb=8192`,
+always freezing at the same 3320-line offset in the pileup stream. Reproduced
+directly, outside the handler: `mpileup`'s RSS climbs to 3.7GB within one
+second and oscillates up to 10GB+ before the kernel kills it, with output
+frozen the entire time. The culprit, found by sorting, indexing, and reading
+the exact stalled position: one 34,215bp read (`DRR1078403.36083`) with CIGAR
+`5523S40M28652S` -- 40bp aligned, 34,175bp soft-clipped. `-d 0` (uncapped
+depth, `2147483647` per samtools' own log line) was ruled out as the sole
+cause -- capping at `-d 100000` OOM'd identically at the same position, so
+this is not (only) the "-d 0 allocates for the theoretical max" failure mode
+the flag's own reasoning above assumed; something about `mpileup`'s per-base
+bookkeeping for a single very-long, mostly-soft-clipped read is what balloons.
+
+**mem_mb=8192 is a real fix for legitimate cases but not a fix for this.** No
+memory ceiling reliably contains what looks like unbounded growth on a
+specific input shape. This is upstream `samtools`/`htslib` behavior (1.21 in
+this image), not a bug this handler's code introduces, and not something
+`_failure`'s OOM classification gets wrong -- it correctly reports "killed,
+most likely out of memory" and the job correctly goes `dead` rather than
+silently producing a wrong consensus.
+
+**Left open for this slice**, since a full mitigation (pre-filtering
+absurd-CIGAR reads before the pipe, or capping read length going into
+`mpileup`) is a real design question of its own rather than a one-line fix,
+and this slice's job is the consensus workflow, not hardening `mpileup`
+against adversarial-shaped input. What a user hits today: a consensus job
+against a BAM containing an extreme soft-clip like this dies with an honest
+OOM error rather than hanging forever or producing silent garbage -- worse
+than success, better than either of those. Worth its own follow-up once a
+second real case shows the same shape.
