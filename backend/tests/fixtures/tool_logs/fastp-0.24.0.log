@@ -1,0 +1,43 @@
+Detecting adapter sequence for read1...
+No adapter detected for read1
+
+[15:40:00] start to load data 
+[15:40:00] Loading completed with 25 packs 
+[15:40:00] thread 2 data processing completed 
+[15:40:00] thread 2 finished 
+[15:40:00] thread 1 data processing completed 
+[15:40:00] thread 1 finished 
+[15:40:00] thread 4 data processing completed 
+[15:40:00] thread 4 finished 
+[15:40:00] thread 3 data processing completed 
+[15:40:00] thread 3 finished 
+[15:40:00] /data/tmp/trim/6a6e134ea384162f7205ebb8/out/SRR39891651.trimmed.fastq writer finished 
+[15:40:00] start to generate reports
+ 
+Read1 before filtering:
+total reads: 6217
+total bases: 14806822
+Q20 bases: 14673579(99.1001%)
+Q30 bases: 14507101(97.9758%)
+
+Read1 after filtering:
+total reads: 6217
+total bases: 14806822
+Q20 bases: 14673579(99.1001%)
+Q30 bases: 14507101(97.9758%)
+
+Filtering result:
+reads passed filter: 6217
+reads failed due to low quality: 0
+reads failed due to too many N: 0
+reads failed due to too short: 0
+reads with adapter trimmed: 0
+bases trimmed due to adapters: 0
+
+Duplication rate (may be overestimated since this is SE data): 36.2715%
+
+JSON report: /data/tmp/trim/6a6e134ea384162f7205ebb8/fastp.json
+HTML report: /data/tmp/trim/6a6e134ea384162f7205ebb8/fastp.html
+
+/usr/bin/fastp --verbose -i /data/tmp/trim/6a6e134ea384162f7205ebb8/in_SRR39891651.fastq -o /data/tmp/trim/6a6e134ea384162f7205ebb8/out/SRR39891651.trimmed.fastq --json /data/tmp/trim/6a6e134ea384162f7205ebb8/fastp.json --html /data/tmp/trim/6a6e134ea384162f7205ebb8/fastp.html --thread 4 --compression 4 --qualified_quality_phred 15 --unqualified_percent_limit 40 --length_required 15 
+fastp v0.24.0, time used: 1 seconds

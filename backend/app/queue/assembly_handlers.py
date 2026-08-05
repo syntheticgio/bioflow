@@ -96,13 +96,6 @@ def assemble_reads(ctx: JobContext) -> dict:
     ctx.progress(phase="starting", pct=None, message=f"starting {assembler.value}")
     ctx.extend_lease(ASSEMBLY_LEASE_SECONDS)
 
-    def on_line(line: str) -> None:
-        if progress.feed(line):
-            # No pct: Flye's stages differ in duration by more than an order of
-            # magnitude, so a fraction derived from "stage 3 of 6" would sit
-            # still and then jump. See AssemblyProgress.
-            ctx.progress(pct=None, phase=progress.phase, message=progress.message())
-
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -115,7 +108,7 @@ def assemble_reads(ctx: JobContext) -> dict:
         genome_size=params.genome_size,
     )
 
-    code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
+    code = run_subprocess(ctx, cmd, log_path=str(log_path), parser=progress)
     if code != 0:
         raise _failure(code, log_path, assembler.value)
 

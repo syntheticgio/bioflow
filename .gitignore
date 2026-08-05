@@ -9,6 +9,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+!backend/tests/fixtures/tool_logs/*.log
 .idea/
 .vscode/
 tsconfig.tsbuildinfo

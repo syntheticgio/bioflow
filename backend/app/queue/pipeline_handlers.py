@@ -156,22 +156,12 @@ def _run_fastp_trim(ctx: JobContext, object_id: str) -> dict:
     progress = fastp_runner.TrimProgress(expected_reads=ctx.payload.get("expected_reads"))
     ctx.progress(phase="starting", pct=0.0, message="starting fastp")
 
-    def on_line(line: str) -> None:
-        if progress.feed(line):
-            ctx.progress(
-                pct=progress.pct,
-                phase=progress.phase,
-                message=progress.message(),
-                phase_index=progress.phase_index,
-                phase_total=len(fastp_runner.PHASE_ORDER),
-            )
-
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     log.info("trim_started", job_id=ctx.job_id, tool="fastp", paired=paired, cmd=" ".join(cmd))
 
-    code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
+    code = run_subprocess(ctx, cmd, log_path=str(log_path), parser=progress)
     if code != 0:
         raise _failure(code, log_path, tool="fastp")
 
@@ -497,19 +487,9 @@ def _run_short_read_qc(
     progress = fastp_runner.TrimProgress(expected_reads=ctx.payload.get("expected_reads"))
     ctx.progress(phase="starting", pct=0.0, message="starting fastp")
 
-    def on_line(line: str) -> None:
-        if progress.feed(line):
-            ctx.progress(
-                pct=progress.pct,
-                phase=progress.phase,
-                message=progress.message(),
-                phase_index=progress.phase_index,
-                phase_total=len(fastp_runner.PHASE_ORDER),
-            )
-
     log.info("qc_started", job_id=ctx.job_id, object_id=object_id, cmd=" ".join(cmd))
 
-    code = run_subprocess(ctx, cmd, log_path=str(log_path), on_line=on_line)
+    code = run_subprocess(ctx, cmd, log_path=str(log_path), parser=progress)
     if code != 0:
         raise _failure(code, log_path)
 

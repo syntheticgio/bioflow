@@ -702,6 +702,7 @@ class AlignProgress:
     a completion it cannot verify.
     """
 
+    name: str = "aligner"
     expected_reads: int | None = None
     processed: int = 0
     phase: str = "aligning"
@@ -739,3 +740,12 @@ class AlignProgress:
         if self.processed:
             return f"aligned {self.processed:,} reads"
         return "aligning"
+
+    def snapshot(self) -> dict:
+        return {
+            "pct": self.pct,
+            "phase": self.phase,
+            "message": self.message(),
+            "phase_index": self.phase_index,
+            "phase_total": len(PHASE_ORDER),
+        }

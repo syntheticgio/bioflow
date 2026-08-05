@@ -1,0 +1,229 @@
+
+[INFO] CLAIR3 VERSION: v2.0.2
+[INFO] BAM FILE PATH: /data/tmp/variants/6a6e1403a384162f7205ebc3/SRR39891651.trimmed.bam
+[INFO] REFERENCE FILE PATH: /data/tmp/variants/6a6e1403a384162f7205ebc3/ref/GCF_000146045.2_R64_genomic.fna
+[INFO] MODEL PATH: /opt/clair3/models/hifi
+[INFO] OUTPUT FOLDER: /data/tmp/variants/6a6e1403a384162f7205ebc3/out
+[INFO] PLATFORM: hifi
+[INFO] THREADS: 4
+[INFO] BED FILE PATH: EMPTY
+[INFO] VCF FILE PATH: EMPTY
+[INFO] CONTIGS: EMPTY
+[INFO] CONDA PREFIX: 
+[INFO] SAMTOOLS PATH: samtools
+[INFO] PYTHON PATH: python3
+[INFO] PYPY PATH: pypy3
+[INFO] PARALLEL PATH: parallel
+[INFO] WHATSHAP PATH: whatshap
+[INFO] LONGPHASE PATH: EMPTY
+[INFO] CHUNK SIZE: 5000000
+[INFO] FULL ALIGN PROPORTION: 0.3
+[INFO] FULL ALIGN REFERENCE PROPORTION: 0.3
+[INFO] PHASING PROPORTION: 0.7
+[INFO] MINIMUM MQ: 5
+[INFO] MINIMUM COVERAGE: 2
+[INFO] SNP AF THRESHOLD: 0.08
+[INFO] INDEL AF THRESHOLD: 0.08
+[INFO] BASE ERROR IN GVCF: 0.001
+[INFO] GQ BIN SIZE IN GVCF: 5
+[INFO] ENABLE FILEUP ONLY CALLING: False
+[INFO] ENABLE FAST MODE CALLING: False
+[INFO] ENABLE CALLING SNP CANDIDATES ONLY: False
+[INFO] ENABLE PRINTING REFERENCE CALLS: False
+[INFO] ENABLE OUTPUT GVCF: False
+[INFO] ENABLE HAPLOID PRECISE MODE: False
+[INFO] ENABLE HAPLOID SENSITIVE MODE: False
+[INFO] ENABLE INCLUDE ALL CTGS CALLING: True
+[INFO] ENABLE NO PHASING FOR FULL ALIGNMENT: False
+[INFO] ENABLE REMOVING INTERMEDIATE FILES: False
+[INFO] ENABLE LONGPHASE FOR INTERMEDIATE VCF PHASING: False
+[INFO] ENABLE PHASING FINAL VCF OUTPUT USING WHATSHAP: False
+[INFO] ENABLE PHASING FINAL VCF OUTPUT USING LONGPHASE: False
+[INFO] ENABLE HAPLOTAGGING FINAL BAM: False
+[INFO] ENABLE LONG INDEL CALLING: False
+[INFO] ENABLE C_IMPLEMENT: True
+[INFO] ENABLE DWELL TIME: False
+
+[INFO] Check environment variables
+[INFO] --include_all_ctgs enabled
+[93m[WARNING] Please enable --no_phasing_for_fa if calling variant in non-diploid organisms[0m
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/log
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/pileup_output
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/merge_output
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/phase_output
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/gvcf_tmp_output
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/full_alignment_output
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/phase_output/phase_vcf
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/phase_output/phase_bam
+[INFO] Create folder /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/full_alignment_output/candidate_bed
+[93m[WARNING] Contig name NC_001146.8 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001134.8 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001133.9 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001140.6 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001148.4 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001137.3 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001136.10 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001141.2 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001144.5 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001143.9 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001224.1 provided but no mapped reads in BAM, skip![0m
+[93m[WARNING] Contig name NC_001145.3 provided but no mapped reads in BAM, skip![0m
+[INFO] Call variant in contigs: NC_001135.5 NC_001147.6 NC_001142.9 NC_001138.5 NC_001139.9
+[INFO] Chunk number for each contig: 1 1 1 1 1
+[INFO] 1/7 Call variants using pileup model
+Calling variants ...
+Total processed positions in NC_001147.6 (chunk 1/1) : 0
+Total time elapsed: 0.01 s
+[INFO] No vcf output for file /data/tmp/variants/6a6e1403a384162f7205ebc3/out/tmp/pileup_output/pileup_NC_001147.6_1.vcf, remove empty file
+Calling variants ...
+Total processed positions in NC_001142.9 (chunk 1/1) : 3
+Total time elapsed: 0.03 s
+Calling variants ...
+Total processed positions in NC_001135.5 (chunk 1/1) : 26
+Total time elapsed: 0.04 s
+Calling variants ...
+Total processed positions in NC_001138.5 (chunk 1/1) : 3
+Total time elapsed: 0.03 s
+Calling variants ...
+Total processed positions in NC_001139.9 (chunk 1/1) : 1
+Total time elapsed: 0.07 s
+
+[INFO] 2/7 Select heterozygous SNP variants for Whatshap phasing and haplotagging
+[93m[WARNING] Cannot find any 0/1 variant in pileup output using variant quality cut-off proportion: 0.30000000000000004, total heterozygous variants: 0[0m
+[93m[WARNING] Set low variant quality score cut-off to 0.0[0m
+[INFO] Select heterozygous pileup variants exceeding phasing quality cutoff 0
+[INFO] Total heterozygous SNP positions selected: NC_001147.6: 0
+[INFO] Total heterozygous SNP positions selected: NC_001142.9: 1
+[INFO] Total heterozygous SNP positions selected: NC_001135.5: 2
+[INFO] Total heterozygous SNP positions selected: NC_001138.5: 0
+[INFO] Total heterozygous SNP positions selected: NC_001139.9: 0
+
+[INFO] 3/7 Phase VCF file using Whatshap
+This is WhatsHap 2.8 running under Python 3.11.15
+Working on 1 sample from 1 family
+
+# Working on contig NC_001135.5 in individual SAMPLE
+Found 2 usable heterozygous variants (0 skipped due to missing genotypes)
+Number of supplementary alignments: 0
+Number of non-singleton groups: 0
+Skipped 0 groups
+Found 4 reads covering 2 variants
+Kept 2 reads that cover at least two variants each
+Selected 2 most phase-informative reads covering 2 variants
+Phasing 1 sample by solving the MEC problem ...
+Largest block contains 1 variants (50.0% of accessible variants) between position 260955 and 260955
+
+# Resource usage
+Maximum memory usage: 0.056 GB
+Time spent reading BAM/CRAM:                    0.0 s
+Time spent parsing VCF:                         0.0 s
+Time spent selecting reads:                     0.0 s
+Time spent phasing:                             0.0 s
+Time spent writing VCF:                         0.0 s
+Time spent finding components:                  0.0 s
+Time spent on rest:                             0.0 s
+Total elapsed time:                             0.0 s
+This is WhatsHap 2.8 running under Python 3.11.15
+Working on 1 sample from 1 family
+
+# Resource usage
+Maximum memory usage: 0.055 GB
+Time spent reading BAM/CRAM:                    0.0 s
+Time spent parsing VCF:                         0.0 s
+Time spent selecting reads:                     0.0 s
+Time spent phasing:                             0.0 s
+Time spent writing VCF:                         0.0 s
+Time spent finding components:                  0.0 s
+Time spent on rest:                             0.0 s
+Total elapsed time:                             0.0 s
+This is WhatsHap 2.8 running under Python 3.11.15
+Working on 1 sample from 1 family
+
+# Resource usage
+Maximum memory usage: 0.054 GB
+Time spent reading BAM/CRAM:                    0.0 s
+Time spent parsing VCF:                         0.0 s
+Time spent selecting reads:                     0.0 s
+Time spent phasing:                             0.0 s
+Time spent writing VCF:                         0.0 s
+Time spent finding components:                  0.0 s
+Time spent on rest:                             0.0 s
+Total elapsed time:                             0.0 s
+This is WhatsHap 2.8 running under Python 3.11.15
+Working on 1 sample from 1 family
+
+# Working on contig NC_001142.9 in individual SAMPLE
+Found 1 usable heterozygous variants (0 skipped due to missing genotypes)
+Number of supplementary alignments: 0
+Number of non-singleton groups: 0
+Skipped 0 groups
+Found 54 reads covering 1 variants
+Kept 0 reads that cover at least two variants each
+Selected 0 most phase-informative reads covering 0 variants
+Phasing 1 sample by solving the MEC problem ...
+No. of phased blocks: 0
+
+# Resource usage
+Maximum memory usage: 0.057 GB
+Time spent reading BAM/CRAM:                    0.0 s
+Time spent parsing VCF:                         0.0 s
+Time spent selecting reads:                     0.0 s
+Time spent phasing:                             0.0 s
+Time spent writing VCF:                         0.0 s
+Time spent finding components:                  0.0 s
+Time spent on rest:                             0.0 s
+Total elapsed time:                             0.0 s
+This is WhatsHap 2.8 running under Python 3.11.15
+Working on 1 sample from 1 family
+
+# Resource usage
+Maximum memory usage: 0.055 GB
+Time spent reading BAM/CRAM:                    0.0 s
+Time spent parsing VCF:                         0.0 s
+Time spent selecting reads:                     0.0 s
+Time spent phasing:                             0.0 s
+Time spent writing VCF:                         0.0 s
+Time spent finding components:                  0.0 s
+Time spent on rest:                             0.0 s
+Total elapsed time:                             0.0 s
+
+[INFO] 5/7 Select candidates for full-alignment calling
+[INFO] Set variants quality cutoff 15.0
+[INFO] Set reference calls quality cutoff 13.0
+[INFO] Low quality reference calls to be processed in NC_001135.5: 6
+[INFO] Low quality variants to be processed in NC_001135.5: 1
+[93m[WARNING] Cannot find any low-quality 0/0, 0/1 or 1/1 variant in pileup output in contig NC_001147.6[0m
+[93m[WARNING] Copying pileup.vcf.gz to /data/tmp/variants/6a6e1403a384162f7205ebc3/out/merge_output.vcf.gz[0m
+[INFO] Low quality reference calls to be processed in NC_001147.6: 0
+[INFO] Low quality variants to be processed in NC_001147.6: 0
+[93m[WARNING] Cannot find any low-quality 0/0, 0/1 or 1/1 variant in pileup output in contig NC_001138.5[0m
+[93m[WARNING] Copying pileup.vcf.gz to /data/tmp/variants/6a6e1403a384162f7205ebc3/out/merge_output.vcf.gz[0m
+[INFO] Low quality reference calls to be processed in NC_001138.5: 0
+[INFO] Low quality variants to be processed in NC_001138.5: 0
+[93m[WARNING] Cannot find any low-quality 0/0, 0/1 or 1/1 variant in pileup output in contig NC_001142.9[0m
+[93m[WARNING] Copying pileup.vcf.gz to /data/tmp/variants/6a6e1403a384162f7205ebc3/out/merge_output.vcf.gz[0m
+[INFO] Low quality reference calls to be processed in NC_001142.9: 0
+[INFO] Low quality variants to be processed in NC_001142.9: 0
+[93m[WARNING] Cannot find any low-quality 0/0, 0/1 or 1/1 variant in pileup output in contig NC_001139.9[0m
+[93m[WARNING] Copying pileup.vcf.gz to /data/tmp/variants/6a6e1403a384162f7205ebc3/out/merge_output.vcf.gz[0m
+[INFO] Low quality reference calls to be processed in NC_001139.9: 0
+[INFO] Low quality variants to be processed in NC_001139.9: 0
+
+[INFO] 6/7 Call low-quality variants using full-alignment model
+Calling variants ...
+Total processed positions in NC_001135.5 (chunk 1/1) : 7
+Total time elapsed: 0.03 s
+
+[INFO] 7/7 Merge pileup VCF and full-alignment VCF
+[INFO] Pileup variants processed in NC_001147.6: 0
+[INFO] Full-alignment variants processed in NC_001147.6: 0
+[INFO] Pileup variants processed in NC_001142.9: 3
+[INFO] Full-alignment variants processed in NC_001142.9: 0
+[INFO] Pileup variants processed in NC_001135.5: 1
+[INFO] Full-alignment variants processed in NC_001135.5: 1
+[INFO] Pileup variants processed in NC_001138.5: 3
+[INFO] Full-alignment variants processed in NC_001138.5: 0
+[INFO] Pileup variants processed in NC_001139.9: 1
+[INFO] Full-alignment variants processed in NC_001139.9: 0
+
+[INFO] Finish calling, output file: /data/tmp/variants/6a6e1403a384162f7205ebc3/out/merge_output.vcf.gz

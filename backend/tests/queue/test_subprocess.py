@@ -12,10 +12,12 @@ import sys
 import textwrap
 import threading
 import time
+from dataclasses import dataclass, field
 
 import pytest
 
 from app.errors import JobCancelled
+from app.queue import executor as executor_module
 from app.queue.executor import run_subprocess
 from app.queue.registry import JobContext
 
@@ -264,6 +266,143 @@ class TestCancellation:
                 on_line=lambda line: None,
             )
         assert "phase one done" in log.read_text()
+
+
+@dataclass
+class _FakeParser:
+    """A minimal ProgressParser: matches every line containing `token`."""
+
+    name: str = "fake-tool"
+    token: str = "PROGRESS"
+    seen: int = 0
+    calls: list = field(default_factory=list)
+
+    def feed(self, line: str) -> bool:
+        if self.token not in line:
+            return False
+        self.seen += 1
+        return True
+
+    def snapshot(self) -> dict:
+        self.calls.append(self.seen)
+        return {"message": f"seen {self.seen}"}
+
+
+class TestParser:
+    def test_snapshot_reaches_ctx_progress(self):
+        """The forwarding contract parser= exists for: whatever keys
+        snapshot() returns arrive at ctx.progress() unmodified, including one
+        no current hand-written parser emits -- that is the drift this seam
+        removes."""
+        ctx = make_ctx()
+        received: list[dict] = []
+        ctx._progress_cb = received.append
+
+        parser = _FakeParser()
+        code = run_subprocess(
+            ctx,
+            py("print('PROGRESS one'); print('noise'); print('PROGRESS two')"),
+            parser=parser,
+        )
+        assert code == 0
+        assert received == [{"message": "seen 1"}, {"message": "seen 2"}]
+
+    def test_feed_false_publishes_nothing(self):
+        ctx = make_ctx()
+        received: list[dict] = []
+        ctx._progress_cb = received.append
+
+        run_subprocess(ctx, py("print('irrelevant line')"), parser=_FakeParser())
+        assert received == []
+
+    def test_passing_both_on_line_and_parser_is_an_error(self):
+        with pytest.raises(ValueError):
+            run_subprocess(
+                make_ctx(),
+                py("print('x')"),
+                on_line=lambda line: None,
+                parser=_FakeParser(),
+            )
+
+    def test_a_raising_parser_does_not_fail_the_job(self):
+        """Same advisory-only guarantee as on_line, extended to parser=."""
+
+        class BoomParser:
+            name = "boom"
+
+            def feed(self, line: str) -> bool:
+                raise ValueError("bad parse")
+
+            def snapshot(self) -> dict:
+                return {}
+
+        assert run_subprocess(make_ctx(), py("print('x')"), parser=BoomParser()) == 0
+
+
+class TestParserSilence:
+    """structlog here writes straight to stdout via PrintLoggerFactory,
+    bypassing stdlib logging entirely -- caplog cannot see it. Patch
+    executor.log directly instead."""
+
+    def test_warns_when_a_parser_never_matches_past_the_floor(self, monkeypatch):
+        monkeypatch.setattr(executor_module, "PARSER_SILENCE_FLOOR_S", 0.05)
+        warnings: list[tuple] = []
+        monkeypatch.setattr(
+            executor_module.log, "warning", lambda event, **kw: warnings.append((event, kw))
+        )
+        ctx = make_ctx()
+
+        run_subprocess(
+            ctx,
+            py("""
+                import time
+                print('hello')
+                time.sleep(0.2)
+            """),
+            parser=_FakeParser(token="NEVER MATCHES"),
+        )
+
+        assert len(warnings) == 1
+        event, kw = warnings[0]
+        assert event == "progress_parser_silent"
+        assert kw["parser"] == "fake-tool"
+        assert kw["line_count"] == 1
+
+    def test_no_warning_when_the_parser_matches(self, monkeypatch):
+        monkeypatch.setattr(executor_module, "PARSER_SILENCE_FLOOR_S", 0.05)
+        warnings: list[tuple] = []
+        monkeypatch.setattr(
+            executor_module.log, "warning", lambda event, **kw: warnings.append((event, kw))
+        )
+        ctx = make_ctx()
+
+        run_subprocess(
+            ctx,
+            py("""
+                import time
+                print('PROGRESS')
+                time.sleep(0.2)
+            """),
+            parser=_FakeParser(),
+        )
+
+        assert warnings == []
+
+    def test_no_warning_below_the_floor(self, monkeypatch):
+        """A short job with a parser that never matched is not evidence of a
+        broken parser -- most short jobs never print anything worth matching."""
+        monkeypatch.setattr(executor_module, "PARSER_SILENCE_FLOOR_S", 30.0)
+        warnings: list[tuple] = []
+        monkeypatch.setattr(
+            executor_module.log, "warning", lambda event, **kw: warnings.append((event, kw))
+        )
+        ctx = make_ctx()
+
+        run_subprocess(
+            ctx, py("print('irrelevant')"), parser=_FakeParser(token="NEVER MATCHES")
+        )
+
+        assert warnings == []
 
 
 def _pid_alive(pid: int) -> bool:

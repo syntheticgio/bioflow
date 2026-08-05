@@ -83,6 +83,7 @@ class AssemblyProgress:
     fabricated fraction is worse than an honest phase name.
     """
 
+    name: str = "flye"
     phase: str = "starting"
 
     def feed(self, line: str) -> bool:
@@ -102,6 +103,11 @@ class AssemblyProgress:
 
     def message(self) -> str:
         return self.phase
+
+    def snapshot(self) -> dict:
+        # No pct, no phase_index/phase_total: see the class docstring for why
+        # a fraction or a "step N of M" would both be fabricated here.
+        return {"pct": None, "phase": self.phase, "message": self.message()}
 
 
 # assembly_info.txt is tab-separated with a `#seq_name` header:
