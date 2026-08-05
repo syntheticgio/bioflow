@@ -59,6 +59,16 @@ pub trait DockerBackend {
     /// `docker compose pull`, only ever called on an explicit Update click.
     fn pull(&self, install_dir: &str) -> ActionResult;
 
+    /// `docker pull <image>` for one arbitrary, non-compose image -- an
+    /// optional pipeline tool's image (task 9's prefetch), not a service
+    /// this stack's compose file names. Plain `docker pull`, not `docker
+    /// compose --project-directory ... pull`: `compose pull` only knows
+    /// about the images declared in the compose file, and an optional
+    /// tool's image is deliberately never one of those (see
+    /// docs/superpowers/specs/2026-08-05-optional-tool-delivery-design.md
+    /// on why delivery is image-only and separate from the stack itself).
+    fn pull_image(&self, image: &str) -> ActionResult;
+
     /// The API healthcheck -- what makes "Running" mean the API answered,
     /// not merely that containers exist.
     fn health(&self, install_dir: &str) -> bool;
