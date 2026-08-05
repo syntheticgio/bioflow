@@ -467,6 +467,19 @@ async def verify_files(ctx: JobContext) -> dict:
          single bad sweep. `_BREAKER_MIN_MISSES` keeps a small library (a
          handful of blobs, all genuinely deleted) from tripping the breaker
          on a 100% miss rate that is completely mundane at that size.
+
+    A `MISSING` blob is excluded from the batch above (its rotation is done --
+    guard 2 already confirmed it twice) but is not abandoned: a second, smaller
+    pass re-stats up to `recheck_batch_size` of them, oldest-checked-first, and
+    heals any that are actually present. Without this, a `MISSING` blob can
+    never leave that state on its own -- see docs/TODO.md, where a mount event
+    put 45 blobs there at once with no automatic way back. The recheck pass
+    only ever heals; it never re-marks a still-missing blob (nothing new is
+    learned by re-confirming an already-confirmed absence, and guard 2's
+    two-strike bookkeeping has no meaning for a blob already past it), and it
+    is not subject to guard 3 -- a bad stat here can only mean "still missing,"
+    never "newly discovered," so there is nothing for a circuit breaker to
+    protect against.
     """
     import asyncio
     from datetime import UTC, datetime, timedelta
@@ -627,15 +640,60 @@ async def verify_files(ctx: JobContext) -> dict:
             "blob.missing", {"sha256": blob.id}, owner=keys.SYSTEM_OWNER
         )
 
+    # --- Recheck pass: give MISSING blobs a way back ---
+    recheck_batch_size = int(ctx.payload.get("recheck_batch_size", 100))
+    missing_blobs = (
+        await Blob.find(Blob.state == BlobState.MISSING)
+        .sort("+last_verified_at")
+        .limit(recheck_batch_size)
+        .to_list()
+    )
+
+    recovered = 0
+    for blob in missing_blobs:
+        ctx.check_cancel()
+        stat = await asyncio.to_thread(_stat_or_none, _path_for(blob))
+        if stat is None:
+            # Still missing. Nothing new was learned -- re-confirming an
+            # already-confirmed absence earns no additional miss_count, and
+            # last_verified_at is left alone so this blob keeps surfacing at
+            # the front of the recheck rotation rather than the back.
+            continue
+
+        recovered += 1
+        await blob.set(
+            {
+                Blob.state: BlobState.PRESENT,
+                Blob.miss_count: 0,
+                Blob.last_miss_at: None,
+                Blob.last_verified_at: now,
+                Blob.updated_at: now,
+            }
+        )
+        # Scoped to status == MISSING, not every object referencing this blob:
+        # an object could have moved to ERROR for an unrelated reason since,
+        # and this heal should not paper over that.
+        await DataObject.find(
+            DataObject.blob_sha256 == blob.id, DataObject.status == ObjectStatus.MISSING
+        ).update({"$set": {"status": ObjectStatus.READY.value, "updated_at": now}})
+        log.info("blob_recovered", digest=blob.id, path=str(_path_for(blob)))
+        await queue_mod.publish_event(
+            "blob.recovered", {"sha256": blob.id}, owner=keys.SYSTEM_OWNER
+        )
+
     result = {
         "checked": checked,
         "present": present,
         "first_miss": newly_missing,
         "confirmed_missing": confirmed_missing,
         "drifted": drifted,
+        "rechecked_missing": len(missing_blobs),
+        "recovered": recovered,
     }
     if confirmed_missing or drifted:
         log.warning("verify_found_problems", **result)
+    if recovered:
+        log.info("verify_recovered_blobs", recovered=recovered)
     return result
 
 

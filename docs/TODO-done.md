@@ -452,6 +452,107 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## MISSING blobs can never self-heal, and 45 got wrongly marked missing at once — FIXED (circuit breaker + recheck pass, 2026-08-05)
+
+Raised: 2026-08-05, found while investigating a user report that the `blobs`
+collection held 45 documents in `state: "missing"` although every one of
+those files was actually present on disk with a matching size (verified via
+`blob_path(blob.id).exists()` plus a size comparison against all 45).
+
+Two separate things came out of that investigation:
+
+**1. The data was already repaired.** All 45 were healed back to
+`state: "present"` and their dependent `objects` documents back to
+`status: "ready"` with `backend/scripts/repair_missing_blobs.py`, which mirrors
+`verify_files`'s own "present" healing branch (stat the file, compare size,
+heal). Confirmed after running: `db.blobs.count_documents({'state':
+'missing'})` → 0, `db.objects.count_documents({'status': 'missing'})` → 0.
+The script takes `--dry-run` and is safe to run again if this recurs -- it
+only ever heals a blob whose file is actually present with a matching size,
+and leaves anything genuinely absent or size-mismatched untouched.
+
+**2. How they got into that state is unresolved, and the exact combination
+ruled out every explanation except an out-of-band write.** All 45 shared
+`miss_count: 1` with no prior `last_miss_at`, clustered at the same
+`last_verified_at` timestamp (`2026-08-05T17:20:10Z`). That combination is one
+`verify_files` (`backend/app/queue/handlers.py`) cannot produce: its two-strike
+guard only sets `state: MISSING` in the "confirmed_missing" branch, which only
+runs when `last_miss_at` was already set from an *earlier* miss -- meaning
+`miss_count` would already be incremented past 1 by the time `state` flips.
+The "first miss" branch never touches `state` at all. This has been true since
+the handler's introduction in the initial commit; no prior version behaved
+differently. A full-repo grep found no other code that writes `Blob.state`.
+Container logs from the 17:20 window were gone by the time this was
+investigated (the worker container had since restarted), so the actual
+mutation was not recoverable.
+
+Best working theory: a direct Mongo mutation (manual script, debugging
+session) set `state: missing` on the whole batch at once, bypassing
+`verify_files` entirely -- the clustered timestamp reads like one bulk write,
+not 45 independent verifier misses.
+
+**3. Shipped 2026-08-05: the circuit breaker.** `verify_files` now stats the
+whole batch before writing anything (`backend/app/queue/handlers.py`, guard 3
+in the docstring). If `miss_total >= _BREAKER_MIN_MISSES` (10) and
+`miss_total / len(blobs) >= _BREAKER_MISS_FRACTION` (0.5), the batch is
+treated as one mount event rather than N independent deletions: nothing is
+written -- not even a `miss_count` bump, which would otherwise burn through
+guard 2's two-strike budget on every affected blob in a single bad sweep --
+and a `storage.mass_miss` event is published instead. `_BREAKER_MIN_MISSES`
+exists so a small library where a handful of files are genuinely gone (a
+100% miss rate at that size is mundane) doesn't trip the breaker; both
+thresholds must clear for it to fire. Covered by
+`backend/tests/queue/test_verify_files_circuit_breaker.py` (all-missing above
+the floor aborts with no writes and publishes `storage.mass_miss`; a few
+genuine misses below the floor proceed normally; a mixed batch below the
+fraction proceeds normally). This directly closes the risk this entry
+originally flagged -- guard 1 only ever caught a *fully* empty mount; a
+partially-remounted drive or a share that serves an empty listing for some
+paths would still miss most of a batch and previously had no protection.
+
+**4. Shipped 2026-08-05: the recheck pass.** `verify_files`'s main batch still
+excludes `MISSING` blobs (`Blob.find(Blob.state != BlobState.MISSING)`), but a
+second pass now runs after it: up to `recheck_batch_size` (default 100)
+`MISSING` blobs, oldest-`last_verified_at`-first, get re-stat'd. Any that are
+actually present are healed straight to `PRESENT` (`miss_count` and
+`last_miss_at` reset) and their referencing objects flipped back to `READY`
+-- scoped to `status == MISSING` specifically, so an object that moved to
+`ERROR` for an unrelated reason in the meantime is not silently resurrected.
+A still-missing blob is left completely untouched (no `miss_count` bump, no
+`last_verified_at` bump) -- there is nothing new to learn from re-confirming
+an already-confirmed absence, and leaving `last_verified_at` alone keeps it
+sorting first in the next recheck rather than drifting to the back of a
+rotation it can never age out of naturally. This pass is deliberately not
+subject to guard 3 (the circuit breaker): a bad stat here can only mean
+"still missing," never "newly discovered," so there is nothing for a breaker
+to protect against. Publishes `blob.recovered` per healed blob. Covered by
+`backend/tests/queue/test_verify_files_recheck.py` (a present file heals its
+blob and object; a still-missing blob and its `last_verified_at` are left
+alone; an object already moved to `ERROR` is not resurrected;
+`recheck_batch_size` caps how many are tried per tick).
+
+This closes the entry: a blob that lands in `MISSING`, by any path, now has
+an automatic way back within one `recheck_batch_size`-sized window per tick,
+instead of requiring the manual repair script above.
+
+Confirmed *not* an immediate risk: `blob_service.gc_candidates` filters only
+on `ref_count <= 0` and `storage == MANAGED`, ignoring `state` -- all 45 had
+`ref_count >= 1` so none were GC-eligible. But `state` provides no protection
+either; a `MISSING` blob whose refcount later drops to 0 would be GC'd despite
+possibly still being present and wanted. The recheck pass narrows the window
+this matters in, but does not close it -- worth keeping in mind if
+`gc_candidates` is ever revisited.
+
+Confirmed *is* user-visible while a blob sits in this state (now a
+self-healing window measured in ticks, not indefinite):
+`frontend/src/components/ManageFile.tsx` reads `blob.state === "missing"`
+directly to disable downloads and show "The stored file is not currently
+available... check that the drive is mounted."
+
+Touches: `backend/app/queue/handlers.py` (`verify_files`),
+`backend/app/services/blob_service.py`, `backend/app/storage/home.py`
+(`check_home`), `frontend/src/components/ManageFile.tsx`.
+
 ## Changing an index definition is a hard startup failure — FIXED
 
 Fixed before 2026-08-03 by the startup reconciliation mechanism in
