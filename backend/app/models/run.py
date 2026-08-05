@@ -163,6 +163,10 @@ class RunJobRole(StrEnum):
     # fixed here, because giving these two handlers Run records is its own
     # change with its own verification.
     POLISH = "polish"
+    # Reference-guided scaffolding. Named for the action, same reasoning as
+    # CONSENSUS and POLISH above. Also currently unlinked -- see POLISH's own
+    # comment; the gap is the same one and not created by adding this member.
+    SCAFFOLD = "scaffold"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive

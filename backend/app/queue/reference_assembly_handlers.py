@@ -1,12 +1,13 @@
-"""Reference-guided assembly handlers: iVar consensus, Polypolish polishing.
+"""Reference-guided assembly handlers: iVar consensus, Polypolish polishing,
+RagTag scaffolding.
 
-Both ride on the reference-based assembly foundation (#21), which provides
-validators and a provenance rule but installs no tool and dispatches to
-nothing on its own. These handlers are what make it real -- epic #14's
-shipped slices.
+All three ride on the reference-based assembly foundation (#21), which
+provides validators and a provenance rule but installs no tool and dispatches
+to nothing on its own. These handlers are what make it real -- epic #14's
+three tool slices.
 
-The two answer the foundation's provenance question differently, which is
-worth knowing before assuming one is a template for the other:
+They answer the foundation's provenance question three different ways, which
+is worth knowing before assuming one is a template for the others:
 
 - `consensus_from_alignment` takes a user-supplied BAM, so its launch path
   *validates* that the BAM was aligned to the selected reference.
@@ -14,6 +15,11 @@ worth knowing before assuming one is a template for the other:
   location a read maps to, and `align_reads` produces best-alignment output
   -- so it aligns the reads to the draft itself and the target is correct
   *by construction*, recorded as facts rather than checked at launch.
+- `scaffold_assembly` follows `polish_assembly`'s shape (RagTag invokes
+  minimap2 itself), plus a second provenance obligation neither sibling
+  carries: a scaffolded assembly is partly a claim about the *reference*, not
+  only the sample, since RagTag names scaffolds after the reference's own
+  sequences. See the design doc's "Scaffolds are inference, not observation".
 
 Imported by `handlers.py` for the `@handler` registration side effects.
 """
@@ -24,7 +30,7 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import ivar_runner, polypolish_runner, tools
+from app.pipelines import ivar_runner, polypolish_runner, ragtag_runner, tools
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir, _resolve_input
 from app.queue.registry import HandlerMode, JobContext, handler
@@ -346,3 +352,132 @@ def polish_assembly(ctx: JobContext) -> dict:
         "output": {"tmp_path": str(polished), "name": "polished.fasta"},
         "facts": facts,
     }
+
+
+# Bacterial in minutes, a large plant reference can take an hour -- sized
+# like the alignment jobs (minimap2's whole-genome alignment dominates the
+# cost), not like consensus_from_alignment's small-reference case.
+SCAFFOLD_LEASE_SECONDS = 3600
+
+
+@handler(
+    "scaffold_assembly",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    # minimap2's index dominates, the same reasoning polish_assembly's budget
+    # gives for bwa-mem2 -- size for the reference, not the draft. LIGHT, not
+    # HEAVY: unlike the other two slices there is no high-coverage read file
+    # being streamed, just two assemblies. (IoClass has no NORMAL member --
+    # NONE/LIGHT/HEAVY is the full set.)
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT),
+    # Deterministic tool, deterministic input -- and see the docstring below
+    # for why a retry here would be worse than merely pointless.
+    max_attempts=1,
+)
+def scaffold_assembly(ctx: JobContext) -> dict:
+    """Order and orient a draft assembly's contigs against a reference, with
+    RagTag.
+
+    One subprocess call. RagTag invokes minimap2 itself -- the alignment is
+    not a separate stage the way Polypolish's is, because there is no filter
+    step in between; RagTag consumes the alignment directly.
+
+    The critical property of this handler, load-bearing enough to name in
+    its own paragraph: **RagTag can exit 0 having produced nothing.** Given
+    an unrelated reference it raises `RuntimeError: There are no useful
+    alignments`, writes no `ragtag.scaffold.fasta`, and still returns status
+    0 -- verified twice against a real 2.1.0 install, see the design doc and
+    ragtag_runner's module docstring. So the output file's existence is not
+    a belt-and-braces check here, it is the *only* success signal this
+    handler has; the subprocess return code is not trustworthy evidence
+    either way.
+    """
+    tool = tools.require(tools.ragtag())
+
+    work = _prepare_workdir(ctx, "scaffold")
+
+    reference = _resolve_input(ctx.payload, "reference")
+    reference = _named_link(work, reference, ctx.payload.get("reference_name"))
+
+    draft = _resolve_input(ctx.payload, "draft")
+    draft = _named_link(work, draft, ctx.payload.get("draft_name"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.extend_lease(SCAFFOLD_LEASE_SECONDS)
+
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+    divergence = ctx.payload.get("divergence") or ragtag_runner.Divergence.SAME_SPECIES
+
+    ctx.progress(phase="scaffolding", pct=0.1, message="aligning and scaffolding")
+    out_dir = work / "out"
+    cmd = ragtag_runner.build_scaffold_command(
+        ragtag_path=tool.path,
+        reference=reference,
+        draft=draft,
+        out_dir=out_dir,
+        threads=threads,
+        divergence=divergence,
+    )
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+
+    scaffold_fasta = out_dir / "ragtag.scaffold.fasta"
+    if not scaffold_fasta.exists() or scaffold_fasta.stat().st_size == 0:
+        # Not RetryableError: RagTag's own diagnosis ("no useful alignments")
+        # is a statement about these two inputs, and the same pair will fail
+        # identically on retry. Surfacing the log path lets the user read
+        # RagTag's own message, which is the thing that tells them what to
+        # change (a closer reference, or a coarser --mm2-params).
+        raise PermanentError(
+            "ragtag.py scaffold exited without producing a scaffolded "
+            "assembly. This usually means no useful alignments were found "
+            f"between the draft and the reference (exit code {code}); see "
+            f"{log_path} for RagTag's own diagnosis."
+        )
+
+    agp_path = out_dir / "ragtag.scaffold.agp"
+    stats = ragtag_runner.parse_stats(
+        (out_dir / "ragtag.scaffold.stats").read_text()
+        if (out_dir / "ragtag.scaffold.stats").exists()
+        else ""
+    )
+    confidence = ragtag_runner.parse_confidence(
+        (out_dir / "ragtag.scaffold.confidence.txt").read_text()
+        if (out_dir / "ragtag.scaffold.confidence.txt").exists()
+        else ""
+    )
+
+    facts = {**stats, **confidence}
+    facts["scaffold_tool_version"] = tool.version
+    facts["scaffold_aligner"] = "minimap2"
+    facts["scaffold_divergence_preset"] = divergence
+    facts["scaffold_reference_object_id"] = ctx.payload.get("reference_object_id")
+    facts["scaffold_reference_name"] = ctx.payload.get("reference_name")
+    facts["scaffold_count"] = ragtag_runner.count_scaffolds(scaffold_fasta.read_text())
+
+    ctx.progress(phase="done", pct=1.0, message="scaffolding complete")
+    log.info(
+        "scaffold_finished",
+        job_id=ctx.job_id,
+        placed=facts.get("scaffold_placed_sequences"),
+        unplaced=facts.get("scaffold_unplaced_sequences"),
+        scaffolds=facts.get("scaffold_count"),
+    )
+
+    output = {"tmp_path": str(scaffold_fasta), "name": "scaffolds.fasta"}
+    result = {
+        "job_id": ctx.job_id,
+        "draft_object_id": ctx.payload.get("draft_object_id"),
+        "reference_object_id": ctx.payload.get("reference_object_id"),
+        "output": output,
+        "facts": facts,
+    }
+    # The AGP is the one intermediate this slice keeps, unlike its siblings:
+    # it is the only record of which contig went where and in what
+    # orientation, small, and the standard interchange format for exactly
+    # this. Optional in the result -- a missing AGP costs a missing sidecar,
+    # not a failed job, since the FASTA is the deliverable.
+    if agp_path.exists():
+        result["agp"] = {"tmp_path": str(agp_path), "name": "scaffolds.agp"}
+    return result

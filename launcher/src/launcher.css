@@ -92,14 +92,7 @@ a:hover { color: var(--color-accent-2); }
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
 }
 .masthead-brand { display: flex; align-items: baseline; gap: 16px; }
-.masthead-word {
-  font-family: var(--font-heading); font-weight: 600; font-size: 34px;
-  line-height: 1; letter-spacing: -0.01em; color: var(--color-text);
-}
-.masthead-kicker {
-  font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--ink-55);
-}
+.masthead-logo { height: 52px; width: auto; display: block; }
 .masthead-settings-link {
   font-size: 15px; font-family: var(--font-heading); font-weight: 600;
 }

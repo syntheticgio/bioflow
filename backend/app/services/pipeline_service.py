@@ -49,6 +49,7 @@ from app.pipelines import (
     lineage_inference,
     pairing,
     polypolish_runner,
+    ragtag_runner,
     resource_estimator,
     tools,
     trimmomatic_runner,
@@ -1680,6 +1681,68 @@ async def _sidecar_of_role(obj: DataObject, role: SidecarRole) -> DataObject | N
     return None
 
 
+async def _require_or_offer_install(
+    tool, *, owner: str, install_optional: bool
+) -> PydanticObjectId | None:
+    """Assert a caller is usable, or -- for an on-demand tool that simply has
+    not been pulled yet -- offer to install it instead of refusing outright.
+
+    Returns the id of an install job the launch should `depends_on`, or
+    `None` when nothing needs to be queued (the tool was already available).
+
+    Three outcomes, matching `tools.InstallState`:
+
+    - `INSTALLED` (or any BUNDLED tool, whose `install_state` is always
+      `None`): nothing to do, `tools.require` passes it straight through.
+    - `NOT_INSTALLED`, no consent: raise `ValidationError` naming the tool
+      and its download size, in the same `details={"needs": ...}` shape the
+      `.bai`/`.fai` refusals above already use -- the dialog reads `needs`
+      to decide what to offer, and "install this tool" belongs in the same
+      vocabulary as "index this BAM first" rather than a new one.
+    - `NOT_INSTALLED`, with consent: enqueue the install job
+      (`tool_install_service.install`, which already deduplicates an
+      in-flight install for the same tool) and return its id, so the caller
+      can chain `call_variants` behind it with `depends_on`. Genuinely
+      broken (`UNKNOWN`, or unavailable with no install_state at all) still
+      raises the ordinary `require()` error -- pressing "install" cannot fix
+      an unreachable daemon, so that path must not pretend it can.
+    """
+    if tool.available:
+        tools.require(tool)
+        return None
+
+    if tool.install_state is tools.InstallState.NOT_INSTALLED:
+        meta = tools.TOOL_META.get(tool.name)
+        if not install_optional:
+            raise ValidationError(
+                f"{tool.name} is not installed. It runs as a separate "
+                f"container image and is downloaded on first use "
+                f"(about {_format_gb(meta.download_bytes) if meta else '?'}).",
+                details={
+                    "tool": tool.name,
+                    "needs": "install_tool",
+                    "download_bytes": meta.download_bytes if meta else None,
+                },
+            )
+
+        from app.services import tool_install_service
+
+        job = await tool_install_service.install(tool_name=tool.name, owner=owner)
+        return job.id
+
+    # UNKNOWN, or unavailable with no install_state at all (every BUNDLED
+    # tool that is simply missing/broken) -- a genuine fault. require()
+    # raises PermanentError with the probe's own reason.
+    tools.require(tool)
+    return None
+
+
+def _format_gb(download_bytes: int | None) -> str:
+    if not download_bytes:
+        return "a few GB"
+    return f"{download_bytes / 1_000_000_000:.1f} GB"
+
+
 async def launch_variant_calling(
     *,
     bam_id: PydanticObjectId,
@@ -1687,6 +1750,13 @@ async def launch_variant_calling(
     reference_id: PydanticObjectId | None = None,
     caller: str | None = None,
     params: dict | None = None,
+    # Consent to a multi-gigabyte download. Distinct from every other launch
+    # parameter here because it is not a choice about *what* to run -- it is
+    # permission to spend bandwidth the user has not yet agreed to. Without
+    # it, launch_variant_calling refuses naming the size (see
+    # _require_or_offer_install); the dialog re-posts with this set once the
+    # user has actually seen and accepted that number.
+    install_optional: bool = False,
 ):
     """Queue a variant calling run over an aligned BAM.
 
@@ -1732,10 +1802,13 @@ async def launch_variant_calling(
             **(params or {}),
         }
     )
+    install_job_id = None
     if merged.caller is variant_runner.VariantCaller.CLAIR3:
         tools.require(tools.clair3())
     elif merged.caller is variant_runner.VariantCaller.DEEPVARIANT:
-        tools.require(tools.deepvariant())
+        install_job_id = await _require_or_offer_install(
+            tools.deepvariant(), owner=owner, install_optional=install_optional
+        )
     else:
         tools.require(tools.bcftools())
     tools.require(tools.bcftools())  # always: it writes the .tbi
@@ -1776,8 +1849,13 @@ async def launch_variant_calling(
         dedup_key=_variant_dedup_key(bam_id=bam.id, params=merged.as_dict()),
         project_id=bam.project_id,
         object_id=bam.id,
-        # No depends_on: the .bai and .fai are required above, so there is
-        # nothing left to wait for.
+        # The .bai and .fai are required above, so ordinarily there is
+        # nothing left to wait for -- except when _require_or_offer_install
+        # queued a pull for an on-demand caller (DeepVariant, with consent).
+        # A failed install fails this job too rather than leaving it blocked
+        # forever: queue.py's _failed_dependencies already covers that, the
+        # same mechanism launch_alignment's index-build dependency relies on.
+        depends_on=[install_job_id] if install_job_id is not None else [],
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)
@@ -3307,6 +3385,127 @@ async def launch_polish(
         draft_id=str(draft.id),
         read_files=len(chosen),
         depth=payload["depth"],
+        tool_version=tool.version,
+    )
+    return job
+
+
+async def launch_scaffold(
+    *,
+    draft_object_id: PydanticObjectId,
+    owner: str,
+    reference_object_id: PydanticObjectId | None = None,
+    divergence: str | None = None,
+) -> Job:
+    """Queue a RagTag run: order and orient a draft assembly's contigs
+    against a reference.
+
+    Same provenance shape as `launch_polish`: RagTag invokes minimap2 itself
+    (verified from its own log), so there is no BAM to check and the
+    alignment target is correct by construction. Recorded as facts on the
+    output, not validated at launch -- see reference_assembly_handlers'
+    module docstring for why this slice and Polypolish share that shape
+    while iVar does not.
+
+    Unlike polishing, the reference must be named or unambiguous: a project
+    holding two reference-role FASTA (the ordinary case -- the real yeast
+    project carries both the GCA and GCF genomic FASTA for one organism) is
+    a real ambiguity, not an edge case, so `reference_object_id` is expected
+    to arrive from a dialog's chooser rather than resolved silently the way
+    `launch_polish` resolves reads.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tool = tools.require(tools.ragtag())
+
+    draft = await object_service.get_object(draft_object_id, owner=owner)
+    reference_assembly.check_draft_assembly(draft)
+
+    if reference_object_id is None:
+        candidates = [
+            o
+            for o in await object_service.list_objects(
+                draft.project_id, owner=owner, status=ObjectStatus.READY
+            )
+            if o.role is ObjectRole.REFERENCE and o.format.kind is FormatKind.FASTA
+        ]
+        if not candidates:
+            raise ValidationError(
+                "Scaffolding needs a reference assembly, and this project "
+                "has none",
+                details={"draft_id": str(draft.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several reference assemblies; name the "
+                "one to scaffold against",
+                details={
+                    "draft_id": str(draft.id),
+                    "candidates": [str(o.id) for o in candidates],
+                },
+            )
+        reference = candidates[0]
+    else:
+        reference = await object_service.get_object(
+            reference_object_id, owner=owner
+        )
+
+    reference_assembly.check_reference_assembly(reference)
+
+    if reference.id == draft.id:
+        raise ValidationError(
+            "The draft and the reference cannot be the same object",
+            details={"object_id": str(draft.id)},
+        )
+
+    draft_digest, draft_path = await _resolve_readable(draft)
+    ref_digest, ref_path = await _resolve_readable(reference)
+
+    divergence = divergence or ragtag_runner.Divergence.SAME_SPECIES
+    payload: dict = {
+        "draft_object_id": str(draft.id),
+        "draft_name": draft.name,
+        "reference_object_id": str(reference.id),
+        "reference_name": reference.name,
+        "divergence": divergence,
+        "threads": 4,
+    }
+    if draft_digest:
+        payload["draft_sha256"] = draft_digest
+    if draft_path:
+        payload["draft_path"] = draft_path
+    if ref_digest:
+        payload["reference_sha256"] = ref_digest
+    if ref_path:
+        payload["reference_path"] = ref_path
+
+    job = await queue.enqueue(
+        "scaffold_assembly",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # Sized for minimap2's whole-genome alignment, not for RagTag's own
+        # graph work -- see the handler's own note.
+        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT),
+        max_attempts=1,
+        dedup_key=f"scaffold:{draft.id}:{reference.id}",
+        project_id=draft.project_id,
+        object_id=draft.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Scaffolding is already queued or running for this assembly "
+            "against this reference",
+            details={"object_id": str(draft.id)},
+        )
+
+    log.info(
+        "scaffold_launched",
+        job_id=str(job.id),
+        draft_id=str(draft.id),
+        reference_id=str(reference.id),
+        divergence=divergence,
         tool_version=tool.version,
     )
     return job

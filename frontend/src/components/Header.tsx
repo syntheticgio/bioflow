@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import mastheadImg from "../assets/broadhead-masthead.png";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
@@ -79,7 +80,7 @@ export function Header() {
           is the only one from a full-width view like /activity. */}
       <Link to="/" className="header-brand" title="Back to projects">
         <span className="header-logo">B</span>
-        <span>BioFlow</span>
+        <img src={mastheadImg} alt="BioFlow" className="header-masthead-img" />
       </Link>
 
       <nav className="header-menu">

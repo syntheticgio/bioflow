@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { classifyChromosomes } from "../lib/chromosomes";
 import { useUploads } from "../hooks/useUploads";
@@ -44,6 +44,7 @@ import { ProjectDangerZone } from "./ProjectDangerZone";
 import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { CompletenessDialog } from "./CompletenessDialog";
+import { ScaffoldDialog } from "./ScaffoldDialog";
 import { QuantifyDialog } from "./QuantifyDialog";
 import { DifferentialExpressionDialog } from "./DifferentialExpressionDialog";
 import { VariantDialog } from "./VariantDialog";
@@ -57,8 +58,16 @@ import { TruncatedValue } from "./TruncatedValue";
 export function DetailPanel() {
   const [params] = useSearchParams();
   const sel = params.get("sel");
+  const { pathname } = useLocation();
 
-  if (!sel) return <EmptyDetail />;
+  if (!sel) {
+    // Inside an opened project (/p/:projectId) with nothing picked yet, the
+    // right panel should still be about that project -- not the app-wide
+    // splash, which belongs at the project list root (/).
+    const projectMatch = pathname.match(/^\/p\/([^/]+)/);
+    if (projectMatch) return <ProjectDetail id={projectMatch[1]} />;
+    return <EmptyDetail />;
+  }
   const [kind, id] = sel.split(":");
   if (kind === "project") return <ProjectDetail id={id} />;
   if (kind === "object") return <ObjectDetail id={id} />;
@@ -392,6 +401,7 @@ function ObjectDetail({ id }: { id: string }) {
   const [quantifyOpen, setQuantifyOpen] = useState(false);
   const [assembleOpen, setAssembleOpen] = useState(false);
   const [completenessOpen, setCompletenessOpen] = useState(false);
+  const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [deOpen, setDeOpen] = useState(false);
 
   const startFlow = (pipeline: "trim" | "align" | "variant") => {
@@ -640,6 +650,10 @@ function ObjectDetail({ id }: { id: string }) {
     obj.format.kind === "fasta" &&
     obj.role !== "protein" &&
     obj.role !== "transcript";
+  // Same assembly-shape gate as canScoreCompleteness, for the same reason:
+  // the launch and the card both refuse elsewhere, so the button matching
+  // that here is cosmetic consistency, not the actual guard.
+  const canScaffold = canScoreCompleteness;
 
   return (
     <div className="panel">
@@ -804,6 +818,8 @@ function ObjectDetail({ id }: { id: string }) {
                   onAssemble={() => setAssembleOpen(true)}
                   canScoreCompleteness={canScoreCompleteness}
                   onScoreCompleteness={() => setCompletenessOpen(true)}
+                  canScaffold={canScaffold}
+                  onScaffold={() => setScaffoldOpen(true)}
                   canDifferentialExpression={canDifferentialExpression}
                   onDifferentialExpression={() => setDeOpen(true)}
                   canQC={canQC}
@@ -888,6 +904,9 @@ function ObjectDetail({ id }: { id: string }) {
           object={obj}
           onClose={() => setCompletenessOpen(false)}
         />
+      )}
+      {scaffoldOpen && (
+        <ScaffoldDialog object={obj} onClose={() => setScaffoldOpen(false)} />
       )}
       {deOpen && (
         <DifferentialExpressionDialog

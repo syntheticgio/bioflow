@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     # from upstream's musl-static release binary, and absent on arm64 by
     # design -- see backend/scripts/install-polypolish.sh.
     polypolish_path: str = "polypolish"
+    # Reference-guided scaffolding. Not in Debian; installed from PyPI (pure
+    # Python, pinned in backend/Dockerfile). The binary is `ragtag.py`, not
+    # `ragtag` -- see tools.ragtag()'s own comment.
+    ragtag_path: str = "ragtag.py"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"
@@ -182,6 +186,14 @@ class Settings(BaseSettings):
     # provider document. See services/ai/migration.py.
     ai_legacy_base_url: str = Field(default="", alias="LLM_BASE_URL")
     ai_legacy_model: str = Field(default="", alias="LLM_MODEL")
+
+    # --- Feedback notifications ---
+    # When true, new feedback submissions are pushed to feedback_webhook_url
+    # (a Discord-compatible webhook) after the database insert succeeds.
+    # Delivery is best-effort: a failure is logged but never affects the
+    # 201 response or the persisted record.
+    feedback_enabled: bool = True
+    feedback_webhook_url: str = ""
 
     log_level: str = "INFO"
     owner: str = "local"

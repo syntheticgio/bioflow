@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import mastheadImg from "./assets/broadhead-masthead.png";
 import {
   dockerReady,
   runFirstSetup,
@@ -101,8 +102,7 @@ export function SetupWizard({ onInstalled }: Props) {
       <header className="masthead">
         <div className="masthead-row">
           <div className="masthead-brand">
-            <span className="masthead-word">BioFlow</span>
-            <span className="masthead-kicker">Genomics pipeline desk</span>
+            <img src={mastheadImg} alt="BioFlow" className="masthead-logo" />
           </div>
         </div>
         <div className="masthead-rule-thick" />

@@ -51,6 +51,7 @@ import type {
   RegisterAccepted,
   RunDetail,
   RunSummary,
+  ScaffoldRequest,
   ScheduleInfo,
   Share,
   SraAccepted,
@@ -744,6 +745,12 @@ export const api = {
 
   launchCompleteness: (body: CompletenessRequest) =>
     request<JobSummary>("/pipelines/completeness", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  launchScaffold: (body: ScaffoldRequest) =>
+    request<JobSummary>("/pipelines/scaffold", {
       method: "POST",
       body: JSON.stringify(body),
     }),
