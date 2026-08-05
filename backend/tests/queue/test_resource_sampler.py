@@ -99,6 +99,22 @@ class TestEmptyState:
         assert sampler.peak_rss_bytes is None
         assert sampler.peak_cpu_percent is None
         assert sampler.mean_cpu_percent is None
+        assert sampler.last_rss_bytes is None
+        assert sampler.last_cpu_percent is None
+
+
+class TestLastReading:
+    def test_last_reading_is_the_most_recent_not_the_peak(self):
+        """Progress display wants 'what is it doing right now', which a peak
+        cannot answer once the job has passed its high point."""
+        sampler = ResourceSampler(pid=1)
+        sampler.observe(FakeProcess(rss=900, cpu=10.0))
+        sampler.observe(FakeProcess(rss=100, cpu=5.0))
+        assert sampler.last_rss_bytes == 100
+        assert sampler.last_cpu_percent == 5.0
+        # The peak is unaffected by tracking the last reading alongside it.
+        assert sampler.peak_rss_bytes == 900
+        assert sampler.peak_cpu_percent == 10.0
 
 
 class TestChildCpuAcrossPolls:

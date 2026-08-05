@@ -18,6 +18,7 @@ from app.pipelines import tool_cache
 from app.queue import governor, keys, queue
 from app.queue.executor import JobExecutor
 from app.queue.registry import JobContext, get_handler, load_handlers
+from app.services import run_service
 
 log = get_logger(__name__)
 
@@ -296,15 +297,37 @@ class Worker:
             )
             return
 
+        # Resolved once here, at claim time, and cached on the context for the
+        # rest of the run -- never re-queried from the throttled progress
+        # writer, which runs up to twice a second. A list, not the first
+        # match: a deduplicated job (build_index reused by a second
+        # alignment) genuinely belongs to more than one run.
+        run_ids = [str(rid) for rid in await run_service.runs_for_job(job.id)]
+
+        # Same reasoning as run_ids: the model's prediction is a function of
+        # job type and input size, both fixed at claim time, so caching it
+        # here costs nothing in accuracy and takes a Mongo read off a path
+        # that runs twice a second per job.
+        eta_model_ms = await self._eta_model_ms(job)
+
         ctx = JobContext(
             job_id=claimed.job_id,
             payload=job.payload,
             epoch=claimed.epoch,
             attempts=job.attempts,
             owner=job.owner,
+            run_ids=run_ids,
+            eta_model_ms=eta_model_ms,
+            started_at=job.timing.started_at,
         )
         ctx._progress_cb = lambda upd: self.executor._schedule_progress(
-            claimed.job_id, claimed.epoch, upd, owner=job.owner
+            claimed.job_id,
+            claimed.epoch,
+            upd,
+            owner=job.owner,
+            run_ids=run_ids,
+            started_at=job.timing.started_at,
+            eta_model_ms=eta_model_ms,
         )
         # Renew immediately rather than waiting up to a full heartbeat interval:
         # a handler calls extend_lease *because* it is about to go quiet, and the
@@ -323,6 +346,32 @@ class Worker:
             await self.executor.run(job, spec, epoch, ctx=ctx)
         finally:
             self._running.pop(str(job.id), None)
+
+    async def _eta_model_ms(self, job: Job) -> int | None:
+        """The prior-runs duration model's prediction for this job, or None.
+
+        Mirrors the size resolution `executor._record_timing` uses: a job's
+        own payload size first, falling back to its object's size. A job with
+        neither (a schedule tick) or too little history has nothing to
+        correlate, so this is None -- eta_seconds then falls back to pure
+        extrapolation once there is enough progress to trust, or reports no
+        ETA at all.
+        """
+        from app.services import timing_service
+
+        size = job.payload.get("size") or 0
+        if not size and job.object_id:
+            from app.models import DataObject
+
+            obj = await DataObject.get(job.object_id)
+            size = obj.size if obj else 0
+        if not size:
+            return None
+
+        estimate = await timing_service.estimate(job.type, size)
+        if estimate is None or not estimate.get("known"):
+            return None
+        return estimate["estimate_ms"]
 
     # ---------- heartbeat ----------
 

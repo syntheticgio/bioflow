@@ -19,9 +19,11 @@ from app.logging import get_logger
 from app.models import (
     ACTIVE_STATES,
     TERMINAL_STATES,
+    AttemptProgress,
     Job,
     JobClass,
     JobLease,
+    JobProgress,
     JobResources,
     JobState,
     JobTiming,
@@ -379,7 +381,22 @@ async def claim(
 
 
 async def mark_running(job_id: str, worker_id: str, epoch: int) -> Job | None:
-    """Record the lease in Mongo. Returns None if the job is gone or cancelled."""
+    """Record the lease in Mongo. Returns None if the job is gone or cancelled.
+
+    Also where a later attempt's stale progress gets reset. A job that died
+    mid-run and was requeued (lease expiry, retry backoff) still carries
+    whatever `progress` it last reported -- 80% on a run that is restarting
+    from zero, if nothing intervenes. `attempts > 0` is the signal: `retry_later`
+    and `reap_expired` both increment `attempts` before scheduling the next
+    try, so by the time this runs for that try, `job.attempts` is already
+    what the *previous* attempt reached. `mark_running` is the once-per-attempt
+    write that starts a job running again, so it is the one place this needs
+    to happen regardless of which requeue path led here.
+
+    A terminal failure is untouched by this: nothing here runs on that path,
+    so a failed job keeps showing what it was doing when it died -- already
+    correct, and the more useful of the two behaviours for that case.
+    """
     job = await Job.get(PydanticObjectId(job_id))
     if job is None:
         return None
@@ -388,16 +405,29 @@ async def mark_running(job_id: str, worker_id: str, epoch: int) -> Job | None:
 
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=settings.lease_ttl_seconds)
-    await job.set(
-        {
-            Job.state: JobState.RUNNING,
-            Job.lease: JobLease(
-                worker_id=worker_id, expires_at=expires, heartbeat_at=now, epoch=epoch
-            ),
-            "timing.started_at": now,
-            Job.updated_at: now,
-        }
+    update = {
+        Job.state: JobState.RUNNING,
+        Job.lease: JobLease(
+            worker_id=worker_id, expires_at=expires, heartbeat_at=now, epoch=epoch
+        ),
+        "timing.started_at": now,
+        Job.updated_at: now,
+    }
+
+    had_progress = (
+        job.progress.pct is not None or job.progress.phase != "" or job.progress.message != ""
     )
+    if job.attempts > 0 and had_progress:
+        update[Job.last_attempt_progress] = AttemptProgress(
+            attempt=job.attempts,
+            pct=job.progress.pct,
+            phase=job.progress.phase,
+            message=job.progress.message,
+            peak_rss_bytes=job.progress.peak_rss_bytes,
+        )
+        update[Job.progress] = JobProgress()
+
+    await job.set(update)
     return await Job.get(PydanticObjectId(job_id))
 
 

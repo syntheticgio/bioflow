@@ -29,6 +29,12 @@ _PHASES: tuple[tuple[re.Pattern, str], ...] = (
     (re.compile(r"start to generate reports", re.IGNORECASE), "reporting"),
 )
 
+# The distinct phase names from _PHASES above, in order, with duplicates
+# collapsed ("trimming" is reached by two different log lines). fastp's own
+# stage list is closed and known ahead of time -- unlike Flye's, which is why
+# assembly_runner has no equivalent -- so a fixed ordered list is honest here.
+PHASE_ORDER: tuple[str, ...] = ("loading", "trimming", "writing", "reporting")
+
 # Progress derived from a read count is never allowed to reach 100%: the count
 # is an estimate extrapolated from the first 1000 records, and a bar that sits
 # at 100% while the job is still running is worse than one that sits at 95%.
@@ -268,6 +274,13 @@ class TrimProgress:
         if not self.expected_reads or self.reads_loaded <= 0:
             return None
         return min(self.reads_loaded / self.expected_reads, MAX_MEASURED_PCT)
+
+    @property
+    def phase_index(self) -> int | None:
+        """Position in PHASE_ORDER, 1-based for "step N of M" display."""
+        if self.phase not in PHASE_ORDER:
+            return None
+        return PHASE_ORDER.index(self.phase) + 1
 
     def message(self) -> str:
         if self.reads_loaded <= 0:

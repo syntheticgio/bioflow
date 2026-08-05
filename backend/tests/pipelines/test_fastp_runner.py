@@ -209,6 +209,24 @@ class TestProgressParsing:
         p.feed(line)
         assert p.phase == phase
 
+    @pytest.mark.parametrize(
+        ("line", "index"),
+        [
+            (LOADING, 1),
+            (COMPLETE, 2),
+            (WRITER, 3),
+            (REPORTS, 4),
+        ],
+    )
+    def test_phase_index_matches_phase_order(self, line, index):
+        p = TrimProgress()
+        p.feed(line)
+        assert p.phase_index == index
+        assert len(fastp_runner.PHASE_ORDER) == 4
+
+    def test_phase_index_is_none_before_any_phase_is_recognized(self):
+        assert TrimProgress().phase_index is None
+
     def test_reports_a_change_only_when_something_changed(self):
         """Progress writes hit Mongo and fan out over SSE; repeating an
         unchanged value would be pure noise."""

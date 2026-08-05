@@ -165,6 +165,24 @@ async def members(run_id: PydanticObjectId) -> list[RunJob]:
     return await RunJob.find(RunJob.run_id == run_id).to_list()
 
 
+async def runs_for_job(job_id: PydanticObjectId) -> list[PydanticObjectId]:
+    """Every run a job belongs to, not just the first.
+
+    `run_for_job` above is singular by design for its own callers, but a job
+    can genuinely belong to more than one run: `build_index` is deduplicated
+    by content, so a second alignment against the same reference reuses the
+    first one's build and is `shared=True` in the second run's membership. A
+    scalar `run_id` on `Job` was rejected for exactly this reason -- see
+    `models/run.py`'s `RunJob` docstring. Progress events that carry run
+    membership (for #18's aggregation) must use this, not `find_one`, or a
+    reused job's second run silently never hears about its own progress.
+
+    Unscoped -- see link_job for why.
+    """
+    links = await RunJob.find(RunJob.job_id == job_id).to_list()
+    return [link.run_id for link in links]
+
+
 async def status_for(run_id: PydanticObjectId, *, owner: str) -> tuple[RunStatus, list[dict]]:
     """A run's derived status and the state of each member job.
 

@@ -24,6 +24,7 @@ class JobOut(BaseModel):
     attempts: int
     max_attempts: int
     progress: dict
+    last_attempt_progress: dict | None
     result: dict | None
     error: dict | None
     timing: dict
@@ -46,6 +47,11 @@ class JobOut(BaseModel):
             attempts=j.attempts,
             max_attempts=j.max_attempts,
             progress=j.progress.model_dump(mode="json"),
+            last_attempt_progress=(
+                j.last_attempt_progress.model_dump(mode="json")
+                if j.last_attempt_progress
+                else None
+            ),
             result=j.result,
             error=j.error.model_dump(mode="json") if j.error else None,
             timing=j.timing.model_dump(mode="json"),
@@ -248,6 +254,24 @@ async def get_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
         if size:
             out["timing_estimate"] = await timing_service.estimate(job.type, size)
             out["memory_estimate"] = await timing_service.estimate_memory(job.type, size)
+
+        # eta_seconds is not timing_estimate's replacement: the estimate
+        # describes what runs of this type usually cost, this is a single
+        # number about *this* run, preferring elapsed/pct extrapolation once
+        # there is enough progress to trust it. Derived here, not persisted.
+        if job.state is JobState.RUNNING and job.timing.started_at is not None:
+            model_ms = None
+            estimate = out.get("timing_estimate")
+            if estimate and estimate.get("known"):
+                model_ms = estimate["estimate_ms"]
+            elapsed_s = (
+                datetime.now(UTC) - job.timing.started_at
+            ).total_seconds()
+            eta = timing_service.eta_seconds(
+                pct=job.progress.pct, elapsed_s=elapsed_s, model_ms=model_ms
+            )
+            if eta is not None:
+                out["eta_seconds"] = eta
     return out
 
 

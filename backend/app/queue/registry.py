@@ -11,6 +11,7 @@ convention.
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -19,6 +20,14 @@ from app.logging import get_logger
 from app.models import JobClass, JobResources
 
 log = get_logger(__name__)
+
+# `pct` is the one progress field where "not passed" and "explicitly unknown"
+# must be distinguishable. A tool that cannot produce an honest fraction
+# (Flye, Clair3, minimap2 -- see assembly_runner.py:83) calls
+# `ctx.progress(pct=None, ...)` meaning "clear it", not "leave it". Every
+# other field keeps the ordinary omit-means-unchanged behaviour, where `None`
+# is indistinguishable from not passing it at all.
+_UNSET: Any = object()
 
 
 class HandlerMode(StrEnum):
@@ -44,6 +53,27 @@ class JobContext:
     # construction site has to answer that question rather than silently
     # inheriting someone else's channel.
     owner: str
+    # Every run this job belongs to (usually zero or one; more than one when
+    # the job was reused -- a deduplicated build_index shared across two
+    # alignments). Resolved once per attempt and cached here for the same
+    # reason `owner` is: the throttled progress writer runs up to twice a
+    # second and must not re-read link rows to answer a question whose answer
+    # cannot change mid-run. A list, never a scalar -- see `RunJob`'s
+    # docstring in models/run.py for why a singular `run_id` on `Job` was
+    # rejected.
+    run_ids: list[str] = field(default_factory=list)
+    # The prior-runs duration model's prediction for this job (milliseconds),
+    # resolved once at claim time alongside run_ids and owner, for the same
+    # reason: it is a function of job type and input size, both fixed at
+    # claim, so it cannot change mid-run and re-deriving it per tick would
+    # cost a Mongo read the throttled writer cannot afford. None when there
+    # is not enough history or no known input size. Feeds eta_seconds.
+    eta_model_ms: int | None = None
+    # When this attempt started, so the throttled writer can compute elapsed
+    # time for eta_seconds without a Mongo read. Set from `Job.timing.started_at`
+    # at construction (already written by `mark_running` before this context
+    # exists), not re-read per tick.
+    started_at: datetime | None = None
     # Set from the async side; thread handlers poll it, which is why it is a
     # threading.Event rather than an asyncio.Event.
     cancel_event: threading.Event = field(default_factory=threading.Event)
@@ -69,26 +99,37 @@ class JobContext:
     def progress(
         self,
         *,
-        pct: float | None = None,
+        pct: float | None = _UNSET,
         phase: str | None = None,
         bytes_done: int | None = None,
         bytes_total: int | None = None,
         message: str | None = None,
+        units_done: int | None = None,
+        units_total: int | None = None,
+        unit_label: str | None = None,
+        phase_index: int | None = None,
+        phase_total: int | None = None,
     ) -> None:
-        if self._progress_cb is None:
-            return
         update = {
             k: v
             for k, v in {
-                "pct": pct,
                 "phase": phase,
                 "bytes_done": bytes_done,
                 "bytes_total": bytes_total,
                 "message": message,
+                "units_done": units_done,
+                "units_total": units_total,
+                "unit_label": unit_label,
+                "phase_index": phase_index,
+                "phase_total": phase_total,
             }.items()
             if v is not None
         }
-        if update:
+        # pct=None means "explicitly unknown" and must survive into the
+        # update; simply not passing pct means "unchanged" and must not.
+        if pct is not _UNSET:
+            update["pct"] = pct
+        if update and self._progress_cb is not None:
             self._progress_cb(update)
 
     def extend_lease(self, seconds: int) -> None:

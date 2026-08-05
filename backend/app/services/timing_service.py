@@ -35,6 +35,38 @@ MIN_SAMPLES = 5
 MAX_SAMPLES = 200
 OUTLIER_FACTOR = 3.0
 
+# Below this fraction complete, `elapsed / pct` is not trusted for an ETA.
+# The first percent of a run is usually its least representative stretch --
+# process startup, index loading -- so at pct=0.01 the extrapolation
+# multiplies elapsed time by a hundred. Below the floor, eta_seconds falls
+# back to the prior-runs model instead.
+ETA_PCT_FLOOR = 0.05
+
+
+def eta_seconds(*, pct: float | None, elapsed_s: float, model_ms: int | None) -> float | None:
+    """Seconds remaining, derived fresh on every call and never persisted.
+
+    Two estimators, chosen per call rather than picked once: `elapsed / pct`
+    self-corrects as a run proceeds but is only trustworthy above
+    `ETA_PCT_FLOOR`; the prior-runs duration model (`estimate()` above) is
+    available before any progress exists but is blind to how this particular
+    run is actually going. Extrapolation wins whenever it applies -- the run's
+    own progress is a better signal than history the moment there is enough
+    of it to trust. Returns None when neither applies, which is the honest
+    answer for a phase-only job with no history yet.
+
+    A stored ETA would be wrong by exactly the time since it was stored, so
+    this takes plain numbers and is meant to be called at read/emit time, not
+    written to the job document.
+    """
+    if pct is not None and pct >= ETA_PCT_FLOOR:
+        total = elapsed_s / pct
+        return max(0.0, total - elapsed_s)
+    if model_ms is not None:
+        remaining = model_ms / 1000 - elapsed_s
+        return max(0.0, remaining)
+    return None
+
 
 async def record(
     *,

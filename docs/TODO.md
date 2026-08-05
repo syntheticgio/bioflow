@@ -261,9 +261,51 @@ of external source) and whether the sidecar or separate-container approach works
 better for each. Per CLAUDE.md: `suggestion_service.py` must recognize any new
 dispatch path.
 
-## Observability in tools: progress reporting and resource transparency
+## Observability in tools: progress reporting and resource transparency -- PARTIALLY FIXED
 
 Raised: 2026-08-01, requested.
+
+**2026-08-05: the model, transport, and persistence questions this entry
+raised are resolved.** Shipped in
+[#24](https://github.com/syntheticgio/bioflow/issues/24) (spec:
+`docs/superpowers/specs/2026-08-05-job-progress-model-design.md`, plan:
+`docs/superpowers/plans/2026-08-05-job-progress-model.md`). `JobProgress`
+(`app/models/job.py`) now carries a nullable `pct` (unknown vs. zero are
+distinct states), generic countable units (`units_done`/`units_total`/
+`unit_label`, for "N of M chunks" -- the exact question this entry asked),
+live current + running-peak CPU/RSS sampled at 1Hz
+(`queue/resource_sampler.py`, driven onto the progress path even for
+phase-only jobs, not merged into handler ticks), a derived `eta_seconds`
+(never persisted -- computed from `elapsed/pct` above a 5% floor, falling
+back to the prior-runs duration model), and optional `phase_index`/
+`phase_total` for tools with a closed phase list. Progress resets on
+requeue but keeps the previous attempt's high-water mark
+(`Job.last_attempt_progress`), so a job that dies repeatedly at the same
+phase says so. Transport is the `job.progress` SSE event
+(`api/v1/events.py`) plus the `GET /jobs`/`GET /jobs/{id}` API -- both of
+which already existed and needed widening, not inventing.
+
+**The architecture sketch above -- a separate observability container
+running its own pub/sub broker -- was rejected, not built.** Redis pub/sub
+plus the job document already is that broker: `queue/executor.py`'s
+throttled writer was already publishing progress before this entry was
+written up, the sketch simply predated it. A second broker would have been
+a container to run, a restart story to invent, and a failure mode to
+handle, to arrive at what was already running.
+
+**What remains open, and why this entry does not move to
+`docs/TODO-done.md`:** per-tool instrumentation. The model can now express
+"N of M chunks" or "42M reads read", but only `fastp`, `align_runner`, and
+the handlers that already called `ctx.progress()` before this entry emit
+it. Minimap2/bwa-mem2 stderr parsing, and instrumenting or wrapping tools
+that report nothing today, are separate children of
+[epic #6](https://github.com/syntheticgio/bioflow/issues/6). One other
+narrow follow-up: `assembly_runner.py`'s Flye progress deliberately has no
+`phase_index`/`phase_total`, because Flye's own stage list is not closed --
+tracked as [#55](https://github.com/syntheticgio/bioflow/issues/55).
+
+Original text follows, for context on what "N of M chunks" and "seconds-left
+estimates" referred to before the model existed to hold them.
 
 When a long-running job executes, the user sees "running" but not progress
 within it. For some tools we can parse output (`minimap2`, `bwa-mem2` write
