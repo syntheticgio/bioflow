@@ -13,7 +13,7 @@ claim they have to notice first.
 import pytest
 
 from app.metadata import enrich, schemas
-from app.models import FormatKind, ObjectRole
+from app.models import FormatKind, ObjectRole, SequenceType
 
 
 class TestNcbiNames:
@@ -186,7 +186,7 @@ class TestFieldIsAvailableEverywhere:
     def test_options_are_the_four_asked_for(self):
         field = schemas.all_known_fields()["sequence_type"]
         assert field.type == schemas.FieldType.ENUM
-        assert field.options == ("Genomic", "CDS", "Protein", "RNA")
+        assert field.options == tuple(t.value for t in SequenceType)
 
     def test_every_detected_value_is_a_valid_option(self):
         """A detector returning something the dropdown cannot show would leave
@@ -198,3 +198,16 @@ class TestFieldIsAvailableEverywhere:
             enrich._EXTENSION_SEQUENCE_TYPES.values()
         )
         assert detected <= set(field.options)
+
+    def test_every_option_is_reachable_by_some_token(self):
+        """The reverse of the check above: an option nobody can detect is a
+        dropdown entry only ever set by hand, which is worth knowing rather
+        than discovering by accident. All four are reachable today via
+        _TOKEN_SEQUENCE_TYPES, _COMPOUND_SEQUENCE_TYPES or
+        _EXTENSION_SEQUENCE_TYPES -- this pins that down."""
+        detected = {
+            v for _, v in enrich._COMPOUND_SEQUENCE_TYPES
+        } | set(enrich._TOKEN_SEQUENCE_TYPES.values()) | set(
+            enrich._EXTENSION_SEQUENCE_TYPES.values()
+        )
+        assert detected == set(SequenceType)

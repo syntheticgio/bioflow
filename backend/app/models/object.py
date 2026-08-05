@@ -147,6 +147,24 @@ class SidecarRole(StrEnum):
     TBI = "tbi"
 
 
+class SequenceType(StrEnum):
+    """What kind of sequence a file holds: genomic DNA, coding sequence,
+    protein, or non-coding/messenger RNA.
+
+    Stored as a plain string in `metadata.sequence_type` and `facts` --
+    `metadata/schemas.py` derives the dropdown's options from this enum
+    rather than the other way around, and `enrich.detect_sequence_type` and
+    `ncbi_assembly_components.ComponentSpec` are checked against it, but
+    nothing on disk is typed by it. See `detect_sequence_type` in
+    `app.metadata.enrich`.
+    """
+
+    GENOMIC = "Genomic"
+    CDS = "CDS"
+    PROTEIN = "Protein"
+    RNA = "RNA"
+
+
 class FormatConfidence(StrEnum):
     MAGIC = "magic"  # identified from file contents
     EXTENSION = "extension"  # guessed from the filename only
