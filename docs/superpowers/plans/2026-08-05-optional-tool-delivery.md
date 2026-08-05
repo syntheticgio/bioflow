@@ -127,13 +127,17 @@ Also updated `tool_with_meta`'s fallback dict (for a tool with no `TOOL_META` en
 
 ## Task 2 — An honest probe for image-delivered tools
 
-- [ ] Add an `InstallState` to `tools.py` distinguishing three cases: `INSTALLED`, `NOT_INSTALLED` (a real, expected state — **not** an error), and `UNKNOWN` (no docker client, or daemon unreachable — the only genuine failure).
-- [ ] Carry it on `Tool` as an optional field. **`Tool.available` stays a boolean** and stays false for a not-installed optional tool, so every existing caller — `require()`, the launch dialog, the aligner registry — keeps working unchanged.
-- [ ] Rewrite `tools.deepvariant()` to run `docker image inspect <image>` after confirming the daemon is reachable, and set `install_state` accordingly. Keep reporting the image tag as `version` when installed.
-- [ ] Give a not-installed tool an `error` string that reads as an offer, not a fault — it is what the UNAVAILABLE path renders today, and it should not say "not found."
-- [ ] Generalize the probe rather than hardcoding DeepVariant: a helper taking a tool name and image reference, so Task 8's Clair3 move is a table entry rather than a second special case.
+- [x] Added `InstallState` to `tools.py`: `INSTALLED`, `NOT_INSTALLED` (a real, expected state — **not** an error), `UNKNOWN` (no docker client, or daemon unreachable — the only genuine failure).
+- [x] Carried it on `Tool` as `install_state: InstallState | None = None`. `Tool.available` stays a boolean, but its logic changed: when `install_state is not None`, availability now requires `install_state is INSTALLED` as well as the existing path/error checks. Every BUNDLED tool leaves `install_state` at `None`, so their `available` computation is byte-for-byte what it was before — `require()`, the launch dialog, and the aligner registry needed no changes.
+- [x] Rewrote `tools.deepvariant()` down to a one-line call into a new shared helper, `_probe_on_demand_image(name, image)`, which runs `docker image inspect <image>` after confirming the daemon is reachable, and sets `install_state` accordingly. Reports the image tag as `version` only when `INSTALLED`; a not-installed tool has no image to read a tag from, so `version` stays `None` rather than guessing at the configured name.
+- [x] The not-installed `error` reads "deepvariant is not installed. It runs as a separate container image (...) rather than being bundled here, and is downloaded on first use." — an offer, not a fault. Guarded by a test asserting `"not found"` does **not** appear, since that was the old missing-binary wording this must not echo.
+- [x] Generalized as planned: `_probe_on_demand_image` takes `(name, image)`, so Task 8's Clair3 move becomes `_probe_on_demand_image("clair3", <image>)` rather than a second copy of the daemon/inspect logic.
 
-**Tests:** patch the `docker image inspect` seam to return non-zero and assert `available is False` and `install_state is NOT_INSTALLED`; patch the daemon probe to fail and assert `UNKNOWN`. That is the direction that fails when the seam breaks — asserting the installed direction passes whether or not the patch worked.
+**Tests:** `test_unavailable_when_the_image_was_never_pulled` patches `docker image inspect` to return non-zero and asserts `available is False`, `install_state is NOT_INSTALLED`, and the offer-not-fault wording. `test_unavailable_when_the_daemon_is_unreachable` (kept from before this task, assertions extended) covers `UNKNOWN`. `test_available_and_versioned_when_the_image_is_present` is the positive case, since the daemon and inspect calls needed a fake dispatching on argv (`_fake_run`) once there were two `subprocess.run` calls to distinguish rather than one.
+
+**Also verified live, not only in mocks** — this is the class of bug that looks fixed against a mock and isn't: with the worktree stack up and DeepVariant's image genuinely never pulled, `docker exec <api> python -c "from app.pipelines import tools; print(tools.deepvariant())"` and a `curl` against the running `/api/v1/pipelines/tools` endpoint both show `available: false`, `install_state: "not_installed"`, paired with Task 1's `delivery: "on_demand"` / `image` / `download_bytes` in the same payload. Before this task, the same live check reported `available: true`.
+
+Extended `frontend/src/api/types.ts`'s `PipelineTool` with `install_state`; `tsc -b --noEmit` passes. Full backend suite: 2738 passed, 0 failed.
 
 ---
 
