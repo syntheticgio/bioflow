@@ -260,6 +260,21 @@ class TestReferenceFieldDefinitions:
         ambiguous."""
         assert not set(schemas.ROLE_FIELDS) & schemas.FORMAT_DERIVED_ROLES
 
+    def test_every_format_kind_is_accounted_for(self):
+        """The FORMAT_FIELDS mirror of the role test above.
+
+        A new FormatKind absent from both FORMAT_FIELDS and
+        FORMAT_COMMON_ONLY would fall through to COMMON_FIELDS in fields_for
+        with nothing to say that was deliberate -- the same silent-skip shape
+        results._SIDECAR_ROLES had for a new SidecarRole.
+        """
+        assert set(FormatKind) == set(schemas.FORMAT_FIELDS) | schemas.FORMAT_COMMON_ONLY
+
+    def test_a_format_and_its_field_group_are_mutually_exclusive(self):
+        """Listing a format in both places would make fields_for's precedence
+        ambiguous, same as for roles."""
+        assert not set(schemas.FORMAT_FIELDS) & schemas.FORMAT_COMMON_ONLY
+
     def test_trimmed_reads_still_get_the_fastq_fields(self):
         """The regression this exists for: trimmed output is FASTQ exactly like
         its input, so declaring the role must not strip the library-prep

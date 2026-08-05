@@ -330,13 +330,39 @@ FORMAT_FIELDS: dict[FormatKind, tuple[FieldDef, ...]] = {
     FormatKind.CRAM: ALIGNMENT_FIELDS,
     FormatKind.VCF: VARIANT_FIELDS,
     FormatKind.BCF: VARIANT_FIELDS,
-    # A FASTA is no longer assumed to be a reference -- that now comes from the
-    # object's role, so a FASTA of reads is not asked reference questions.
-    FormatKind.FASTA: (),
     FormatKind.BED: INTERVAL_FIELDS,
     FormatKind.GFF: INTERVAL_FIELDS,
     FormatKind.GTF: INTERVAL_FIELDS,
 }
+
+# Formats whose questions are entirely the common ones -- listed explicitly
+# for the same reason FORMAT_DERIVED_ROLES is: a format added without thought
+# should fail a test rather than quietly fall through to COMMON_FIELDS with
+# nothing to say so.
+FORMAT_COMMON_ONLY: frozenset[FormatKind] = frozenset(
+    {
+        # A FASTA is no longer assumed to be a reference -- that now comes
+        # from the object's role, so a FASTA of reads is not asked reference
+        # questions.
+        FormatKind.FASTA,
+        # An assembly graph's questions are its role's, not its format's: see
+        # ObjectRole.ASSEMBLY_GRAPH in FORMAT_DERIVED_ROLES above. A GFA
+        # reached without that role (still possible -- role is optional)
+        # falls back to here rather than to a field group that does not
+        # exist.
+        FormatKind.GFA,
+        # samtools FASTA index: name, length, offset, linebases, linewidth.
+        # Sidecar data a person does not annotate.
+        FormatKind.FAI,
+        # Free-form text with no format-specific shape to ask about.
+        FormatKind.TEXT,
+        # Not a format at all so much as the absence of an answer -- included
+        # here rather than carved out of the exhaustiveness check below,
+        # since an exception in the assertion is a hole in exactly the place
+        # the assertion exists to close.
+        FormatKind.UNKNOWN,
+    }
+)
 
 # Keyed by role rather than format, and consulted first: see fields_for. Kept as
 # a dict so a new role-specific field group is a one-line entry that both
