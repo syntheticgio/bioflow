@@ -156,19 +156,20 @@ Extended `frontend/src/api/types.ts`'s `PipelineTool` with `install_state`; `tsc
 
 ## Task 4 — Install and uninstall as jobs
 
-- [ ] `app/queue/tool_handlers.py` with `install_tool` (`HandlerMode.SUBPROCESS`, `JobClass.USER_INTERACTIVE`), payload `{"tool": name}`. Shell to `docker pull`, parse its progress lines into `ctx.progress()`.
-  - `USER_INTERACTIVE` deliberately, **not** `COMPUTE`: the user pressed a button and is watching. `COMPUTE` is documented as never promoted, so a download would sit behind a multi-hour alignment.
-  - `max_attempts`: 2 or 3. A pull failure is often transient (network), unlike a missing binary — but do not spend five attempts on an auth or manifest error.
-- [ ] `uninstall_tool` alongside it, shelling to `docker image rm`.
-- [ ] Import `tool_handlers` from `app/queue/handlers.py` for the registration side effect, the way `pipeline_handlers` is imported.
-- [ ] `app/services/tool_install_service.py`:
-  - **One install per tool at a time.** Find an in-flight install for that tool and return it rather than starting a second. `enqueue`'s `dedup_key` does this — note it folds `owner` in, which is right here.
-  - Refuse an install for a tool whose `delivery` is `BUNDLED`, and refuse an uninstall of anything not `ON_DEMAND_IMAGE` and currently installed. **This is the symmetry rule from the spec** — uninstall is offered exactly when install was.
-  - Refuse an uninstall while a running job uses that tool.
-- [ ] `POST /pipelines/tools/{name}/install` and `DELETE /pipelines/tools/{name}/install`, returning the job the way the other launch endpoints do (`JobOut`).
-- [ ] Publish the invalidation from Task 3 on success.
+- [x] `app/queue/tool_handlers.py` with `install_tool` (`HandlerMode.SUBPROCESS`, `JobClass.USER_INTERACTIVE`), payload `{"tool": name}`. Shells to `docker pull`, parsing its progress lines into `ctx.progress()` via a `_PullProgress` class (mirrors `variant_runner.VariantProgress`'s shape) that tracks `<layer-id>: <status>` lines and counts layers that reached `Pull complete`/`Already exists` against layers seen — confirmed against a real `docker pull nginx:latest` piped through a non-TTY stdout, not assumed: piped output collapses to one discrete line per layer-state-change with no byte counts, so a monotonic layer-fraction is what the output actually supports.
+  - `USER_INTERACTIVE`, not `COMPUTE`, as planned.
+  - `max_attempts=3` for install (transient pull failures), `max_attempts=2` for uninstall (`docker image rm` fails deterministically — image in use, image already gone — so retrying does not change the outcome).
+- [x] `uninstall_tool` alongside it, shelling to `docker image rm`.
+- [x] Imported `tool_handlers` from `app/queue/handlers.py`.
+- [x] `app/services/tool_install_service.py` — all three rules enforced, plus the eligibility checks (`ValidationError` for a `BUNDLED` tool, `NotFoundError` for an unknown one) that gate both `install` and `uninstall` before a job is ever created.
+- [x] `POST /pipelines/tools/{name}/install` and `DELETE /pipelines/tools/{name}/install`, both returning `JobOut`.
+- [x] `_invalidate()` calls `tool_cache.publish_invalidation` at the end of both handlers on success only (not on failure — a failed pull changed nothing worth invalidating), reached from the SUBPROCESS thread via `db.client.run_from_thread`, the same seam `summary_handlers._resolve_sync` uses for the identical thread-has-no-event-loop problem. Corrected that seam's own docstring while using it: nothing about `run_from_thread` is Mongo-specific despite the name and its original Mongo-only docstring — it reaches whatever the process's one real event loop is, and `connect_to_redis()` runs on that same loop in both `app/main.py` and `worker_main.py`.
 
-**Watch for:** `docker pull` progress output is layer-interleaved and not a clean percentage. Getting a monotonic overall percentage out of it is fiddly; a phase string plus a coarse percentage is enough, and a job that reports "pulling" with no number beats a bar that jumps backwards. Don't over-invest here.
+**A real bug found while writing tests, not by inspection.** `_active_install_query` (the fallback lookup used when `enqueue` reports a dedup collision) had no `owner` filter. `enqueue`'s stored dedup key *is* owner-scoped (`f"{owner}:{dedup_key}"`), so two different profiles installing the same tool correctly get two independent jobs -- but the unfiltered fallback lookup would then hand the *second* profile's caller back the *first* profile's job id, collapsing two independent requests into one shared job record. Caught by `test_a_second_install_returns_the_first_jobs_id` failing with two different owners' job ids compared equal, in a run where an *earlier* test's leftover job was the one actually matched. Fixed by adding `owner` to the query; the bug and the fix are documented in the query's own docstring so it isn't rediscovered as a mystery later. A second, unrelated test-isolation bug surfaced alongside it: `TestUninstallRefusesWhileRunning` inserted `Job` documents directly into the shared module-scoped test database and never retired them, so a RUNNING job with `payload.caller: "deepvariant"` outlived its own test and poisoned every later `uninstall()` call in the module — fixed by resetting each such job to `SUCCEEDED` in a `finally` block after use.
+
+**Verified live against the running worktree stack, not only against tests or mocks.** `curl -X POST /pipelines/tools/deepvariant/install` created a real job; `docker logs` on the worker showed it claimed, `state: running`, and `tool_install_started` logged with the correct image name; polling `/jobs/{id}` a few seconds later showed `state: "running"`, `phase: "pulling"`, `message: "pulling (20/96 layers)"` — a genuine fraction computed from real `docker pull` output, the same shape Task 5's UI will render. Cancelled the job afterward (via the existing `/jobs/{id}/cancel`, which worked without any code written for this task — `run_subprocess`'s cancellation plumbing is transparent to any SUBPROCESS handler) rather than let a ~3 GB download run to completion in a throwaway stack; `state` moved to `cancelled` immediately.
+
+Full backend suite: 2860 passed, 0 failed (2774 baseline + 86 net new, including the API/service/handler suites above). Frontend `tsc -b --noEmit` clean (no frontend changes this task, checked anyway since the stack was up).
 
 ---
 
