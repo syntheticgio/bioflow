@@ -6,6 +6,7 @@ document plus, on acceptance, a second `DataObject` per shared file pointing at
 the same blob. See docs/superpowers/specs/2026-08-05-profile-sharing-design.md.
 """
 
+import asyncio
 from collections.abc import Iterable
 from datetime import UTC, datetime
 
@@ -332,6 +333,18 @@ async def accept_share(
     if source is None or source.owner != share.from_owner:
         raise ConflictError("The sender deleted this file before it was accepted")
 
+    # The denormalized digest, not source.blob_sha256 -- meaningful even as the
+    # source object drifts, and it is what find_present_blob covers a blob
+    # that was collected, quarantined, or found missing since the offer was
+    # made, in one call. Refused, not withdrawn: the offer stays OFFERED, since
+    # a rejected accept should not write, and the recipient should not see the
+    # row vanish under them -- they clear it themselves by declining.
+    if await blob_service.find_present_blob(share.blob_sha256) is None:
+        raise ConflictError(
+            "This file's content is no longer available and cannot be "
+            "accepted. It may need to be shared again after re-upload."
+        )
+
     if project_id is None:
         project = await _shared_with_me_project(owner)
     else:
@@ -382,6 +395,14 @@ async def accept_share(
         project.id, objects=len(copies), total_bytes=sum(c.size for c in copies)
     )
 
+    # Filesystem work, so it does not belong inside the Mongo transaction above
+    # -- and it runs for every object in the group, not just the source, since
+    # a shared BAM's stats live under the BAM and a mate's under the mate.
+    # Best-effort by design (object_service.copy_report_dirs never raises): a
+    # copy failure must not undo an otherwise-correct accept.
+    for src, copy in zip(group, copies, strict=True):
+        await asyncio.to_thread(object_service.copy_report_dirs, src.id, copy.id)
+
     # After the transaction commits, not inside it -- an event for a write that
     # then rolled back would be a lie. publish_event swallows its own failures,
     # so this cannot turn a successful accept into a reported failure.
@@ -390,13 +411,5 @@ async def accept_share(
         {"share_id": str(share.id), "to_owner": owner, "name": share.name},
         owner=share.from_owner,
     )
-
-    # Not built here, deliberately -- see #51 (owner-delete/GC follow-on):
-    #
-    # Report directories (qc_reports/, bam_stats/, vcf_stats/) are keyed by
-    # object id, not digest, so the copies above have none. A fallback through
-    # `shared_from.object_id` is the wrong fix: it breaks the moment the sender
-    # deletes their copy, since delete_object removes those directories. #51
-    # copies the report directory at share time instead.
 
     return await DataObject.get(source_copy.id)  # type: ignore[return-value]

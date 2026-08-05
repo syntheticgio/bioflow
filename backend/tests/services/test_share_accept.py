@@ -12,7 +12,7 @@ import pytest
 from beanie import PydanticObjectId
 
 from app.errors import ConflictError, NotFoundError
-from app.models import Blob, DataObject, ObjectStatus, SidecarRole
+from app.models import Blob, BlobState, DataObject, ObjectStatus, SidecarRole
 from app.services import blob_service, object_service, project_service, share_service
 from tests.services.helpers_share import make_profile, ready_object, scratch_file
 
@@ -219,8 +219,47 @@ async def test_accepting_when_the_source_was_deleted_is_refused():
     share = await _offer_and_load(sender=sender, recipient=recipient, obj=obj)
     await object_service.delete_object(obj.id, owner=sender)
 
+    with pytest.raises(ConflictError, match="sender deleted"):
+        await share_service.accept_share(owner=recipient, share_id=share.id)
+
+    # The offer stays OFFERED and still renders -- the denormalized name/size
+    # on Share are what let the inbox show it even with the source gone.
+    reloaded = await share_service.load_for_recipient(share.id, owner=recipient)
+    from app.models import ShareState
+
+    assert reloaded.state is ShareState.OFFERED
+    inbox = await share_service.list_inbox(owner=recipient)
+    assert any(s.id == share.id and s.name == obj.name for s in inbox)
+
+
+async def test_accepting_when_the_blob_is_quarantined_is_refused():
+    sender = await make_profile("accept-quarantined-sender")
+    recipient = await make_profile("accept-quarantined-recipient")
+    obj = await ready_object(owner=sender)
+
+    share = await _offer_and_load(sender=sender, recipient=recipient, obj=obj)
+    await Blob.find_one(Blob.id == obj.blob_sha256).set({Blob.state: BlobState.QUARANTINED})
+
+    with pytest.raises(ConflictError, match="no longer available"):
+        await share_service.accept_share(owner=recipient, share_id=share.id)
+
+
+async def test_a_refused_accept_leaves_no_partial_object_behind():
+    sender = await make_profile("accept-refused-noop-sender")
+    recipient = await make_profile("accept-refused-noop-recipient")
+    obj = await ready_object(owner=sender)
+
+    share = await _offer_and_load(sender=sender, recipient=recipient, obj=obj)
+    await Blob.find_one(Blob.id == obj.blob_sha256).set({Blob.state: BlobState.MISSING})
+
     with pytest.raises(ConflictError):
         await share_service.accept_share(owner=recipient, share_id=share.id)
+
+    from app.models import ShareState
+
+    reloaded = await share_service.load_for_recipient(share.id, owner=recipient)
+    assert reloaded.state is ShareState.OFFERED
+    assert reloaded.accepted_object_id is None
 
 
 async def test_accepting_with_no_destination_creates_shared_with_me_project():

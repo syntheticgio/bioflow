@@ -29,7 +29,7 @@ from pymongo.errors import DuplicateKeyError
 
 from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
-from app.models import DataObject, Profile, Project
+from app.models import DataObject, Profile, Project, Share, ShareState
 
 log = get_logger(__name__)
 
@@ -222,9 +222,24 @@ async def delete_profile(profile_id: PydanticObjectId | str) -> None:
     await profile.delete()
     log.info("profile_deleted", profile_id=str(profile.id), username=profile.username)
 
-    # Not built here: Share documents naming this profile as from_owner or
-    # to_owner are not cleaned up. A dangling offer either direction is inert
-    # (an inbox entry for a to_owner that no longer exists, or an outbox entry
-    # nobody can revoke) rather than unsafe, and this profile has just been
-    # proven empty above -- but see #51 (owner-delete/GC follow-on for
-    # sharing), which is where this belongs.
+    # owner_id(), never str(profile.id) -- same trap as count_owned_documents
+    # above. The adopted profile's shares carry the literal "local", and a
+    # query built from the id would match none of them, leaving every offer
+    # behind. ACCEPTED shares are kept deliberately: the surviving profile's
+    # copied object carries shared_from.share_id, and an ACCEPTED row is the
+    # only record of where that copy came from. Nothing reads it today, and it
+    # costs one clause to not destroy it.
+    owner = profile.owner_id()
+    result = await Share.find(
+        {
+            "$or": [{"from_owner": owner}, {"to_owner": owner}],
+            "state": {"$ne": ShareState.ACCEPTED.value},
+        }
+    ).delete()
+    if result and result.deleted_count:
+        log.info(
+            "profile_shares_deleted",
+            profile_id=str(profile.id),
+            username=profile.username,
+            count=result.deleted_count,
+        )

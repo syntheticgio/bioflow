@@ -746,6 +746,53 @@ def remove_report_dirs(object_id: PydanticObjectId) -> None:
             log.info("report_dir_removed", object_id=str(object_id), path=str(path))
 
 
+def copy_report_dirs(src_object_id: PydanticObjectId, dst_object_id: PydanticObjectId) -> None:
+    """Copy the per-object Results directories to a new object id, for sharing.
+
+    Report directories are keyed by object id, not by blob digest, so a shared
+    copy has a different id than its source and would otherwise arrive with no
+    QC report. A read-time fallback through the source id is the wrong fix --
+    it breaks the moment the source is deleted, since `remove_report_dirs`
+    removes exactly these directories. Copying at share time makes the
+    recipient's report independent bytes under the recipient's own id.
+
+    Best-effort, mirroring `remove_report_dirs`: a missing source directory is
+    the common case (most objects have no Results computed) and is skipped
+    silently; an already-present destination is left alone rather than merged;
+    a copy failure logs and moves to the next root. Nothing here raises -- a
+    missing report is recomputable, and failing the share over one would trade
+    a working file for none.
+    """
+    for parent in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
+        src = parent / str(src_object_id)
+        dst = parent / str(dst_object_id)
+        try:
+            src.resolve().relative_to(parent.resolve())
+            dst.resolve().relative_to(parent.resolve())
+        except ValueError:
+            log.error("refusing_report_copy_outside_parent", src=str(src), dst=str(dst))
+            continue
+        if not src.exists() or dst.exists():
+            continue
+        try:
+            shutil.copytree(src, dst)
+        except OSError as exc:
+            log.warning(
+                "report_dir_copy_failed",
+                src_object_id=str(src_object_id),
+                dst_object_id=str(dst_object_id),
+                path=str(src),
+                error=str(exc),
+            )
+        else:
+            log.info(
+                "report_dir_copied",
+                src_object_id=str(src_object_id),
+                dst_object_id=str(dst_object_id),
+                path=str(dst),
+            )
+
+
 async def object_with_blob(
     object_id: PydanticObjectId, *, owner: str
 ) -> tuple[DataObject, Blob | None]:
