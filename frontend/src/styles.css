@@ -1098,6 +1098,24 @@ a.btn {
   background: var(--error);
 }
 
+/* pct === null: the tool cannot produce an honest fraction (Flye, Clair3,
+   minimap2), which is a different state from a determinate 0% and must look
+   different -- a moving stripe rather than a bar stuck at zero. */
+.progress-bar.indeterminate {
+  width: 40% !important;
+  background: var(--accent);
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
 .tray-item-meta {
   display: flex;
   justify-content: space-between;

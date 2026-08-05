@@ -194,12 +194,31 @@ export interface JobSummary {
   attempts: number;
   max_attempts: number;
   progress: {
-    pct: number;
+    // null means indeterminate -- a tool that cannot produce an honest
+    // fraction (Flye, Clair3, minimap2) reports phases only. Must render
+    // differently from a determinate 0, not as a bar stuck at zero.
+    pct: number | null;
     phase: string;
     bytes_done: number;
     bytes_total: number;
     message: string;
+    units_done: number | null;
+    units_total: number | null;
+    unit_label: string;
+    rss_bytes: number | null;
+    cpu_percent: number | null;
+    peak_rss_bytes: number | null;
+    peak_cpu_percent: number | null;
+    phase_index: number | null;
+    phase_total: number | null;
   };
+  last_attempt_progress: {
+    attempt: number;
+    pct: number | null;
+    phase: string;
+    message: string;
+    peak_rss_bytes: number | null;
+  } | null;
   result: Record<string, unknown> | null;
   error: { code: string; message: string; retryable: boolean } | null;
   timing: {

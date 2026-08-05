@@ -2,7 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../api/client";
-import { formatDate, formatDuration } from "../lib/format";
+import { formatBytes, formatDate, formatDuration } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types";
 import { JobLogView } from "./JobLogView";
@@ -273,7 +273,8 @@ function JobRow({
   onToggleLog?: () => void;
   logOpen?: boolean;
 }) {
-  const pct = Math.round((job.progress.pct ?? 0) * 100);
+  const { pct } = job.progress;
+  const indeterminate = pct === null;
   const started = job.timing.started_at;
   const elapsed = started ? Date.now() - new Date(started).getTime() : null;
 
@@ -332,14 +333,17 @@ function JobRow({
       {job.state === "running" && (
         <div
           className="progress"
-          style={{ marginTop: 5, opacity: job.progress.pct > 0 ? 1 : 0.25 }}
+          style={{ marginTop: 5, opacity: indeterminate || pct > 0 ? 1 : 0.25 }}
           title={
-            job.progress.pct >= 0.95
+            !indeterminate && pct >= 0.95
               ? "Read counts are estimates, so the bar stops short of complete"
               : undefined
           }
         >
-          <div className="progress-bar" style={{ width: `${pct || 100}%` }} />
+          <div
+            className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
+            style={indeterminate ? undefined : { width: `${Math.round(pct * 100)}%` }}
+          />
         </div>
       )}
 
@@ -347,9 +351,23 @@ function JobRow({
         <span className="mono">{job.type}</span>
         <span>{job.job_class}</span>
         {job.progress.message && <span>{job.progress.message}</span>}
+        {job.state === "running" && job.progress.rss_bytes != null && (
+          <span>{formatBytes(job.progress.rss_bytes)}</span>
+        )}
         {job.attempts > 1 && (
           <span>
             attempt {job.attempts}/{job.max_attempts}
+            {job.last_attempt_progress && (
+              <>
+                {" — attempt "}
+                {job.last_attempt_progress.attempt} reached{" "}
+                {job.last_attempt_progress.pct !== null
+                  ? `${Math.round(job.last_attempt_progress.pct * 100)}%`
+                  : job.last_attempt_progress.phase || "no progress"}
+                {job.last_attempt_progress.peak_rss_bytes != null &&
+                  `, peaking at ${formatBytes(job.last_attempt_progress.peak_rss_bytes)}`}
+              </>
+            )}
           </span>
         )}
         {job.state === "running" && elapsed !== null && (

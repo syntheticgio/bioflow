@@ -76,7 +76,8 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
 
 function QueueRow({ job }: { job: JobSummary }) {
   const isRunning = RUNNING.has(job.state);
-  const pct = Math.round((job.progress.pct ?? 0) * 100);
+  const { pct } = job.progress;
+  const indeterminate = pct === null;
   const started = job.timing.started_at;
   const elapsed = started ? Date.now() - new Date(started).getTime() : null;
 
@@ -90,9 +91,12 @@ function QueueRow({ job }: { job: JobSummary }) {
       {isRunning && (
         <div
           className="progress"
-          style={{ marginTop: 4, opacity: job.progress.pct > 0 ? 1 : 0.25 }}
+          style={{ marginTop: 4, opacity: indeterminate || pct > 0 ? 1 : 0.25 }}
         >
-          <div className="progress-bar" style={{ width: `${pct || 100}%` }} />
+          <div
+            className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
+            style={indeterminate ? undefined : { width: `${Math.round(pct * 100)}%` }}
+          />
         </div>
       )}
 

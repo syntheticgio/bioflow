@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { formatDate } from "../lib/format";
+import { formatBytes, formatDate } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { JobSummary } from "../api/types";
 
@@ -49,7 +49,8 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
     <div>
       {jobs.map((job) => {
         const active = ACTIVE_STATES.has(job.state);
-        const pct = Math.round((job.progress.pct ?? 0) * 100);
+        const { pct } = job.progress;
+        const indeterminate = pct === null;
 
         return (
           <div
@@ -97,13 +98,33 @@ export function JobList({ projectId, limit = 10 }: { projectId?: string; limit?:
 
             {job.state === "running" && (
               <div className="progress" style={{ marginTop: 5 }}>
-                <div className="progress-bar" style={{ width: `${pct}%` }} />
+                <div
+                  className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
+                  style={indeterminate ? undefined : { width: `${Math.round(pct * 100)}%` }}
+                />
+              </div>
+            )}
+
+            {job.state === "running" && job.progress.rss_bytes != null && (
+              <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
+                {formatBytes(job.progress.rss_bytes)}
               </div>
             )}
 
             {job.attempts > 1 && (
               <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 3 }}>
                 attempt {job.attempts}/{job.max_attempts}
+                {job.last_attempt_progress && (
+                  <>
+                    {" — attempt "}
+                    {job.last_attempt_progress.attempt} reached{" "}
+                    {job.last_attempt_progress.pct !== null
+                      ? `${Math.round(job.last_attempt_progress.pct * 100)}%`
+                      : job.last_attempt_progress.phase || "no progress"}
+                    {job.last_attempt_progress.peak_rss_bytes != null &&
+                      `, peaking at ${formatBytes(job.last_attempt_progress.peak_rss_bytes)}`}
+                  </>
+                )}
               </div>
             )}
 
