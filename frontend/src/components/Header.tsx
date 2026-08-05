@@ -7,6 +7,19 @@ import { useProfileStore } from "../stores/profileStore";
 import { LoadIndicator } from "./LoadIndicator";
 import { Menu } from "./Menu";
 
+/** Same query the header badge and /shares itself both read, so opening the
+ *  page costs no second request and the badge clears from the same
+ *  invalidation `useEvents` schedules on `share.accepted`/`share.declined`. */
+function useShareInboxCount() {
+  const profileId = useProfileStore((s) => s.current?.id);
+  const { data } = useQuery({
+    queryKey: ["shares", "inbox", profileId],
+    queryFn: api.shareInbox,
+    enabled: Boolean(profileId),
+  });
+  return data?.length ?? 0;
+}
+
 /** Destinations that exist. Without these, /search and /activity are
  *  reachable only by typing the URL. */
 const LINKS: { to: string; label: string; title: string }[] = [
@@ -47,6 +60,7 @@ export function Header() {
 
   const profile = useProfileStore((s) => s.current);
   const logout = useProfileStore((s) => s.logout);
+  const inboxCount = useShareInboxCount();
 
   const cleanUp = useMutation({
     mutationFn: () => api.runScheduleNow("gc_blobs"),
@@ -122,11 +136,26 @@ export function Header() {
 
             There is deliberately no "Edit details": the backend exposes only
             GET/POST/select/DELETE on /profiles, so an edit control would be
-            dead on arrival. */}
+            dead on arrival.
+
+            "Shared with me" sits here rather than under Activity: sharing is
+            identity-shaped (something another profile did, to you), and
+            Activity is about jobs and runs. The count badge is what makes a
+            new offer visible without opening the menu at all. */}
         {profile && (
           <Menu
-            label={`${profile.display.emoji} ${profile.username}`}
+            label={
+              <>
+                {profile.display.emoji} {profile.username}
+                {inboxCount > 0 && (
+                  <span className="menu-badge" title={`${inboxCount} pending share offer(s)`}>
+                    {inboxCount}
+                  </span>
+                )}
+              </>
+            }
             items={[
+              { label: "Shared with me", onSelect: () => navigate("/shares") },
               { label: "Settings", onSelect: () => navigate("/settings") },
               { label: "Switch profile", onSelect: logout },
             ]}

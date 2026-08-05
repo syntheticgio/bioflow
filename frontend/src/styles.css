@@ -4839,3 +4839,111 @@ table.software-matrix thead th.software-matrix-corner {
   margin: 0 0 14px;
   font-size: 15px;
 }
+
+/* --- Sharing --- */
+
+/* The unread count on the profile menu label. Small enough to sit inline
+   after the emoji/username without pushing the menu button wider than its
+   neighbours. */
+.menu-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  min-width: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+}
+
+.shares-view {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.shares-view h1 {
+  margin: 0 0 20px;
+  font-size: 20px;
+}
+
+.shares-view section {
+  margin-bottom: 32px;
+}
+
+.shares-view h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.share-empty {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.share-row {
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.share-row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.share-row-size {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.share-row-message {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.share-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.share-row-note {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.share-state {
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-radius: 10px;
+  color: var(--text-faint);
+  background: var(--bg-hover);
+}
+
+.share-state-accepted {
+  color: var(--success);
+}
+
+.share-state-declined,
+.share-state-withdrawn {
+  color: var(--text-faint);
+}

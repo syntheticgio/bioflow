@@ -11,7 +11,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-from app.services import object_service
+from app.services import object_service, profile_service
 from tests.services.helpers_share import ready_object, reclaim_scratch_files
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
@@ -175,3 +175,42 @@ async def test_revoking_a_pending_offer_succeeds(client, two_profiles):
 
     assert r.status_code == 200
     assert r.json()["state"] == "withdrawn"
+
+
+async def test_share_out_names_the_other_profile(client, two_profiles):
+    """The inbox has to say who, and the raw owner string cannot answer that."""
+    a, b = two_profiles["a"], two_profiles["b"]
+    obj = await _ready_object(a.owner_id())
+
+    r = await client.post(
+        "/api/v1/shares",
+        json={"object_id": str(obj.id), "to_profile_id": b.owner_id()},
+        headers=two_profiles["a_headers"],
+    )
+
+    body = r.json()
+    assert body["from_profile"]["username"] == a.username
+    assert body["from_profile"]["emoji"] == a.display.emoji
+    assert body["to_profile"]["username"] == b.username
+
+
+async def test_share_out_resolves_the_adopted_profile(client):
+    """The regression this task exists for. The adopted profile's owner string
+    is the literal "local", which matches no profile id -- so a resolver keyed
+    on `str(profile.id)` returns nothing for exactly the profile holding the
+    pre-existing library."""
+    adopter = await profile_service.create_profile(username="sh-adopter", is_first_boot=True)
+    other = await profile_service.create_profile(username="sh-other")
+    obj = await _ready_object(adopter.owner_id())  # owner is "local"
+    assert adopter.owner_id() == "local"
+
+    r = await client.post(
+        "/api/v1/shares",
+        json={"object_id": str(obj.id), "to_profile_id": other.owner_id()},
+        headers={"X-BioFlow-Profile": adopter.owner_id()},
+    )
+
+    assert r.json()["from_profile"]["username"] == "sh-adopter"
+
+    await adopter.delete()
+    await other.delete()
