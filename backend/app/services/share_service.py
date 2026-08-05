@@ -333,6 +333,18 @@ async def accept_share(
     if source is None or source.owner != share.from_owner:
         raise ConflictError("The sender deleted this file before it was accepted")
 
+    # The denormalized digest, not source.blob_sha256 -- meaningful even as the
+    # source object drifts, and it is what find_present_blob covers a blob
+    # that was collected, quarantined, or found missing since the offer was
+    # made, in one call. Refused, not withdrawn: the offer stays OFFERED, since
+    # a rejected accept should not write, and the recipient should not see the
+    # row vanish under them -- they clear it themselves by declining.
+    if await blob_service.find_present_blob(share.blob_sha256) is None:
+        raise ConflictError(
+            "This file's content is no longer available and cannot be "
+            "accepted. It may need to be shared again after re-upload."
+        )
+
     if project_id is None:
         project = await _shared_with_me_project(owner)
     else:
