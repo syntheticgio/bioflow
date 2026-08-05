@@ -48,6 +48,18 @@ separate shared area, and what happens to a share when the owner deletes their
 copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
 refcount reaching zero and the bytes being unlinked).
 
+**The three policy questions above are answered** as of 2026-08-05 in
+[`docs/superpowers/specs/2026-08-05-profile-sharing-design.md`](superpowers/specs/2026-08-05-profile-sharing-design.md):
+revoke withdraws an un-accepted offer only, the recipient gets an auto-created
+"Shared with me" `Project` rather than a separate explorer area, and the
+owner-delete case needs no storage work at all — the refcount already leaves
+the recipient a working file. The entry stays open because none of it is built:
+[#25](https://github.com/syntheticgio/bioflow/issues/25) (offer/accept/revoke),
+[#50](https://github.com/syntheticgio/bioflow/issues/50) (recipient
+visibility), [#51](https://github.com/syntheticgio/bioflow/issues/51)
+(delete/GC) are the slices, under
+[epic #3](https://github.com/syntheticgio/bioflow/issues/3).
+
 ## Helper install program — PARTIALLY FIXED
 
 The core launcher (Docker detection/auto-start, first-run setup writing
