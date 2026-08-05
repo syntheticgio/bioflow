@@ -2101,3 +2101,186 @@ collection of `tests/api`, `tests/services/ai`, and a few modules that import
 through them; confirmed pre-existing and untouched by this change.)
 
 ---
+
+## Reference-guided assembly: Pilon, RagTag, iVar -- FIXED
+
+Raised: 2026-07-31, requested. **Depends on the assembly pipeline below.**
+
+**Partially resolved 2026-08-04: the shared foundation shipped, no tool has.**
+`services/reference_assembly.py` now carries the validators and the provenance
+rule the Pilon bullet below asked to have "checked against before building" --
+`alignment_target_for_bam` walks `derived_from` to find what a BAM was aligned
+to, refusing missing or ambiguous targets rather than guessing from filenames,
+and `check_bam_aligned_to` requires that target to equal the selected assembly.
+`PipelineType.REFERENCE_ASSEMBLY`, `RunKind.REFERENCE_ASSEMBLY`, and the
+`DRAFT_ASSEMBLY`/`ALIGNMENT`/`PRIMERS` input roles exist, with frontend enum
+mirrors. Design:
+`docs/superpowers/specs/2026-08-04-reference-assembly-foundation-design.md`
+(GitHub #21, closed). The entry stays open because none of the three tools is
+installed or dispatched to, which is the part that was actually requested.
+
+iVar is the first tool slice rather than Pilon (GitHub #47, design
+`docs/superpowers/specs/2026-08-05-ivar-consensus-design.md`): it is the lighter
+runner, it exercises the unused `PRIMERS` role, and this repo's own
+genome-analysis review argues Pilon is effectively obsolete for HiFi and worth
+keeping only for legacy ONT-only work. **Correction, 2026-08-05: iVar *is* in
+Debian trixie** (`ivar 1.4.4+dfsg-1`) -- the original "not in Debian" note came
+from running `apt-cache policy ivar` without an `apt-get update` first, which
+reports `Candidate: (none)` for anything regardless of what the repository
+carries. Installed and smoke-tested clean against the running image with no
+new dependencies beyond what samtools/bcftools already pull in. It is a
+one-line `apt-get install` addition to `backend/Dockerfile`, not a source build.
+
+**Update 2026-08-05: iVar and Polypolish have both shipped; only RagTag
+(#52) is left, and its spec is now written
+(`docs/superpowers/specs/2026-08-05-ragtag-scaffolding-design.md`).** iVar is
+installed, dispatched, and carded (#47, closed).
+Polypolish shipped the same day (#23, design
+`docs/superpowers/specs/2026-08-05-polypolish-design.md`) -- install script,
+`tools.polypolish()`, `polypolish_runner`, a `polish_assembly` handler,
+`launch_polish`, `/pipelines/polish`, a results applier, and an Actions card.
+#52 was created that day because the epic required a linked child issue per
+tool and RagTag was the one that never had one.
+
+**The polishing slice is Polypolish, not Pilon** -- swapped before any code
+was written, because Pilon consumes best-alignment BAM and so mis-corrects
+repeats, which is the one place a long-read assembly needs polishing to be
+trustworthy. Pilon is out permanently.
+
+Two things the implementation found that the design did not predict, both
+worth keeping because both are the silent-wrong-answer shape:
+
+- **Polypolish's stderr summary repeats per contig.** A real 0.7.1 run on a
+  20kb synthetic draft with 20 planted errors printed "20 positions changed";
+  the same draft split into two contigs printed 11 and 9. The first parser
+  took the first match, so it would have reported 11 for a run that made 20
+  and nothing would have said so. The parser sums across blocks and the test
+  fixtures are verbatim from those two runs. (That run also corrected all 20
+  planted errors with zero remaining mismatches, which is what verified the
+  five-stage pipeline shape.)
+- **`qc_read_chemistry` cannot decide what counts as short reads.**
+  `ERR16145610.fastq` in the real database is a MinION run whose inferred
+  chemistry is `short` -- the inference reads read *lengths*, so a nanopore
+  run carrying short reads infers short. Gating on chemistry would have fed
+  ONT reads to a short-read polisher, which does not error and quietly
+  degrades the assembly. `reference_assembly.is_short_read` is platform-first
+  and a known long-read platform disqualifies regardless of chemistry.
+
+Also different from the design: the input shape. The design said inputs were
+`DRAFT_ASSEMBLY` + `READS`, which held, but the reason matters more than the
+list -- Polypolish *cannot* consume an existing BAM, so the job aligns the
+reads to the draft itself with `bwa-mem2 mem -a` and the epic's provenance
+requirement is true by construction rather than by validation. arm64 is
+declared unsupported rather than built from source, as the design
+recommended: upstream ships no linux-aarch64 binary and bwa-mem2 has its own
+arm64 gap here, so a built Polypolish would have no aligner to pair with.
+
+**Pilon is out, permanently.** The heading keeps its name because that is what
+the entry was raised as, but the tool was swapped after the review below was
+taken seriously: Pilon consumes best-alignment BAM, so in a repeat every read
+lands on one copy and it "corrects" that copy toward a consensus built from its
+paralogs. Its characteristic failure is *introducing* errors in exactly the
+regions a long-read assembly was chosen for. Polypolish consumes all-alignment
+SAM (`bwa mem -a`) and leaves ambiguous positions alone; the Bouras et al. 2024
+benchmark (*Microbial Genomics*, doi:10.1099/mgen.0.001254) recommends it for
+ONT bacterial assemblies with Pilon among the riskier options. It is also a
+static Rust binary rather than a JVM application, which retires the heap-sizing
+problem against `job_timings` that sent iVar first.
+
+**Closed 2026-08-05: all three tool slices shipped.** iVar (#47), Polypolish
+(#23), and RagTag (#52, design
+`docs/superpowers/specs/2026-08-05-ragtag-scaffolding-design.md`) are all
+installed, dispatched, carded, and merged to `main`. RagTag scaffolds a draft
+assembly's contigs against a reference (`ragtag.py scaffold`) using minimap2
+internally, following Polypolish's by-construction provenance shape rather
+than iVar's validated one -- plus a provenance obligation neither sibling
+carries, since RagTag names scaffolds after the *reference's* sequences, so
+the result is partly a claim about which reference was used, not only about
+the sample.
+
+Install is pip, pinned `ragtag==2.1.0`, pure Python -- of its four
+dependencies only `intervaltree` was new to the image. Unlike Polypolish it
+has no arm64 problem: its only external binary dependency is minimap2, already
+shipped for both architectures.
+
+RagTag needed a manual dialog (`ScaffoldDialog.tsx`) alongside its Actions-tab
+card, which neither iVar nor Polypolish needed: a project holding two
+reference-role assemblies for one organism is the *ordinary* case (the real
+Drosophila and yeast test projects demonstrate both shapes -- see below), so
+the card refuses on ambiguity more often than it launches, and the dialog with
+its own reference chooser is where a real launch usually happens.
+
+Two things the implementation found that the design did not predict, both the
+same silent-wrong-answer shape the Polypolish slice's own findings were:
+
+- **RagTag exits 0 when it fails.** Given an unrelated reference it raises
+  `RuntimeError: There are no useful alignments`, writes no
+  `ragtag.scaffold.fasta`, and returns status 0 -- verified twice against the
+  real 2.1.0 binary. `scaffold_assembly` treats the output file's existence as
+  the only trustworthy success signal; the subprocess return code is not
+  evidence either way. This is the single most load-bearing fact in the whole
+  slice: a handler trusting the exit code would record a successful run that
+  produced nothing.
+- **The scaffold card offered a reference-role assembly as its own scaffold
+  target.** Found live in the browser against the real Drosophila project,
+  which has exactly one reference-role FASTA: the orchestrator's candidate
+  list never excluded the anchor object itself, so the one-reference case --
+  the common case the card exists to handle cleanly -- rendered an AVAILABLE
+  card naming the file as the reference for its own run. `launch_scaffold`
+  already refused this at enqueue time (`reference.id == draft.id`), but the
+  card should never have offered it in the first place. Fixed by excluding
+  `o.id == obj.id` from the candidate list, with two new orchestrator-level
+  regression tests
+  (`test_suggestion_service.py::TestScaffoldCardOrchestration`) added because
+  every existing card-level test builds its reference list by hand with IDs
+  that never collide with the draft's own id -- a class of test that
+  structurally cannot catch this bug. Worth remembering for the next card that
+  lists a project's own objects as candidates for itself.
+
+Verified: the real `ragtag.py` binary end to end on synthetic data (a
+2-chromosome reference, a 7-contig draft cut from it, shuffled and partly
+reverse-complemented, all 7 contigs placed into exactly 2 scaffolds); the card
+against real database objects in both directions (`protein.faa`,
+`cds_from_genomic.fna`, and `rna.fna` produce no card; the yeast project's two
+reference-role FASTA correctly produce the ambiguity refusal; the Drosophila
+project's one real reference correctly offers, post-fix); and the full flow
+live in the browser against a worktree stack -- the Computations button, the
+suggestion card, and the manual dialog all rendering correctly with zero
+console errors across the session. 2971 tests green on `main` after merge.
+
+**Not verified: an actual scaffold job run end to end through the app,** for
+the same reason Polypolish's slice recorded the same gap: every object in the
+current database reads `status=missing` at the blob level, so no project can
+launch a real job today. That is a pre-existing data-availability problem, not
+a code gap -- the queue, the runner, the provenance, and the card are all
+verified against the real binary and the real object graph; only the "click
+Launch and watch a job finish" step needs live blobs it does not currently
+have.
+
+Note what this does to the "legacy ONT-only" carve-out below: that scope *is*
+the ONT-assembly-plus-Illumina case Polypolish took over, so the narrow role
+Pilon was going to be kept for contains nothing Polypolish does not do better.
+
+De-novo assembly first; these three all take an existing assembly plus
+something else and improve it.
+
+- **~~Pilon~~ Polypolish** polishes an assembly using short reads. The original
+  bullet assumed it would consume a BAM against the assembly, making it "the
+  first pipeline whose input is an alignment to a previous pipeline's output."
+  **That premise did not survive the tool swap.** Polypolish cannot consume an
+  existing BAM -- it needs all-alignment SAM, which `align_reads` does not
+  produce -- so the alignment happens *inside* the job and the provenance
+  question is answered by construction rather than by validation. The
+  provenance-model check the bullet asked for was still worth doing and was
+  done: `check_bam_aligned_to` exists and iVar exercises it.
+- **RagTag** scaffolds contigs against a reference assembly, giving
+  chromosome-scale ordering. Now #52. Its provenance shape is a third one again
+  -- two assemblies, aligned internally with minimap2 -- so neither iVar's
+  validated answer nor Polypolish's by-construction one carries over unexamined.
+- **iVar** is the amplicon/viral path -- primer trimming and consensus calling
+  from an alignment, which is a different enough workflow from the other two
+  that it may deserve its own card rather than sharing theirs.
+
+All three are chemistry- and context-dependent enough that
+`suggestion_service.py` will need real rules, not just availability checks.
+
