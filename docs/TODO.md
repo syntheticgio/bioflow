@@ -53,12 +53,20 @@ refcount reaching zero and the bytes being unlinked).
 revoke withdraws an un-accepted offer only, the recipient gets an auto-created
 "Shared with me" `Project` rather than a separate explorer area, and the
 owner-delete case needs no storage work at all — the refcount already leaves
-the recipient a working file. The entry stays open because none of it is built:
-[#25](https://github.com/syntheticgio/bioflow/issues/25) (offer/accept/revoke),
+the recipient a working file.
+
+**Offer/accept/revoke shipped** 2026-08-05 in
+[#25](https://github.com/syntheticgio/bioflow/issues/25) (commit `4efa4d1`,
+merge `2a855be`): a `Share` model, `share_service`, and `/api/v1/shares`,
+including the materialization cascade that re-points a copied sidecar's
+`sidecar_of` and a copied read pair's `mate_object_id` at the new copies
+rather than leaving them dangling into the sender's partition. Backend only —
+no UI yet. The entry stays open for the two remaining slices:
 [#50](https://github.com/syntheticgio/bioflow/issues/50) (recipient
-visibility), [#51](https://github.com/syntheticgio/bioflow/issues/51)
-(delete/GC) are the slices, under
-[epic #3](https://github.com/syntheticgio/bioflow/issues/3).
+visibility — the "Shared with me" project and the offer/accept UI) and
+[#51](https://github.com/syntheticgio/bioflow/issues/51) (delete/GC — mostly
+tests, plus copying report directories at share time since they are keyed by
+object id, not digest), under [epic #3](https://github.com/syntheticgio/bioflow/issues/3).
 
 ## Helper install program — PARTIALLY FIXED
 

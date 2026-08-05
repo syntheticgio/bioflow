@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { applySettings } from "./commands";
 import type { Settings as SettingsValues } from "./types";
+import { storageLocationChanged } from "./wizard-logic";
 
 interface Props {
   current: SettingsValues;
@@ -15,7 +16,7 @@ export function Settings({ current, onClose, onApplied }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
 
-  const storageChanged = storageLocation !== current.storageLocation;
+  const storageChanged = storageLocationChanged(current.storageLocation, storageLocation);
 
   async function handleApply() {
     setApplying(true);

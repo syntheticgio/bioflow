@@ -80,6 +80,9 @@ async def beanie_models():
             # not look like a missing patch from the test: it reads as an empty
             # facet list and a bulk edit that 404s on the caller's own rows.
             "app.services.search_service",
+            # share_service opens its own `get_client().start_session()` for
+            # the accept-cascade transaction, same reason blob_service is here.
+            "app.services.share_service",
         ):
             module = importlib.import_module(module_name)
             if hasattr(module, "get_db"):

@@ -43,15 +43,52 @@ VERSION_TIMEOUT_SECONDS = 10
 SLOW_IMPORT_TIMEOUT_SECONDS = 60
 
 
+class InstallState(StrEnum):
+    """Whether an ON_DEMAND_IMAGE tool's image has actually been pulled.
+
+    Distinct from `Tool.available` on purpose: `available` answers "can this
+    run right now", which for a not-installed optional tool is correctly
+    False, but the UI needs to tell "not installed" (an offer -- press
+    Install) apart from "broken" (a fault -- something is wrong). Folding
+    both into one boolean is what let the old `deepvariant()` probe report
+    `available=True` for an image that had never been pulled: it only asked
+    whether the Docker daemon answered, never whether the image existed, so
+    `suggestion_service` offered the card, `require()` passed, and the job
+    was accepted only to die later at `_require_image` telling the user to
+    open a terminal. See docs/superpowers/specs/
+    2026-08-05-optional-tool-delivery-design.md.
+
+    NOT_INSTALLED is a real, expected state on a first run -- not an error.
+    UNKNOWN is the only one that is: no docker client, or a daemon that will
+    not answer, both of which are genuine faults rather than "you haven't
+    installed this yet."
+    """
+
+    INSTALLED = "installed"
+    NOT_INSTALLED = "not_installed"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
     path: str | None  # absolute path, or None when not found
     version: str | None
     error: str | None = None
+    # None for every BUNDLED tool -- the concept does not apply to a binary
+    # found on PATH, only to an ON_DEMAND_IMAGE tool probed by image
+    # presence. Set only by probes that actually check, so a tool nobody has
+    # wired up for on-demand delivery cannot silently claim NOT_INSTALLED.
+    install_state: InstallState | None = None
 
     @property
     def available(self) -> bool:
+        if self.install_state is not None:
+            return (
+                self.path is not None
+                and self.error is None
+                and self.install_state is InstallState.INSTALLED
+            )
         return self.path is not None and self.error is None
 
     def as_dict(self) -> dict:
@@ -61,6 +98,7 @@ class Tool:
             "version": self.version,
             "available": self.available,
             "error": self.error,
+            "install_state": self.install_state.value if self.install_state else None,
         }
 
 
@@ -378,61 +416,125 @@ def clair3() -> Tool:
     return _probe("clair3", settings.clair3_path, ["--version"])
 
 
-@lru_cache(maxsize=1)
-def deepvariant() -> Tool:
-    """Whether DeepVariant can be run, which is a question about Docker.
+def _probe_on_demand_image(name: str, image: str) -> Tool:
+    """Whether an ON_DEMAND_IMAGE tool can be run, which is a question about
+    Docker rather than about a binary on PATH.
 
-    Unlike every other tool here there is no binary to find: DeepVariant runs
-    from its own image as a sibling container, because vendoring 2.3GB of
-    TensorFlow on a second Python runtime into this image to gain one caller is
-    a bad trade. So the probe asks whether we can reach a Docker daemon, and
-    reports the image reference as the version -- the tag is the provenance a
-    methods section would cite, and there is no `--version` to ask.
+    Generalized from what was, until this function existed, a DeepVariant-only
+    probe -- so that a second tool moving to this delivery model (Clair3,
+    per docs/superpowers/plans/2026-08-05-optional-tool-delivery.md's task 8)
+    is a table entry, not a second copy of this logic.
 
-    The `path` returned here is the *docker client's* path, not DeepVariant's
-    -- there is no DeepVariant binary. That path is real and fingerprints
-    successfully, which means the probe cache in `tool_cache.py` would
-    otherwise persist this result keyed to the docker client's identity, and
-    it would not change when the image is pulled or removed. `tool_cache.warm`
-    excludes this tool by name for exactly that reason; see the comment there.
+    Two checks, in order, because they answer different questions and must not
+    be conflated: first, can the daemon be reached at all (a real fault, not
+    an install state -- UNKNOWN); second, given a reachable daemon, has this
+    specific image actually been pulled (INSTALLED or NOT_INSTALLED, both
+    expected states, neither an error). The probe this replaced only asked the
+    first question and reported `available=True` whenever it succeeded, never
+    checking the image was present -- so a card was offered, `require()`
+    passed, and the job was accepted only to die later telling the user to run
+    `docker pull` from a terminal. See docs/superpowers/specs/
+    2026-08-05-optional-tool-delivery-design.md.
+
+    The `path` returned here is the *docker client's* path, not the tool's --
+    there is no binary for an image-delivered tool. That path is real and
+    fingerprints successfully, which means the probe cache in `tool_cache.py`
+    would otherwise persist a result keyed to the docker client's identity,
+    unchanged by the image being pulled or removed. `NOT_FINGERPRINTABLE`
+    excludes every ON_DEMAND_IMAGE tool by name for exactly that reason.
     """
     client = shutil.which("docker")
     if client is None:
         return Tool(
-            name="deepvariant",
+            name=name,
             path=None,
             version=None,
             error=(
-                "No docker client in this container, so DeepVariant's image "
+                f"No docker client in this container, so {name}'s image "
                 "cannot be run. It runs as a sibling container rather than "
                 "being installed here."
             ),
+            install_state=InstallState.UNKNOWN,
         )
 
     try:
-        proc = subprocess.run(
+        daemon_proc = subprocess.run(
             [client, "version", "--format", "{{.Server.Version}}"],
             capture_output=True,
             timeout=VERSION_TIMEOUT_SECONDS,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as e:
-        return Tool(name="deepvariant", path=client, version=None, error=str(e))
-
-    if proc.returncode != 0:
-        detail = _decode(proc.stderr) or _decode(proc.stdout) or "unknown error"
         return Tool(
-            name="deepvariant",
+            name=name,
+            path=client,
+            version=None,
+            error=str(e),
+            install_state=InstallState.UNKNOWN,
+        )
+
+    if daemon_proc.returncode != 0:
+        detail = (
+            _decode(daemon_proc.stderr) or _decode(daemon_proc.stdout) or "unknown error"
+        )
+        return Tool(
+            name=name,
             path=client,
             version=None,
             error=f"Docker daemon is not reachable: {detail.splitlines()[0]}",
+            install_state=InstallState.UNKNOWN,
+        )
+
+    try:
+        inspect_proc = subprocess.run(
+            [client, "image", "inspect", image],
+            capture_output=True,
+            timeout=VERSION_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return Tool(
+            name=name,
+            path=client,
+            version=None,
+            error=str(e),
+            install_state=InstallState.UNKNOWN,
+        )
+
+    if inspect_proc.returncode != 0:
+        # Not installed is the expected state on a first run, not a fault --
+        # the wording here is what the UNAVAILABLE card path renders today,
+        # and an offer to install reads very differently from "not found".
+        return Tool(
+            name=name,
+            path=client,
+            version=None,
+            error=(
+                f"{name} is not installed. It runs as a separate container "
+                f"image ({image}) rather than being bundled here, and is "
+                "downloaded on first use."
+            ),
+            install_state=InstallState.NOT_INSTALLED,
         )
 
     return Tool(
-        name="deepvariant",
+        name=name,
         path=client,
-        version=settings.deepvariant_image.rsplit("/", 1)[-1],
+        version=image.rsplit("/", 1)[-1],
+        install_state=InstallState.INSTALLED,
     )
+
+
+@lru_cache(maxsize=1)
+def deepvariant() -> Tool:
+    """Whether DeepVariant is installed and runnable.
+
+    DeepVariant runs from its own image as a sibling container rather than a
+    binary in this one, because vendoring 2.3GB of TensorFlow on a second
+    Python runtime into this image to gain one caller is a bad trade. See
+    `_probe_on_demand_image` for what "installed" actually checks and why.
+    """
+    return _probe_on_demand_image("deepvariant", settings.deepvariant_image)
 
 
 @lru_cache(maxsize=1)
