@@ -3,6 +3,12 @@
 #   docker compose -f docker-compose.yml up
 services:
   api:
+    # The base file names a published image so an end user's machine can pull
+    # it. Local development builds from source instead, and this is what makes
+    # `docker compose up -d --build` still do that -- the override always
+    # loads, and it is now the only place that knows how to build.
+    build:
+      context: ./backend
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
@@ -24,6 +30,8 @@ services:
       BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}
 
   worker:
+    build:
+      context: ./backend
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
@@ -44,7 +52,12 @@ services:
       BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}
 
   web:
+    # `context:` is required here now. It used to be inherited from the base
+    # file's build block, which this change replaced with an image reference --
+    # leaving `target: dev` alone would build nothing and silently run the
+    # published prod image instead of local source.
     build:
+      context: ./frontend
       target: dev
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
     volumes:
