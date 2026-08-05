@@ -83,13 +83,26 @@ Note also that `tool_cache.NOT_FINGERPRINTABLE` already excludes `deepvariant` f
 
 Without this, optional tools work only in a source checkout, and DeepVariant is already broken for launcher users.
 
-- [ ] Move `- /var/run/docker.sock:/var/run/docker.sock` from `docker-compose.override.yml` (both `api` and `worker`) into `docker-compose.yml`.
-- [ ] Move `BIOINFO_HOME_HOST` into the base file's `x-backend-env` anchor for the same reason — a sibling container's mounts are resolved from the host, and the override is where that value currently lives.
-- [ ] Carry the existing comments across rather than dropping them: the override's note that this is *"a real privilege increase — a container that can reach the daemon can start any container — accepted because this app is single-user and local"* is the justification, and it now applies to every install, not just DeepVariant. Say so.
-- [ ] Note in `launcher/README.md` that the shipped stack grants the daemon socket and why.
-- [ ] Verify: `./ops/worktree-up.sh`, then `docker compose -p <worktree project> exec api docker version` succeeds using **only** `docker-compose.yml` plus the worktree port file — i.e. prove the socket no longer depends on the override.
+- [x] Move `- /var/run/docker.sock:/var/run/docker.sock` from `docker-compose.override.yml` (both `api` and `worker`) into `docker-compose.yml`.
+- [x] Move `BIOINFO_HOME_HOST` into the base file's `x-backend-env` anchor for the same reason — a sibling container's mounts are resolved from the host, and the override is where that value currently lives.
+- [x] Carry the existing comments across rather than dropping them: the override's note that this is *"a real privilege increase — a container that can reach the daemon can start any container — accepted because this app is single-user and local"* is the justification, and it now applies to every install, not just DeepVariant. Say so.
+- [x] Note in `launcher/README.md` that the shipped stack grants the daemon socket and why.
+- [x] Verify: `./ops/worktree-up.sh`, then confirm the socket resolves using **only** `docker-compose.yml` plus the worktree port file — i.e. prove the socket no longer depends on the override.
 
-**Watch for:** Windows and macOS paths. Docker Desktop presents the socket at `/var/run/docker.sock` inside the VM on both, so the literal path is right, but confirm on the launcher's target platforms before calling this done.
+  Done via `docker compose -p biopipe-base-only -f docker-compose.yml config`
+  (base file alone, no override) — the resolved config still carries the
+  socket mount on both `api` and `worker`. Also verified against the live
+  worktree stack: `docker exec <worktree>-api-1 docker version --format
+  '{{.Server.Version}}'` returned `27.5.1`, i.e. the daemon is reachable
+  through the mount at runtime, not just present in the resolved YAML.
+
+- [x] Ran the full backend suite against this change: 2728 passed, 0 failed
+  (`./backend/run-worktree-tests.sh` resolved a stale fallback image missing
+  an unrelated dependency, `cryptography`, added by an earlier feature; ran
+  manually against the worktree's actual built image instead — the compose
+  change itself introduced no failures).
+
+**Watch for:** Windows and macOS paths. Docker Desktop presents the socket at `/var/run/docker.sock` inside the VM on both, so the literal path is right, but this was only verified on Linux here — confirm on the launcher's other target platforms before calling this fully done.
 
 ---
 
