@@ -17,13 +17,32 @@ import pytest_asyncio
 from pymongo.errors import DuplicateKeyError
 
 from app.errors import ConflictError, ValidationError
-from app.models import DataObject, Profile, Project
-from app.services import profile_service, project_service
+from app.models import DataObject, Profile, Project, Share, ShareState
+from app.services import object_service, profile_service, project_service, share_service
+from tests.services.helpers_share import ready_object
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
     pytest.mark.asyncio(loop_scope="module"),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _no_queue(monkeypatch):
+    async def _skip(obj, **kwargs):
+        return ""
+
+    monkeypatch.setattr(object_service, "enqueue_ingest", _skip)
+
+
+@pytest.fixture(autouse=True)
+def _no_events(monkeypatch):
+    from app.queue import queue
+
+    async def _skip(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(queue, "publish_event", _skip)
 
 
 @pytest_asyncio.fixture(autouse=True, loop_scope="module")
@@ -52,6 +71,7 @@ async def _clear():
     await Profile.find_all().delete()
     await Project.find_all().delete()
     await DataObject.find_all().delete()
+    await Share.find_all().delete()
 
 
 class TestFirstBootAdoption:
@@ -331,3 +351,94 @@ class TestDeleteProfile:
 
         with pytest.raises(ValidationError):
             await profile_service.delete_profile("not-an-object-id")
+
+
+class TestDeleteProfileSharesCleanup:
+    """#51: deleting a profile must not strand the inbox or outbox on the
+    other side. Pending offers naming this profile on either side are
+    deleted with it; ACCEPTED shares are kept, since the surviving profile's
+    copied object's `shared_from.share_id` is the only record of where it
+    came from."""
+
+    async def test_deleting_the_sender_removes_a_pending_outgoing_offer(self):
+        sender = await profile_service.create_profile(username="cleanup-out-sender")
+        recipient = await profile_service.create_profile(username="cleanup-out-recipient")
+        obj = await ready_object(owner=sender.owner_id())
+
+        share = await share_service.offer_share(
+            owner=sender.owner_id(), object_id=obj.id, to_profile_id=str(recipient.id)
+        )
+        await object_service.delete_object(obj.id, owner=sender.owner_id())
+        await project_service.delete_project(obj.project_id, owner=sender.owner_id())
+
+        await profile_service.delete_profile(sender.id)
+
+        inbox = await share_service.list_inbox(owner=recipient.owner_id())
+        assert all(s.id != share.id for s in inbox)
+        assert await Share.get(share.id) is None
+
+    async def test_deleting_the_recipient_removes_a_pending_incoming_offer(self):
+        sender = await profile_service.create_profile(username="cleanup-in-sender")
+        recipient = await profile_service.create_profile(username="cleanup-in-recipient")
+        obj = await ready_object(owner=sender.owner_id())
+
+        share = await share_service.offer_share(
+            owner=sender.owner_id(), object_id=obj.id, to_profile_id=str(recipient.id)
+        )
+
+        await profile_service.delete_profile(recipient.id)
+
+        outbox = await share_service.list_outbox(owner=sender.owner_id())
+        assert all(s.id != share.id for s in outbox)
+        assert await Share.get(share.id) is None
+
+    async def test_an_accepted_share_survives_the_senders_deletion(self):
+        sender = await profile_service.create_profile(username="cleanup-accepted-sender")
+        recipient = await profile_service.create_profile(username="cleanup-accepted-recipient")
+        obj = await ready_object(owner=sender.owner_id())
+
+        share = await share_service.offer_share(
+            owner=sender.owner_id(), object_id=obj.id, to_profile_id=str(recipient.id)
+        )
+        await share_service.accept_share(owner=recipient.owner_id(), share_id=share.id)
+        await object_service.delete_object(obj.id, owner=sender.owner_id())
+        await project_service.delete_project(obj.project_id, owner=sender.owner_id())
+
+        await profile_service.delete_profile(sender.id)
+
+        reloaded = await Share.get(share.id)
+        assert reloaded is not None
+        assert reloaded.state is ShareState.ACCEPTED
+
+    async def test_an_accepted_share_survives_the_recipients_deletion(self):
+        sender = await profile_service.create_profile(username="cleanup-accepted2-sender")
+        recipient = await profile_service.create_profile(username="cleanup-accepted2-recipient")
+        obj = await ready_object(owner=sender.owner_id())
+
+        share = await share_service.offer_share(
+            owner=sender.owner_id(), object_id=obj.id, to_profile_id=str(recipient.id)
+        )
+        copy = await share_service.accept_share(owner=recipient.owner_id(), share_id=share.id)
+        await object_service.delete_object(copy.id, owner=recipient.owner_id())
+        await project_service.delete_project(copy.project_id, owner=recipient.owner_id())
+
+        await profile_service.delete_profile(recipient.id)
+
+        reloaded = await Share.get(share.id)
+        assert reloaded is not None
+        assert reloaded.state is ShareState.ACCEPTED
+
+    async def test_a_non_empty_profile_is_refused_before_any_share_is_touched(self):
+        sender = await profile_service.create_profile(username="cleanup-guard-sender")
+        recipient = await profile_service.create_profile(username="cleanup-guard-recipient")
+        obj = await ready_object(owner=sender.owner_id())
+
+        share = await share_service.offer_share(
+            owner=sender.owner_id(), object_id=obj.id, to_profile_id=str(recipient.id)
+        )
+
+        with pytest.raises(ConflictError) as exc_info:
+            await profile_service.delete_profile(sender.id)
+
+        assert exc_info.value.code == "profile_not_empty"
+        assert await Share.get(share.id) is not None
