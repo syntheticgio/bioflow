@@ -4817,6 +4817,79 @@ table.software-matrix thead th.software-matrix-corner {
   border-bottom: none;
 }
 
+/* Settings section nav (AI / Tools), above the AI page's own rail-and-detail
+   body and the Tools page's table alike -- see SettingsNav.tsx. */
+.settings-section-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section-nav-item {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+
+.settings-section-nav-item:hover {
+  color: var(--text);
+}
+
+.settings-section-nav-item.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* Settings > Tools table. A variant of .settings-table rather than a second
+   class on its cells: the AI routing table's first column is a narrow label,
+   this one's is a name plus a one-liner and needs room to wrap instead of
+   being clipped to content width. */
+.settings-tools-table th {
+  text-align: left;
+  font-weight: 400;
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.settings-tools-table tr:last-child th,
+.settings-tools-table tr:last-child td {
+  border-bottom: none;
+}
+
+.settings-tools-name {
+  display: block;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.settings-tools-one-liner {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.settings-tools-state {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-tools-state-failed {
+  color: var(--error);
+}
+
+.settings-tools-action {
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: top;
+}
+
 .settings-security-note {
   margin-top: 28px;
   padding-top: 14px;

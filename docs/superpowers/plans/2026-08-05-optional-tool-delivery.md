@@ -177,19 +177,18 @@ Full backend suite: 2860 passed, 0 failed (2774 baseline + 86 net new, including
 
 Settings is a single page today (`SettingsView.tsx` renders `Settings · AI`, `App.tsx` routes `/settings` and `/settings/ai` to the same component), so this introduces the section nav a second page implies.
 
-- [ ] `SettingsNav.tsx` — a rail with AI and Tools. Keep `/settings` landing where it does today so no existing link breaks.
-- [ ] Route `/settings/tools` → `SettingsTools.tsx`. `App.tsx`'s `singleColumn` check already covers `/settings` by prefix, so nothing is needed there.
-- [ ] `SettingsTools.tsx` renders one row per tool from `GET /pipelines/tools` — **including bundled ones**:
-  - **Included** — bundled, with version, no button. Listing these is what makes the page the answer to "why is this card greyed out," and is the reason tools with no action attached still appear.
-  - **Installed** — with the image tag as version, and Uninstall.
-  - **Not installed** — with the download size and Install.
-  - **Installing** — the job's progress, and cancel.
-  - **Failed** — the job's error, and retry.
-- [ ] Confirm before uninstall, naming the space reclaimed.
-- [ ] Poll or invalidate the tools query while an install job is in flight, so the row advances without a manual refresh.
-- [ ] **Do not add a second list of tools.** Both this page and `HelpSoftware.tsx` read the same endpoint built from `TOOL_META`. `/help/software` stays documentation and gains no buttons.
+- [x] `SettingsNav.tsx` — a section rail (AI / Tools) driven by `useLocation()` rather than component state, since the two pages have no other shared state and routing already *is* the thing that decides which is active. `/settings` still lands on the AI page unchanged.
+- [x] Route `/settings/tools` → `SettingsTools.tsx`. `App.tsx`'s `singleColumn` prefix check needed no edit, confirmed.
+- [x] `SettingsTools.tsx` renders one row per tool from `GET /pipelines/tools`, sorted alphabetically, **including bundled ones** — all five states implemented (Included / Installed / Not installed / Installing with live progress and Cancel / Failed with Retry).
+- [x] Confirm before uninstall via the plain `confirm()` browser dialog, matching the existing pattern in `ProviderForm.tsx`/`ProjectExplorer.tsx` rather than introducing a modal component for this one page. Names the reclaimed size when `download_bytes` is known.
+- [x] Polling, not a bare invalidation: `installJobs`/`uninstallJobs` queries use the same conditional-`refetchInterval` shape `JobList.tsx` already established for the Activity tab (poll only while something is actually in flight, `false` otherwise) — chosen over a fixed interval because most of the time there is nothing installing and polling would be pure waste, and chosen over relying only on SSE because this page has no per-tool event channel to subscribe to.
+- [x] No second tool list: `SettingsTools.tsx` and `HelpSoftware.tsx` both read `api.pipelineTools()` fresh; `/help/software` untouched, no buttons added there.
 
-**Verify in the browser at localhost:5273** via `./ops/worktree-up.sh` — there is no headless component testing in this repo and none is expected.
+**Two API client methods added** (`installTool`/`uninstallTool` in `frontend/src/api/client.ts`) that were not in this task's original file list but are the obvious client-side pair to the task-4 endpoints — `cancelJob`/`retryJob` already existed and were reused as-is for the Installing/Failed states rather than duplicated.
+
+**Verified in the browser via `./ops/worktree-up.sh`, the full round trip, not just a static read.** Loaded `/settings/tools`: every bundled tool showed "Included — `<version>`" with no button, and DeepVariant showed "Not installed — 2.8 GB" (2.99 GB decimal, correctly rendered in `formatBytes`' binary GiB) with an Install button. Clicked Install: the row immediately became "pulling (0/96 layers)" with a Cancel button and the footer's running-job count incremented, with **zero code written for that job-count update** -- it is the existing global job-count indicator picking up the same job. Waited and re-read the page: progress advanced live to "pulling (20/96 layers)" with no manual refresh, confirming the poll loop. Clicked Cancel: the job stopped and the row reverted cleanly to "Not installed — 2.8 GB / Install". Navigated back to `/settings/ai` and confirmed the section nav and the existing AI page still render correctly with the new wrapper. Zero console errors across the entire sequence.
+
+`tsc -b --noEmit`: clean. Backend suite (unaffected by this frontend-only task, checked anyway since the stack was rebuilt): 2921 passed, 0 failed.
 
 ---
 
