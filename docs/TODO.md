@@ -632,16 +632,45 @@ carries. Installed and smoke-tested clean against the running image with no
 new dependencies beyond what samtools/bcftools already pull in. It is a
 one-line `apt-get install` addition to `backend/Dockerfile`, not a source build.
 
+**Update 2026-08-05: iVar shipped, and the polishing slice is now Polypolish
+rather than Pilon.** iVar is installed, dispatched, and carded (#47, closed).
+The remaining two slices are Polypolish (#23, spec written,
+`docs/superpowers/specs/2026-08-05-polypolish-design.md`) and RagTag (#52, spec
+needed) -- #52 was created that day because the epic required a linked child
+issue per tool and RagTag was the one that never had one.
+
+**Pilon is out, permanently.** The heading keeps its name because that is what
+the entry was raised as, but the tool was swapped after the review below was
+taken seriously: Pilon consumes best-alignment BAM, so in a repeat every read
+lands on one copy and it "corrects" that copy toward a consensus built from its
+paralogs. Its characteristic failure is *introducing* errors in exactly the
+regions a long-read assembly was chosen for. Polypolish consumes all-alignment
+SAM (`bwa mem -a`) and leaves ambiguous positions alone; the Bouras et al. 2024
+benchmark (*Microbial Genomics*, doi:10.1099/mgen.0.001254) recommends it for
+ONT bacterial assemblies with Pilon among the riskier options. It is also a
+static Rust binary rather than a JVM application, which retires the heap-sizing
+problem against `job_timings` that sent iVar first.
+
+Note what this does to the "legacy ONT-only" carve-out below: that scope *is*
+the ONT-assembly-plus-Illumina case Polypolish took over, so the narrow role
+Pilon was going to be kept for contains nothing Polypolish does not do better.
+
 De-novo assembly first; these three all take an existing assembly plus
 something else and improve it.
 
-- **Pilon** polishes an assembly using aligned reads -- so it consumes a BAM
-  against the assembly, meaning it needs the *assembly* indexed and the reads
-  realigned to it. That makes it the first pipeline whose input is an alignment
-  to a previous pipeline's output, which the run-provenance model should be
-  checked against before building.
+- **~~Pilon~~ Polypolish** polishes an assembly using short reads. The original
+  bullet assumed it would consume a BAM against the assembly, making it "the
+  first pipeline whose input is an alignment to a previous pipeline's output."
+  **That premise did not survive the tool swap.** Polypolish cannot consume an
+  existing BAM -- it needs all-alignment SAM, which `align_reads` does not
+  produce -- so the alignment happens *inside* the job and the provenance
+  question is answered by construction rather than by validation. The
+  provenance-model check the bullet asked for was still worth doing and was
+  done: `check_bam_aligned_to` exists and iVar exercises it.
 - **RagTag** scaffolds contigs against a reference assembly, giving
-  chromosome-scale ordering.
+  chromosome-scale ordering. Now #52. Its provenance shape is a third one again
+  -- two assemblies, aligned internally with minimap2 -- so neither iVar's
+  validated answer nor Polypolish's by-construction one carries over unexamined.
 - **iVar** is the amplicon/viral path -- primer trimming and consensus calling
   from an alignment, which is a different enough workflow from the other two
   that it may deserve its own card rather than sharing theirs.
