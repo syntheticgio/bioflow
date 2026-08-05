@@ -17,6 +17,9 @@ pub fn run() {
       commands::run_stack,
       commands::stop_stack,
       commands::update_stack,
+      commands::setup_defaults,
+      commands::validate_storage,
+      commands::validate_setup_port,
       commands::run_first_setup,
       commands::apply_settings,
     ])

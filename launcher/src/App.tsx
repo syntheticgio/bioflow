@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { runStack, status, stopStack, updateStack } from "./commands";
 import { Settings } from "./Settings";
+import { SetupWizard } from "./SetupWizard";
 import type { LauncherState, Settings as SettingsValues } from "./types";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
@@ -10,8 +11,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  // Placeholder until first-run setup (a later slice of this UI) provides
-  // the real values; Settings still needs something to edit against.
+  // Populated once first-run setup completes (or, on a relaunch of an
+  // already-installed stack, left at these placeholders -- there is no
+  // command yet to read .env back out, since nothing before this needed
+  // to know the values outside of setup/settings themselves).
   const [settings, setSettings] = useState<SettingsValues>({
     storageLocation: "",
     port: 5173,
@@ -74,7 +77,19 @@ export function App() {
     <main>
       <h1>BioFlow</h1>
 
-      {state.kind === "NotInstalled" && <p>Not installed yet.</p>}
+      {state.kind === "NotInstalled" && (
+        <SetupWizard
+          onInstalled={({ storageLocation, port }) => {
+            setSettings((prev) => ({ ...prev, storageLocation, port }));
+            // run_first_setup already brought the stack up (setup::install's
+            // last step); what's left is exactly Run's health-gated wait and
+            // browser handoff, so reuse handleRun rather than landing on
+            // Stopped and asking for a second click.
+            setState({ kind: "Stopped" });
+            handleRun();
+          }}
+        />
+      )}
 
       {state.kind === "DockerUnavailable" && !state.installed && (
         <div>

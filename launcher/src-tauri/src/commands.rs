@@ -7,14 +7,21 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::path::BaseDirectory;
+use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome};
 use crate::docker::ShellDocker;
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
-use crate::setup::{self, InstallError, InstallInputs};
+use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefaults, StoragePathValidation};
 use crate::state::{self, InstallInfo, LauncherState};
+
+/// The name the launcher's bundled compose resource is registered under --
+/// see `tauri.conf.json`'s `bundle.resources` mapping
+/// `../../docker-compose.yml` to this name, and `launcher/README.md` on why
+/// that mapping must stay a reference to the repository's own file.
+const BUNDLED_COMPOSE_RESOURCE: &str = "docker-compose.yml";
 
 /// Tracks the state that isn't a Docker fact: where (if anywhere) the stack
 /// is installed, and which port it's configured to serve on. Both are
@@ -127,6 +134,81 @@ pub fn update_stack(app: State<LauncherApp>) -> Result<(), String> {
     }
 }
 
+/// Per-OS starting points for the three first-run questions -- always
+/// overridable in the wizard, never a forced choice.
+#[derive(Debug, Clone, Serialize)]
+pub struct SetupDefaultsDto {
+    pub storage_location: String,
+    pub install_dir: String,
+    pub port: u16,
+}
+
+impl From<SetupDefaults> for SetupDefaultsDto {
+    fn from(defaults: SetupDefaults) -> Self {
+        Self {
+            storage_location: defaults.storage_location.to_string_lossy().into_owned(),
+            install_dir: defaults.install_dir.to_string_lossy().into_owned(),
+            port: defaults.port,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn setup_defaults() -> SetupDefaultsDto {
+    SetupDefaults::for_this_os().into()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind")]
+pub enum StoragePathValidationDto {
+    Ok,
+    DoesNotExist,
+    NotWritable,
+    NotDockerShared,
+}
+
+impl From<StoragePathValidation> for StoragePathValidationDto {
+    fn from(v: StoragePathValidation) -> Self {
+        match v {
+            StoragePathValidation::Ok => Self::Ok,
+            StoragePathValidation::DoesNotExist => Self::DoesNotExist,
+            StoragePathValidation::NotWritable => Self::NotWritable,
+            StoragePathValidation::NotDockerShared => Self::NotDockerShared,
+        }
+    }
+}
+
+/// `shared_roots` is empty until the launcher grows a way to read Docker
+/// Desktop's actual file-sharing configuration; an empty list means every
+/// macOS path outside no explicit root trips the warning, which is the safe
+/// (over-cautious) direction per the spec.
+#[tauri::command]
+pub fn validate_storage(path: String) -> StoragePathValidationDto {
+    let home_root = dirs::home_dir().into_iter().collect::<Vec<_>>();
+    setup::validate_storage_path(std::path::Path::new(&path), &home_root).into()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind")]
+pub enum PortValidationDto {
+    Ok,
+    InUse,
+}
+
+impl From<PortValidation> for PortValidationDto {
+    fn from(v: PortValidation) -> Self {
+        match v {
+            PortValidation::Ok => Self::Ok,
+            PortValidation::InUse => Self::InUse,
+        }
+    }
+}
+
+#[tauri::command]
+pub fn validate_setup_port(port: u16) -> PortValidationDto {
+    setup::validate_port(port).into()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct FirstRunSetupArgs {
     pub storage_location: String,
@@ -136,29 +218,32 @@ pub struct FirstRunSetupArgs {
 
 #[tauri::command]
 pub fn run_first_setup(
+    handle: tauri::AppHandle,
     app: State<LauncherApp>,
     args: FirstRunSetupArgs,
-    bundled_compose_path: String,
 ) -> Result<(), String> {
+    let bundled_compose_path = handle
+        .path()
+        .resolve(BUNDLED_COMPOSE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|e| format!("could not locate the bundled compose file: {e}"))?;
+
     let inputs = InstallInputs {
         storage_location: PathBuf::from(args.storage_location),
         install_dir: PathBuf::from(&args.install_dir),
         port: args.port,
     };
 
-    setup::install(&app.docker, &inputs, &PathBuf::from(bundled_compose_path)).map_err(
-        |e| match e {
-            InstallError::CouldNotCreateInstallDir { reason } => {
-                format!("could not create the install directory: {reason}")
-            }
-            InstallError::CouldNotCopyComposeFile { reason } => {
-                format!("could not copy the compose file: {reason}")
-            }
-            InstallError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
-            InstallError::PullFailed { output } => output,
-            InstallError::UpFailed { output } => output,
-        },
-    )?;
+    setup::install(&app.docker, &inputs, &bundled_compose_path).map_err(|e| match e {
+        InstallError::CouldNotCreateInstallDir { reason } => {
+            format!("could not create the install directory: {reason}")
+        }
+        InstallError::CouldNotCopyComposeFile { reason } => {
+            format!("could not copy the compose file: {reason}")
+        }
+        InstallError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
+        InstallError::PullFailed { output } => output,
+        InstallError::UpFailed { output } => output,
+    })?;
 
     *app.install_dir.lock().unwrap() = Some(inputs.install_dir);
     *app.port.lock().unwrap() = Some(inputs.port);
