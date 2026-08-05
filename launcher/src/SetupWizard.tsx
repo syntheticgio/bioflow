@@ -8,6 +8,7 @@ import {
   type PortValidation,
   type StoragePathValidation,
 } from "./commands";
+import { canInstall as computeCanInstall, setupStatusText } from "./wizard-logic";
 
 interface Props {
   onInstalled: (installed: { storageLocation: string; port: number }) => void;
@@ -67,11 +68,12 @@ export function SetupWizard({ onInstalled }: Props) {
     return () => clearTimeout(id);
   }, [port]);
 
-  const canInstall =
-    loaded &&
-    storageLocation.length > 0 &&
-    storageValidation.kind === "Ok" &&
-    portValidation.kind === "Ok";
+  const installIsAllowed = computeCanInstall({
+    loaded,
+    storageLocation,
+    storageValidation,
+    portValidation,
+  });
 
   const storageProblem = storageValidation.kind !== "Ok";
   const portProblem = portValidation.kind !== "Ok";
@@ -105,13 +107,7 @@ export function SetupWizard({ onInstalled }: Props) {
         </div>
         <div className="masthead-rule-thick" />
         <div className={`status-line${hasProblems ? " status-line-warn" : ""}`}>
-          <span>
-            {hasProblems
-              ? `First run · ${[storageProblem, portProblem].filter(Boolean).length} thing${
-                  storageProblem && portProblem ? "s" : ""
-                } to fix`
-              : "First run · not yet installed"}
-          </span>
+          <span>{setupStatusText({ storageProblem, portProblem })}</span>
           <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · Launcher 0.1.0</span>
         </div>
         <div className="masthead-rule-thin" />
@@ -185,12 +181,12 @@ export function SetupWizard({ onInstalled }: Props) {
           <button
             className="btn btn-primary"
             onClick={handleInstall}
-            disabled={!canInstall || installing}
+            disabled={!installIsAllowed || installing}
           >
             {installing ? "Setting up…" : "Install"}
           </button>
           <span className="setup-bar-hint">
-            {canInstall
+            {installIsAllowed
               ? "Pulls the container images and starts the stack — a few minutes on first run."
               : "Fix the items above to continue."}
           </span>
