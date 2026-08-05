@@ -343,7 +343,7 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
-## MISSING blobs can never self-heal, and 45 got wrongly marked missing at once
+## MISSING blobs can never self-heal, and 45 got wrongly marked missing at once — PARTIALLY FIXED (circuit breaker, 2026-08-05)
 
 Raised: 2026-08-05, found while investigating a user report that the `blobs`
 collection held 45 documents in `state: "missing"` although every one of
@@ -382,19 +382,33 @@ session) set `state: missing` on the whole batch at once, bypassing
 `verify_files` entirely -- the clustered timestamp reads like one bulk write,
 not 45 independent verifier misses.
 
-**The gap worth closing regardless of root cause:** `verify_files` queries
-`Blob.find(Blob.state != BlobState.MISSING)` (handlers.py:475), which
-permanently excludes `MISSING` blobs from all future verification. Once a
-blob lands in `MISSING` -- by any path, buggy or legitimate -- it can never
-self-heal; only a manual repair (like the script above) or a fresh write
-through `attach_blob_to_object` brings it back. Worth adding either periodic
+**3. Shipped 2026-08-05: the circuit breaker.** `verify_files` now stats the
+whole batch before writing anything (`backend/app/queue/handlers.py`, guard 3
+in the docstring). If `miss_total >= _BREAKER_MIN_MISSES` (10) and
+`miss_total / len(blobs) >= _BREAKER_MISS_FRACTION` (0.5), the batch is
+treated as one mount event rather than N independent deletions: nothing is
+written -- not even a `miss_count` bump, which would otherwise burn through
+guard 2's two-strike budget on every affected blob in a single bad sweep --
+and a `storage.mass_miss` event is published instead. `_BREAKER_MIN_MISSES`
+exists so a small library where a handful of files are genuinely gone (a
+100% miss rate at that size is mundane) doesn't trip the breaker; both
+thresholds must clear for it to fire. Covered by
+`backend/tests/queue/test_verify_files_circuit_breaker.py` (all-missing above
+the floor aborts with no writes and publishes `storage.mass_miss`; a few
+genuine misses below the floor proceed normally; a mixed batch below the
+fraction proceeds normally). This directly closes the risk this entry
+originally flagged -- guard 1 only ever caught a *fully* empty mount; a
+partially-remounted drive or a share that serves an empty listing for some
+paths would still miss most of a batch and previously had no protection.
+
+**Still open:** `verify_files` queries `Blob.find(Blob.state !=
+BlobState.MISSING)` (handlers.py), which permanently excludes `MISSING` blobs
+from all future verification. Once a blob lands in `MISSING` -- by any path,
+buggy or legitimate, breaker or no breaker -- it can never self-heal; only a
+manual repair (like the script above) or a fresh write through
+`attach_blob_to_object` brings it back. Worth adding either periodic
 re-verification of `MISSING` blobs (cheap: just a stat, same as any other
-blob) or an on-demand repair action reachable from the UI. Also worth
-adding the circuit breaker guard 1 already applies to a fully-empty mount,
-generalized: if a single sweep would newly-miss an unusually large fraction
-of its batch at once, treat it as a suspect mount rather than trusting each
-individual `stat()` -- that is the shape this incident had, whatever actually
-caused it.
+blob) or an on-demand repair action reachable from the UI.
 
 Confirmed *not* an immediate risk: `blob_service.gc_candidates` filters only
 on `ref_count <= 0` and `storage == MANAGED`, ignoring `state` -- all 45 had
