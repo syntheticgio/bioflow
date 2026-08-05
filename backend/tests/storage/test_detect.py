@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.models import Compression, FormatConfidence, FormatKind
-from app.storage.detect import detect, detect_from_extension, detect_from_magic
+from app.storage.detect import (
+    EXTENSION_MAP,
+    detect,
+    detect_from_extension,
+    detect_from_magic,
+)
 
 FASTQ = b"""@SEQ_ID_1
 GATTTGGGGTTCAAAGCAGTATCGATCAAATAGTAAATCCATTTGTTCAA
@@ -109,6 +114,21 @@ class TestExtension:
     )
     def test_extension(self, filename, expected):
         assert detect_from_extension(filename) == expected
+
+    def test_every_format_kind_has_an_extension(self):
+        """A new FormatKind must say what it looks like on disk.
+
+        EXTENSION_MAP's *keys* are an open vocabulary -- `fq` and `fastq` both
+        mean FASTQ, and no enum can generate that list. Its values are not: a
+        kind absent from here is one only magic-byte detection can ever
+        produce, which is a real claim rather than an oversight, and this is
+        what makes someone state it deliberately.
+
+        UNKNOWN is excluded because it is the absence of an answer rather than
+        a format. There is no other exception on purpose -- an escape hatch
+        built before it has a member tends to become a dumping ground.
+        """
+        assert set(EXTENSION_MAP.values()) == set(FormatKind) - {FormatKind.UNKNOWN}
 
 
 class TestMagic:
