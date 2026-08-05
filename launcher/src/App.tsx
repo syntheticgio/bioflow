@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
 import { checkForUpdate, runStack, status, stopStack, updateStack } from "./commands";
+import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
 import type { LauncherState, Settings as SettingsValues } from "./types";
@@ -18,6 +19,12 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  // Set only on the transition out of SetupWizard, never on an ordinary
+  // Stop -> Run click -- the prefetch offer is a first-run thing, asked
+  // once, not something to show every time the stack starts. Cleared the
+  // moment PrefetchStep calls back, whether the user picked tools or
+  // skipped; there is no "ask again later" path back into it this session.
+  const [showPrefetch, setShowPrefetch] = useState(false);
   // Populated once first-run setup completes (or, on a relaunch of an
   // already-installed stack, left at these placeholders -- there is no
   // command yet to read .env back out, since nothing before this needed
@@ -106,10 +113,36 @@ export function App() {
         // last step); what's left is exactly Run's health-gated wait and
         // browser handoff, so reuse handleRun rather than landing on
         // Stopped and asking for a second click.
+        //
+        // Prefetch (task 9, closing #40) needs the API reachable to call
+        // GET /pipelines/tools, and health-gating is exactly what handleRun
+        // already waits for -- so it is offered *after* this resolves, not
+        // before, which is the ordering inversion the plan calls out: every
+        // other first-run question is answered before the stack exists,
+        // this one only makes sense once it does. handleRun also opens the
+        // browser as its own side effect (run_stack's job, unconditional),
+        // so by the time PrefetchStep renders the app is already open in a
+        // tab -- the prefetch offer appears in the launcher window
+        // alongside it, not gating it.
         setState({ kind: "Stopped" });
+        setShowPrefetch(true);
         handleRun();
       }}
     />;
+  }
+
+  // Renders in place of the running/stopped screen, not layered over it --
+  // showPrefetch is only ever true right after the health-gated wait above
+  // resolves into state.kind === "Running", so this and the main screen
+  // below never need to coexist. Guarding on state.kind too (rather than
+  // showPrefetch alone) means a mid-wait error (state stays "Stopped",
+  // handleRun's catch sets `error`) falls through to the ordinary Stopped
+  // screen with its error box instead of hanging on a prefetch screen for
+  // a stack that never became healthy.
+  if (showPrefetch && state.kind === "Running") {
+    return (
+      <PrefetchStep port={settings.port} onDone={() => setShowPrefetch(false)} />
+    );
   }
 
   const showFooter = state.kind === "Stopped" || state.kind === "Running";

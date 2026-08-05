@@ -2284,3 +2284,92 @@ something else and improve it.
 All three are chemistry- and context-dependent enough that
 `suggestion_service.py` will need real rules, not just availability checks.
 
+## Post-install tool downloads — FIXED
+
+Raised: 2026-08-01, requested. Shipped 2026-08-05 through 2026-08-06 as epic
+[#5](https://github.com/syntheticgio/bioflow/issues/5), planned in
+[#26](https://github.com/syntheticgio/bioflow/issues/26).
+
+Instead of baking all tools into the container image, allow users to install
+some tools after deployment (similar to the DeepVariant model). This could mean
+either installing into a sidecar container or pulling a separate tool-specific
+container depending on the tool.
+
+This trades smaller initial image size and faster startup against network
+bandwidth at first use, which is the right tradeoff for tools that are large
+(DeepVariant's ~3 GB is already a precedent) or rarely used. The installer
+already has a "full install" option to pre-pull optional images; this extends
+that model to a live install flow in the running application.
+
+Scope this against which tools are candidates (size, frequency of use, stability
+of external source) and whether the sidecar or separate-container approach works
+better for each. Per CLAUDE.md: `suggestion_service.py` must recognize any new
+dispatch path.
+
+Where the code lives: `backend/app/pipelines/tools.py` (`Delivery`,
+`InstallState`, `_probe_on_demand_image`), `backend/app/queue/tool_handlers.py`
+(`install_tool`/`uninstall_tool` jobs, `_PullProgress`),
+`backend/app/services/tool_install_service.py` (eligibility and dedup),
+`backend/app/services/pipeline_service.py`
+(`_require_or_offer_install`, the confirm-then-chain launch),
+`backend/app/services/suggestion_service.py` (`CardStatus.NEEDS_INSTALL`),
+frontend `SettingsTools.tsx`/`SettingsNav.tsx` (the install/uninstall screen)
+and `PipelineSuggestions.tsx`/`VariantDialog.tsx` (the consent flow), and on
+the launcher side `launcher/src-tauri/src/optional_tools.rs` plus
+`launcher/src/PrefetchStep.tsx` (issue #40's first-run prefetch). Design:
+`docs/superpowers/specs/2026-08-05-optional-tool-delivery-design.md`. Plan:
+`docs/superpowers/plans/2026-08-05-optional-tool-delivery.md`.
+
+**What the implementation did differently from this entry:**
+
+- **"Sidecar or separate container" resolved to one mechanism, not a
+  per-tool choice.** Every `ON_DEMAND_IMAGE` tool is a pinned OCI image run
+  as a sibling container through the host Docker daemon -- generalizing the
+  DeepVariant precedent rather than choosing between two shapes per tool. A
+  tool that cannot be a pinned image stays bundled; the design doc records
+  this as a deliberate trade of coverage for one mechanism that is atomic,
+  versioned, and reversible.
+- **Only DeepVariant actually migrated.** The entry's own candidate list
+  ("which tools are candidates... stability of external source") turned out
+  to matter more than expected. Clair3 was the planned second citizen
+  (plan task 8) specifically to prove the mechanism generalizes beyond
+  DeepVariant, but neither the tool's own maintainers' image
+  (`hkubal/clair3`) nor the biocontainers rebuild publish an arm64 build --
+  confirmed by pulling both, not by inspection. Moving Clair3 to
+  `ON_DEMAND_IMAGE` on every architecture would have removed it, the
+  *preferred* long-read caller, from arm64 entirely. Deferred rather than
+  forced through with a real regression; **Clair3 stays bundled**, and the
+  mechanism's genericity rests on how tasks 1-7 were built (no
+  DeepVariant-specific control flow anywhere in `Delivery`,
+  `_probe_on_demand_image`, `tool_install_service`, or
+  `_require_or_offer_install`) rather than on a second migration proving it
+  empirically. See the plan's task 8 section for the full research record
+  and what would need to be true to revisit it.
+- **A real, non-obvious blocker in the confirm-then-chain flow, caught by a
+  test rather than by inspection.** The fallback lookup used when `enqueue`
+  reports a dedup collision had no `owner` filter, which could have handed
+  one profile's install job to a different profile's caller. Fixed; the bug
+  and fix are documented in the query's own docstring
+  (`tool_install_service._active_install_query`).
+- **The launcher's prefetch does not use the same install job the web UI's
+  Settings page does.** `POST /pipelines/tools/{name}/install` requires a
+  resolved profile, and none exists on a fresh install -- profile creation is
+  the web app's own onboarding, which the launcher never drives. The launcher
+  instead pulls images directly with a new `DockerBackend::pull_image`, the
+  same shell-out style as every other launcher action. The honest cost: a
+  launcher-initiated pull creates no queue job and no Activity-tab entry,
+  only the image landing in the shared Docker daemon.
+- **DeepVariant's probe used to lie.** Before this work, `tools.deepvariant()`
+  reported `available=True` whenever the Docker daemon answered, without
+  checking the image had ever been pulled -- so a card was offered, the job
+  was accepted, and it died later telling the user to open a terminal. Fixing
+  that (plan task 2) was not in this entry's original scope but turned out to
+  be the precondition for everything else being honest.
+
+Verified against real running stacks throughout, not only against mocks:
+DeepVariant's install/progress/cancel flow was exercised live end-to-end
+through the Settings > Tools UI (a real `docker pull` reaching 20/96 layers
+and reverting cleanly on cancel); the launcher's `StackToolsClient` and
+`pull_image` were each confirmed against the real main-stack API and a real
+(if harmless) image pull.
+

@@ -12,7 +12,8 @@ use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome};
-use crate::docker::{DockerBackend, DockerPresence, ShellDocker};
+use crate::docker::{ActionResult, DockerBackend, DockerPresence, ShellDocker};
+use crate::optional_tools::{OptionalTool, StackToolsClient, ToolsClient};
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
 use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefaults, StoragePathValidation};
 use crate::state::{self, InstallInfo, LauncherState};
@@ -442,4 +443,52 @@ pub async fn check_for_update() -> bool {
     })
     .await
     .unwrap_or(false)
+}
+
+/// The optional-tool list for the first-run prefetch screen (task 9,
+/// closing #40) -- `GET /pipelines/tools` on the just-started stack,
+/// filtered to on-demand tools. Called only after `run_stack` has already
+/// confirmed `RunOutcome::Running`, so the API is known reachable by the
+/// time this fires; a failure here still degrades to an empty list rather
+/// than an error, since a step that offers to skip itself must not become
+/// the one thing blocking first-run setup from finishing.
+///
+/// `async`/`spawn_blocking` for the same reason as every other command here
+/// that reaches outside the process: `StackToolsClient::list_tools` is a
+/// real (if same-machine) HTTP call, bounded by its own timeout but still
+/// not something to run on the IPC thread.
+#[tauri::command]
+pub async fn fetch_optional_tools(port: u16) -> Vec<OptionalTool> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = StackToolsClient::default();
+        client.list_tools(port).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// Pulls one optional tool's image directly with `docker pull`, bypassing
+/// `POST /pipelines/tools/{name}/install` -- that endpoint requires a
+/// resolved profile, and none exists yet on a fresh install (profile
+/// creation is the web app's own onboarding step, which the launcher has
+/// never driven and has no business driving on the user's behalf here). See
+/// this module's own top-of-file comment for the full reasoning.
+///
+/// Errors are returned to the caller rather than swallowed, unlike
+/// `fetch_optional_tools` above: listing tools degrading to "offer
+/// nothing" is safe, but a user who explicitly checked a box and clicked
+/// through needs to know if their multi-gigabyte download actually failed,
+/// the same way `run_first_setup`'s own pull failure is surfaced rather
+/// than silently ignored.
+#[tauri::command]
+pub async fn install_optional_tool(image: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        match docker.pull_image(&image) {
+            ActionResult::Ok => Ok(()),
+            ActionResult::Failed { output } => Err(output),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

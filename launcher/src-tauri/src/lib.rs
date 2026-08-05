@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod commands;
 pub mod docker;
+pub mod optional_tools;
 pub mod settings;
 pub mod setup;
 pub mod state;
@@ -25,6 +26,8 @@ pub fn run() {
       commands::run_first_setup,
       commands::apply_settings,
       commands::check_for_update,
+      commands::fetch_optional_tools,
+      commands::install_optional_tool,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

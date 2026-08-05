@@ -211,26 +211,6 @@ Also note this is a different *kind* of artifact from everything else here: a
 native desktop app, outside this repo's Python/React/Docker toolchain, needing
 its own repo and build/signing story.
 
-## Post-install tool downloads
-
-Raised: 2026-08-01, requested.
-
-Instead of baking all tools into the container image, allow users to install
-some tools after deployment (similar to the DeepVariant model). This could mean
-either installing into a sidecar container or pulling a separate tool-specific
-container depending on the tool.
-
-This trades smaller initial image size and faster startup against network
-bandwidth at first use, which is the right tradeoff for tools that are large
-(DeepVariant's ~3 GB is already a precedent) or rarely used. The installer
-already has a "full install" option to pre-pull optional images; this extends
-that model to a live install flow in the running application.
-
-Scope this against which tools are candidates (size, frequency of use, stability
-of external source) and whether the sidecar or separate-container approach works
-better for each. Per CLAUDE.md: `suggestion_service.py` must recognize any new
-dispatch path.
-
 ## Observability in tools: progress reporting and resource transparency
 
 Raised: 2026-08-01, requested.

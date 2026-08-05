@@ -62,6 +62,35 @@ export function checkForUpdate(): Promise<boolean> {
   return invoke("check_for_update");
 }
 
+// One row of GET /pipelines/tools, reduced to what the prefetch screen
+// needs -- mirrors optional_tools.rs's OptionalTool struct exactly, so this
+// type is a straight pass-through of what Tauri's IPC already deserialized,
+// not a second shape to keep in sync by hand.
+export interface OptionalTool {
+  name: string;
+  image: string | null;
+  download_bytes: number | null;
+  available: boolean;
+}
+
+// Never hardcodes which tools are optional -- that's the whole point of
+// task 9 (closing #40): the list lives in the stack's own TOOL_META and
+// this just reads it back. Degrades to an empty array on any failure
+// (offline stack, malformed response, timeout) rather than throwing --
+// PrefetchStep.tsx treats an empty list as "nothing to offer" and skips
+// itself, which is the correct behavior for a step that was always
+// optional in the first place.
+export function fetchOptionalTools(port: number): Promise<OptionalTool[]> {
+  return invoke("fetch_optional_tools", { port });
+}
+
+// Pulls one tool's image directly with `docker pull`, bypassing
+// POST /pipelines/tools/{name}/install -- see optional_tools.rs's
+// module comment for why (no profile exists yet on a fresh install).
+export function installOptionalTool(image: string): Promise<void> {
+  return invoke("install_optional_tool", { image });
+}
+
 // No install_dir argument -- only one install is supported per machine, so
 // the launcher always installs to its fixed default path (~/.bioflow) rather
 // than a user-chosen one. See run_first_setup's own doc comment in

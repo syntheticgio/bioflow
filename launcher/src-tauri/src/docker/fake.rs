@@ -15,6 +15,11 @@ pub struct FakeDocker {
     pub up_result: RefCell<ActionResult>,
     pub down_result: RefCell<ActionResult>,
     pub pull_result: RefCell<ActionResult>,
+    pub pull_image_result: RefCell<ActionResult>,
+    /// Every image name `pull_image` was called with, in order -- lets a
+    /// test assert *which* tools were actually pulled, not merely that
+    /// pulling succeeded.
+    pub pull_image_calls: RefCell<Vec<String>>,
     pub manifest_differs: Cell<Option<bool>>,
     pub daemon_start_calls: Cell<u32>,
     /// If set, `probe` returns this value the Nth time it is called (1-indexed)
@@ -32,6 +37,8 @@ impl Default for FakeDocker {
             up_result: RefCell::new(ActionResult::Ok),
             down_result: RefCell::new(ActionResult::Ok),
             pull_result: RefCell::new(ActionResult::Ok),
+            pull_image_result: RefCell::new(ActionResult::Ok),
+            pull_image_calls: RefCell::new(Vec::new()),
             manifest_differs: Cell::new(None),
             daemon_start_calls: Cell::new(0),
             probe_after_start_sequence: RefCell::new(Vec::new()),
@@ -91,6 +98,11 @@ impl DockerBackend for FakeDocker {
 
     fn pull(&self, _install_dir: &str) -> ActionResult {
         self.pull_result.borrow().clone()
+    }
+
+    fn pull_image(&self, image: &str) -> ActionResult {
+        self.pull_image_calls.borrow_mut().push(image.to_string());
+        self.pull_image_result.borrow().clone()
     }
 
     fn health(&self, _install_dir: &str) -> bool {

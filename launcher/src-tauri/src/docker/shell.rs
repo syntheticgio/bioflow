@@ -108,6 +108,12 @@ impl DockerBackend for ShellDocker {
         Self::run_action(cmd)
     }
 
+    fn pull_image(&self, image: &str) -> ActionResult {
+        let mut cmd = Command::new("docker");
+        cmd.arg("pull").arg(image);
+        Self::run_action(cmd)
+    }
+
     fn health(&self, install_dir: &str) -> bool {
         // The api service's own healthcheck already probes /healthz (see
         // docker-compose.yml); reading compose's view of that healthcheck

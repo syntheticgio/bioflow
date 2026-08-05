@@ -252,12 +252,20 @@ Raised explicitly rather than decided silently. Two other options were on the ta
 
 Nearly free once Task 1 lands, since the manifest is already served.
 
-- [ ] Launcher queries `GET /pipelines/tools` after the stack is healthy and offers a checkbox per optional tool, with sizes, during first-run setup.
-- [ ] **The list must not be hardcoded in the launcher** — that is #40's first acceptance criterion and the reason it was cut from #28.
-- [ ] Declining leaves on-demand behavior unchanged.
-- [ ] Note the ordering inversion #40 flags: this runs *after* the stack is up, unlike the rest of first-run setup.
+- [x] Launcher queries `GET /pipelines/tools` (new `optional_tools.rs` module, `StackToolsClient`, `ureq`-based like `update_check.rs`'s `GhcrClient`) once the stack is confirmed healthy (`RunOutcome::Running`), and offers a checkbox per on-demand tool with its size in a new `PrefetchStep.tsx` screen.
+- [x] **Not hardcoded**: `optional_tools.rs`'s own module doc states this as its first design constraint, and the implementation reads `TOOL_META` indirectly through the live API response, filtering on `delivery == "on_demand"` -- there is no tool name or image anywhere in the launcher source.
+- [x] Declining (unchecking everything, or clicking Continue with nothing selected) calls `onDone()` with no installs started; on-demand behavior for every tool is unchanged, exactly as if this screen had never existed.
+- [x] The ordering inversion is real and is handled explicitly, documented in both `App.tsx`'s `onInstalled` comment and `PrefetchStep.tsx`'s module doc: `run_first_setup`'s own `docker compose up -d` is **not** health-gated (confirmed by reading `ShellDocker::up` -- it is a bare compose call), so `GET /pipelines/tools` cannot be called from inside first-run setup itself. The screen is shown only after `handleRun()`'s health-gated wait resolves to `state.kind === "Running"`.
 
-Close #40 with a note on what shipped, per the TODO close-out rules.
+**A second, unplanned finding, surfaced and resolved before writing code:** `POST /pipelines/tools/{name}/install` (the endpoint Settings > Tools uses) requires a resolved profile (`OwnerDep`), and a genuinely fresh install has none yet -- profile creation is the web app's own onboarding step, which the launcher has never driven. Raised to the user rather than assumed away; chosen fix (of three options considered) was for the launcher to pull images directly with a new `DockerBackend::pull_image(image)` -- one more shell-out in the same style as every other Docker action here -- rather than calling the job-queue endpoint or having the launcher create a profile on the user's behalf. The tradeoff, stated in both the Rust module doc and the design record below: a launcher-initiated pull creates no queue job and no Activity-tab entry, only the image landing in the shared Docker daemon, which is what makes it read as already-installed the moment a profile exists and Settings > Tools is opened.
+
+**Verified live, twice, against the real running main stack (port 5173), not only against unit tests or mocks.** Built a throwaway `cargo run --example` binary calling `StackToolsClient::list_tools(5173)` against the actual running API: it returned `Some([OptionalTool { name: "deepvariant", image: Some("google/deepvariant:1.9.0"), download_bytes: Some(2990000000), available: false }])` -- the real manifest, correctly filtered and parsed. Separately verified `DockerBackend::pull_image` with `docker.pull_image("hello-world:latest")` (a harmless real image, not the 3 GB DeepVariant one): returned `Ok`, and `docker image inspect hello-world:latest` confirmed it was genuinely pulled, not merely reported successful. Both throwaway example files were removed afterward; neither shipped.
+
+Rust: `cargo test` in `launcher/src-tauri` — 44 passed, 1 ignored (the pre-existing network-bound GHCR test, per its own documented convention), 0 failed, including 4 new tests in `optional_tools::tests`. `cargo check` compiles clean against the real webkit2gtk toolchain present in this environment.
+
+Frontend: `npm run lint` (tsc --noEmit) clean, `npm run build` (tsc -b && vite build) clean, `npm test` (vitest) — 11 passed, 0 failed (pre-existing `wizard-logic.test.ts`, untouched by this task).
+
+Closed #40 with a comment recording what shipped and where.
 
 ---
 
