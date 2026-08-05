@@ -194,19 +194,26 @@ async def _modelled(job_type: str) -> list[JobRunTiming]:
     )
 
 
-async def records_for_object(object_id: str) -> list[JobRunTiming]:
+async def records_for_object(
+    object_id: str, *, limit: int | None = None
+) -> list[JobRunTiming]:
     """Every run that touched one object, **including failures**.
 
     The deliberate counterpart to `_samples`: provenance is the one reader
     that wants failed runs, since a failure is the most informative record a
     user can read. Named explicitly so that opting out of the filter is a
     visible choice rather than an omission.
+
+    `limit` defaults to unbounded so existing callers are unaffected; the
+    per-object provenance route passes `limit + 1` and truncates, which is
+    where its `has_more` flag comes from.
     """
-    return (
-        await JobRunTiming.find(JobRunTiming.object_id == object_id)
-        .sort("-finished_at")
-        .to_list()
+    query = JobRunTiming.find(JobRunTiming.object_id == object_id).sort(
+        "-finished_at"
     )
+    if limit is not None:
+        query = query.limit(limit)
+    return await query.to_list()
 
 
 def _fit(samples: list[tuple[int, int]]) -> dict | None:
