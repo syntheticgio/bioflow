@@ -183,6 +183,88 @@ class TestIngestLocalFileCompresses:
         assert blob.ref_count == 2
 
 
+class TestIngestLocalFileWithPrecomputedContentHash:
+    """The SRA download path: download_sra_run compresses inside its own
+    handler (it has a JobContext to report progress and check cancellation
+    through, which this async service function never does), then hands
+    ingest_local_file an already-.gz file plus the plaintext hash it
+    computed on the way. See docs/superpowers/specs/
+    2026-08-05-object-compression-design.md."""
+
+    async def test_precompressed_file_is_not_compressed_again(self):
+        from app.storage import compress
+
+        owner = "compress-precomp-a"
+        project = await _project(owner)
+        content = _fastq(6)
+        plain_path = _scratch_file("SRR1.fastq", content)
+
+        result = compress.compress_and_hash(plain_path, dest_dir=plain_path.parent)
+        gz_path = plain_path.with_name(plain_path.name + ".gz")
+        result.path.rename(gz_path)
+        plain_path.unlink()
+        _scratch_files.append(gz_path)
+
+        compressed_size = result.compressed_size
+        obj = await object_service.ingest_local_file(
+            project_id=project.id,
+            path=gz_path,
+            name="SRR1.fastq.gz",
+            owner=owner,
+            content_sha256=result.content_sha256,
+        )
+
+        assert obj.name == "SRR1.fastq.gz"
+        # ingest_local_file's precomputed-hash branch skips re-compressing, so
+        # the stored size must equal what compress_and_hash already produced
+        # rather than a second, independent compression of the same bytes.
+        assert obj.size == compressed_size
+        blob = await Blob.get(obj.blob_sha256)
+        assert blob.content_sha256 == result.content_sha256
+
+    async def test_dedups_by_content_against_a_blob_from_a_different_compressor(self):
+        """The gap this parameter closes: without it, an SRA download that
+        happens to match plaintext already stored under a CAS digest from a
+        *different* compressor run would miss the dedup entirely."""
+        from app.storage import compress
+
+        owner = "compress-precomp-b"
+        project = await _project(owner)
+        content = _fastq(7)
+
+        # First copy ingested normally, via the stdlib fallback -- a
+        # different compressor than the one the SRA path below uses. Scoped
+        # to its own context rather than the shared `monkeypatch` fixture, so
+        # undoing it does not also undo _no_queue's enqueue_ingest stub.
+        unavailable = tools.Tool(name="bgzip", path=None, version=None, error="x")
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(tools, "bgzip", lambda: unavailable)
+            path1 = _scratch_file("uploaded.fastq", content)
+            obj1 = await object_service.ingest_local_file(
+                project_id=project.id, path=path1, name="uploaded.fastq", owner=owner
+            )
+
+        # Second copy: bgzip, as download_sra_run's handler would use.
+        plain_path = _scratch_file("SRR2.fastq", content)
+        result = compress.compress_and_hash(plain_path, dest_dir=plain_path.parent)
+        gz_path = plain_path.with_name(plain_path.name + ".gz")
+        result.path.rename(gz_path)
+        plain_path.unlink()
+        _scratch_files.append(gz_path)
+
+        obj2 = await object_service.ingest_local_file(
+            project_id=project.id,
+            path=gz_path,
+            name="SRR2.fastq.gz",
+            owner=owner,
+            content_sha256=result.content_sha256,
+        )
+
+        assert obj2.blob_sha256 == obj1.blob_sha256
+        blob = await Blob.get(obj1.blob_sha256)
+        assert blob.ref_count == 2
+
+
 class TestIngestStreamCompresses:
     async def test_uploaded_fastq_is_stored_compressed_and_renamed(self):
         owner = "compress-stream-a"

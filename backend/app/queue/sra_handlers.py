@@ -21,6 +21,8 @@ from app.queue import download_failures
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
+from app.storage import compress as compress_mod
+from app.storage import detect as detect_mod
 
 log = get_logger(__name__)
 
@@ -35,6 +37,14 @@ _PROGRESS_RE = re.compile(r"^\s*(\w+)\s*:\|[^|]*?([\d.]+)%")
 # FASTQ, so the extracted size is several times the archive's -- and prefetch
 # holds the archive at the same time.
 EXTRACTION_FACTOR = 4.0
+
+# Peak disk now briefly holds three things at once rather than two: the
+# archive, fasterq-dump's plain FASTQ, and the bgzip'd copy being written
+# beside it before the plain file is removed -- see docs/superpowers/specs/
+# 2026-08-05-object-compression-design.md. At bgzip's measured ~6.3x ratio the
+# compressed copy adds roughly EXTRACTION_FACTOR's own headroom back, so
+# EXTRACTION_FACTOR is left as-is rather than inflated for a peak that lasts
+# only as long as one file's compression.
 
 
 @handler(
@@ -104,7 +114,10 @@ def download_sra_run(ctx: JobContext) -> dict:
             f"fasterq-dump exited 0 but produced no FASTQ for {accession}"
         )
 
-    staged = _describe(fastq_files)
+    ctx.check_cancel()
+    content_hashes = _compress_staged(ctx, fastq_files, accession)
+
+    staged = _describe(content_hashes)
 
     ctx.progress(phase="done", pct=1.0, message=f"downloaded {accession}")
     log.info(
@@ -112,7 +125,7 @@ def download_sra_run(ctx: JobContext) -> dict:
         job_id=ctx.job_id,
         accession=accession,
         files=len(staged),
-        bytes=sum(f.stat().st_size for f in fastq_files),
+        bytes=sum(p.stat().st_size for p in content_hashes),
     )
 
     # No cleanup: the applier consumes these paths, and ingest_local_file
@@ -248,29 +261,105 @@ def _fasterq_dump(
         raise _download_failure(code, log_path, accession)
 
 
-def _describe(fastq_files: list[Path]) -> list[dict]:
+def _compress_staged(
+    ctx: JobContext, fastq_files: list[Path], accession: str
+) -> dict[Path, str | None]:
+    """Bgzip each staged FASTQ before it is described and handed to the applier.
+
+    Run here rather than left to `ingest_local_file`'s own compression (which
+    still applies to every other ingest path) because this is the one place
+    with a `JobContext`: the applier that actually calls `ingest_local_file`
+    for an SRA download runs later, as a plain async function with no job to
+    report progress or check cancellation against. See docs/superpowers/specs/
+    2026-08-05-object-compression-design.md.
+
+    fasterq-dump's own output is always plain FASTQ (`should_compress` will
+    say yes for every file here), but the check still runs rather than being
+    assumed, since a future fasterq-dump flag or a differently-shaped staged
+    file should not silently double-compress.
+
+    Returns the new (compressed) paths mapped to the plaintext hash each was
+    compressed from -- None for a file left uncompressed. Carried through
+    `_describe` into the staged dict so `ingest_local_file` can dedup by
+    content even though it never sees the plaintext itself.
+    """
+    total_bytes = sum(f.stat().st_size for f in fastq_files)
+    done_bytes = 0
+    content_hashes: dict[Path, str | None] = {}
+
+    for i, path in enumerate(fastq_files):
+        ctx.check_cancel()
+        detection = detect_mod.detect(path, path.name)
+        if not compress_mod.should_compress(detection.kind, detection.compression):
+            content_hashes[path] = None
+            done_bytes += path.stat().st_size
+            continue
+
+        ctx.progress(
+            phase="compressing",
+            pct=min(0.95 + (done_bytes / total_bytes) * 0.04, 0.99) if total_bytes else 0.95,
+            message=f"compressing {path.name} ({i + 1}/{len(fastq_files)})",
+        )
+        result = compress_mod.compress_and_hash(
+            path, dest_dir=path.parent, cancel_event=ctx.cancel_event
+        )
+        gz_path = path.with_name(path.name + ".gz")
+        result.path.rename(gz_path)
+        # `path` is the plain FASTQ that fasterq-dump wrote; `done_bytes`
+        # tracks against the plaintext total computed above, not the
+        # (smaller) compressed size, so progress still reaches 1.0 by the
+        # last file regardless of each file's ratio.
+        done_bytes += path.stat().st_size
+        path.unlink()
+        content_hashes[gz_path] = result.content_sha256
+
+    log.info(
+        "sra_download_compressed",
+        job_id=ctx.job_id,
+        accession=accession,
+        plain_bytes=total_bytes,
+        compressed_bytes=sum(f.stat().st_size for f in content_hashes),
+    )
+    return content_hashes
+
+
+def _describe(content_hashes: dict[Path, str | None]) -> list[dict]:
     """Label each staged file with its mate role.
 
     Derived from fasterq-dump's own `_1`/`_2` suffixes rather than by
     re-detecting the pair from the filenames: the tool already said which is
     which, and `pairing.py`'s inference exists for files that arrived without
-    that guarantee.
+    that guarantee. Matched against the name with any trailing `.gz` from
+    `_compress_staged` stripped first, so a compressed run pairs exactly like
+    an uncompressed one always did.
     """
-    paired = any(f.name.endswith(("_1.fastq", "_2.fastq")) for f in fastq_files)
+    from app.storage.detect import strip_compression_suffix
+
+    fastq_files = list(content_hashes)
+    bare_names = {f: strip_compression_suffix(f.name) for f in fastq_files}
+    paired = any(name.endswith(("_1.fastq", "_2.fastq")) for name in bare_names.values())
 
     staged = []
     for path in fastq_files:
+        bare = bare_names[path]
         mate = None
         if paired:
-            if path.name.endswith("_1.fastq"):
+            if bare.endswith("_1.fastq"):
                 mate = "R1"
-            elif path.name.endswith("_2.fastq"):
+            elif bare.endswith("_2.fastq"):
                 mate = "R2"
             else:
                 # A third file alongside a pair: reads whose mate was filtered
                 # out upstream. Real data, but not part of the pair.
                 mate = "unpaired"
-        staged.append({"path": str(path), "name": path.name, "mate": mate})
+        staged.append(
+            {
+                "path": str(path),
+                "name": path.name,
+                "mate": mate,
+                "content_sha256": content_hashes[path],
+            }
+        )
     return staged
 
 
