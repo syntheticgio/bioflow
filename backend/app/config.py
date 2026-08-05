@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     # from upstream's musl-static release binary, and absent on arm64 by
     # design -- see backend/scripts/install-polypolish.sh.
     polypolish_path: str = "polypolish"
+    # Reference-guided scaffolding. Not in Debian; installed from PyPI (pure
+    # Python, pinned in backend/Dockerfile). The binary is `ragtag.py`, not
+    # `ragtag` -- see tools.ragtag()'s own comment.
+    ragtag_path: str = "ragtag.py"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

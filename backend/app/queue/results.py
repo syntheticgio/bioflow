@@ -1580,6 +1580,94 @@ async def _apply_polish_assembly(result: dict, *, owner: str) -> None:
             )
 
 
+async def _apply_scaffold_assembly(result: dict, *, owner: str) -> None:
+    """Turn a finished RagTag run into a new scaffolded assembly object.
+
+    Two parents, like the polish applier: the draft and the reference. That
+    is not optional bookkeeping here the way it might read at a glance --
+    RagTag names scaffolds after the *reference's* sequences, so the
+    resulting object's structure is partly a claim about which reference
+    produced it. `derived_from` omitting the reference would make that claim
+    unrecoverable, and `scaffold_reference_name` on the facts is what a
+    human reads before trusting the arrangement at all.
+
+    The AGP, when the handler produced one, is ingested as its own visible
+    object beside the scaffolded FASTA rather than folded into it or left in
+    the workdir -- unlike the intermediates the polish and consensus
+    appliers discard, it is the only record of which contig went where and
+    in what orientation, and regenerating it means re-running the job. It
+    is not a `sidecar_of` scaffolding file (that model exists for aligner
+    index files the explorer deliberately hides); a human is meant to open
+    this one.
+    """
+    from app.services import object_service, run_service
+
+    output = result.get("output")
+    draft_id = result.get("draft_object_id")
+    reference_id = result.get("reference_object_id")
+    if not output or not draft_id:
+        return
+
+    draft = await DataObject.get(PydanticObjectId(draft_id))
+    if draft is None:
+        log.warning("scaffold_parent_missing", object_id=draft_id)
+        return
+
+    parents = [draft.id]
+    if reference_id:
+        parents.append(PydanticObjectId(reference_id))
+
+    job_id = result.get("job_id")
+    facts = result.get("facts") or {}
+    try:
+        scaffolded = await object_service.ingest_local_file(
+            owner=draft.owner,
+            project_id=draft.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.REFERENCE,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=facts,
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error("scaffold_ingest_failed", object_id=draft_id, error=str(e))
+        return
+
+    agp = result.get("agp")
+    if agp:
+        try:
+            await object_service.ingest_local_file(
+                owner=draft.owner,
+                project_id=draft.project_id,
+                path=Path(agp["tmp_path"]),
+                name=agp["name"],
+                derived_from=parents,
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts={"scaffold_of_object_id": str(scaffolded.id)},
+            )
+        except Exception as e:  # noqa: BLE001
+            # The AGP is a convenience, not the deliverable -- its own
+            # ingest failing must not undo the scaffold that already
+            # succeeded above.
+            log.warning("scaffold_agp_ingest_failed", object_id=draft_id, error=str(e))
+
+    log.info(
+        "scaffold_applied",
+        draft_id=draft_id,
+        scaffolded_id=str(scaffolded.id),
+        placed=facts.get("scaffold_placed_sequences"),
+        unplaced=facts.get("scaffold_unplaced_sequences"),
+    )
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(
+                run_id, [scaffolded.id], owner=scaffolded.owner
+            )
+
+
 def variant_provenance(result: dict) -> dict:
     """The facts a variant calling run stamps onto the VCF it produced.
 
@@ -1915,4 +2003,5 @@ _APPLIERS = {
     "assess_completeness": _apply_assess_completeness,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
+    "scaffold_assembly": _apply_scaffold_assembly,
 }

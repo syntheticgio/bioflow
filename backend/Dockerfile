@@ -262,6 +262,19 @@ RUN pip install --no-cache-dir NanoPlot==1.45.0
 # one from the same version.
 RUN pip install --no-cache-dir pydeseq2==0.5.4
 
+# RagTag, reference-guided scaffolding. Not in Debian (checked with an
+# apt-get update first: no candidate for ragtag, ragtag-python, or
+# python3-ragtag). Pure Python and PyPI carries it, so pip is correct here
+# rather than a source build or a script -- unlike Polypolish this has no
+# arm64 problem, since its only external binary dependency is minimap2,
+# already installed above for both architectures. Pinned because a
+# scaffolding result is only comparable to another one from the same
+# version, the same reasoning pydeseq2 above gives. Of its four dependencies
+# (intervaltree, networkx, numpy, pysam) only intervaltree is new to this
+# image -- networkx, numpy and pysam already arrived via NanoPlot/PyDESeq2
+# and pysam's own top-level dependency.
+RUN pip install --no-cache-dir ragtag==2.1.0
+
 # compleasm, the assembly completeness tool -- BUSCO's job, ~10-20x faster,
 # and it recovers BUSCOs the metaeuk step in Debian's own busco package
 # misses. Placed after the pip installs above rather than beside Clair3:

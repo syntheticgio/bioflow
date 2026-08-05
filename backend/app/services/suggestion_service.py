@@ -1048,6 +1048,86 @@ def build_polish_card(obj, read_sets) -> SuggestionCard | None:
     )
 
 
+def build_scaffold_card(obj, references) -> SuggestionCard | None:
+    """Reference-guided scaffolding of a draft assembly, by RagTag.
+
+    Anchored on the draft, matching the polish card. `references` is the
+    project's reference-role FASTA, resolved by the orchestrator the same
+    way `read_sets` is for polishing.
+
+    Same "ambiguity is unavailable, not a guess" rule `build_polish_card`
+    documents, but it fires far more often here: a project holding two
+    reference-role FASTA for one organism is the *ordinary* case (the real
+    yeast project carries both the GCA and GCF genomic FASTA), not an edge
+    case the way several short-read sets is for polishing. When this card is
+    unavailable for that reason, the manual scaffold dialog -- which carries
+    its own reference chooser -- is where the launch actually happens; this
+    card only covers the single-reference case because cards have no room
+    for a chooser (see `SuggestionCard.launch`'s own docstring: `body` must
+    be the complete request, assembled with nothing left for the client to
+    pick).
+
+    Deliberately not gated on the draft looking unscaffolded -- the
+    `protein.faa` mistake in the same costume `build_polish_card` warns
+    about: rescaffolding an already-scaffolded assembly against a better
+    reference is a legitimate workflow, not a mistake to prevent.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Scaffold assembly"
+    description = (
+        "Order and orient this assembly's contigs against a reference "
+        "assembly, with RagTag. Scaffolds are named after the reference's "
+        "own sequences, so real structural differences from the reference "
+        "will not appear in the result."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="scaffold",
+            category="REFERENCE_ASSEMBLY",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.ragtag()
+    if not tool.available:
+        return unavailable(tool.error or "RagTag is not installed.")
+
+    if not references:
+        return unavailable(
+            "Scaffolding needs a reference assembly, and this project has "
+            "none."
+        )
+    if len(references) > 1:
+        return unavailable(
+            f"This project has {len(references)} reference assemblies. Use "
+            "the Scaffold tool to pick one."
+        )
+
+    reference = references[0]
+    return SuggestionCard(
+        kind="scaffold",
+        category="REFERENCE_ASSEMBLY",
+        title=title,
+        description=description,
+        why=f"Reference: {reference.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/scaffold",
+            "body": {
+                "draft_object_id": str(obj.id),
+                "reference_object_id": str(reference.id),
+            },
+        },
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -1215,6 +1295,33 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             read_sets = None
 
+    scaffold_references = None
+    if reference_assembly._is_assembly_like(obj):
+        # Same reasoning as read_sets above: an async project listing kept
+        # out of the synchronous scaffold card, computed only for
+        # assembly-like FASTA. Deliberately not the `references` list built
+        # above -- that one is gated to the FASTQ branch and stays empty for
+        # a FASTA click, which would starve this card of every candidate.
+        try:
+            scaffold_references = [
+                o
+                for o in await object_service.list_objects(
+                    obj.project_id, owner=obj.owner, status=ObjectStatus.READY
+                )
+                if o.role is ObjectRole.REFERENCE
+                and o.format.kind is FormatKind.FASTA
+                # A draft that is itself marked REFERENCE -- an already
+                # scaffolded assembly, say -- must not be offered as its own
+                # reference. launch_scaffold refuses this at launch, but a
+                # card that offers a self-referential run in the first place
+                # is the bug this real project surfaced: one reference-role
+                # FASTA in a project (itself) rendered as an AVAILABLE card
+                # naming itself as the target.
+                and o.id != obj.id
+            ]
+        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            scaffold_references = None
+
     builders = (
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
@@ -1225,6 +1332,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("completeness", lambda: build_completeness_card(obj)),
         ("consensus", lambda: build_consensus_card(obj, alignment_target)),
         ("polish", lambda: build_polish_card(obj, read_sets)),
+        ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
     )
 
     cards: list[dict] = []

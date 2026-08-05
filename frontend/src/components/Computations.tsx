@@ -4,6 +4,7 @@ interface Props {
   canCallVariants: boolean;
   canQuantify: boolean;
   canAssemble: boolean;
+  canScaffold: boolean;
   canScoreCompleteness: boolean;
   canDifferentialExpression: boolean;
   canQC: boolean;
@@ -18,6 +19,7 @@ interface Props {
    * directly rather than going through the tool selector first. */
   onQuantify: () => void;
   onAssemble: () => void;
+  onScaffold: () => void;
   onScoreCompleteness: () => void;
   onDifferentialExpression: () => void;
   onRunQC: () => void;
@@ -44,6 +46,7 @@ export function Computations({
   canCallVariants,
   canQuantify,
   canAssemble,
+  canScaffold,
   canScoreCompleteness,
   canDifferentialExpression,
   canQC,
@@ -54,6 +57,7 @@ export function Computations({
   onStart,
   onQuantify,
   onAssemble,
+  onScaffold,
   onScoreCompleteness,
   onDifferentialExpression,
   onRunQC,
@@ -137,6 +141,16 @@ export function Computations({
             title="Score what fraction of a lineage-specific ortholog set can be found in this assembly"
           >
             Score completeness
+          </button>
+        )}
+        {canScaffold && (
+          <button
+            type="button"
+            className="btn"
+            onClick={onScaffold}
+            title="Order and orient this assembly's contigs against a reference, with RagTag"
+          >
+            Scaffold
           </button>
         )}
         {canQuantify && (

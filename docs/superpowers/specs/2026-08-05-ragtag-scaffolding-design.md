@@ -343,7 +343,9 @@ Two familiar traps:
 
 ## Resources
 
-`JobResources(cpu=4, mem_mb=8192, io=IoClass.NORMAL)`.
+`JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT)`. (Implementation note,
+2026-08-05: `IoClass` has no `NORMAL` member -- the enum is
+`NONE`/`LIGHT`/`HEAVY`. `LIGHT` is the correct match for the reasoning below.)
 
 The cost is minimap2's whole-genome alignment of draft against reference, plus
 RagTag's own graph work in `networkx`. Neither is heavy for bacterial or fungal

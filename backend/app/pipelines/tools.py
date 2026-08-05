@@ -614,6 +614,16 @@ def polypolish() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def ragtag() -> Tool:
+    # The binary is `ragtag.py`, not `ragtag` -- a probe looking for `ragtag`
+    # on PATH finds nothing and reports a working install as missing, the
+    # same shape iVar's `version`-vs-`--version` trap has. Verified against a
+    # real installed 2.1.0: `ragtag.py --version` prints "v2.1.0" and exits
+    # zero.
+    return _probe("ragtag", settings.ragtag_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -1426,6 +1436,51 @@ TOOL_META: dict[str, ToolMeta] = {
             "minutes and a vertebrate one can be hours. Records lineage and "
             "OrthoDB version alongside the four percentages, since a score "
             "from one version is not comparable to a score from another."
+        ),
+    ),
+    "ragtag": ToolMeta(
+        pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
+        one_liner="Reference-guided assembly scaffolding",
+        summary=(
+            "Orders and orients a draft assembly's contigs by aligning them "
+            "against a related reference assembly, producing chromosome-scale "
+            "scaffolds without Hi-C data. Scaffolds are named after the "
+            "reference's own sequences, so the result inherits the "
+            "reference's arrangement -- a real structural difference between "
+            "the sample and the reference will not appear in the output."
+        ),
+        strengths=(
+            "The cheapest route from contigs to chromosome-scale sequence "
+            "when a reasonable reference already exists",
+            "Reports a per-contig placement confidence rather than a single "
+            "pass/fail result",
+            "Carries unplaced contigs through into the output instead of "
+            "silently dropping them",
+        ),
+        homepage="https://github.com/malonge/RagTag",
+        repository="https://github.com/malonge/RagTag",
+        citation=(
+            "Alonge M, Lebeigle L, Kirsche M, Jenike K, Ou S, Aganezov S, "
+            "Wang X, Lippman ZB, Schatz MC, Soyk S. Automated assembly "
+            "scaffolding using RagTag elevates a new tomato system for "
+            "high-throughput genome editing. Genome Biology. 2022;23:258."
+        ),
+        citation_url="https://doi.org/10.1186/s13059-022-02823-7",
+        # From the repository's own LICENSE, checked 2026-08-05: "MIT
+        # License / Copyright (c) 2021 Michael Alonge".
+        license="MIT",
+        usage=(
+            "Orders and orients a draft assembly's contigs against a related "
+            "reference assembly using ragtag.py scaffold, which aligns the "
+            "two internally with minimap2 at a divergence preset the user "
+            "chooses. The scaffolded assembly is stored as a new object "
+            "beside the draft, with the reference it was ordered against and "
+            "per-contig placement confidence recorded as facts, since "
+            "scaffold structure is inferred from the reference rather than "
+            "observed in the sample. Unplaced contigs are carried through "
+            "into the output rather than dropped. Upstream also credits the "
+            "earlier RaGOO method this tool superseded (Alonge et al., "
+            "Genome Biology 2019, doi:10.1186/s13059-019-1829-6)."
         ),
     ),
     "polypolish": ToolMeta(

@@ -1436,3 +1436,87 @@ class TestQuantifyCard:
     def test_a_vcf_gets_no_card_at_all(self):
         with installed_featurecounts(True):
             assert build_quantify_card(_vcf(), [_annotation()]) is None
+
+
+class TestScaffoldCardOrchestration:
+    """`suggestions_for`'s own listing for the scaffold card, as opposed to
+    `build_scaffold_card`'s unit tests in test_scaffold_card.py -- those hand
+    the builder a pre-filtered list and cannot catch a bug in how that list
+    gets built.
+
+    This is where a real bug lived: a project with exactly one reference-role
+    FASTA -- itself -- rendered an AVAILABLE scaffold card naming itself as
+    the reference. Caught against a real worktree stack on 2026-08-05, not
+    by any unit test, because build_scaffold_card correctly trusts whatever
+    list it is given and every existing test constructed that list by hand
+    with IDs that never collided with the draft's own id.
+    """
+
+    async def test_a_reference_role_fasta_is_not_offered_as_its_own_scaffold_target(self):
+        from types import SimpleNamespace
+
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="draft1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.ragtag",
+                  return_value=_FakeTool(True)),
+            patch(
+                "app.services.object_service.list_objects",
+                return_value=[
+                    SimpleNamespace(
+                        id="draft1",
+                        name="self.fasta",
+                        role=ObjectRole.REFERENCE,
+                        format=SimpleNamespace(kind=FormatKind.FASTA),
+                    )
+                ],
+            ),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        scaffold = next(c for c in cards if c["kind"] == "scaffold")
+        assert scaffold["status"] == "unavailable"
+        assert "none" in scaffold["reason"]
+
+    async def test_a_second_real_reference_in_the_project_is_still_offered(self):
+        """The fix must exclude only the anchor object, not every reference
+        -- a real second reference in the project should still produce an
+        available card."""
+        from types import SimpleNamespace
+
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="draft1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.ragtag",
+                  return_value=_FakeTool(True)),
+            patch(
+                "app.services.object_service.list_objects",
+                return_value=[
+                    SimpleNamespace(
+                        id="draft1",
+                        name="self.fasta",
+                        role=ObjectRole.REFERENCE,
+                        format=SimpleNamespace(kind=FormatKind.FASTA),
+                    ),
+                    SimpleNamespace(
+                        id="ref2",
+                        name="real_reference.fasta",
+                        role=ObjectRole.REFERENCE,
+                        format=SimpleNamespace(kind=FormatKind.FASTA),
+                    ),
+                ],
+            ),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        scaffold = next(c for c in cards if c["kind"] == "scaffold")
+        assert scaffold["status"] == "available"
+        assert scaffold["launch"]["body"]["reference_object_id"] == "ref2"

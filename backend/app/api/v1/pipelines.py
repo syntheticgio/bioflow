@@ -925,6 +925,32 @@ async def launch_polish_route(body: PolishRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+class ScaffoldRequest(BaseModel):
+    draft_object_id: PydanticObjectId
+    # Optional, but unlike PolishRequest's reads the ambiguous case is the
+    # common one here (a project frequently carries more than one
+    # reference-role assembly), so the frontend dialog is expected to always
+    # pass this rather than lean on the launch's own fallback.
+    reference_object_id: PydanticObjectId | None = None
+    divergence: str | None = None
+
+
+@router.post("/scaffold", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_scaffold_route(body: ScaffoldRequest, owner: OwnerDep) -> JobOut:
+    """Queue a RagTag run: order and orient a draft assembly's contigs
+    against a reference.
+
+    No alignment is supplied. RagTag invokes minimap2 itself against the
+    draft and the reference directly."""
+    job = await pipeline_service.launch_scaffold(
+        draft_object_id=body.draft_object_id,
+        reference_object_id=body.reference_object_id,
+        divergence=body.divergence,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep
