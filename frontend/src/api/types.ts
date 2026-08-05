@@ -412,6 +412,23 @@ export interface PipelineTool {
   license: string;
   /** How BioFlow uses this tool -- the part no upstream page can tell you. */
   usage: string;
+
+  /**
+   * How this tool reaches the running stack. "bundled" ships in the backend
+   * image; "on_demand" is a pinned OCI image pulled on first use and run as
+   * a sibling container (the DeepVariant shape). See
+   * docs/superpowers/specs/2026-08-05-optional-tool-delivery-design.md.
+   */
+  delivery: "bundled" | "on_demand";
+  /** The pinned image reference, only set when delivery is "on_demand". */
+  image: string | null;
+  /**
+   * Compressed transfer size an Install button should state, only set when
+   * delivery is "on_demand". Not the on-disk size after decompression --
+   * DeepVariant's 2.99 GB pull becomes 8.83 GB on disk, and the download is
+   * the number a user weighing their connection actually wants.
+   */
+  download_bytes: number | null;
 }
 
 export interface PipelineTools {

@@ -525,6 +525,54 @@ class TestBibliographicFields:
         assert payload["license"] == ""
         assert payload["usage"] == ""
 
+    def test_delivery_defaults_to_bundled(self):
+        """Every existing tool -- fastp through pydeseq2 -- ships in the
+        image, so BUNDLED must be the default an entry gets without saying
+        so, not something every one of them has to state."""
+        meta = tools.ToolMeta(
+            pipelines=(tools.PipelineType.ALIGN,), summary="s", strengths=()
+        )
+        assert meta.delivery is tools.Delivery.BUNDLED
+        assert meta.image is None
+        assert meta.download_bytes is None
+
+    def test_deepvariant_is_on_demand(self):
+        """The one tool this delivery mechanism already exists for -- if this
+        drifts to BUNDLED, the Install button vanishes and the card falls
+        back to a plain unavailable/available toggle that lies about whether
+        the image was ever pulled."""
+        meta = tools.TOOL_META["deepvariant"]
+        assert meta.delivery is tools.Delivery.ON_DEMAND_IMAGE
+        assert meta.image
+        assert meta.download_bytes and meta.download_bytes > 0
+
+    def test_delivery_reaches_the_api_payload_as_its_string_value(self):
+        """StrEnum serializes as its value automatically everywhere else in
+        this module (PipelineType needs no special handling either), but
+        `delivery` is asserted explicitly since a caller reading `payload["
+        delivery"] == "on_demand"` should not have to know it is comparing a
+        string to an enum member that merely prints the same."""
+        tool = tools.Tool(name="deepvariant", path="/usr/bin/docker", version="1.9.0")
+        payload = tools.tool_with_meta(tool)
+        assert payload["delivery"] == "on_demand"
+        assert isinstance(payload["delivery"], str)
+
+    def test_bundled_tool_serializes_with_no_image_or_size(self):
+        tool = tools.Tool(name="fastp", path="/usr/bin/fastp", version="0.24.0")
+        payload = tools.tool_with_meta(tool)
+        assert payload["delivery"] == "bundled"
+        assert payload["image"] is None
+        assert payload["download_bytes"] is None
+
+    def test_undescribed_tool_serializes_as_bundled(self):
+        """Same fallback shape as every other ToolMeta field: a tool with no
+        entry has no delivery story either, so it reads as BUNDLED/absent
+        rather than raising or omitting the keys."""
+        payload = tools.tool_with_meta(tools.Tool(name="mystery", path="/x", version="1"))
+        assert payload["delivery"] == "bundled"
+        assert payload["image"] is None
+        assert payload["download_bytes"] is None
+
     def test_every_tool_is_documented(self):
         """Adding a tool without documenting it must fail here rather than
         render a blank help entry.
@@ -540,6 +588,40 @@ class TestBibliographicFields:
         }
         missing = {k: v for k, v in missing.items() if v}
         assert not missing, f"undocumented tools: {missing}"
+
+    def test_on_demand_tools_declare_image_and_size(self):
+        """A tool delivered as a pinned image must state what it costs to
+        install, so an Install button never has to render without a size.
+
+        Checked separately from the four fields above rather than folded into
+        `required`: those four apply to every tool, these two only to
+        ON_DEMAND_IMAGE ones, and merging the checks would make a BUNDLED
+        tool's failure message claim it needs an image it will never have.
+        """
+        missing = {
+            name: [
+                f
+                for f in ("image", "download_bytes")
+                if not getattr(meta, f)
+            ]
+            for name, meta in tools.TOOL_META.items()
+            if meta.delivery is tools.Delivery.ON_DEMAND_IMAGE
+        }
+        missing = {k: v for k, v in missing.items() if v}
+        assert not missing, f"on-demand tools missing image/size: {missing}"
+
+    def test_bundled_tools_have_no_image_or_size(self):
+        """The inverse of the check above: a BUNDLED tool with an image or a
+        download size would be a stale leftover from a delivery change that
+        forgot to flip `delivery` back, and would render an Install button
+        for something already in the container."""
+        wrong = [
+            name
+            for name, meta in tools.TOOL_META.items()
+            if meta.delivery is tools.Delivery.BUNDLED
+            and (meta.image or meta.download_bytes)
+        ]
+        assert not wrong, f"bundled tools carrying delivery fields: {wrong}"
 
 
     def test_documented_urls_are_urls(self):
