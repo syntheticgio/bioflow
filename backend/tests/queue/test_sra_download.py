@@ -7,12 +7,21 @@ retryable and permanent, since that decides whether a user waits through three
 attempts for an error that will never change.
 """
 
+import threading
 from pathlib import Path
 
 import pytest
 
-from app.errors import PermanentError, RetryableError
+from app.errors import JobCancelled, PermanentError, RetryableError
 from app.queue import sra_handlers
+from app.queue.registry import JobContext
+
+
+def _ctx(**kwargs) -> JobContext:
+    return JobContext(job_id="sra-j1", payload={}, epoch=0, attempts=0, owner="local", **kwargs)
+
+
+FASTQ = b"@read\nACGTACGTACGTACGTACGTACGTACGTACGT\n+\nIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII\n" * 20000
 
 
 class TestDescribeStaging:
@@ -20,7 +29,7 @@ class TestDescribeStaging:
         """fasterq-dump --split-files says which file is which, so the applier
         can set a real mate link rather than inferring one from the name."""
         staged = sra_handlers._describe(
-            [Path("/tmp/SRR1_1.fastq"), Path("/tmp/SRR1_2.fastq")]
+            {Path("/tmp/SRR1_1.fastq"): None, Path("/tmp/SRR1_2.fastq"): None}
         )
         assert [s["mate"] for s in staged] == ["R1", "R2"]
         assert [s["name"] for s in staged] == ["SRR1_1.fastq", "SRR1_2.fastq"]
@@ -28,7 +37,7 @@ class TestDescribeStaging:
     def test_a_single_end_run_has_no_mate(self):
         """None rather than "R1": there is no pair, and claiming one would
         make the applier look for a partner that does not exist."""
-        staged = sra_handlers._describe([Path("/tmp/SRR1.fastq")])
+        staged = sra_handlers._describe({Path("/tmp/SRR1.fastq"): None})
         assert staged[0]["mate"] is None
 
     def test_an_orphan_beside_a_pair_is_marked_unpaired(self):
@@ -36,11 +45,11 @@ class TestDescribeStaging:
         filtered upstream. Real data, but not part of the pair -- linking it as
         one would corrupt the pairing."""
         staged = sra_handlers._describe(
-            [
-                Path("/tmp/SRR1.fastq"),
-                Path("/tmp/SRR1_1.fastq"),
-                Path("/tmp/SRR1_2.fastq"),
-            ]
+            {
+                Path("/tmp/SRR1.fastq"): None,
+                Path("/tmp/SRR1_1.fastq"): None,
+                Path("/tmp/SRR1_2.fastq"): None,
+            }
         )
         by_name = {s["name"]: s["mate"] for s in staged}
         assert by_name["SRR1.fastq"] == "unpaired"
@@ -50,8 +59,104 @@ class TestDescribeStaging:
     def test_the_absolute_path_rides_along(self):
         """The applier consumes these paths directly; a bare name would leave
         it guessing at the staging directory."""
-        staged = sra_handlers._describe([Path("/data/tmp/sra_download/j1/SRR1.fastq")])
+        staged = sra_handlers._describe({Path("/data/tmp/sra_download/j1/SRR1.fastq"): None})
         assert staged[0]["path"] == "/data/tmp/sra_download/j1/SRR1.fastq"
+
+    def test_a_compressed_names_pair_correctly_via_the_stripped_suffix(self):
+        """A run _compress_staged already bgzip'd carries a .gz suffix that
+        must not defeat the _1/_2 pairing match."""
+        staged = sra_handlers._describe(
+            {Path("/tmp/SRR1_1.fastq.gz"): "aaa", Path("/tmp/SRR1_2.fastq.gz"): "bbb"}
+        )
+        assert [s["mate"] for s in staged] == ["R1", "R2"]
+        assert [s["name"] for s in staged] == ["SRR1_1.fastq.gz", "SRR1_2.fastq.gz"]
+
+    def test_content_sha256_rides_along_from_compression(self):
+        """What ingest_local_file's dedup-by-content lookup needs, since it
+        never sees the plaintext this hash was computed from."""
+        staged = sra_handlers._describe(
+            {Path("/tmp/SRR1.fastq.gz"): "deadbeef", Path("/tmp/SRR2.fastq"): None}
+        )
+        by_name = {s["name"]: s["content_sha256"] for s in staged}
+        assert by_name["SRR1.fastq.gz"] == "deadbeef"
+        assert by_name["SRR2.fastq"] is None
+
+
+class TestCompressStaged:
+    """`_compress_staged` runs inside the SUBPROCESS handler specifically so
+    it has a JobContext to report progress and check cancellation through --
+    the async applier that calls ingest_local_file later never gets one. See
+    docs/superpowers/specs/2026-08-05-object-compression-design.md."""
+
+    def test_compresses_and_renames_with_gz(self, tmp_path):
+        path = tmp_path / "SRR1.fastq"
+        path.write_bytes(FASTQ)
+
+        result = sra_handlers._compress_staged(_ctx(), [path], "SRR1")
+
+        [(gz_path, content_sha256)] = result.items()
+        assert gz_path.name == "SRR1.fastq.gz"
+        assert gz_path.exists()
+        assert not path.exists()
+        assert gz_path.stat().st_size < len(FASTQ)
+        assert content_sha256 is not None
+
+    def test_compressed_content_hash_matches_the_plaintext(self, tmp_path):
+        import hashlib
+
+        path = tmp_path / "SRR1.fastq"
+        path.write_bytes(FASTQ)
+        expected = hashlib.sha256(FASTQ).hexdigest()
+
+        result = sra_handlers._compress_staged(_ctx(), [path], "SRR1")
+
+        [content_sha256] = result.values()
+        assert content_sha256 == expected
+
+    def test_compressed_output_round_trips(self, tmp_path):
+        import gzip
+
+        path = tmp_path / "SRR1.fastq"
+        path.write_bytes(FASTQ)
+
+        result = sra_handlers._compress_staged(_ctx(), [path], "SRR1")
+
+        [gz_path] = result
+        with gzip.open(gz_path, "rb") as f:
+            assert f.read() == FASTQ
+
+    def test_reports_a_compressing_phase(self, tmp_path):
+        path = tmp_path / "SRR1.fastq"
+        path.write_bytes(FASTQ)
+        calls: list[dict] = []
+
+        sra_handlers._compress_staged(_ctx(_progress_cb=calls.append), [path], "SRR1")
+
+        phases = [c.get("phase") for c in calls]
+        assert "compressing" in phases
+
+    def test_honours_cancellation(self, tmp_path):
+        path = tmp_path / "SRR1.fastq"
+        path.write_bytes(FASTQ)
+        event = threading.Event()
+        event.set()
+
+        with pytest.raises(JobCancelled):
+            sra_handlers._compress_staged(_ctx(cancel_event=event), [path], "SRR1")
+
+    def test_leaves_a_format_outside_the_allowlist_untouched(self, tmp_path):
+        """fasterq-dump only ever writes plain FASTQ, but the should_compress
+        check still runs rather than being assumed -- this is what proves it
+        actually gates rather than compressing unconditionally."""
+        path = tmp_path / "notes.txt"
+        path.write_bytes(b"not a bioinformatics format\n" * 5)
+
+        result = sra_handlers._compress_staged(_ctx(), [path], "SRR1")
+
+        [(kept_path, content_sha256)] = result.items()
+        assert kept_path == path
+        assert kept_path.exists()
+        assert content_sha256 is None
 
 
 class TestDiskPreflight:

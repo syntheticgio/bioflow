@@ -523,6 +523,12 @@ async def _apply_sra_download(result: dict, *, owner: str) -> None:
                 produced_by_job=PydanticObjectId(job_id) if job_id else None,
                 facts=dict(provenance),
                 metadata=dict(metadata),
+                # The handler already compressed this file (it has a
+                # JobContext to report progress through; this applier does
+                # not) and hashed the plaintext on the way -- passed through
+                # so dedup-by-content still applies. None for a format the
+                # allowlist left uncompressed.
+                content_sha256=entry.get("content_sha256"),
             )
         except Exception as e:  # noqa: BLE001 - one bad file must not lose the rest
             log.error(

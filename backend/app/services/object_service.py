@@ -195,6 +195,7 @@ async def ingest_local_file(
     metadata: dict | None = None,
     sidecar_of: PydanticObjectId | None = None,
     sidecar_role: SidecarRole | None = None,
+    content_sha256: str | None = None,
 ) -> DataObject:
     """Take ownership of a file this application produced.
 
@@ -209,6 +210,12 @@ async def ingest_local_file(
     dedup it is unlinked. Callers pass a file under `tmp_dir`, which shares a
     filesystem with `objects/` so the placement is an atomic rename rather than
     a copy.
+
+    `content_sha256` is for a caller that already compressed `path` itself --
+    `download_sra_run` does, since it has a JobContext to report progress
+    through and this function never does. Passing it here skips a redundant
+    compression attempt (`path` is already `.gz`) while still letting dedup
+    find a blob compressed by a different run or a different compressor.
     """
     require_home()
 
@@ -248,7 +255,9 @@ async def ingest_local_file(
         # `path` is reassigned to the compressed copy when compression ran;
         # the plaintext `path` handed in by the caller no longer exists past
         # this point in that case (_stage_for_placement discards it).
-        staged = await _stage_for_placement(path, safe_name)
+        staged = await _stage_for_placement(
+            path, safe_name, precomputed_content_sha256=content_sha256
+        )
         path, digest, size = staged.path, staged.digest, staged.size
         await obj.set({DataObject.size: size})
 
@@ -325,7 +334,9 @@ class _StagedContent:
     content_sha256: str | None
 
 
-async def _stage_for_placement(path: Path, name: str) -> _StagedContent:
+async def _stage_for_placement(
+    path: Path, name: str, *, precomputed_content_sha256: str | None = None
+) -> _StagedContent:
     """Detect the format, compress if the design's allowlist says so, and
     return what to place -- fused into one pass per compress.compress_and_hash
     so this costs no extra read of a large file.
@@ -335,7 +346,26 @@ async def _stage_for_placement(path: Path, name: str) -> _StagedContent:
     going into the store. The uncompressed branch leaves `path` exactly as
     handed in, so a caller's existing cleanup-on-error path keeps working
     unchanged for every format that is not compressed.
+
+    `precomputed_content_sha256` is for a caller that already compressed
+    `path` itself before handing it here -- `download_sra_run` compresses in
+    its own handler, where it has a JobContext to report progress and honour
+    cancellation against, something this async service function never has.
+    Detection there already established the content is compressed, so this
+    skips both the redundant detect() call and a second compression, but
+    still carries the plaintext hash through so dedup-by-content applies
+    exactly as it does for every other ingest path.
     """
+    if precomputed_content_sha256 is not None:
+        digest, size = await asyncio.to_thread(cas.hash_file, path)
+        return _StagedContent(
+            path=path,
+            digest=digest,
+            size=size,
+            name=name,
+            content_sha256=precomputed_content_sha256,
+        )
+
     detection = await asyncio.to_thread(detect.detect, path, name)
 
     if not compress.should_compress(detection.kind, detection.compression):
