@@ -3,6 +3,7 @@
 Uses fakeredis rather than a live server, matching tests/queue/conftest.py.
 """
 
+import asyncio
 import os
 
 import fakeredis.aioredis
@@ -157,3 +158,137 @@ class TestWarm:
                 raise ConnectionError("redis is down")
 
         await tool_cache.warm(Broken())  # must not raise
+
+
+class TestNotFingerprintable:
+    def test_deepvariant_is_excluded(self):
+        """The worked case this set exists for: DeepVariant's Tool.path is
+        the docker client's, not a DeepVariant binary."""
+        assert "deepvariant" in tool_cache.NOT_FINGERPRINTABLE
+
+    def test_derived_from_tool_meta_not_hand_listed(self):
+        """Regression guard for the point of this task: the set used to be a
+        hardcoded {"deepvariant"}, which meant a second tool moving to
+        ON_DEMAND_IMAGE (Clair3, eventually) needed a matching manual edit
+        here, silently, with nothing to fail if someone forgot it. Comparing
+        directly against what TOOL_META declares makes that edit
+        impossible to forget -- there is nothing left to edit."""
+        expected = {
+            name
+            for name, meta in tools.TOOL_META.items()
+            if meta.delivery is tools.Delivery.ON_DEMAND_IMAGE
+        }
+        assert tool_cache.NOT_FINGERPRINTABLE == expected
+
+    def test_a_bundled_tool_is_not_excluded(self):
+        assert "fastp" not in tool_cache.NOT_FINGERPRINTABLE
+        assert "samtools" not in tool_cache.NOT_FINGERPRINTABLE
+
+
+class TestInvalidationPublish:
+    async def test_publishes_the_tool_name_on_the_invalidate_channel(self, redis):
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(tool_cache.INVALIDATE_CHANNEL)
+        await pubsub.get_message(timeout=1)  # discard the subscribe confirmation
+
+        await tool_cache.publish_invalidation(redis, "deepvariant")
+
+        message = await pubsub.get_message(timeout=1)
+        assert message is not None
+        assert message["data"] == "deepvariant"
+        await pubsub.aclose()
+
+    async def test_survives_an_unreachable_redis(self):
+        """Same discipline as every other function here: a missed
+        invalidation means a stale badge until restart, not a failed
+        install -- the install already succeeded by the time this runs."""
+
+        class Broken:
+            async def publish(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        await tool_cache.publish_invalidation(Broken(), "deepvariant")  # must not raise
+
+
+class TestInvalidationListen:
+    async def test_a_published_message_clears_the_probe_cache(self, redis, monkeypatch):
+        """The regression this task exists to fix: without a subscriber, a
+        process that did not perform the install keeps serving whatever its
+        lru_cache already decided, until it happens to restart."""
+        cleared = asyncio.Event()
+        monkeypatch.setattr(tools, "reset_cache", cleared.set)
+
+        listener = asyncio.create_task(tool_cache.listen_for_invalidations(redis))
+        try:
+            # Give the subscriber time to actually subscribe before
+            # publishing, or the message has nowhere to arrive.
+            await asyncio.sleep(0.1)
+            await tool_cache.publish_invalidation(redis, "deepvariant")
+            await asyncio.wait_for(cleared.wait(), timeout=5)
+        finally:
+            listener.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await listener
+
+    async def test_cancellation_stops_the_loop(self, redis):
+        """A subscriber that swallowed CancelledError would keep a Redis
+        connection open past the process's own shutdown -- the same leak the
+        warm task's cancellation exists to avoid."""
+        listener = asyncio.create_task(tool_cache.listen_for_invalidations(redis))
+        await asyncio.sleep(0.05)
+
+        listener.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(listener, timeout=5)
+
+    async def test_a_broken_subscribe_is_retried_not_fatal(self, monkeypatch):
+        """The direction that fails when the seam breaks: a subscriber that
+        gives up on the first Redis error would silently stop watching for
+        the rest of the process's life. Patch the retry sleep to near-zero so
+        the test does not spend five real seconds proving the loop comes back
+        around."""
+        real_sleep = asyncio.sleep
+        # `tool_cache.asyncio` *is* the `asyncio` module (a shared reference,
+        # not a copy), so patching its `sleep` attribute and then calling
+        # `asyncio.sleep` from inside the replacement calls the replacement
+        # again -- infinite recursion. Capturing the real function above,
+        # before patching, is what breaks that cycle.
+        monkeypatch.setattr(tool_cache.asyncio, "sleep", lambda _: real_sleep(0))
+
+        attempts = 0
+        succeeded = asyncio.Event()
+
+        class FlakyPubSub:
+            async def subscribe(self, *a, **kw):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise ConnectionError("redis is down")
+                succeeded.set()
+
+            def listen(self):
+                async def _gen():
+                    await asyncio.sleep(30)
+                    yield {}  # pragma: no cover - never reached in this test
+
+                return _gen()
+
+            async def unsubscribe(self, *a, **kw):
+                return None
+
+            async def aclose(self):
+                return None
+
+        class FlakyClient:
+            def pubsub(self):
+                return FlakyPubSub()
+
+        listener = asyncio.create_task(tool_cache.listen_for_invalidations(FlakyClient()))
+        try:
+            await asyncio.wait_for(succeeded.wait(), timeout=5)
+        finally:
+            listener.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await listener
+
+        assert attempts >= 2
