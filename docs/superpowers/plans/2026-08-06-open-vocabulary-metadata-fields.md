@@ -517,8 +517,16 @@ In `interface MetadataField`, after `suggested: boolean;`:
 
 - [ ] **Step 2: Typecheck**
 
+**`docker compose -p biopipe exec web npm run lint` checks the wrong tree from a
+worktree.** `biopipe-web-1` bind-mounts the *main checkout's* `frontend/src`,
+not this worktree's — confirmed via `docker inspect biopipe-web-1 --format
+'{{range .Mounts}}{{.Source}}{{"\n"}}{{end}}'`. Running the container command
+here silently typechecks unmodified main and reports success regardless of
+what this worktree's code says. Run `tsc` directly against the worktree
+instead, using its own `node_modules`:
+
 ```bash
-docker compose -p biopipe exec web npm run lint
+cd frontend && npx tsc --noEmit
 ```
 
 Expected: no errors. `MetadataField` is only constructed from API responses,
@@ -628,8 +636,12 @@ Two details that matter:
 
 - [ ] **Step 2: Typecheck**
 
+Same caveat as Task 4: `docker compose -p biopipe exec web npm run lint` mounts
+the *main checkout's* source, not this worktree's, and would report success
+even if this file didn't compile. Run against the worktree directly:
+
 ```bash
-docker compose -p biopipe exec web npm run lint
+cd frontend && npx tsc --noEmit
 ```
 
 Expected: no errors.
