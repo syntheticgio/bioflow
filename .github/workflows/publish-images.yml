@@ -201,9 +201,14 @@ jobs:
           # architectures. Assert it here rather than trusting that the merge
           # step above did what it looked like it did.
           tag="$(head -n1 <<< "$TAGS")"
-          manifest="$(docker buildx imagetools inspect --raw "$tag")"
+          # The human-readable form, not `--raw`: the raw JSON is pretty-printed,
+          # so matching on `"architecture":"amd64"` misses it over the space
+          # after the colon and reports a correctly-built manifest as broken.
+          # This output has one `Platform: linux/<arch>` line per entry.
+          manifest="$(docker buildx imagetools inspect "$tag")"
+          echo "$manifest"
           for arch in amd64 arm64; do
-            grep -q "\"architecture\":\"${arch}\"" <<< "$manifest" \
+            grep -q "linux/${arch}" <<< "$manifest" \
               || { echo "::error::${tag} is missing linux/${arch}"; exit 1; }
           done
           echo "${tag} serves linux/amd64 and linux/arm64"
