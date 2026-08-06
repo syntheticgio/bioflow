@@ -517,8 +517,9 @@ file rather than moving to `docs/TODO-done.md`.
   **Wrong on both counts, corrected 2026-08-05** by the epic design note; see
   "CRAQ and GCI were never blocked on Pilon" below. Realigning reads to a
   user's own assembly has worked since the assembly work landed, and Merqury
-  is k-mer based and needs no alignment at all. Still open, now GitHub #63
-  (CRAQ), #64 (Merqury), #65 (GCI).
+  is k-mer based and needs no alignment at all. GitHub #63 (CRAQ), #64
+  (Merqury), #65 (GCI). ~~**CRAQ**~~ **FIXED, 2026-08-06.** Shipped as CRAQ
+  1.10, GitHub #63. See below. Merqury and GCI are still open.
 - **gfastats** is superseded by computing contiguity here, not built.
 - **Contamination screening** is a real axis nothing here covers and is a
   named non-goal: FCS-GX's database is ~470 GB.
@@ -652,6 +653,95 @@ design -- each would have shipped a wrong number or a wrong claim silently.
   the same organism: `build_completeness_card` returns `None` for both, and
   the genome FASTA gets a real card -- the role-exclusion trap the design
   worried about inheriting from the align card does not reproduce here.
+
+### CRAQ assembly error detection shipped, 2026-08-06
+
+Design: `docs/superpowers/specs/2026-08-06-craq-assembly-error-detection-
+design.md`. Plan: `docs/superpowers/plans/2026-08-06-craq-assembly-error-
+detection.md`. GitHub #63.
+
+Reference-*free* assembly error detection from read-clipping signals,
+complementary to QUAST (#62) rather than a second flavour of it -- it gates
+on a BAM aligned to the assembly, never on a reference. Consumes BioFlow's
+own align pipeline output directly (upstream calls pre-made BAMs "highly
+recommended"), auto-pairing a short-read and/or long-read BAM when exactly
+one of each exists against an assembly, refusing ambiguity the same way
+`launch_misassembly_qc` refuses an ambiguous reference.
+
+Code: `backend/app/pipelines/craq_runner.py` (command builder, report/bed
+parsers), `backend/app/queue/assembly_qc_handlers.py::assess_assembly_errors`
+(the job), `backend/app/services/pipeline_service.py::launch_assembly_error_qc`
+and `alignments_against`, `POST /pipelines/assembly-errors`,
+`suggestion_service.build_assembly_error_card`, `AssemblyFacts.tsx`'s
+Assembly errors block. Chimera-breaking (`-b`, opt-in, never offered by the
+Actions card) ingests its corrected FASTA as a brand-new `REFERENCE` object
+rather than replacing the input assembly -- a deliberate, explicit widening
+of epic #13's "does not produce a replacement assembly" scope line, recorded
+as a comment on #13 rather than left to read as a silent contradiction.
+
+**Measured against a real run, not assumed:** 43 MB installed (`du -sh
+/opt/craq`, includes the pinned commit's shallow-cloned `.git`) and 61-67s
+end to end against `GCA_000146045.2_R64_genomic.fna` (12.1 Mb, 16 sequences)
+with a DRR1066343 short-read BAM already aligned to it -- fast because
+supplying a pre-made BAM skips the read-mapping step CRAQ's own README
+calls its most expensive part.
+
+**What the implementation found that the design and plan did not know yet,**
+all from actually running CRAQ against real data rather than re-reading its
+source more carefully -- a repeat of the QUAST slice's own lesson, this time
+needing two real end-to-end runs before every fact matched:
+
+- **The design's own source-read of the report filename was wrong**, and it
+  shipped in this repo's spec for hours before a real run caught it. The
+  spec concluded `<genome_basename>_final.Report` from `runAQI.sh`'s use of
+  `$name` without confirming what `$name` resolves to. All three of
+  `runAQI.sh`/`runAQI_SMS.sh`/`runAQI_NGS.sh` hardcode `name="out"` at line 5
+  -- the report is unconditionally `runAQI_out/out_final.Report`. Every real
+  run raised a spurious `RetryableError` until this was fixed, even though
+  CRAQ had genuinely succeeded and written real output under a different
+  name than the handler was looking for.
+- **The whole-assembly summary row is keyed `Genome`, not `all`.** Confirmed
+  hardcoded in `src/final_short_report_minlen.pl:42`, a literal unrelated to
+  any input filename -- upstream-stable, not particular to one run. Every
+  unit test's own fixture used `"all"` throughout, so all of them passed
+  while testing an assumption no real report ever satisfies. A regression
+  test asserting a per-contig row (which looks equally plausible) is *not*
+  mistaken for the `Genome` row now guards the same class of bug from
+  recurring.
+- **`bc` was missing from the image**, a real if low-severity install gap.
+  `runSR.sh`/`runLR.sh`/`runAQI.sh` call it 7 times total, all in
+  parameter-sanity guards (negative/zero checks on mapq, threads, clip-rate
+  cutoffs). Confirmed these guards fail *open* without it -- `bc: command
+  not found` followed by a harmless `[: -eq: unary operator expected` --
+  so the run still completed with correct facts either way. Fixed anyway:
+  BioFlow never passes a parameter that would need catching today, but a
+  silently-skipped safety check is the same shape of bug this file's own
+  "Audit the hand-maintained registries" entry warns about elsewhere, for a
+  few KB of image size.
+- **Two integration bugs caught by code review before either reached a real
+  run**, both in how a BAM's `.bai` index reaches the handler. BioFlow's
+  storage is content-addressed, so a BAM and its index are separate
+  `DataObject`s with no path relationship -- the first draft's path-guessing
+  fallback could never find a BioFlow-produced BAM's index at all. Fixed by
+  resolving the index as its own sidecar (`SidecarRole.BAI`, matching
+  `launch_bam_stats`'s existing `bai_sha256`/`bai_path` pattern) -- and then
+  a second review pass found the launch path's payload keys
+  (`ngs_bam_bai_sha256`) didn't match what the handler actually read
+  (`ngs_bai_sha256`), which would have silently reproduced the exact same
+  failure the first fix closed. Both are pinned by regression tests
+  asserting the literal key-name strings match, not just that some key
+  exists.
+- **The Actions card could go AVAILABLE for a BAM set the launch path would
+  then reject.** `build_misassembly_card` already refuses an ambiguous
+  reference; the CRAQ card's first draft had no equivalent check for two
+  same-chemistry BAMs. Fixed by having the card call the exact same
+  `alignments_against` function the launch path uses, so the two can no
+  longer drift apart on what counts as ambiguous.
+- Confirmed end-to-end in the real UI, not just in stored facts: a
+  short-reads-only run against the real yeast assembly rendered R-AQI (0.4)
+  and CRE (656) with the caveat "Short reads only: structural errors are not
+  reported, because CRAQ can barely detect them without long reads" -- and
+  genuinely no AQI/S-AQI/CSE rows, not a blank or a zero.
 
 ## The in-app DESeq2 path has never been run end to end
 
