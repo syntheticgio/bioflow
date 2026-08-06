@@ -12,6 +12,7 @@ from app.db.client import close_mongo, connect_to_mongo
 from app.db.redis_client import close_redis, connect_to_redis, get_redis
 from app.errors import StorageUnavailableError, register_exception_handlers
 from app.logging import configure_logging, get_logger
+from app.mcp.server import mount_mcp_app
 from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
 from app.storage.home import initialize_home
@@ -95,6 +96,9 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(health_router)
     app.include_router(api_router)
+    # Chains the MCP app's own lifespan into this app's -- see
+    # mount_mcp_app's docstring for why a plain app.mount() is not enough.
+    mount_mcp_app(app)
     return app
 
 
