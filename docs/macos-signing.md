@@ -234,11 +234,6 @@ pipelines do — the keychain is already there. The tradeoff is that the signing
 key lives on a dev machine rather than in GitHub's secret store, which for a
 single-maintainer project is the simpler and less leaky of the two.
 
-`APPLE_TEAM_ID` (Settings → Secrets and variables → Actions → Variables)
-configures the team ID. The three `APPLE_API_*` values that
-`build-macos.sh` requires for notarization are not yet wired into the
-workflow — see "Still open" below.
-
 The runner's keychain must be **unlocked** for signing to work non-interactively.
 A runner installed via `svc.sh` runs as a LaunchAgent at user login, so the
 login keychain is normally unlocked already — but a machine that has been
@@ -246,24 +241,32 @@ locked or is sitting at the login window will fail signing with
 `errSecInternalComponent`, which is an unhelpfully generic error for "the
 keychain is locked."
 
-### Still open: getting `APPLE_API_KEY_PATH` onto the runner
+### Notarization secrets
 
-The `.p8` file needs to exist on the self-hosted runner's filesystem (or be
-written there by the workflow from a secret) for CI to notarize. Options, not
-yet decided:
+Unlike the signing certificate (which stays in the runner's own keychain —
+see above), the App Store Connect API key is passed in as three **GitHub
+Actions repository secrets** rather than left on the runner's disk, so that a
+compromised runner doesn't carry a standing plaintext copy of it. The
+workflow decodes it to a per-job temp file (`$RUNNER_TEMP`) and deletes it in
+an `if: always()` step regardless of build outcome.
 
-- Leave the `.p8` in place on the runner's disk (it already lives there for
-  manual builds) and set `APPLE_API_KEY_PATH` as a repository variable
-  pointing at it. Simplest, but ties the workflow to a path that exists only
-  on this one machine.
-- Store the `.p8` contents as a GitHub Actions **secret** (base64-encoded)
-  and have the workflow write it to a temp file at job start. More portable,
-  standard practice, but the secret must be marked `sensitive`-equivalent and
-  the temp file cleaned up after the job.
+Add these under **Settings → Secrets and variables → Actions → Secrets** (not
+Variables — these are credentials, not configuration):
 
-Either way, `APPLE_API_KEY` and `APPLE_API_ISSUER` are not secret-sensitive
-in the same way (they don't grant anything without the `.p8`) and can be
-plain repository variables.
+| Secret name | Value | Where it comes from |
+| --- | --- | --- |
+| `APPLE_API_KEY_ID` | the Key ID | Filename of the `.p8`, e.g. `AuthKey_G3RTU78U5S.p8` → `G3RTU78U5S` |
+| `APPLE_API_ISSUER_ID` | the Issuer ID | The UUID shown above the key list at [appstoreconnect.apple.com/access/integrations/api](https://appstoreconnect.apple.com/access/integrations/api) |
+| `APPLE_API_KEY_P8_BASE64` | the `.p8` file, base64-encoded, single line | `base64 -i AuthKey_XXXXXXXX.p8` (macOS) |
+
+The workflow also reads `APPLE_TEAM_ID` as a repository **variable** (not a
+secret — it's not sensitive on its own) under the same Settings page's
+Variables tab.
+
+`APPLE_API_KEY_ID` and `APPLE_API_ISSUER_ID` don't strictly need to be
+secrets on their own — neither grants access without the `.p8` — but they sit
+alongside it as GitHub secrets anyway so the credential lives in one place
+rather than being split across Secrets and Variables.
 
 ## Troubleshooting
 
