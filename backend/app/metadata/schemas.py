@@ -566,8 +566,14 @@ def _coerce(spec: FieldDef, raw):
             return _coerce_date(raw), None
         if spec.type is FieldType.ENUM:
             s = str(raw).strip()
-            if spec.options and s not in spec.options:
-                # Kept: lab vocabularies always outgrow a fixed list.
+            # An open field's options are suggestions from a vocabulary this
+            # repo does not own, so an off-list value is the normal case rather
+            # than a mistake -- SRA writes instrument models the dropdown never
+            # listed. Warning on those was wrong about which value was
+            # authoritative. A closed field's list really is complete, so an
+            # off-list value there still earns the warning.
+            if spec.options and not spec.open_vocabulary and s not in spec.options:
+                # Kept regardless: lab vocabularies always outgrow a fixed list.
                 return s, (
                     f"{spec.label}: {s!r} is not one of the suggested options; "
                     "stored anyway"
