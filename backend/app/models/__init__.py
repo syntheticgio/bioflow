@@ -6,6 +6,7 @@ its indexes.
 
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.models.blob import Blob, BlobState, BlobStorage
+from app.models.conversation import ConversationTurn, ProjectConversation
 from app.models.feedback import Feedback
 from app.models.job import (
     ACTIVE_STATES,
@@ -72,6 +73,7 @@ ALL_MODELS = [
     StructureLookup,
     Feedback,
     Share,
+    ProjectConversation,
 ]
 
 __all__ = [
@@ -85,6 +87,7 @@ __all__ = [
     "BlobState",
     "BlobStorage",
     "Compression",
+    "ConversationTurn",
     "DataObject",
     "FailureReason",
     "Feedback",
@@ -109,6 +112,7 @@ __all__ = [
     "PipelineRun",
     "Profile",
     "ProfileDisplay",
+    "ProjectConversation",
     "Project",
     "ProjectCounters",
     "ProviderKind",
