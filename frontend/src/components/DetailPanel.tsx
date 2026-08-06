@@ -1042,7 +1042,7 @@ function QcTab({
       />
 
       {isReference ? (
-        hasFacts && <AssemblyFacts facts={obj.facts} />
+        hasFacts && <AssemblyFacts facts={obj.facts} objectId={obj.id} />
       ) : (
         /* One column flow for everything below the charts: the parsed-fact
            groups, the QC report and the trim comparison are all cards of the

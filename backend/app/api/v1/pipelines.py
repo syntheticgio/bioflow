@@ -374,6 +374,39 @@ async def get_qc_report(
     numeric read-length/quality stats rather than verbatim read sequences, so
     it does not carry the same attacker-chosen-bytes risk as FastQC's
     overrepresented-sequences table.
+
+    QUAST is the second scripting exception, and it needs one more argument
+    than NanoPlot's because dropping `sandbox` is exactly what makes an XSS
+    exploitable, and this report's data is not numeric like NanoPlot's --
+    it is assembly and reference names. QUAST's report has no static
+    fallback either: every number lives in a JSON blob inside
+    `<div id='total-report-json'>`, rendered into tables by inline script,
+    and it renders as a blank page under the FastQC-shaped CSP above
+    (confirmed against a real report). Three things make this defensible
+    rather than a repeat of the FastQC risk:
+
+    1. **Contig names are sanitized by QUAST itself**
+       (`qutils.correct_name`, `re.sub(r'[^\\w\\._\\-]', '_', ...)`) --
+       verified against `>ctg_");alert(1);//`, which QUAST rewrites to
+       `ctg____alert_1____` before it ever reaches an HTML page.
+    2. **The assembly label is not sanitized by QUAST**
+       (`qutils.correct_asm_label` only strips and truncates) and is
+       otherwise taken from the input filename -- the one gap QUAST leaves
+       open, verified by exploiting it: an input named
+       `ev<img src=x onerror=alert(7)>.fasta` puts that tag verbatim and
+       unescaped into `report.html`. This is closed upstream of this route
+       entirely, at the handler: `assess_misassemblies` always links its
+       input under a fixed filename and always passes a fixed `-l` label,
+       never the object's own name (`app/queue/assembly_qc_handlers.py`).
+       That handler-side fix is what this route's safety actually rests on
+       -- this docstring records the reasoning, not a second enforcement of
+       it, since the object's name is not information this route has any
+       way to check against.
+    3. **No external origin is permitted at all**, unlike NanoPlot's
+       `cdn.plot.ly` allowance -- QUAST inlines everything (verified: the
+       only outbound `href` in a real report is a link to QUAST's own
+       homepage), so this CSP is strictly tighter than NanoPlot's despite
+       both dropping `sandbox`.
     """
     # Rejected outright rather than resolved away. The ASGI layer collapses
     # `..` before routing, so a path that reaches here still containing one is
@@ -410,6 +443,16 @@ async def get_qc_report(
         csp = (
             "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; "
             "script-src https://cdn.plot.ly 'unsafe-inline'"
+        )
+    elif parts[0] == "quast":
+        # No `sandbox` here either -- see the docstring above for the three
+        # reasons this is defensible rather than a repeat of the FastQC
+        # risk. No external origin at all, unlike NanoPlot: QUAST inlines
+        # everything, so this is strictly tighter than the NanoPlot branch
+        # above despite both dropping `sandbox`.
+        csp = (
+            "default-src 'none'; img-src 'self' data:; "
+            "style-src 'unsafe-inline'; script-src 'unsafe-inline'"
         )
     else:
         csp = (

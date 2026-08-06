@@ -48,6 +48,8 @@ def client(tmp_path, monkeypatch):
     (reports / OBJECT_ID / "nanoplot" / "NanoPlot-report.html").write_text(
         "<html>nanoplot</html>"
     )
+    (reports / OBJECT_ID / "quast").mkdir(parents=True)
+    (reports / OBJECT_ID / "quast" / "report.html").write_text("<html>quast</html>")
     (reports / OTHER_ID).mkdir(parents=True)
     (reports / OTHER_ID / "fastp.html").write_text("<html>someone else</html>")
 
@@ -146,6 +148,48 @@ class TestNanoplotReport:
         csp = get(client, "fastp.html").headers["content-security-policy"]
         assert "sandbox" in csp
         assert "script-src" not in csp
+
+
+class TestQuastReport:
+    """QUAST's report has no static fallback either: every value lives in a
+    JSON blob rendered into tables by inline script. It needs its own
+    scripting exception the same shape NanoPlot's does, but stricter --
+    QUAST inlines everything, so unlike NanoPlot it needs no external
+    origin at all. Safety here rests on the handler
+    (`assess_misassemblies`) always using a fixed assembly label rather than
+    the object's own name, not on anything this route checks -- see that
+    handler's own docstring."""
+
+    def test_serves_without_being_sandboxed(self, client):
+        r = get(client, "quast/report.html")
+        assert r.status_code == 200
+        assert "quast" in r.text
+        assert "sandbox" not in r.headers["content-security-policy"]
+
+    def test_allows_inline_scripts_but_no_external_origin(self, client):
+        """Unlike NanoPlot's CDN allowance -- QUAST's report has no
+        external script source at all, so `script-src` is only
+        `'unsafe-inline'`, never a URL."""
+        csp = get(client, "quast/report.html").headers["content-security-policy"]
+        assert "script-src 'unsafe-inline'" in csp
+        assert "cdn.plot.ly" not in csp
+
+    def test_still_cannot_fetch_anything_else(self, client):
+        csp = get(client, "quast/report.html").headers["content-security-policy"]
+        assert "default-src 'none'" in csp
+
+    def test_other_reports_are_unaffected(self, client):
+        """The relaxed policy is keyed off the `quast/` path segment, not a
+        global change -- FastQC/fastp keep the sandboxed policy, and
+        NanoPlot keeps its own CDN-scoped one."""
+        csp = get(client, "fastp.html").headers["content-security-policy"]
+        assert "sandbox" in csp
+        assert "script-src" not in csp
+
+        nanoplot_csp = get(client, "nanoplot/NanoPlot-report.html").headers[
+            "content-security-policy"
+        ]
+        assert "cdn.plot.ly" in nanoplot_csp
 
 
 class TestPathTraversal:

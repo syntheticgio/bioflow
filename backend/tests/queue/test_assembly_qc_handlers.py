@@ -68,3 +68,115 @@ class TestMisassembliesReportPathIsNotLabelSuffixed:
 
         source = inspect.getsource(handlers.assess_misassemblies)
         assert '"contigs_reports" / "misassemblies_report.tsv"' in source
+
+
+class TestCopyReport:
+    """`_copy_report` -- selective, not a directory copy, since QUAST's
+    `out_dir` also holds report.tex/report.pdf/transposed_report* and
+    per-tool stdout/stderr logs this application has no reader for."""
+
+    def _ctx(self, tmp_path, object_id="obj1"):
+        from app.queue.registry import JobContext
+
+        return JobContext(
+            job_id="job1",
+            payload={"object_id": object_id},
+            epoch=1,
+            attempts=1,
+            owner="local",
+        )
+
+    def _real_quast_output(self, tmp_path):
+        """The subset of a real quast.py -l assembly run's out_dir this
+        function reads -- named and shaped exactly as verified against a
+        real 5.3.0 run on 2026-08-05."""
+        out_dir = tmp_path / "out"
+        (out_dir / "contigs_reports").mkdir(parents=True)
+        (out_dir / "icarus_viewers").mkdir(parents=True)
+        (out_dir / "report.html").write_text("<html>report</html>")
+        (out_dir / "icarus.html").write_text("<html>icarus</html>")
+        (out_dir / "icarus_viewers" / "alignment_viewer.html").write_text(
+            "<html>alignment viewer</html>"
+        )
+        (out_dir / "icarus_viewers" / "contig_size_viewer.html").write_text(
+            "<html>contig size viewer</html>"
+        )
+        (out_dir / "contigs_reports" / "assembly.misassemblies.gff").write_text(
+            "##gff-version 3\n"
+        )
+        # Present in a real run's out_dir, never read by this function --
+        # confirms the copy is selective rather than a directory copy.
+        (out_dir / "report.pdf").write_bytes(b"not a real pdf")
+        (out_dir / "report.tex").write_text("not read either")
+        return out_dir
+
+    def test_copies_report_and_icarus_into_qc_reports(self, tmp_path, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        out_dir = self._real_quast_output(tmp_path)
+        ctx = self._ctx(tmp_path)
+
+        result = handlers._copy_report(ctx, out_dir)
+
+        report_dir = settings.qc_reports_dir / "obj1" / "quast"
+        assert result == "quast/report.html"
+        assert (report_dir / "report.html").read_text() == "<html>report</html>"
+        assert (report_dir / "icarus.html").read_text() == "<html>icarus</html>"
+        assert (
+            report_dir / "icarus_viewers" / "alignment_viewer.html"
+        ).read_text() == "<html>alignment viewer</html>"
+        assert (report_dir / "misassemblies.gff").read_text() == "##gff-version 3\n"
+
+    def test_does_not_copy_files_it_never_reads(self, tmp_path, monkeypatch):
+        """The selective-copy property itself: report.pdf and report.tex
+        exist in a real out_dir and must not end up in qc_reports/."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        out_dir = self._real_quast_output(tmp_path)
+        ctx = self._ctx(tmp_path)
+
+        handlers._copy_report(ctx, out_dir)
+
+        report_dir = settings.qc_reports_dir / "obj1" / "quast"
+        assert not (report_dir / "report.pdf").exists()
+        assert not (report_dir / "report.tex").exists()
+
+    def test_missing_report_html_returns_none(self, tmp_path, monkeypatch):
+        """Nothing to copy -- the caller (assess_misassemblies) already
+        raised before reaching this point in the real handler, but this
+        function's own contract must not assume that."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        empty_out_dir = tmp_path / "empty_out"
+        empty_out_dir.mkdir()
+        ctx = self._ctx(tmp_path)
+
+        assert handlers._copy_report(ctx, empty_out_dir) is None
+
+    def test_missing_icarus_and_gff_are_not_fatal(self, tmp_path, monkeypatch):
+        """report.html alone is enough to succeed -- icarus.html and the
+        .gff are extras, not required for the report link itself to work."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        out_dir = tmp_path / "out"
+        out_dir.mkdir()
+        (out_dir / "report.html").write_text("<html>report only</html>")
+        ctx = self._ctx(tmp_path)
+
+        result = handlers._copy_report(ctx, out_dir)
+
+        assert result == "quast/report.html"
+
+    def test_no_object_id_returns_none(self, tmp_path, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        out_dir = self._real_quast_output(tmp_path)
+        ctx = self._ctx(tmp_path, object_id=None)
+        ctx.payload["object_id"] = None
+
+        assert handlers._copy_report(ctx, out_dir) is None
