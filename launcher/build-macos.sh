@@ -14,8 +14,13 @@
 #
 # Prerequisites, both one-time:
 #
-#   1. A "Developer ID Application" certificate with its private key in the
-#      login keychain. Check with:
+#   1. A "Developer ID Application" certificate with its private key in a
+#      keychain on the default search list. On the CI runner this is a
+#      dedicated ci-signing.keychain-db, not the login keychain -- codesign
+#      invoked from the runner's LaunchAgent context fails with
+#      errSecInternalComponent against the login keychain even with correct
+#      ACLs and an unlocked, active GUI session (see docs/macos-signing.md).
+#      Check with:
 #        security find-identity -v -p codesigning
 #
 #   2. An App Store Connect API key (.p8) plus its Key ID and Issuer ID.
@@ -47,6 +52,22 @@ if [ "${1:-}" = "--no-notarize" ]; then
 fi
 
 : "${APPLE_TEAM_ID:=GMFYKVC5VL}"
+
+# Unlock the dedicated CI signing keychain if one is configured. A freshly
+# created keychain is locked at the start of every session; codesign against
+# a locked keychain fails the same way as one that isn't on the search list
+# at all. CI_KEYCHAIN_PATH / CI_KEYCHAIN_PASSWORD are only set on the runner
+# (see .github/workflows/release-launcher.yml) -- a local dev build with no
+# CI keychain configured just falls through to whatever's already unlocked.
+if [ -n "${CI_KEYCHAIN_PATH:-}" ]; then
+  if [ -z "${CI_KEYCHAIN_PASSWORD:-}" ]; then
+    echo "error: CI_KEYCHAIN_PATH is set but CI_KEYCHAIN_PASSWORD is not." >&2
+    exit 1
+  fi
+  echo "Unlocking CI signing keychain: $CI_KEYCHAIN_PATH"
+  security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$CI_KEYCHAIN_PATH"
+  security set-keychain-settings -lut 21600 "$CI_KEYCHAIN_PATH"
+fi
 
 # Resolve the signing identity from the keychain rather than hardcoding the
 # name, so a renewed certificate (they expire yearly) doesn't silently stop
