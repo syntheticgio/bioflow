@@ -275,7 +275,27 @@ async def search_ncbi(term: str, *, owner: str) -> dict:
 
     return {
         "organisms": [s.as_dict() for s in suggestions],
-        "assemblies": [a.as_dict() for a in page.assemblies],
+        # AssemblyMetadata is a plain dataclass with no as_dict() -- unlike
+        # TaxonSuggestion above. Built field-by-field here, matching how the
+        # real /ncbi/organism-search route builds its own
+        # OrganismAssemblySummary from the same AssemblyMetadata objects.
+        "assemblies": [
+            {
+                "accession": a.accession,
+                "organism": a.organism,
+                "tax_id": a.tax_id,
+                "strain": a.strain,
+                "assembly_name": a.assembly_name,
+                "assembly_level": a.assembly_level,
+                "submitter": a.submitter,
+                "release_date": a.release_date,
+                "refseq_category": a.refseq_category,
+                "total_length": a.total_length,
+                "scaffold_count": a.scaffold_count,
+                "gc_percent": a.gc_percent,
+            }
+            for a in page.assemblies
+        ],
     }
 
 

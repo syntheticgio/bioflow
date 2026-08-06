@@ -244,6 +244,88 @@ async def test_search_objects_is_scoped_to_the_owner():
     assert all(o.get("owner") != a.owner_id() for o in result["objects"])
 
 
+async def test_search_ncbi_returns_organisms_and_their_assemblies(monkeypatch):
+    """Regression test for a real bug caught in code review: AssemblyMetadata
+    has no as_dict() (unlike TaxonSuggestion), so building the assemblies
+    list naively crashed on any organism that actually had assemblies on
+    file. This exercises the real conversion path end to end."""
+    from app.metadata.ncbi_assembly import AssemblyMetadata
+    from app.metadata.ncbi_taxonomy import AssemblyPage, TaxonSuggestion
+
+    profile = await profile_service.create_profile(username="tools-search-ncbi")
+
+    def fake_suggest_organisms(query):
+        return [TaxonSuggestion(sci_name="Escherichia coli", tax_id=562)]
+
+    def fake_search_assemblies_by_taxon(tax_id, **kwargs):
+        return AssemblyPage(
+            assemblies=[
+                AssemblyMetadata(accession="GCF_000005845.2", organism="Escherichia coli"),
+            ]
+        )
+
+    monkeypatch.setattr(
+        "app.metadata.ncbi_taxonomy.suggest_organisms", fake_suggest_organisms
+    )
+    monkeypatch.setattr(
+        "app.metadata.ncbi_taxonomy.search_assemblies_by_taxon",
+        fake_search_assemblies_by_taxon,
+    )
+
+    result = await tools.search_ncbi("e coli", owner=profile.owner_id())
+
+    assert result["organisms"][0]["sci_name"] == "Escherichia coli"
+    assert result["assemblies"][0]["accession"] == "GCF_000005845.2"
+
+
+async def test_search_ncbi_returns_empty_when_no_organism_matches(monkeypatch):
+    profile = await profile_service.create_profile(username="tools-search-ncbi-none")
+
+    monkeypatch.setattr(
+        "app.metadata.ncbi_taxonomy.suggest_organisms", lambda query: []
+    )
+
+    result = await tools.search_ncbi("not-a-real-organism-xyz", owner=profile.owner_id())
+
+    assert result == {"organisms": [], "assemblies": []}
+
+
+async def test_download_reference_delegates_to_launch_download(monkeypatch):
+    """Confirms the tool calls the real service function (which owns
+    validation, dedup and run-tracking) rather than enqueuing a raw job --
+    the correction made over the plan's original hand-rolled enqueue call."""
+    profile = await profile_service.create_profile(username="tools-download")
+    owner = profile.owner_id()
+    project = await project_service.create_project(name="Ref project", owner=owner)
+
+    captured = {}
+
+    async def fake_launch_download(*, project_id, accession, components, owner):
+        captured["project_id"] = project_id
+        captured["accession"] = accession
+        captured["components"] = components
+        captured["owner"] = owner
+
+        # launch_download's real return shape is (run, [str(job.id)]) --
+        # a list of string ids, not job objects. See
+        # app/services/ncbi_assembly_service.py's final `return run, [str(job.id)]`.
+        return object(), ["507f1f77bcf86cd799439077"]
+
+    monkeypatch.setattr(
+        "app.services.ncbi_assembly_service.launch_download", fake_launch_download
+    )
+
+    result = await tools.download_reference(
+        "GCF_000005845.2", str(project.id), owner=owner
+    )
+
+    assert captured["accession"] == "GCF_000005845.2"
+    assert captured["owner"] == owner
+    assert str(captured["project_id"]) == str(project.id)
+    assert result["accession"] == "GCF_000005845.2"
+    assert result["job_id"] == "507f1f77bcf86cd799439077"
+
+
 async def test_list_tools_reports_installation_state():
     """An agent needs to know what is installed, not just what exists.
 
