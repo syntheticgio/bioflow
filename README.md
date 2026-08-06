@@ -409,3 +409,14 @@ files.
 - Phase 4 — periodic jobs and the load-aware governor
 - Phase 5 — metadata schemas and search
 - Phase 6a — read preparation: adapter trimming and QC (fastp)
+
+## License
+
+Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) — free to
+use, modify, and redistribute for any noncommercial purpose. Commercial use
+requires a separate agreement with the copyright holder.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — contributions require agreeing to a
+CLA before a first PR can be merged.
