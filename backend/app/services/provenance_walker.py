@@ -163,3 +163,38 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
 # phrase would turn "we have no phrase for this" into a wrong guess, which is
 # worse than a clumsy sentence.
 GENERIC_VERB = "processed with"
+
+def extract_tool_facts(facts: dict) -> tuple[str | None, str | None]:
+    """The tool that produced an object and its version, read by convention.
+
+    The `*_provenance` builders in `queue/results.py` all follow the same
+    shape: `<verb>_by` names the tool, and a sibling key ending `_version`
+    carries its version. Reading by convention rather than from a fixed key
+    list means a builder added later still surfaces its tool here.
+    """
+    tool = None
+    for key, value in sorted(facts.items()):
+        if not key.endswith("_by"):
+            continue
+        if isinstance(value, str) and value:
+            tool = value
+            break
+
+    version = None
+    for key, value in sorted(facts.items()):
+        if key.endswith("_version") and isinstance(value, str) and value:
+            version = value
+            break
+
+    return tool, version
+
+
+def extract_params(facts: dict) -> dict:
+    """Parameters recorded for the step that produced an object.
+
+    Same convention: `align_params`, `trim_params`, `count_params`.
+    """
+    for key, value in sorted(facts.items()):
+        if key.endswith("_params") and isinstance(value, dict) and value:
+            return value
+    return {}
