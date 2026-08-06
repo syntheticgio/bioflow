@@ -279,6 +279,7 @@ class TestSerialization:
             "datasets",
             "featurecounts",
             "ivar",
+            "quast",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that

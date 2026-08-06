@@ -21,6 +21,13 @@ dependencies = [
     # Fernet, for API keys at rest. See services/ai/crypto.py -- the threat
     # model is a curious look at the Mongo collection, not shell access.
     "cryptography>=44.0",
+    # QUAST's install patch replaces its `distutils.version.LooseVersion`
+    # import with `packaging.version.Version` (distutils was removed in
+    # Python 3.12) -- see backend/scripts/install-quast.sh. Declared
+    # explicitly rather than relied on as a transitive dependency of
+    # something else, since a QC tool's importability should not depend on
+    # an undeclared side effect of an unrelated package's own requirements.
+    "packaging>=24",
 ]
 
 [project.optional-dependencies]
