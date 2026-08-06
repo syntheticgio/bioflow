@@ -100,6 +100,15 @@ jobs:
           # platforms in `docker manifest inspect` -- that entry is the
           # attestation, not a broken build.
           provenance: mode=max
+          # image.source is what links the GHCR package back to this repository,
+          # which is what lets GITHUB_TOKEN write to it. The `packages: write`
+          # permission above authorizes the *token*; the *package* separately has
+          # to admit this repo, and a package first pushed by hand with a PAT (as
+          # #37 did) is linked to nothing. Without the link the push fails at the
+          # very end with `denied: permission_denied: write_package`.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           outputs: type=image,name=${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export the digest
