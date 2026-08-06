@@ -111,7 +111,7 @@ class TestSamPlatform:
             ("PromethION", "ONT"),
             ("PacBio Sequel IIe", "PACBIO"),
             ("Revio", "PACBIO"),
-            ("DNBSEQ-T7", "BGI"),
+            ("DNBSEQ-T7", "DNBSEQ"),
             ("Ion Torrent S5", "IONTORRENT"),
             ("454 GS FLX+", "LS454"),
             ("AVITI", "ELEMENT"),

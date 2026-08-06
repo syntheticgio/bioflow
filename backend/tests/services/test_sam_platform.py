@@ -43,3 +43,46 @@ class TestSamPlatformVocabulary:
         """
         assert not hasattr(SamPlatform, "OTHER")
         assert "OTHER" not in {p.value for p in SamPlatform}
+
+
+class TestTablesAgreeWithTheEnum:
+    def test_every_pattern_maps_to_a_spec_value(self):
+        """The table's right-hand column is what lands in a BAM header, so a
+        value outside the spec is not a style problem -- GATK warns on it and
+        some tools read the platform as unknown.
+
+        This test is why the enum exists. It caught `BGI`, which the table
+        emitted for DNBSEQ/MGISEQ/BGISEQ instrument models; the spec's name
+        for that platform has been DNBSEQ since April 2020 and BGI was never
+        valid.
+        """
+        from app.services.pipeline_service import _SAM_PLATFORM_PATTERNS
+
+        valid = {p.value for p in SamPlatform}
+        offenders = [
+            value for _needles, value in _SAM_PLATFORM_PATTERNS if value not in valid
+        ]
+        assert offenders == []
+
+    def test_every_preset_key_is_a_spec_value(self):
+        """_PLATFORM_PRESETS is keyed by SAM PL value. A key outside the
+        vocabulary can never be looked up, so the preset would silently never
+        apply and the platform would quietly take the short-read default.
+        """
+        from app.services.pipeline_service import _PLATFORM_PRESETS
+
+        valid = {p.value for p in SamPlatform}
+        assert [key for key in _PLATFORM_PRESETS if key not in valid] == []
+
+
+class TestDnbseqRegression:
+    def test_dnbseq_instrument_model_maps_to_the_spec_value(self):
+        """Was BGI, which is not in the SAM vocabulary. A real MGI file's
+        metadata.platform holds an instrument model like "DNBSEQ-T7", so this
+        is the value that actually reaches a BAM header.
+        """
+        from app.services.pipeline_service import sam_platform
+
+        assert sam_platform("DNBSEQ-T7") == SamPlatform.DNBSEQ
+        assert sam_platform("MGISEQ-2000") == SamPlatform.DNBSEQ
+        assert sam_platform("BGISEQ-500") == SamPlatform.DNBSEQ

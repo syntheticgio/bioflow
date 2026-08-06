@@ -641,32 +641,32 @@ class SamPlatform(StrEnum):
 # Ordered, and specific before general: "DNBSEQ" has to be tested before the
 # bare "seq" family names it contains, and "Illumina" last so a model name that
 # happens to mention the vendor does not outrank its own instrument family.
-_SAM_PLATFORM_PATTERNS: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("nanopore", "minion", "gridion", "promethion", "flongle"), "ONT"),
-    (("pacbio", "sequel", "revio", "rs ii"), "PACBIO"),
-    (("dnbseq", "mgiseq", "bgiseq"), "BGI"),
-    (("ion torrent", "ion proton", "ion s5", "ion gene"), "IONTORRENT"),
-    (("454 gs", "gs flx", "gs junior"), "LS454"),
-    (("solid",), "SOLID"),
-    (("helicos",), "HELICOS"),
-    (("element", "aviti"), "ELEMENT"),
-    (("ultima",), "ULTIMA"),
-    (("singular", "g4"), "SINGULAR"),
+_SAM_PLATFORM_PATTERNS: tuple[tuple[tuple[str, ...], SamPlatform], ...] = (
+    (("nanopore", "minion", "gridion", "promethion", "flongle"), SamPlatform.ONT),
+    (("pacbio", "sequel", "revio", "rs ii"), SamPlatform.PACBIO),
+    (("dnbseq", "mgiseq", "bgiseq"), SamPlatform.DNBSEQ),
+    (("ion torrent", "ion proton", "ion s5", "ion gene"), SamPlatform.IONTORRENT),
+    (("454 gs", "gs flx", "gs junior"), SamPlatform.LS454),
+    (("solid",), SamPlatform.SOLID),
+    (("helicos",), SamPlatform.HELICOS),
+    (("element", "aviti"), SamPlatform.ELEMENT),
+    (("ultima",), SamPlatform.ULTIMA),
+    (("singular", "g4"), SamPlatform.SINGULAR),
     (
         (
             "illumina", "novaseq", "nextseq", "miseq", "hiseq", "miniseq",
             "iseq", "genome analyzer", "nova x",
         ),
-        "ILLUMINA",
+        SamPlatform.ILLUMINA,
     ),
 )
 
 # Which preset suits a platform's reads. The wrong one produces silently poor
 # alignments rather than an error, so this is a real default rather than a
 # convenience.
-_PLATFORM_PRESETS: dict[str, str] = {
-    "ONT": align_runner.Preset.MAP_ONT,
-    "PACBIO": align_runner.Preset.MAP_PB,
+_PLATFORM_PRESETS: dict[SamPlatform, str] = {
+    SamPlatform.ONT: align_runner.Preset.MAP_ONT,
+    SamPlatform.PACBIO: align_runner.Preset.MAP_PB,
 }
 
 
