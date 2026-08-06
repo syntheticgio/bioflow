@@ -45,6 +45,34 @@ class Failure:
     detail: str | None = None
 
 
+@dataclass(frozen=True)
+class ToolCall:
+    """The model asked to call one of the tools it was offered.
+
+    Only one call is modeled per turn, deliberately -- both wire formats can
+    carry more than one in a single response, but the project Q&A loop this
+    exists for only ever needs one tool result before deciding its next move.
+    A response with several is handled by taking the first and logging the
+    rest as dropped (see each adapter's `complete()`), not by modeling a list
+    here.
+    """
+
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """An adapter-neutral tool definition. Each adapter's `complete()`
+    translates `parameters` into its own wire shape (OpenAI's
+    `function.parameters`, Anthropic's `input_schema`) internally."""
+
+    name: str
+    description: str
+    parameters: dict
+
+
 def _reason_for_status(code: int) -> FailureReason:
     """Map an HTTP status onto the coarse vocabulary the UI shows.
 
