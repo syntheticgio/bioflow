@@ -63,7 +63,15 @@ jobs:
         working-directory: launcher
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          APPLE_KEYCHAIN_PROFILE: ${{ vars.APPLE_KEYCHAIN_PROFILE || 'bioflow' }}
+          # build-macos.sh notarizes via these three (Tauri's own build-time
+          # notarization step reads them directly; it does not read a
+          # notarytool keychain profile) -- see docs/macos-signing.md.
+          # APPLE_API_KEY_PATH currently points at a file that must already
+          # exist on this runner's disk; see that doc's "Still open" section
+          # for the alternative of shipping it via a secret instead.
+          APPLE_API_KEY: ${{ vars.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ vars.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ vars.APPLE_API_KEY_PATH }}
         run: |
           set -euo pipefail
           if [ "${{ inputs.notarize == false }}" = "true" ]; then

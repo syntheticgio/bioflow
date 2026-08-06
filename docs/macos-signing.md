@@ -43,37 +43,58 @@ T=$(mktemp -d) && echo x > "$T/f" && codesign -s "Developer ID Application" "$T/
 **These expire yearly.** When it lapses, builds fail with `errSecInternalComponent`
 or simply find no identity. Renewal is a new certificate, not an extension.
 
-### 2. The notarytool credential profile
+### 2. An App Store Connect API key
 
-Notarization uploads to Apple and needs credentials. Two options; the API key
-is preferred because it survives Apple ID password changes and is what CI uses.
-
-**App Store Connect API key (recommended).** At
+Notarization uploads to Apple and needs credentials. At
 [appstoreconnect.apple.com/access/integrations/api](https://appstoreconnect.apple.com/access/integrations/api),
 create a key with the **Developer** role — the least privilege that can
 notarize. Download the `.p8`; **Apple allows exactly one download**, so store
-it somewhere durable. Note the Key ID and Issuer ID, then:
+it somewhere durable and restrict its permissions:
+
+```bash
+chmod 600 ~/path/to/AuthKey_XXXXXXXX.p8
+```
+
+Note the **Key ID** (also the filename) and the **Issuer ID** (a UUID shown
+above the key list on that page, not in the downloaded file).
+
+**Two different credential mechanisms exist here, and they are easy to
+conflate — `build-macos.sh` uses only the second one:**
+
+- `xcrun notarytool store-credentials` stores the key in the login keychain
+  under a profile name, for manual `notarytool submit`/`history` calls. This
+  is what most notarization guides show first, and it is useful for
+  diagnostics (see Troubleshooting below), but Tauri's own build-time
+  notarization step does **not** read a keychain profile.
+- Tauri's `tauri build` notarizes via three environment variables read
+  directly: `APPLE_API_KEY` (the Key ID), `APPLE_API_ISSUER`, and
+  `APPLE_API_KEY_PATH` (path to the `.p8`). `build-macos.sh` requires these
+  three and fails fast if any is missing, rather than letting Tauri silently
+  skip notarization — see below.
+
+Set up both, since the keychain profile is genuinely useful for
+troubleshooting even though the build doesn't consume it:
 
 ```bash
 xcrun notarytool store-credentials "bioflow" --key ~/AuthKey_XXXXXXXX.p8 --key-id YOUR_KEY_ID --issuer YOUR_ISSUER_ID
+xcrun notarytool history --keychain-profile "bioflow"   # empty history = credentials authenticated
 ```
 
-**App-specific password (simpler, more fragile).** Generate at
-[account.apple.com](https://account.apple.com) → Sign-In and Security →
-App-Specific Passwords:
+Then export the three variables `build-macos.sh` actually reads (e.g. in your
+shell profile, or see `BUILDING.local.md` for this machine's values):
 
 ```bash
-xcrun notarytool store-credentials "bioflow" --apple-id you@example.com --team-id YOUR_TEAM_ID --password xxxx-xxxx-xxxx-xxxx
+export APPLE_API_KEY=YOUR_KEY_ID
+export APPLE_API_ISSUER=YOUR_ISSUER_ID
+export APPLE_API_KEY_PATH=~/path/to/AuthKey_XXXXXXXX.p8
 ```
 
-Verify either way:
-
-```bash
-xcrun notarytool history --keychain-profile "bioflow"
-```
-
-An empty history is success — it means the credentials authenticated. An error
-means they did not.
+**The silent-skip trap:** if these three are unset, `tauri build` does not
+error. It prints a `Warn skipping app notarization, no APPLE_ID & ...` line
+that scrolls past in normal output, signs the bundle successfully, and
+finishes looking green — with an unnotarized `.dmg` as the result.
+`build-macos.sh` checks for all three up front specifically to turn that into
+a hard failure before the build starts.
 
 ## Building
 
@@ -83,10 +104,13 @@ From `launcher/`:
 ./build-macos.sh
 ```
 
-The script resolves the signing identity from the keychain, checks the
-notarytool profile *before* starting the build (a missing profile otherwise
-surfaces only at the very end, after everything else has succeeded), runs
-`tauri build`, and prints verification output.
+The script resolves the signing identity from the keychain, checks the three
+`APPLE_API_*` variables *before* starting the build (missing ones otherwise
+surface only at the very end, after everything else has succeeded), runs
+`tauri build`, **separately notarizes and staples the `.dmg` itself**, and
+prints verification output. That separate `.dmg` step exists because of a gap
+in Tauri's own notarization (next section) — do not skip it by calling
+`tauri build` directly for a distributable bundle.
 
 For a fast local check that skips the slow Apple round-trip:
 
@@ -119,6 +143,40 @@ open /tmp/gatekeeper-test.dmg
 
 Testing without that attribute is the single most common false pass here: the
 bundle opens fine on the build machine and is blocked for everyone else.
+
+## Tauri notarizes the `.app`, not the `.dmg` — a gap `build-macos.sh` works around
+
+Discovered on the first real end-to-end run (2026-08-06): `tauri build`'s
+built-in notarization step notarizes and staples the `.app`, but the `.dmg`
+is assembled *after* that, wrapping the already-notarized app, and Tauri does
+not separately notarize or staple the `.dmg` container. The result:
+
+```bash
+spctl -a -vvv -t install "BioFlow Launcher.app"   # source=Notarized Developer ID
+spctl -a -vvv -t install "BioFlow Launcher.dmg"   # source=Unnotarized Developer ID
+```
+
+— run right after the same build, on the same machine. The `.app` is
+genuinely notarized; the `.dmg` sitting next to it is not, and a real user's
+download of it is Gatekeeper-blocked, with the app inside being irrelevant
+because macOS never gets that far. `codesign --verify` and opening the
+locally-built `.dmg` directly both look fine, because neither exercises
+Gatekeeper's online check the way a quarantined download does — this is
+exactly the false-pass mode the quarantine-attribute test above exists to
+catch, and it is what caught this.
+
+The fix, which `build-macos.sh` now does automatically after `tauri build`
+completes: notarize and staple the `.dmg` as its own, second submission:
+
+```bash
+xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+xcrun stapler staple "$DMG"
+```
+
+If this script is ever bypassed in favor of calling `tauri build` directly,
+this step has to be reproduced by hand — the `.dmg` it produces is not
+distributable without it, regardless of how successful the build output
+looks.
 
 ## Hardened runtime and entitlements
 
@@ -176,13 +234,10 @@ pipelines do — the keychain is already there. The tradeoff is that the signing
 key lives on a dev machine rather than in GitHub's secret store, which for a
 single-maintainer project is the simpler and less leaky of the two.
 
-Two repository variables (Settings → Secrets and variables → Actions →
-Variables) configure it:
-
-| Variable | Purpose | Default if unset |
-| --- | --- | --- |
-| `APPLE_TEAM_ID` | Team ID for notarization | none — set this |
-| `APPLE_KEYCHAIN_PROFILE` | notarytool profile name on the runner | `bioflow` |
+`APPLE_TEAM_ID` (Settings → Secrets and variables → Actions → Variables)
+configures the team ID. The three `APPLE_API_*` values that
+`build-macos.sh` requires for notarization are not yet wired into the
+workflow — see "Still open" below.
 
 The runner's keychain must be **unlocked** for signing to work non-interactively.
 A runner installed via `svc.sh` runs as a LaunchAgent at user login, so the
@@ -191,12 +246,34 @@ locked or is sitting at the login window will fail signing with
 `errSecInternalComponent`, which is an unhelpfully generic error for "the
 keychain is locked."
 
+### Still open: getting `APPLE_API_KEY_PATH` onto the runner
+
+The `.p8` file needs to exist on the self-hosted runner's filesystem (or be
+written there by the workflow from a secret) for CI to notarize. Options, not
+yet decided:
+
+- Leave the `.p8` in place on the runner's disk (it already lives there for
+  manual builds) and set `APPLE_API_KEY_PATH` as a repository variable
+  pointing at it. Simplest, but ties the workflow to a path that exists only
+  on this one machine.
+- Store the `.p8` contents as a GitHub Actions **secret** (base64-encoded)
+  and have the workflow write it to a temp file at job start. More portable,
+  standard practice, but the secret must be marked `sensitive`-equivalent and
+  the temp file cleaned up after the job.
+
+Either way, `APPLE_API_KEY` and `APPLE_API_ISSUER` are not secret-sensitive
+in the same way (they don't grant anything without the `.p8`) and can be
+plain repository variables.
+
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
 | `errSecInternalComponent` at signing | Keychain locked, or private key missing for the certificate |
 | App crashes immediately after a successful notarization | Missing JIT entitlements — see above |
+| Build log says `skipping app notarization, no APPLE_ID & ...` | `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` not all set — this is a silent skip, not a build failure, so the build otherwise looks successful |
+| `.app` shows `Notarized`, `.dmg` right next to it shows `Unnotarized` | The Tauri gap described above — the `.dmg` needs its own notarize+staple pass, which `build-macos.sh` now does automatically |
 | `spctl` says `rejected` on a fresh build | Notarization did not actually run; check the build log's final step |
 | "damaged and can't be opened" for a downloaded copy | Signed but not notarized |
-| Notarization hangs for many minutes | Normal — Apple's queue is often slow. `xcrun notarytool log <id> --keychain-profile bioflow` shows why a submission was rejected |
+| Notarization hangs for many minutes | Normal — Apple's queue is often slow. `xcrun notarytool log <id> --keychain-profile bioflow` shows why a submission was rejected (this uses the keychain profile from setup step 2, for diagnostics only) |
+| `HTTP status code: 403. A required agreement is missing or has expired` | An Apple Developer Program License Agreement update needs accepting by the **Account Holder** at [developer.apple.com/account](https://developer.apple.com/account) (check the banner) and/or [App Store Connect → Business](https://appstoreconnect.apple.com/business). Not fixable by re-running the command. |

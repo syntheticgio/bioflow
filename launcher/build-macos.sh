@@ -9,7 +9,7 @@
 #
 # Usage, from launcher/:
 #
-#   ./build-macos.sh              # sign + notarize (needs the keychain profile)
+#   ./build-macos.sh              # sign + notarize
 #   ./build-macos.sh --no-notarize  # sign only, for a fast local smoke test
 #
 # Prerequisites, both one-time:
@@ -18,9 +18,23 @@
 #      login keychain. Check with:
 #        security find-identity -v -p codesigning
 #
-#   2. A stored notarytool credential profile named by APPLE_KEYCHAIN_PROFILE:
-#        xcrun notarytool store-credentials "bioflow" \
-#          --key ~/AuthKey_XXXXXXXX.p8 --key-id KEY_ID --issuer ISSUER_ID
+#   2. An App Store Connect API key (.p8) plus its Key ID and Issuer ID.
+#      `xcrun notarytool store-credentials` is NOT what this script reads --
+#      that stores a *keychain profile* for manual `notarytool submit` calls,
+#      but Tauri's own notarization step (invoked inside `tauri build`, not
+#      by us calling notarytool directly) only recognizes the API key given
+#      directly via APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_PATH (or
+#      the older APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID trio). A stored
+#      keychain profile with none of those set produces:
+#        "skipping app notarization, no APPLE_ID & APPLE_PASSWORD &
+#         APPLE_TEAM_ID or APPLE_API_KEY & APPLE_API_ISSUER &
+#         APPLE_API_KEY_PATH environment variables found"
+#      which reads as an error and is actually a silent skip -- the build
+#      finishes, signs, and produces an unnotarized .dmg with no failure.
+#      Set the three variables below (once, e.g. in your shell profile):
+#        export APPLE_API_KEY=YOUR_KEY_ID
+#        export APPLE_API_ISSUER=YOUR_ISSUER_ID
+#        export APPLE_API_KEY_PATH=~/path/to/AuthKey_XXXXXXXX.p8
 #
 # See docs/macos-signing.md for the full walkthrough.
 set -euo pipefail
@@ -33,7 +47,6 @@ if [ "${1:-}" = "--no-notarize" ]; then
 fi
 
 : "${APPLE_TEAM_ID:=GMFYKVC5VL}"
-: "${APPLE_KEYCHAIN_PROFILE:=bioflow}"
 
 # Resolve the signing identity from the keychain rather than hardcoding the
 # name, so a renewed certificate (they expire yearly) doesn't silently stop
@@ -65,17 +78,25 @@ echo "Team ID:          $APPLE_TEAM_ID"
 export APPLE_SIGNING_IDENTITY APPLE_TEAM_ID
 
 if [ "$NOTARIZE" -eq 1 ]; then
-  # Fail here rather than forty minutes into a release build. `tauri build`
-  # signs first and notarizes last, so a missing profile is not discovered
-  # until everything else has already succeeded.
-  if ! xcrun notarytool history --keychain-profile "$APPLE_KEYCHAIN_PROFILE" >/dev/null 2>&1; then
-    cat >&2 <<EOF
-error: no notarytool credential profile named "$APPLE_KEYCHAIN_PROFILE".
+  # Fail here rather than forty minutes into a release build. Without these,
+  # `tauri build` does not error -- it silently skips the notarization step
+  # and still produces a signed, unnotarized .dmg, which then fails much
+  # later and less clearly at the spctl check below (or, worse, in a user's
+  # hands if that check is ever skipped).
+  if [ -z "${APPLE_API_KEY:-}" ] || [ -z "${APPLE_API_ISSUER:-}" ] || [ -z "${APPLE_API_KEY_PATH:-}" ]; then
+    cat >&2 <<'EOF'
+error: APPLE_API_KEY, APPLE_API_ISSUER, and APPLE_API_KEY_PATH must all be set
+for Tauri to notarize the build.
 
-Create one (one time, interactive):
+  export APPLE_API_KEY=YOUR_KEY_ID
+  export APPLE_API_ISSUER=YOUR_ISSUER_ID
+  export APPLE_API_KEY_PATH=~/path/to/AuthKey_XXXXXXXX.p8
 
-  xcrun notarytool store-credentials "$APPLE_KEYCHAIN_PROFILE" \\
-    --key ~/AuthKey_XXXXXXXX.p8 --key-id YOUR_KEY_ID --issuer YOUR_ISSUER_ID
+These are the same Key ID / Issuer ID / .p8 from creating an App Store
+Connect API key -- see docs/macos-signing.md. Note this is NOT the same
+credential store as `xcrun notarytool store-credentials`; that stores a
+keychain profile for manual notarytool calls, which Tauri's own build-time
+notarization step does not read.
 
 Or skip notarization for a local-only test build:
 
@@ -83,8 +104,12 @@ Or skip notarization for a local-only test build:
 EOF
     exit 1
   fi
-  export APPLE_KEYCHAIN_PROFILE
-  echo "Notarizing via keychain profile: $APPLE_KEYCHAIN_PROFILE"
+  if [ ! -f "$APPLE_API_KEY_PATH" ]; then
+    echo "error: APPLE_API_KEY_PATH ($APPLE_API_KEY_PATH) does not exist." >&2
+    exit 1
+  fi
+  export APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
+  echo "Notarizing with API key: $APPLE_API_KEY"
 else
   echo "Skipping notarization (--no-notarize). The result will be signed but"
   echo "Gatekeeper-blocked on any machine that downloads it."
@@ -94,6 +119,28 @@ npm run tauri build
 
 DMG="$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -maxdepth 1 2>/dev/null | head -n1 || true)"
 APP="$(find src-tauri/target/release/bundle/macos -name '*.app' -maxdepth 1 2>/dev/null | head -n1 || true)"
+
+# Tauri's built-in notarization step (above, inside `tauri build`) notarizes
+# and staples the .app -- but the .dmg is built *after* that, wrapping the
+# already-notarized app, and Tauri does not separately notarize or staple the
+# .dmg container itself. The result: `spctl` on the .app says "Notarized
+# Developer ID" while `spctl` on the .dmg sitting right next to it says
+# "Unnotarized Developer ID", and a real downloaded copy of that .dmg is
+# blocked by Gatekeeper even though the app inside it is genuinely notarized.
+# This was caught by testing with the quarantine attribute set (see
+# docs/macos-signing.md) -- `codesign --verify` and an un-quarantined `open`
+# both look fine and do not catch it.
+#
+# The fix is to notarize and staple the .dmg itself as a second, separate
+# submission after the build.
+if [ "$NOTARIZE" -eq 1 ] && [ -n "$DMG" ]; then
+  echo
+  echo "=== Notarizing the .dmg container ==="
+  xcrun notarytool submit "$DMG" \
+    --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+    --wait
+  xcrun stapler staple "$DMG"
+fi
 
 echo
 echo "=== Verification ==="
