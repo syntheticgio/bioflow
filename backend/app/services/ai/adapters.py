@@ -18,6 +18,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Literal
 
 from app.config import settings
 from app.logging import get_logger
@@ -71,6 +72,26 @@ class ToolSpec:
     name: str
     description: str
     parameters: dict
+
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    """One turn in a replayed conversation, adapter-neutral.
+
+    Four roles, not two, because a tool exchange is not representable as
+    plain user/assistant text in either wire format. `tool_call` records
+    what the model asked for -- needed to echo back the assistant's own
+    `tool_calls`/`tool_use` block, which both APIs require present before a
+    matching result. `tool_result` carries the JSON-string result keyed to
+    the call it answers.
+    """
+
+    role: Literal["user", "assistant", "tool_call", "tool_result"]
+    content: str = ""
+    # Only set on role == "tool_call".
+    tool_call: ToolCall | None = None
+    # Only set on role == "tool_result".
+    tool_call_id: str | None = None
 
 
 def _reason_for_status(code: int) -> FailureReason:
@@ -145,6 +166,43 @@ class OpenAICompatAdapter(_BaseAdapter):
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
+    @staticmethod
+    def _render_messages(
+        *, system: str, user: str, history: list[ConversationTurn] | None
+    ) -> list[dict]:
+        if not history:
+            return [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ]
+        messages: list[dict] = [{"role": "system", "content": system}]
+        for turn in history:
+            if turn.role in ("user", "assistant"):
+                messages.append({"role": turn.role, "content": turn.content})
+            elif turn.role == "tool_call":
+                call = turn.tool_call
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": json.dumps(call.arguments),
+                                },
+                            }
+                        ],
+                    }
+                )
+            elif turn.role == "tool_result":
+                messages.append(
+                    {"role": "tool", "tool_call_id": turn.tool_call_id, "content": turn.content}
+                )
+        return messages
+
     def complete(
         self,
         *,
@@ -153,13 +211,11 @@ class OpenAICompatAdapter(_BaseAdapter):
         model: str,
         max_tokens: int,
         tools: list[ToolSpec] | None = None,
+        history: list[ConversationTurn] | None = None,
     ) -> Completion | ToolCall | Failure:
         body = {
             "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": self._render_messages(system=system, user=user, history=history),
             # Low but not zero, carried over from llm_client: these summaries
             # restate measured numbers, so invention is the failure mode to
             # suppress, while a little variation keeps a re-run from being
@@ -242,6 +298,44 @@ class AnthropicAdapter(_BaseAdapter):
             headers["x-api-key"] = self.api_key
         return headers
 
+    @staticmethod
+    def _render_messages(*, user: str, history: list[ConversationTurn] | None) -> list[dict]:
+        if not history:
+            return [{"role": "user", "content": user}]
+        messages: list[dict] = []
+        for turn in history:
+            if turn.role in ("user", "assistant"):
+                messages.append({"role": turn.role, "content": turn.content})
+            elif turn.role == "tool_call":
+                call = turn.tool_call
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": call.id,
+                                "name": call.name,
+                                "input": call.arguments,
+                            }
+                        ],
+                    }
+                )
+            elif turn.role == "tool_result":
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": turn.tool_call_id,
+                                "content": turn.content,
+                            }
+                        ],
+                    }
+                )
+        return messages
+
     def complete(
         self,
         *,
@@ -250,13 +344,14 @@ class AnthropicAdapter(_BaseAdapter):
         model: str,
         max_tokens: int,
         tools: list[ToolSpec] | None = None,
+        history: list[ConversationTurn] | None = None,
     ) -> Completion | ToolCall | Failure:
         body = {
             "model": model,
             # Top-level, not a message with role "system". This is the single
             # biggest shape difference from the OpenAI format.
             "system": system,
-            "messages": [{"role": "user", "content": user}],
+            "messages": self._render_messages(user=user, history=history),
             "temperature": 0.2,
             "max_tokens": max_tokens,
         }
