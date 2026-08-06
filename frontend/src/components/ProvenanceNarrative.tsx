@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "../api/client";
+import { notify } from "../stores/messageStore";
 
 /**
  * The methods report for one file.
@@ -21,6 +22,7 @@ export function ProvenanceNarrative({ objectId }: { objectId: string }) {
 
   const prose = useMutation({
     mutationFn: () => api.generateProvenanceProse(objectId),
+    onError: (e: Error) => notify.error(e.message),
   });
 
   const copy = (text: string, which: "report" | "prose") => {

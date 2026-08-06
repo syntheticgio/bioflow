@@ -849,7 +849,9 @@ function ObjectDetail({ id }: { id: string }) {
                   reingestDisabled={!obj.blob_sha256}
                 />
               }
-              provenanceNarrative={<ProvenanceNarrative objectId={obj.id} />}
+              provenanceNarrative={
+                <ProvenanceNarrative key={obj.id} objectId={obj.id} />
+              }
               confirmingDelete={confirmingDelete}
               setConfirmingDelete={setConfirmingDelete}
               remove={remove}
