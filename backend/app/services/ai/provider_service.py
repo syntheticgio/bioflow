@@ -117,6 +117,13 @@ def _list_models(provider: AiProvider) -> list[str] | Failure:
     return adapter.list_models()
 
 
+def _list_models_with_context(provider: AiProvider) -> dict[str, int | None] | Failure:
+    """Same blocking-call seam as `_list_models`, for context_length capture."""
+    key = crypto.decrypt(provider.api_key_enc) if provider.api_key_enc else None
+    adapter = adapter_for(provider.kind, base_url=provider.base_url, api_key=key)
+    return adapter.list_models_with_context()
+
+
 async def fetch_models(provider_id: str) -> list[str] | Failure | None:
     """Fetch and cache the model list. Returns None if the provider is gone.
 
@@ -139,6 +146,17 @@ async def fetch_models(provider_id: str) -> list[str] | Failure | None:
         return result
 
     provider.models_cache = result
+
+    # Best-effort: a context-length fetch failing must not fail the whole
+    # model-list refresh, which is the thing the caller actually asked for.
+    context_result = await asyncio.to_thread(_list_models_with_context, provider)
+    if not isinstance(context_result, Failure):
+        provider.context_windows = {
+            model_id: length
+            for model_id, length in context_result.items()
+            if length is not None
+        }
+
     provider.mark_ok()
     await provider.save()
     return result

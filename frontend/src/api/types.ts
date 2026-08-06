@@ -1574,6 +1574,22 @@ export interface Share {
   updated_at: string;
 }
 
+// --- Project Q&A chat ---
+
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface ProjectConversation {
+  turns: ConversationTurn[];
+  compacted_summary: string | null;
+}
+
+export interface AskQuestionResponse {
+  job_id: string;
+}
+
 // --- UniProt ---
 
 /** One proteome, as the download dialog's card and picker render it. */

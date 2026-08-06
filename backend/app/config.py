@@ -192,6 +192,16 @@ class Settings(BaseSettings):
     # and a summary cut off mid-sentence reads worse than a slightly long one.
     llm_max_tokens: int = 400
 
+    # --- Project Q&A chat ---
+    # Fraction of the routed provider's context window a live conversation
+    # tail may occupy before older turns are folded into a summary. Not
+    # aiming for exactness -- the token estimate feeding this is a coarse
+    # heuristic -- just "don't wait until the request 400s."
+    qa_compaction_threshold: float = 0.75
+    # Assumed context length when a provider's /v1/models response does not
+    # report one (confirmed not universal -- OpenAI's endpoint omits it).
+    qa_default_context_tokens: int = 8000
+
     # Read once, at first startup after providers moved into the database, to
     # seed a provider from however this installation was already configured.
     # Nothing else reads these -- the base URL and model now live on the

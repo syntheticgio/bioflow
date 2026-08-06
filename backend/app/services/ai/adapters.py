@@ -18,6 +18,7 @@ import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Literal
 
 from app.config import settings
 from app.logging import get_logger
@@ -43,6 +44,54 @@ class Failure:
     # The upstream body, scrubbed and truncated. Stored on the provider, so it
     # must never contain the key.
     detail: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """The model asked to call one of the tools it was offered.
+
+    Only one call is modeled per turn, deliberately -- both wire formats can
+    carry more than one in a single response, but the project Q&A loop this
+    exists for only ever needs one tool result before deciding its next move.
+    A response with several is handled by taking the first and logging the
+    rest as dropped (see each adapter's `complete()`), not by modeling a list
+    here.
+    """
+
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """An adapter-neutral tool definition. Each adapter's `complete()`
+    translates `parameters` into its own wire shape (OpenAI's
+    `function.parameters`, Anthropic's `input_schema`) internally."""
+
+    name: str
+    description: str
+    parameters: dict
+
+
+@dataclass(frozen=True)
+class ConversationTurn:
+    """One turn in a replayed conversation, adapter-neutral.
+
+    Four roles, not two, because a tool exchange is not representable as
+    plain user/assistant text in either wire format. `tool_call` records
+    what the model asked for -- needed to echo back the assistant's own
+    `tool_calls`/`tool_use` block, which both APIs require present before a
+    matching result. `tool_result` carries the JSON-string result keyed to
+    the call it answers.
+    """
+
+    role: Literal["user", "assistant", "tool_call", "tool_result"]
+    content: str = ""
+    # Only set on role == "tool_call".
+    tool_call: ToolCall | None = None
+    # Only set on role == "tool_result".
+    tool_call_id: str | None = None
 
 
 def _reason_for_status(code: int) -> FailureReason:
@@ -117,15 +166,56 @@ class OpenAICompatAdapter(_BaseAdapter):
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def complete(
-        self, *, system: str, user: str, model: str, max_tokens: int
-    ) -> Completion | Failure:
-        body = {
-            "model": model,
-            "messages": [
+    @staticmethod
+    def _render_messages(
+        *, system: str, user: str, history: list[ConversationTurn] | None
+    ) -> list[dict]:
+        if not history:
+            return [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
-            ],
+            ]
+        messages: list[dict] = [{"role": "system", "content": system}]
+        for turn in history:
+            if turn.role in ("user", "assistant"):
+                messages.append({"role": turn.role, "content": turn.content})
+            elif turn.role == "tool_call":
+                call = turn.tool_call
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": json.dumps(call.arguments),
+                                },
+                            }
+                        ],
+                    }
+                )
+            elif turn.role == "tool_result":
+                messages.append(
+                    {"role": "tool", "tool_call_id": turn.tool_call_id, "content": turn.content}
+                )
+        return messages
+
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec] | None = None,
+        history: list[ConversationTurn] | None = None,
+    ) -> Completion | ToolCall | Failure:
+        body = {
+            "model": model,
+            "messages": self._render_messages(system=system, user=user, history=history),
             # Low but not zero, carried over from llm_client: these summaries
             # restate measured numbers, so invention is the failure mode to
             # suppress, while a little variation keeps a re-run from being
@@ -134,6 +224,18 @@ class OpenAICompatAdapter(_BaseAdapter):
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
         result = self._request(
             "/v1/chat/completions", body=body, timeout=settings.llm_timeout_seconds
         )
@@ -141,8 +243,26 @@ class OpenAICompatAdapter(_BaseAdapter):
             return result
 
         try:
-            text = result["choices"][0]["message"]["content"]
+            message = result["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
+            log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
+            return Failure(FailureReason.BAD_RESPONSE)
+
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if tool_calls:
+            if len(tool_calls) > 1:
+                log.info("ai_multi_tool_call_dropped", dropped=len(tool_calls) - 1)
+            call = tool_calls[0]
+            try:
+                arguments = json.loads(call["function"]["arguments"])
+            except (KeyError, TypeError, json.JSONDecodeError):
+                log.warning("ai_tool_call_arguments_unparseable")
+                return Failure(FailureReason.BAD_RESPONSE)
+            return ToolCall(id=call["id"], name=call["function"]["name"], arguments=arguments)
+
+        try:
+            text = message["content"]
+        except (KeyError, TypeError):
             log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
             return Failure(FailureReason.BAD_RESPONSE)
 
@@ -165,6 +285,29 @@ class OpenAICompatAdapter(_BaseAdapter):
         # that reports `loaded`; everywhere else this is a plain sort.
         return sorted(ids, key=lambda i: (i not in loaded, i))
 
+    def list_models_with_context(self) -> dict[str, int | None] | Failure:
+        """Model id -> context_length, for compaction's use.
+
+        A second method rather than widening `list_models()`'s return shape:
+        that function has existing callers (the settings-page fetch-models
+        flow) that only want the id list, and every one of them would need an
+        unpacking step to satisfy a caller only this feature needs. Not every
+        provider reports `context_length` (OpenAI's own /v1/models omits it)
+        -- a model with no value maps to `None`, not dropped from the dict.
+        """
+        result = self._request(
+            "/v1/models", body=None, timeout=settings.llm_health_timeout_seconds
+        )
+        if isinstance(result, Failure):
+            return result
+
+        entries = result.get("data") or []
+        return {
+            str(e["id"]): e.get("context_length")
+            for e in entries
+            if e.get("id")
+        }
+
 
 class AnthropicAdapter(_BaseAdapter):
     """Anthropic's Messages API."""
@@ -178,18 +321,68 @@ class AnthropicAdapter(_BaseAdapter):
             headers["x-api-key"] = self.api_key
         return headers
 
+    @staticmethod
+    def _render_messages(*, user: str, history: list[ConversationTurn] | None) -> list[dict]:
+        if not history:
+            return [{"role": "user", "content": user}]
+        messages: list[dict] = []
+        for turn in history:
+            if turn.role in ("user", "assistant"):
+                messages.append({"role": turn.role, "content": turn.content})
+            elif turn.role == "tool_call":
+                call = turn.tool_call
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": call.id,
+                                "name": call.name,
+                                "input": call.arguments,
+                            }
+                        ],
+                    }
+                )
+            elif turn.role == "tool_result":
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": turn.tool_call_id,
+                                "content": turn.content,
+                            }
+                        ],
+                    }
+                )
+        return messages
+
     def complete(
-        self, *, system: str, user: str, model: str, max_tokens: int
-    ) -> Completion | Failure:
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec] | None = None,
+        history: list[ConversationTurn] | None = None,
+    ) -> Completion | ToolCall | Failure:
         body = {
             "model": model,
             # Top-level, not a message with role "system". This is the single
             # biggest shape difference from the OpenAI format.
             "system": system,
-            "messages": [{"role": "user", "content": user}],
+            "messages": self._render_messages(user=user, history=history),
             "temperature": 0.2,
             "max_tokens": max_tokens,
         }
+        if tools:
+            body["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters}
+                for t in tools
+            ]
         result = self._request(
             "/v1/messages", body=body, timeout=settings.llm_timeout_seconds
         )
@@ -197,7 +390,27 @@ class AnthropicAdapter(_BaseAdapter):
             return result
 
         try:
-            text = result["content"][0]["text"]
+            blocks = result["content"]
+        except (KeyError, TypeError):
+            log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
+            return Failure(FailureReason.BAD_RESPONSE)
+
+        if not isinstance(blocks, list) or not blocks:
+            return Failure(FailureReason.BAD_RESPONSE)
+
+        tool_use_blocks = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"]
+        if tool_use_blocks:
+            if len(tool_use_blocks) > 1:
+                log.info("ai_multi_tool_call_dropped", dropped=len(tool_use_blocks) - 1)
+            block = tool_use_blocks[0]
+            try:
+                return ToolCall(id=block["id"], name=block["name"], arguments=block["input"])
+            except KeyError:
+                log.warning("ai_tool_use_block_unparseable")
+                return Failure(FailureReason.BAD_RESPONSE)
+
+        try:
+            text = blocks[0]["text"]
         except (KeyError, IndexError, TypeError):
             log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
             return Failure(FailureReason.BAD_RESPONSE)
@@ -215,6 +428,18 @@ class AnthropicAdapter(_BaseAdapter):
             return result
         entries = result.get("data") or []
         return sorted(str(e["id"]) for e in entries if e.get("id"))
+
+    def list_models_with_context(self) -> dict[str, int | None] | Failure:
+        """Model id -> context_length. Never observed present on Anthropic's
+        /v1/models -- every model maps to None -- but the method exists here
+        too so a caller does not need to special-case the provider kind."""
+        result = self._request(
+            "/v1/models", body=None, timeout=settings.llm_health_timeout_seconds
+        )
+        if isinstance(result, Failure):
+            return result
+        entries = result.get("data") or []
+        return {str(e["id"]): e.get("context_length") for e in entries if e.get("id")}
 
 
 def adapter_for(kind: str, *, base_url: str, api_key: str | None) -> _BaseAdapter:

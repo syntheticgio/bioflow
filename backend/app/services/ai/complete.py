@@ -13,13 +13,20 @@ from app.config import settings
 from app.logging import get_logger
 from app.models.ai import FailureReason
 from app.services.ai import provider_service
-from app.services.ai.adapters import Completion, Failure, adapter_for
+from app.services.ai.adapters import (
+    Completion,
+    ConversationTurn,
+    Failure,
+    ToolCall,
+    ToolSpec,
+    adapter_for,
+)
 from app.services.ai.router import ResolvedProvider
 
 log = get_logger(__name__)
 
 
-def _run(provider: ResolvedProvider, **kwargs) -> Completion | Failure:
+def _run(provider: ResolvedProvider, **kwargs) -> Completion | ToolCall | Failure:
     """The blocking adapter call. Its own function so tests have a seam that
     is not a socket."""
     adapter = adapter_for(
@@ -46,8 +53,15 @@ async def complete(
     system: str,
     user: str,
     max_tokens: int | None = None,
-) -> Completion | Failure:
-    """Run one completion, recording the outcome on the provider document."""
+    tools: list[ToolSpec] | None = None,
+    history: list[ConversationTurn] | None = None,
+) -> Completion | ToolCall | Failure:
+    """Run one completion, recording the outcome on the provider document.
+
+    A `ToolCall` result counts as success for recording purposes -- the
+    round trip to the provider worked, even though no final text came back
+    yet.
+    """
     model = _model_for(provider)
     if model is None:
         log.info("ai_no_model", provider=provider.name)
@@ -64,6 +78,8 @@ async def complete(
             user=user,
             model=model,
             max_tokens=max_tokens or settings.llm_max_tokens,
+            tools=tools,
+            history=history,
         )
     except Exception as e:  # noqa: BLE001 - the invariant: never raise into a job
         log.warning("ai_call_crashed", provider=provider.name, error=str(e))
@@ -83,7 +99,9 @@ def complete_sync(
     system: str,
     user: str,
     max_tokens: int | None = None,
-) -> Completion | Failure:
+    tools: list[ToolSpec] | None = None,
+    history: list[ConversationTurn] | None = None,
+) -> Completion | ToolCall | Failure:
     """Blocking variant for thread handlers, which cannot await.
 
     Queue handlers run in a worker thread with no event loop, so they cannot
@@ -101,6 +119,8 @@ def complete_sync(
             user=user,
             model=model,
             max_tokens=max_tokens or settings.llm_max_tokens,
+            tools=tools,
+            history=history,
         )
     except Exception as e:  # noqa: BLE001
         log.warning("ai_call_crashed", provider=provider.name, error=str(e))

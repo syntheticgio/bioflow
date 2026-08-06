@@ -13,6 +13,7 @@ class TestTaskSlot:
         the labels -- they come from here via the routing endpoint."""
         assert TaskSlot.FILE_SUMMARY.label == "File summaries"
         assert TaskSlot.ORGANISM_BLURB.label == "Organism blurbs"
+        assert TaskSlot.PROJECT_QA.label == "Project Q&A chat"
 
     def test_every_slot_has_a_label(self):
         for slot in TaskSlot:

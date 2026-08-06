@@ -56,6 +56,7 @@ class TaskSlot(StrEnum):
 
     FILE_SUMMARY = "file_summary"
     ORGANISM_BLURB = "organism_blurb"
+    PROJECT_QA = "project_qa"
 
     @property
     def label(self) -> str:
@@ -65,6 +66,7 @@ class TaskSlot(StrEnum):
 _SLOT_LABELS = {
     TaskSlot.FILE_SUMMARY: "File summaries",
     TaskSlot.ORGANISM_BLURB: "Organism blurbs",
+    TaskSlot.PROJECT_QA: "Project Q&A chat",
 }
 
 
@@ -86,6 +88,11 @@ class AiProvider(TimestampedDocument):
     # Last successful /v1/models fetch. Kept across a failed fetch: a listing
     # endpoint having a bad day should not empty the model dropdown.
     models_cache: list[str] = Field(default_factory=list)
+    # Model id -> context length, populated alongside models_cache. A model
+    # missing here (or mapped to None) means the provider's /v1/models did
+    # not report a context_length for it -- not every provider does (OpenAI's
+    # own endpoint omits it) -- and callers fall back to a configured default.
+    context_windows: dict[str, int] = Field(default_factory=dict)
     status: str = "untested"  # ok | failed | untested
     status_reason: FailureReason | None = None
     checked_at: datetime | None = None

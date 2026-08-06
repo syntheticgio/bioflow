@@ -13,17 +13,20 @@ cannot see.
 """
 
 from app.models.ai import FailureReason, ProviderKind, TaskSlot
-from app.services.ai.adapters import Completion, Failure
+from app.services.ai.adapters import Completion, ConversationTurn, Failure, ToolCall, ToolSpec
 from app.services.ai.complete import complete, complete_sync
 from app.services.ai.router import ResolvedProvider, resolve
 
 __all__ = [
     "Completion",
+    "ConversationTurn",
     "Failure",
     "FailureReason",
     "ProviderKind",
     "ResolvedProvider",
     "TaskSlot",
+    "ToolCall",
+    "ToolSpec",
     "complete",
     "complete_sync",
     "resolve",

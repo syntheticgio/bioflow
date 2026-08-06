@@ -67,47 +67,6 @@ affect the 201 response to the submitter (it shouldn't -- the record is
 already saved; notification is best-effort on top of it), and where the
 webhook URL / credential lives (`.env` / `settings`, not hardcoded).
 
-## Sharing between profiles
-
-Depends on profiles. Share a file with another profile without copying the
-bytes — which the storage layer already supports: a second `DataObject` with a
-different `owner` pointing at the same digest, with the existing refcount
-governing lifetime. The open work is policy and UI, not storage: how a share is
-offered and revoked, whether the recipient sees it in their own explorer or a
-separate shared area, and what happens to a share when the owner deletes their
-copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
-refcount reaching zero and the bytes being unlinked).
-
-**The three policy questions above are answered** as of 2026-08-05 in
-[`docs/superpowers/specs/2026-08-05-profile-sharing-design.md`](superpowers/specs/2026-08-05-profile-sharing-design.md):
-revoke withdraws an un-accepted offer only, the recipient gets an auto-created
-"Shared with me" `Project` rather than a separate explorer area, and the
-owner-delete case needs no storage work at all — the refcount already leaves
-the recipient a working file.
-
-**Offer/accept/revoke shipped** 2026-08-05 in
-[#25](https://github.com/syntheticgio/bioflow/issues/25) (commit `4efa4d1`,
-merge `2a855be`): a `Share` model, `share_service`, and `/api/v1/shares`,
-including the materialization cascade that re-points a copied sidecar's
-`sidecar_of` and a copied read pair's `mate_object_id` at the new copies
-rather than leaving them dangling into the sender's partition.
-
-**Recipient visibility shipped** 2026-08-05 in
-[#50](https://github.com/syntheticgio/bioflow/issues/50) (commit `f0adef0`):
-the share dialog off `ManageFile`, the `/shares` inbox/outbox route, an
-unread-count badge on the header profile menu, and the two backend gaps that
-made the UI possible at all — `ShareOut` resolving `from_owner`/`to_owner`
-into a username server-side (the adopted profile's owner string is the
-literal `"local"`, which matches no profile id in a client-side join, so the
-resolver is keyed on `owner_id()` instead), and `share.accepted`/
-`share.declined` events so an outbox does not sit on "offered" after being
-answered. Verified end to end in a browser with two real profiles, including
-offering *as* the adopted profile to confirm the sender resolves correctly.
-
-The entry stays open for the last slice:
-[#51](https://github.com/syntheticgio/bioflow/issues/51) (delete/GC — mostly
-tests, plus copying report directories at share time since they are keyed by
-object id, not digest), under [epic #3](https://github.com/syntheticgio/bioflow/issues/3).
 
 ## Helper install program — PARTIALLY FIXED
 

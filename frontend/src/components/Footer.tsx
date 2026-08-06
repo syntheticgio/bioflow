@@ -2,11 +2,19 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
 import { useMessageStore } from "../stores/messageStore";
+import { ProjectQaDrawer } from "./ProjectQaDrawer";
 import { QueuePanel } from "./QueuePanel";
 
-export function Footer({ streamConnected = false }: { streamConnected?: boolean }) {
+export function Footer({
+  streamConnected = false,
+  projectId,
+}: {
+  streamConnected?: boolean;
+  projectId?: string;
+}) {
   const latest = useMessageStore((s) => s.latest);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [qaOpen, setQaOpen] = useState(false);
 
   const { data, isError } = useQuery({
     queryKey: ["system", "stats"],
@@ -21,6 +29,9 @@ export function Footer({ streamConnected = false }: { streamConnected?: boolean 
   return (
     <>
       {queueOpen && <QueuePanel onClose={() => setQueueOpen(false)} />}
+      {qaOpen && projectId && (
+        <ProjectQaDrawer projectId={projectId} onClose={() => setQaOpen(false)} />
+      )}
     <footer className="footer">
       <span className={`footer-message ${latest?.level ?? ""}`}>
         {latest?.text ?? "Ready"}
@@ -41,6 +52,17 @@ export function Footer({ streamConnected = false }: { streamConnected?: boolean 
         <span title={data.storage.detail}>
           {data.counts.projects} projects · {data.counts.objects} files
         </span>
+      )}
+
+      {projectId && (
+        <button
+          type="button"
+          className="footer-link"
+          title="Ask a question about this project"
+          onClick={() => setQaOpen((o) => !o)}
+        >
+          💬 Ask
+        </button>
       )}
 
       <span
