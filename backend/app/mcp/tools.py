@@ -17,7 +17,9 @@ HTTP by anything on this machine.
 """
 
 from beanie import PydanticObjectId
+from bson.errors import InvalidId
 
+from app.errors import ProfileUnresolvedError
 from app.models import Profile
 from app.services import object_service, project_service
 
@@ -38,8 +40,11 @@ def _object_summary(obj) -> dict:
         "id": str(obj.id),
         "name": obj.name,
         "status": obj.status.value,
-        "format": obj.format.kind.value if obj.format else None,
+        # DataObject.format is a required field with a default_factory, never
+        # None -- unlike role, two lines down, which genuinely can be.
+        "format": obj.format.kind.value,
         "role": obj.role.value if obj.role else None,
+        # Renamed at this boundary: DataObject's own field is `size`.
         "size_bytes": obj.size,
     }
 
@@ -49,7 +54,18 @@ async def whoami(*, owner: str) -> dict:
     if owner == "local":
         profile = await Profile.find_one({"adopted_legacy_owner": True})
     else:
-        profile = await Profile.get(PydanticObjectId(owner))
+        try:
+            profile = await Profile.get(PydanticObjectId(owner))
+        except InvalidId as e:
+            # bson raises InvalidId, a BSONError -- not a ValueError -- for
+            # the same reason app/api/deps.py's resolve_owner catches it
+            # explicitly rather than letting it become an unhandled 500.
+            # owner normally reaches this function already validated by
+            # context.owner_for, but whoami is the one tool here that
+            # re-derives an owner from the string instead of just forwarding
+            # it, so it is the one place a malformed value could still slip
+            # through to a raw, unhelpful bson stack trace.
+            raise ProfileUnresolvedError(f"Malformed owner: {owner!r}") from e
 
     if profile is None:
         return {"owner": owner, "username": None}

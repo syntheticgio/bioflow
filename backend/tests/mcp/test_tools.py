@@ -9,7 +9,7 @@ seam breaks.
 
 import pytest
 
-from app.errors import NotFoundError
+from app.errors import NotFoundError, ProfileUnresolvedError
 from app.mcp import tools
 from app.services import profile_service, project_service
 
@@ -63,3 +63,11 @@ async def test_whoami_reports_the_acting_profile():
     result = await tools.whoami(owner=profile.owner_id())
 
     assert result["username"] == "tools-whoami"
+
+
+async def test_whoami_rejects_a_malformed_owner_cleanly():
+    """A malformed owner should reach an agent as an actionable error, not a
+    raw bson.errors.InvalidId stack trace -- the same trap app.api.deps'
+    resolve_owner already guards against for the REST routes."""
+    with pytest.raises(ProfileUnresolvedError):
+        await tools.whoami(owner="not-a-valid-object-id")
