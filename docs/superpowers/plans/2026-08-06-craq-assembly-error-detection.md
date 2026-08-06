@@ -25,6 +25,16 @@ Read these first — each encodes a trap this plan is shaped around:
 
 **`worker` does not hot-reload.** After changing any handler, `docker compose restart worker` (from the main checkout) or the job runs old in-memory code.
 
+**Task 4 implementer: the plan below was patched after Task 3 shipped.** The
+original Task 4 draft in this file resolved a BAM's digest/path but never its
+`.bai` index. Task 3's code review caught that `_link_bam_index`'s
+path-guessing fallback cannot find a BioFlow-produced BAM's index (storage is
+content-addressed; the BAM and its `.bai` are unrelated `DataObject`s). Task
+4's payload-building loop below now includes the `_sidecar_of_role` block
+that resolves it — do not skip it, and match `launch_bam_stats`'s existing
+`bai_sha256`/`bai_path` pattern (`pipeline_service.py:1496-1542`) rather than
+re-deriving your own.
+
 ## File Structure
 
 | File | Responsibility | Action |
@@ -1007,6 +1017,28 @@ async def launch_assembly_error_qc(
         if path:
             payload[f"{prefix}_path"] = path
         payload[f"{prefix}_object_id"] = str(bam.id)
+
+        # **Added after Task 3's code review found a real gap the plan
+        # missed**: BioFlow's storage is content-addressed, so a BAM and
+        # its .bai are separate DataObjects with no path relationship --
+        # `_link_bam_index`'s path-guessing fallback cannot find the index
+        # of a BAM produced by BioFlow's own align pipeline, which is the
+        # primary input this whole slice exists to consume. Resolve the
+        # sidecar explicitly, the same way `launch_bam_stats` already does
+        # (`bai_sha256`/`bai_path`, `pipeline_service.py:1496-1542`) via
+        # `_sidecar_of_role(bam, SidecarRole.BAI)`. The handler now reads
+        # `{prefix}_bai_sha256`/`{prefix}_bai_path` -- e.g. `ngs_bai_path`,
+        # `sms_bai_path` -- via `_resolve_input(payload, f"{prefix}_bai")`,
+        # commit b719d90. Omitting these is not silently tolerated: a
+        # missing index now raises `PermanentError` rather than warning
+        # and continuing into an opaque samtools failure.
+        bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+        if bai is not None:
+            bai_digest, bai_path = await _resolve_readable(bai)
+            if bai_digest:
+                payload[f"{prefix}_bai_sha256"] = bai_digest
+            if bai_path:
+                payload[f"{prefix}_bai_path"] = bai_path
 
     dedup = f"assess_assembly_errors:{assembly.id}:{ngs_bam.id if ngs_bam else '-'}"
     dedup += f":{sms_bam.id if sms_bam else '-'}:{break_chimera}"
