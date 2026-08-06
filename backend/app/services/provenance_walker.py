@@ -121,6 +121,7 @@ _STEP_VERBS: dict[str, str] = {
     "run_qc": "quality-checked with",
     "assess_completeness": "assessed for completeness with",
     "assess_misassemblies": "assessed for misassemblies with",
+    "assess_assembly_errors": "assessed for assembly errors with",
     "download_sra_run": "downloaded from the SRA",
     "download_assembly": "downloaded from NCBI",
     "download_uniprot": "downloaded from UniProt",

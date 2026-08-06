@@ -23,6 +23,8 @@ docs/superpowers/specs/2026-08-05-tool-progress-instrumentation-design.md,
 from pathlib import Path
 
 from app.pipelines.align_runner import AlignProgress
+from app.pipelines import assembly_runner
+from app.pipelines.assembly_params import FlyeParams
 from app.pipelines.assembly_runner import AssemblyProgress
 from app.pipelines.completeness_runner import CompletenessProgress
 from app.pipelines.fastp_runner import TrimProgress
@@ -97,6 +99,28 @@ class TestFlyeFixture:
         parser = AssemblyProgress()
         phases = _replay(parser, FIXTURES / "flye-2.9.5.log")
         assert "starting" not in phases
+
+    def test_phase_index_tracks_the_real_log(self):
+        """The fixture aborts after `assembly`, so it can only prove the
+        first two steps -- but it proves them against bytes Flye wrote."""
+        parser = AssemblyProgress(
+            stage_order=assembly_runner.flye_stage_order(FlyeParams())
+        )
+        indices = []
+        for line in (FIXTURES / "flye-2.9.5.log").read_text().splitlines():
+            if parser.feed(line):
+                indices.append(parser.phase_index)
+        assert indices == [1, 2]
+        assert parser.phase_total == 7
+
+    def test_default_parser_reports_no_phase_structure(self):
+        """Constructed without a stage order, the fixture replay must still
+        produce today's behaviour: names, no numbers."""
+        parser = AssemblyProgress()
+        for line in (FIXTURES / "flye-2.9.5.log").read_text().splitlines():
+            parser.feed(line)
+        assert parser.phase_index is None
+        assert "phase_index" not in parser.snapshot()
 
 
 class TestMinimap2Fixture:

@@ -103,9 +103,10 @@ class TestPhaseStructure:
         assert calls == [{"phase": "trimming", "phase_index": 1, "phase_total": 3}]
 
     def test_omitted_phase_structure_is_absent_not_null(self):
-        """A runner that cannot declare a phase list (assembly_runner, for
-        Flye's open-ended stages) must not have to pass phase_index=None
-        explicitly on every call -- omitting the kwargs is enough."""
+        """A parser with no stage order to report from (e.g. a
+        default-constructed AssemblyProgress with no `stage_order`) must not
+        have to pass phase_index=None explicitly on every call -- omitting
+        the kwargs is enough."""
         calls: list[dict] = []
         ctx = _ctx(calls)
 
