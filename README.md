@@ -14,6 +14,17 @@ make up
 
 Then open <http://localhost:5173>. The API is at <http://localhost:8000/docs>.
 
+## Security
+
+**The API has no authentication.** It's built for a single trusted user on
+their own machine, and `BIND_ADDRESS=127.0.0.1` in `.env.example` keeps it
+reachable only from localhost by default. Setting `BIND_ADDRESS=0.0.0.0` (or
+otherwise exposing the port to a network) hands anyone who can reach it full
+read/write access to every project and file — there is no login, and the
+`X-BioFlow-Profile` header used to separate projects is an organizational
+convenience, not an access control. Only do this on a network you trust, and
+understand that's what you're doing.
+
 ## Required macOS setup
 
 **You must share the external drive with Docker Desktop before the stack will work.**
