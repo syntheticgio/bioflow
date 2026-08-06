@@ -41,10 +41,19 @@ was run, not what it showed.
 5. Write plainly, in past tense, one paragraph.
 """
 
-# A version claim: two or more dot-separated numeric components. Deliberately
-# not `\d+` alone -- a year, a thread count and a sample size are ordinary
-# numbers, and rejecting those would make the check unusable.
-_VERSION_RE = re.compile(r"\b\d+\.\d+[\w.\-]*")
+# A version claim: two or more dot-separated numeric components, with an
+# optional leading "v" -- the conventional way bioinformatics tools are cited
+# in prose ("bwa-mem2 v2.2.1"). The "v" is matched but not captured: group(1)
+# is the bare numeric portion, which is what `supported_tokens` actually
+# stores, so a "v"-prefixed fabrication is still checked against the same
+# supported set as a bare one rather than silently failing to match at all.
+# ("v" and a digit are both word characters, so a plain `\b` before the "v"
+# would not have kept "v2.2.1" from matching -- it was the missing "v?" that
+# left it unmatched, not the boundary.)
+#
+# Deliberately not `\d+` alone -- a year, a thread count and a sample size
+# are ordinary numbers, and rejecting those would make the check unusable.
+_VERSION_RE = re.compile(r"\bv?(\d+\.\d+[\w.\-]*)", re.IGNORECASE)
 
 
 def build_prompt(chain: ProvenanceChain) -> tuple[str, str]:
@@ -82,9 +91,10 @@ def verify_containment(prose: str, chain: ProvenanceChain) -> str | None:
     """
     supported = supported_tokens(chain)
 
-    for match in _VERSION_RE.findall(prose):
-        if match.lower().rstrip(".,;)") not in supported:
-            return f"unsupported version token: {match}"
+    for match in _VERSION_RE.finditer(prose):
+        numeric = match.group(1)
+        if numeric.lower().rstrip(".,;)") not in supported:
+            return f"unsupported version token: {match.group(0)}"
 
     lowered = prose.lower()
     known_tools = {

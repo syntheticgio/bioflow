@@ -96,6 +96,17 @@ def test_containment_rejects_an_invented_version():
     assert "2.2.9" in reason
 
 
+def test_containment_rejects_an_invented_version_with_leading_v():
+    """The conventional bioinformatics citation style ("tool vX.Y.Z") must
+    not be a bypass. A regex anchored on a bare digit would never even see
+    a "v"-prefixed token, letting a fabricated version through unchecked."""
+    chain = _chain_with(_align_step())
+    prose = "Reads were aligned with bwa-mem2 v2.2.9."
+    reason = verify_containment(prose, chain)
+    assert reason is not None
+    assert "2.2.9" in reason
+
+
 def test_containment_rejects_an_invented_tool():
     chain = _chain_with(_align_step())
     prose = "Reads were aligned with bowtie2 2.2.1."
