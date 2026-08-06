@@ -511,9 +511,14 @@ file rather than moving to `docs/TODO-done.md`.
   anything here; deserves its own entry rather than being folded into this
   one's closure.~~ **FIXED, 2026-08-06.** Shipped as QUAST 5.3.0, GitHub #62.
   See below.
-- **CRAQ, GCI and Merqury** all need reads realigned to the assembly, which is
+- ~~**CRAQ, GCI and Merqury** all need reads realigned to the assembly, which is
   the **Pilon** entry's blocker rather than this one -- they are not peers of
-  completeness and contiguity, and building them means building that first.
+  completeness and contiguity, and building them means building that first.~~
+  **Wrong on both counts, corrected 2026-08-05** by the epic design note; see
+  "CRAQ and GCI were never blocked on Pilon" below. Realigning reads to a
+  user's own assembly has worked since the assembly work landed, and Merqury
+  is k-mer based and needs no alignment at all. Still open, now GitHub #63
+  (CRAQ), #64 (Merqury), #65 (GCI).
 - **gfastats** is superseded by computing contiguity here, not built.
 - **Contamination screening** is a real axis nothing here covers and is a
   named non-goal: FCS-GX's database is ~470 GB.
