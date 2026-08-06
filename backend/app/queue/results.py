@@ -1514,6 +1514,38 @@ async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
+    """Record CRAQ's error-detection facts on the assembly they describe.
+
+    Near-copy of `_apply_assess_misassemblies`: read-only, nothing to
+    ingest, and an uploaded assembly is scored exactly like one this
+    application produced.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("assembly_errors_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "assembly_errors_applied",
+        object_id=object_id,
+        cre=facts.get("assembly_error_cre_count"),
+        aqi=facts.get("assembly_error_aqi"),
+    )
+
+
 async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
     """Turn a finished iVar consensus run into a new reference object.
 
@@ -2068,6 +2100,7 @@ _APPLIERS = {
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
+    "assess_assembly_errors": _apply_assess_assembly_errors,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,
