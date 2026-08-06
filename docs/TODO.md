@@ -367,26 +367,6 @@ rules passed green while being wrong.
 
 Touches: `backend/app/services/timing_service.py`.
 
-## No provenance panel for computation records
-
-Raised: 2026-08-03, deferred while building computation records (same specs
-as above).
-
-`timing_service.records_for_object()` returns every run that touched an
-object, failures included, and nothing renders it. The design listed
-per-object provenance as one of three read surfaces; the accessor shipped
-(and is covered by `backend/tests/queue/test_record_outcomes.py`), the UI and
-the route exposing it did not.
-
-Would show, per run: duration, peak RSS, thread count, tool and version, the
-machine it ran on, and outcome (a failed run is the most useful record here --
-it is the whole reason `records_for_object` includes failures when every other
-reader filters them out).
-
-Touches: `frontend/src/`, plus a new route in `backend/app/api/v1/jobs.py` (or
-wherever an object-scoped provenance list belongs) exposing
-`timing_service.records_for_object`.
-
 ## QC report directories can vanish from disk while the object's facts still point at them
 
 Raised: 2026-08-02, found while investigating a user report of a 404 on the

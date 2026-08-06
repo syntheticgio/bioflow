@@ -446,6 +446,76 @@ management to keep synchronized between mobile and desktop versions.
 
 Touches: `frontend/src/pages/`, routing layer, mobile-specific styling.
 
+## No provenance panel for computation records — FIXED
+
+Raised: 2026-08-03, deferred while building computation records (same specs
+as above). Closed 2026-08-05/06: spec
+`docs/superpowers/specs/2026-08-05-object-provenance-panel-design.md`, plan
+`docs/superpowers/plans/2026-08-05-object-provenance-panel.md`, issue
+[#9](https://github.com/syntheticgio/bioflow/issues/9).
+
+`timing_service.records_for_object()` returns every run that touched an
+object, failures included, and nothing renders it. The design listed
+per-object provenance as one of three read surfaces; the accessor shipped
+(and is covered by `backend/tests/queue/test_record_outcomes.py`), the UI and
+the route exposing it did not.
+
+Would show, per run: duration, peak RSS, thread count, tool and version, the
+machine it ran on, and outcome (a failed run is the most useful record here --
+it is the whole reason `records_for_object` includes failures when every other
+reader filters them out).
+
+Touches: `frontend/src/`, plus a new route in `backend/app/api/v1/jobs.py` (or
+wherever an object-scoped provenance list belongs) exposing
+`timing_service.records_for_object`.
+
+**What the implementation did differently from this entry:**
+
+- **The write path was the real blocker, and this entry did not know it.**
+  Checking the real database before writing the spec found 1 of 111
+  `job_timings` rows carried an `object_id`, and `tool`/`tool_version`/`threads`
+  were null on every row. `_record_timing` in `executor.py` never passed
+  `tool`/`tool_version` to `timing_service.record()` at all, and read
+  `threads` from `payload["threads"]` -- a key no real launcher sets; every
+  launcher nests it under `payload["params"]["threads"]`. Both were fixed
+  first, before the route existed, so the route and panel were built against
+  columns that could actually hold data.
+- **The route landed in `objects.py`, not `jobs.py`** (`GET
+  /objects/{id}/computations`), scoped through the same `get_object` the
+  existing detail route uses -- `JobRunTiming` has no owner field, so that
+  fetch is the entire authorization boundary.
+- **A derived object (a BAM, counts, an assembly) needed its own half of the
+  answer.** A `JobRunTiming.object_id` is the job's *input*, so a naive
+  "records for this object" would leave every produced file's panel
+  permanently empty -- the run that made a BAM is filed under the FASTQ it
+  read. `DataObject.produced_by_job` already carried the link (33 of 49 real
+  objects had it), so the response splits `produced_by` ("how this file was
+  made", a `job_id` lookup) from `records` ("what has run on it since").
+  `produced_by_job` rides along even when `produced_by` resolves to nothing,
+  so the UI can tell "nothing ever ran" from "the producing run predates
+  2026-08-03" -- the common case for objects that existed before this
+  shipped, verified in the running app against `ERR17609896.bam`.
+- **No pagination UI**, against the entry's implicit assumption. Capped
+  `limit` (default 100, `le=500`) plus `has_more`, no offset: the busiest
+  real object had one record, so a `Load more` control would page a list
+  that fits on screen.
+- **The tab is called History, not Computations.** `Computations.tsx` was
+  already the tool-picker in the Actions tab; reusing the name for the
+  provenance panel would have meant two panels answering "what can/has run
+  on this file" under the same label.
+- **`tool_version` reads a cache only, never probes.** A new
+  `tools.cached_version()` looks at the seeded probe cache
+  (`app/pipelines/tools.py`) and returns `None` on a miss, deliberately never
+  falling through to a real probe -- `_record_timing` runs in the executor's
+  `finally`, and a cold NanoPlot probe alone costs 12s that would delay every
+  job's completion to record one field.
+
+Verified end to end in the browser (`./ops/worktree-up.sh`): a fresh
+`trim_reads` job produced a row showing `fastp`, 4 threads (read from
+`payload["params"]["threads"]`), and the machine, with peak RSS as an
+em-dash under the sampling floor -- confirming the executor fix and the
+route/panel agree on a real run, not only in tests with hand-built fixtures.
+
 # Deferred findings
 
 See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
