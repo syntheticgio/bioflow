@@ -684,6 +684,38 @@ one before the next schema change rather than after.
 
 Touches: `backend/app/models/job.py`, `backend/app/db/client.py`.
 
+## Sharing between profiles — FIXED
+
+Shipped 2026-08-05 across three slices: offer/accept/revoke [#25](https://github.com/syntheticgio/bioflow/issues/25), recipient visibility [#50](https://github.com/syntheticgio/bioflow/issues/50), and delete/GC [#51](https://github.com/syntheticgio/bioflow/issues/51), all under epic [#3](https://github.com/syntheticgio/bioflow/issues/3).
+
+**What shipped:** A `Share` model and `share_service` (`backend/app/services/share_service.py`) offering/accepting/declining/revoking file shares between profiles without copying bytes — the storage-level deduplication already existed (two `DataObject`s under different owners pointing at one blob digest, with refcount governing lifetime). Shares materialize as real `DataObject`s in an auto-created "Shared with me" project on accept, with cascading re-pointing of sidecars and mate pairs. An inbox/outbox UI (`ManageFile` share dialog, `/shares` route, header badge). Report directories (`qc_reports/`, `bam_stats/`, `vcf_stats/`) are copied at share time since they're keyed by object id. Pending offers are deleted on both sides when a profile is deleted. A re-check on accept refuses offers whose source was deleted.
+
+Plans: `2026-08-05-profile-share-offer-revoke.md`, `2026-08-05-profile-share-recipient-visibility.md`, `2026-08-05-profile-share-delete-and-gc.md`.
+
+Where the code lives: `backend/app/models/share.py`, `backend/app/services/share_service.py`, `backend/app/api/v1/shares.py`, `backend/app/queue/share_handlers.py`, `backend/tests/services/test_share_*.py` and `backend/tests/api/test_shares_api.py` (eleven test files). Frontend: `frontend/src/components/ShareFileModal.tsx`, `frontend/src/components/SharesView.tsx`.
+
+**Design decisions and implementation departures:**
+
+- **Revoke withdraws un-accepted offers only.** Deleting an accepted copy would let one profile destroy another's file through an unauthenticated endpoint and break the one-owner-per-object invariant.
+- **Shared files land in an auto-created "Shared with me" project**, not a separate explorer area — a real `Project` rather than a second case everywhere that lists, counts, or deletes.
+- **The copy's cross-partition pointers are sanitized.** `sidecar_of` and `mate_object_id` cascade to the new copies; `derived_from` and `produced_by_job` are cleared and replaced by a typed `shared_from` field carrying the source share_id and object_id.
+- **Deletion and GC already behave correctly.** The sender deleting drops the refcount by one and the recipient keeps a working file; both deleting drives it to zero and the blob appears in gc_candidates after GC_GRACE. Tests added to prevent regression.
+- **Report-directory copying is best-effort, never fatal.** A copy failure is logged; acceptance never rolls back.
+- **Stale-offer handling re-checks the blob exists at accept time,** refusing with a message if the source was deleted.
+
+Verified end to end in a running app with two real profiles: offering a FASTQ from profile A, accepting it into profile B's "Shared with me" project, finding it listed there with correct metadata, offering *as* the adopted profile (confirming sender resolution), and revoking an un-accepted offer. Report directories confirmed to copy correctly (`qc_reports/` present and serving 200 on the recipient's object).
+
+Original entry follows.
+
+Depends on profiles. Share a file with another profile without copying the
+bytes — which the storage layer already supports: a second `DataObject` with a
+different `owner` pointing at the same digest, with the existing refcount
+governing lifetime. The open work is policy and UI, not storage: how a share is
+offered and revoked, whether the recipient sees it in their own explorer or a
+separate shared area, and what happens to a share when the owner deletes their
+copy (`GC_GRACE` in `blob_service.py` is currently the only thing between a
+refcount reaching zero and the bytes being unlinked).
+
 ## STAR: annotation-aware indexing (`--sjdbGTFfile`) — FIXED
 
 Fixed 2026-08-02. `StarParams` unaffected; the flag lives on the index build,
