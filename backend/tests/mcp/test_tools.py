@@ -200,3 +200,36 @@ async def test_list_jobs_does_not_see_another_owners_jobs():
     result = await tools.list_jobs(owner=b.owner_id())
 
     assert all(j["owner"] != a.owner_id() for j in result.get("jobs", []))
+
+
+async def test_get_job_treats_another_owners_job_as_missing():
+    a = await profile_service.create_profile(username="tools-getjob-a")
+    b = await profile_service.create_profile(username="tools-getjob-b")
+
+    from app.models import Job
+
+    job = Job(type="qc", owner=a.owner_id())
+    await job.insert()
+
+    with pytest.raises(NotFoundError):
+        await tools.get_job(str(job.id), owner=b.owner_id())
+
+
+async def test_cancel_job_treats_another_owners_job_as_missing():
+    a = await profile_service.create_profile(username="tools-cancel-a")
+    b = await profile_service.create_profile(username="tools-cancel-b")
+
+    from app.models import Job
+
+    job = Job(type="qc", owner=a.owner_id())
+    await job.insert()
+
+    with pytest.raises(NotFoundError):
+        await tools.cancel_job(str(job.id), owner=b.owner_id())
+
+
+async def test_cancel_job_rejects_an_unknown_job_id():
+    profile = await profile_service.create_profile(username="tools-cancel-unknown")
+
+    with pytest.raises(NotFoundError):
+        await tools.cancel_job("507f1f77bcf86cd799439011", owner=profile.owner_id())

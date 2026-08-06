@@ -19,8 +19,10 @@ HTTP by anything on this machine.
 from beanie import PydanticObjectId
 from bson.errors import InvalidId
 
-from app.errors import ProfileUnresolvedError
-from app.models import Profile
+from app.errors import NotFoundError, ProfileUnresolvedError, ValidationError
+from app.models import Job, Profile
+from app.queue import queue
+from app.queue.registry import all_handlers
 from app.services import object_service, project_service, suggestion_service
 
 
@@ -47,6 +49,16 @@ def _object_summary(obj) -> dict:
         # Renamed at this boundary: DataObject's own field is `size`.
         "size_bytes": obj.size,
     }
+
+
+async def _owned_job(job_id: str, *, owner: str) -> Job:
+    """Fetch a job, treating another profile's job as one that does not
+    exist -- mirrors app/api/v1/jobs.py's private _owned_job, which this
+    module can't import since it's local to the routes file."""
+    job = await Job.get(PydanticObjectId(job_id))
+    if job is None or job.owner != owner:
+        raise NotFoundError(f"Job not found: {job_id}")
+    return job
 
 
 async def whoami(*, owner: str) -> dict:
@@ -150,10 +162,6 @@ async def run_pipeline(kind: str, params: dict, *, owner: str) -> dict:
     The unknown-kind error names the valid values on purpose: this is the
     message an agent reads to correct itself.
     """
-    from app.errors import ValidationError
-    from app.queue import queue
-    from app.queue.registry import all_handlers
-
     known = all_handlers()
     if kind not in known:
         raise ValidationError(
@@ -166,20 +174,20 @@ async def run_pipeline(kind: str, params: dict, *, owner: str) -> dict:
     if job is None:
         # enqueue returns None when a matching non-terminal job already
         # exists. That is a successful outcome, not a failure -- saying so
-        # stops an agent retrying into the same dedup guard.
-        return {"job_id": None, "deduplicated": True, "kind": kind}
+        # stops an agent retrying into the same dedup guard. No job_id key
+        # at all (not job_id: None) so an agent that blindly reads
+        # result["job_id"] fails immediately with KeyError rather than
+        # carrying a plausible-looking None one hop further into
+        # get_job/cancel_job, which would 404 with the confusing
+        # "Job not found: None".
+        return {"deduplicated": True, "kind": kind}
 
     return {"job_id": str(job.id), "kind": kind, "state": job.state.value}
 
 
 async def get_job(job_id: str, *, owner: str) -> dict:
     """A job's current state. Poll this for progress; jobs are asynchronous."""
-    from app.errors import NotFoundError
-    from app.models import Job
-
-    job = await Job.get(PydanticObjectId(job_id))
-    if job is None or job.owner != owner:
-        raise NotFoundError(f"Job not found: {job_id}")
+    job = await _owned_job(job_id, owner=owner)
 
     return {
         "job_id": str(job.id),
@@ -192,8 +200,6 @@ async def get_job(job_id: str, *, owner: str) -> dict:
 
 async def list_jobs(*, owner: str, limit: int = 50) -> dict:
     """Recent jobs for this profile, newest first."""
-    from app.models import Job
-
     jobs = await Job.find({"owner": owner}).sort("-created_at").limit(limit).to_list()
     return {
         "jobs": [
@@ -220,13 +226,7 @@ async def cancel_job(job_id: str, *, owner: str) -> dict:
     and is fully stopped now), "cancelling" (it was running and has been
     signalled to stop), or "already_terminal" (it had already finished).
     """
-    from app.errors import NotFoundError
-    from app.models import Job
-    from app.queue import queue
-
-    job = await Job.get(PydanticObjectId(job_id))
-    if job is None or job.owner != owner:
-        raise NotFoundError(f"Job not found: {job_id}")
+    job = await _owned_job(job_id, owner=owner)
 
     outcome = await queue.request_cancel(str(job_id))
     if outcome == "not_found":
