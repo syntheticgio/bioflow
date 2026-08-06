@@ -534,6 +534,12 @@ def assess_assembly_errors(ctx: JobContext) -> dict:
         "corrected_fasta": str(aqi_dir / "out_correct.fa")
         if break_chimera and (aqi_dir / "out_correct.fa").exists()
         else None,
+        # So the results applier can attribute a corrected FASTA to the BAM(s)
+        # that produced it (ingest_local_file's derived_from), the same ids
+        # the launch path stamped into the payload -- see
+        # launch_assembly_error_qc's `payload[f"{prefix}_object_id"]`.
+        "ngs_bam_object_id": ctx.payload.get("ngs_bam_object_id"),
+        "sms_bam_object_id": ctx.payload.get("sms_bam_object_id"),
     }
 
 

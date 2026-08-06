@@ -1520,6 +1520,12 @@ async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
     Near-copy of `_apply_assess_misassemblies`: read-only, nothing to
     ingest, and an uploaded assembly is scored exactly like one this
     application produced.
+
+    The one exception is opt-in chimera breaking (`-b`, never set by the
+    Actions card): when the handler produced a corrected FASTA, it is
+    ingested below as a brand new REFERENCE object, never as a replacement
+    for the assembly scored above -- that assembly's facts and identity are
+    untouched by the ingest.
     """
     object_id = result.get("object_id")
     facts = result.get("facts") or {}
@@ -1544,6 +1550,41 @@ async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
         cre=facts.get("assembly_error_cre_count"),
         aqi=facts.get("assembly_error_aqi"),
     )
+
+    corrected = result.get("corrected_fasta")
+    if not corrected:
+        return
+
+    from app.services import object_service
+
+    job_id = result.get("job_id")
+    parents = [obj.id]
+    for key in ("ngs_bam_object_id", "sms_bam_object_id"):
+        bam_id = result.get(key)
+        if bam_id:
+            parents.append(PydanticObjectId(bam_id))
+
+    try:
+        await object_service.ingest_local_file(
+            owner=obj.owner,
+            project_id=obj.project_id,
+            path=Path(corrected),
+            name=f"{obj.name}.craq-corrected.fa",
+            # REFERENCE for the same reason a de novo assembly gets it
+            # (results.py:1271): it is assembly-shaped and alignable. A new
+            # object, never a replacement -- the input assembly keeps its
+            # facts and its identity.
+            role=ObjectRole.REFERENCE,
+            derived_from=parents,
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={"assembly_source": "craq_break"},
+            metadata=dict(obj.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        # Never destroys the QC result: the facts above are already
+        # committed, and a secondary ingest failing must not lose them --
+        # the posture _apply_assemble_reads takes for its graph output.
+        log.error("craq_corrected_ingest_failed", object_id=str(obj.id), error=str(e))
 
 
 async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:

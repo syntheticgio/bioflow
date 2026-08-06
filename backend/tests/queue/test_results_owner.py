@@ -465,3 +465,118 @@ class TestApplyAssessMisassemblies:
 
         refreshed = await DataObject.get(assembly.id)
         assert refreshed.updated_at == before
+
+
+class TestApplyAssessAssemblyErrors:
+    """`_apply_assess_assembly_errors` -- CRAQ's facts merge onto the scored
+    assembly exactly like misassemblies, plus an opt-in ingest of the
+    corrected FASTA when chimera breaking (`-b`) produced one."""
+
+    async def test_facts_are_merged_onto_the_object(self):
+        owner = "results-craq-a"
+        assembly = await _parent(owner, "draft.fasta")
+
+        await results._apply_assess_assembly_errors(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_error_cre_count": 3, "assembly_error_aqi": 92.1},
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.facts["assembly_error_cre_count"] == 3
+        assert refreshed.facts["assembly_error_aqi"] == 92.1
+
+    async def test_no_corrected_fasta_does_not_ingest(self, monkeypatch):
+        """The default, `-b` off: `corrected_fasta` is None/absent, so the
+        applier must return after the facts merge without touching
+        ingest_local_file at all."""
+        owner = "results-craq-b"
+        assembly = await _parent(owner, "draft.fasta")
+
+        called = False
+
+        async def _spy(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(object_service, "ingest_local_file", _spy)
+
+        await results._apply_assess_assembly_errors(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_error_cre_count": 1},
+                "corrected_fasta": None,
+            },
+            owner=owner,
+        )
+
+        assert called is False
+
+    async def test_corrected_fasta_is_ingested_as_a_new_reference_object(self):
+        """The core of chimera breaking: a new REFERENCE object, derived from
+        both the original assembly and the BAM(s) CRAQ used, with the
+        original assembly's own facts left untouched by the ingest call
+        (only by the earlier obj.set in the same applier)."""
+        owner = "results-craq-c"
+        assembly = await _parent(owner, "draft.fasta")
+        ngs_bam = await _parent(owner, "ngs.bam", role=ObjectRole.ALIGNMENT)
+        sms_bam = await _parent(owner, "sms.bam", role=ObjectRole.ALIGNMENT)
+        corrected = _scratch_file()
+
+        await results._apply_assess_assembly_errors(
+            {
+                "object_id": str(assembly.id),
+                "job_id": str(ngs_bam.id),
+                "facts": {"assembly_error_cre_count": 5},
+                "corrected_fasta": str(corrected),
+                "ngs_bam_object_id": str(ngs_bam.id),
+                "sms_bam_object_id": str(sms_bam.id),
+            },
+            owner=owner,
+        )
+
+        produced = await DataObject.find(
+            DataObject.derived_from == assembly.id, DataObject.owner == owner
+        ).to_list()
+        assert len(produced) == 1
+        new_obj = produced[0]
+        # .gz: the scratch fixture's bytes land in FASTA's entry in
+        # compress.COMPRESSIBLE_KINDS, so ingest compresses it -- see
+        # docs/superpowers/specs/2026-08-05-object-compression-design.md.
+        assert new_obj.name == f"{assembly.name}.craq-corrected.fa.gz"
+        assert new_obj.role == ObjectRole.REFERENCE
+        assert set(new_obj.derived_from) == {assembly.id, ngs_bam.id, sms_bam.id}
+        assert new_obj.facts["assembly_source"] == "craq_break"
+        assert new_obj.owner == owner
+
+        refreshed_assembly = await DataObject.get(assembly.id)
+        assert refreshed_assembly.facts["assembly_error_cre_count"] == 5
+        # The new object's own facts (checked above) must not leak back onto
+        # the original assembly -- the ingest call must never touch it.
+        assert "assembly_source" not in refreshed_assembly.facts
+
+    async def test_ingest_failure_is_logged_not_raised(self, monkeypatch):
+        """Matches _apply_assemble_reads's posture for a secondary output:
+        the facts merge already committed, so a failing ingest must not
+        propagate and must not undo it."""
+        owner = "results-craq-d"
+        assembly = await _parent(owner, "draft.fasta")
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(object_service, "ingest_local_file", _boom)
+
+        await results._apply_assess_assembly_errors(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_error_cre_count": 2},
+                "corrected_fasta": "/nonexistent/out_correct.fa",
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.facts["assembly_error_cre_count"] == 2
