@@ -91,11 +91,17 @@ class TestBuildCraqCommand:
             )
 
 
+# Row key is "Genome", not "all" -- verified against a real 1.10 run on
+# 2026-08-06 and confirmed hardcoded in
+# src/final_short_report_minlen.pl:42. An earlier version of this fixture
+# used "all", which no real report ever contains; every test below passed
+# against a fixture that didn't match reality until a real end-to-end run
+# caught it.
 _REPORT = (
     "Short Report:\n"
     "#Chr\tCovered.Rate\tLow-conf.Rate\tAvg.CRH\tAvg.CSH\t"
     "Avg.CRE(R-AQI)\tAvg.CSE(S-AQI)\tAQI\n"
-    "all\t0.998\t0.012\t1.250\t0.310\t0.512(94.881)\t0.104(97.220)\t96.031\n"
+    "Genome\t0.998\t0.012\t1.250\t0.310\t0.512(94.881)\t0.104(97.220)\t96.031\n"
 )
 
 
@@ -133,11 +139,26 @@ class TestParseFinalReport:
     def test_unparseable_returns_empty(self):
         assert craq_runner.parse_final_report("garbage", has_ngs=True, has_sms=True) == {}
 
-    def test_missing_all_row_returns_empty(self):
+    def test_missing_genome_row_returns_empty(self):
         text = (
             "Short Report:\n"
             "#Chr\tCovered.Rate\tLow-conf.Rate\tAvg.CRH\tAvg.CSH\t"
             "Avg.CRE(R-AQI)\tAvg.CSE(S-AQI)\tAQI\n"
+        )
+        assert craq_runner.parse_final_report(text, has_ngs=True, has_sms=True) == {}
+
+    def test_per_contig_rows_are_not_mistaken_for_the_genome_row(self):
+        """A real report's per-contig rows (e.g. `BK006938.2\t...`) must not
+        be parsed as the whole-assembly summary -- only the literal
+        `Genome` row is. Regression for the same class of bug the row-key
+        fix itself was: a plausible-looking row that isn't actually the
+        aggregate."""
+        text = (
+            "Short Report:\n"
+            "#Chr\tCovered.Rate\tLow-conf.Rate\tAvg.CRH\tAvg.CSH\t"
+            "Avg.CRE(R-AQI)\tAvg.CSE(S-AQI)\tAQI\n"
+            "BK006938.2\t0.781\t0.000\t91.484\t0.000\t"
+            "49.293(0.723)\t0.000(100.000)\t1.436\n"
         )
         assert craq_runner.parse_final_report(text, has_ngs=True, has_sms=True) == {}
 

@@ -472,12 +472,16 @@ def assess_assembly_errors(ctx: JobContext) -> dict:
         raise _failure(code, log_path, "craq")
 
     aqi_dir = out_dir / "runAQI_out"
-    # `<genome basename>_final.Report` -- predictable only because the
-    # assembly is linked under a fixed name above. `assembly` here is the
-    # actual path CRAQ was invoked with (`_named_link` prefixes the
-    # requested name with `in_`), so the report's basename must be derived
-    # from it rather than from the bare `_CRAQ_ASSEMBLY_LINK` constant.
-    report_path = aqi_dir / f"{assembly.name}_final.Report"
+    # `out_final.Report` -- NOT derived from the assembly's filename.
+    # Verified against a real 1.10 run on 2026-08-06: all three of
+    # `runAQI.sh`/`runAQI_SMS.sh`/`runAQI_NGS.sh` hardcode `name="out"`
+    # (line 5 of each), so the report is always `out_final.Report`
+    # regardless of what the assembly was linked as or which script ran.
+    # The design doc's source read concluded `<genome basename>_final
+    # .Report` from `runAQI.sh`'s use of `$name` without confirming what
+    # `$name` actually resolves to -- a real run is what caught this, the
+    # same way it caught the two `_named_link`-prefix bugs in Task 3.
+    report_path = aqi_dir / "out_final.Report"
     if not report_path.exists():
         raise RetryableError("craq exited successfully but wrote no final report")
 

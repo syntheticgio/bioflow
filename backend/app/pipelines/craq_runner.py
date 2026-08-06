@@ -81,9 +81,14 @@ def parse_final_report(text: str, *, has_ngs: bool, has_sms: bool) -> dict:
     `quast_runner.parse_report_tsv` documents: a summary that cannot be read
     must not fail a run that already produced real output.
 
-    Only the `all` row is stored. The per-contig rows above it are a
-    different granularity than the fact table holds, and the `.bed` files
-    carry the per-locus detail anyway.
+    Only the `Genome` row (the whole-assembly aggregate) is stored -- not
+    `all`, which never appears in a real report. Verified against a real
+    1.10 run on 2026-08-06 and confirmed in source
+    (`src/final_short_report_minlen.pl:42`, a hardcoded literal, not
+    derived from any input filename or chromosome name -- so this is
+    upstream-stable, not particular to one run). The per-contig rows below
+    it are a different granularity than the fact table holds, and the
+    `.bed` files carry the per-locus detail anyway.
 
     **`has_sms=False` drops every structural field**, including the overall
     AQI, which is a harmonic mean of R-AQI and S-AQI and so inherits its
@@ -99,7 +104,7 @@ def parse_final_report(text: str, *, has_ngs: bool, has_sms: bool) -> dict:
     facts: dict = {}
     for line in text.strip().splitlines():
         parts = line.strip().split("\t")
-        if len(parts) != 8 or parts[0] != "all":
+        if len(parts) != 8 or parts[0] != "Genome":
             continue
 
         _, cov, lowconf, _crh, _csh, cre_field, cse_field, aqi = parts
