@@ -1219,13 +1219,37 @@ def build_misassembly_card(obj, references) -> SuggestionCard | None:
     )
 
 
-def build_assembly_error_card(obj, alignments) -> SuggestionCard | None:
+def build_assembly_error_card(
+    obj, alignments: tuple[list, list, list] | None
+) -> SuggestionCard | None:
     """Reference-free assembly error detection for an assembly, by CRAQ.
 
-    Anchored on the assembly; `alignments` is the project's BAMs whose
-    `derived_from` contains it. Unlike the misassembly card beside it, this
-    gates on *reads*, not on a reference -- CRAQ needs no second genome,
-    which is what makes it usable for an organism with no relative in NCBI.
+    Anchored on the assembly; `alignments` is `(short, long, unknown)` --
+    the project's READY BAMs whose `derived_from` contains it, pre-split by
+    read chemistry via `pipeline_service.alignments_against`, the exact
+    split `launch_assembly_error_qc` itself uses to auto-pair. Unlike the
+    misassembly card beside it, this gates on *reads*, not on a reference --
+    CRAQ needs no second genome, which is what makes it usable for an
+    organism with no relative in NCBI.
+
+    Same "ambiguity is unavailable, not a guess" rule `build_misassembly_card`
+    documents: more than one short-read candidate, or more than one
+    long-read candidate, is refused here rather than silently picking one,
+    matching `launch_assembly_error_qc`'s own refusal
+    (`len(short) > 1 or len(long_) > 1`). Without this check the card went
+    AVAILABLE for a BAM set the launch path would then reject with a
+    `ValidationError`, since the card's `object_id`-only launch body has no
+    room to name which BAM to use.
+
+    `unknown`-chemistry BAMs are never folded into `short`, mirroring
+    `alignments_against`'s own contract (see that function's docstring), and
+    they are excluded from both gates here: a project with *only*
+    unknown-chemistry alignments reads as "none" (`not short and not
+    long_`), the same "needs reads" reason as a project with no alignments
+    at all, rather than "one, unknown"; and a project with exactly one
+    short-read BAM plus an unknown-chemistry BAM is still unambiguous, since
+    `launch_assembly_error_qc` auto-pairs on `short[0]` and never looks at
+    `unknown` when both ids are omitted.
 
     `category="ASSEMBLY_QC"`: this evaluates an assembly rather than
     improving it. Chimera breaking is never offered here -- the card's
@@ -1259,10 +1283,25 @@ def build_assembly_error_card(obj, alignments) -> SuggestionCard | None:
     if not tool.available:
         return unavailable(tool.error or "CRAQ is not installed.")
 
-    if not alignments:
+    short, long_, unknown = alignments or ([], [], [])
+
+    # Mirrors `launch_assembly_error_qc`'s own gate exactly: `unknown` never
+    # substitutes for a usable short/long candidate (a project with only
+    # chemistry-unknown BAMs is "none", not "one, unknown"), and it never
+    # counts toward ambiguity either -- ambiguity is about not knowing which
+    # of several *usable* candidates to pick, not about a BAM this endpoint
+    # cannot classify at all.
+    if not short and not long_:
         return unavailable(
             "Assembly error detection needs reads aligned to this assembly. "
             "Align a read set against it first."
+        )
+
+    if len(short) > 1 or len(long_) > 1:
+        total = len(short) + len(long_)
+        return unavailable(
+            f"This assembly has {total} alignment(s); use the tool to "
+            "pick which ones to use."
         )
 
     return SuggestionCard(
@@ -1270,7 +1309,7 @@ def build_assembly_error_card(obj, alignments) -> SuggestionCard | None:
         category="ASSEMBLY_QC",
         title=title,
         description=description,
-        why=f"{len(alignments)} alignment(s) against this assembly.",
+        why=f"{len(short) + len(long_)} alignment(s) against this assembly.",
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/assembly-errors",
@@ -1477,17 +1516,18 @@ async def suggestions_for(obj) -> list[dict]:
     if reference_assembly._is_assembly_like(obj):
         # Same reasoning as scaffold_references above: an async project
         # listing kept out of the synchronous assembly-errors card, computed
-        # only for assembly-like FASTA. Filters to READY BAMs whose
-        # `derived_from` names this object -- the reverse of the reference
-        # lookup `reference_for_bam` does for a BAM.
+        # only for assembly-like FASTA. Delegates to `alignments_against`
+        # (`pipeline_service.py`) rather than re-deriving the filter here --
+        # that function already does the "READY BAMs whose `derived_from`
+        # names this object" lookup *and* the chemistry split into
+        # `(short, long, unknown)` that `launch_assembly_error_qc` uses to
+        # auto-pair, so `build_assembly_error_card` can apply the identical
+        # ambiguity gate the launch path enforces instead of only checking
+        # "any alignments at all".
         try:
-            assembly_alignments = [
-                o
-                for o in await object_service.list_objects(
-                    obj.project_id, owner=obj.owner, status=ObjectStatus.READY
-                )
-                if o.format.kind is FormatKind.BAM and obj.id in o.derived_from
-            ]
+            assembly_alignments = await pipeline_service.alignments_against(
+                obj, owner=obj.owner
+            )
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             assembly_alignments = None
 
