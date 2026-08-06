@@ -108,3 +108,30 @@ async def test_suggest_next_returns_cards_with_their_reasons(monkeypatch):
 
     unavailable = [s for s in result["suggestions"] if s["status"] == "unavailable"]
     assert unavailable[0]["reason"] == "No aligner is installed"
+
+
+async def test_suggest_next_returns_an_empty_list_when_nothing_applies(monkeypatch):
+    """No candidate pipelines is a well-formed answer, not an omission."""
+    profile = await profile_service.create_profile(username="tools-suggest-empty")
+    owner = profile.owner_id()
+
+    from app.mcp import tools as mcp_tools
+
+    async def fake_suggestions_for(obj):
+        return []
+
+    class FakeObject:
+        id = "507f1f77bcf86cd799439011"
+        name = "unrecognized.bin"
+
+    async def fake_get_object(object_id, *, owner):
+        return FakeObject()
+
+    monkeypatch.setattr(
+        "app.services.suggestion_service.suggestions_for", fake_suggestions_for
+    )
+    monkeypatch.setattr("app.services.object_service.get_object", fake_get_object)
+
+    result = await mcp_tools.suggest_next("507f1f77bcf86cd799439011", owner=owner)
+
+    assert result == {"suggestions": []}

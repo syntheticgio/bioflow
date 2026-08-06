@@ -21,7 +21,7 @@ from bson.errors import InvalidId
 
 from app.errors import ProfileUnresolvedError
 from app.models import Profile
-from app.services import object_service, project_service
+from app.services import object_service, project_service, suggestion_service
 
 
 def _project_summary(project) -> dict:
@@ -136,8 +136,6 @@ async def suggest_next(object_id: str, *, owner: str) -> dict:
     Cards carry `payload` when they are runnable: hand that straight to
     `run_pipeline` rather than constructing one.
     """
-    from app.services import suggestion_service
-
     obj = await object_service.get_object(PydanticObjectId(object_id), owner=owner)
     return {"suggestions": await suggestion_service.suggestions_for(obj)}
 
