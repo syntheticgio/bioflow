@@ -1455,6 +1455,40 @@ async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
+    """Record QUAST's reference-based misassembly facts on the assembly it
+    described.
+
+    A near-copy of `_apply_assess_completeness`: read-only, no files to
+    ingest, and the object need not have been produced by a prior BioFlow
+    run -- an uploaded assembly is scored exactly like one this application
+    produced.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("misassembly_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "misassembly_applied",
+        object_id=object_id,
+        total=facts.get("assembly_misassembly_total"),
+        reference_id=facts.get("assembly_reference_id"),
+    )
+
+
 async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
     """Turn a finished iVar consensus run into a new reference object.
 
@@ -2007,6 +2041,7 @@ _APPLIERS = {
     "differential_expression": _apply_differential_expression,
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
+    "assess_misassemblies": _apply_assess_misassemblies,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,
