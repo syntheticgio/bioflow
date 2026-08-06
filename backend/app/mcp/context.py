@@ -35,7 +35,8 @@ async def owner_for(profile_param: str | None) -> str:
     if not profiles:
         raise ProfileUnresolvedError(
             "No profiles exist yet. Create one in BioFlow first, then copy the "
-            "MCP connection URL from Settings > MCP."
+            "MCP connection URL from Settings > MCP. Once it's the only "
+            "profile, no ?profile= parameter is needed."
         )
 
     raise ProfileUnresolvedError(

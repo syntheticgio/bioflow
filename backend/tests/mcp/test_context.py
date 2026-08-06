@@ -50,3 +50,16 @@ async def test_absent_profile_with_two_profiles_names_the_parameter():
 async def test_unknown_profile_is_rejected():
     with pytest.raises(ProfileUnresolvedError):
         await context.owner_for("507f1f77bcf86cd799439011")
+
+
+async def test_empty_string_profile_falls_back_like_absent():
+    """`?profile=` with no value and no `?profile=` at all must behave the
+    same way. This pins that choice: `owner_for` mirrors `resolve_owner`'s own
+    `if not value:` truthiness check rather than treating "" as a real,
+    resolvable id.
+    """
+    profile = await profile_service.create_profile(username="mcp-empty-param")
+
+    owner = await context.owner_for("")
+
+    assert owner == profile.owner_id()
