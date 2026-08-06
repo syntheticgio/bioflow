@@ -325,7 +325,6 @@ class TestReconcile:
 **Step 2: Run to verify failure**
 
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner
 docker compose exec -T api pytest tests/db/test_index_reconcile.py -v
 ```
 
