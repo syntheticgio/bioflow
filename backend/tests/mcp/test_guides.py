@@ -134,9 +134,18 @@ def test_tool_names_are_real():
 
 
 def test_endpoint_paths_are_real():
-    """A guide naming a REST path must name one the app actually serves."""
-    routes = {getattr(r, "path", None) for r in app.routes}
-    routes.discard(None)
+    """A guide naming a REST path must name one the app actually serves.
+
+    Sourced from `app.openapi()["paths"]` rather than `app.routes`:
+    `app.include_router(api_router)` composes sub-routers as
+    `_IncludedRouter` objects with no top-level `.path`, so `app.routes`
+    yields only the framework's own paths (/docs, /openapi.json, ...) and
+    none of the ~114 real /api/v1/... endpoints. That made this test
+    vacuously pass -- it discarded every real path down to nothing and never
+    ran its assertion loop -- rather than actually checking anything.
+    """
+    routes = set(app.openapi()["paths"].keys())
+    assert len(routes) > 10, "Route table looks suspiciously empty -- check app.openapi() still works"
 
     named = {s for s in _all_guide_symbols() if s.startswith("/")}
 
