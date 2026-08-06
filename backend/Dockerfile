@@ -245,7 +245,22 @@ RUN set -e \
 # image. Keeping it separate means an application source edit does not
 # reinstall it. Installed globally rather than in a venv because the worker
 # already runs in the system Python.
-RUN pip install --no-cache-dir NanoPlot==1.45.0
+# biopython is pinned here even though nothing in this project imports it: it
+# is NanoPlot's transitive dependency, and 1.88 ships no aarch64 wheel, so pip
+# falls back to the sdist and the build dies with `command 'gcc' failed` --
+# the same trap the cutadapt note at the top of this file describes. Pinning
+# NanoPlot alone does not prevent it, because the break arrives through a
+# dependency NanoPlot leaves unpinned.
+#
+# It broke arm64 only, which is how it reached main unnoticed: amd64 still
+# resolves a wheel and builds clean. Raise this pin when biopython publishes
+# aarch64 wheels again, not before -- check PyPI rather than assuming a newer
+# release has them.
+#
+# Unlike cutadapt this cannot come from apt: NanoPlot imports biopython, so it
+# has to be installed into this image's Python 3.12, whereas Debian's
+# python3-biopython targets the system python3 that nothing here runs.
+RUN pip install --no-cache-dir biopython==1.87 NanoPlot==1.45.0
 
 # PyDESeq2 rather than Bioconductor's DESeq2, which is also packaged for
 # trixie (r-bioc-deseq2). Both implement the same negative-binomial GLM; the
