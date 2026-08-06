@@ -6,6 +6,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useMatch,
   useNavigate,
 } from "react-router-dom";
 import { api } from "./api/client";
@@ -77,6 +78,12 @@ function Shell() {
     pathname.startsWith("/help/") ||
     pathname.startsWith("/settings");
 
+  // Footer sits outside any one <Route>, but the Q&A chat is inherently
+  // project-scoped -- there is no meaningful "ask about nothing" -- so it
+  // needs the currently open project's id read straight off the URL rather
+  // than threaded through a store no other feature here needs.
+  const projectMatch = useMatch("/p/:projectId");
+
   // Themes that scroll the window rather than the panes (Broadsheet) would
   // otherwise land mid-page on every route change, carrying the previous
   // view's offset with them. Harmless where the panes scroll instead.
@@ -125,7 +132,7 @@ function Shell() {
           onMouseDown={startResize}
         />
       )}
-      <Footer streamConnected={connected} />
+      <Footer streamConnected={connected} projectId={projectMatch?.params.projectId} />
       <UploadTray />
     </div>
   );

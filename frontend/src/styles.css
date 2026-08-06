@@ -1897,6 +1897,98 @@ a.btn {
   text-decoration: underline;
 }
 
+/* --- Project Q&A chat drawer --- */
+
+.qa-drawer {
+  position: fixed;
+  right: 12px;
+  bottom: 44px;
+  width: 420px;
+  max-width: calc(100vw - 24px);
+  height: 480px;
+  max-height: calc(100vh - 88px);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 35%);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  animation: queue-rise 0.16s ease-out;
+}
+
+.qa-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qa-turn {
+  max-width: 85%;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.qa-turn-user {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.qa-turn-assistant {
+  align-self: flex-start;
+  background: var(--bg-elevated, var(--bg-panel));
+  border: 1px solid var(--border);
+}
+
+.qa-thinking {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.qa-drawer-input {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.qa-drawer-input input {
+  flex: 1;
+}
+
+.qa-pill {
+  position: fixed;
+  right: 12px;
+  bottom: 44px;
+  z-index: 41;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.qa-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+}
+
 /* --- SRA download dialog --- */
 
 .sra-modal {
