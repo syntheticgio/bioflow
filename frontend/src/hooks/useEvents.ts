@@ -60,6 +60,13 @@ export function useEvents() {
           qc.invalidateQueries({ queryKey: ["objects"] });
           qc.invalidateQueries({ queryKey: ["object"] });
         }
+        // A terminal job writes its JobRunTiming row in the executor's
+        // `finally`, *after* it publishes this event -- so this can arrive
+        // slightly ahead of the record it announces. The debounce below and
+        // a refetch on next mount both cover it; see the History tab's plan.
+        if (key === "computations") {
+          qc.invalidateQueries({ queryKey: ["object-computations"] });
+        }
         if (key === "stats") qc.invalidateQueries({ queryKey: ["system", "stats"] });
         if (key === "shares") qc.invalidateQueries({ queryKey: ["shares"] });
         if (key === "projects") qc.invalidateQueries({ queryKey: ["projects"] });
@@ -85,11 +92,20 @@ export function useEvents() {
       "job.progress",
       "job.cancel_requested",
     ];
+    // A terminal outcome, not enqueue/progress/cancel-requested -- those
+    // cannot have produced a JobRunTiming row yet.
+    const terminalJobEvents = new Set([
+      "job.succeeded",
+      "job.failed",
+      "job.cancelled",
+      "job.dead",
+    ]);
     for (const name of jobEvents) {
       source.addEventListener(name, () => {
         schedule("jobs");
         schedule("stats");
         if (name !== "job.progress") schedule("objects");
+        if (terminalJobEvents.has(name)) schedule("computations");
       });
     }
 
