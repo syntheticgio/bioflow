@@ -111,11 +111,12 @@ class JobProgress(BaseModel):
     peak_rss_bytes: int | None = None
     peak_cpu_percent: float | None = None
     # "Step 2 of 5" -- only where a runner can declare its phase list up
-    # front. Most can (fastp, align_runner); assembly_runner deliberately
-    # cannot, because Flye's own stage list is not closed and displaying an
-    # unrecognized stage raw is preferred there to a stale phase_total. Both
-    # null means "unstructured -- render the phase name alone", which is the
-    # correct representation for that case, not a placeholder.
+    # front, which every runner now can: fastp and align_runner from a flat
+    # constant, assembly_runner from `flye_stage_order(params)`, since Flye
+    # builds its whole job list at launch and only `--iterations 0` varies it.
+    # Both null still means "unstructured -- render the phase name alone",
+    # which is the correct representation for a stage no runner declared
+    # (a future Flye adding one), not a placeholder.
     phase_index: int | None = None
     phase_total: int | None = None
 
