@@ -216,10 +216,13 @@ class TestReadGroup:
     def test_an_explicit_id_wins(self):
         assert "ID:RUN7" in rg(identifier="RUN7").as_sam_header()
 
-    @pytest.mark.parametrize("missing", ["sample", "library", "platform"])
+    @pytest.mark.parametrize("missing", ["sample", "library"])
     def test_every_required_field_is_enforced(self, missing):
-        """Required rather than optional, because a BAM without them has to be
-        rewritten end to end to add them later."""
+        """Sample and library are required, because a BAM without them has to
+        be rewritten end to end to add them later. Platform is not required --
+        see test_read_group_pl.py::TestFromDictAcceptsAMissingPlatform -- since
+        an unrecognized instrument model must not fail the whole alignment
+        launch now that sam_platform can return None."""
         data = {"sample": "S", "library": "L", "platform": "ILLUMINA"}
         del data[missing]
         with pytest.raises(ValidationError, match="Read group requires"):

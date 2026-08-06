@@ -129,7 +129,7 @@ class ReadGroup:
 
     sample: str
     library: str
-    platform: str
+    platform: str | None = None
     identifier: str | None = None
 
     def as_sam_header(self) -> str:
@@ -138,6 +138,9 @@ class ReadGroup:
         Emitted with literal backslash-t rather than real tabs: this string is
         passed as a single argv element to `-R`, and the aligners parse the
         two-character escape themselves.
+
+        PL is omitted when the platform is unknown, which the SAM spec
+        prescribes -- see `pipeline_service.sam_platform`.
         """
         rg_id = self.identifier or self.sample
         fields = [
@@ -145,8 +148,9 @@ class ReadGroup:
             f"ID:{rg_id}",
             f"SM:{self.sample}",
             f"LB:{self.library}",
-            f"PL:{self.platform}",
         ]
+        if self.platform:
+            fields.append(f"PL:{self.platform}")
         return "\\t".join(fields)
 
     def as_rg_args(self) -> list[str]:
@@ -156,14 +160,15 @@ class ReadGroup:
         them `as_sam_header()` would embed a literal backslash-t in the BAM
         header, which reads as a corrupt read group to every downstream tool
         rather than failing at alignment time.
+
+        PL is omitted when the platform is unknown, as in `as_sam_header`.
         """
         rg_id = self.identifier or self.sample
         args = ["--rg-id", rg_id]
-        for field_value in (
-            f"SM:{self.sample}",
-            f"LB:{self.library}",
-            f"PL:{self.platform}",
-        ):
+        field_values = [f"SM:{self.sample}", f"LB:{self.library}"]
+        if self.platform:
+            field_values.append(f"PL:{self.platform}")
+        for field_value in field_values:
             args += ["--rg", field_value]
         return args
 
@@ -175,14 +180,18 @@ class ReadGroup:
         `as_sam_header()`'s tab-escaped string as one malformed ID. Verified
         against STAR 2.7.11b, whose output carries the resulting `@RG` line
         intact.
+
+        PL is omitted when the platform is unknown, as in `as_sam_header`.
         """
         rg_id = self.identifier or self.sample
-        return [
+        fields = [
             f"ID:{rg_id}",
             f"SM:{self.sample}",
             f"LB:{self.library}",
-            f"PL:{self.platform}",
         ]
+        if self.platform:
+            fields.append(f"PL:{self.platform}")
+        return fields
 
     def as_dict(self) -> dict:
         return {
@@ -195,7 +204,7 @@ class ReadGroup:
     @classmethod
     def from_dict(cls, data: dict | None) -> "ReadGroup":
         data = data or {}
-        missing = [k for k in ("sample", "library", "platform") if not data.get(k)]
+        missing = [k for k in ("sample", "library") if not data.get(k)]
         if missing:
             raise ValidationError(
                 f"Read group requires {', '.join(missing)}",
@@ -204,7 +213,7 @@ class ReadGroup:
         return cls(
             sample=str(data["sample"]),
             library=str(data["library"]),
-            platform=str(data["platform"]),
+            platform=str(data["platform"]) if data.get("platform") else None,
             identifier=str(data["identifier"]) if data.get("identifier") else None,
         )
 

@@ -7,6 +7,7 @@ without HTTP.
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from beanie import PydanticObjectId
@@ -592,6 +593,40 @@ def _params_fingerprint(params: dict) -> str:
 ALIGNABLE_KINDS = {FormatKind.FASTQ}
 REFERENCE_KINDS = {FormatKind.FASTA}
 
+class SamPlatform(StrEnum):
+    """The SAM `@RG PL` vocabulary, verbatim from the specification.
+
+    Source: https://github.com/samtools/hts-specs, `SAMv1.tex`, the `@RG` `PL`
+    row -- "Valid values: CAPILLARY, DNBSEQ (MGI/BGI), ELEMENT, HELICOS,
+    ILLUMINA, IONTORRENT, LS454, ONT (Oxford Nanopore), PACBIO (Pacific
+    Biosciences), SINGULAR, SOLID, and ULTIMA."
+
+    Membership is set by that standard, not by what this codebase happens to
+    detect. Two members are currently produced by no pattern -- CAPILLARY,
+    which nothing sequences here, and DNBSEQ, which is new in this commit --
+    and that is correct: a reachability test of the kind
+    `test_every_option_is_reachable_by_some_token` applies would be wrong for
+    an externally-owned vocabulary.
+
+    There is deliberately no OTHER member. It is not in the spec, and the
+    spec's remedy for an unrecognized technology is to omit the field rather
+    than substitute a placeholder -- see `sam_platform`.
+    """
+
+    CAPILLARY = "CAPILLARY"
+    DNBSEQ = "DNBSEQ"
+    ELEMENT = "ELEMENT"
+    HELICOS = "HELICOS"
+    ILLUMINA = "ILLUMINA"
+    IONTORRENT = "IONTORRENT"
+    LS454 = "LS454"
+    ONT = "ONT"
+    PACBIO = "PACBIO"
+    SINGULAR = "SINGULAR"
+    SOLID = "SOLID"
+    ULTIMA = "ULTIMA"
+
+
 # The metadata vocabulary is human-facing; SAM's PL field has its own
 # controlled vocabulary, and a value outside it makes downstream callers behave
 # inconsistently -- GATK warns and some tools silently treat the platform as
@@ -606,55 +641,63 @@ REFERENCE_KINDS = {FormatKind.FASTA}
 # Ordered, and specific before general: "DNBSEQ" has to be tested before the
 # bare "seq" family names it contains, and "Illumina" last so a model name that
 # happens to mention the vendor does not outrank its own instrument family.
-_SAM_PLATFORM_PATTERNS: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("nanopore", "minion", "gridion", "promethion", "flongle"), "ONT"),
-    (("pacbio", "sequel", "revio", "rs ii"), "PACBIO"),
-    (("dnbseq", "mgiseq", "bgiseq"), "BGI"),
-    (("ion torrent", "ion proton", "ion s5", "ion gene"), "IONTORRENT"),
-    (("454 gs", "gs flx", "gs junior"), "LS454"),
-    (("solid",), "SOLID"),
-    (("helicos",), "HELICOS"),
-    (("element", "aviti"), "ELEMENT"),
-    (("ultima",), "ULTIMA"),
-    (("singular", "g4"), "SINGULAR"),
+_SAM_PLATFORM_PATTERNS: tuple[tuple[tuple[str, ...], SamPlatform], ...] = (
+    (("nanopore", "minion", "gridion", "promethion", "flongle"), SamPlatform.ONT),
+    (("pacbio", "sequel", "revio", "rs ii"), SamPlatform.PACBIO),
+    (("dnbseq", "mgiseq", "bgiseq"), SamPlatform.DNBSEQ),
+    (("ion torrent", "ion proton", "ion s5", "ion gene"), SamPlatform.IONTORRENT),
+    (("454 gs", "gs flx", "gs junior"), SamPlatform.LS454),
+    (("solid",), SamPlatform.SOLID),
+    (("helicos",), SamPlatform.HELICOS),
+    (("element", "aviti"), SamPlatform.ELEMENT),
+    (("ultima",), SamPlatform.ULTIMA),
+    (("singular", "g4"), SamPlatform.SINGULAR),
     (
         (
             "illumina", "novaseq", "nextseq", "miseq", "hiseq", "miniseq",
             "iseq", "genome analyzer", "nova x",
         ),
-        "ILLUMINA",
+        SamPlatform.ILLUMINA,
     ),
 )
 
 # Which preset suits a platform's reads. The wrong one produces silently poor
 # alignments rather than an error, so this is a real default rather than a
 # convenience.
-_PLATFORM_PRESETS: dict[str, str] = {
-    "ONT": align_runner.Preset.MAP_ONT,
-    "PACBIO": align_runner.Preset.MAP_PB,
+_PLATFORM_PRESETS: dict[SamPlatform, str] = {
+    SamPlatform.ONT: align_runner.Preset.MAP_ONT,
+    SamPlatform.PACBIO: align_runner.Preset.MAP_PB,
 }
 
 
-def sam_platform(metadata_platform: str | None) -> str:
+def sam_platform(metadata_platform: str | None) -> SamPlatform | None:
     """A SAM `PL` value from a platform label or instrument model.
 
-    Falls back to ILLUMINA when nothing is recorded -- the overwhelmingly
-    common case here, and a wrong guess is visible in the BAM header rather
-    than silent. An unrecognized *non-empty* value becomes OTHER, which is in
-    the SAM vocabulary; passing the raw label through would not be.
-    """
-    if not metadata_platform:
-        return "ILLUMINA"
+    Returns None when the recorded value is not in the SAM vocabulary, which
+    means *omit the field*: SAMv1.tex says the PL field "should be omitted
+    when the technology is not in this list ... or is unknown." This used to
+    return "OTHER", and the docstring used to claim OTHER was a spec value.
+    It is not one.
 
-    text = metadata_platform.strip().lower()
+    Falls back to ILLUMINA when nothing is recorded at all -- the
+    overwhelmingly common case here, and a wrong guess is visible in the BAM
+    header rather than silent. That asymmetry is deliberate: an empty field
+    means "nobody said," while an unrecognized non-empty field means "somebody
+    said something this vocabulary cannot express," and only the second is a
+    case the spec rules on.
+    """
+    text = (metadata_platform or "").strip().lower()
+    if not text:
+        return SamPlatform.ILLUMINA
+
     for needles, sam_value in _SAM_PLATFORM_PATTERNS:
         if any(needle in text for needle in needles):
             return sam_value
-    return "OTHER"
+    return None
 
 
 def suggested_preset(
-    sam_pl: str, *, chemistry: align_runner.ReadChemistry | None = None
+    sam_pl: SamPlatform | None, *, chemistry: align_runner.ReadChemistry | None = None
 ) -> str:
     """The minimap2 preset matching a platform, defaulting to short-read.
 

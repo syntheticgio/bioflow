@@ -1180,9 +1180,6 @@ export interface AiSummaryFacts {
 
 // --- NCBI SRA ---
 
-/** NCBI's own platform spellings, as they appear on the SRA record. */
-export type SraPlatform = "ILLUMINA" | "PACBIO_SMRT" | "OXFORD_NANOPORE";
-
 /** One sequencing run: the unit that can actually be downloaded. */
 export interface SraRunInfo {
   accession: string;

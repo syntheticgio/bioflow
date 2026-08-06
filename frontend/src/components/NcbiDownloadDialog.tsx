@@ -24,6 +24,9 @@ const SUGGESTION_LIMIT = 8;
 /** Mirrors the server's MAX_RUNS_PER_REQUEST, so the limit is visible here. */
 const MAX_SELECTION = 100;
 
+// Mirrors SRA_PLATFORM_FILTERS in backend/app/api/v1/ncbi.py, which is the
+// source of truth and is pinned by a test there. These are NCBI's SRA
+// PLATFORM tags, not SAM PL values -- OXFORD_NANOPORE, not ONT.
 const PLATFORM_FILTERS = [
   { value: "", label: "Any platform" },
   { value: "ILLUMINA", label: "Illumina" },

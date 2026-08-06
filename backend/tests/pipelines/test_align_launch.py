@@ -111,7 +111,7 @@ class TestSamPlatform:
             ("PromethION", "ONT"),
             ("PacBio Sequel IIe", "PACBIO"),
             ("Revio", "PACBIO"),
-            ("DNBSEQ-T7", "BGI"),
+            ("DNBSEQ-T7", "DNBSEQ"),
             ("Ion Torrent S5", "IONTORRENT"),
             ("454 GS FLX+", "LS454"),
             ("AVITI", "ELEMENT"),
@@ -139,10 +139,14 @@ class TestSamPlatform:
         guess here is visible in the BAM header rather than silent."""
         assert pipeline_service.sam_platform(None) == "ILLUMINA"
 
-    def test_an_unrecognized_platform_becomes_other(self):
-        """OTHER is in the SAM vocabulary; passing the raw label through would
-        not be."""
-        assert pipeline_service.sam_platform("Some New Sequencer") == "OTHER"
+    def test_an_unrecognized_platform_is_omitted(self):
+        """This test used to assert OTHER, on the docstring's claim that OTHER
+        "is in the SAM vocabulary." It is not -- SAMv1.tex lists twelve values
+        and OTHER is not among them. The spec says to omit PL when the
+        technology is not in the list, so None (meaning "omit") is the correct
+        answer and there is no placeholder to substitute.
+        """
+        assert pipeline_service.sam_platform("Some New Sequencer") is None
 
 
 class TestPresetSelection:
@@ -159,7 +163,10 @@ class TestPresetSelection:
         assert pipeline_service.suggested_preset("ILLUMINA") == Preset.SHORT_READ
 
     def test_unknown_platforms_get_short_read(self):
-        assert pipeline_service.suggested_preset("OTHER") == Preset.SHORT_READ
+        """None is what sam_platform now returns for an unrecognized platform;
+        it must still fall through to the short-read default rather than
+        raising."""
+        assert pipeline_service.suggested_preset(None) == Preset.SHORT_READ
 
     def test_no_chemistry_argument_still_works(self):
         """Existing callers that only know the platform must keep working
