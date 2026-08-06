@@ -248,14 +248,30 @@ Not packaged for Debian (verified: no apt candidate). From GitHub:
 CRAQ is run against BioFlow-produced BAMs only, reference-free, plotting off,
 chimera-breaking opt-in.
 
-## Report format, read from upstream source (2026-08-06)
+## Report format, read from upstream source (2026-08-06), corrected against a real run (2026-08-06)
 
-Resolved from `src/format_results_addAQI.pl` via `gh api`, not measured — the
-file the README calls `out_final.Report` is written as
-**`runAQI_out/<genome_basename>_final.Report`**. The `out_final.*` names in
-the README apply to the `.bed` files; the report itself is prefixed with the
-input genome's basename. Since the handler links the assembly under a fixed
-name (below), that prefix is fixed and predictable.
+Initially resolved from `src/format_results_addAQI.pl` via `gh api`, not
+measured — and that source read got two things wrong, both caught by
+actually running CRAQ 1.10 against real yeast data
+(GCA_000146045.2_R64_genomic.fna + a DRR1066343 short-read BAM) rather than
+by re-reading the source more carefully. Corrected here rather than silently
+fixed, because the wrong version shipped in this same document for hours and
+is worth recording as the reason a real run, not just a source read, is what
+"verify before implementing" means:
+
+1. **The report is `runAQI_out/out_final.Report` — unconditionally, never
+   `<genome_basename>_final.Report`.** All three of
+   `runAQI.sh`/`runAQI_SMS.sh`/`runAQI_NGS.sh` hardcode `name="out"` at line 5
+   of each script; the earlier read of `runAQI.sh`'s `$name` usage never
+   confirmed what `$name` actually resolves to. This made every real run raise
+   a spurious `RetryableError`, because the handler was looking for a file
+   that never existed under that name.
+2. **The whole-assembly summary row is keyed `Genome`, not `all`.** Confirmed
+   hardcoded in `src/final_short_report_minlen.pl:42` — a literal, not
+   derived from any input filename or chromosome name, so this is
+   upstream-stable rather than particular to one run. Every unit test's own
+   fixture used `"all"`, so all of them passed while testing an assumption no
+   real report satisfies.
 
 Its format, verbatim from the formatter:
 
@@ -296,22 +312,37 @@ So the omission is enforced at the parser, driven by which inputs were
 supplied, and never by trusting the file's contents. Same for the derived
 AQI, which inherits the meaninglessness of its S-AQI input.
 
-## Verify before implementing
+**Confirmed against the real report** produced by the run above (short reads
+only): the `Genome` row printed `0.000(100.000)` for the CSE/S-AQI field —
+exactly the clean, structurally valid, meaningless value this section
+predicted — and the shipped parser correctly omitted
+`assembly_error_cse_count`/`assembly_error_s_aqi`/`assembly_error_aqi` from
+the stored facts rather than storing that zero.
 
-One fact remains unmeasured. The QUAST slice's numbers held *because* they
-were measured against a real install, and its most important finding came from
-running the thing:
+## Measured (2026-08-06, real run)
 
-- **Install size and runtime.** QUAST's entry recorded 8.6 MB and 3–4 s for a
-  12 Mb yeast assembly; record the equivalents here. CRAQ's own README warns
-  that read mapping dominates its cost — which this design avoids by
-  supplying BAMs, so the measured runtime should be substantially below a
-  from-FASTQ run and that difference is worth recording.
+Both fell out of the same real run against `GCA_000146045.2_R64_genomic.fna`
+(12.1 Mb, 16 sequences) and a DRR1066343 short-read BAM already aligned to it:
 
-`Example/run_example.sh` upstream is the fastest route to a real run. Note it
-invokes `perl ../bin/craq`, and that `bin/` holds a single Perl script whose
-real work is in sibling `src/*.sh` and `src/*.pl` — so the install must place
-the whole tree, not just the entrypoint.
+- **Install size: 43 MB** (`du -sh /opt/craq`), including the pinned commit's
+  shallow-cloned `.git` — QUAST's 8.6 MB is not a fair comparison, since that
+  figure came after trimming everything a reference run never touches, which
+  this install does not attempt.
+- **Runtime: 61–67 s end to end** (two runs, before and after the `bc` fix
+  below), API launch to job `succeeded`, against a BAM CRAQ never had to
+  produce itself. CRAQ's own README warns that read mapping dominates its
+  cost from FASTQ; supplying a pre-made BAM is exactly what keeps this run
+  in the low-minute range rather than needing README's warning to apply.
+- **A real, if low-severity, install gap**: `bc` was missing from the image.
+  `runSR.sh`/`runLR.sh`/`runAQI.sh` call it 7 times total, all in
+  parameter-sanity guards (negative/zero checks on mapq, threads, clip-rate
+  cutoffs). Confirmed these guards fail *open* without it — `bc: command not
+  found` followed by a harmless `[: -eq: unary operator expected` — so the
+  run still completed and produced correct facts either way. Fixed by adding
+  `bc` to the install script regardless: BioFlow never passes a parameter
+  that would need catching today, but a silently-skipped safety check is the
+  same shape of bug this repo's CLAUDE.md warns about elsewhere, and `bc`
+  costs a few KB.
 
 ## Testing
 

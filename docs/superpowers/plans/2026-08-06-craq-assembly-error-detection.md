@@ -1465,7 +1465,7 @@ Close #63 with a comment recording what shipped, the measured numbers, and anyth
 
 **If CRAQ turns out not to accept a BAM the way this plan assumes**, the approved fallback is letting it realign internally from FASTQ. The README documents both forms and prefers BAMs, so this should not arise — but if it does, the fallback is a decision already made, not a question to re-open.
 
-**The `_final.Report` prefix depends on the fixed link name.** If you change `_CRAQ_ASSEMBLY_LINK`, the handler's `stem` must change with it. They are two halves of one fact.
+**Corrected 2026-08-06, Task 7, against a real run — the report filename and row-key claims above (Steps 2/3/7 of Task 2, Step 1 of Task 3) were wrong.** The report is unconditionally `runAQI_out/out_final.Report`, never `<genome basename>_final.Report` -- all three of `runAQI.sh`/`runAQI_SMS.sh`/`runAQI_NGS.sh` hardcode `name="out"`, so the `_named_link`-prefix reasoning above (deriving the filename from `assembly.name`/`stem`) was solving a problem that doesn't exist. The whole-assembly summary row is keyed `Genome`, not `all` -- hardcoded in `src/final_short_report_minlen.pl:42`. Both are fixed in the shipped code and its tests (commit `91c8387`); this note exists so a reader of this plan's draft code doesn't copy the wrong version. See the design spec's "Report format" section for the full correction.
 
 **Do not add CRAQ to `assembly_qc_registry`.** That module is completeness-only and its docstring says so explicitly.
 
