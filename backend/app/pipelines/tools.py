@@ -661,6 +661,18 @@ def quast() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def craq() -> Tool:
+    # Verified against a real installed 1.10 (2026-08-06): `craq -h` prints
+    # "CRAQ Version: 1.10" on stdout but still exits 1 -- `_probe` already
+    # tolerates a non-zero exit when the output still looks like a version,
+    # the same shape featurecounts' probe relies on. Bare `craq` (no flag)
+    # prints only an argument error with no recognizable version string and
+    # exits 2, so the flag is still load-bearing: without it the probe would
+    # read a working install as absent.
+    return _probe("craq", settings.craq_path, ["-h"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -733,6 +745,7 @@ def all_tools() -> list[Tool]:
         featurecounts(),
         pydeseq2(),
         quast(),
+        craq(),
     ]
 
 
@@ -1560,6 +1573,53 @@ TOOL_META: dict[str, ToolMeta] = {
             "would eventually disagree with the first."
         ),
     ),
+    "craq": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Reference-free assembly error detection from read clipping",
+        summary=(
+            "Finds positions where reads align to the assembly only "
+            "partially -- clipped alignments pile up where the assembly is "
+            "wrong. Reports small-scale regional errors (CRE) and "
+            "large-scale structural errors (CSE), and separates both from "
+            "their heterozygous-variant lookalikes (CRH/CSH), which is what "
+            "keeps a diploid assembly's real heterozygosity from reading as "
+            "misassembly. Needs no reference genome -- only the reads, "
+            "aligned back to the assembly they built."
+        ),
+        strengths=(
+            "Reference-free: catches errors in organisms with no related "
+            "reference assembly, where QUAST cannot run at all",
+            "Separates true misassemblies from heterozygous variants "
+            "rather than counting both as errors",
+            "Published AQI quality bands (>90 reference, 80-90 high, "
+            "60-80 draft, <60 low) for a directly interpretable score",
+        ),
+        homepage="https://github.com/JiaoLaboratory/CRAQ",
+        repository="https://github.com/JiaoLaboratory/CRAQ",
+        citation=(
+            "Li K, Xu P, Wang J, Yi X, Jiao Y. Identification of errors in "
+            "draft genome assemblies at single-nucleotide resolution for "
+            "quality assessment and improvement. Nature Communications. "
+            "2023;14:6556."
+        ),
+        citation_url="https://doi.org/10.1038/s41467-023-42336-w",
+        # From the repository's own metadata, checked 2026-08-06 via
+        # `gh api repos/JiaoLaboratory/CRAQ` -> spdx_id: MIT.
+        license="MIT",
+        usage=(
+            "Runs against sorted BAMs BioFlow's own align pipeline "
+            "produced, never raw FASTQ -- upstream recommends pre-made "
+            "alignments, and it keeps a second aligner from running "
+            "hidden inside a QC job. Short-read BAMs are passed as -ngs "
+            "and long-read as -sms, decided from the reads' recorded "
+            "chemistry rather than guessed. Circos plotting (-pl) is never "
+            "enabled, so no pycircos dependency is installed and no "
+            "CRAQ-generated document is served. Chimera breaking (-b) is "
+            "off unless the user opts in, and its corrected FASTA is "
+            "ingested as a new object rather than replacing the assembly "
+            "it came from."
+        ),
+    ),
     "ragtag": ToolMeta(
         pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
         one_liner="Reference-guided assembly scaffolding",
@@ -1874,3 +1934,4 @@ def reset_cache() -> None:
     featurecounts.cache_clear()
     pydeseq2.cache_clear()
     quast.cache_clear()
+    craq.cache_clear()

@@ -148,6 +148,11 @@ class Settings(BaseSettings):
     # not the tool's own quast.py, so the entry point on PATH is stable
     # regardless of where the tarball unpacks.
     quast_path: str = "quast.py"
+    # /usr/local/bin/craq, a wrapper installed by
+    # backend/scripts/install-craq.sh that execs the real Perl entrypoint
+    # at its install location -- bin/craq resolves its src/ siblings
+    # relative to its own path, so it cannot be symlinked.
+    craq_path: str = "craq"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"
