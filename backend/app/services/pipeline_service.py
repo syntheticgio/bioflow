@@ -3514,3 +3514,126 @@ async def launch_scaffold(
         tool_version=tool.version,
     )
     return job
+
+
+async def launch_misassembly_qc(
+    *,
+    draft_object_id: PydanticObjectId,
+    owner: str,
+    reference_object_id: PydanticObjectId | None = None,
+) -> Job:
+    """Queue a QUAST run: reference-based misassembly QC for one assembly.
+
+    Same reference-resolution shape as `launch_scaffold`, since both take an
+    assembly-shaped draft plus a reference and both treat "a project holds
+    more than one reference-role FASTA" as the ordinary case rather than an
+    edge case -- see `launch_scaffold`'s own docstring. `reference_object_id`
+    is expected to arrive from a dialog's chooser in the ambiguous case; the
+    Actions card only fires when exactly one candidate exists, so it never
+    needs to supply this argument at all.
+
+    Read-only: this never produces a new object, only facts merged onto the
+    draft. `--min-contig` is deliberately not a parameter here -- QUAST's
+    default (500) is what every run in this application uses, so counts
+    across runs stay comparable; the value is recorded as a fact regardless,
+    so a report's contig count can still be explained against it.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tool = tools.require(tools.quast())
+
+    draft = await object_service.get_object(draft_object_id, owner=owner)
+    reference_assembly.check_draft_assembly(draft)
+
+    if reference_object_id is None:
+        candidates = [
+            o
+            for o in await object_service.list_objects(
+                draft.project_id, owner=owner, status=ObjectStatus.READY
+            )
+            if o.role is ObjectRole.REFERENCE
+            and o.format.kind is FormatKind.FASTA
+            and o.id != draft.id
+        ]
+        if not candidates:
+            raise ValidationError(
+                "Misassembly QC needs a reference assembly, and this "
+                "project has none",
+                details={"draft_id": str(draft.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several reference assemblies; name the "
+                "one to check against",
+                details={
+                    "draft_id": str(draft.id),
+                    "candidates": [str(o.id) for o in candidates],
+                },
+            )
+        reference = candidates[0]
+    else:
+        reference = await object_service.get_object(
+            reference_object_id, owner=owner
+        )
+
+    reference_assembly.check_reference_assembly(reference)
+
+    if reference.project_id != draft.project_id:
+        raise ValidationError(
+            "The draft and the reference must be in the same project"
+        )
+
+    if reference.id == draft.id:
+        # QUAST would happily report a perfect assembly against itself --
+        # the most misleading possible success, and nothing else in the
+        # validation stack above catches this specific pairing.
+        raise ValidationError(
+            "The draft and the reference cannot be the same object",
+            details={"object_id": str(draft.id)},
+        )
+
+    draft_digest, draft_path = await _resolve_readable(draft)
+    ref_digest, ref_path = await _resolve_readable(reference)
+
+    payload: dict = {
+        "object_id": str(draft.id),
+        "reference_object_id": str(reference.id),
+        "reference_name": reference.name,
+        "threads": 4,
+    }
+    if draft_digest:
+        payload["assembly_sha256"] = draft_digest
+    if draft_path:
+        payload["assembly_path"] = draft_path
+    if ref_digest:
+        payload["reference_sha256"] = ref_digest
+    if ref_path:
+        payload["reference_path"] = ref_path
+
+    job = await queue.enqueue(
+        "assess_misassemblies",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"assess_misassemblies:{draft.id}:{reference.id}",
+        project_id=draft.project_id,
+        object_id=draft.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Misassembly QC is already queued or running for this "
+            "assembly against this reference",
+            details={"object_id": str(draft.id)},
+        )
+
+    log.info(
+        "misassembly_qc_launched",
+        job_id=str(job.id),
+        draft_id=str(draft.id),
+        reference_id=str(reference.id),
+        tool_version=tool.version,
+    )
+    return job
