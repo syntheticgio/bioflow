@@ -285,6 +285,29 @@ class OpenAICompatAdapter(_BaseAdapter):
         # that reports `loaded`; everywhere else this is a plain sort.
         return sorted(ids, key=lambda i: (i not in loaded, i))
 
+    def list_models_with_context(self) -> dict[str, int | None] | Failure:
+        """Model id -> context_length, for compaction's use.
+
+        A second method rather than widening `list_models()`'s return shape:
+        that function has existing callers (the settings-page fetch-models
+        flow) that only want the id list, and every one of them would need an
+        unpacking step to satisfy a caller only this feature needs. Not every
+        provider reports `context_length` (OpenAI's own /v1/models omits it)
+        -- a model with no value maps to `None`, not dropped from the dict.
+        """
+        result = self._request(
+            "/v1/models", body=None, timeout=settings.llm_health_timeout_seconds
+        )
+        if isinstance(result, Failure):
+            return result
+
+        entries = result.get("data") or []
+        return {
+            str(e["id"]): e.get("context_length")
+            for e in entries
+            if e.get("id")
+        }
+
 
 class AnthropicAdapter(_BaseAdapter):
     """Anthropic's Messages API."""
@@ -405,6 +428,18 @@ class AnthropicAdapter(_BaseAdapter):
             return result
         entries = result.get("data") or []
         return sorted(str(e["id"]) for e in entries if e.get("id"))
+
+    def list_models_with_context(self) -> dict[str, int | None] | Failure:
+        """Model id -> context_length. Never observed present on Anthropic's
+        /v1/models -- every model maps to None -- but the method exists here
+        too so a caller does not need to special-case the provider kind."""
+        result = self._request(
+            "/v1/models", body=None, timeout=settings.llm_health_timeout_seconds
+        )
+        if isinstance(result, Failure):
+            return result
+        entries = result.get("data") or []
+        return {str(e["id"]): e.get("context_length") for e in entries if e.get("id")}
 
 
 def adapter_for(kind: str, *, base_url: str, api_key: str | None) -> _BaseAdapter:

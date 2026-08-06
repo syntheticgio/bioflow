@@ -165,6 +165,25 @@ class TestFetchModels:
         assert refreshed.status == "ok"
         assert refreshed.checked_at is not None
 
+    async def test_success_also_caches_context_windows(self, monkeypatch):
+        p = await provider_service.create(
+            name="A", kind=ProviderKind.OPENAI_COMPAT, base_url="http://x:1",
+            model="", api_key=None,
+        )
+        monkeypatch.setattr(
+            provider_service, "_list_models", lambda prov: ["alpha", "zeta"]
+        )
+        monkeypatch.setattr(
+            provider_service,
+            "_list_models_with_context",
+            lambda prov: {"alpha": 32000, "zeta": None},
+        )
+
+        await provider_service.fetch_models(str(p.id))
+
+        refreshed = await AiProvider.get(p.id)
+        assert refreshed.context_windows == {"alpha": 32000}
+
     async def test_failure_keeps_the_previous_cache(self, monkeypatch):
         """A listing endpoint having a bad day must not empty the dropdown."""
         from app.services.ai.adapters import Failure
