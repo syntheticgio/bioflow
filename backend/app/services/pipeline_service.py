@@ -3752,7 +3752,10 @@ async def launch_assembly_error_qc(
     if asm_path:
         payload["assembly_path"] = asm_path
 
-    for bam, prefix in ((ngs_bam, "ngs_bam"), (sms_bam, "sms_bam")):
+    for bam, prefix, bai_prefix in (
+        (ngs_bam, "ngs_bam", "ngs_bai"),
+        (sms_bam, "sms_bam", "sms_bai"),
+    ):
         if bam is None:
             continue
         # Validated provenance, not trust: a BAM aligned to some *other*
@@ -3774,17 +3777,17 @@ async def launch_assembly_error_qc(
         # are separate DataObjects with no path relationship -- resolve
         # the sidecar explicitly, the same way `launch_bam_stats` already
         # does (`bai_sha256`/`bai_path`). The handler reads
-        # `{prefix}_bai_sha256`/`{prefix}_bai_path` via
-        # `_resolve_input(payload, f"{prefix}_bai")` and raises
-        # PermanentError if neither resolves -- a missing index is not
-        # silently tolerated.
+        # `{bai_prefix}_sha256`/`{bai_prefix}_path` via
+        # `_resolve_input(payload, bai_prefix)` (called with `"ngs_bai"` /
+        # `"sms_bai"`, NOT `f"{prefix}_bai"`) and raises PermanentError if
+        # neither resolves -- a missing index is not silently tolerated.
         bai = await _sidecar_of_role(bam, SidecarRole.BAI)
         if bai is not None:
             bai_digest, bai_path = await _resolve_readable(bai)
             if bai_digest:
-                payload[f"{prefix}_bai_sha256"] = bai_digest
+                payload[f"{bai_prefix}_sha256"] = bai_digest
             if bai_path:
-                payload[f"{prefix}_bai_path"] = bai_path
+                payload[f"{bai_prefix}_path"] = bai_path
 
     dedup = f"assess_assembly_errors:{assembly.id}:{ngs_bam.id if ngs_bam else '-'}"
     dedup += f":{sms_bam.id if sms_bam else '-'}:{break_chimera}"
