@@ -1,9 +1,47 @@
-# local-bio-pipeliner
+<div align="center">
 
-A local, single-user web application for managing bioinformatics data files: projects,
-uploads, metadata, and a priority- and load-aware background job queue. Built as the
-foundation for later work — assigning rich metadata to files and launching computations
-and pipelines (alignment, variant calling).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-horizontal-reverse.png">
+  <img src="assets/lockup-horizontal-color.png" alt="bioflow" width="420">
+</picture>
+
+<br><br>
+
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/syntheticgio/bioflow)](https://github.com/syntheticgio/bioflow/commits/main)
+[![Top language](https://img.shields.io/github/languages/top/syntheticgio/bioflow)](https://github.com/syntheticgio/bioflow)
+[![Open issues](https://img.shields.io/github/issues/syntheticgio/bioflow)](https://github.com/syntheticgio/bioflow/issues)
+[![Noncommercial use only](https://img.shields.io/badge/use-noncommercial%20only-orange.svg)](LICENSE)
+[![Single-user, local-only](https://img.shields.io/badge/design-single--user%2C%20local--only-lightgrey.svg)](#security)
+
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](backend/pyproject.toml)
+[![React + TypeScript](https://img.shields.io/badge/React-TypeScript-61DAFB?logo=react&logoColor=white)](frontend)
+[![MongoDB](https://img.shields.io/badge/MongoDB-replica%20set-47A248?logo=mongodb&logoColor=white)](#storage-layout)
+
+<strong>A local, single-user web app for managing bioinformatics data: projects, uploads,
+metadata, and a priority- and load-aware background job queue.</strong>
+
+</div>
+
+<p align="center">
+  <img src="docs/images/screenshot-main.png" alt="bioflow main project view — two-pane file browser with metadata panel" width="100%">
+</p>
+
+<!--
+  Screenshot placeholder: drop a PNG at docs/images/screenshot-main.png and it
+  will render above automatically. A shot of the two-pane project/file view
+  (file list + detail panel) is the best "first impression" image.
+-->
+
+[Quick start](#quick-start) •
+[Security](#security) •
+[Architecture](#architecture) •
+[Job queue](#job-queue) •
+[Metadata and search](#metadata-and-search) •
+[Read preparation](#read-preparation) •
+[License](#license) •
+[Contributing](#contributing)
 
 ## Quick start
 
@@ -161,6 +199,15 @@ reference build and aligner, VCF gets caller and variant type — on top of comm
 fields. The schema drives a proper form (dropdowns for enums, number inputs with units,
 date pickers) and gives values a declared type so they sort and compare correctly.
 
+<p align="center">
+  <img src="docs/images/screenshot-metadata-search.png" alt="bioflow metadata search — typed field filters and tag search" width="100%">
+</p>
+
+<!--
+  Screenshot placeholder: docs/images/screenshot-metadata-search.png
+  A shot of the search bar with an active metadata filter and results.
+-->
+
 **Schemas suggest; they do not restrict.** An unknown key is stored as-is. A value that
 does not match its declared type produces a *warning* and is still saved — refusing to
 record what someone typed loses information, while telling them it looks wrong does not.
@@ -301,7 +348,7 @@ broke the running stack:
 - **Phase 6a** — read preparation: adapter trimming and QC (fastp), with an
   activity view and object lineage
 
-All three phases are verified running under `docker compose` against the real
+All phases are verified running under `docker compose` against the real
 drive. Phase 0/1: an uploaded FASTQ lands at `objects/a3/a31741…` with a matching
 SHA-256, identical bytes deduplicate to one blob with refcount 2, priority
 classes dispatch in order, a killed worker's job is requeued by the reaper and
@@ -367,6 +414,15 @@ Select a FASTQ and click **Trim** to adapter-trim and quality-filter it with
 [fastp](https://github.com/OpenGene/fastp), which is installed in the backend
 image along with FastQC.
 
+<p align="center">
+  <img src="docs/images/screenshot-activity-view.png" alt="bioflow activity view — running, queued, and finished jobs with before/after QC" width="100%">
+</p>
+
+<!--
+  Screenshot placeholder: docs/images/screenshot-activity-view.png
+  A shot of the Activity panel mid-trim, or the fastp before/after comparison.
+-->
+
 **Paired reads are trimmed together.** Mates must stay synchronized or
 downstream alignment breaks, so the launch dialog detects the R1/R2 partner and
 selects it by default. Trimming them separately is allowed but warns first.
@@ -415,19 +471,16 @@ the activity view, so it fails loudly rather than silently.
 A run's scratch directory and captured log are reclaimed by
 `reap_pipeline_scratch`; without it a cancelled run would strand whole FASTQ
 files.
-- Phase 2 — chunked/resumable uploads, register-in-place, GC
-- Phase 3 — format detection and header parsing (pysam)
-- Phase 4 — periodic jobs and the load-aware governor
-- Phase 5 — metadata schemas and search
-- Phase 6a — read preparation: adapter trimming and QC (fastp)
 
 ## License
 
-Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE) — free to
-use, modify, and redistribute for any noncommercial purpose. Commercial use
-requires a separate agreement with the copyright holder.
+Licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)** —
+free to use, modify, and redistribute for any noncommercial purpose.
+**Commercial use requires a separate agreement** with the copyright holder.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) — contributions require agreeing to a
-CLA before a first PR can be merged.
+See **[CONTRIBUTING.md](CONTRIBUTING.md)**. Contributions are welcome; a first
+pull request requires agreeing to a lightweight CLA (you keep copyright on
+what you write, the project maintainer gets a license broad enough to
+relicense the project in the future).
