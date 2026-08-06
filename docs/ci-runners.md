@@ -58,6 +58,35 @@ LaunchDaemon, so the runner starts at user login rather than at boot — but
 Docker Desktop has the same requirement, so the two agree. A Mac sitting at the
 login window has neither, and its jobs queue as described above.
 
+## GHCR package access
+
+The workflow's jobs request `packages: write`, but that only authorizes the
+*token*. A GHCR package separately has to admit the repository, and the two
+packages here were first pushed by hand with a personal access token under the
+user namespace ([#37](https://github.com/syntheticgio/bioflow/issues/37)), which
+links them to no repository at all.
+
+The symptom is a push that runs to completion and then fails on the last step:
+
+```
+ERROR: failed to solve: failed to push ghcr.io/syntheticgio/bioflow-web: denied: permission_denied: write_package
+```
+
+That is a *package permission* problem, not a token-scope or workflow-syntax
+one, and no amount of editing the workflow fixes it. It is a one-time manual
+grant, per package:
+
+1. Go to the package settings —
+   `https://github.com/users/syntheticgio/packages/container/bioflow-backend/settings`
+   and the same for `bioflow-web`.
+2. Under **Manage Actions access**, choose **Add repository**, pick
+   `syntheticgio/bioflow`, and set the role to **Write**.
+
+The workflow also stamps `org.opencontainers.image.source` on every build, which
+is what keeps the link in place afterwards and makes the package page point back
+at the repo. That label cannot bootstrap the link on its own, though — applying
+it requires a successful push, which is the thing being blocked.
+
 ## Layer caching
 
 Both runners persist their BuildKit state between jobs. The workflow's
