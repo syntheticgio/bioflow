@@ -122,12 +122,39 @@ fix belongs in this file (either dropping "appimage" back out of a full
 target list per platform some other way, or configuring AppImageLauncher
 to exempt `~/.cache/tauri/`), not in re-discovering this from scratch.
 
-This is a **local, unsigned build for testing on the machine that built it**,
-not the distribution story: macOS notarization and hosting a download for end
-users are still open work, tracked in
-[#39](https://github.com/syntheticgio/bioflow/issues/39). There is also no
-CI job that does this automatically yet — every bundle today is built by a
-person, by hand, on their own machine.
+`npm run tauri build` on its own produces a **local, unsigned build for
+testing on the machine that built it**. It is Gatekeeper-blocked anywhere
+else, so it is a smoke test rather than something to hand to anyone.
+
+## Building a signed, notarized macOS bundle
+
+```bash
+./build-macos.sh              # sign + notarize
+./build-macos.sh --no-notarize  # sign only, faster, local testing
+```
+
+Signing and notarization are two different things and both are required —
+a signed-but-un-notarized `.dmg` passes `codesign --verify` and is still
+blocked on every machine that downloads it. The script checks the keychain
+identity and the notarytool credential profile *before* starting the build,
+because both otherwise fail only at the very end.
+
+Full setup (certificate, App Store Connect API key, entitlements, and the
+verification that actually proves a download will work) is in
+[`docs/macos-signing.md`](../docs/macos-signing.md).
+
+**Release bundles are arm64-only.** The macOS CI job runs on the self-hosted
+Apple Silicon runner, so the `.dmg` will not run on an Intel Mac. A universal
+binary needs a rustup-managed toolchain; see the signing doc.
+
+## CI
+
+`.github/workflows/release-launcher.yml` builds macOS and Linux bundles and
+attaches them to a GitHub release on a `launcher-v*` tag. `workflow_dispatch`
+runs build without releasing, which makes it usable as a "does this still
+build" check. Both jobs are self-hosted — see
+[`docs/ci-runners.md`](../docs/ci-runners.md) for why this repo has no
+GitHub-hosted runners.
 
 A hand-built bundle only reaches as far as its own OS and CPU architecture.
 It bundles `docker-compose.yml` verbatim (see above), so it needs the

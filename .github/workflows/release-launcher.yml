@@ -1,0 +1,199 @@
+# Builds the native launcher bundles and attaches them to a GitHub release.
+# Closes the "bundles are produced by CI rather than a developer's machine"
+# half of #39; see docs/macos-signing.md for the signing story this automates.
+#
+# Windows is not built. The launcher targets macOS and Linux only -- see the
+# 2026-08-05 amendment in
+# docs/superpowers/specs/2026-08-04-native-launcher-contract-design.md.
+name: Release launcher
+
+on:
+  push:
+    tags: ['launcher-v*']
+  workflow_dispatch:
+    inputs:
+      notarize:
+        description: 'Notarize the macOS bundle (slow; needs Apple credentials)'
+        type: boolean
+        default: true
+
+# A launcher release moves real artifacts to a public download location.
+# Cancelling halfway leaves a release with some platforms attached and not
+# others, which is worse than waiting.
+concurrency:
+  group: release-launcher-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Both jobs run on self-hosted runners: this repo has no GitHub-hosted ones.
+  # See docs/ci-runners.md -- the repo is private under a personal account, so
+  # hosted macOS and arm64 Linux runners are not on the plan.
+  macos:
+    name: macOS bundle (arm64)
+    # The same Apple Silicon machine that builds linux/arm64 images in
+    # publish-images.yml. It also holds the Developer ID certificate in its
+    # login keychain -- so unlike a hosted runner, there is no need to ship a
+    # base64 .p12 through a secret and import it into a temporary keychain
+    # for *signing*. The tradeoff is that the signing key lives on a dev
+    # machine rather than in GitHub's secret store; for a single-maintainer
+    # project that is the simpler and less leaky option.
+    #
+    # Notarization is different: the App Store Connect API key (.p8) is
+    # shipped as a base64 secret (APPLE_API_KEY_P8_BASE64) and decoded to a
+    # per-job temp file, then removed in an `if: always()` step regardless of
+    # build outcome. Unlike the signing cert, this key isn't tied to Keychain
+    # access control, so leaving a plaintext copy on disk between runs would
+    # be needlessly exposed -- decoding it fresh per job and deleting it
+    # after keeps the same "runner already has what it needs" simplicity the
+    # signing cert gets, without a standing secret file on the machine.
+    runs-on: [self-hosted, macOS, ARM64]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the signing identity is present
+        # Fail in five seconds rather than after the full release build. The
+        # certificate expires yearly, and the failure mode when it lapses is a
+        # build that succeeds and produces an unsignable bundle.
+        run: |
+          set -euo pipefail
+          if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
+            echo "::error::No Developer ID Application identity in the runner keychain."
+            exit 1
+          fi
+          security find-identity -v -p codesigning | grep "Developer ID Application"
+
+      - name: Write the notarization API key
+        # RUNNER_TEMP is per-job and self-hosted-runner-local, not shared
+        # with other concurrent jobs, but is not automatically wiped the way
+        # a hosted runner's workspace is -- hence the explicit cleanup step
+        # below rather than relying on that.
+        id: apikey
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          key_path="${RUNNER_TEMP}/AuthKey.p8"
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          echo "path=$key_path" >> "$GITHUB_OUTPUT"
+
+      - name: Install frontend dependencies
+        working-directory: launcher
+        run: npm ci
+
+      - name: Build, sign, and notarize
+        working-directory: launcher
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          # build-macos.sh notarizes via these three (Tauri's own build-time
+          # notarization step reads them directly; it does not read a
+          # notarytool keychain profile) -- see docs/macos-signing.md.
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ steps.apikey.outputs.path }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.notarize == false }}" = "true" ]; then
+            ./build-macos.sh --no-notarize
+          else
+            ./build-macos.sh
+          fi
+
+      - name: Confirm the bundle is actually notarized
+        # The build script prints spctl output but does not fail on it, so the
+        # gate lives here. `codesign --verify` passing is not evidence of
+        # notarization -- a signed, un-notarized DMG passes it and is still
+        # blocked on every machine that downloads it. Nor is spctl on the
+        # .app enough on its own -- Tauri notarizes the .app but not the .dmg
+        # container by itself (see docs/macos-signing.md); build-macos.sh
+        # handles that as a second notarize+staple pass, and this check is
+        # against the .dmg specifically to confirm that pass actually ran.
+        if: ${{ inputs.notarize != false }}
+        working-directory: launcher
+        run: |
+          set -euo pipefail
+          dmg="$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -maxdepth 1 | head -n1)"
+          [ -n "$dmg" ] || { echo "::error::No .dmg was produced"; exit 1; }
+          if ! spctl -a -vvv -t install "$dmg" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"; then
+            echo "::error::${dmg} is not notarized -- a download of it will be blocked by Gatekeeper."
+            exit 1
+          fi
+
+      - name: Remove the decoded API key
+        if: always()
+        run: rm -f "${{ steps.apikey.outputs.path }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-macos-arm64
+          path: launcher/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  linux:
+    name: Linux bundle (amd64)
+    runs-on: [self-hosted, X64]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        # Tauri v2 needs the -dev packages, not just the runtime libraries --
+        # see launcher/README.md. Kept idempotent so a warm runner skips fast.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev build-essential
+
+      - name: Install frontend dependencies
+        working-directory: launcher
+        run: npm ci
+
+      - name: Build
+        # tauri.linux.conf.json restricts targets to deb and rpm; AppImage
+        # bundling hangs on any machine with AppImageLauncher installed. That
+        # overlay is auto-merged, so no --config flag is needed here.
+        working-directory: launcher
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: launcher-linux-amd64
+          path: |
+            launcher/src-tauri/target/release/bundle/deb/*.deb
+            launcher/src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+
+  release:
+    name: Attach bundles to the release
+    needs: [macos, linux]
+    # Only a tag push publishes. A manual workflow_dispatch run builds and
+    # leaves the artifacts on the run, which is what makes it usable as a
+    # "does this still build" check without creating a release.
+    if: startsWith(github.ref, 'refs/tags/launcher-v')
+    runs-on: [self-hosted, X64]
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: bundles
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ls -la bundles/
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "BioFlow Launcher ${TAG#launcher-v}" \
+            --generate-notes \
+            bundles/* \
+            || gh release upload "$TAG" --repo "${{ github.repository }}" bundles/* --clobber
