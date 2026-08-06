@@ -25,6 +25,7 @@ from app.models import (
     SidecarRole,
 )
 from app.pipelines.aligners import Aligner
+from app.queue.queue import publish_event
 
 log = get_logger(__name__)
 
@@ -929,6 +930,30 @@ async def _apply_summarize_object(result: dict, *, owner: str) -> None:
     )
 
     log.info("summary_applied", object_id=object_id, model=result.get("model"))
+
+
+async def _apply_answer_project_question(result: dict, *, owner: str) -> None:
+    """A structural no-op on the data model -- there is no object this job is
+    "about", so nothing gets merged into `facts` the way every other applier
+    does. It exists only so the dispatch table's exhaustiveness holds (per
+    CLAUDE.md's registry-audit guidance, this is the genuinely-nothing-to-derive
+    case, not a corner being cut) and so a `qa.answered` event gets published --
+    the handler already wrote the answer straight onto `ProjectConversation`
+    itself, since that document, not a `DataObject`, is what a chat answer
+    belongs to.
+
+    A skip (no provider configured, or the model failed) means no new turn was
+    written, so there is nothing for the frontend to refetch -- the event is
+    published only on an actual answer.
+    """
+    if "answer" not in result:
+        return
+
+    await publish_event(
+        "qa.answered",
+        {"conversation_id": result["conversation_id"]},
+        owner=owner,
+    )
 
 
 async def _apply_build_index(result: dict, *, owner: str) -> None:
@@ -1993,6 +2018,7 @@ _APPLIERS = {
     "trim_reads": _apply_trim_reads,
     "run_qc": _apply_run_qc,
     "summarize_object": _apply_summarize_object,
+    "answer_project_question": _apply_answer_project_question,
     "download_sra_run": _apply_sra_download,
     "download_assembly": _apply_assembly_download,
     "download_uniprot": _apply_uniprot_download,
