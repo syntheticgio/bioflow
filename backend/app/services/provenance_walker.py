@@ -198,3 +198,41 @@ def extract_params(facts: dict) -> dict:
         if key.endswith("_params") and isinstance(value, dict) and value:
             return value
     return {}
+
+
+# Fact keys naming a parent that is a material rather than a step. These are
+# written by the `*_provenance` builders, which already distinguish their
+# parents by role -- this reads a distinction the data already makes rather
+# than inventing one.
+_SUPPORTING_PARENT_KEYS = ("reference_object_id", "annotation_object_id")
+
+# Roles that are materials when the facts do not say. Used only as a
+# fallback, for objects predating their step's provenance builder.
+_SUPPORTING_ROLES = frozenset({ObjectRole.REFERENCE, ObjectRole.ANNOTATION})
+
+
+def classify_parent(
+    parent_id: PydanticObjectId,
+    *,
+    facts: dict,
+    role: ObjectRole | None,
+) -> Literal["spine", "supporting"]:
+    """Whether a parent is part of the specimen lineage or a material used.
+
+    Facts win over role: a step that recorded `reference_object_id` is making
+    an explicit claim about how that parent was used, while role is a
+    property of the object in isolation.
+
+    The default is `spine`. That direction matters: a misclassified spine
+    parent appears in the materials list (visible, mildly wrong), while a
+    misclassified material would drop out of the step sequence entirely.
+    """
+    for key in _SUPPORTING_PARENT_KEYS:
+        value = facts.get(key)
+        if value and str(value) == str(parent_id):
+            return "supporting"
+
+    if role is not None and role in _SUPPORTING_ROLES:
+        return "supporting"
+
+    return "spine"
