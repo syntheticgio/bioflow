@@ -23,6 +23,18 @@
 # clone + checkout, to keep the same minimal-image-size tradeoff
 # install-quast.sh makes -- a full history clone would pull far more than
 # this small tree needs just to land on one commit.
+#
+# `bc` is a real dependency, not an optional one: runSR.sh/runLR.sh/
+# runAQI.sh call it 7 times total, all in parameter-sanity guards
+# (negative/zero checks on mapq, threads, clip-rate cutoffs). Confirmed
+# against a real run on 2026-08-06 that these guards fail *open* without
+# it -- `bc: command not found` followed by `[: -eq: unary operator
+# expected`, which the shell's own error handling treats as the
+# condition being false, so CRAQ still ran and produced correct output.
+# Installed anyway: BioFlow never passes an invalid parameter that would
+# need catching today, but a silently-skipped safety check is exactly
+# the shape of bug this project's own CLAUDE.md warns about, and `bc` is
+# a few KB.
 
 set -eu
 
@@ -30,7 +42,7 @@ CRAQ_COMMIT="${CRAQ_COMMIT:-63509381fe85c4bd5832f1c67d0279c823ce9592}"
 INSTALL_DIR="/opt/craq"
 
 apt-get update
-apt-get install -y --no-install-recommends git
+apt-get install -y --no-install-recommends git bc
 
 echo "Fetching CRAQ ${CRAQ_COMMIT}..."
 mkdir -p "${INSTALL_DIR}"
