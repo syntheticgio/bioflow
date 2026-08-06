@@ -56,6 +56,7 @@ class TaskSlot(StrEnum):
 
     FILE_SUMMARY = "file_summary"
     ORGANISM_BLURB = "organism_blurb"
+    PROJECT_QA = "project_qa"
 
     @property
     def label(self) -> str:
@@ -65,6 +66,7 @@ class TaskSlot(StrEnum):
 _SLOT_LABELS = {
     TaskSlot.FILE_SUMMARY: "File summaries",
     TaskSlot.ORGANISM_BLURB: "Organism blurbs",
+    TaskSlot.PROJECT_QA: "Project Q&A chat",
 }
 
 
