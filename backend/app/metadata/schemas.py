@@ -39,6 +39,17 @@ class FieldDef:
     # Marks fields worth prompting for. Nothing is ever *required*: a file with
     # incomplete metadata is still a file we must not refuse to store.
     suggested: bool = False
+    # True when the values come from outside this repo -- NCBI, an instrument
+    # vendor, a lab's own kit names -- so `options` is a set of suggestions
+    # that will never be complete. The UI renders these as a free-text combo
+    # rather than a <select>, and an off-list value is not a warning.
+    #
+    # Inclusion rule: open if the vocabulary is owned elsewhere; closed if this
+    # repo or a published spec defines the complete set. Deliberately a
+    # hand-maintained per-field flag and deliberately without an exhaustiveness
+    # test -- see the spec's note on CLAUDE.md's three-way registry split. This
+    # is the middle case, where forcing coverage would make a detector guess.
+    open_vocabulary: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +61,7 @@ class FieldDef:
             "help": self.help,
             "group": self.group,
             "suggested": self.suggested,
+            "open_vocabulary": self.open_vocabulary,
         }
 
 
@@ -188,6 +200,7 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
                  "Illumina HiSeq", "Oxford Nanopore", "PacBio", "Element", "Other"),
         group="Sequencing",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef("run_id", "Run ID", group="Sequencing"),
     FieldDef("flowcell", "Flowcell", group="Sequencing"),

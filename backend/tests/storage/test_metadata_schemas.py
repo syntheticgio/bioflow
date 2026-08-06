@@ -139,6 +139,15 @@ class TestApiShape:
         assert "GATK HaplotypeCaller" in flat["variant_caller"]["options"]
         assert flat["variant_caller"]["type"] == FieldType.ENUM.value
 
+    def test_open_vocabulary_reaches_the_api(self):
+        """The frontend picks its widget from this flag, so a field that is
+        open on the backend and closed on the wire renders as a <select>
+        and silently blocks the values SRA writes."""
+        out = schemas.schema_for_api(FormatKind.FASTQ)
+        flat = {f["key"]: f for g in out["groups"] for f in g["fields"]}
+        assert flat["platform"]["open_vocabulary"] is True
+        assert flat["read_type"]["open_vocabulary"] is False
+
 
 class TestRoleAwareFields:
     def test_reference_role_replaces_format_fields(self):
