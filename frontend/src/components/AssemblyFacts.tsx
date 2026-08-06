@@ -130,6 +130,21 @@ export function AssemblyFacts({ facts, objectId }: Props) {
     | undefined;
   const hasMisassembly = misassemblyTool !== undefined;
 
+  // Assembly errors: CRAQ, reference-free. Structural facts (CSE, S-AQI,
+  // AQI) are absent rather than zero on a short-read-only run -- the
+  // handler drops them because CRAQ prints meaningless values for them
+  // when no long reads were supplied. `undefined` here means "not
+  // measured", and the block must not render a 0 in its place.
+  const errorTool = facts.assembly_error_tool as string | undefined;
+  const errorAqi = facts.assembly_error_aqi as number | undefined;
+  const errorRAqi = facts.assembly_error_r_aqi as number | undefined;
+  const errorSAqi = facts.assembly_error_s_aqi as number | undefined;
+  const errorCre = facts.assembly_error_cre_count as number | undefined;
+  const errorCse = facts.assembly_error_cse_count as number | undefined;
+  const errorHasNgs = facts.assembly_error_has_ngs as boolean | undefined;
+  const errorHasSms = facts.assembly_error_has_sms as boolean | undefined;
+  const hasAssemblyErrors = errorTool !== undefined;
+
   // A file named for a full assembly that holds one chromosome is a real and
   // easily-missed problem. Compare only when both sides are known.
   const countDiverges =
@@ -146,7 +161,8 @@ export function AssemblyFacts({ facts, objectId }: Props) {
     !assemblyError &&
     !hasContiguity &&
     !hasCompleteness &&
-    !hasMisassembly
+    !hasMisassembly &&
+    !hasAssemblyErrors
   ) {
     return (
       <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
@@ -468,6 +484,71 @@ export function AssemblyFacts({ facts, objectId }: Props) {
               <ReportLink href={api.qcReportUrl(objectId, misassemblyReportPath)}>
                 QUAST report
               </ReportLink>
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasAssemblyErrors && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            Assembly errors ({errorTool}, reference-free)
+          </div>
+          <dl className="kv">
+            {errorAqi !== undefined && (
+              <>
+                <dt>AQI</dt>
+                <dd>
+                  {errorAqi.toFixed(1)}{" "}
+                  <span style={{ color: "var(--text-faint)" }}>
+                    {errorAqi > 90
+                      ? "reference quality"
+                      : errorAqi >= 80
+                        ? "high quality"
+                        : errorAqi >= 60
+                          ? "draft quality"
+                          : "low quality"}
+                  </span>
+                </dd>
+              </>
+            )}
+            {errorRAqi !== undefined && (
+              <>
+                <dt>R-AQI (regional)</dt>
+                <dd>{errorRAqi.toFixed(1)}</dd>
+              </>
+            )}
+            {errorSAqi !== undefined && (
+              <>
+                <dt>S-AQI (structural)</dt>
+                <dd>{errorSAqi.toFixed(1)}</dd>
+              </>
+            )}
+            {errorCre !== undefined && (
+              <>
+                <dt>Regional errors (CRE)</dt>
+                <dd>{errorCre.toLocaleString()}</dd>
+              </>
+            )}
+            {errorCse !== undefined && (
+              <>
+                <dt>Structural errors (CSE)</dt>
+                <dd>{errorCse.toLocaleString()}</dd>
+              </>
+            )}
+          </dl>
+          {errorHasSms === false && (
+            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 4 }}>
+              Short reads only: structural errors are not reported, because
+              CRAQ can barely detect them without long reads.
+            </div>
+          )}
+          {errorHasNgs === false && (
+            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 4 }}>
+              Long reads only: regional errors are undercounted, especially
+              for ONT-based assemblies.
             </div>
           )}
         </div>
