@@ -28,6 +28,10 @@ dependencies = [
     # something else, since a QC tool's importability should not depend on
     # an undeclared side effect of an unrelated package's own requirements.
     "packaging>=24",
+    # MCP server, mounted at /api/v1/mcp. Pinned below 3 because the
+    # Streamable HTTP transport's ASGI surface is what app/mcp/server.py
+    # mounts, and a major bump is where that would change.
+    "mcp>=2.0,<3",
 ]
 
 [project.optional-dependencies]
