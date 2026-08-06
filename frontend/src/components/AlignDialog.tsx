@@ -185,7 +185,12 @@ export function AlignDialog({
     setRgOverrides((o) => ({ ...o, [key]: value }));
 
   const rgComplete =
-    !!readGroup?.sample && !!readGroup?.library && !!readGroup?.platform;
+    // Platform is deliberately not required: the SAM spec says to omit @RG PL
+    // when the technology is unknown, so a file whose instrument model is not
+    // in the SAM vocabulary has no platform to offer and must still be
+    // alignable. Sample and library remain required -- ReadGroup.from_dict
+    // rejects those server-side.
+    !!readGroup?.sample && !!readGroup?.library;
   const ready =
     defaults != null &&
     chosenId != null &&
