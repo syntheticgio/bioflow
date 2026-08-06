@@ -503,13 +503,7 @@ export function AssemblyFacts({ facts, objectId }: Props) {
                 <dd>
                   {errorAqi.toFixed(1)}{" "}
                   <span style={{ color: "var(--text-faint)" }}>
-                    {errorAqi > 90
-                      ? "reference quality"
-                      : errorAqi >= 80
-                        ? "high quality"
-                        : errorAqi >= 60
-                          ? "draft quality"
-                          : "low quality"}
+                    {aqiBand(errorAqi)}
                   </span>
                 </dd>
               </>
@@ -561,6 +555,20 @@ export function AssemblyFacts({ facts, objectId }: Props) {
       )}
     </div>
   );
+}
+
+/**
+ * CRAQ's AQI quality bands, also documented in
+ * backend/app/pipelines/tools.py's TOOL_META["craq"] -- keep the two in sync
+ * if the thresholds ever need correcting. The top band is exclusive
+ * ("reference quality" needs AQI > 90); the rest are inclusive at their
+ * lower edge.
+ */
+function aqiBand(aqi: number): string {
+  if (aqi > 90) return "reference quality";
+  if (aqi >= 80) return "high quality";
+  if (aqi >= 60) return "draft quality";
+  return "low quality";
 }
 
 /** Base counts read better in Gb/Mb than as raw digits. */
