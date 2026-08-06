@@ -92,7 +92,9 @@ def assemble_reads(ctx: JobContext) -> dict:
         params=params,
     )
 
-    progress = assembly_runner.AssemblyProgress()
+    progress = assembly_runner.AssemblyProgress(
+        stage_order=assembly_runner.flye_stage_order(params)
+    )
     ctx.progress(phase="starting", pct=None, message=f"starting {assembler.value}")
     ctx.extend_lease(ASSEMBLY_LEASE_SECONDS)
 

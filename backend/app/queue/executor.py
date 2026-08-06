@@ -81,10 +81,11 @@ class ProgressParser(Protocol):
     def snapshot(self) -> dict:
         """Current progress as kwargs for JobContext.progress().
 
-        Only includes keys this parser actually knows -- a parser with no
-        phase_total (assembly's open-ended stage list) simply omits the key,
-        rather than passing None and overwriting a value ctx.progress()
-        would otherwise leave unchanged.
+        Only includes keys this parser actually knows -- a parser
+        constructed without a declared stage order (assembly's
+        `AssemblyProgress` when built with no `stage_order`) simply omits
+        phase_total, rather than passing None and overwriting a value
+        ctx.progress() would otherwise leave unchanged.
         """
         ...
 
