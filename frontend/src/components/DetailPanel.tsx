@@ -30,6 +30,7 @@ import { MetadataEditor } from "./MetadataEditor";
 import { OrganismBlurb } from "./OrganismBlurb";
 import { ComputationHistory } from "./ComputationHistory";
 import { Computations } from "./Computations";
+import { ProvenanceNarrative } from "./ProvenanceNarrative";
 import { ManageFile } from "./ManageFile";
 import { PipelineSuggestions } from "./PipelineSuggestions";
 import { SchemaMetadataEditor } from "./SchemaMetadataEditor";
@@ -848,6 +849,7 @@ function ObjectDetail({ id }: { id: string }) {
                   reingestDisabled={!obj.blob_sha256}
                 />
               }
+              provenanceNarrative={<ProvenanceNarrative objectId={obj.id} />}
               confirmingDelete={confirmingDelete}
               setConfirmingDelete={setConfirmingDelete}
               remove={remove}
@@ -1225,6 +1227,7 @@ function MetadataTab({
 function ActionsTab({
   obj,
   computations,
+  provenanceNarrative,
   confirmingDelete,
   setConfirmingDelete,
   remove,
@@ -1233,6 +1236,7 @@ function ActionsTab({
 }: {
   obj: ObjectDetailData;
   computations: React.ReactNode;
+  provenanceNarrative: React.ReactNode;
   confirmingDelete: boolean;
   setConfirmingDelete: (v: boolean) => void;
   remove: { mutate: () => void; isPending: boolean };
@@ -1242,6 +1246,7 @@ function ActionsTab({
   return (
     <>
       {computations}
+      {provenanceNarrative}
 
       <div className="section">
         <div className="section-title">Launch a pipeline on this file</div>
