@@ -71,3 +71,40 @@ async def test_whoami_rejects_a_malformed_owner_cleanly():
     resolve_owner already guards against for the REST routes."""
     with pytest.raises(ProfileUnresolvedError):
         await tools.whoami(owner="not-a-valid-object-id")
+
+
+async def test_suggest_next_returns_cards_with_their_reasons(monkeypatch):
+    """The reasons are the point.
+
+    An agent that learns "no aligner is installed" can act; one that gets a
+    bare "unavailable" is stuck. This asserts the reason survives the trip
+    through the tool rather than being flattened into a status.
+    """
+    profile = await profile_service.create_profile(username="tools-suggest")
+    owner = profile.owner_id()
+    project = await project_service.create_project(name="P", owner=owner)
+
+    from app.mcp import tools as mcp_tools
+
+    async def fake_suggestions_for(obj):
+        return [
+            {"kind": "align", "status": "unavailable", "reason": "No aligner is installed"},
+            {"kind": "qc", "status": "available", "payload": {"object_id": "x"}},
+        ]
+
+    class FakeObject:
+        id = "507f1f77bcf86cd799439011"
+        name = "reads.fastq.gz"
+
+    async def fake_get_object(object_id, *, owner):
+        return FakeObject()
+
+    monkeypatch.setattr(
+        "app.services.suggestion_service.suggestions_for", fake_suggestions_for
+    )
+    monkeypatch.setattr("app.services.object_service.get_object", fake_get_object)
+
+    result = await mcp_tools.suggest_next("507f1f77bcf86cd799439011", owner=owner)
+
+    unavailable = [s for s in result["suggestions"] if s["status"] == "unavailable"]
+    assert unavailable[0]["reason"] == "No aligner is installed"

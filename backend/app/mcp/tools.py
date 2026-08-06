@@ -125,6 +125,23 @@ async def get_object(object_id: str, *, owner: str) -> dict:
     return summary
 
 
+async def suggest_next(object_id: str, *, owner: str) -> dict:
+    """What can be run against this object right now, and why not otherwise.
+
+    The highest-value tool here. It lets an agent ask the platform what to do
+    instead of inferring it from the guides, and the answers are computed from
+    the real object -- so they account for what is installed on this machine,
+    whether a reference has an index, and what has already been run.
+
+    Cards carry `payload` when they are runnable: hand that straight to
+    `run_pipeline` rather than constructing one.
+    """
+    from app.services import suggestion_service
+
+    obj = await object_service.get_object(PydanticObjectId(object_id), owner=owner)
+    return {"suggestions": await suggestion_service.suggestions_for(obj)}
+
+
 # Every tool name the server registers. `tests/mcp/test_guides.py` checks
 # guides against this, and `tests/mcp/test_surface.py` checks it for anything
 # destructive that should not be here.
@@ -135,4 +152,5 @@ TOOL_NAMES: set[str] = {
     "bioflow_create_project",
     "bioflow_list_objects",
     "bioflow_get_object",
+    "bioflow_suggest_next",
 }
