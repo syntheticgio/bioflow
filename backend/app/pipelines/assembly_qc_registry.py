@@ -1,9 +1,23 @@
-"""One spec per assembly-completeness tool: the same shape `assembler_registry`
+"""One spec per assembly-*completeness* tool: the same shape `assembler_registry`
 uses, for the same reason. There is exactly one usable tool today, but the
-seam is the point -- CRAQ, Merqury and a declared-but-unavailable BUSCO all
-become specs here rather than edits spread across a runner, a handler and a
-card, which is what happened before `assembler_registry` existed for
-assemblers.
+seam is the point -- a declared-but-unavailable BUSCO becomes a spec here
+rather than an edit spread across a runner, a handler and a card, which is
+what happened before `assembler_registry` existed for assemblers.
+
+**This module is completeness-only, despite an earlier version of this
+docstring promising CRAQ and Merqury a home here too -- that promise was
+wrong and is retracted, corrected while building QUAST's misassembly QC
+slice (2026-08-05).** The shape only fits a tool whose one per-run parameter
+is a lineage compared against an OrthoDB version, which is what `odb` on
+`CompletenessToolSpec` encodes. QUAST takes a second FASTA and has no
+lineage at all; forcing it in here would mean a nullable `odb` and a
+`spec_for` returning two structurally different shapes depending on which
+tool was asked for, which is worse than the duplication this registry exists
+to avoid. It has no registry of its own -- `quast_runner.py` and
+`assembly_qc_handlers.assess_misassemblies` are the whole of it, the same as
+any other single-tool slice before it grows a second option. CRAQ and
+Merqury, when they ship, should look at what QUAST actually needed rather
+than at this module.
 
 Unlike `assembler_registry`, dispatch is not keyed on chemistry: any
 assembly-shaped FASTA is eligible, and the parameter that varies per run is
