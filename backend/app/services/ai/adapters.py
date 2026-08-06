@@ -243,8 +243,14 @@ class AnthropicAdapter(_BaseAdapter):
         return headers
 
     def complete(
-        self, *, system: str, user: str, model: str, max_tokens: int
-    ) -> Completion | Failure:
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec] | None = None,
+    ) -> Completion | ToolCall | Failure:
         body = {
             "model": model,
             # Top-level, not a message with role "system". This is the single
@@ -254,6 +260,11 @@ class AnthropicAdapter(_BaseAdapter):
             "temperature": 0.2,
             "max_tokens": max_tokens,
         }
+        if tools:
+            body["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters}
+                for t in tools
+            ]
         result = self._request(
             "/v1/messages", body=body, timeout=settings.llm_timeout_seconds
         )
@@ -261,7 +272,27 @@ class AnthropicAdapter(_BaseAdapter):
             return result
 
         try:
-            text = result["content"][0]["text"]
+            blocks = result["content"]
+        except (KeyError, TypeError):
+            log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
+            return Failure(FailureReason.BAD_RESPONSE)
+
+        if not isinstance(blocks, list) or not blocks:
+            return Failure(FailureReason.BAD_RESPONSE)
+
+        tool_use_blocks = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"]
+        if tool_use_blocks:
+            if len(tool_use_blocks) > 1:
+                log.info("ai_multi_tool_call_dropped", dropped=len(tool_use_blocks) - 1)
+            block = tool_use_blocks[0]
+            try:
+                return ToolCall(id=block["id"], name=block["name"], arguments=block["input"])
+            except KeyError:
+                log.warning("ai_tool_use_block_unparseable")
+                return Failure(FailureReason.BAD_RESPONSE)
+
+        try:
+            text = blocks[0]["text"]
         except (KeyError, IndexError, TypeError):
             log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
             return Failure(FailureReason.BAD_RESPONSE)
