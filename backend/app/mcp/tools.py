@@ -140,6 +140,101 @@ async def suggest_next(object_id: str, *, owner: str) -> dict:
     return {"suggestions": await suggestion_service.suggestions_for(obj)}
 
 
+async def run_pipeline(kind: str, params: dict, *, owner: str) -> dict:
+    """Start a pipeline job. Returns immediately with a job id.
+
+    `kind` is validated against `all_handlers()` -- the same registry backing
+    `GET /jobs/types` -- rather than a list written here, so a newly
+    registered handler is runnable without touching this module.
+
+    The unknown-kind error names the valid values on purpose: this is the
+    message an agent reads to correct itself.
+    """
+    from app.errors import ValidationError
+    from app.queue import queue
+    from app.queue.registry import all_handlers
+
+    known = all_handlers()
+    if kind not in known:
+        raise ValidationError(
+            f"Unknown pipeline kind: {kind!r}. Valid kinds: {sorted(known)}",
+            details={"kind": kind, "valid": sorted(known)},
+        )
+
+    job = await queue.enqueue(kind, owner=owner, payload=params)
+
+    if job is None:
+        # enqueue returns None when a matching non-terminal job already
+        # exists. That is a successful outcome, not a failure -- saying so
+        # stops an agent retrying into the same dedup guard.
+        return {"job_id": None, "deduplicated": True, "kind": kind}
+
+    return {"job_id": str(job.id), "kind": kind, "state": job.state.value}
+
+
+async def get_job(job_id: str, *, owner: str) -> dict:
+    """A job's current state. Poll this for progress; jobs are asynchronous."""
+    from app.errors import NotFoundError
+    from app.models import Job
+
+    job = await Job.get(PydanticObjectId(job_id))
+    if job is None or job.owner != owner:
+        raise NotFoundError(f"Job not found: {job_id}")
+
+    return {
+        "job_id": str(job.id),
+        "type": job.type,
+        "state": job.state.value,
+        "attempts": job.attempts,
+        "error": job.error.model_dump() if job.error else None,
+    }
+
+
+async def list_jobs(*, owner: str, limit: int = 50) -> dict:
+    """Recent jobs for this profile, newest first."""
+    from app.models import Job
+
+    jobs = await Job.find({"owner": owner}).sort("-created_at").limit(limit).to_list()
+    return {
+        "jobs": [
+            {
+                "job_id": str(j.id),
+                "type": j.type,
+                "state": j.state.value,
+                "owner": j.owner,
+            }
+            for j in jobs
+        ]
+    }
+
+
+async def cancel_job(job_id: str, *, owner: str) -> dict:
+    """Stop a running or queued job.
+
+    The one "undo what I started" affordance in this surface: an agent that
+    can launch a multi-hour aligner should be able to halt it.
+
+    Cancellation is cooperative -- a running job is signalled, not killed
+    instantly -- so the return value is the disposition `queue.request_cancel`
+    reports rather than a bare success flag: "cancelled" (it was queued/delayed
+    and is fully stopped now), "cancelling" (it was running and has been
+    signalled to stop), or "already_terminal" (it had already finished).
+    """
+    from app.errors import NotFoundError
+    from app.models import Job
+    from app.queue import queue
+
+    job = await Job.get(PydanticObjectId(job_id))
+    if job is None or job.owner != owner:
+        raise NotFoundError(f"Job not found: {job_id}")
+
+    outcome = await queue.request_cancel(str(job_id))
+    if outcome == "not_found":
+        raise NotFoundError(f"Job not found: {job_id}")
+
+    return {"job_id": job_id, "outcome": outcome}
+
+
 # Every tool name the server registers. `tests/mcp/test_guides.py` checks
 # guides against this, and `tests/mcp/test_surface.py` checks it for anything
 # destructive that should not be here.
@@ -151,4 +246,8 @@ TOOL_NAMES: set[str] = {
     "bioflow_list_objects",
     "bioflow_get_object",
     "bioflow_suggest_next",
+    "bioflow_run_pipeline",
+    "bioflow_get_job",
+    "bioflow_list_jobs",
+    "bioflow_cancel_job",
 }

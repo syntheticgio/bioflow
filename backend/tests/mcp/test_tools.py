@@ -135,3 +135,68 @@ async def test_suggest_next_returns_an_empty_list_when_nothing_applies(monkeypat
     result = await mcp_tools.suggest_next("507f1f77bcf86cd799439011", owner=owner)
 
     assert result == {"suggestions": []}
+
+
+async def test_run_pipeline_rejects_an_unknown_kind():
+    """The error names the valid kinds.
+
+    An agent that gets "unknown kind: algn" and a list can correct itself; one
+    that gets a bare 400 retries the same thing.
+    """
+    profile = await profile_service.create_profile(username="tools-run-bad")
+
+    from app.errors import ValidationError
+
+    with pytest.raises(ValidationError) as exc:
+        await tools.run_pipeline("not_a_real_kind", {}, owner=profile.owner_id())
+
+    assert "not_a_real_kind" in str(exc.value)
+
+
+async def test_run_pipeline_enqueues_a_known_kind(monkeypatch):
+    profile = await profile_service.create_profile(username="tools-run-ok")
+    owner = profile.owner_id()
+
+    captured = {}
+
+    async def fake_enqueue(job_type, *, owner, payload=None, **kwargs):
+        captured["job_type"] = job_type
+        captured["owner"] = owner
+        captured["payload"] = payload
+
+        class FakeState:
+            value = "queued"
+
+        class FakeJob:
+            id = "507f1f77bcf86cd799439099"
+            type = job_type
+            state = FakeState()
+
+        return FakeJob()
+
+    monkeypatch.setattr("app.queue.queue.enqueue", fake_enqueue)
+
+    from app.queue import registry
+
+    # Handler modules are imported for their registration side effects only
+    # at app/worker startup (app/main.py, app/queue/worker.py), not merely by
+    # importing app.queue.registry -- so a test process that never started
+    # either needs this explicit load first. See
+    # tests/services/test_provenance_verbs.py for the same pattern.
+    registry.load_handlers()
+    kind = next(iter(registry.all_handlers()))
+
+    result = await tools.run_pipeline(kind, {"object_id": "abc"}, owner=owner)
+
+    assert captured["job_type"] == kind
+    assert captured["owner"] == owner
+    assert result["job_id"] == "507f1f77bcf86cd799439099"
+
+
+async def test_list_jobs_does_not_see_another_owners_jobs():
+    a = await profile_service.create_profile(username="tools-jobs-a")
+    b = await profile_service.create_profile(username="tools-jobs-b")
+
+    result = await tools.list_jobs(owner=b.owner_id())
+
+    assert all(j["owner"] != a.owner_id() for j in result.get("jobs", []))
