@@ -1137,6 +1137,88 @@ def build_scaffold_card(obj, references) -> SuggestionCard | None:
     )
 
 
+def build_misassembly_card(obj, references) -> SuggestionCard | None:
+    """Reference-based misassembly QC for a draft assembly, by QUAST.
+
+    Anchored on the draft, `references` reused verbatim from the orchestrator's
+    `scaffold_references` -- the identical input shape `build_scaffold_card`
+    takes (a draft assembly plus the project's reference-role FASTA), so the
+    same list already excludes the draft from its own candidate pool. Without
+    that exclusion a project with one de novo assembly and no other reference
+    would offer to QUAST it against itself: a de novo assembly BioFlow
+    produced carries `ObjectRole.REFERENCE` (`results.py:1246`), so it is in
+    the reference pool by default.
+
+    Same "ambiguity is unavailable, not a guess" rule `build_scaffold_card`
+    documents, copied verbatim rather than re-derived: a project holding two
+    reference-role FASTA for one organism is the *ordinary* case (the real
+    yeast project carries both the GCA and GCF genomic FASTA), not an edge
+    case. When this card is unavailable for that reason, the manual dialog --
+    which carries its own reference chooser -- is where the launch actually
+    happens; this card only covers the single-reference case because cards
+    have no room for a chooser (`SuggestionCard.launch`'s own docstring:
+    `body` must be the complete request, assembled with nothing left for the
+    client to pick).
+
+    `category="ASSEMBLY_QC"`, matching the completeness card -- this
+    evaluates an assembly rather than improving it, unlike the
+    `REFERENCE_ASSEMBLY` cards (polish, scaffold) beside it in this module.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Check for misassemblies"
+    description = (
+        "Align this assembly against a reference and report structural "
+        "disagreements -- relocations, translocations and inversions -- "
+        "that neither contiguity nor completeness can see, with QUAST."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="misassembly",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.quast()
+    if not tool.available:
+        return unavailable(tool.error or "QUAST is not installed.")
+
+    if not references:
+        return unavailable(
+            "Misassembly QC needs a reference assembly, and this project "
+            "has none."
+        )
+    if len(references) > 1:
+        return unavailable(
+            f"This project has {len(references)} reference assemblies. Use "
+            "the Misassembly QC tool to pick one."
+        )
+
+    reference = references[0]
+    return SuggestionCard(
+        kind="misassembly",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"Reference: {reference.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/misassemblies",
+            "body": {
+                "draft_object_id": str(obj.id),
+                "reference_object_id": str(reference.id),
+            },
+        },
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -1342,6 +1424,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("consensus", lambda: build_consensus_card(obj, alignment_target)),
         ("polish", lambda: build_polish_card(obj, read_sets)),
         ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
+        ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
     )
 
     cards: list[dict] = []
