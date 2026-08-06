@@ -7,6 +7,7 @@ without HTTP.
 """
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from beanie import PydanticObjectId
@@ -591,6 +592,40 @@ def _params_fingerprint(params: dict) -> str:
 
 ALIGNABLE_KINDS = {FormatKind.FASTQ}
 REFERENCE_KINDS = {FormatKind.FASTA}
+
+class SamPlatform(StrEnum):
+    """The SAM `@RG PL` vocabulary, verbatim from the specification.
+
+    Source: https://github.com/samtools/hts-specs, `SAMv1.tex`, the `@RG` `PL`
+    row -- "Valid values: CAPILLARY, DNBSEQ (MGI/BGI), ELEMENT, HELICOS,
+    ILLUMINA, IONTORRENT, LS454, ONT (Oxford Nanopore), PACBIO (Pacific
+    Biosciences), SINGULAR, SOLID, and ULTIMA."
+
+    Membership is set by that standard, not by what this codebase happens to
+    detect. Two members are currently produced by no pattern -- CAPILLARY,
+    which nothing sequences here, and DNBSEQ, which is new in this commit --
+    and that is correct: a reachability test of the kind
+    `test_every_option_is_reachable_by_some_token` applies would be wrong for
+    an externally-owned vocabulary.
+
+    There is deliberately no OTHER member. It is not in the spec, and the
+    spec's remedy for an unrecognized technology is to omit the field rather
+    than substitute a placeholder -- see `sam_platform`.
+    """
+
+    CAPILLARY = "CAPILLARY"
+    DNBSEQ = "DNBSEQ"
+    ELEMENT = "ELEMENT"
+    HELICOS = "HELICOS"
+    ILLUMINA = "ILLUMINA"
+    IONTORRENT = "IONTORRENT"
+    LS454 = "LS454"
+    ONT = "ONT"
+    PACBIO = "PACBIO"
+    SINGULAR = "SINGULAR"
+    SOLID = "SOLID"
+    ULTIMA = "ULTIMA"
+
 
 # The metadata vocabulary is human-facing; SAM's PL field has its own
 # controlled vocabulary, and a value outside it makes downstream callers behave
