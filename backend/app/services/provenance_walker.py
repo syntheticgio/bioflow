@@ -172,6 +172,71 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
 # worse than a clumsy sentence.
 GENERIC_VERB = "processed with"
 
+# Fact keys that describe a *downstream* job's step, written onto this
+# object because it was that job's input rather than its output -- not a
+# claim about how this object itself was produced.
+#
+# `trim_reads` is the one confirmed case: `_apply_trim_reads` in
+# `queue/results.py` writes `trimmed_by`/`trim_tool_version`/`trim_params`
+# onto both the trimmed outputs *and* the raw reads they came from ("the
+# report goes on both inputs: either half of a pair is a reasonable place for
+# a user to look"). That is correct for the file-panel comparison it was
+# built for, but it means a root object -- one downloaded from the SRA, with
+# no step of its own beyond the download -- can carry a full
+# `trimmed_by`/`trim_tool_version`/`trim_params` triple despite never having
+# been *produced* by a trim.
+#
+# Found by walking a real chain in the copied project database (Task 10
+# verification): the rendered report described the download step as
+# "downloaded from the SRA trimmomatic 0.24.0", crediting the tool and
+# version of a job that ran on this object, not the job that made it.
+#
+# This is deliberately a fixed list, not a mechanical derivation: the three
+# key names sharing this fact set (`trimmed_by`, `trim_tool_version`,
+# `trim_params`) do not share a common string stem with each other or with
+# the `trim_outputs` key that marks them as writeback (`trimmed` vs `trim`),
+# so there is no prefix rule to generalize here -- and no second instance of
+# this pattern exists elsewhere in `queue/results.py` today (`trim_outputs`
+# is the only `_outputs`-shaped key in the module). Extend this set, with a
+# comment naming the applier, if another writeback-onto-parent pattern shows
+# up the same way trim's did.
+_WRITEBACK_TOOL_KEYS: frozenset[str] = frozenset({"trimmed_by"})
+_WRITEBACK_VERSION_KEYS: frozenset[str] = frozenset({"trim_tool_version"})
+_WRITEBACK_PARAMS_KEYS: frozenset[str] = frozenset({"trim_params"})
+
+# Presence of this key on an object's facts is what confirms the writeback
+# keys above describe a downstream job rather than this object's own origin:
+# a real trim *output* carries no `trim_outputs` key pointing at itself, only
+# the input side does (confirmed against a real trimmed-reads object in the
+# same walk -- `trim_outputs` was absent there, `produced_by_job` pointed at
+# the trim job itself).
+_WRITEBACK_MARKER_KEY = "trim_outputs"
+
+# `qc_tool`/`qc_tool_version` are a second, unconditional case of the same
+# root problem, also found in the same Task 10 walk: `_apply_run_qc` merges
+# these onto whatever object the QC job ran against ("QC derives no files...
+# the whole result is facts merged onto the object the user ran it against"),
+# but never sets `produced_by_job` to the QC job on that object -- QC ran on
+# an object something else already produced (a download, a trim). So
+# `_step_for`'s `Job.get(obj.produced_by_job)` can never resolve to a
+# `run_qc` job, and a QC step can never legitimately be "the step that
+# produced this object": every appearance of `qc_tool_version` on any object
+# is writeback, unconditionally, with no marker key needed to tell it apart
+# from a genuine origin. Excluded unconditionally rather than gated the way
+# trim's keys are.
+#
+# `qc_tool` itself does not end in `_by`, so it was never reachable by the
+# `_by`-suffix scan in the first place; only the orphaned `qc_tool_version`
+# could leak through as a false version for an unrelated step (confirmed:
+# it did, surfacing as the download step's version in the same walk that
+# found the trim case above). Listed here anyway for symmetry and so a
+# future rename to `qc_by` fails safe.
+_UNCONDITIONAL_WRITEBACK_TOOL_KEYS: frozenset[str] = frozenset({"qc_tool"})
+_UNCONDITIONAL_WRITEBACK_VERSION_KEYS: frozenset[str] = frozenset(
+    {"qc_tool_version"}
+)
+
+
 def extract_tool_facts(facts: dict) -> tuple[str | None, str | None]:
     """The tool that produced an object and its version, read by convention.
 
@@ -179,10 +244,23 @@ def extract_tool_facts(facts: dict) -> tuple[str | None, str | None]:
     shape: `<verb>_by` names the tool, and a sibling key ending `_version`
     carries its version. Reading by convention rather than from a fixed key
     list means a builder added later still surfaces its tool here.
+
+    Keys in `_WRITEBACK_TOOL_KEYS`/`_WRITEBACK_VERSION_KEYS` are skipped when
+    `_WRITEBACK_MARKER_KEY` is also present, because that combination means
+    the triple was written onto this object by a downstream job describing
+    itself, not by whatever job produced this object. Keys in
+    `_UNCONDITIONAL_WRITEBACK_TOOL_KEYS`/`_UNCONDITIONAL_WRITEBACK_VERSION_KEYS`
+    are skipped always, for the QC reason above.
     """
+    is_writeback = isinstance(facts.get(_WRITEBACK_MARKER_KEY), list)
+
     tool = None
     for key, value in sorted(facts.items()):
         if not key.endswith("_by"):
+            continue
+        if key in _UNCONDITIONAL_WRITEBACK_TOOL_KEYS:
+            continue
+        if is_writeback and key in _WRITEBACK_TOOL_KEYS:
             continue
         if isinstance(value, str) and value:
             tool = value
@@ -190,7 +268,13 @@ def extract_tool_facts(facts: dict) -> tuple[str | None, str | None]:
 
     version = None
     for key, value in sorted(facts.items()):
-        if key.endswith("_version") and isinstance(value, str) and value:
+        if not key.endswith("_version"):
+            continue
+        if key in _UNCONDITIONAL_WRITEBACK_VERSION_KEYS:
+            continue
+        if is_writeback and key in _WRITEBACK_VERSION_KEYS:
+            continue
+        if isinstance(value, str) and value:
             version = value
             break
 
@@ -200,10 +284,18 @@ def extract_tool_facts(facts: dict) -> tuple[str | None, str | None]:
 def extract_params(facts: dict) -> dict:
     """Parameters recorded for the step that produced an object.
 
-    Same convention: `align_params`, `trim_params`, `count_params`.
+    Same convention: `align_params`, `trim_params`, `count_params`. Skips a
+    key in `_WRITEBACK_PARAMS_KEYS` when `_WRITEBACK_MARKER_KEY` is present --
+    see `extract_tool_facts`.
     """
+    is_writeback = isinstance(facts.get(_WRITEBACK_MARKER_KEY), list)
+
     for key, value in sorted(facts.items()):
-        if key.endswith("_params") and isinstance(value, dict) and value:
+        if not key.endswith("_params"):
+            continue
+        if is_writeback and key in _WRITEBACK_PARAMS_KEYS:
+            continue
+        if isinstance(value, dict) and value:
             return value
     return {}
 
