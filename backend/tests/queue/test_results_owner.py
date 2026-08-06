@@ -390,3 +390,78 @@ class TestTheExecutorSuppliesTheOwner:
         await JobExecutor("test-worker")._apply_result(job, {"anything": True})
 
         assert seen["owner"] == "executor-owner-a"
+
+
+class TestApplyAssessMisassemblies:
+    """`_apply_assess_misassemblies` -- facts merged onto the assembly QUAST
+    scored, read-only like completeness's applier."""
+
+    async def test_facts_are_merged_onto_the_object(self):
+        owner = "results-misassembly-a"
+        assembly = await _parent(owner, "draft.fasta")
+
+        await results._apply_assess_misassemblies(
+            {
+                "object_id": str(assembly.id),
+                "facts": {
+                    "assembly_misassembly_total": 4,
+                    "assembly_misassembly_relocations": 1,
+                    "assembly_reference_genome_fraction_pct": 7.403,
+                    "assembly_reference_id": "ref-id",
+                    "assembly_reference_name": "GCF_000146045.2",
+                },
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.facts["assembly_misassembly_total"] == 4
+        assert refreshed.facts["assembly_misassembly_relocations"] == 1
+        assert refreshed.facts["assembly_reference_genome_fraction_pct"] == 7.403
+        assert refreshed.facts["assembly_reference_name"] == "GCF_000146045.2"
+
+    async def test_preserves_existing_facts_on_the_object(self):
+        """Merged, not replaced -- contiguity facts already on the object
+        from ingest-time `_parse_fasta` must survive a misassembly run
+        landing beside them."""
+        owner = "results-misassembly-b"
+        assembly = await _parent(owner, "draft.fasta")
+        await assembly.set({DataObject.facts: {"sequence_n50": 200000}})
+
+        await results._apply_assess_misassemblies(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_misassembly_total": 0},
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.facts["sequence_n50"] == 200000
+        assert refreshed.facts["assembly_misassembly_total"] == 0
+
+    async def test_missing_object_is_logged_not_raised(self):
+        """A deleted object between job launch and job completion must not
+        crash the applier -- the same posture every other applier in this
+        module takes."""
+        await results._apply_assess_misassemblies(
+            {
+                "object_id": "000000000000000000000000",
+                "facts": {"assembly_misassembly_total": 1},
+            },
+            owner="nobody",
+        )
+
+    async def test_empty_facts_is_a_no_op(self):
+        """No facts means QUAST produced nothing parseable -- skip the write
+        rather than merge an empty dict and bump updated_at for nothing."""
+        owner = "results-misassembly-c"
+        assembly = await _parent(owner, "draft.fasta")
+        before = assembly.updated_at
+
+        await results._apply_assess_misassemblies(
+            {"object_id": str(assembly.id), "facts": {}}, owner=owner
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.updated_at == before

@@ -272,6 +272,14 @@ class TestParseReportTsv:
         facts = runner.parse_report_tsv(text)
         assert facts["assembly_reference_unaligned_contigs"] == 2
 
+    def test_unaligned_contigs_is_an_int_not_a_float(self):
+        """`2 == 2.0` in Python, so an equality-only assertion would not
+        have caught this being parsed as a float -- the bug a real
+        end-to-end run against QUAST output actually found. A contig count
+        rendered as '0.0' reads as a measurement with false precision."""
+        facts = runner.parse_report_tsv(REPORT_TSV)
+        assert isinstance(facts["assembly_reference_unaligned_contigs"], int)
+
     def test_garbage_returns_empty_rather_than_raising(self):
         """A report that fails to parse must not fail a job that already
         spent minutes-to-hours running minimap2 and produced real output."""

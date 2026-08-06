@@ -98,6 +98,7 @@ _INT_FACTS = {
     "assembly_misassembly_contigs",
     "assembly_misassembly_contigs_length",
     "assembly_misassembly_local",
+    "assembly_reference_unaligned_contigs",
     "assembly_reference_unaligned_length",
     "assembly_reference_nga50",
     "assembly_reference_nga90",
