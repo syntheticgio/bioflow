@@ -1219,6 +1219,66 @@ def build_misassembly_card(obj, references) -> SuggestionCard | None:
     )
 
 
+def build_assembly_error_card(obj, alignments) -> SuggestionCard | None:
+    """Reference-free assembly error detection for an assembly, by CRAQ.
+
+    Anchored on the assembly; `alignments` is the project's BAMs whose
+    `derived_from` contains it. Unlike the misassembly card beside it, this
+    gates on *reads*, not on a reference -- CRAQ needs no second genome,
+    which is what makes it usable for an organism with no relative in NCBI.
+
+    `category="ASSEMBLY_QC"`: this evaluates an assembly rather than
+    improving it. Chimera breaking is never offered here -- the card's
+    launch body is the complete request, and a suggestion that silently
+    rewrites an assembly is not a suggestion.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Detect assembly errors"
+    description = (
+        "Find misassembled regions from read clipping -- where reads align "
+        "only partially, the assembly is usually wrong -- and separate true "
+        "errors from heterozygous variants. Needs no reference genome, with "
+        "CRAQ."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="assembly_errors",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.craq()
+    if not tool.available:
+        return unavailable(tool.error or "CRAQ is not installed.")
+
+    if not alignments:
+        return unavailable(
+            "Assembly error detection needs reads aligned to this assembly. "
+            "Align a read set against it first."
+        )
+
+    return SuggestionCard(
+        kind="assembly_errors",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"{len(alignments)} alignment(s) against this assembly.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/assembly-errors",
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -1413,6 +1473,24 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             scaffold_references = None
 
+    assembly_alignments = None
+    if reference_assembly._is_assembly_like(obj):
+        # Same reasoning as scaffold_references above: an async project
+        # listing kept out of the synchronous assembly-errors card, computed
+        # only for assembly-like FASTA. Filters to READY BAMs whose
+        # `derived_from` names this object -- the reverse of the reference
+        # lookup `reference_for_bam` does for a BAM.
+        try:
+            assembly_alignments = [
+                o
+                for o in await object_service.list_objects(
+                    obj.project_id, owner=obj.owner, status=ObjectStatus.READY
+                )
+                if o.format.kind is FormatKind.BAM and obj.id in o.derived_from
+            ]
+        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            assembly_alignments = None
+
     builders = (
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
@@ -1425,6 +1503,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("polish", lambda: build_polish_card(obj, read_sets)),
         ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
         ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
+        ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
     )
 
     cards: list[dict] = []

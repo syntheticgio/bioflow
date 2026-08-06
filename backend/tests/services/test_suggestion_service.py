@@ -1603,3 +1603,71 @@ class TestMisassemblyCardOrchestration:
         misassembly = next(c for c in cards if c["kind"] == "misassembly")
         assert misassembly["status"] == "available"
         assert misassembly["launch"]["body"]["reference_object_id"] == "ref2"
+
+
+def _assembly_object(obj_id="asm1"):
+    """A READY assembly-shaped FASTA, matching `_fake_obj`'s pattern of a
+    SimpleNamespace carrying only what the builder reads. `role` is set
+    explicitly to None -- `_fake_obj` does not set it at all, and
+    `_is_assembly_like` reads `obj.role`, the same fixup
+    `TestScaffoldCardOrchestration`/`TestMisassemblyCardOrchestration` apply
+    to their own assembly-shaped fixtures."""
+    obj = _fake_obj(kind=FormatKind.FASTA, obj_id=obj_id)
+    obj.role = None
+    return obj
+
+
+def _bam_object(assembly_id, obj_id="bam1"):
+    """A READY BAM aligned against `assembly_id` -- `derived_from` contains
+    the assembly's id, the provenance link `build_assembly_error_card`'s
+    caller filters on."""
+    bam = _fake_obj(kind=FormatKind.BAM, obj_id=obj_id)
+    bam.derived_from = [assembly_id]
+    return bam
+
+
+class TestAssemblyErrorCard:
+    def test_unavailable_when_craq_is_not_installed(self):
+        from app.pipelines import tools as tools_module
+        from app.services import suggestion_service
+
+        # `Tool.available` is a computed property (path is not None, error is
+        # None, and -- for an on-demand tool -- install_state is INSTALLED),
+        # not a constructor field, so an unavailable probe is built by
+        # leaving `path` unset and setting `error`, not by passing
+        # `available=False` directly.
+        broken = tools_module.Tool(
+            name="craq", path=None, version=None, error="CRAQ is not installed.",
+        )
+        with patch.object(suggestion_service.tools, "craq", return_value=broken):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(), [_bam_object("asm1")]
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_unavailable_without_any_alignment(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(_assembly_object(), [])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "aligned" in card.reason.lower()
+
+    def test_available_with_exactly_one_alignment(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(), [_bam_object("asm1")]
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/assembly-errors"
+        assert card.launch["body"]["object_id"] == "asm1"
