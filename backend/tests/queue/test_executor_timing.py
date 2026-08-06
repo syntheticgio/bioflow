@@ -61,13 +61,15 @@ async def _make_job(
     size: int = 1_000_000,
     attempts: int = 0,
     max_attempts: int = 5,
+    payload: dict | None = None,
 ) -> Job:
     from datetime import UTC, datetime
 
+    full_payload = {"size": size, **(payload or {})}
     job = Job(
         type=job_type,
         state=JobState.RUNNING,
-        payload={"size": size},
+        payload=full_payload,
         owner="local",
         attempts=attempts,
         max_attempts=max_attempts,
@@ -243,3 +245,164 @@ class TestCancellationPaths:
         record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
         assert record is not None
         assert record.outcome == RunOutcome.CANCELLED
+
+
+class TestToolAndThreadsCapture:
+    """`tool`, `tool_version` and `threads` used to be blank on every row:
+    `tool`/`tool_version` were never passed to `timing_service.record()` at
+    all, and `threads` read `payload["threads"]`, a key no real launcher
+    sets -- every launcher nests it under `payload["params"]["threads"]`.
+    Verified against real job documents in the running app before writing
+    these.
+    """
+
+    async def test_threads_is_read_from_nested_params(self):
+        job = await _make_job(
+            job_type="exec_timing_threads_nested",
+            payload={"params": {"threads": 8}},
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.threads == 8
+
+    async def test_threads_falls_back_to_a_flat_key(self):
+        job = await _make_job(
+            job_type="exec_timing_threads_flat", payload={"threads": 4}
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.threads == 4
+
+    async def test_a_null_params_value_does_not_raise(self):
+        """A payload carrying `"params": null` is not something to discover
+        in the executor's `finally` block."""
+        job = await _make_job(
+            job_type="exec_timing_threads_null_params", payload={"params": None}
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.threads is None
+
+    async def test_tool_key_is_read_from_the_tool_field(self):
+        job = await _make_job(
+            job_type="exec_timing_tool_field", payload={"tool": "fastp"}
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.tool == "fastp"
+
+    async def test_tool_key_falls_back_to_aligner(self):
+        job = await _make_job(
+            job_type="exec_timing_tool_aligner", payload={"aligner": "star"}
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.tool == "star"
+
+    async def test_a_job_naming_no_tool_records_none(self):
+        job = await _make_job(job_type="exec_timing_tool_none", payload={})
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.tool is None
+        assert record.tool_version is None
+
+    async def test_tool_version_comes_from_the_cache_without_probing(
+        self, monkeypatch
+    ):
+        from app.pipelines import tools
+
+        monkeypatch.setattr(
+            tools,
+            "_seeded",
+            {
+                "fastp": (
+                    "fingerprint",
+                    tools.Tool(name="fastp", path="/bin/fastp", version="0.24.0"),
+                )
+            },
+        )
+
+        def _boom_probe(*args, **kwargs):
+            raise AssertionError("must not probe from the executor's finally")
+
+        monkeypatch.setattr(tools, "_probe", _boom_probe)
+
+        job = await _make_job(
+            job_type="exec_timing_tool_version", payload={"tool": "fastp"}
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.tool_version == "0.24.0"
+
+    async def test_tool_version_is_none_on_a_cache_miss(self, monkeypatch):
+        from app.pipelines import tools
+
+        monkeypatch.setattr(tools, "_seeded", {})
+
+        def _boom_probe(*args, **kwargs):
+            raise AssertionError("must not probe from the executor's finally")
+
+        monkeypatch.setattr(tools, "_probe", _boom_probe)
+
+        job = await _make_job(
+            job_type="exec_timing_tool_version_miss", payload={"tool": "fastp"}
+        )
+
+        async def ok(ctx):
+            return {}
+
+        executor = JobExecutor("test-worker")
+        await executor.run(job, _spec(ok), epoch=0)
+
+        record = await JobRunTiming.find_one(JobRunTiming.job_id == str(job.id))
+        assert record is not None
+        assert record.tool_version is None

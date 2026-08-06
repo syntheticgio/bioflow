@@ -123,6 +123,20 @@ def seed(name: str, fingerprint: str | None, tool: Tool) -> None:
     _seeded[name] = (fingerprint, tool)
 
 
+def cached_version(name: str) -> str | None:
+    """Whatever version was last seeded for `name`, without probing.
+
+    Deliberately does not re-validate the fingerprint the way `_probe`'s
+    callers do: a stale entry is acceptable for a *record of what ran*, in a
+    way it would not be for a capability check. Must never grow a probe
+    fallback -- this is called from the executor's `finally`, and a miss
+    triggering a real probe (NanoPlot alone is 12s cold) would delay every
+    job's completion on the way to recording it.
+    """
+    seeded = _seeded.get(name)
+    return seeded[1].version if seeded else None
+
+
 def _probe(
     name: str,
     configured: str,

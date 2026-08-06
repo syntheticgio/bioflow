@@ -111,3 +111,31 @@ class TestProvenance:
             job_type="align_reads", input_bytes=10, duration_ms=1, object_id="obj-2"
         ).insert()
         assert len(await timing_service.records_for_object("obj-1")) == 1
+
+    async def test_limit_returns_the_newest_records(self):
+        from datetime import UTC, datetime, timedelta
+
+        base = datetime.now(UTC)
+        for i in range(3):
+            await JobRunTiming(
+                job_type="align_reads",
+                input_bytes=10,
+                duration_ms=1,
+                object_id="obj-1",
+                finished_at=base + timedelta(seconds=i),
+            ).insert()
+
+        records = await timing_service.records_for_object("obj-1", limit=2)
+        assert len(records) == 2
+        # Mongo round-trips finished_at at millisecond precision, so compare
+        # ordering rather than exact equality against the microsecond values
+        # this test constructed.
+        assert records[0].finished_at > records[1].finished_at
+        assert records[1].finished_at - base > timedelta(milliseconds=500)
+
+    async def test_no_limit_returns_everything(self):
+        for _ in range(3):
+            await JobRunTiming(
+                job_type="align_reads", input_bytes=10, duration_ms=1, object_id="obj-1"
+            ).insert()
+        assert len(await timing_service.records_for_object("obj-1")) == 3

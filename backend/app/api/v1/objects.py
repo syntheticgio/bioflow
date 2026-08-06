@@ -3,14 +3,22 @@
 from pathlib import Path
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 from fastapi.responses import FileResponse
 
 from app.api.deps import LinkableOwnerDep, OwnerDep
-from app.api.v1.schemas import BlobOut, ObjectDetail, ObjectOut, ObjectUpdate, PairRequest
+from app.api.v1.schemas import (
+    BlobOut,
+    ComputationRecord,
+    ObjectComputationsOut,
+    ObjectDetail,
+    ObjectOut,
+    ObjectUpdate,
+    PairRequest,
+)
 from app.errors import NotFoundError, ValidationError
-from app.models import BlobStorage, JobClass
-from app.services import object_service, pipeline_service
+from app.models import BlobStorage, JobClass, JobRunTiming
+from app.services import object_service, pipeline_service, timing_service
 from app.storage.paths import blob_path
 
 router = APIRouter(prefix="/objects", tags=["objects"])
@@ -34,6 +42,41 @@ async def update_object(
         object_id, body.model_dump(exclude_unset=True), owner=owner
     )
     return ObjectOut.of(obj)
+
+
+@router.get("/{object_id}/computations", response_model=ObjectComputationsOut)
+async def object_computations(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    limit: int = Query(100, le=500),
+) -> ObjectComputationsOut:
+    """How this file was made, and every run that has used it since.
+
+    `JobRunTiming` has no owner field, so `get_object` is what authorizes
+    this request -- it must run before any timing row is read, not
+    concurrently with it, or a wrong-owner request would read another
+    profile's records before the check that says it may not.
+    """
+    obj = await object_service.get_object(object_id, owner=owner)
+
+    rows = await timing_service.records_for_object(str(object_id), limit=limit + 1)
+    has_more = len(rows) > limit
+    records = [ComputationRecord.of(r) for r in rows[:limit]]
+
+    produced_by = None
+    if obj.produced_by_job:
+        row = await JobRunTiming.find_one(
+            JobRunTiming.job_id == str(obj.produced_by_job)
+        )
+        if row is not None:
+            produced_by = ComputationRecord.of(row)
+
+    return ObjectComputationsOut(
+        produced_by=produced_by,
+        produced_by_job=str(obj.produced_by_job) if obj.produced_by_job else None,
+        records=records,
+        has_more=has_more,
+    )
 
 
 @router.post("/{object_id}/pair", response_model=ObjectOut)

@@ -28,6 +28,7 @@ import { BaseCompositionChart, QualityChart } from "./SequenceCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { OrganismBlurb } from "./OrganismBlurb";
+import { ComputationHistory } from "./ComputationHistory";
 import { Computations } from "./Computations";
 import { ManageFile } from "./ManageFile";
 import { PipelineSuggestions } from "./PipelineSuggestions";
@@ -359,6 +360,12 @@ function tabsFor(obj: DataObject): TabDef[] {
       label: "Metadata",
       hint: typeof obj.facts.sra_accession === "string" ? "Provenance" : undefined,
     },
+    // No hint: the count lives in ComputationHistory's own query, which does
+    // not run until the tab is open. Fetching provenance for every object
+    // just to label a tab whose answer is almost always zero is the wrong
+    // trade -- unlike Quality/Metadata's hints, which reuse data DetailPanel
+    // already holds for the object it just fetched.
+    { id: "history", label: "History" },
     { id: "actions", label: "Actions" },
   );
   return tabs;
@@ -800,6 +807,12 @@ function ObjectDetail({ id }: { id: string }) {
               saving={save.isPending}
               onDirtyChange={setMetadataDirty}
             />
+          </TabPanel>
+        )}
+
+        {tab === "history" && (
+          <TabPanel id="history" idPrefix="obj">
+            <ComputationHistory objectId={obj.id} />
           </TabPanel>
         )}
 

@@ -25,6 +25,14 @@ from app.queue.resource_sampler import ResourceSampler
 
 log = get_logger(__name__)
 
+# Which payload key names the binary a job ran, checked in this order. Not a
+# {job_type: key} mapping: that shape skips a job type nobody added an entry
+# for, silently -- the "hand-maintained registries keyed by an enum" trap from
+# CLAUDE.md. Reading whichever key is present instead degrades to None for a
+# job type that names no tool (ingest_headers, assemble_upload), which is the
+# honest answer rather than a missing case.
+_TOOL_KEYS = ("tool", "aligner", "assembler")
+
 # Progress writes are throttled: a job reporting at 5 Hz would otherwise cause a
 # Mongo write and an SSE fan-out per tick, swamping the UI with refetches.
 #
@@ -41,6 +49,15 @@ PROGRESS_INTERVAL_SECONDS = 0.5
 # enough to catch a broken parser on an ordinary test run rather than only on
 # a six-hour production job.
 PARSER_SILENCE_FLOOR_S = 120.0
+
+
+def _tool_from_payload(payload: dict) -> str | None:
+    """Whichever `_TOOL_KEYS` entry names the binary this job ran."""
+    for key in _TOOL_KEYS:
+        value = payload.get(key)
+        if value:
+            return value
+    return None
 
 
 @runtime_checkable
@@ -313,6 +330,7 @@ class JobExecutor:
                 return
             from datetime import UTC, datetime
 
+            from app.pipelines import tools
             from app.services import machine_profile, timing_service
             from app.services.params_sanitizer import sanitize
 
@@ -333,6 +351,17 @@ class JobExecutor:
             if not size:
                 return
 
+            # Nested first: every real launcher writes threads into the
+            # sanitized params sub-dict (`payload["params"]["threads"]`), not
+            # at the top level -- the flat key is a fallback for a launcher
+            # that might one day write it there directly, not a shape
+            # anything produces today.
+            params_payload = job.payload.get("params") or {}
+            threads = params_payload.get("threads") or job.payload.get("threads")
+
+            tool = _tool_from_payload(job.payload)
+            tool_version = tools.cached_version(tool) if tool else None
+
             # Under the floor the peak comes from too few samples to mean
             # anything, so the resource block stays empty rather than carrying
             # a number nothing should fit against.
@@ -351,7 +380,9 @@ class JobExecutor:
                 duration_ms=duration_ms,
                 outcome=outcome,
                 queued_ms=queued_ms,
-                threads=job.payload.get("threads"),
+                threads=threads,
+                tool=tool,
+                tool_version=tool_version,
                 resources=resources,
                 machine=machine_profile.capture(),
                 params=sanitize(job.payload),

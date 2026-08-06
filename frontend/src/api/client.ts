@@ -34,6 +34,7 @@ import type {
   MateSuggestion,
   MetadataSchema,
   NcbiResolveResponse,
+  ObjectComputations,
   ObjectDetail,
   ObjectRole,
   OrganismSearchRequest,
@@ -229,6 +230,9 @@ export const api = {
     request<DataObject[]>(`/projects/${projectId}/objects`),
 
   getObject: (id: string) => request<ObjectDetail>(`/objects/${id}`),
+
+  getObjectComputations: (id: string) =>
+    request<ObjectComputations>(`/objects/${id}/computations`),
 
   updateObject: (id: string, body: Record<string, unknown>) =>
     request<DataObject>(`/objects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
