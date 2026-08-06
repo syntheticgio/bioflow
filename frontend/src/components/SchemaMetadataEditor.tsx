@@ -277,7 +277,28 @@ function FieldInput({
         )}
       </label>
 
-      {field.type === "enum" ? (
+      {field.type === "enum" && field.open_vocabulary ? (
+        /* A combo, not a <select>: these options come from a vocabulary we do
+           not own, so the list is suggestions and the real answer is often not
+           on it. A <select> here actively prevented recording the instrument
+           models SRA writes ("NextSeq 550"), which is #66. Same idiom as
+           ModelCombo.tsx, which argues the identical case for model ids. */
+        <>
+          <input
+            list={`meta-${field.key}-options`}
+            value={str}
+            onChange={(e) => onChange(e.target.value)}
+            spellCheck={false}
+            autoComplete="off"
+            style={{ width: "100%", padding: "5px 6px", fontSize: 13 }}
+          />
+          <datalist id={`meta-${field.key}-options`}>
+            {field.options.map((o) => (
+              <option key={o} value={o} />
+            ))}
+          </datalist>
+        </>
+      ) : field.type === "enum" ? (
         <select
           value={str}
           onChange={(e) => onChange(e.target.value)}
