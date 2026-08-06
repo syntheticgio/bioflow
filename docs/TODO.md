@@ -507,15 +507,68 @@ The heading above is `— FIXED` for contiguity and completeness specifically,
 not for post-assembly QC as a whole -- these are why the entry stays in this
 file rather than moving to `docs/TODO-done.md`.
 
-- **QUAST's reference-based misassembly detection.** Genuinely unreplaced by
+- ~~**QUAST's reference-based misassembly detection.** Genuinely unreplaced by
   anything here; deserves its own entry rather than being folded into this
-  one's closure.
+  one's closure.~~ **FIXED, 2026-08-06.** Shipped as QUAST 5.3.0, GitHub #62.
+  See below.
 - **CRAQ, GCI and Merqury** all need reads realigned to the assembly, which is
   the **Pilon** entry's blocker rather than this one -- they are not peers of
   completeness and contiguity, and building them means building that first.
 - **gfastats** is superseded by computing contiguity here, not built.
 - **Contamination screening** is a real axis nothing here covers and is a
   named non-goal: FCS-GX's database is ~470 GB.
+
+### QUAST misassembly detection shipped, 2026-08-06
+
+Design: `docs/superpowers/specs/2026-08-05-remaining-post-assembly-qc-
+design.md`. Plan: `docs/superpowers/plans/2026-08-05-quast-misassembly-qc.md`.
+GitHub #62.
+
+Both of the two numbers the design measured held once wired into a real
+handler and re-checked against a clean image rebuild: **8.6 MB** installed
+(`backend/scripts/install-quast.sh`, GitHub tarball, patched, trimmed) and
+**3-4 s** for a 12 Mb yeast assembly against a reference. The original entry's
+claim that QUAST was too expensive to be worth it does not survive contact
+with an actual install.
+
+Code: `backend/app/pipelines/quast_runner.py` (command builder, two output
+parsers), `backend/app/queue/assembly_qc_handlers.py::assess_misassemblies`
+(the job) and `_copy_report` (the HTML report), `backend/app/services/
+pipeline_service.py::launch_misassembly_qc`, `POST /pipelines/misassemblies`,
+`suggestion_service.build_misassembly_card`, `AssemblyFacts.tsx`'s
+Misassembly QC block.
+
+**What the implementation found that the design and plan did not know yet.**
+All found by running the thing against real data, not by re-reading either
+document -- each would have shipped a real vulnerability or a wrong number
+silently.
+
+- **QUAST's HTML report is a stored XSS waiting to happen, and the design's
+  own "just serve it like FastQC's report" plan would have shipped it.**
+  QUAST sanitizes contig names (`qutils.correct_name`) but not the assembly
+  *label* (`qutils.correct_asm_label`), and the label is taken from the input
+  filename. An input named `ev<img src=x onerror=alert(7)>.fasta` puts that
+  tag verbatim and unescaped into `report.html` -- confirmed by exploiting
+  it, then re-confirmed a second time with an independent payload during
+  final verification. Closed at the handler, not the report route:
+  `assess_misassemblies` always links its input under a fixed filename and
+  always passes QUAST a fixed `-l assembly` label, never the object's own
+  name. Found while writing the implementation plan, before any code
+  existed to ship the bug -- worth recording as the reason "plan before
+  the security-sensitive phase" earned its keep here.
+- **`assembly_reference_unaligned_contigs` parsed as a float, not an int**,
+  invisible to every unit test because `2 == 2.0` in Python and the existing
+  assertions were equality-only. Found by running the real handler against
+  real data and reading the actual returned type. Fixed in `quast_runner`'s
+  `_INT_FACTS`, with a new `isinstance` test that would have caught it.
+- **`ragtag`/`polypolish` are missing from `tools.all_tools()`**, discovered
+  while adding `quast` to the same list -- a pre-existing gap this entry does
+  not close, left alone rather than folded into an unrelated diff.
+- **The reference's own filename is safe, only the assembly's is not.**
+  Verified both directions before assuming: a hostile *reference* filename
+  goes through QUAST's sanitizing `correct_name` and comes out mangled but
+  harmless, so only the reference gets its normal `_named_link` treatment;
+  the assembly does not.
 
 **Two of those bullets went stale and were corrected 2026-08-05** by the epic
 design note (`docs/superpowers/specs/2026-08-05-remaining-post-assembly-qc-
