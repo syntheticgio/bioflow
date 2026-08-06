@@ -146,8 +146,14 @@ class OpenAICompatAdapter(_BaseAdapter):
         return headers
 
     def complete(
-        self, *, system: str, user: str, model: str, max_tokens: int
-    ) -> Completion | Failure:
+        self,
+        *,
+        system: str,
+        user: str,
+        model: str,
+        max_tokens: int,
+        tools: list[ToolSpec] | None = None,
+    ) -> Completion | ToolCall | Failure:
         body = {
             "model": model,
             "messages": [
@@ -162,6 +168,18 @@ class OpenAICompatAdapter(_BaseAdapter):
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
         result = self._request(
             "/v1/chat/completions", body=body, timeout=settings.llm_timeout_seconds
         )
@@ -169,8 +187,26 @@ class OpenAICompatAdapter(_BaseAdapter):
             return result
 
         try:
-            text = result["choices"][0]["message"]["content"]
+            message = result["choices"][0]["message"]
         except (KeyError, IndexError, TypeError):
+            log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
+            return Failure(FailureReason.BAD_RESPONSE)
+
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if tool_calls:
+            if len(tool_calls) > 1:
+                log.info("ai_multi_tool_call_dropped", dropped=len(tool_calls) - 1)
+            call = tool_calls[0]
+            try:
+                arguments = json.loads(call["function"]["arguments"])
+            except (KeyError, TypeError, json.JSONDecodeError):
+                log.warning("ai_tool_call_arguments_unparseable")
+                return Failure(FailureReason.BAD_RESPONSE)
+            return ToolCall(id=call["id"], name=call["function"]["name"], arguments=arguments)
+
+        try:
+            text = message["content"]
+        except (KeyError, TypeError):
             log.warning("ai_response_unparseable", keys=sorted(result) if result else None)
             return Failure(FailureReason.BAD_RESPONSE)
 
