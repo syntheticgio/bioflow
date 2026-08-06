@@ -174,6 +174,31 @@ export interface ObjectComputations {
   has_more: boolean;
 }
 
+export type ProvenanceStep = {
+  object_id: string;
+  name: string;
+  kind: "spine" | "supporting";
+  verb: string | null;
+  tool: string | null;
+  tool_version: string | null;
+  job_type: string | null;
+  ran_at: string | null;
+  outcome: string | null;
+};
+
+export type ProvenanceNarrative = {
+  markdown: string;
+  gap_count: number;
+  steps: ProvenanceStep[];
+  materials: ProvenanceStep[];
+  has_branches: boolean;
+};
+
+export type ProvenanceProse = {
+  prose: string | null;
+  unavailable_reason: string | null;
+};
+
 export interface SystemStats {
   storage: {
     ok: boolean;

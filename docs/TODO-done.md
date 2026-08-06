@@ -2674,3 +2674,102 @@ decision; the pub/sub model is one option but may not be the right one.
 Consider what metadata each tool can realistically report (some have seconds-left
 estimates, others only have bytes processed), and whether the server should be
 persistent (survives container restart) or ephemeral.
+
+
+## More LLM usage: pipeline provenance narratives -- FIXED
+
+Raised: 2026-07-31, requested. Issue:
+[#16](https://github.com/syntheticgio/bioflow/issues/16), closed 2026-08-06.
+
+**2026-08-06: shipped.** `backend/app/services/provenance_walker.py::walk()`
+traces an object's full ancestry (reads to trim to align to variant call,
+with references/annotations classified separately as "materials"), and
+`backend/app/services/provenance_report.py::render_markdown()` turns that
+into a deterministic, gap-honest methods report -- pure, no DB, no AI, works
+with zero provider configured. An optional AI-prose rendering sits on top in
+`backend/app/services/provenance_prompt.py` (`build_prompt()` /
+`verify_containment()`), which rejects any model output introducing a tool
+name or version the record doesn't actually support. Routed through a new
+`TaskSlot.PROVENANCE_NARRATIVE` (`backend/app/models/ai.py`). Served via
+`GET /objects/{id}/provenance-narrative` (structured report, no AI
+dependency) and `POST /objects/{id}/provenance-narrative/prose` (optional AI
+rendering; every failure mode returns 200 with a reason, never 4xx/5xx), both
+in `backend/app/api/v1/objects.py`. Rendered in
+`frontend/src/components/ProvenanceNarrative.tsx`, wired into
+`DetailPanel.tsx`'s Actions tab under the Computations section.
+
+What shipped differently from plan:
+
+- The plan assumed `Job.type` was backed by an enum to write an
+  exhaustiveness test against; it's actually a plain `str` naming a
+  registered handler. The test was built against
+  `app.queue.registry.all_handlers()` instead -- a live registry check,
+  arguably stronger than a static enum would have been.
+- A test-isolation bug surfaced during implementation: a test-only handler
+  (`worker_run_ids_probe`, registered by an unrelated test file with no
+  teardown) polluted the registry-exhaustiveness test when both files ran in
+  the same process. Fixed by changing the test from an equality check to a
+  subset check -- every *registered* handler must be classified, rather than
+  requiring the classified set to exactly equal the registered set, since the
+  classified set may legitimately contain names not always registered in a
+  given test run.
+- **The most significant deviation, and the one no unit test caught across
+  ~90 tests written over the other ten tasks:** verifying against a real
+  database (per this file's own "check a rule against the real database, not
+  only its unit tests" precedent) found `extract_tool_facts`/
+  `extract_params` crediting a downstream job's tool/version to the wrong
+  object. Two real appliers (`_apply_trim_reads`, `_apply_run_qc`) write
+  facts back onto their *input* objects, not just their outputs -- so a raw
+  SRA-downloaded FASTQ that was later trimmed rendered as "downloaded from
+  the SRA trimmomatic 0.24.0," crediting a downstream step's tool to an
+  earlier one. Fixed with a documented, deliberately narrow "writeback key"
+  exclusion list (not a general mechanism) plus 5 regression tests. Every
+  fixture-based test had passed throughout, because every fixture was
+  hand-built to already look the way the code expected.
+- Code review before merge caught two real frontend bugs: prose state
+  persisting across object switches (fixed with a `key` prop forcing
+  remount), and a silent failure on prose-generation network errors (fixed
+  with a `notify.error` handler matching the codebase's existing
+  convention).
+- Code review also caught a leading-`v` version-format bypass in the
+  containment check (`bwa-mem2 v9.9.9` wasn't being checked at all, since the
+  regex required the match to start on a digit) -- a real gap in the
+  anti-fabrication guarantee, fixed before merge.
+
+Not built, deliberately out of scope (noted in the spec, not silently
+dropped): project-level methods generation spanning multiple objects, and
+backfilling provenance for historical objects predating this fact-provenance
+builder.
+
+Original text follows.
+
+The valuable version: given a VCF, generate a plain-language account of
+everything that produced it -- which reads, which QC, which trim parameters,
+which aligner and version, which caller -- walking the provenance chain back to
+the original reads. That is a methods paragraph, generated from facts the
+system already recorded rather than from the user's memory.
+
+The chain largely exists. `align_provenance` in `backend/app/queue/results.py`
+already copies facts forward so a BAM knows its reads' chemistry, and tool
+versions are captured at probe time precisely because "a trimming parameter set
+means nothing without the version of the tool that applied it" (the module
+docstring in `tools.py`). What is missing is a walker that assembles the chain
+and a prompt that renders it.
+
+`backend/app/services/summary_prompt.py` is the existing pattern to follow.
+As of the AI provider settings feature (2026-08-03,
+`docs/superpowers/specs/2026-08-03-ai-provider-settings-design.md`), the model
+is no longer a single hardcoded host process -- routing goes through
+`app/services/ai/router.resolve(TaskSlot)`, and the `host.docker.internal`
+address is now just the "Local / custom" preset's default, not a universal
+fact. This walker would want its own `TaskSlot` member (e.g.
+`PROVENANCE_NARRATIVE`) rather than assuming any particular provider.
+
+The hard constraint: this output will be pasted into papers. It must never
+invent a step or a version. Prefer a narrative assembled from facts with the
+model only doing the prose, over asking the model to infer what happened.
+
+Other candidates worth considering under the same heading: explaining *why* a
+QC run failed a threshold, and suggesting the next pipeline step in prose
+alongside the Actions cards.
+

@@ -697,38 +697,3 @@ Two things to settle early, because they shape everything after:
 
 This is the largest item in this file and probably wants decomposing into its
 own spec before any plan.
-
-## More LLM usage: pipeline provenance narratives
-
-Raised: 2026-07-31, requested.
-
-The valuable version: given a VCF, generate a plain-language account of
-everything that produced it -- which reads, which QC, which trim parameters,
-which aligner and version, which caller -- walking the provenance chain back to
-the original reads. That is a methods paragraph, generated from facts the
-system already recorded rather than from the user's memory.
-
-The chain largely exists. `align_provenance` in `backend/app/queue/results.py`
-already copies facts forward so a BAM knows its reads' chemistry, and tool
-versions are captured at probe time precisely because "a trimming parameter set
-means nothing without the version of the tool that applied it" (the module
-docstring in `tools.py`). What is missing is a walker that assembles the chain
-and a prompt that renders it.
-
-`backend/app/services/summary_prompt.py` is the existing pattern to follow.
-As of the AI provider settings feature (2026-08-03,
-`docs/superpowers/specs/2026-08-03-ai-provider-settings-design.md`), the model
-is no longer a single hardcoded host process -- routing goes through
-`app/services/ai/router.resolve(TaskSlot)`, and the `host.docker.internal`
-address is now just the "Local / custom" preset's default, not a universal
-fact. This walker would want its own `TaskSlot` member (e.g.
-`PROVENANCE_NARRATIVE`) rather than assuming any particular provider.
-
-The hard constraint: this output will be pasted into papers. It must never
-invent a step or a version. Prefer a narrative assembled from facts with the
-model only doing the prose, over asking the model to infer what happened.
-
-Other candidates worth considering under the same heading: explaining *why* a
-QC run failed a threshold, and suggesting the next pipeline step in prose
-alongside the Actions cards.
-

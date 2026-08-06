@@ -243,6 +243,49 @@ class ObjectComputationsOut(BaseModel):
     has_more: bool
 
 
+# --- Provenance narratives ---
+class ProvenanceStepOut(BaseModel):
+    """One step, flattened for the panel.
+
+    Deliberately not the whole `Step`: `job_type` is here because the UI
+    shows it when parameters are missing, but `Gap` objects are not -- the
+    markdown already places each gap in the position its fact would have
+    occupied, and a second parallel representation would drift.
+    """
+
+    object_id: str
+    name: str
+    kind: str
+    verb: str | None
+    tool: str | None
+    tool_version: str | None
+    job_type: str | None
+    ran_at: datetime | None
+    outcome: str | None
+
+
+class ProvenanceNarrativeOut(BaseModel):
+    markdown: str
+    gap_count: int
+    steps: list[ProvenanceStepOut]
+    materials: list[ProvenanceStepOut]
+    has_branches: bool
+
+
+class ProvenanceProseOut(BaseModel):
+    """The model-rendered half.
+
+    `prose` is None whenever the paragraph could not be produced *or* was
+    rejected by the containment check, with `unavailable_reason` saying
+    which. Rejection is not an error state to retry -- it means the model
+    introduced a fact the record does not support, and the structured report
+    stands alone.
+    """
+
+    prose: str | None
+    unavailable_reason: str | None
+
+
 # --- System ---
 class HealthOut(BaseModel):
     status: str

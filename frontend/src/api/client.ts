@@ -48,6 +48,8 @@ import type {
   Project,
   ProjectConversation,
   ProjectDetail,
+  ProvenanceNarrative,
+  ProvenanceProse,
   QuantifyDefaults,
   QuantifyRequest,
   ReferenceOption,
@@ -235,6 +237,14 @@ export const api = {
 
   getObjectComputations: (id: string) =>
     request<ObjectComputations>(`/objects/${id}/computations`),
+
+  getProvenanceNarrative: (id: string) =>
+    request<ProvenanceNarrative>(`/objects/${id}/provenance-narrative`),
+
+  generateProvenanceProse: (id: string) =>
+    request<ProvenanceProse>(`/objects/${id}/provenance-narrative/prose`, {
+      method: "POST",
+    }),
 
   updateObject: (id: string, body: Record<string, unknown>) =>
     request<DataObject>(`/objects/${id}`, { method: "PATCH", body: JSON.stringify(body) }),

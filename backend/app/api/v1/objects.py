@@ -15,13 +15,28 @@ from app.api.v1.schemas import (
     ObjectOut,
     ObjectUpdate,
     PairRequest,
+    ProvenanceNarrativeOut,
+    ProvenanceProseOut,
+    ProvenanceStepOut,
 )
 from app.errors import NotFoundError, ValidationError
+from app.logging import get_logger
 from app.models import BlobStorage, JobClass, JobRunTiming
-from app.services import object_service, pipeline_service, timing_service
+from app.models.ai import TaskSlot
+from app.services import (
+    ai,
+    object_service,
+    pipeline_service,
+    provenance_prompt,
+    provenance_report,
+    provenance_walker,
+    timing_service,
+)
+from app.services.ai import Completion
 from app.storage.paths import blob_path
 
 router = APIRouter(prefix="/objects", tags=["objects"])
+log = get_logger(__name__)
 
 
 @router.get("/{object_id}", response_model=ObjectDetail)
@@ -77,6 +92,100 @@ async def object_computations(
         records=records,
         has_more=has_more,
     )
+
+
+@router.get(
+    "/{object_id}/provenance-narrative",
+    response_model=ProvenanceNarrativeOut,
+)
+async def provenance_narrative(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+) -> ProvenanceNarrativeOut:
+    """A methods report for one object, assembled from recorded facts only.
+
+    No model involvement: this must work on an install with no AI provider
+    configured, because it is the artifact users cite.
+    """
+    chain = await provenance_walker.walk(object_id, owner=owner)
+
+    def _out(node) -> ProvenanceStepOut:
+        step = node.produced_by
+        return ProvenanceStepOut(
+            object_id=str(node.object_id),
+            name=node.name,
+            kind=node.kind,
+            verb=step.verb if step else None,
+            tool=step.tool if step else None,
+            tool_version=step.tool_version if step else None,
+            job_type=step.job_type if step else None,
+            ran_at=step.ran_at if step else None,
+            outcome=step.outcome if step else None,
+        )
+
+    nodes = [chain.nodes[oid] for oid in chain.order]
+    return ProvenanceNarrativeOut(
+        markdown=provenance_report.render_markdown(chain),
+        gap_count=chain.gap_count,
+        steps=[_out(n) for n in nodes if n.kind == "spine"],
+        materials=[_out(n) for n in nodes if n.kind == "supporting"],
+        has_branches=bool(chain.branches),
+    )
+
+
+@router.post(
+    "/{object_id}/provenance-narrative/prose",
+    response_model=ProvenanceProseOut,
+)
+async def provenance_narrative_prose(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+) -> ProvenanceProseOut:
+    """The same facts, rendered as prose by a model.
+
+    Every failure mode returns 200 with `prose=None` and a reason: no
+    provider configured, the call failed, or the output was rejected for
+    introducing an unsupported fact. None of those is an error the caller
+    should retry, and the structured report is unaffected either way.
+    """
+    chain = await provenance_walker.walk(object_id, owner=owner)
+
+    provider = await ai.resolve(TaskSlot.PROVENANCE_NARRATIVE)
+    if provider is None:
+        return ProvenanceProseOut(
+            prose=None,
+            unavailable_reason="No AI provider is configured for methods narratives.",
+        )
+
+    system, user = provenance_prompt.build_prompt(chain)
+    result = await ai.complete(provider, system=system, user=user)
+
+    # `complete()` never raises and never returns None -- it returns
+    # Completion | ToolCall | Failure. Checking for None here would treat
+    # every failure as a success.
+    if not isinstance(result, Completion):
+        return ProvenanceProseOut(
+            prose=None,
+            unavailable_reason="The model call did not succeed.",
+        )
+
+    rejection = provenance_prompt.verify_containment(result.text, chain)
+    if rejection is not None:
+        log.warning(
+            "provenance_prose_rejected",
+            object_id=str(object_id),
+            reason=rejection,
+        )
+        return ProvenanceProseOut(
+            prose=None,
+            unavailable_reason=(
+                f"The generated paragraph was rejected because it introduced a "
+                f"fact this record does not support ({rejection}). "
+                f"The structured report above is unaffected."
+            ),
+        )
+
+    return ProvenanceProseOut(prose=result.text, unavailable_reason=None)
 
 
 @router.post("/{object_id}/pair", response_model=ObjectOut)
