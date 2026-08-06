@@ -27,10 +27,24 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/ncbi", tags=["ncbi"])
 
+# NCBI's SRA PLATFORM vocabulary, as offered by the download dialog's filter.
+# Deliberately NOT the SAM PL vocabulary in `pipeline_service.SamPlatform` --
+# these are different standards (OXFORD_NANOPORE vs ONT, PACBIO_SMRT vs
+# PACBIO), and one enum cannot serve both without betraying one spelling.
+#
+# `frontend/src/components/NcbiDownloadDialog.tsx`'s PLATFORM_FILTERS is a
+# hand-maintained copy of this set; there is no frontend test infrastructure
+# in this repo, so this constant is the source of truth a reader checks it
+# against. Not validated against on the way in: NCBI owns this vocabulary and
+# may add to it, and rejecting a tag they accept would break a working query.
+SRA_PLATFORM_FILTERS: frozenset[str] = frozenset(
+    {"ILLUMINA", "PACBIO_SMRT", "OXFORD_NANOPORE"}
+)
+
 
 class SraResolveRequest(BaseModel):
     accession: str
-    # ILLUMINA | PACBIO_SMRT | OXFORD_NANOPORE, or None for everything.
+    # One of SRA_PLATFORM_FILTERS, or None for everything.
     platform_filter: str | None = None
     # Which project to check for runs already present. Optional: resolving is
     # useful before a project is chosen, it just cannot mark anything.
@@ -190,9 +204,9 @@ class OrganismSearchRequest(BaseModel):
     assembly_page_token: str | None = None
     sra_offset: int = 0
     page_size: int = 20
-    # ILLUMINA | PACBIO_SMRT | OXFORD_NANOPORE, or None for everything. Applies
-    # only to sequencing runs -- a genome assembly has no sequencing platform
-    # of its own, it is downstream of whatever reads built it.
+    # One of SRA_PLATFORM_FILTERS, or None for everything. Applies only to
+    # sequencing runs -- a genome assembly has no sequencing platform of its
+    # own, it is downstream of whatever reads built it.
     platform_filter: str | None = None
     # NCBI's own assembly_level vocabulary: "Complete Genome" / "Chromosome" /
     # "Scaffold" / "Contig". Applies only to the assembly list.
