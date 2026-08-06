@@ -7,6 +7,7 @@ import type {
   AlignDefaults,
   AlignEnvelope,
   AlignerSchema,
+  AskQuestionResponse,
   AssembleRequest,
   AssemblerSchema,
   AssemblyParams,
@@ -45,6 +46,7 @@ import type {
   PipelineTools,
   Profile,
   Project,
+  ProjectConversation,
   ProjectDetail,
   QuantifyDefaults,
   QuantifyRequest,
@@ -265,6 +267,19 @@ export const api = {
   declineShare: (id: string) => request<Share>(`/shares/${id}/decline`, { method: "POST" }),
 
   revokeShare: (id: string) => request<Share>(`/shares/${id}`, { method: "DELETE" }),
+
+  // --- Project Q&A chat ---
+  getProjectConversation: (projectId: string) =>
+    request<ProjectConversation>(`/projects/${projectId}/qa/conversation`),
+
+  askProjectQuestion: (projectId: string, question: string) =>
+    request<AskQuestionResponse>(`/projects/${projectId}/qa/ask`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+
+  clearProjectConversation: (projectId: string) =>
+    request<void>(`/projects/${projectId}/qa/conversation`, { method: "DELETE" }),
 
   reingestObject: (id: string) =>
     request<{ object_id: string; job_id: string }>(`/objects/${id}/reingest`, {
