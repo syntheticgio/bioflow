@@ -47,9 +47,12 @@ A GUI session (X11 or Wayland) is required to run the app, even in dev mode
 **macOS:** Xcode Command Line Tools (`xcode-select --install`) — no extra
 system packages beyond that.
 
-**Windows:** the [Microsoft C++ Build
-Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and the
-WebView2 runtime (preinstalled on current Windows 10/11).
+**Windows is not a supported platform.** The launcher targets macOS and Linux
+only. Some `#[cfg(target_os = "windows")]` branches survive in
+`src-tauri/src/docker/` — they are left in place deliberately, since they cost
+nothing to compile past and re-deriving the Docker Desktop launch path later
+would be real work. Nothing builds or tests them, so treat them as a starting
+point rather than as working code.
 
 See [Tauri's own prerequisites
 guide](https://v2.tauri.app/start/prerequisites/) if a package name above has
@@ -95,9 +98,8 @@ npm run tauri build
 
 This runs the full release build (`cargo build --release` plus the Vite
 production build) and then bundles it per `src-tauri/tauri.conf.json`'s
-`bundle.targets: "all"` — a signed-or-not `.app` and `.dmg` on macOS, an
-NSIS/MSI installer on Windows. Artifacts land under
-`src-tauri/target/release/bundle/`.
+`bundle.targets: "all"` — a signed-or-not `.app` and `.dmg` on macOS.
+Artifacts land under `src-tauri/target/release/bundle/`.
 
 **On Linux, `.deb` and `.rpm` only** — `src-tauri/tauri.linux.conf.json`
 overrides `bundle.targets` to just those two, dropping AppImage. Tauri v2
@@ -121,8 +123,8 @@ target list per platform some other way, or configuring AppImageLauncher
 to exempt `~/.cache/tauri/`), not in re-discovering this from scratch.
 
 This is a **local, unsigned build for testing on the machine that built it**,
-not the distribution story: macOS notarization, Windows code signing, and
-hosting a download for end users are still open work, tracked in
+not the distribution story: macOS notarization and hosting a download for end
+users are still open work, tracked in
 [#39](https://github.com/syntheticgio/bioflow/issues/39). There is also no
 CI job that does this automatically yet — every bundle today is built by a
 person, by hand, on their own machine.

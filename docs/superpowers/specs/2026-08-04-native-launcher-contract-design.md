@@ -5,6 +5,26 @@
 **Issue:** [#28](https://github.com/syntheticgio/bioflow/issues/28), the first
 slice of epic [#4](https://github.com/syntheticgio/bioflow/issues/4).
 
+## Amendments since this was written
+
+The body below is left as it was written on 2026-08-04, because the reasoning
+still explains why the launcher looks the way it does. Two decisions have since
+changed, and the body has *not* been rewritten to match — read these first:
+
+- **2026-08-05 — Windows is out of scope.** This document assumes macOS,
+  Windows, and Linux throughout; the supported set is now macOS and Linux only.
+  Some `#[cfg(target_os = "windows")]` branches remain in `launcher/src-tauri/`
+  deliberately, but nothing builds or tests them. Wherever the text below says
+  "macOS, Windows, and Linux," read "macOS and Linux."
+- **2026-08-05 — the CI/CD pipeline shipped.** The "New issue, replaces the
+  manual step" row in the table below is done:
+  `.github/workflows/publish-images.yml`, per
+  [#38](https://github.com/syntheticgio/bioflow/issues/38). It differs from the
+  sketch here in that it builds each architecture natively on its own
+  self-hosted runner and merges the results into a multi-arch manifest, rather
+  than one runner building both — see [`docs/ci-runners.md`](../../ci-runners.md)
+  for why.
+
 ## Goal
 
 Remove `docker compose` from the user's vocabulary. A small native application

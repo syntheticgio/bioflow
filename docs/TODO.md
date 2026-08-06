@@ -180,7 +180,28 @@ One regression to be aware of: `docker buildx imagetools create` rebuilds an
 index from only the sources named, so the `unknown/unknown` provenance
 attestation the arm64-only indexes carried is gone. Nothing depends on it;
 [#38](https://github.com/syntheticgio/bioflow/issues/38) should restore it
-with `--provenance=true` when CI takes over the build.
+with `--provenance=true` when CI takes over the build. **Done 2026-08-05:**
+`.github/workflows/publish-images.yml` sets `provenance: mode=max` on both
+builds, so the attestation is back on every published tag.
+
+**CI publishing shipped 2026-08-05 (#38).** `.github/workflows/publish-images.yml`
+builds `bioflow-backend` and `bioflow-web` for both architectures and pushes to
+GHCR on every push to `main`, and on a `v*` tag publishes the version tag and
+moves `latest`. What it did differently from #38's sketch: the issue assumed one
+runner building both architectures, but hosted arm64 runners are unavailable on
+a private personal repo and #46 had already measured emulated backend builds as
+hours long, so each architecture builds natively on its own self-hosted runner
+and a separate job merges the digests into a multi-arch manifest. Layer caching
+is BuildKit state persisted on the runners (`keep-state: true`) rather than
+`type=gha`, whose 10GB repo-wide limit cannot hold a 7.9GB backend image. Setup
+and the offline-runner tradeoff are in
+[`docs/ci-runners.md`](ci-runners.md). Still open under this entry: #39,
+packaging and distributing the launcher binary itself.
+
+**Windows was dropped from scope on 2026-08-05.** The supported platforms are
+macOS and Linux. Some `#[cfg(target_os = "windows")]` branches remain in
+`launcher/src-tauri/` but nothing builds or tests them, so #28's cross-platform
+criterion now reads as macOS + Linux, both of which are met.
 Verification so far is macOS-only (`cargo test`, `cargo clippy
 --all-targets`, `npm run lint`, and a full `tauri build --bundles app`
 launching and staying alive) — #28's "builds and runs on macOS, Windows, and

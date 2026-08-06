@@ -1,0 +1,200 @@
+# Builds the BioFlow container images and publishes them to GHCR, so the
+# native launcher (#28) can start a stack on a machine with no source tree.
+# Replaces the by-hand publish of #37: see docs/superpowers/plans/2026-08-04-ghcr-image-publishing.md
+# for what that did manually.
+#
+# Two images, not three. `api` and `worker` are the same image with different
+# `command:` values (see docker-compose.yml), so they share one published
+# `bioflow-backend`. Building them separately would push ~8GB of identical
+# layers twice.
+name: Publish container images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+# Deliberately no `paths:` filter. It would skip the build on a docs-only push,
+# but `paths:` also applies to the tag pushes above, where "changed files"
+# compares against the previous tag rather than the previous commit -- a release
+# could silently publish nothing. A no-op rebuild is cheap here (every layer
+# cache-hits and every blob already exists in the registry); a release that
+# quietly publishes nothing is not.
+
+# Never cancel in flight: these pushes move gigabytes, and a half-pushed image
+# is worse than a queued one.
+concurrency:
+  group: publish-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  # One job per (image, architecture). Each pushes an untagged, single-arch
+  # manifest and reports its digest; the `manifest` job below stitches the
+  # digests into one multi-arch tag. This is what lets each architecture build
+  # natively on its own runner instead of one runner emulating the other --
+  # #46 measured an emulated backend build as hours long and liable to fail
+  # partway, because backend/Dockerfile compiles bwa-mem2 from source, installs
+  # Clair3, and builds compleasm.
+  build:
+    name: Build ${{ matrix.image }} (${{ matrix.arch }})
+    runs-on: [self-hosted, "${{ matrix.runner_arch }}"]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [backend, web]
+        arch: [amd64, arm64]
+        include:
+          - image: backend
+            context: ./backend
+            target: ''
+          - image: web
+            context: ./frontend
+            # frontend/Dockerfile's default stage is `dev` (hot-reload, used by
+            # docker-compose.override.yml). The published image must be `prod`,
+            # the nginx static build -- omitting this ships a Vite dev server.
+            target: prod
+          - arch: amd64
+            runner_arch: X64
+          - arch: arm64
+            runner_arch: ARM64
+    steps:
+      - uses: actions/checkout@v4
+
+      # A fixed builder name plus keep-state is what makes layer caching work
+      # on self-hosted runners: the BuildKit state volume survives the job, so
+      # the next run reattaches to a warm cache. Without it every run starts
+      # cold, which for the backend image means recompiling bwa-mem2 each time.
+      # GitHub Actions cache (`type=gha`) is not an option -- the repo-wide
+      # limit is 10GB and the backend image alone is ~7.9GB.
+      - uses: docker/setup-buildx-action@v3
+        with:
+          name: bioflow
+          keep-state: true
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          # Restores the provenance attestation that #46 dropped: publishing
+          # arm64 by hand there ran `imagetools create`, which rebuilds an index
+          # from only the sources named and so lost the attestation the original
+          # build carried. docs/TODO.md records restoring it as this issue's
+          # job. It surfaces as an `unknown/unknown` entry alongside the two real
+          # platforms in `docker manifest inspect` -- that entry is the
+          # attestation, not a broken build.
+          provenance: mode=max
+          outputs: type=image,name=${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Turns the per-architecture digests into one tag that serves both, so
+  # `docker manifest inspect ghcr.io/.../bioflow-backend:latest` lists
+  # linux/amd64 and linux/arm64 -- the contract #46 established and
+  # docker-compose.yml's `image:` references depend on.
+  manifest:
+    name: Publish ${{ matrix.image }} manifest
+    needs: build
+    runs-on: [self-hosted, X64]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [backend, web]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `latest` on a push to main; on a `v*` tag, the bare version plus
+      # `latest` again (metadata-action's default `latest=auto` flavor moves it
+      # for semver tags). `type=sha` gives every build a permanent handle even
+      # after `latest` moves off it.
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - name: Create the multi-arch manifest
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # Built from the metadata-action output rather than piping its JSON
+          # through jq, which is not guaranteed to be installed on a
+          # self-hosted runner.
+          args=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && args+=(--tag "$tag")
+          done <<< "$TAGS"
+          for digest in *; do
+            args+=("${IMAGE}@sha256:${digest}")
+          done
+          docker buildx imagetools create "${args[@]}"
+
+      - name: Verify both architectures are present
+        env:
+          IMAGE: ${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }}
+          # Via env rather than interpolated into the script below: these tags
+          # derive from git ref names, so inlining them puts ref-controlled text
+          # into a shell command.
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          # The acceptance criterion for #38 is that a single tag serves both
+          # architectures. Assert it here rather than trusting that the merge
+          # step above did what it looked like it did.
+          tag="$(head -n1 <<< "$TAGS")"
+          manifest="$(docker buildx imagetools inspect --raw "$tag")"
+          for arch in amd64 arm64; do
+            grep -q "\"architecture\":\"${arch}\"" <<< "$manifest" \
+              || { echo "::error::${tag} is missing linux/${arch}"; exit 1; }
+          done
+          echo "${tag} serves linux/amd64 and linux/arm64"
