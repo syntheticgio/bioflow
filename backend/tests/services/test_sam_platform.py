@@ -86,3 +86,43 @@ class TestDnbseqRegression:
         assert sam_platform("DNBSEQ-T7") == SamPlatform.DNBSEQ
         assert sam_platform("MGISEQ-2000") == SamPlatform.DNBSEQ
         assert sam_platform("BGISEQ-500") == SamPlatform.DNBSEQ
+
+
+class TestUnrecognizedPlatformIsOmitted:
+    def test_unrecognized_non_empty_value_returns_none(self):
+        """SAMv1.tex: the PL field "should be omitted when the technology is
+        not in this list ... or is unknown." This used to return "OTHER",
+        which is not a spec value -- the docstring claimed it was.
+
+        None means "omit the field"; the ReadGroup emission methods act on it.
+        """
+        from app.services.pipeline_service import sam_platform
+
+        assert sam_platform("Sanger 3730xl") is None
+        assert sam_platform("some bespoke sequencer") is None
+
+    def test_empty_metadata_still_defaults_to_illumina(self):
+        """The asymmetry is deliberate and is NOT the bug being fixed here.
+
+        An empty field means "nobody said," and defaulting to the
+        overwhelmingly common platform is a documented product decision for
+        this tool's users -- a wrong guess is visible in the BAM header rather
+        than silent. An unrecognized non-empty field means "somebody said
+        something this vocabulary cannot express," which is the only case the
+        spec rules on.
+        """
+        from app.services.pipeline_service import sam_platform
+
+        assert sam_platform(None) == SamPlatform.ILLUMINA
+        assert sam_platform("") == SamPlatform.ILLUMINA
+        assert sam_platform("   ") == SamPlatform.ILLUMINA
+
+    def test_suggested_preset_handles_none(self):
+        """A None platform must fall through to the short-read default rather
+        than raising -- an unrecognized platform should not break the align
+        dialog's preset suggestion.
+        """
+        from app.pipelines import align_runner
+        from app.services.pipeline_service import suggested_preset
+
+        assert suggested_preset(None) == align_runner.Preset.SHORT_READ

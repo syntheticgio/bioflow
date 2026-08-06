@@ -670,26 +670,34 @@ _PLATFORM_PRESETS: dict[SamPlatform, str] = {
 }
 
 
-def sam_platform(metadata_platform: str | None) -> str:
+def sam_platform(metadata_platform: str | None) -> SamPlatform | None:
     """A SAM `PL` value from a platform label or instrument model.
 
-    Falls back to ILLUMINA when nothing is recorded -- the overwhelmingly
-    common case here, and a wrong guess is visible in the BAM header rather
-    than silent. An unrecognized *non-empty* value becomes OTHER, which is in
-    the SAM vocabulary; passing the raw label through would not be.
-    """
-    if not metadata_platform:
-        return "ILLUMINA"
+    Returns None when the recorded value is not in the SAM vocabulary, which
+    means *omit the field*: SAMv1.tex says the PL field "should be omitted
+    when the technology is not in this list ... or is unknown." This used to
+    return "OTHER", and the docstring used to claim OTHER was a spec value.
+    It is not one.
 
-    text = metadata_platform.strip().lower()
+    Falls back to ILLUMINA when nothing is recorded at all -- the
+    overwhelmingly common case here, and a wrong guess is visible in the BAM
+    header rather than silent. That asymmetry is deliberate: an empty field
+    means "nobody said," while an unrecognized non-empty field means "somebody
+    said something this vocabulary cannot express," and only the second is a
+    case the spec rules on.
+    """
+    text = (metadata_platform or "").strip().lower()
+    if not text:
+        return SamPlatform.ILLUMINA
+
     for needles, sam_value in _SAM_PLATFORM_PATTERNS:
         if any(needle in text for needle in needles):
             return sam_value
-    return "OTHER"
+    return None
 
 
 def suggested_preset(
-    sam_pl: str, *, chemistry: align_runner.ReadChemistry | None = None
+    sam_pl: SamPlatform | None, *, chemistry: align_runner.ReadChemistry | None = None
 ) -> str:
     """The minimap2 preset matching a platform, defaulting to short-read.
 
