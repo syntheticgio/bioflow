@@ -1702,6 +1702,51 @@ async def reference_for_bam(bam: DataObject) -> DataObject | None:
     return fallback
 
 
+async def alignments_against(
+    assembly: DataObject, *, owner: str
+) -> tuple[list[DataObject], list[DataObject], list[DataObject]]:
+    """BAMs aligned against this assembly, split by read chemistry.
+
+    Returns `(short, long, unknown)`. The reverse of `reference_for_bam`:
+    an alignment records its reference in `derived_from`, so "was this BAM
+    aligned to this assembly?" is a lookup rather than a guess, and an
+    uploaded BAM with no provenance is correctly excluded.
+
+    `unknown` is returned rather than folded into `short`. Callers must
+    refuse it: `read_chemistry_for_alignment` falls back to a short-read
+    default for picking an alignment preset, which is right there and wrong
+    here -- passing long reads as `-ngs` misdescribes the evidence rather
+    than degrading.
+    """
+    from app.services import object_service
+
+    candidates = [
+        o
+        for o in await object_service.list_objects(
+            assembly.project_id, owner=owner, status=ObjectStatus.READY
+        )
+        if o.format.kind is FormatKind.BAM and assembly.id in o.derived_from
+    ]
+
+    short: list[DataObject] = []
+    long_: list[DataObject] = []
+    unknown: list[DataObject] = []
+    for bam in candidates:
+        chemistry = await read_chemistry_for_alignment(bam)
+        if chemistry is align_runner.ReadChemistry.SHORT:
+            short.append(bam)
+        elif chemistry in (
+            align_runner.ReadChemistry.HIFI,
+            align_runner.ReadChemistry.CLR,
+            align_runner.ReadChemistry.ONT_SIMPLEX,
+            align_runner.ReadChemistry.ONT_DUPLEX,
+        ):
+            long_.append(bam)
+        else:
+            unknown.append(bam)
+    return short, long_, unknown
+
+
 async def default_variant_params(obj: DataObject | None = None) -> dict:
     """Server-owned variant calling defaults, so the form does not encode its own.
 
@@ -3677,6 +3722,140 @@ async def launch_misassembly_qc(
         job_id=str(job.id),
         draft_id=str(draft.id),
         reference_id=str(reference.id),
+        tool_version=tool.version,
+    )
+    return job
+
+
+async def launch_assembly_error_qc(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    ngs_bam_id: PydanticObjectId | None = None,
+    sms_bam_id: PydanticObjectId | None = None,
+    break_chimera: bool = False,
+) -> Job:
+    """Queue a CRAQ run: reference-free assembly error detection.
+
+    Auto-pairs when unambiguous -- exactly one short-read BAM and/or exactly
+    one long-read BAM against this assembly -- and refuses otherwise, the
+    same "ambiguity is a chooser, not a guess" rule `launch_misassembly_qc`
+    follows for references. Explicit ids come from the dialog.
+
+    Read-only unless `break_chimera`, which is opt-in per run and never set
+    by the Actions card.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tool = tools.require(tools.craq())
+
+    assembly = await object_service.get_object(object_id, owner=owner)
+    reference_assembly.check_draft_assembly(assembly)
+
+    if ngs_bam_id is None and sms_bam_id is None:
+        short, long_, _unknown = await alignments_against(assembly, owner=owner)
+        if not short and not long_:
+            raise ValidationError(
+                "Assembly error detection needs reads aligned to this "
+                "assembly, and this project has none",
+                details={"object_id": str(assembly.id)},
+            )
+        if len(short) > 1 or len(long_) > 1:
+            raise ValidationError(
+                "This assembly has several alignments; name the ones to use",
+                details={
+                    "short": [str(o.id) for o in short],
+                    "long": [str(o.id) for o in long_],
+                },
+            )
+        ngs_bam = short[0] if short else None
+        sms_bam = long_[0] if long_ else None
+    else:
+        ngs_bam = (
+            await object_service.get_object(ngs_bam_id, owner=owner)
+            if ngs_bam_id
+            else None
+        )
+        sms_bam = (
+            await object_service.get_object(sms_bam_id, owner=owner)
+            if sms_bam_id
+            else None
+        )
+
+    payload: dict = {
+        "object_id": str(assembly.id),
+        "threads": 4,
+        "break_chimera": break_chimera,
+    }
+
+    asm_digest, asm_path = await _resolve_readable(assembly)
+    if asm_digest:
+        payload["assembly_sha256"] = asm_digest
+    if asm_path:
+        payload["assembly_path"] = asm_path
+
+    for bam, prefix, bai_prefix in (
+        (ngs_bam, "ngs_bam", "ngs_bai"),
+        (sms_bam, "sms_bam", "sms_bai"),
+    ):
+        if bam is None:
+            continue
+        # Validated provenance, not trust: a BAM aligned to some *other*
+        # assembly would produce clipping signals that describe the wrong
+        # sequence and read as errors in this one.
+        if assembly.id not in bam.derived_from:
+            raise ValidationError(
+                f"{bam.name} was not aligned against this assembly",
+                details={"bam_id": str(bam.id), "object_id": str(assembly.id)},
+            )
+        digest, path = await _resolve_readable(bam)
+        if digest:
+            payload[f"{prefix}_sha256"] = digest
+        if path:
+            payload[f"{prefix}_path"] = path
+        payload[f"{prefix}_object_id"] = str(bam.id)
+
+        # BioFlow's storage is content-addressed, so a BAM and its .bai
+        # are separate DataObjects with no path relationship -- resolve
+        # the sidecar explicitly, the same way `launch_bam_stats` already
+        # does (`bai_sha256`/`bai_path`). The handler reads
+        # `{bai_prefix}_sha256`/`{bai_prefix}_path` via
+        # `_resolve_input(payload, bai_prefix)` (called with `"ngs_bai"` /
+        # `"sms_bai"`, NOT `f"{prefix}_bai"`) and raises PermanentError if
+        # neither resolves -- a missing index is not silently tolerated.
+        bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+        if bai is not None:
+            bai_digest, bai_path = await _resolve_readable(bai)
+            if bai_digest:
+                payload[f"{bai_prefix}_sha256"] = bai_digest
+            if bai_path:
+                payload[f"{bai_prefix}_path"] = bai_path
+
+    dedup = f"assess_assembly_errors:{assembly.id}:{ngs_bam.id if ngs_bam else '-'}"
+    dedup += f":{sms_bam.id if sms_bam else '-'}:{break_chimera}"
+
+    job = await queue.enqueue(
+        "assess_assembly_errors",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=dedup,
+        project_id=assembly.project_id,
+        object_id=assembly.id,
+    )
+    if job is None:
+        raise ConflictError("This assembly error QC job is already queued")
+
+    log.info(
+        "assembly_error_qc_launched",
+        job_id=str(job.id),
+        object_id=str(assembly.id),
+        ngs_bam_id=str(ngs_bam.id) if ngs_bam else None,
+        sms_bam_id=str(sms_bam.id) if sms_bam else None,
+        break_chimera=break_chimera,
         tool_version=tool.version,
     )
     return job

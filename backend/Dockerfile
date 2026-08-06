@@ -335,6 +335,19 @@ RUN chmod +x /srv/scripts/install-quast.sh \
     && QUAST_VERSION="${QUAST_VERSION}" \
        /srv/scripts/install-quast.sh
 
+# --- CRAQ --------------------------------------------------------------
+#
+# Reference-free assembly error detection. Not packaged for Debian trixie;
+# installed straight from GitHub since CRAQ publishes no release tags -- see
+# the install script's comments for why the whole tree, not just bin/craq,
+# has to come along, and for how CRAQ_COMMIT pins a specific commit despite
+# there being no tag to name.
+ARG CRAQ_COMMIT=63509381fe85c4bd5832f1c67d0279c823ce9592
+COPY scripts/install-craq.sh /srv/scripts/install-craq.sh
+RUN chmod +x /srv/scripts/install-craq.sh \
+    && CRAQ_COMMIT="${CRAQ_COMMIT}" \
+       /srv/scripts/install-craq.sh
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \

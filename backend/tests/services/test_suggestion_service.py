@@ -1603,3 +1603,177 @@ class TestMisassemblyCardOrchestration:
         misassembly = next(c for c in cards if c["kind"] == "misassembly")
         assert misassembly["status"] == "available"
         assert misassembly["launch"]["body"]["reference_object_id"] == "ref2"
+
+
+def _assembly_object(obj_id="asm1"):
+    """A READY assembly-shaped FASTA, matching `_fake_obj`'s pattern of a
+    SimpleNamespace carrying only what the builder reads. `role` is set
+    explicitly to None -- `_fake_obj` does not set it at all, and
+    `_is_assembly_like` reads `obj.role`, the same fixup
+    `TestScaffoldCardOrchestration`/`TestMisassemblyCardOrchestration` apply
+    to their own assembly-shaped fixtures."""
+    obj = _fake_obj(kind=FormatKind.FASTA, obj_id=obj_id)
+    obj.role = None
+    return obj
+
+
+def _bam_object(assembly_id, obj_id="bam1"):
+    """A READY BAM aligned against `assembly_id` -- `derived_from` contains
+    the assembly's id, the provenance link `build_assembly_error_card`'s
+    caller filters on."""
+    bam = _fake_obj(kind=FormatKind.BAM, obj_id=obj_id)
+    bam.derived_from = [assembly_id]
+    return bam
+
+
+class TestAssemblyErrorCard:
+    """`alignments` is `(short, long, unknown)`, the pre-split
+    `pipeline_service.alignments_against` returns -- matching the shape
+    `launch_assembly_error_qc` itself consumes to auto-pair or refuse.
+    """
+
+    def test_unavailable_when_craq_is_not_installed(self):
+        from app.pipelines import tools as tools_module
+        from app.services import suggestion_service
+
+        # `Tool.available` is a computed property (path is not None, error is
+        # None, and -- for an on-demand tool -- install_state is INSTALLED),
+        # not a constructor field, so an unavailable probe is built by
+        # leaving `path` unset and setting `error`, not by passing
+        # `available=False` directly.
+        broken = tools_module.Tool(
+            name="craq", path=None, version=None, error="CRAQ is not installed.",
+        )
+        with patch.object(suggestion_service.tools, "craq", return_value=broken):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(), ([_bam_object("asm1")], [], [])
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_unavailable_without_any_alignment(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(), ([], [], [])
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "aligned" in card.reason.lower()
+
+    def test_unavailable_with_only_unknown_chemistry_alignments(self):
+        """A project with alignments CRAQ cannot classify by chemistry reads
+        as "none usable", the same reason as no alignments at all --
+        `launch_assembly_error_qc` never looks at `unknown` when auto-pairing,
+        so a card offering to launch on unknown-only BAMs would be offering
+        something the launch path refuses."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(), ([], [], [_bam_object("asm1")])
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "aligned" in card.reason.lower()
+
+    def test_available_with_exactly_one_alignment(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(), ([_bam_object("asm1")], [], [])
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/assembly-errors"
+        assert card.launch["body"]["object_id"] == "asm1"
+
+    def test_available_with_one_short_and_one_unknown_chemistry_alignment(self):
+        """Unknown-chemistry BAMs must not tip an otherwise-unambiguous
+        project into "ambiguous" -- `launch_assembly_error_qc` auto-pairs on
+        `short[0]` and ignores `unknown` entirely when ids are omitted, so
+        the card should follow the same rule rather than refusing a launch
+        that would actually succeed."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(),
+                ([_bam_object("asm1", obj_id="bam1")], [], [_bam_object("asm1", obj_id="bam2")]),
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+
+    def test_unavailable_with_two_short_read_alignments(self):
+        """Mirrors `build_misassembly_card`'s `len(references) > 1` refusal,
+        and `launch_assembly_error_qc`'s own `len(short) > 1` check -- the
+        gap this test guards: the card previously went AVAILABLE for any
+        nonzero alignment count with no split by chemistry, so two short-read
+        BAMs against the same assembly rendered an AVAILABLE card whose
+        click would raise a ValidationError at launch."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(),
+                (
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [],
+                    [],
+                ),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "alignment" in card.reason.lower()
+
+    def test_unavailable_with_two_long_read_alignments(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(),
+                (
+                    [],
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [],
+                ),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "alignment" in card.reason.lower()
+
+    def test_unavailable_with_one_short_and_one_long_and_extra_short(self):
+        """Ambiguity in either bucket refuses the whole card, even when the
+        other bucket is unambiguous -- matching
+        `len(short) > 1 or len(long_) > 1` rather than only checking the
+        bucket that grew."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "craq", return_value=_FakeTool(True, name="craq")
+        ):
+            card = suggestion_service.build_assembly_error_card(
+                _assembly_object(),
+                (
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [_bam_object("asm1", obj_id="bam3")],
+                    [],
+                ),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE

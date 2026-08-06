@@ -1026,6 +1026,36 @@ async def launch_misassembly_qc_route(
     return JobOut.of(job)
 
 
+class AssemblyErrorRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Both optional, same reasoning MisassemblyQcRequest's reference_object_id
+    # gives: the Actions card only fires when auto-pairing is unambiguous
+    # (at most one short-read and one long-read BAM against this assembly),
+    # so it never needs to supply these. A dialog handling the ambiguous
+    # case names them explicitly.
+    ngs_bam_id: PydanticObjectId | None = None
+    sms_bam_id: PydanticObjectId | None = None
+    break_chimera: bool = False
+
+
+@router.post("/assembly-errors", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_assembly_error_qc_route(
+    body: AssemblyErrorRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a CRAQ run: reference-free assembly error detection.
+
+    Read-only unless `break_chimera` is set, like /misassemblies produces no
+    derived object by default."""
+    job = await pipeline_service.launch_assembly_error_qc(
+        object_id=body.object_id,
+        owner=owner,
+        ngs_bam_id=body.ngs_bam_id,
+        sms_bam_id=body.sms_bam_id,
+        break_chimera=body.break_chimera,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep

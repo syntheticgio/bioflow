@@ -280,6 +280,7 @@ class TestSerialization:
             "featurecounts",
             "ivar",
             "quast",
+            "craq",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that
@@ -323,6 +324,52 @@ class TestIvarProbe:
 
     def test_ivar_is_in_all_tools(self):
         assert "ivar" in {t.name for t in tools.all_tools()}
+
+
+class TestCraqProbe:
+    def test_craq_probes(self):
+        tool = tools.craq()
+        assert tool.name == "craq"
+        assert isinstance(tool.available, bool)
+
+    def test_probes_with_a_flag_that_prints_a_recognizable_version(self, tmp_path, monkeypatch):
+        """Bare `craq` prints only an argument error with no version string
+        and exits non-zero -- a probe passing no flag reads a working binary
+        as absent. `-h` prints "CRAQ Version: X.Y" (still exiting non-zero,
+        verified against a real 1.10 install), which `_probe` already
+        accepts since the output looks like a version."""
+        script = tmp_path / "fakecraq"
+        script.write_text(
+            "#!/bin/sh\n"
+            'if [ "$1" = "-h" ]; then\n'
+            '  echo "craq version 1.0"\n'
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        )
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+
+        tool = tools._probe("craq", "fakecraq", ["-h"])
+
+        assert tool.available
+
+    def test_craq_is_an_assembly_qc_tool(self):
+        assert tools.PipelineType.ASSEMBLY_QC in tools.TOOL_META["craq"].pipelines
+
+    def test_craq_is_runnable(self):
+        assert tools.TOOL_META["craq"].runnable
+
+    def test_craq_is_in_all_tools(self):
+        assert "craq" in {t.name for t in tools.all_tools()}
+
+    def test_craq_is_documented_and_probeable(self):
+        assert "craq" in tools.TOOL_META
+        meta = tools.TOOL_META["craq"]
+        assert meta.homepage
+        assert meta.citation
+        assert meta.license
+        assert meta.usage
 
 
 class TestToolMeta:

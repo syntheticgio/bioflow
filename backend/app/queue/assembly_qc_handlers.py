@@ -19,7 +19,13 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import assembly_qc_registry, completeness_runner, quast_runner, tools
+from app.pipelines import (
+    assembly_qc_registry,
+    completeness_runner,
+    craq_runner,
+    quast_runner,
+    tools,
+)
 from app.queue.executor import run_subprocess
 from app.queue.lineage_handlers import lineage_present
 from app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir, _resolve_input
@@ -358,3 +364,226 @@ def _copy_report(ctx: JobContext, out_dir: Path) -> str | None:
     # repeats it names a path nothing was ever written to. Matches the
     # `qc_fastp_report`/`qc_fastqc_report` convention in pipeline_handlers.py.
     return "quast/report.html"
+
+
+# CRAQ over pre-made BAMs skips the read-mapping step its own README calls
+# the most time-consuming part, so this is far below assess_completeness's
+# three hours. Matched to QUAST's hour until a real vertebrate-scale run is
+# measured -- a lease expiring mid-run is a worse failure than one set long.
+ASSEMBLY_ERROR_LEASE_SECONDS = 3600
+
+# Fixed names, never the object's own. CRAQ is a Perl/shell pipeline that
+# interpolates its inputs into `system()` calls (see bin/craq), so a
+# filename carrying shell metacharacters is the analogue of the QUAST label
+# XSS -- closed the same way, before it can exist.
+_CRAQ_ASSEMBLY_LINK = "assembly.fasta"
+_CRAQ_NGS_LINK = "ngs_sort.bam"
+_CRAQ_SMS_LINK = "sms_sort.bam"
+
+
+@handler(
+    "assess_assembly_errors",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def assess_assembly_errors(ctx: JobContext) -> dict:
+    """Reference-free assembly error detection for one assembly, with CRAQ.
+
+    Read-only by default: no new object, only facts merged onto the assembly
+    that was scored. `-b` chimera breaking is the one exception and is
+    opt-in per run.
+
+    **Input filenames never reach the command line.** CRAQ shells out
+    through `system()` with its arguments interpolated, so unlike QUAST the
+    risk is shell metacharacters rather than HTML. Every input is linked
+    under a fixed name; the object's own name is recorded as a fact, not
+    passed as an argument.
+
+    **A BAM's index must travel with it.** CRAQ requires `sort.bam.bai`
+    beside `sort.bam`; linking the BAM alone produces a failure deep in a
+    samtools call rather than a clear error. BioFlow's storage is
+    content-addressed -- a managed BAM and its `.bai` are two unrelated
+    `DataObject`s (`SidecarRole.BAI`) with no path relationship between
+    them, the same way `launch_bam_stats` resolves `bai_sha256`/`bai_path`
+    as their own payload keys rather than guessing a sibling path. The
+    launch path is expected to supply `{ngs,sms}_bai_sha256`/`_path`
+    alongside the BAM's own; a register-in-place BAM (no sidecar resolved)
+    falls back to `.bai`/`with_suffix(".bai")` beside the BAM's own file,
+    which is the only case where that guess is valid.
+    """
+    tool = tools.require(tools.craq())
+
+    work = _prepare_workdir(ctx, "assembly_errors")
+
+    assembly = _resolve_input(ctx.payload, "assembly")
+    assembly = _named_link(work, assembly, _CRAQ_ASSEMBLY_LINK)
+
+    ngs_bam = None
+    if ctx.payload.get("ngs_bam_path") or ctx.payload.get("ngs_bam_sha256"):
+        raw = _resolve_input(ctx.payload, "ngs_bam")
+        ngs_bam = _named_link(work, raw, _CRAQ_NGS_LINK)
+        _link_bam_index(ctx.payload, "ngs_bai", raw, ngs_bam)
+
+    sms_bam = None
+    if ctx.payload.get("sms_bam_path") or ctx.payload.get("sms_bam_sha256"):
+        raw = _resolve_input(ctx.payload, "sms_bam")
+        sms_bam = _named_link(work, raw, _CRAQ_SMS_LINK)
+        _link_bam_index(ctx.payload, "sms_bai", raw, sms_bam)
+
+    if ngs_bam is None and sms_bam is None:
+        raise PermanentError(
+            "Assembly error detection needs at least one alignment of reads "
+            "against this assembly."
+        )
+
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+    break_chimera = bool(ctx.payload.get("break_chimera"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    out_dir = work / "out"
+    cmd = craq_runner.build_craq_command(
+        craq_path=tool.path,
+        assembly=assembly,
+        ngs_bam=ngs_bam,
+        sms_bam=sms_bam,
+        out_dir=out_dir,
+        threads=threads,
+        break_chimera=break_chimera,
+    )
+
+    ctx.progress(phase="starting", pct=None, message="starting craq")
+    ctx.extend_lease(ASSEMBLY_ERROR_LEASE_SECONDS)
+
+    log.info(
+        "assembly_errors_started",
+        job_id=ctx.job_id,
+        has_ngs=ngs_bam is not None,
+        has_sms=sms_bam is not None,
+        break_chimera=break_chimera,
+        threads=threads,
+    )
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "craq")
+
+    aqi_dir = out_dir / "runAQI_out"
+    # `out_final.Report` -- NOT derived from the assembly's filename.
+    # Verified against a real 1.10 run on 2026-08-06: all three of
+    # `runAQI.sh`/`runAQI_SMS.sh`/`runAQI_NGS.sh` hardcode `name="out"`
+    # (line 5 of each), so the report is always `out_final.Report`
+    # regardless of what the assembly was linked as or which script ran.
+    # The design doc's source read concluded `<genome basename>_final
+    # .Report` from `runAQI.sh`'s use of `$name` without confirming what
+    # `$name` actually resolves to -- a real run is what caught this, the
+    # same way it caught the two `_named_link`-prefix bugs in Task 3.
+    report_path = aqi_dir / "out_final.Report"
+    if not report_path.exists():
+        raise RetryableError("craq exited successfully but wrote no final report")
+
+    has_ngs = ngs_bam is not None
+    has_sms = sms_bam is not None
+
+    facts = craq_runner.parse_final_report(
+        report_path.read_text(errors="replace"), has_ngs=has_ngs, has_sms=has_sms
+    )
+
+    cre = craq_runner.count_bed_records(aqi_dir / "locER_out" / "out_final.CRE.bed")
+    if cre is not None:
+        facts["assembly_error_cre_count"] = cre
+    crh = craq_runner.count_bed_records(aqi_dir / "locER_out" / "out_final.CRH.bed")
+    if crh is not None:
+        facts["assembly_error_crh_count"] = crh
+
+    # Structural counts only when long reads were supplied -- the same rule
+    # parse_final_report applies to S-AQI, for the same reason.
+    if has_sms:
+        cse = craq_runner.count_bed_records(aqi_dir / "strER_out" / "out_final.CSE.bed")
+        if cse is not None:
+            facts["assembly_error_cse_count"] = cse
+        csh = craq_runner.count_bed_records(aqi_dir / "strER_out" / "out_final.CSH.bed")
+        if csh is not None:
+            facts["assembly_error_csh_count"] = csh
+
+    if not facts:
+        log.warning("assembly_errors_report_unparseable", job_id=ctx.job_id)
+
+    # Which inputs produced these numbers is not optional metadata: a CRE
+    # count from a long-read-only run is undercounted, and without these
+    # flags nothing downstream can say so.
+    facts["assembly_error_tool"] = "craq"
+    facts["assembly_error_tool_version"] = tool.version
+    facts["assembly_error_has_ngs"] = has_ngs
+    facts["assembly_error_has_sms"] = has_sms
+
+    ctx.progress(phase="done", pct=1.0, message="assembly error QC complete")
+    log.info(
+        "assembly_errors_finished",
+        job_id=ctx.job_id,
+        cre=facts.get("assembly_error_cre_count"),
+        cse=facts.get("assembly_error_cse_count"),
+        aqi=facts.get("assembly_error_aqi"),
+    )
+
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
+        "workdir": str(work),
+        "break_chimera": break_chimera,
+        "corrected_fasta": str(aqi_dir / "out_correct.fa")
+        if break_chimera and (aqi_dir / "out_correct.fa").exists()
+        else None,
+        # So the results applier can attribute a corrected FASTA to the BAM(s)
+        # that produced it (ingest_local_file's derived_from), the same ids
+        # the launch path stamped into the payload -- see
+        # launch_assembly_error_qc's `payload[f"{prefix}_object_id"]`.
+        "ngs_bam_object_id": ctx.payload.get("ngs_bam_object_id"),
+        "sms_bam_object_id": ctx.payload.get("sms_bam_object_id"),
+    }
+
+
+def _link_bam_index(payload: dict, prefix: str, raw_bam: Path, linked_bam: Path) -> None:
+    """Link a BAM's `.bai` beside its fixed-name link.
+
+    CRAQ requires the index next to the BAM and fails inside a samtools
+    call, not with a clear message, when it is missing -- so a missing
+    index is a `PermanentError` here, not a warning: this handler already
+    knows the failure will be opaque, and letting it happen anyway just
+    trades a clear message for an obscure one.
+
+    Prefers `payload[f"{prefix}_sha256"/"_path"]`, resolved the same way
+    `_resolve_input` resolves the BAM itself -- BioFlow's storage is
+    content-addressed, so a managed BAM's `.bai` is a sibling `DataObject`
+    with no path relationship to the BAM's own blob path, and the launch
+    path is expected to supply it explicitly (see `launch_bam_stats`'s
+    `bai_sha256`/`bai_path`, the existing precedent for this exact
+    resolve-the-sidecar-separately shape). Falls back to `x.bam.bai` /
+    `x.bai` beside `raw_bam` only when the payload carries no index at
+    all -- valid for a register-in-place file already sitting under its
+    real name, not for one from BioFlow's own storage.
+    """
+    if payload.get(f"{prefix}_sha256") or payload.get(f"{prefix}_path"):
+        source = _resolve_input(payload, prefix)
+    else:
+        source = next(
+            (
+                c
+                for c in (Path(f"{raw_bam}.bai"), raw_bam.with_suffix(".bai"))
+                if c.exists()
+            ),
+            None,
+        )
+        if source is None:
+            raise PermanentError(
+                f"{raw_bam.name} has no discoverable .bai index; CRAQ cannot "
+                "run without one"
+            )
+
+    target = Path(f"{linked_bam}.bai")
+    if not target.exists():
+        target.symlink_to(source)
