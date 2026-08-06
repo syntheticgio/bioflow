@@ -248,22 +248,70 @@ Not packaged for Debian (verified: no apt candidate). From GitHub:
 CRAQ is run against BioFlow-produced BAMs only, reference-free, plotting off,
 chimera-breaking opt-in.
 
+## Report format, read from upstream source (2026-08-06)
+
+Resolved from `src/format_results_addAQI.pl` via `gh api`, not measured — the
+file the README calls `out_final.Report` is written as
+**`runAQI_out/<genome_basename>_final.Report`**. The `out_final.*` names in
+the README apply to the `.bed` files; the report itself is prefixed with the
+input genome's basename. Since the handler links the assembly under a fixed
+name (below), that prefix is fixed and predictable.
+
+Its format, verbatim from the formatter:
+
+```
+Short Report:
+#Chr	Covered.Rate	Low-conf.Rate	Avg.CRH	Avg.CSH	Avg.CRE(R-AQI)	Avg.CSE(S-AQI)	AQI
+```
+
+Three consequences for the parser:
+
+1. **R-AQI and S-AQI are embedded inside columns**, not columns of their own:
+   the CRE column is literally `<value>(<R-AQI>)`. Both need extracting from
+   one field with a regex, matching the formatter's own
+   `/(\S+)\((\S+)\)/`.
+2. **AQI is a harmonic mean** of S-AQI and R-AQI —
+   `2*S*R/(S+R)` — not an independent measurement. It is parsed rather than
+   recomputed, but knowing it is derived matters: it is meaningless whenever
+   either input is.
+3. Every numeric field is `sprintf("%.3f")`, so all of them parse as
+   **float**. The counts in this report are *averages* (`Avg.CRE`), not the
+   integer counts the fact table needs — those come from counting `.bed`
+   rows, which is a separate parse.
+
+### The NGS-only trap this exposes
+
+`runAQI_NGS.sh` (the short-only path) pipes through **the same**
+`format_results_addAQI.pl`. That formatter unconditionally prints all eight
+columns and computes AQI from both R-AQI and S-AQI. So a short-only run
+emits **structurally valid CSE, S-AQI and AQI numbers that mean nothing** —
+upstream says CSE is "hardly detected" without long reads, and here it is
+printed as a clean `0.000` anyway.
+
+This is the concrete form of the omission rule above, and it is stronger
+than the spec first assumed: the danger is not that we might choose to write
+a zero, it is that **reading the file correctly produces one**. A parser
+that simply maps columns to facts ships the fabricated number by default.
+So the omission is enforced at the parser, driven by which inputs were
+supplied, and never by trusting the file's contents. Same for the derived
+AQI, which inherits the meaninglessness of its S-AQI input.
+
 ## Verify before implementing
 
-Two facts could not be established from the README and must be measured, not
-assumed. The QUAST slice's numbers held *because* they were measured against a
-real install, and its most important finding came from running the thing:
+One fact remains unmeasured. The QUAST slice's numbers held *because* they
+were measured against a real install, and its most important finding came from
+running the thing:
 
-1. **The exact column layout of `out_final.Report`.** The README names the
-   file and the metrics it carries but not its format. Read a real one from
-   `Example/run_example.sh` before writing the parser.
-2. **Install size and runtime.** QUAST's entry recorded 8.6 MB and 3–4 s for a
-   12 Mb yeast assembly; record the equivalents here. CRAQ's own README warns
-   that read mapping dominates its cost — which this design avoids by
-   supplying BAMs, so the measured runtime should be substantially below a
-   from-FASTQ run and that difference is worth recording.
+- **Install size and runtime.** QUAST's entry recorded 8.6 MB and 3–4 s for a
+  12 Mb yeast assembly; record the equivalents here. CRAQ's own README warns
+  that read mapping dominates its cost — which this design avoids by
+  supplying BAMs, so the measured runtime should be substantially below a
+  from-FASTQ run and that difference is worth recording.
 
-`Example/run_example.sh` in the upstream repo is the fastest route to both.
+`Example/run_example.sh` upstream is the fastest route to a real run. Note it
+invokes `perl ../bin/craq`, and that `bin/` holds a single Perl script whose
+real work is in sibling `src/*.sh` and `src/*.pl` — so the install must place
+the whole tree, not just the entrypoint.
 
 ## Testing
 
