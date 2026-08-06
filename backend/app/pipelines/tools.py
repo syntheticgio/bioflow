@@ -637,6 +637,16 @@ def ragtag() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def quast() -> Tool:
+    # Verified against a real installed 5.3.0: `quast.py --version` prints
+    # "QUAST v5.3.0" and exits zero, alongside a harmless
+    # "WARNING: Python locale settings can't be changed" on stderr that
+    # `_probe` already tolerates (it reads whichever stream produced
+    # something).
+    return _probe("quast", settings.quast_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -708,6 +718,7 @@ def all_tools() -> list[Tool]:
         datasets(),
         featurecounts(),
         pydeseq2(),
+        quast(),
     ]
 
 
@@ -1486,6 +1497,55 @@ TOOL_META: dict[str, ToolMeta] = {
             "from one version is not comparable to a score from another."
         ),
     ),
+    "quast": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Reference-based misassembly detection",
+        summary=(
+            "Aligns a draft assembly against a related reference and reports "
+            "structural disagreements -- relocations, translocations and "
+            "inversions -- that neither contiguity nor completeness can see. "
+            "A chimeric assembly that joins two chromosomes into one contig "
+            "scores better on N50 and identically on completeness, since "
+            "every gene is still present, just in the wrong place; this is "
+            "the only BioFlow check that catches that."
+        ),
+        strengths=(
+            "Reports per-breakpoint coordinates and error type "
+            "(relocation/translocation/inversion), not just a count",
+            "Genome fraction and duplication ratio, alongside the "
+            "misassembly breakdown, from one run",
+            "No compilation needed -- it prefers an installed minimap2 "
+            "over its own bundled copy",
+        ),
+        homepage="https://quast.sourceforge.net/",
+        repository="https://github.com/ablab/quast",
+        citation=(
+            "Alla Mikheenko, Vladislav Saveliev, Pascal Hirsch, Alexey "
+            "Gurevich, WebQUAST: online evaluation of genome assemblies. "
+            "Nucleic Acids Research. 2023;51(W1):W601-W606."
+        ),
+        citation_url="https://doi.org/10.1093/nar/gkad406",
+        # From the repository's own LICENSE.txt, checked 2026-08-05: GNU
+        # General Public License, Version 2.
+        license="GPL-2.0",
+        usage=(
+            "Runs quast.py in reference-based mode only, against a "
+            "reference the user picks -- no --gene-finding, "
+            "--rna-finding or --conserved-genes-finding, and no de novo "
+            "mode. The input is linked under a fixed name and passed with "
+            "a fixed --l label rather than the object's own name: QUAST "
+            "sanitizes contig names but not the assembly label, and the "
+            "label is otherwise taken from the input filename. Stores only "
+            "the reference-derived numbers as facts -- misassembly counts "
+            "and types, genome fraction, duplication ratio, mismatches and "
+            "indels per 100 kbp -- alongside which reference and "
+            "--min-contig cutoff produced them. Contiguity numbers QUAST "
+            "also reports (N50, L50, total length, ...) are not stored "
+            "here, since BioFlow already computes those for every FASTA "
+            "at ingest and a second code path with a different cutoff "
+            "would eventually disagree with the first."
+        ),
+    ),
     "ragtag": ToolMeta(
         pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
         one_liner="Reference-guided assembly scaffolding",
@@ -1799,3 +1859,4 @@ def reset_cache() -> None:
     datasets.cache_clear()
     featurecounts.cache_clear()
     pydeseq2.cache_clear()
+    quast.cache_clear()

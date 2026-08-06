@@ -142,6 +142,12 @@ class Settings(BaseSettings):
     # Python, pinned in backend/Dockerfile). The binary is `ragtag.py`, not
     # `ragtag` -- see tools.ragtag()'s own comment.
     ragtag_path: str = "ragtag.py"
+    # Reference-based misassembly QC. Not in Debian; installed from the
+    # GitHub release tarball, patched and trimmed -- see
+    # backend/scripts/install-quast.sh. `quast_path` names a wrapper script,
+    # not the tool's own quast.py, so the entry point on PATH is stable
+    # regardless of where the tarball unpacks.
+    quast_path: str = "quast.py"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

@@ -309,6 +309,17 @@ RUN chmod +x /srv/scripts/install-polypolish.sh \
        TARGETARCH="${TARGETARCH}" \
        /srv/scripts/install-polypolish.sh
 
+# QUAST, reference-based misassembly QC. Not in Debian; PyPI stops at 5.2.0,
+# which is dead on this image's Python 3.12 (`distutils` was removed), so
+# this takes the 5.3.0 GitHub release tarball instead and patches it -- see
+# the install script's comments, including why this is not a source build
+# despite not being packaged.
+ARG QUAST_VERSION=5.3.0
+COPY scripts/install-quast.sh /srv/scripts/install-quast.sh
+RUN chmod +x /srv/scripts/install-quast.sh \
+    && QUAST_VERSION="${QUAST_VERSION}" \
+       /srv/scripts/install-quast.sh
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \
