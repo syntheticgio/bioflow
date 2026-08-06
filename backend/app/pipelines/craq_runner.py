@@ -88,6 +88,13 @@ def parse_final_report(text: str, *, has_ngs: bool, has_sms: bool) -> dict:
     **`has_sms=False` drops every structural field**, including the overall
     AQI, which is a harmonic mean of R-AQI and S-AQI and so inherits its
     meaninglessness. See the module docstring.
+
+    `has_ngs` is accepted for API symmetry with `has_sms` and to document
+    intent, but it does not currently gate anything: R-AQI/CRE is written
+    unconditionally regardless of its value. This is deliberate, not an
+    oversight -- CRAQ only *undercounts* R-AQI without short reads (per the
+    module docstring), it does not fabricate a number the way CSE/S-AQI are
+    fabricated without long reads, so there is nothing to drop.
     """
     facts: dict = {}
     for line in text.strip().splitlines():
