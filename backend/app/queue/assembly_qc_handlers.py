@@ -403,7 +403,15 @@ def assess_assembly_errors(ctx: JobContext) -> dict:
 
     **A BAM's index must travel with it.** CRAQ requires `sort.bam.bai`
     beside `sort.bam`; linking the BAM alone produces a failure deep in a
-    samtools call rather than a clear error.
+    samtools call rather than a clear error. BioFlow's storage is
+    content-addressed -- a managed BAM and its `.bai` are two unrelated
+    `DataObject`s (`SidecarRole.BAI`) with no path relationship between
+    them, the same way `launch_bam_stats` resolves `bai_sha256`/`bai_path`
+    as their own payload keys rather than guessing a sibling path. The
+    launch path is expected to supply `{ngs,sms}_bai_sha256`/`_path`
+    alongside the BAM's own; a register-in-place BAM (no sidecar resolved)
+    falls back to `.bai`/`with_suffix(".bai")` beside the BAM's own file,
+    which is the only case where that guess is valid.
     """
     tool = tools.require(tools.craq())
 
@@ -416,13 +424,13 @@ def assess_assembly_errors(ctx: JobContext) -> dict:
     if ctx.payload.get("ngs_bam_path") or ctx.payload.get("ngs_bam_sha256"):
         raw = _resolve_input(ctx.payload, "ngs_bam")
         ngs_bam = _named_link(work, raw, _CRAQ_NGS_LINK)
-        _link_bam_index(raw, ngs_bam)
+        _link_bam_index(ctx.payload, "ngs_bai", raw, ngs_bam)
 
     sms_bam = None
     if ctx.payload.get("sms_bam_path") or ctx.payload.get("sms_bam_sha256"):
         raw = _resolve_input(ctx.payload, "sms_bam")
         sms_bam = _named_link(work, raw, _CRAQ_SMS_LINK)
-        _link_bam_index(raw, sms_bam)
+        _link_bam_index(ctx.payload, "sms_bai", raw, sms_bam)
 
     if ngs_bam is None and sms_bam is None:
         raise PermanentError(
@@ -529,20 +537,43 @@ def assess_assembly_errors(ctx: JobContext) -> dict:
     }
 
 
-def _link_bam_index(raw_bam: Path, linked_bam: Path) -> None:
+def _link_bam_index(payload: dict, prefix: str, raw_bam: Path, linked_bam: Path) -> None:
     """Link a BAM's `.bai` beside its fixed-name link.
 
     CRAQ requires the index next to the BAM and fails inside a samtools
-    call, not with a clear message, when it is missing. Both `x.bam.bai`
-    and `x.bai` are accepted on input. The index must sit beside
-    `linked_bam` -- the path `_named_link` actually returned (it prefixes
-    the requested name with `in_`), not the bare fixed-name constant --
-    since that is where samtools looks first.
+    call, not with a clear message, when it is missing -- so a missing
+    index is a `PermanentError` here, not a warning: this handler already
+    knows the failure will be opaque, and letting it happen anyway just
+    trades a clear message for an obscure one.
+
+    Prefers `payload[f"{prefix}_sha256"/"_path"]`, resolved the same way
+    `_resolve_input` resolves the BAM itself -- BioFlow's storage is
+    content-addressed, so a managed BAM's `.bai` is a sibling `DataObject`
+    with no path relationship to the BAM's own blob path, and the launch
+    path is expected to supply it explicitly (see `launch_bam_stats`'s
+    `bai_sha256`/`bai_path`, the existing precedent for this exact
+    resolve-the-sidecar-separately shape). Falls back to `x.bam.bai` /
+    `x.bai` beside `raw_bam` only when the payload carries no index at
+    all -- valid for a register-in-place file already sitting under its
+    real name, not for one from BioFlow's own storage.
     """
-    for candidate in (Path(f"{raw_bam}.bai"), raw_bam.with_suffix(".bai")):
-        if candidate.exists():
-            target = Path(f"{linked_bam}.bai")
-            if not target.exists():
-                target.symlink_to(candidate)
-            return
-    log.warning("craq_bam_index_missing", bam=str(raw_bam))
+    if payload.get(f"{prefix}_sha256") or payload.get(f"{prefix}_path"):
+        source = _resolve_input(payload, prefix)
+    else:
+        source = next(
+            (
+                c
+                for c in (Path(f"{raw_bam}.bai"), raw_bam.with_suffix(".bai"))
+                if c.exists()
+            ),
+            None,
+        )
+        if source is None:
+            raise PermanentError(
+                f"{raw_bam.name} has no discoverable .bai index; CRAQ cannot "
+                "run without one"
+            )
+
+    target = Path(f"{linked_bam}.bai")
+    if not target.exists():
+        target.symlink_to(source)
