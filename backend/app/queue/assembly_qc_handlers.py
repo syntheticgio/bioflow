@@ -12,6 +12,7 @@ not conflated with whatever else touched the object.
 Imported by `handlers.py` for the `@handler` registration side effects.
 """
 
+import shutil
 from pathlib import Path
 
 from app.config import settings
@@ -274,6 +275,10 @@ def assess_misassemblies(ctx: JobContext) -> dict:
     facts["assembly_reference_id"] = ctx.payload.get("reference_object_id")
     facts["assembly_reference_name"] = ctx.payload.get("reference_name")
 
+    report_fact = _copy_report(ctx, out_dir)
+    if report_fact:
+        facts["assembly_misassembly_report"] = report_fact
+
     ctx.progress(phase="done", pct=1.0, message="misassembly QC complete")
     log.info(
         "misassembly_finished",
@@ -288,3 +293,66 @@ def assess_misassemblies(ctx: JobContext) -> dict:
         "facts": facts,
         "workdir": str(work),
     }
+
+
+def _copy_report(ctx: JobContext, out_dir: Path) -> str | None:
+    """Copy QUAST's HTML report tree into `qc_reports/<object_id>/quast/`,
+    where `get_qc_report` serves it -- same storage shape `run_qc` uses for
+    fastp's and FastQC's reports.
+
+    Selective, not a directory copy: `out_dir` also holds `report.tex`,
+    `report.pdf`, `transposed_report*`, `contigs_reports/*.stdout`, and
+    several other artifacts this application has no reader for. Copying the
+    whole tree would store bytes nothing ever serves.
+
+    `report.html` and `icarus.html` are self-contained -- the only outbound
+    `href` in a real report is a link to QUAST's own homepage -- but
+    `icarus.html` still links to `icarus_viewers/*.html` as separate pages,
+    so those come along too. The `.misassemblies.gff` is not part of the
+    report page at all; it is copied alongside it because it carries
+    per-breakpoint coordinates and types that make a bare count actionable,
+    and `qc_reports/<object_id>/` is already the place this application
+    keeps a run's human-readable artifacts.
+
+    Returns None, logging a warning, rather than raising: a QUAST run that
+    produced real facts must not fail the job over a report copy failing --
+    the same posture the rest of this handler takes on parse failures.
+    """
+    object_id = ctx.payload.get("object_id")
+    report_html = out_dir / "report.html"
+    if not object_id or not report_html.exists():
+        log.warning("misassembly_report_missing", job_id=ctx.job_id)
+        return None
+
+    report_dir = settings.qc_reports_dir / str(object_id) / "quast"
+    try:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(report_html, report_dir / "report.html")
+
+        icarus_html = out_dir / "icarus.html"
+        if icarus_html.exists():
+            shutil.copyfile(icarus_html, report_dir / "icarus.html")
+
+        icarus_viewers = out_dir / "icarus_viewers"
+        if icarus_viewers.is_dir():
+            shutil.copytree(
+                icarus_viewers, report_dir / "icarus_viewers", dirs_exist_ok=True
+            )
+
+        gff = out_dir / "contigs_reports" / f"{_ASSEMBLY_LABEL}.misassemblies.gff"
+        if gff.exists():
+            shutil.copyfile(gff, report_dir / "misassemblies.gff")
+    except OSError as e:
+        # Cosmetic only, the same reasoning _run_fastqc's own copy failures
+        # take: the facts are already computed and are the half of this
+        # result a user cannot get any other way. A missing report page is
+        # recoverable by re-running; lost facts from a job that already ran
+        # for real are not.
+        log.warning("misassembly_report_copy_failed", job_id=ctx.job_id, error=str(e))
+        return None
+
+    # Relative to report_dir, which is already qc_reports_dir/<object_id> --
+    # get_qc_report's `root` includes the object_id once, so a fact that
+    # repeats it names a path nothing was ever written to. Matches the
+    # `qc_fastp_report`/`qc_fastqc_report` convention in pipeline_handlers.py.
+    return "quast/report.html"

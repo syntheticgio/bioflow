@@ -1,8 +1,27 @@
 import { useState } from "react";
+import { api } from "../api/client";
 import { accessionUrl } from "../lib/format";
 
 interface Props {
   facts: Record<string, unknown>;
+  objectId: string;
+}
+
+/**
+ * Same link shape `QcReport.tsx`'s `ReportLink` uses -- new tab, noopener,
+ * CSP-sandboxed on the server. Not imported from there: that component is
+ * scoped to read QC, and duplicating four lines here is cheaper than adding
+ * a cross-cutting export for one reuse.
+ */
+function ReportLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="report-link">
+      {children}
+      <span className="report-link-icon" aria-hidden="true">
+        ↗
+      </span>
+    </a>
+  );
 }
 
 const MAX_VISIBLE_CONTIGS = 25;
@@ -14,7 +33,7 @@ const MAX_VISIBLE_CONTIGS = 25;
  * that actually characterize a genome build. This shows those, and nothing
  * else.
  */
-export function AssemblyFacts({ facts }: Props) {
+export function AssemblyFacts({ facts, objectId }: Props) {
   const [showAllContigs, setShowAllContigs] = useState(false);
 
   const exactCount = facts.sequence_count as number | undefined;
@@ -85,6 +104,32 @@ export function AssemblyFacts({ facts }: Props) {
     | undefined;
   const hasCompleteness = completenessTool !== undefined;
 
+  // Misassembly QC: QUAST, a separate job the user launches against a
+  // reference. Deliberately excludes N50/L50/total-length-shaped facts --
+  // those are the contiguity block above, computed once at ingest by
+  // `_parse_fasta`, not by QUAST's own report.tsv over a --min-contig
+  // subset. See quast_runner.py's module docstring for why storing both
+  // would eventually let two numbers meant to agree quietly disagree.
+  const misassemblyTool = facts.assembly_misassembly_tool as string | undefined;
+  const misassemblyTotal = facts.assembly_misassembly_total as number | undefined;
+  const misassemblyRelocations = facts.assembly_misassembly_relocations as
+    | number
+    | undefined;
+  const misassemblyTranslocations = facts.assembly_misassembly_translocations as
+    | number
+    | undefined;
+  const misassemblyInversions = facts.assembly_misassembly_inversions as
+    | number
+    | undefined;
+  const genomeFractionPct = facts.assembly_reference_genome_fraction_pct as
+    | number
+    | undefined;
+  const referenceName = facts.assembly_reference_name as string | undefined;
+  const misassemblyReportPath = facts.assembly_misassembly_report as
+    | string
+    | undefined;
+  const hasMisassembly = misassemblyTool !== undefined;
+
   // A file named for a full assembly that holds one chromosome is a real and
   // easily-missed problem. Compare only when both sides are known.
   const countDiverges =
@@ -95,7 +140,14 @@ export function AssemblyFacts({ facts }: Props) {
     Math.abs(totalBases - ncbiTotal) / ncbiTotal > 0.01;
   const diverges = countDiverges || lengthDiverges;
 
-  if (!hasAnything && !hasNcbi && !assemblyError && !hasContiguity && !hasCompleteness) {
+  if (
+    !hasAnything &&
+    !hasNcbi &&
+    !assemblyError &&
+    !hasContiguity &&
+    !hasCompleteness &&
+    !hasMisassembly
+  ) {
     return (
       <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
         No assembly facts extracted yet.
@@ -369,6 +421,53 @@ export function AssemblyFacts({ facts }: Props) {
             <div className="warn-box" style={{ marginTop: 8 }}>
               {duplicatedPct}% of markers are duplicated, which can mean
               retained haplotypes rather than real gene duplication.
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasMisassembly && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            Misassembly QC ({misassemblyTool}
+            {referenceName ? ` vs. ${referenceName}` : ""})
+          </div>
+          <dl className="kv">
+            {misassemblyTotal !== undefined && (
+              <>
+                <dt>Misassemblies</dt>
+                <dd>{misassemblyTotal.toLocaleString()}</dd>
+              </>
+            )}
+            {genomeFractionPct !== undefined && (
+              <>
+                <dt>Genome fraction</dt>
+                <dd>{genomeFractionPct}%</dd>
+              </>
+            )}
+          </dl>
+          {/* Only when there is at least one to explain -- a project with
+              zero misassemblies gains nothing from a 0/0/0 breakdown row. */}
+          {misassemblyTotal !== undefined && misassemblyTotal > 0 && (
+            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 4 }}>
+              {misassemblyRelocations !== undefined && (
+                <>{misassemblyRelocations} relocation{misassemblyRelocations === 1 ? "" : "s"}, </>
+              )}
+              {misassemblyTranslocations !== undefined && (
+                <>{misassemblyTranslocations} translocation{misassemblyTranslocations === 1 ? "" : "s"}, </>
+              )}
+              {misassemblyInversions !== undefined && (
+                <>{misassemblyInversions} inversion{misassemblyInversions === 1 ? "" : "s"}</>
+              )}
+            </div>
+          )}
+          {misassemblyReportPath && (
+            <div style={{ marginTop: 8 }}>
+              <ReportLink href={api.qcReportUrl(objectId, misassemblyReportPath)}>
+                QUAST report
+              </ReportLink>
             </div>
           )}
         </div>
