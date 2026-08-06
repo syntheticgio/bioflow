@@ -8,7 +8,7 @@ strings and paths, with no queue or filesystem involved. Mirrors
 
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
@@ -437,43 +437,99 @@ _PHASE_MESSAGES = {
     "merging": "merging outputs",
 }
 
+# Clair3 declares its whole chunk plan up front, one line naming the contigs
+# and the next naming how many chunks each was split into, in the same order:
+#   [INFO] Call variant in contigs: NC_001135.5 NC_001147.6 NC_001142.9 ...
+#   [INFO] Chunk number for each contig: 1 1 1 1 1
+# Summed, that total is fixed for the whole pileup phase -- a genuine
+# units_total, not an estimate. bcftools and full-alignment calling have no
+# equivalent line, so those stay phase-only exactly as before; this only
+# feeds units on the pileup phase, where Clair3 does most of its per-chunk
+# work. Verified against a real captured run
+# (tests/fixtures/tool_logs/clair3-v2.0.2.log) before writing, per the
+# convention that cost a bug once already (see the golden-fixture module
+# docstring for align_runner's minimap2 history).
+_CHUNK_PLAN_RE = re.compile(r"Chunk number for each contig:\s*([\d\s]+)$")
+
+# Each chunk announces its own completion once, naming the contig it belongs
+# to and its position in that contig's chunk count -- not a running total,
+# a single event to count.
+#   Total processed positions in NC_001147.6 (chunk 1/1) : 0
+_CHUNK_DONE_RE = re.compile(r"Total processed positions in (\S+) \(chunk (\d+)/(\d+)\)")
+
 
 @dataclass
 class VariantProgress:
-    """Turns a caller's own output into a phase label.
+    """Turns a caller's own output into a phase label, and for Clair3's
+    pileup phase, a chunk count.
 
-    Deliberately not a percentage. Clair3 prints stage banners but no
-    per-region progress, and bcftools' stderr has no per-contig line worth
-    counting, so any fraction would be invented. The phase is genuinely useful
-    -- full-alignment is the slow one, and knowing the run reached it is worth
-    more than a number that does not mean anything.
+    Deliberately no percentage: Clair3's chunks vary enormously in size (a
+    contig with no reads is one *and* a contig with millions is also one), so
+    "N of M chunks" is honest in a way a fraction derived from it would not
+    be -- see units_total's docstring above. bcftools' stderr has no
+    per-contig line worth counting at all, so it stays phase-only. The phase
+    itself is genuinely useful regardless -- full-alignment is the slow one,
+    and knowing the run reached it is worth more than a number that does not
+    mean anything.
     """
 
     name: str = "variant-caller"
     phase: str = "calling"
+    units_total: int | None = None
+    _chunks_seen: set[tuple[str, str]] = field(default_factory=set)
 
     def feed(self, line: str) -> bool:
         """Consume a line. True if the caller should publish an update.
 
-        False on a repeat of the current phase: these callbacks write to the
+        False on a repeat phase banner: these callbacks write to the
         database, and a banner printed on every line must not mean a write on
-        every line.
+        every line. A chunk-completion line always publishes, since each one
+        is a distinct event rather than a restatement of known state.
         """
+        changed = False
+
         for pattern, phase in _PHASE_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 if self.phase != phase:
                     self.phase = phase
-                    return True
-                return False
-        return False
+                    changed = True
+                break
+
+        plan = _CHUNK_PLAN_RE.search(line)
+        if plan:
+            self.units_total = sum(int(n) for n in plan.group(1).split())
+            changed = True
+
+        done = _CHUNK_DONE_RE.search(line)
+        if done:
+            key = (done.group(1), done.group(2))
+            if key not in self._chunks_seen:
+                self._chunks_seen.add(key)
+                changed = True
+
+        return changed
+
+    @property
+    def units_done(self) -> int | None:
+        return len(self._chunks_seen) if self._chunks_seen else None
 
     @property
     def pct(self) -> float | None:
-        """Always None: neither caller reports measurable progress."""
+        """Always None: neither caller reports a measurable fraction, only
+        chunk counts -- see the class docstring for why those stay units
+        rather than being turned into one."""
         return None
 
     def message(self) -> str:
-        return _PHASE_MESSAGES.get(self.phase, "calling variants")
+        base = _PHASE_MESSAGES.get(self.phase, "calling variants")
+        if self.units_done and self.units_total:
+            return f"{base}: {self.units_done}/{self.units_total} chunks"
+        return base
 
     def snapshot(self) -> dict:
-        return {"pct": self.pct, "phase": self.phase, "message": self.message()}
+        result = {"pct": self.pct, "phase": self.phase, "message": self.message()}
+        if self.units_total is not None:
+            result["units_total"] = self.units_total
+            result["units_done"] = self.units_done or 0
+            result["unit_label"] = "chunks"
+        return result

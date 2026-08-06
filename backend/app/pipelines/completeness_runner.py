@@ -26,7 +26,7 @@ installed 0.2.9 package rather than trusting the grep.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 log = None  # set lazily below to avoid an import cycle at module load time
@@ -129,6 +129,76 @@ _CATEGORY_NAMES = {
     "F": "fragmented",
     "M": "missing",
 }
+
+# compleasm's own stderr is mostly tool-discovery chatter; the batched work is
+# entirely miniprot's, which shares minimap2's logging library and its
+# per-batch line:
+#   [M::worker_pipeline::50.792*7.96] mapped 2257 sequences
+# Same regex, same per-batch-not-cumulative semantics as align_runner's
+# _MAPPED_RE (#57) -- both come from mm_analysis.c's worker_pipeline printf.
+# Verified against a real captured run of this exact pipeline
+# (`assess_completeness`) rather than assumed: compleasm never prints a
+# closed phase list the way fastp or bwa-mem2's aligning/sorting split does,
+# so there is nothing to name "step N of M" -- this is one phase
+# ("mapping") with a running count, then a silent hmmsearch stage with no
+# stderr of its own to parse. hmmsearch is only ever a phase transition, not
+# a countable one, for the same reason variant calling's full-alignment
+# phase is: it exists to be named, not measured.
+_MAPPED_RE = re.compile(r"worker_pipeline.*mapped\s+(\d+)\s+sequences", re.IGNORECASE)
+_HMMSEARCH_RE = re.compile(r"hmmsearch execute command", re.IGNORECASE)
+
+
+@dataclass
+class CompletenessProgress:
+    """Turns compleasm's own output into a phase and a running mapped-
+    sequence count.
+
+    No expected_reads, unlike TrimProgress/AlignProgress -- compleasm's
+    ortholog set size is known ahead of time (the lineage's marker count) but
+    is not the same unit as the sequences miniprot maps, so there is no
+    honest total to divide by. The count is shown as a running number, not a
+    fraction, for the same reason assembly_runner's Flye phases show no pct:
+    a number that cannot be verified against a total must not claim one.
+    """
+
+    name: str = "compleasm"
+    phase: str = "mapping"
+    mapped: int = 0
+    _seen_hmmsearch: bool = field(default=False, repr=False)
+
+    def feed(self, line: str) -> bool:
+        """Consume a line. True if the caller should publish an update."""
+        if _HMMSEARCH_RE.search(line):
+            if self._seen_hmmsearch:
+                return False
+            self._seen_hmmsearch = True
+            self.phase = "scoring"
+            return True
+
+        match = _MAPPED_RE.search(line)
+        if not match:
+            return False
+
+        # Cumulative, not a running total: miniprot reports per batch, same
+        # as bwa-mem2 and minimap2 (align_runner.AlignProgress).
+        self.mapped += int(match.group(1))
+        return True
+
+    @property
+    def pct(self) -> float | None:
+        """Always None -- see the class docstring for why there is no honest
+        total to divide the mapped count by."""
+        return None
+
+    def message(self) -> str:
+        if self.phase == "scoring":
+            return "scoring completeness"
+        if self.mapped:
+            return f"mapping proteins: {self.mapped:,} sequences"
+        return "mapping proteins"
+
+    def snapshot(self) -> dict:
+        return {"pct": self.pct, "phase": self.phase, "message": self.message()}
 
 
 def parse_summary(text: str) -> dict:

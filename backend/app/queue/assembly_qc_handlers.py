@@ -102,7 +102,9 @@ def assess_completeness(ctx: JobContext) -> dict:
         threads=params.threads,
     )
 
-    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    code = run_subprocess(
+        ctx, cmd, log_path=str(log_path), parser=completeness_runner.CompletenessProgress()
+    )
     if code != 0:
         raise _failure(code, log_path, "compleasm")
 
