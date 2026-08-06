@@ -16,14 +16,27 @@ security boundary -- everything omitted here is still reachable over plain
 HTTP by anything on this machine.
 """
 
+import asyncio
+
 from beanie import PydanticObjectId
 from bson.errors import InvalidId
 
 from app.errors import NotFoundError, ProfileUnresolvedError, ValidationError
+from app.mcp.resources import GuideTopic, load_guide
+from app.metadata import ncbi_taxonomy
 from app.models import Job, Profile
+from app.pipelines import tools as pipeline_tools
+from app.pipelines.tools import TOOL_META
 from app.queue import queue
 from app.queue.registry import all_handlers
-from app.services import object_service, project_service, suggestion_service
+from app.services import (
+    ncbi_assembly_service,
+    object_service,
+    project_service,
+    search_service,
+    suggestion_service,
+)
+from app.services.search_service import SearchQuery
 
 
 def _project_summary(project) -> dict:
@@ -235,6 +248,87 @@ async def cancel_job(job_id: str, *, owner: str) -> dict:
     return {"job_id": job_id, "outcome": outcome}
 
 
+async def search_objects(query: str, *, owner: str, limit: int = 50) -> dict:
+    """Find objects across the whole library by name and metadata."""
+    result = await search_service.search_objects(
+        SearchQuery(text=query, limit=limit), owner=owner
+    )
+    return {"objects": [_object_summary(o) for o in result["objects"]]}
+
+
+async def search_ncbi(term: str, *, owner: str) -> dict:
+    """Search NCBI for an organism and the assemblies it has on file.
+
+    Two-step under the hood, same as the download dialog: `term` resolves to
+    candidate organisms first, then the best match's assemblies are fetched.
+    Acquisition itself is a separate step -- take an `accession` from the
+    result and hand it to `bioflow_download_reference`.
+    """
+    suggestions = await asyncio.to_thread(ncbi_taxonomy.suggest_organisms, term)
+    if not suggestions:
+        return {"organisms": [], "assemblies": []}
+
+    top = suggestions[0]
+    page = await asyncio.to_thread(
+        ncbi_taxonomy.search_assemblies_by_taxon, top.tax_id
+    )
+
+    return {
+        "organisms": [s.as_dict() for s in suggestions],
+        "assemblies": [a.as_dict() for a in page.assemblies],
+    }
+
+
+async def download_reference(
+    accession: str, project_id: str, *, owner: str
+) -> dict:
+    """Download an NCBI assembly's genome into a project. Returns a job id.
+
+    Like every pipeline, this is asynchronous -- poll `bioflow_get_job`.
+    """
+    run, job_ids = await ncbi_assembly_service.launch_download(
+        project_id=PydanticObjectId(project_id),
+        accession=accession,
+        components=["genome"],
+        owner=owner,
+    )
+    return {"job_id": job_ids[0] if job_ids else None, "accession": accession}
+
+
+async def list_tools(*, owner: str) -> dict:
+    """The bioinformatics tools BioFlow knows about, and whether each is
+    installed on this machine."""
+    out = {}
+    for name, meta in TOOL_META.items():
+        probe = getattr(pipeline_tools, name, None)
+        installed = bool(probe and probe().available) if callable(probe) else None
+        out[name] = {
+            "installed": installed,
+            "usage": getattr(meta, "usage", None),
+            "homepage": getattr(meta, "homepage", None),
+        }
+    return {"tools": out}
+
+
+async def get_guide(topic: str, *, owner: str) -> dict:
+    """A workflow guide.
+
+    Duplicated as a tool as well as a resource because agent support for MCP
+    resources is uneven while tool-calling is universal -- same content, two
+    doors.
+    """
+    try:
+        parsed = GuideTopic(topic)
+    except ValueError as e:
+        valid = sorted(t.value for t in GuideTopic)
+        raise ValidationError(
+            f"Unknown guide topic: {topic!r}. Valid topics: {valid}",
+            details={"topic": topic, "valid": valid},
+        ) from e
+
+    return {"topic": parsed.value, "content": load_guide(parsed)}
+
+
 # Every tool name the server registers. `tests/mcp/test_guides.py` checks
 # guides against this, and `tests/mcp/test_surface.py` checks it for anything
 # destructive that should not be here.
@@ -250,4 +344,9 @@ TOOL_NAMES: set[str] = {
     "bioflow_get_job",
     "bioflow_list_jobs",
     "bioflow_cancel_job",
+    "bioflow_search_objects",
+    "bioflow_search_ncbi",
+    "bioflow_download_reference",
+    "bioflow_list_tools",
+    "bioflow_get_guide",
 }

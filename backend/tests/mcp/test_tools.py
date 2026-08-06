@@ -233,3 +233,48 @@ async def test_cancel_job_rejects_an_unknown_job_id():
 
     with pytest.raises(NotFoundError):
         await tools.cancel_job("507f1f77bcf86cd799439011", owner=profile.owner_id())
+
+
+async def test_search_objects_is_scoped_to_the_owner():
+    a = await profile_service.create_profile(username="tools-search-a")
+    b = await profile_service.create_profile(username="tools-search-b")
+
+    result = await tools.search_objects("anything", owner=b.owner_id())
+
+    assert all(o.get("owner") != a.owner_id() for o in result["objects"])
+
+
+async def test_list_tools_reports_installation_state():
+    """An agent needs to know what is installed, not just what exists.
+
+    `needs_install` is a real first-run state for ON_DEMAND_IMAGE tools, and
+    an agent that cannot see it will read a pullable tool as permanently
+    broken -- the same wrong reading `CardStatus.NEEDS_INSTALL` exists to
+    prevent in the UI.
+    """
+    profile = await profile_service.create_profile(username="tools-listtools")
+
+    result = await tools.list_tools(owner=profile.owner_id())
+
+    assert result["tools"]
+    sample = next(iter(result["tools"].values()))
+    assert "installed" in sample
+
+
+async def test_get_guide_returns_content():
+    profile = await profile_service.create_profile(username="tools-guide")
+
+    result = await tools.get_guide("getting-started", owner=profile.owner_id())
+
+    assert "bioflow_suggest_next" in result["content"]
+
+
+async def test_get_guide_rejects_an_unknown_topic():
+    profile = await profile_service.create_profile(username="tools-guide-bad")
+
+    from app.errors import ValidationError
+
+    with pytest.raises(ValidationError) as exc:
+        await tools.get_guide("no-such-guide", owner=profile.owner_id())
+
+    assert "getting-started" in str(exc.value)
