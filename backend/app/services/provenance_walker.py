@@ -154,9 +154,14 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # AI features that write a field rather than producing an object.
         "summarize_object",
         "answer_project_question",
-        # Test-only.
+        # Test-only. `worker_run_ids_probe` is registered by
+        # tests/queue/test_worker_run_ids.py with no teardown, so it is
+        # visible to `registry.all_handlers()` in any test process that has
+        # imported that module -- exactly the silent-registry-gap this
+        # exhaustiveness test exists to catch, caught in itself.
         "noop",
         "sleep_test",
+        "worker_run_ids_probe",
     }
 )
 
