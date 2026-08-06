@@ -1,0 +1,70 @@
+Searching for miniprot in the path where compleasm.py is located
+Searching for miniprot in the current execution path
+Searching for miniprot in $PATH
+Searching for hmmsearch in the path where compleasm.py is located
+Searching for hmmsearch in the current execution path
+Searching for hmmsearch in $PATH
+miniprot execute command:
+ /usr/local/bin/miniprot
+lineage: saccharomycetaceae_odb12
+[M::mp_ntseq_read@0.025*0.74] read 12071326 bases in 16 contigs
+[M::mp_idx_build@0.025*0.74] 94324 blocks
+[M::mp_idx_build@0.063*4.47] collected syncmers
+[M::mp_idx_build@0.159*2.37] 5588353 kmer-block pairs
+[M::mp_mapopt_set_max_intron] set max intron size to 12508
+[M::mp_idx_print_stat] 1201262 distinct k-mers; mean occ of infrequent k-mers: 4.65; 0 frequent k-mers accounting for 0 occurrences
+[M::worker_pipeline::1.152*6.76] mapped 724 sequences
+[M::worker_pipeline::2.137*7.30] mapped 1025 sequences
+[M::worker_pipeline::3.289*7.53] mapped 1224 sequences
+[M::worker_pipeline::4.518*7.63] mapped 1365 sequences
+[M::worker_pipeline::5.721*7.70] mapped 1495 sequences
+[M::worker_pipeline::6.817*7.72] mapped 1627 sequences
+[M::worker_pipeline::8.030*7.76] mapped 1751 sequences
+[M::worker_pipeline::9.174*7.78] mapped 1861 sequences
+[M::worker_pipeline::10.311*7.81] mapped 1963 sequences
+[M::worker_pipeline::11.441*7.83] mapped 2069 sequences
+[M::worker_pipeline::12.662*7.84] mapped 2179 sequences
+[M::worker_pipeline::13.953*7.85] mapped 2294 sequences
+[M::worker_pipeline::15.197*7.86] mapped 2403 sequences
+[M::worker_pipeline::16.535*7.87] mapped 2504 sequences
+[M::worker_pipeline::17.786*7.88] mapped 2608 sequences
+[M::worker_pipeline::19.150*7.89] mapped 2719 sequences
+[M::worker_pipeline::20.569*7.90] mapped 2842 sequences
+[M::worker_pipeline::21.950*7.91] mapped 2971 sequences
+[M::worker_pipeline::23.373*7.91] mapped 3103 sequences
+[M::worker_pipeline::24.717*7.92] mapped 3244 sequences
+[M::worker_pipeline::26.093*7.92] mapped 3394 sequences
+[M::worker_pipeline::27.408*7.92] mapped 3546 sequences
+[M::worker_pipeline::28.788*7.93] mapped 3704 sequences
+[M::worker_pipeline::30.088*7.93] mapped 3882 sequences
+[M::worker_pipeline::31.409*7.93] mapped 4069 sequences
+[M::worker_pipeline::32.791*7.94] mapped 4271 sequences
+[M::worker_pipeline::34.152*7.94] mapped 4482 sequences
+[M::worker_pipeline::35.554*7.94] mapped 4709 sequences
+[M::worker_pipeline::37.029*7.94] mapped 4991 sequences
+[M::worker_pipeline::38.536*7.94] mapped 5314 sequences
+[M::worker_pipeline::40.083*7.95] mapped 5676 sequences
+[M::worker_pipeline::41.635*7.95] mapped 6091 sequences
+[M::worker_pipeline::43.146*7.95] mapped 6586 sequences
+[M::worker_pipeline::44.801*7.95] mapped 7252 sequences
+[M::worker_pipeline::46.548*7.95] mapped 8253 sequences
+[M::worker_pipeline::48.457*7.96] mapped 9760 sequences
+[M::worker_pipeline::50.568*7.96] mapped 13782 sequences
+[M::worker_pipeline::50.792*7.96] mapped 2257 sequences
+[M::main] Version: 0.18-r281
+[M::main] CMD: /usr/local/bin/miniprot --trans -u -I --outs=0.95 -t 8 --gff /data/tmp/completeness/6a6f6845c8ba32e67f452130/in_GCA_000146045.2_R64_genomic.fna /data/lineages/saccharomycetaceae_odb12/refseq_db.faa.gz
+[M::main] Real time: 50.806 sec; CPU: 404.291 sec; Peak RSS: 0.484 GB
+hmmsearch execute command:
+ /usr/bin/hmmsearch
+
+S:99.91%, 3279
+D:0.03%, 1
+F:0.06%, 2
+I:0.00%, 0
+M:0.00%, 0
+N:3282
+
+## Download lineage: 0.00(s)
+## Run miniprot: 50.82(s)
+## Analyze miniprot: 168.78(s)
+## Total runtime: 219.60(s)

@@ -270,6 +270,70 @@ class TestVariantProgress:
         assert p.message() == "merging outputs"
 
 
+class TestVariantProgressChunkUnits:
+    """Clair3 declares its whole chunk plan before doing any work, one line
+    naming the contigs and the next naming each one's chunk count, in the
+    same order. That total is fixed for the whole pileup phase -- a genuine
+    units_total, unlike a fraction derived from it (see the class docstring
+    for why pct still stays None)."""
+
+    def test_chunk_plan_sets_units_total(self):
+        p = variant_runner.VariantProgress()
+        assert (
+            p.feed("[INFO] Call variant in contigs: NC_001135.5 NC_001147.6")
+            is False
+        )
+        assert p.feed("[INFO] Chunk number for each contig: 3 2") is True
+        assert p.units_total == 5
+
+    def test_chunk_completion_increments_units_done(self):
+        p = variant_runner.VariantProgress()
+        p.feed("[INFO] Chunk number for each contig: 1 1")
+        assert (
+            p.feed("Total processed positions in NC_001135.5 (chunk 1/1) : 26")
+            is True
+        )
+        assert p.units_done == 1
+        assert (
+            p.feed("Total processed positions in NC_001147.6 (chunk 1/1) : 3")
+            is True
+        )
+        assert p.units_done == 2
+
+    def test_a_repeated_chunk_line_does_not_double_count(self):
+        """Clair3 reports the same contig's chunk again during
+        full-alignment calling; that is not a new unit of pileup work."""
+        p = variant_runner.VariantProgress()
+        p.feed("[INFO] Chunk number for each contig: 1")
+        p.feed("Total processed positions in NC_001135.5 (chunk 1/1) : 26")
+        assert (
+            p.feed("Total processed positions in NC_001135.5 (chunk 1/1) : 7")
+            is False
+        )
+        assert p.units_done == 1
+
+    def test_units_done_is_none_before_any_chunk_completes(self):
+        p = variant_runner.VariantProgress()
+        assert p.units_done is None
+
+    def test_units_absent_from_snapshot_before_the_plan_is_known(self):
+        """No chunk-plan line seen yet -- units must not appear as 0/None,
+        which would read as a stalled run rather than an unmeasured one."""
+        p = variant_runner.VariantProgress()
+        p.feed("[INFO] 1/7 Call variants using pileup model")
+        snap = p.snapshot()
+        assert "units_total" not in snap
+        assert "units_done" not in snap
+        assert "unit_label" not in snap
+
+    def test_message_includes_chunk_count_once_known(self):
+        p = variant_runner.VariantProgress()
+        p.feed("[INFO] 1/7 Call variants using pileup model")
+        p.feed("[INFO] Chunk number for each contig: 2")
+        p.feed("Total processed positions in NC_001135.5 (chunk 1/1) : 26")
+        assert p.message() == "pileup calling: 1/2 chunks"
+
+
 class TestDeepVariantCommand:
     def _cmd(self, **over):
         kwargs = dict(
