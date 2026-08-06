@@ -213,10 +213,17 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          ls -la bundles/
+          # The linux artifact preserves its bundle/deb, bundle/rpm subpaths
+          # under bundles/ (merge-multiple flattens artifact *names*, not the
+          # directory structure inside each one), while the macOS .dmg lands
+          # flat. A `bundles/*` glob therefore includes the deb/ and rpm/
+          # directories themselves, and `gh release create` fails trying to
+          # upload a directory as a release asset. Find actual files instead.
+          find bundles -type f -print
+          mapfile -t assets < <(find bundles -type f)
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "BioFlow Launcher ${TAG#launcher-v}" \
             --generate-notes \
-            bundles/* \
-            || gh release upload "$TAG" --repo "${{ github.repository }}" bundles/* --clobber
+            "${assets[@]}" \
+            || gh release upload "$TAG" --repo "${{ github.repository }}" "${assets[@]}" --clobber
