@@ -97,6 +97,49 @@ class TestAssemblyProgress:
         assert progress.message() == "finishing"
 
 
+class TestFlyeStageOrder:
+    """The stage list Flye will actually run, derived from params.
+
+    Flye builds its whole job list at launch (`_create_job_list`), so this is
+    knowable before the process starts -- which is what makes an honest
+    phase_total possible at all.
+    """
+
+    def test_default_params_run_all_seven_stages(self):
+        order = assembly_runner.flye_stage_order(FlyeParams())
+        assert order == (
+            "configure",
+            "assembly",
+            "consensus",
+            "repeat",
+            "contigger",
+            "polishing",
+            "finalize",
+        )
+
+    def test_zero_iterations_drops_polishing(self):
+        """`--iterations 0` skips JobPolishing, so declaring 7 would leave the
+        counter jumping from 5/7 to 7/7 with nothing at 6."""
+        order = assembly_runner.flye_stage_order(FlyeParams(iterations=0))
+        assert "polishing" not in order
+        assert len(order) == 6
+        assert order[-1] == "finalize"
+
+    def test_extra_iterations_do_not_add_stages(self):
+        """Polishing is one stage regardless of how many rounds it runs."""
+        order = assembly_runner.flye_stage_order(FlyeParams(iterations=5))
+        assert len(order) == 7
+
+    def test_every_stage_has_a_display_label(self):
+        """_STAGE_LABELS and _FLYE_STAGES are two hand-maintained structures
+        in parallel: a stage in one and not the other is skipped silently
+        rather than raised, which is the shape CLAUDE.md flags (the same trap
+        COMPONENT_ORDER carried against COMPONENTS)."""
+        assert set(assembly_runner._STAGE_LABELS) == set(
+            assembly_runner._FLYE_STAGES
+        )
+
+
 class TestParseAssemblyInfo:
     HEADER = "#seq_name\tlength\tcov.\tcirc.\trepeat\tmult.\talt_group\tgraph_path\n"
 

@@ -59,16 +59,42 @@ def build_assembly_command(
 # updating rather than one that fails.
 _STAGE_RE = re.compile(r">>>STAGE:\s*(\w+)")
 
+# The stages Flye runs, in order. Not a guess and not open-ended:
+# `flye/main.py:_create_job_list` appends these seven jobs at launch, before
+# any work starts, so the sequence is knowable before the process runs.
+_FLYE_STAGES: tuple[str, ...] = (
+    "configure",
+    "assembly",
+    "consensus",
+    "repeat",
+    "contigger",
+    "polishing",
+    "finalize",
+)
+
 _STAGE_LABELS: dict[str, str] = {
     "configure": "configuring",
     "assembly": "assembling draft",
     "consensus": "building consensus",
     "repeat": "resolving repeats",
     "contigger": "generating contigs",
-    "trestle": "resolving repeats",
     "polishing": "polishing",
     "finalize": "finishing",
 }
+
+
+def flye_stage_order(params: FlyeParams) -> tuple[str, ...]:
+    """The stages this particular run will execute, in order.
+
+    Mirrors the two conditionals in `_create_job_list`. Only one of them can
+    fire here: `consensus` is skipped for `read_type == "subasm"`, which is
+    not among the modes `assembler_registry` offers, while `--iterations 0`
+    genuinely does drop polishing and is selectable in the dialog
+    (`MIN_ITERATIONS = 0`).
+    """
+    if params.iterations > 0:
+        return _FLYE_STAGES
+    return tuple(stage for stage in _FLYE_STAGES if stage != "polishing")
 
 
 @dataclass
