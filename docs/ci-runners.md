@@ -58,6 +58,21 @@ LaunchDaemon, so the runner starts at user login rather than at boot — but
 Docker Desktop has the same requirement, so the two agree. A Mac sitting at the
 login window has neither, and its jobs queue as described above.
 
+The runner being *online* is not evidence that Docker is. The runner registers
+and accepts jobs perfectly well without it, then fails about thirty seconds in
+with:
+
+```
+ERROR: failed to initialize builder bioflow (bioflow0): failed to connect to the
+docker API at unix:///Users/<user>/.docker/run/docker.sock; check if the path is
+correct and if the daemon is running: dial unix ...: no such file or directory
+```
+
+That socket path is Docker Desktop's own, and it does not exist until Docker
+Desktop starts. Turn on **Start Docker Desktop when you sign in** in its
+settings, so a reboot doesn't quietly take arm64 builds offline while leaving
+the runner showing green in the Actions UI.
+
 ## GHCR package access
 
 The workflow's jobs request `packages: write`, but that only authorizes the
