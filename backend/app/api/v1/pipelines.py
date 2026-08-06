@@ -957,6 +957,32 @@ async def launch_scaffold_route(body: ScaffoldRequest, owner: OwnerDep) -> JobOu
     return JobOut.of(job)
 
 
+class MisassemblyQcRequest(BaseModel):
+    draft_object_id: PydanticObjectId
+    # Optional, same reasoning ScaffoldRequest gives: a project holding more
+    # than one reference-role assembly is the ordinary case, so the frontend
+    # dialog is expected to always pass this rather than lean on the
+    # launch's own single-candidate fallback. The Actions card never needs
+    # to supply it -- it only offers this pipeline when exactly one
+    # candidate exists.
+    reference_object_id: PydanticObjectId | None = None
+
+
+@router.post("/misassemblies", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_misassembly_qc_route(
+    body: MisassemblyQcRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a QUAST run: reference-based misassembly QC for one assembly.
+
+    Read-only, like /completeness: produces facts, no derived object."""
+    job = await pipeline_service.launch_misassembly_qc(
+        draft_object_id=body.draft_object_id,
+        reference_object_id=body.reference_object_id,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep
