@@ -13,13 +13,15 @@ placeholder these tests replace survived a green suite.
 import inspect
 import uuid
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
+from beanie import PydanticObjectId
 
 from app.config import settings
 from app.models import DataObject, ObjectRole, SidecarRole
 from app.queue import results
-from app.services import object_service, project_service
+from app.services import object_service, project_service, run_service
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -556,6 +558,47 @@ class TestApplyAssessAssemblyErrors:
         # The new object's own facts (checked above) must not leak back onto
         # the original assembly -- the ingest call must never touch it.
         assert "assembly_source" not in refreshed_assembly.facts
+
+    async def test_corrected_fasta_ingest_records_outputs_on_the_run(
+        self, monkeypatch
+    ):
+        """Matches every other applier that ingests a new object from a job's
+        output (_apply_polish_assembly, _apply_scaffold_assembly, etc.): the
+        new object must be recorded as a run output, or it never shows up in
+        the pipeline run's Runs history/UI even though produced_by_job ties
+        it to the job correctly."""
+        owner = "results-craq-e"
+        assembly = await _parent(owner, "draft.fasta")
+        ngs_bam = await _parent(owner, "ngs.bam", role=ObjectRole.ALIGNMENT)
+        corrected = _scratch_file()
+
+        run_id = PydanticObjectId()
+        run_for_job = AsyncMock(return_value=run_id)
+        record_outputs = AsyncMock()
+        monkeypatch.setattr(run_service, "run_for_job", run_for_job)
+        monkeypatch.setattr(run_service, "record_outputs", record_outputs)
+
+        await results._apply_assess_assembly_errors(
+            {
+                "object_id": str(assembly.id),
+                "job_id": str(ngs_bam.id),
+                "facts": {"assembly_error_cre_count": 5},
+                "corrected_fasta": str(corrected),
+                "ngs_bam_object_id": str(ngs_bam.id),
+            },
+            owner=owner,
+        )
+
+        produced = await DataObject.find(
+            DataObject.derived_from == assembly.id, DataObject.owner == owner
+        ).to_list()
+        assert len(produced) == 1
+        new_obj = produced[0]
+
+        run_for_job.assert_awaited_once_with(PydanticObjectId(str(ngs_bam.id)))
+        record_outputs.assert_awaited_once_with(
+            run_id, [new_obj.id], owner=new_obj.owner
+        )
 
     async def test_ingest_failure_is_logged_not_raised(self, monkeypatch):
         """Matches _apply_assemble_reads's posture for a secondary output:

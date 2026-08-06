@@ -1555,7 +1555,7 @@ async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
     if not corrected:
         return
 
-    from app.services import object_service
+    from app.services import object_service, run_service
 
     job_id = result.get("job_id")
     parents = [obj.id]
@@ -1565,7 +1565,7 @@ async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
             parents.append(PydanticObjectId(bam_id))
 
     try:
-        await object_service.ingest_local_file(
+        new_obj = await object_service.ingest_local_file(
             owner=obj.owner,
             project_id=obj.project_id,
             path=Path(corrected),
@@ -1585,6 +1585,14 @@ async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
         # committed, and a secondary ingest failing must not lose them --
         # the posture _apply_assemble_reads takes for its graph output.
         log.error("craq_corrected_ingest_failed", object_id=str(obj.id), error=str(e))
+        return
+
+    if job_id:
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(
+                run_id, [new_obj.id], owner=new_obj.owner
+            )
 
 
 async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
