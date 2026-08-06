@@ -140,6 +140,95 @@ class TestFlyeStageOrder:
         )
 
 
+class TestAssemblyPhaseStructure:
+    """"Step N of M" for assembly. The UI renders the counter only when index
+    and total are both non-null, so every case below is either a real pair or
+    a deliberate fallback to the phase name alone.
+    """
+
+    def _progress(self, iterations: int = 1) -> AssemblyProgress:
+        return AssemblyProgress(
+            stage_order=assembly_runner.flye_stage_order(
+                FlyeParams(iterations=iterations)
+            )
+        )
+
+    def test_first_stage_is_step_one(self):
+        progress = self._progress()
+        progress.feed(">>>STAGE: configure")
+        assert progress.phase_index == 1
+        assert progress.phase_total == 7
+
+    def test_index_advances_through_the_whole_run(self):
+        progress = self._progress()
+        seen = []
+        for stage in assembly_runner._FLYE_STAGES:
+            progress.feed(f">>>STAGE: {stage}")
+            seen.append(progress.phase_index)
+        assert seen == [1, 2, 3, 4, 5, 6, 7]
+
+    def test_final_stage_is_the_last_step(self):
+        progress = self._progress()
+        progress.feed(">>>STAGE: finalize")
+        assert progress.phase_index == 7
+        assert progress.phase_total == 7
+
+    def test_zero_iterations_finishes_at_six_of_six(self):
+        """The case that decided the design: a flat constant would report
+        finalize as 7 of 7 on a run that only ever executes six stages."""
+        progress = self._progress(iterations=0)
+        progress.feed(">>>STAGE: contigger")
+        assert progress.phase_index == 5
+        progress.feed(">>>STAGE: finalize")
+        assert progress.phase_index == 6
+        assert progress.phase_total == 6
+
+    def test_index_is_null_before_any_stage_line(self):
+        progress = self._progress()
+        assert progress.phase_index is None
+        assert progress.phase == "starting"
+
+    def test_unknown_stage_shows_its_name_without_a_step_number(self):
+        """A future Flye stage must not borrow the previous stage's number.
+        Null index means the UI drops the counter and shows the name alone --
+        exactly what shipped before this feature."""
+        progress = self._progress()
+        progress.feed(">>>STAGE: repeat")
+        assert progress.phase_index == 4
+        progress.feed(">>>STAGE: newthing")
+        assert progress.phase == "newthing"
+        assert progress.phase_index is None
+        assert progress.phase_total == 7
+
+    def test_snapshot_carries_both_keys(self):
+        progress = self._progress()
+        progress.feed(">>>STAGE: repeat")
+        snap = progress.snapshot()
+        assert snap["phase_index"] == 4
+        assert snap["phase_total"] == 7
+        assert snap["phase"] == "resolving repeats"
+        assert snap["pct"] is None
+
+    def test_snapshot_omits_both_keys_without_a_declared_order(self):
+        """executor.py's parser contract: omit keys you do not know rather
+        than passing None, which ctx.progress() would write over a value it
+        should have left alone."""
+        snap = AssemblyProgress().snapshot()
+        assert "phase_index" not in snap
+        assert "phase_total" not in snap
+        assert snap["phase"] == "starting"
+
+    def test_duplicate_labels_do_not_confuse_the_index(self):
+        """Index keys on the raw stage name, not the display label. Two
+        stages sharing a label must still report distinct steps."""
+        progress = self._progress()
+        progress.feed(">>>STAGE: consensus")
+        first = progress.phase_index
+        progress.feed(">>>STAGE: contigger")
+        assert progress.phase_index != first
+        assert progress.phase_index == 5
+
+
 class TestParseAssemblyInfo:
     HEADER = "#seq_name\tlength\tcov.\tcirc.\trepeat\tmult.\talt_group\tgraph_path\n"
 
