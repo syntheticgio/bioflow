@@ -4130,7 +4130,12 @@ async def launch_qv_qc(
     reads_payload = []
     for r in chosen:
         digest, path = await _resolve_readable(r)
-        entry: dict = {}
+        # name rides along so the handler can link this file under its own
+        # extension rather than a hardcoded one -- meryl (like every other
+        # read-consuming tool here) detects gzip by suffix, and a plain
+        # FASTQ linked as .fastq.gz silently counts zero k-mers rather than
+        # erroring, confirmed against a real DRR1066343_1.fastq run.
+        entry: dict = {"read_name": r.name}
         if digest:
             entry["read_sha256"] = digest
         if path:
@@ -4146,7 +4151,10 @@ async def launch_qv_qc(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=16384, io=IoClass.HEAVY),
+        # Matches the handler's own @handler(...) registration -- see
+        # assess_assembly_qv's docstring for the real-data measurement this
+        # figure is based on.
+        resources=JobResources(cpu=4, mem_mb=12288, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"assess_assembly_qv:{assembly.id}:{read_obj.id}:{resolved_k}",
         project_id=assembly.project_id,

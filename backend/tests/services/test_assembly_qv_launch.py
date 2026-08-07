@@ -120,7 +120,13 @@ class TestReadSetResolution:
         assert payload["object_id"] == str(assembly.id)
         assert payload["read_object_id"] == str(reads.id)
         assert payload["k"] == pipeline_service.DEFAULT_MERYL_K
-        assert payload["reads"] == [{"read_sha256": "a" * 64}]
+        # read_name rides along so the handler can link this file under its
+        # own real extension -- see _resolve_read_inputs's docstring for why
+        # a hardcoded ".fastq.gz" silently produced an empty k-mer database
+        # against a real plain-text FASTQ, confirmed against a real run.
+        assert payload["reads"] == [
+            {"read_name": reads.name, "read_sha256": "a" * 64}
+        ]
         assert "read_db_path" not in payload
 
     async def test_ambiguity_raises_validation_error(self):
@@ -206,7 +212,7 @@ class TestReadSetResolution:
         job, enqueued = await _run(assembly=assembly, read_sets=[[reads]])
 
         assert enqueued["resources"].cpu == 4
-        assert enqueued["resources"].mem_mb == 16384
+        assert enqueued["resources"].mem_mb == 12288
 
 
 class TestMerylCacheMaterialization:

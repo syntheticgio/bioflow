@@ -593,13 +593,17 @@ def _link_bam_index(payload: dict, prefix: str, raw_bam: Path, linked_bam: Path)
 _MERQURY_ASSEMBLY_LINK = "assembly.fasta"
 _MERQURY_READ_DB_LINK = "reads.meryl"
 ASSEMBLY_QV_LEASE_SECONDS = 3600
+# The version installed by install-merqury.sh -- merqury.sh has no --version
+# flag, so this is the only accurate "version" available; see the comment
+# where it is used below.
+MERQURY_PINNED_VERSION = "1.4.1"
 
 
 @handler(
     "assess_assembly_qv",
     mode=HandlerMode.SUBPROCESS,
     job_class=JobClass.COMPUTE,
-    resources=JobResources(cpu=4, mem_mb=16384, io=IoClass.HEAVY),
+    resources=JobResources(cpu=4, mem_mb=12288, io=IoClass.HEAVY),
     max_attempts=1,
 )
 def assess_assembly_qv(ctx: JobContext) -> dict:
@@ -621,9 +625,14 @@ def assess_assembly_qv(ctx: JobContext) -> dict:
     sidecar for the next run. Rebuilding per assembly is the wasteful
     default this cache exists to avoid.
 
-    **mem_mb is 16384, not CRAQ's 8192.** A meryl database over a real read
-    set is memory-hungry in a way a BAM scan is not. Task 7 measures this
-    against real data and corrects it if wrong.
+    **mem_mb is 12288, not CRAQ's 8192.** Measured against a real run
+    (2026-08-07): S. cerevisiae R64 (~12 Mb genome) against DRR1066343
+    (23.7 billion input bases, 21.4M reads) peaked at 8531324928 bytes
+    (~8.14 GiB) RSS and took 5m50s wall time. 12288 keeps ~4 GiB of headroom
+    above that measured peak -- the plan's original 16384 placeholder was
+    directionally reasonable but untested; this replaces the guess with a
+    measured figure plus margin, per the plan's own instruction to correct
+    this against real data rather than trust the placeholder.
     """
     meryl_tool = tools.require(tools.meryl())
     merqury_tool = tools.require(tools.merqury())
@@ -707,7 +716,15 @@ def assess_assembly_qv(ctx: JobContext) -> dict:
                 ctx.payload.get("read_object_name") or ""
             ),
             "assembly_qv_tool": "merqury",
-            "assembly_qv_tool_version": merqury_tool.version or "",
+            # merqury.sh has no --version: tools.merqury()'s probe (see its
+            # docstring) reports its bare-call usage banner as `version`
+            # because that is the only output the tool ever produces, not
+            # because it is a version string. Confirmed against a real run:
+            # storing it verbatim put "Usage: merqury.sh [-c] <read-db..."
+            # in this fact. MERQURY_PINNED_VERSION is the version this image
+            # actually installs (see install-merqury.sh), which is the only
+            # true "version" available here.
+            "assembly_qv_tool_version": MERQURY_PINNED_VERSION,
             "assembly_qv_meryl_version": meryl_tool.version or "",
         }
     )
@@ -763,9 +780,21 @@ def _resolve_read_inputs(work: Path, payload: dict) -> list[Path]:
     so `_resolve_input` applies per entry. Fixed sequential names keep any
     object's own name off the command line, the same reason the assembly
     gets a fixed link.
+
+    **The fixed name preserves the source's real compression suffix.**
+    meryl detects gzip by file extension, the same convention
+    `align_runner._is_gzipped` already relies on for aligner inputs -- a
+    plain FASTQ forced under a `.fastq.gz` name is not decompressed, and
+    `meryl count` silently built an empty database from one rather than
+    erroring, confirmed against a real run. `entry["read_name"]` is the
+    source object's own name; only its suffix is trusted here; the object's
+    own basename never reaches the command line, matching the assembly's
+    fixed-link treatment above.
     """
     resolved: list[Path] = []
     for i, entry in enumerate(payload.get("reads") or []):
         raw = _resolve_input(entry, "read")
-        resolved.append(_named_link(work, raw, f"reads_{i}.fastq.gz"))
+        source_name = str(entry.get("read_name") or "")
+        suffix = "".join(Path(source_name).suffixes) or ".fastq"
+        resolved.append(_named_link(work, raw, f"reads_{i}{suffix}"))
     return resolved

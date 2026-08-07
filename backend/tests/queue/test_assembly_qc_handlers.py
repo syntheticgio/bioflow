@@ -329,7 +329,14 @@ class TestAssessAssemblyQV:
         assert facts["assembly_qv_completeness_pct"] == 96.33
         assert facts["assembly_qv_k"] == 21
         assert facts["assembly_qv_tool"] == "merqury"
-        assert facts["assembly_qv_tool_version"] == "1.3"
+        # Not the probed Tool.version -- merqury.sh has no --version flag,
+        # so the probe's "version" is really its usage banner (confirmed
+        # against a real run). assembly_qv_tool_version is the pinned
+        # install version instead; see MERQURY_PINNED_VERSION.
+        assert (
+            facts["assembly_qv_tool_version"]
+            == assembly_qc_handlers.MERQURY_PINNED_VERSION
+        )
         assert facts["assembly_qv_meryl_version"] == "1.4.1"
 
     def test_meryl_count_is_skipped_when_read_db_path_is_cached(
