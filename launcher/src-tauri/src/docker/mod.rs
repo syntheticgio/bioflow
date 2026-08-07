@@ -83,4 +83,21 @@ pub trait DockerBackend {
     /// launching Docker Desktop on Windows, `systemctl --user start docker`
     /// on Linux). Returns immediately; the caller polls `probe` afterward.
     fn attempt_daemon_start(&self);
+
+    /// Finds the working directory of a running Compose project by name,
+    /// regardless of where it lives on disk. `None` if no project with
+    /// that name is currently running.
+    ///
+    /// Exists for the debug/dev case: a `biopipe` stack started by hand
+    /// with plain `docker compose up` from a repo checkout (this repo's
+    /// own documented dev-trunk workflow, not the launcher's own install
+    /// flow) has no presence at the launcher's fixed `~/.bioflow` install
+    /// directory, so `install_dir_str` in commands.rs falls back to this
+    /// when the fixed path finds nothing. This does not make such a stack
+    /// "launcher-managed" in any deeper sense -- Settings and storage
+    /// migration remain visible against it (per the design decision this
+    /// exists for) but are not expected to necessarily work correctly
+    /// against an install the launcher did not create; this method only
+    /// grants Run/Stop/status recognition, which is the actual ask.
+    fn discover_running_project_dir(&self, project_name: &str) -> Option<String>;
 }
