@@ -4,7 +4,7 @@
 
 **Goal:** Let a user opt into a kernel-enforced memory ceiling on the worker container, set from the launcher, blank by default.
 
-**Architecture:** The launcher writes `BIOFLOW_HARD_MEM_LIMIT` (compose-facing, e.g. `16g`) and `BIOFLOW_HARD_MEM_MB` (a plain integer for the API) into `.env`, then recreates the stack. `docker-compose.yml` applies `mem_limit` to `worker` only; empty resolves to unlimited so off-by-default needs no code. The API receives the MB value as an env var and clamps the soft admission budget to it. The worker turns exit 137 terminal when a limit is set.
+**Architecture:** The launcher writes `BIOFLOW_HARD_MEM_LIMIT` (compose-facing, e.g. `16g`) and `BIOFLOW_HARD_MEM_MB` (a plain integer for the API) into `.env`, then recreates the stack. `docker-compose.yml` applies `mem_limit` to `worker` only; an unset variable defaults to `0`, Docker's own no-limit value, so off-by-default needs no code. The API receives the MB value as an env var and clamps the soft admission budget to it. The worker turns exit 137 terminal when a limit is set.
 
 **Tech Stack:** Rust (Tauri launcher, `cargo test`), React + TypeScript (launcher UI and web UI), Python (FastAPI backend, `pytest`), Docker Compose.
 
