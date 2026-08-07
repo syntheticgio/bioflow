@@ -42,6 +42,10 @@ const BUNDLED_COMPOSE_RESOURCE: &str = "docker-compose.yml";
 pub struct LauncherApp {
     pub install_dir: Mutex<Option<PathBuf>>,
     pub port: Mutex<Option<u16>>,
+    /// Shared with the background migration thread spawned by
+    /// `start_storage_migration`; `migration_progress` polls this. `None`
+    /// until a migration has been started at least once this session.
+    pub migration_progress: std::sync::Arc<Mutex<Option<crate::migrate::MigrationProgress>>>,
 }
 
 impl Default for LauncherApp {
@@ -49,6 +53,7 @@ impl Default for LauncherApp {
         Self {
             install_dir: Mutex::new(None),
             port: Mutex::new(None),
+            migration_progress: std::sync::Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -491,4 +496,189 @@ pub async fn install_optional_tool(image: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "phase")]
+pub enum MigrationPhaseDto {
+    Scanning,
+    Copying,
+    Validating,
+    Removing,
+    Complete,
+}
+
+impl From<crate::migrate::MigrationPhase> for MigrationPhaseDto {
+    fn from(phase: crate::migrate::MigrationPhase) -> Self {
+        match phase {
+            crate::migrate::MigrationPhase::Scanning => Self::Scanning,
+            crate::migrate::MigrationPhase::Copying => Self::Copying,
+            crate::migrate::MigrationPhase::Validating => Self::Validating,
+            crate::migrate::MigrationPhase::Removing => Self::Removing,
+            crate::migrate::MigrationPhase::Complete => Self::Complete,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MigrationProgressDto {
+    pub phase: MigrationPhaseDto,
+    pub bytes_copied: u64,
+    pub total_bytes: u64,
+    pub error: Option<String>,
+}
+
+impl From<crate::migrate::MigrationProgress> for MigrationProgressDto {
+    fn from(p: crate::migrate::MigrationProgress) -> Self {
+        Self {
+            phase: p.phase.into(),
+            bytes_copied: p.bytes_copied,
+            total_bytes: p.total_bytes,
+            error: p.error,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StartStorageMigrationArgs {
+    pub new_location: String,
+    pub keep_original: bool,
+    pub validate_by_hash: bool,
+}
+
+/// Kicks off the migration on a background thread and returns immediately
+/// -- unlike every other blocking command in this file, this one is not
+/// `async`/`spawn_blocking`-and-await, because the frontend needs to poll
+/// `migration_progress` *while* the copy is still running, not receive a
+/// single result at the end. The spawned thread writes into
+/// `app.migration_progress` as it goes; `finish_storage_migration` (a
+/// second command) is what the frontend calls once `migration_progress`
+/// reports `Complete`, to perform the `.env` rewrite + stack restart this
+/// function deliberately does not do itself (see `run_migration`'s doc
+/// comment in migrate.rs on why that split exists).
+///
+/// Errors from a failed migration are not returned here (the call returns
+/// before the migration finishes) -- they are surfaced through
+/// `migration_progress`'s stored error field instead. See Step 3 below,
+/// which extends `MigrationProgress`'s DTO with an optional error.
+#[tauri::command]
+pub fn start_storage_migration(app: State<'_, LauncherApp>, args: StartStorageMigrationArgs) -> Result<(), String> {
+    let install_dir = app.install_dir.lock().unwrap().clone().ok_or("not installed")?;
+    // The current storage location lives in .env, not in LauncherApp's
+    // in-memory state (which only tracks install_dir and port) -- read it
+    // the same way settings::CurrentSettings would be reconstructed, by
+    // parsing .env. A dedicated read here (rather than extending
+    // LauncherApp with a third mutex) keeps the source of truth as the
+    // file on disk, matching how settings::apply already treats .env as
+    // the one thing it writes and nothing else caches.
+    let env_path = install_dir.join(".env");
+    let env_contents = std::fs::read_to_string(&env_path).map_err(|e| format!("could not read .env: {e}"))?;
+    let current_storage = env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOINFO_HOME="))
+        .ok_or("BIOINFO_HOME not found in .env")?
+        .to_string();
+
+    let source = PathBuf::from(current_storage);
+    let dest = PathBuf::from(args.new_location);
+    let options = crate::migrate::MigrationOptions {
+        keep_original: args.keep_original,
+        validate_by_hash: args.validate_by_hash,
+    };
+    let progress_handle = std::sync::Arc::clone(&app.migration_progress);
+    *progress_handle.lock().unwrap() = Some(crate::migrate::MigrationProgress::default());
+
+    std::thread::spawn(move || {
+        let progress_state = std::sync::Arc::new(std::sync::Mutex::new(crate::migrate::MigrationProgress::default()));
+
+        // Mirror progress_state into the app-visible progress_handle every
+        // 250ms while the migration runs, so migration_progress (polled by
+        // the frontend) sees live updates rather than only the final
+        // state. Stopped by the done flag once run_migration_with_space_check
+        // returns, below.
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mirror_progress_state = std::sync::Arc::clone(&progress_state);
+        let mirror_progress_handle = std::sync::Arc::clone(&progress_handle);
+        let mirror_done = std::sync::Arc::clone(&done);
+        let mirror_thread = std::thread::spawn(move || {
+            while !mirror_done.load(std::sync::atomic::Ordering::Relaxed) {
+                let snapshot = mirror_progress_state.lock().unwrap().clone();
+                *mirror_progress_handle.lock().unwrap() = Some(snapshot);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        });
+
+        let result = crate::migrate::run_migration_with_space_check(
+            &source,
+            &dest,
+            &options,
+            &progress_state,
+            crate::migrate::available_space_at,
+        );
+
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = mirror_thread.join();
+
+        let mut final_state = progress_state.lock().unwrap().clone();
+        if let Err(e) = &result {
+            final_state.error = Some(e.to_string());
+        }
+        *progress_handle.lock().unwrap() = Some(final_state);
+    });
+
+    Ok(())
+}
+
+/// Polled by the frontend (see `App.tsx`'s existing `status` polling for
+/// the pattern) while a migration is in flight. Returns `None` if no
+/// migration has been started yet this session.
+#[tauri::command]
+pub fn migration_progress(app: State<'_, LauncherApp>) -> Option<MigrationProgressDto> {
+    app.migration_progress.lock().unwrap().clone().map(Into::into)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FinishStorageMigrationArgs {
+    pub new_location: String,
+    pub port: u16,
+    pub network_exposed: bool,
+}
+
+/// Rewrites `.env` to point at the migrated location and restarts the
+/// stack -- reuses `settings::apply` unchanged, exactly as a plain
+/// Settings repoint already does. Callers (the frontend) must only invoke
+/// this after `migration_progress` has reported `phase: Complete` with no
+/// `error` -- this command does not re-verify that the migration actually
+/// succeeded, since `settings.rs`'s `apply` has no concept of a
+/// migration, only of writing `.env` and recreating the stack. See
+/// MigrateStorage.tsx (a later task) for where that gating lives.
+#[tauri::command]
+pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishStorageMigrationArgs) -> Result<(), String> {
+    let install_dir = app.install_dir.lock().unwrap().clone().ok_or("not installed")?;
+
+    let settings = CurrentSettings {
+        storage_location: PathBuf::from(args.new_location),
+        port: args.port,
+        network_exposed: args.network_exposed,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        settings::apply(&docker, &install_dir, &settings, &[])
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| match e {
+        SettingsUpdateError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
+        SettingsUpdateError::RecreateFailed { output } => output,
+    })?;
+
+    // Keep LauncherApp's in-memory port in sync with what was just written
+    // to .env, matching apply_settings's own behavior above -- the
+    // migration dialog does not offer a port change today, but args.port
+    // is still an explicit input here, and a caller that resolved this
+    // command's own DTO should not silently leave the in-memory value
+    // stale relative to the file `apply` just wrote.
+    *app.port.lock().unwrap() = Some(args.port);
+    Ok(())
 }

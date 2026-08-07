@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod commands;
 pub mod docker;
+pub mod migrate;
 pub mod optional_tools;
 pub mod settings;
 pub mod setup;
@@ -28,6 +29,9 @@ pub fn run() {
       commands::check_for_update,
       commands::fetch_optional_tools,
       commands::install_optional_tool,
+      commands::start_storage_migration,
+      commands::migration_progress,
+      commands::finish_storage_migration,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

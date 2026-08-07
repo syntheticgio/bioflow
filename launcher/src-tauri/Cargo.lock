@@ -247,9 +247,11 @@ name = "bioflow-launcher"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "libc",
  "log",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
