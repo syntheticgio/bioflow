@@ -678,7 +678,19 @@ def craq() -> Tool:
 # whatever version string it found would call that install green and then
 # fail at runtime on arguments the binary has never heard of, which is the
 # same shape as Debian's BUSCO.
-_CELERA_MERYL_VERSION = re.compile(r"^0~20\d{6}")
+#
+# Verified against the real Debian package (2026-08-07): `meryl --version`
+# does NOT exit non-zero and does NOT print a dpkg-style version string.
+# It exits 0 and prints "Unknown option '--version'." to stdout, because
+# Celera meryl's argument parser doesn't recognise `--version` at all and
+# treats it like any other bad flag. That output doesn't match
+# `_VERSION_PATTERN`, so `_probe` leaves it in `Tool.version` verbatim
+# rather than routing it through the exit-code mismatch branch -- an
+# earlier version of this check matched on the dpkg version string shape
+# (`0~20150903...`), which the binary itself never prints, so it never
+# fired. The message text itself is what actually distinguishes the two
+# programs.
+_CELERA_MERYL_UNKNOWN_OPTION = re.compile(r"^Unknown option ")
 
 
 @lru_cache(maxsize=1)
@@ -686,13 +698,14 @@ def meryl() -> Tool:
     # Verified against a real installed 1.4.2 (2026-08-06): `meryl --version`
     # prints "meryl 1.4.2" and exits zero.
     probed = _probe("meryl", settings.meryl_path, ["--version"])
-    if probed.version and _CELERA_MERYL_VERSION.match(probed.version):
+    if probed.version and _CELERA_MERYL_UNKNOWN_OPTION.match(probed.version):
         return Tool(
             name="meryl",
             path=probed.path,
             version=None,
             error=(
-                f"Found meryl {probed.version}, which is Debian's Celera "
+                f"Found meryl at {probed.path}, but it does not understand "
+                f"--version ({probed.version!r}) -- this is Debian's Celera "
                 f"Assembler k-mer suite, not Marbl meryl. Merqury needs "
                 f"Marbl meryl 1.3 or newer (this image installs 1.4.2 at "
                 f"/opt/meryl/bin/meryl). Set MERYL_PATH to a Marbl build."

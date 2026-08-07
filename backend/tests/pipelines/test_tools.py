@@ -376,13 +376,18 @@ class TestCraqProbe:
 
 class TestMerylProbe:
     def test_meryl_probe_rejects_debian_celera_build(self, monkeypatch, tmp_path):
-        """Debian's `meryl` is 0~20150903+r2013-9+b1 -- the Celera Assembler
-        k-mer suite, not Marbl meryl. It reports a version and would pass a
-        naive probe, then fail at runtime on arguments it has never heard of.
-        This is the acceptance criterion on issue #64.
+        """Debian's `meryl` package is 0~20150903+r2013-9+b1, the Celera
+        Assembler k-mer suite, not Marbl meryl -- but that dpkg version
+        string is never what the *binary* prints. Verified against the real
+        package (2026-08-07): `meryl --version` exits 0 and prints
+        "Unknown option '--version'." to stdout, because Celera meryl's
+        argument parser doesn't recognise --version at all. A probe that
+        only matched the dpkg version shape would never catch this: it
+        would leave that message in Tool.version verbatim and report the
+        tool as available. This is the acceptance criterion on issue #64.
         """
         fake = tmp_path / "meryl"
-        fake.write_text("#!/bin/sh\necho '0~20150903+r2013-9+b1'\n")
+        fake.write_text("#!/bin/sh\necho \"Unknown option '--version'.\"\nexit 0\n")
         fake.chmod(0o755)
 
         monkeypatch.setattr(tools.settings, "meryl_path", str(fake))
