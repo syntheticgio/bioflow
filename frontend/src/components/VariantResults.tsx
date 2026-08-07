@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
+import { AiSummary } from "./AiSummary";
 import { DistributionChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
@@ -85,6 +86,23 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
           {compute.isPending ? "recomputing…" : "recompute results"}
         </button>
       </div>
+
+      {/* Unconditional (not nested inside the zero-variants branch below):
+          AiSummary already self-suppresses when there's nothing stored and
+          no model reachable, and a summary can still be stored here even if
+          the call set is currently empty -- e.g. after a re-run dropped the
+          count to zero following an earlier non-zero run. Nesting this
+          inside the zero-variants branch would make that stored summary
+          permanently unreachable. */}
+      <AiSummary
+        facts={obj.facts}
+        objectId={obj.id}
+        fingerprint={obj.summary_fingerprint ?? undefined}
+        factPrefix="ai_variant_summary"
+        statusFn={() => api.variantSummaryStatus()}
+        launchFn={(id) => api.launchVariantSummary(id)}
+        emptyLabel="No summary yet for this file."
+      />
 
       {summary && summary.variants === 0 ? (
         <div className="section">

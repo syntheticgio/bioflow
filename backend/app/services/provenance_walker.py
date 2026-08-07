@@ -155,6 +155,8 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "reap_uploads",
         # AI features that write a field rather than producing an object.
         "summarize_object",
+        "summarize_de_results",
+        "summarize_variant_results",
         "answer_project_question",
         # Test-only. `worker_run_ids_probe` is registered by
         # tests/queue/test_worker_run_ids.py with no teardown, so it is
