@@ -1,0 +1,54 @@
+"""Reading the user's resource budget, and resolving it against the host.
+
+Split from the model so the arithmetic is pure and testable without a worker
+or a host probe -- the same reason `worker.compute_free_resources` is pure.
+"""
+
+from app.models.base import utcnow
+from app.models.resource_limits import ResourceLimits
+
+
+def resolve_mem_budget_mb(*, stored_mb: int | None, machine_mb: int) -> int:
+    """The memory ceiling admission should compute headroom against.
+
+    A stored limit only ever *lowers* the budget. Typing 64 GB on a 16 GB
+    machine cannot conjure headroom, and letting it try would over-admit
+    exactly as badly as having no limit at all -- the number is a budget to
+    stay under, not a claim about the hardware.
+
+    Zero and negatives are treated as "no opinion" rather than as a real
+    ceiling of nothing. A literal zero budget would admit no job ever and
+    stall the queue with no error anywhere, which is the silent-failure shape
+    this codebase already goes out of its way to avoid.
+    """
+    if stored_mb is None or stored_mb <= 0:
+        return machine_mb
+    return min(stored_mb, machine_mb)
+
+
+async def load() -> ResourceLimits:
+    """The stored limits, created on first read."""
+    return await ResourceLimits.load()
+
+
+async def save(
+    *,
+    max_mem_mb: int | None,
+    max_cpu: float | None,
+    max_threads: int | None,
+) -> ResourceLimits:
+    """Replace the stored limits.
+
+    Every field is written on every save, including None. The UI's "No limit"
+    must be able to *clear* a previously-set ceiling, so an absent value here
+    means "no limit" rather than "leave unchanged" -- the opposite of
+    ProviderUpdate's three-way api_key semantics, and deliberately simpler
+    because there is no secret to preserve.
+    """
+    limits = await ResourceLimits.load()
+    limits.max_mem_mb = max_mem_mb
+    limits.max_cpu = max_cpu
+    limits.max_threads = max_threads
+    limits.updated_at = utcnow()
+    await limits.save()
+    return limits

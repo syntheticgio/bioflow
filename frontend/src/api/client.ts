@@ -54,6 +54,8 @@ import type {
   QuantifyRequest,
   ReferenceOption,
   RegisterAccepted,
+  ResourceLimits,
+  ResourceLimitsIn,
   RunDetail,
   RunSummary,
   ScaffoldRequest,
@@ -597,6 +599,14 @@ export const api = {
 
   setAiRouting: (body: { default: string | null; slots: Record<string, string> }) =>
     request<AiRouting>("/settings/ai/routing", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  resourceLimits: () => request<ResourceLimits>("/settings/resources"),
+
+  setResourceLimits: (body: ResourceLimitsIn) =>
+    request<ResourceLimits>("/settings/resources", {
       method: "PUT",
       body: JSON.stringify(body),
     }),

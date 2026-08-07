@@ -22,6 +22,7 @@ def free(**kwargs):
         "cpu_budget": 16,
         "mem_mb": 8192,
         "reserved_cpu": 0,
+        "reserved_mem": 0,
         "reserved_io_heavy": 0,
         "in_flight": 0,
     }
@@ -49,6 +50,48 @@ class TestCpuHeadroom:
         """A fully-reserved queue must still drain. Offering zero would let the
         queue deadlock against its own bookkeeping."""
         assert free(reserved_cpu=999, in_flight=3)["cpu"] == 1
+
+
+class TestMemoryHeadroom:
+    """The counterpart of TestCpuHeadroom, missing until now.
+
+    `claim.lua` INCRBYs `bp:conc:mem_mb` and `release.lua` DECRBYs it, but the
+    worker never read the counter and `compute_free_resources` had no parameter
+    for it -- so a correctly-maintained ledger was written and thrown away.
+    """
+
+    def test_an_idle_worker_offers_the_whole_budget(self):
+        assert free()["mem_mb"] == 8192
+
+    def test_reservations_are_subtracted(self):
+        """The bug. One 6 GB job must leave 2 GB of headroom, not 8."""
+        assert free(reserved_mem=6144, in_flight=1)["mem_mb"] == 2048
+
+    def test_two_heavy_jobs_cannot_both_be_offered_the_same_memory(self):
+        """The over-admission case that matters, expressed as headroom.
+
+        Two 6 GB alignments against an 8 GB budget: after the first is
+        reserved, the remaining headroom must be too small for the second.
+        `claim.lua` refuses any candidate where `mem > mem_free`, so this is
+        the number that decides it.
+        """
+        after_first = free(reserved_mem=6144, in_flight=1)["mem_mb"]
+        assert after_first < 6144
+
+    def test_never_offers_less_than_zero(self):
+        """An over-reserved worker offers nothing rather than a negative,
+        which would read as extra capacity and over-admit."""
+        assert free(reserved_mem=99999, in_flight=3)["mem_mb"] == 0
+
+    def test_an_idle_worker_ignores_leaked_memory_counters(self):
+        """Memory joins the self-healing clamp. A worker running nothing
+        cannot still owe a reservation, so a counter left high by a crashed
+        worker must not shrink its capacity forever."""
+        assert free(reserved_mem=8192, in_flight=0)["mem_mb"] == 8192
+
+    def test_a_busy_worker_still_respects_memory_counters(self):
+        """The clamp must not become a way to ignore real reservations."""
+        assert free(reserved_mem=4096, in_flight=2)["mem_mb"] == 4096
 
 
 class TestIoHeavyCap:

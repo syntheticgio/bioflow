@@ -41,6 +41,7 @@ from app.models.object import (
 from app.models.organism import OrganismBlurb, normalize_organism
 from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
+from app.models.resource_limits import ResourceLimits
 from app.models.share import Share, ShareState
 from app.models.run import (
     OPTIONAL_ROLES,
@@ -76,6 +77,7 @@ ALL_MODELS = [
     Feedback,
     Share,
     ProjectConversation,
+    ResourceLimits,
 ]
 
 __all__ = [
@@ -119,6 +121,7 @@ __all__ = [
     "Project",
     "ProjectCounters",
     "ProviderKind",
+    "ResourceLimits",
     "RunInput",
     "RunInputRole",
     "RunJob",

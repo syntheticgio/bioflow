@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.models.ai import AiRouting, ProviderKind, TaskSlot
+from app.services import resource_limit_service
 from app.services.ai import presets as presets_mod
 from app.services.ai import provider_service
 from app.services.ai.adapters import Failure
@@ -91,6 +92,34 @@ class FetchModelsOut(BaseModel):
     models: list[str]
     reason: str | None = None
     detail: str | None = None
+
+
+class ResourceLimitsOut(BaseModel):
+    """The stored budget, plus what the machine actually has.
+
+    The machine numbers are reported alongside so the UI can render a range
+    and say what "no limit" resolves to right now, without a second request.
+    """
+
+    max_mem_mb: int | None
+    max_cpu: float | None
+    max_threads: int | None
+    machine_mem_mb: int
+    machine_cpu: float
+
+
+class ResourceLimitsIn(BaseModel):
+    """Every field is written on every save, including None.
+
+    Absent means "no limit", not "leave unchanged": the UI's "No limit" option
+    has to be able to clear a ceiling that was set earlier. Deliberately
+    simpler than ProviderUpdate's three-way api_key semantics -- there is no
+    secret here to accidentally erase.
+    """
+
+    max_mem_mb: int | None = Field(default=None, gt=0)
+    max_cpu: float | None = Field(default=None, gt=0)
+    max_threads: int | None = Field(default=None, gt=0)
 
 
 async def _used_by_map() -> dict[str, list[str]]:
@@ -238,3 +267,42 @@ async def set_routing(body: RoutingIn) -> RoutingOut:
         slots=routing.slots,
         catalog=[SlotOut(name=s.value, label=s.label) for s in TaskSlot],
     )
+
+
+def _machine_budget() -> tuple[int, float]:
+    """What this host actually has, via the governor's cgroup-aware readers.
+
+    Uses the governor rather than psutil directly: inside Docker the cgroup
+    limit is the number that binds, and psutil reports the Linux VM's
+    resources rather than the container's.
+    """
+    from app.queue.governor import LoadGovernor
+
+    governor = LoadGovernor()
+    return int(governor.mem_budget_bytes() / (1024 * 1024)), governor.cpu_budget()
+
+
+def _limits_out(limits) -> ResourceLimitsOut:
+    machine_mem_mb, machine_cpu = _machine_budget()
+    return ResourceLimitsOut(
+        max_mem_mb=limits.max_mem_mb,
+        max_cpu=limits.max_cpu,
+        max_threads=limits.max_threads,
+        machine_mem_mb=machine_mem_mb,
+        machine_cpu=machine_cpu,
+    )
+
+
+@router.get("/resources", response_model=ResourceLimitsOut)
+async def get_resource_limits() -> ResourceLimitsOut:
+    return _limits_out(await resource_limit_service.load())
+
+
+@router.put("/resources", response_model=ResourceLimitsOut)
+async def set_resource_limits(body: ResourceLimitsIn) -> ResourceLimitsOut:
+    limits = await resource_limit_service.save(
+        max_mem_mb=body.max_mem_mb,
+        max_cpu=body.max_cpu,
+        max_threads=body.max_threads,
+    )
+    return _limits_out(limits)

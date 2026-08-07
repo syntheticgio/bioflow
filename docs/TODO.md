@@ -221,9 +221,54 @@ Also note this is a different *kind* of artifact from everything else here: a
 native desktop app, outside this repo's Python/React/Docker toolchain, needing
 its own repo and build/signing story.
 
-## Resource limits and intelligent enforcement
+## Resource limits and intelligent enforcement -- PARTIALLY FIXED
 
-Raised: 2026-08-01, requested.
+Raised: 2026-08-01, requested. Foundation shipped 2026-08-07 as epic
+[#7](https://github.com/syntheticgio/bioflow/issues/7), issues
+[#68](https://github.com/syntheticgio/bioflow/issues/68) and
+[#22](https://github.com/syntheticgio/bioflow/issues/22): design in
+`docs/superpowers/specs/2026-08-07-resource-limits-admission-design.md`, plan
+in `docs/superpowers/plans/2026-08-07-resource-limits-foundation.md`.
+
+**This entry stays open.** The design resolved the "admission vs monitoring"
+question this entry poses two paragraphs down -- admission, not monitoring or
+kill-based enforcement -- but only the persisted-settings-plus-admission
+foundation shipped. The refusal UI, the estimate resolver, auto re-plan, and
+cgroup enforcement (option 1 below) are separate open issues, listed at the
+end of this entry.
+
+**What shipped, and how it differs from the plan below.** A persisted
+`ResourceLimits` singleton (`backend/app/models/resource_limits.py`) stores a
+user-set memory ceiling. `Worker._free_resources()`
+(`backend/app/queue/worker.py`) resolves it against the machine's real budget
+-- a stored limit only ever lowers the ceiling, never raises it above what the
+host has -- and the result flows into `claim.lua`'s existing
+`mem <= mem_free` admission check. No new enforcement code was written:
+`claim.lua` already refused any job whose declared `mem_mb` exceeded the
+budget it was handed, so shrinking that budget *is* the enforcement.
+
+That surfaced a live bug this entry didn't know about: `claim.lua` and
+`release.lua` maintained a `bp:conc:mem_mb` reservation ledger correctly on
+both sides, but `Worker._read_reservations()` never read it and
+`compute_free_resources()` had no parameter for it. The ledger was written and
+discarded -- two memory-heavy jobs claimed in the same second both saw full
+headroom and both got admitted. Fixed as #68, alongside #22.
+
+**This is deliberately an admission budget, not a kill switch.** A job that
+overruns its prediction is not stopped -- see the spec for why cgroup
+enforcement (option 1 below) was rejected as the *default*; it survives as
+opt-in follow-up work.
+
+**A narrower version of the concurrency bug remains, found during final
+review and filed as
+[#74](https://github.com/syntheticgio/bioflow/issues/74).** `claim.lua`
+compares against a `mem_free` value computed in Python moments before the
+script runs, rather than reading the live counter inside the atomic script
+itself. Two workers can still both compute stale headroom and both admit in
+the same tick -- narrowed from unbounded staleness (the pre-#68 bug) to about
+one Redis round-trip's worth of clock skew, not eliminated.
+
+Original text follows, for the reasoning that produced the above:
 
 Allow users to set global resource constraints (max memory, max CPU %, max CPU
 threads) via settings, and intelligently enforce them on running jobs. The open
@@ -252,6 +297,14 @@ use more than N GB" (admission) or "gracefully degrade when close to N GB"
 
 Touches: `backend/app/models/job.py`, `backend/app/queue/governor.py`,
 `docker-compose.yml`, `docker-compose.override.yml`.
+
+Remaining open issues:
+[#69](https://github.com/syntheticgio/bioflow/issues/69) (layered memory
+estimate resolver), [#70](https://github.com/syntheticgio/bioflow/issues/70)
+(four-choice refusal card), [#71](https://github.com/syntheticgio/bioflow/issues/71)
+(auto re-plan), [#72](https://github.com/syntheticgio/bioflow/issues/72)
+(cgroup enforcement, opt-in), [#74](https://github.com/syntheticgio/bioflow/issues/74)
+(remaining cross-worker admission race).
 
 ---
 

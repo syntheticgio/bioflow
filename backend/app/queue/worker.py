@@ -18,7 +18,7 @@ from app.pipelines import tool_cache
 from app.queue import governor, keys, queue
 from app.queue.executor import JobExecutor
 from app.queue.registry import JobContext, get_handler, load_handlers
-from app.services import run_service
+from app.services import resource_limit_service, run_service
 
 log = get_logger(__name__)
 
@@ -52,6 +52,7 @@ def compute_free_resources(
     cpu_budget: int,
     mem_mb: int,
     reserved_cpu: int,
+    reserved_mem: int,
     reserved_io_heavy: int,
     in_flight: int,
 ) -> dict:
@@ -64,26 +65,31 @@ def compute_free_resources(
 
     The defence is the `in_flight` clamp. Reservations are cluster-wide, but a
     worker also knows how many jobs it is actually running, and a single worker
-    cannot be responsible for more reserved CPU than the jobs it holds. Taking
-    the smaller of the two means a leaked counter costs at most the capacity of
-    the jobs genuinely in flight, and an idle worker always recovers full
-    headroom no matter what the counters claim.
+    cannot be responsible for more reserved capacity than the jobs it holds.
+    Taking the smaller of the two means a leaked counter costs at most the
+    capacity of the jobs genuinely in flight, and an idle worker always
+    recovers full headroom no matter what the counters claim.
 
     At least 1 CPU is always offered so a fully-reserved queue still drains
-    rather than deadlocking against its own bookkeeping.
+    rather than deadlocking against its own bookkeeping. Memory has no such
+    floor: offering a phantom megabyte would admit a job that does not fit,
+    which is the failure this exists to prevent, and `claim.lua` compares
+    `mem <= mem_free` so zero simply admits nothing until something releases.
     """
     if in_flight == 0:
         # Nothing running here, so nothing this worker reserved can still be
         # outstanding. This is the line that makes a leak self-healing.
         effective_cpu_reserved = 0
+        effective_mem_reserved = 0
         effective_io_reserved = 0
     else:
         effective_cpu_reserved = reserved_cpu
+        effective_mem_reserved = reserved_mem
         effective_io_reserved = reserved_io_heavy
 
     return {
         "cpu": max(cpu_budget - effective_cpu_reserved, 1),
-        "mem_mb": mem_mb,
+        "mem_mb": max(mem_mb - effective_mem_reserved, 0),
         "io_heavy": max(IO_HEAVY_LIMIT - effective_io_reserved, 0),
     }
 
@@ -243,16 +249,37 @@ class Worker:
             cpu_budget = float(psutil.cpu_count() or 4)
             mem_budget = psutil.virtual_memory().total
 
+        # The user's admission budget, if they set one. It only ever lowers
+        # the ceiling -- see resource_limit_service.resolve_mem_budget_mb.
+        #
+        # This is the entire enforcement path for the setting: `claim.lua`
+        # already refuses any candidate whose declared mem_mb exceeds
+        # mem_mb_free, so a smaller ceiling here *is* the limit taking effect.
+        # A read failure falls back to the machine budget rather than stalling
+        # dispatch, matching _read_reservations' policy for the same reason.
+        machine_mb = int(mem_budget / (1024 * 1024))
+        try:
+            stored = await resource_limit_service.load()
+            budget_source_mb = resource_limit_service.resolve_mem_budget_mb(
+                stored_mb=stored.max_mem_mb, machine_mb=machine_mb
+            )
+            if stored.max_cpu:
+                cpu_budget = min(cpu_budget, stored.max_cpu)
+        except Exception as e:  # noqa: BLE001 - dispatch must survive a DB blip
+            log.warning("resource_limits_read_failed", error=str(e))
+            budget_source_mb = machine_mb
+
         available_mb = int(psutil.virtual_memory().available / (1024 * 1024))
         # Never hand out the last of memory: leave headroom so a job that
         # slightly overshoots its declared demand does not push into swap.
-        budget_mb = int(mem_budget / (1024 * 1024) * 0.7)
+        budget_mb = int(budget_source_mb * 0.7)
 
         reserved = await self._read_reservations()
         return compute_free_resources(
             cpu_budget=int(cpu_budget),
             mem_mb=max(min(available_mb, budget_mb), 128),
             reserved_cpu=reserved["cpu"],
+            reserved_mem=reserved["mem_mb"],
             reserved_io_heavy=reserved["io_heavy"],
             in_flight=len(self._running),
         )
@@ -266,14 +293,17 @@ class Worker:
         """
         try:
             values = await get_redis().mget(
-                keys.conc_key("cpu"), keys.conc_key("io_heavy")
+                keys.conc_key("cpu"),
+                keys.conc_key("mem_mb"),
+                keys.conc_key("io_heavy"),
             )
         except Exception as e:  # noqa: BLE001 - dispatch must survive a Redis blip
             log.warning("reservation_read_failed", error=str(e))
-            return {"cpu": 0, "io_heavy": 0}
+            return {"cpu": 0, "mem_mb": 0, "io_heavy": 0}
         return {
             "cpu": _as_int(values[0]),
-            "io_heavy": _as_int(values[1]),
+            "mem_mb": _as_int(values[1]),
+            "io_heavy": _as_int(values[2]),
         }
 
     async def _start_job(self, claimed) -> None:
