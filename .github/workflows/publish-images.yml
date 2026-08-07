@@ -100,7 +100,14 @@ jobs:
       # session can still unlock a keychain given the real password -- it
       # just can't get an *interactive* unlock prompt answered, which is
       # what -25308 is actually complaining about.
+      #
+      # arm64-only: this job's amd64 leg runs on MainLinux (X64), where
+      # there is no `security` command and no keychain to unlock -- running
+      # this unconditionally there fails with "security: command not
+      # found" (exit 127), a regression this run introduced and this
+      # matrix.arch gate fixes.
       - name: Unlock the login keychain
+        if: matrix.arch == 'arm64'
         env:
           KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
         run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
@@ -185,15 +192,12 @@ jobs:
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
 
-      # See the identical comment on the build job: SessionCreate isolation
-      # means -25308 on docker login, and the actual fix is unlocking the
-      # login keychain right before it, not steering Docker away from a
-      # credential helper (which just produces a different fatal error).
-      - name: Unlock the login keychain
-        env:
-          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
-        run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
-
+      # No keychain unlock needed here, unlike the build job: this job
+      # always runs on MainLinux (X64), never on the macOS arm64 runner, so
+      # docker/login-action never hits osxkeychain's -25308 in the first
+      # place. (v0.2.5's run confirmed this the hard way: an unconditional
+      # `security unlock-keychain` here fails with "security: command not
+      # found" on Linux, exit 127 -- security(1) doesn't exist off macOS.)
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
