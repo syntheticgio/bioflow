@@ -10,6 +10,10 @@ that at the seam, independent of the SUBPROCESS body itself: a test that
 only asserted "the report renders" would pass whether or not the fix held.
 """
 
+from pathlib import Path
+
+import pytest
+
 from app.queue import assembly_qc_handlers as handlers
 from app.pipelines import quast_runner
 
@@ -180,3 +184,345 @@ class TestCopyReport:
         ctx.payload["object_id"] = None
 
         assert handlers._copy_report(ctx, out_dir) is None
+
+
+class TestAssessAssemblyContinuity:
+    """`assess_assembly_continuity` -- GCI's handler. Modeled closely on
+    `assess_assembly_errors` (CRAQ): a BAM's `.bai` must land beside its
+    fixed-name link in the workdir, the same `_link_bam_index` contract CRAQ's
+    handler relies on, or GCI fails deep inside a samtools call rather than
+    with a clear error.
+
+    Mocks at the same seams `assess_assembly_errors` itself is built from:
+    `tools.gci()` (fake but `available`), `run_subprocess` (writes a fake
+    `gci.gci` and returns 0), and `_resolve_input` (resolves straight from
+    tmp_path fixture files instead of content-addressed storage) -- there is
+    no existing end-to-end SUBPROCESS-mode test for CRAQ or QUAST in this
+    file to copy verbatim, so this follows the narrower-grain approach the
+    plan calls out as acceptable.
+    """
+
+    def _ctx(self, payload):
+        from app.queue.registry import JobContext
+
+        return JobContext(
+            job_id="job1",
+            payload=payload,
+            epoch=1,
+            attempts=1,
+            owner="local",
+        )
+
+    def _fake_gci_output(self):
+        return (
+            "Chr\tExp_N50\tObs_N50\tExp_contig\tObs_contig\tGCI\n"
+            "chr1\t100\t90\t2\t3\t0.90\n"
+            "Genome\t1000\t950\t10\t12\t0.95\n"
+        )
+
+    def test_hifi_bai_lands_beside_the_linked_bam(self, tmp_path, monkeypatch):
+        from app.config import settings
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        # Real fixture files standing in for content-addressed storage.
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        hifi_bam_src = tmp_path / "src" / "hifi.bam"
+        hifi_bai_src = tmp_path / "src" / "hifi.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (hifi_bam_src, "not a real bam"),
+            (hifi_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "hifi_bam_path": str(hifi_bam_src),
+            "hifi_bai_path": str(hifi_bai_src),
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        captured_out_dir = {}
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            # -d <out_dir> is the directory GCI is told to write into.
+            out_dir = Path(cmd[cmd.index("-d") + 1])
+            captured_out_dir["path"] = out_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "gci.gci").write_text(self._fake_gci_output())
+            return 0
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        result = handlers.assess_assembly_continuity(ctx)
+
+        out_dir = captured_out_dir["path"]
+        work = out_dir.parent
+        # `_named_link` places the link at work / f"in_{name}", not the bare
+        # name -- see pipeline_handlers._named_link.
+        linked_bam = work / f"in_{handlers._GCI_HIFI_LINK}"
+        linked_bai = Path(f"{linked_bam}.bai")
+
+        assert linked_bam.exists() or linked_bam.is_symlink()
+        assert linked_bai.exists() or linked_bai.is_symlink()
+        assert linked_bai.resolve() == hifi_bai_src.resolve()
+
+        assert result["facts"]["assembly_continuity_gci"] == 0.95
+        assert result["facts"]["assembly_continuity_observed_n50"] == 950
+
+    def test_no_long_read_bam_raises_permanent_error(self, tmp_path, monkeypatch):
+        from app.config import settings
+        from app.errors import PermanentError
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        assembly_src.parent.mkdir(parents=True, exist_ok=True)
+        assembly_src.write_text(">chr1\nACGT\n")
+
+        payload = {"object_id": "obj1", "assembly_path": str(assembly_src)}
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        with pytest.raises(PermanentError):
+            handlers.assess_assembly_continuity(ctx)
+
+    def test_nano_bai_lands_beside_the_linked_bam(self, tmp_path, monkeypatch):
+        """Symmetric to the hifi test above: the nano slot must go through
+        the same _link_bam_index treatment as hifi, not a special-cased
+        subset of it."""
+        from app.config import settings
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        nano_bam_src = tmp_path / "src" / "nano.bam"
+        nano_bai_src = tmp_path / "src" / "nano.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (nano_bam_src, "not a real bam"),
+            (nano_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "nano_bam_path": str(nano_bam_src),
+            "nano_bai_path": str(nano_bai_src),
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        captured_out_dir = {}
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            out_dir = Path(cmd[cmd.index("-d") + 1])
+            captured_out_dir["path"] = out_dir
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "gci.gci").write_text(self._fake_gci_output())
+            return 0
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        result = handlers.assess_assembly_continuity(ctx)
+
+        out_dir = captured_out_dir["path"]
+        work = out_dir.parent
+        linked_bam = work / f"in_{handlers._GCI_NANO_LINK}"
+        linked_bai = Path(f"{linked_bam}.bai")
+
+        assert linked_bam.exists() or linked_bam.is_symlink()
+        assert linked_bai.exists() or linked_bai.is_symlink()
+        assert linked_bai.resolve() == nano_bai_src.resolve()
+
+        assert result["facts"]["assembly_continuity_gci"] == 0.95
+        assert result["facts"]["assembly_continuity_observed_n50"] == 950
+        assert result["workdir"] == str(work)
+
+    def test_plot_copies_images_to_qc_reports(self, tmp_path, monkeypatch):
+        """plot=True in the payload must copy .pdf/.png files GCI wrote
+        under out_dir/images/ into qc_reports/<object_id>/."""
+        from app.config import settings
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        hifi_bam_src = tmp_path / "src" / "hifi.bam"
+        hifi_bai_src = tmp_path / "src" / "hifi.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (hifi_bam_src, "not a real bam"),
+            (hifi_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "hifi_bam_path": str(hifi_bam_src),
+            "hifi_bai_path": str(hifi_bai_src),
+            "plot": True,
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            out_dir = Path(cmd[cmd.index("-d") + 1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "gci.gci").write_text(self._fake_gci_output())
+            images_dir = out_dir / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            (images_dir / "chr1.pdf").write_text("fake pdf")
+            (images_dir / "chr1.png").write_text("fake png")
+            (images_dir / "notes.txt").write_text("not an image, must not copy")
+            return 0
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        handlers.assess_assembly_continuity(ctx)
+
+        report_dir = settings.qc_reports_dir / "obj1"
+        assert (report_dir / "chr1.pdf").exists()
+        assert (report_dir / "chr1.png").exists()
+        assert not (report_dir / "notes.txt").exists()
+
+    def test_nonzero_exit_raises_retryable_error(self, tmp_path, monkeypatch):
+        from app.config import settings
+        from app.errors import RetryableError
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        hifi_bam_src = tmp_path / "src" / "hifi.bam"
+        hifi_bai_src = tmp_path / "src" / "hifi.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (hifi_bam_src, "not a real bam"),
+            (hifi_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "hifi_bam_path": str(hifi_bam_src),
+            "hifi_bai_path": str(hifi_bai_src),
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            return 1
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        with pytest.raises(RetryableError):
+            handlers.assess_assembly_continuity(ctx)
+
+    def test_missing_gci_output_raises_retryable_error(self, tmp_path, monkeypatch):
+        """Exit 0 but no gci.gci written -- same disk-filled-during-final-write
+        reasoning the sibling handlers give for their own missing-output
+        checks."""
+        from app.config import settings
+        from app.errors import RetryableError
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        hifi_bam_src = tmp_path / "src" / "hifi.bam"
+        hifi_bai_src = tmp_path / "src" / "hifi.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (hifi_bam_src, "not a real bam"),
+            (hifi_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "hifi_bam_path": str(hifi_bam_src),
+            "hifi_bai_path": str(hifi_bai_src),
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            out_dir = Path(cmd[cmd.index("-d") + 1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            # No gci.gci written, despite a zero exit code.
+            return 0
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        with pytest.raises(RetryableError):
+            handlers.assess_assembly_continuity(ctx)

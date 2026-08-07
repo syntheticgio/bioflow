@@ -1777,3 +1777,168 @@ class TestAssemblyErrorCard:
             )
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
+
+
+class TestContinuityCard:
+    """`build_continuity_card(obj, alignments, gci_candidates)` -- `alignments`
+    is the same `(short, long, unknown)` split `build_assembly_error_card`
+    consumes, used only to distinguish "no long reads" from "short-read
+    alignments only" in the unavailable message. `gci_candidates` is
+    `(hifi_candidates, nano_candidates)`, GCI's own further split of
+    `long_` by chemistry -- what `pipeline_service._gci_candidates` (and
+    therefore `launch_continuity_qc`) actually uses to auto-pair, so the
+    card's ambiguity/CLR gates match the launch path exactly.
+    """
+
+    def test_unavailable_when_gci_is_not_installed(self):
+        """The image ships most tools installed, so an available-direction
+        test alone would pass even if the tool patch never took effect --
+        assert the UNAVAILABLE direction specifically."""
+        from app.pipelines import tools as tools_module
+        from app.services import suggestion_service
+
+        broken = tools_module.Tool(
+            name="gci", path=None, version=None, error="GCI is not installed.",
+        )
+        with patch.object(suggestion_service.tools, "gci", return_value=broken):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                ([], [_bam_object("asm1")], []),
+                ([_bam_object("asm1")], []),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_unavailable_without_any_alignment(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(), ([], [], []), ([], [])
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "long reads" in card.reason.lower()
+
+    def test_unavailable_message_is_specific_for_short_read_only(self):
+        """Short-read-only projects must not get the generic "align reads
+        first" message: GCI takes no short-read input at all, so that
+        advice would send the user to redo work that cannot help."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                ([_bam_object("asm1")], [], []),
+                ([], []),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "short-read" in card.reason.lower()
+        assert "align a read set against it first" not in card.reason.lower()
+
+    def test_unavailable_when_only_clr_long_reads(self):
+        """Long reads are present (`long_` is nonempty) but none survived
+        `_gci_candidates`'s chemistry split -- CLR-only. Must not be
+        confused with "no long reads at all"."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                ([], [_bam_object("asm1")], []),
+                ([], []),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "clr" in card.reason.lower()
+
+    def test_available_with_one_hifi_candidate(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                ([], [_bam_object("asm1")], []),
+                ([_bam_object("asm1")], []),
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/assembly-continuity"
+        assert card.launch["body"]["object_id"] == "asm1"
+
+    def test_available_with_one_hifi_and_one_nano_candidate(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                (
+                    [],
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [],
+                ),
+                (
+                    [_bam_object("asm1", obj_id="bam1")],
+                    [_bam_object("asm1", obj_id="bam2")],
+                ),
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+
+    def test_unavailable_with_two_hifi_candidates(self):
+        """Mirrors `build_assembly_error_card`'s ambiguity gate: more than
+        one usable candidate in either GCI slot is refused rather than
+        silently picking one."""
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                (
+                    [],
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [],
+                ),
+                (
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [],
+                ),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "alignment" in card.reason.lower()
+
+    def test_unavailable_with_two_nano_candidates(self):
+        from app.services import suggestion_service
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                (
+                    [],
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                    [],
+                ),
+                (
+                    [],
+                    [_bam_object("asm1", obj_id="bam1"), _bam_object("asm1", obj_id="bam2")],
+                ),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE

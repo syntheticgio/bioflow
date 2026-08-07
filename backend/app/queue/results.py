@@ -1592,6 +1592,37 @@ async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_assess_assembly_continuity(result: dict, *, owner: str) -> None:
+    """Record GCI's continuity facts on the assembly they describe.
+
+    Near-copy of `_apply_assess_assembly_errors`: read-only, nothing to
+    ingest, and an uploaded assembly is scored exactly like one this
+    application produced.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("assembly_continuity_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "assembly_continuity_applied",
+        object_id=object_id,
+        gci=facts.get("assembly_continuity_gci"),
+    )
+
+
 async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
     """Record CRAQ's error-detection facts on the assembly they describe.
 
@@ -2240,6 +2271,7 @@ _APPLIERS = {
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
     "assess_assembly_errors": _apply_assess_assembly_errors,
+    "assess_assembly_continuity": _apply_assess_assembly_continuity,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,
