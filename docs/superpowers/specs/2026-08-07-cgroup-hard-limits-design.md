@@ -62,9 +62,13 @@ reasoning for the soft budget:
 > "No limit" option writes None rather than a sentinel number.
 
 Off-by-default falls out of Compose's own semantics rather than needing code:
-`mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-}` resolves to empty when the variable is
-unset, and Compose reads empty as unlimited. A fresh install has no cgroup limit
-without anyone having chosen that.
+`mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}` resolves to `0` when the variable is
+unset, and `0` is Docker's own no-limit value -- the same thing `docker run
+--memory=0` means -- not a sentinel this repo invented. (An empty-string
+default was tried first and rejected: Compose v5 type-checks `mem_limit` as a
+byte-size field and errors on `''` outright, caught by running `docker compose
+config` against the real tool rather than assuming the substitution would
+parse.) A fresh install has no cgroup limit without anyone having chosen that.
 
 **The blank state must still be captioned.** An empty field with no explanation
 reads as "unset, probably fine," not "no hard cap -- a job that overruns will
@@ -76,7 +80,7 @@ cover. The wording for both states is in [The wording](#the-wording) below.
 
 ```yaml
 worker:
-  mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-}      # empty = unlimited
+  mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}     # 0 = unlimited (Docker's own value)
   deploy:
     replicas: ${WORKER_REPLICAS:-2}           # launcher pins to 1 when a limit is set
 

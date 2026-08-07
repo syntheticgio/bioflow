@@ -575,12 +575,18 @@ git commit -m "feat(launcher): read the hard memory limit back from .env"
 In `docker-compose.yml`, in the `worker` service, add above `deploy:`:
 
 ```yaml
-    # Opt-in kernel-enforced ceiling. Empty (the default) means unlimited, so
-    # off-by-default costs no code -- the launcher simply omits the variable.
+    # Opt-in kernel-enforced ceiling. `0` (the default, and what an unset
+    # BIOFLOW_HARD_MEM_LIMIT resolves to) is Docker's own "no limit" value,
+    # matching `docker run --memory=0` -- not a sentinel this repo invented.
+    # An empty-string default was tried first: Compose v5 type-checks
+    # mem_limit as a byte-size field and rejects '' outright, so off-by-default
+    # needs this specific default rather than an empty one, though it is still
+    # free of code -- the launcher simply omits the variable and this default
+    # fills in.
     # Worker only: capping `api` would put the web UI under an OOM ceiling,
     # and a user who set the limit too low would lose the interface they need
     # in order to raise it.
-    mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-}
+    mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}
 ```
 
 - [ ] **Step 2: Pass the MB value to api**
@@ -605,7 +611,9 @@ Expected: exits 0 with no output. (A project name is required — bare `docker c
 
 Run: `BIOFLOW_HARD_MEM_LIMIT=16384m docker compose -p biopipe-plancheck config | grep -A2 "mem_limit"`
 
-Expected: shows the worker's `mem_limit` resolved to `16384m` (compose may render it as bytes).
+Expected: shows the worker's `mem_limit` resolved to bytes (`17179869184` for `16384m`).
+
+Also verify the unset case doesn't just parse but genuinely reads as "no limit": `docker compose -p biopipe-plancheck config | grep mem_limit` should print nothing at all -- Compose omits a `0`-valued `mem_limit` from its rendered config entirely, which is a second confirmation (beyond the exit code) that it's being read as unlimited rather than as a limit of zero bytes.
 
 - [ ] **Step 5: Commit**
 
