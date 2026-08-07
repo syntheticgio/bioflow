@@ -170,6 +170,11 @@ class Settings(BaseSettings):
     # execs /opt/gci/GCI.py -- see that script for why it is a wrapper
     # rather than a symlink.
     gci_path: str = "gci"
+    # Built from source by backend/scripts/install-winnowmap.sh -- Winnowmap
+    # ships no binary releases. See that script for the two arm64 build
+    # gotchas (the top-level Makefile's `-e` discarding the aarch64
+    # `-fsigned-char` flag, and the bundled ext/meryl that must not be built).
+    winnowmap_path: str = "winnowmap"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

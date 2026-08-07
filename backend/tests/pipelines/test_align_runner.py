@@ -501,12 +501,72 @@ class TestNewAlignersKeepPipefail:
     that existed when the pipe was written."""
 
     @pytest.mark.parametrize(
-        "aligner", [Aligner.BOWTIE2, Aligner.HISAT2, Aligner.STAR]
+        "aligner", [Aligner.BOWTIE2, Aligner.HISAT2, Aligner.STAR, Aligner.WINNOWMAP]
     )
     def test_pipefail_is_set(self, aligner):
         params = align_params.from_dict({"aligner": aligner.value})
-        cmd = align_cmd(aligner=aligner, aligner_path=aligner.value, params=params)
+        kwargs = {}
+        if aligner is Aligner.WINNOWMAP:
+            kwargs["winnowmap_repetitive_kmers"] = Path("/w/genome.fna.repetitive_k15.txt")
+        cmd = align_cmd(
+            aligner=aligner, aligner_path=aligner.value, params=params, **kwargs
+        )
         assert cmd[:3] == ["/bin/sh", "-o", "pipefail"]
+
+
+class TestWinnowmapCommand:
+    def cmd(self, **kw):
+        params = align_params.from_dict({"aligner": "winnowmap", **kw})
+        return align_cmd(
+            aligner=Aligner.WINNOWMAP,
+            aligner_path="winnowmap",
+            params=params,
+            winnowmap_repetitive_kmers=Path("/w/genome.fna.repetitive_k15.txt"),
+        )
+
+    def test_missing_repetitive_kmers_is_rejected(self):
+        """Reaching the command builder for winnowmap with no repetitive-
+        k-mer file is a caller bug -- there is no way to run winnowmap
+        without the file meryl produces."""
+        params = align_params.from_dict({"aligner": "winnowmap"})
+        with pytest.raises(ValidationError):
+            align_cmd(aligner=Aligner.WINNOWMAP, aligner_path="winnowmap", params=params)
+
+    def test_dash_w_carries_the_repetitive_kmer_file(self):
+        joined = " ".join(self.cmd())
+        assert "-W /w/genome.fna.repetitive_k15.txt" in joined
+
+    def test_preset_reaches_the_command_like_minimap2(self):
+        """winnowmap shares minimap2's -a -x <preset> shape -- verified
+        against a real build of winnowmap, which is built on minimap2's own
+        codebase and shares its argument parser."""
+        joined = " ".join(self.cmd(preset="map-hifi"))
+        assert " -a " in joined
+        assert "-x map-hifi" in joined
+
+    def test_carries_the_read_group_like_minimap2(self):
+        """Verified against a real build: `winnowmap --help` documents -R
+        in minimap2's exact phrasing."""
+        joined = " ".join(self.cmd())
+        assert "@RG" in joined
+        assert "SM:SAMP1" in joined
+
+    def test_reads_are_positional_like_minimap2(self):
+        joined = " ".join(self.cmd())
+        assert "/w/r1.fq.gz" in joined
+
+    def test_passes_both_mates_when_paired(self):
+        params = align_params.from_dict({"aligner": "winnowmap"})
+        cmd = align_cmd(
+            aligner=Aligner.WINNOWMAP,
+            aligner_path="winnowmap",
+            params=params,
+            r2=Path("/w/r2.fq.gz"),
+            winnowmap_repetitive_kmers=Path("/w/genome.fna.repetitive_k15.txt"),
+        )
+        joined = " ".join(cmd)
+        assert "/w/r1.fq.gz" in joined
+        assert "/w/r2.fq.gz" in joined
 
 
 class TestStarCommand:

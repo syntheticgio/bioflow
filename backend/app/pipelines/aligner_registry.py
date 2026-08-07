@@ -430,6 +430,63 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
             *_SHARED_FIELDS,
         ),
     ),
+    Aligner.WINNOWMAP: AlignerSpec(
+        aligner=Aligner.WINNOWMAP,
+        tool=tools.winnowmap,
+        index=aligners.layout_for(Aligner.WINNOWMAP),
+        params_class=align_params.WinnowmapParams,
+        # builder_tool is meryl, not winnowmap's own binary -- the same
+        # separate-builder shape as bowtie2/HISAT2, except what meryl
+        # produces is consumed via -W rather than discovered by suffix.
+        builder_tool=tools.meryl,
+        # meryl's peak is the memory-hungry phase, not winnowmap's own
+        # alignment, so this model describes the *index build* cost against
+        # the assembly rather than a resident-alignment-index cost the way
+        # every other aligner's does. No measured run exists yet; this
+        # coefficient is a placeholder until one is taken against a real
+        # assembly (see the design doc's implementation-order note) and
+        # should not be trusted for a sizing decision before then.
+        memory_model=MemoryModel(
+            index_bytes_per_ref_base=2.0,
+            fixed_overhead_mb=512,
+            bytes_per_thread_mb=512,
+            index_build_multiplier=2.0,
+        ),
+        fields=(
+            ParamField(
+                key="preset",
+                label="Read type",
+                kind="select",
+                default="map-pb",
+                group="biology",
+                help=(
+                    "winnowmap has no short-read mode -- it exists to "
+                    "cross-check minimap2 on long reads for GCI continuity "
+                    "scoring."
+                ),
+                choices=(
+                    Choice("map-ont", "Oxford Nanopore"),
+                    Choice("map-pb", "PacBio (CLR)"),
+                    Choice("map-hifi", "PacBio (HiFi/CCS)"),
+                ),
+            ),
+            ParamField(
+                key="k",
+                label="Meryl k-mer size",
+                kind="int",
+                default=15,
+                min=1,
+                max=28,
+                group="performance",
+                help=(
+                    "Size of the k-mers meryl counts to find repetitive "
+                    "regions. GCI's own example uses 15; winnowmap refuses "
+                    "anything above 28."
+                ),
+            ),
+            *_SHARED_FIELDS,
+        ),
+    ),
 }
 
 

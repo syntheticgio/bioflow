@@ -1228,12 +1228,16 @@ async def launch_assembly_qv_route(body: AssemblyQvRequest, owner: OwnerDep) -> 
 
 class AssemblyContinuityRequest(BaseModel):
     object_id: PydanticObjectId
-    # Both optional, same reasoning as AssemblyErrorRequest's ngs_bam_id /
-    # sms_bam_id: the Actions card only fires when auto-pairing is
-    # unambiguous, so it never needs to supply these. A dialog handling the
-    # ambiguous case, or a CLR-only project, names them explicitly.
-    hifi_bam_id: PydanticObjectId | None = None
-    nano_bam_id: PydanticObjectId | None = None
+    # Both default empty, same reasoning as AssemblyErrorRequest's ngs_bam_id
+    # / sms_bam_id: the Actions card only fires when auto-pairing is
+    # unambiguous, so it never needs to supply these. Lists, not single ids,
+    # because two aligners (minimap2 and, when installed, winnowmap) make
+    # two BAMs in one slot the routine case for GCI's own cross-check
+    # recommendation -- see pipeline_service.launch_continuity_qc. A dialog
+    # handling the genuinely ambiguous case (two BAMs from the *same*
+    # aligner), or a CLR-only project, names them explicitly.
+    hifi_bam_ids: list[PydanticObjectId] = []
+    nano_bam_ids: list[PydanticObjectId] = []
     map_qual: int | None = None
     plot: bool | None = None
 
@@ -1248,8 +1252,8 @@ async def launch_assembly_continuity_route(
     job = await pipeline_service.launch_continuity_qc(
         object_id=body.object_id,
         owner=owner,
-        hifi_bam_id=body.hifi_bam_id,
-        nano_bam_id=body.nano_bam_id,
+        hifi_bam_ids=body.hifi_bam_ids,
+        nano_bam_ids=body.nano_bam_ids,
         map_qual=body.map_qual,
         plot=body.plot,
     )

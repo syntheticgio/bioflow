@@ -1421,6 +1421,16 @@ def build_continuity_card(
     Short-read-only projects get their own message rather than the generic
     "align reads first" -- that advice would send the user to redo work
     that cannot help, since GCI takes no short-read input at all.
+
+    **Ambiguity is per-aligner, not per-slot, since winnowmap arrived.**
+    Two usable HiFi BAMs against the same assembly is the routine
+    cross-check case when they come from two different aligners (minimap2 +
+    winnowmap, same reads) -- GCI's own recommendation, not something to
+    warn about. It is genuinely ambiguous only when the *same* aligner
+    produced more than one candidate in a slot, mirroring
+    `launch_continuity_qc`'s identical `_group_gci_candidates_by_aligner`
+    check, so this card never claims a launch is blocked when it is not (or
+    vice versa).
     """
     if not reference_assembly._is_assembly_like(obj):
         return None
@@ -1467,20 +1477,28 @@ def build_continuity_card(
             "ONT -- GCI cannot use PacBio CLR reads."
         )
 
-    if len(hifi_candidates) > 1 or len(nano_candidates) > 1:
+    hifi_by_aligner = pipeline_service._group_gci_candidates_by_aligner(hifi_candidates)
+    nano_by_aligner = pipeline_service._group_gci_candidates_by_aligner(nano_candidates)
+    if any(len(group) > 1 for group in (*hifi_by_aligner.values(), *nano_by_aligner.values())):
         total = len(hifi_candidates) + len(nano_candidates)
         return unavailable(
-            f"This assembly has {total} usable long-read alignment(s); use "
-            "the tool to pick which ones to use."
+            f"This assembly has {total} usable long-read alignment(s) from "
+            "the same aligner; use the tool to pick which ones to use."
         )
+
+    aligners = sorted({*hifi_by_aligner, *nano_by_aligner})
+    cross_checked = len(aligners) > 1
+    why = f"{len(hifi_candidates) + len(nano_candidates)} long-read alignment(s)"
+    why += f" ({', '.join(aligners)}) against this assembly." if aligners else " against this assembly."
+    if cross_checked:
+        why += " Both aligners will be cross-checked, per GCI's own recommendation."
 
     return SuggestionCard(
         kind="assembly_continuity",
         category="ASSEMBLY_QC",
         title=title,
         description=description,
-        why=f"{len(hifi_candidates) + len(nano_candidates)} long-read "
-        "alignment(s) against this assembly.",
+        why=why,
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/assembly-continuity",

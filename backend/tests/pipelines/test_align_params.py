@@ -29,6 +29,10 @@ class TestDispatch:
         with pytest.raises(ValueError):
             align_params.from_dict({"aligner": "not-a-real-aligner"})
 
+    def test_winnowmap_gets_its_own_class(self):
+        p = align_params.from_dict({"aligner": "winnowmap"})
+        assert isinstance(p, align_params.WinnowmapParams)
+
 
 class TestSharedValidation:
     def test_threads_must_be_at_least_one(self):
@@ -111,6 +115,47 @@ class TestStar:
         assert p.align_intron_max == 0
 
 
+class TestWinnowmap:
+    def test_preset_defaults_to_map_pb(self):
+        p = align_params.from_dict({"aligner": "winnowmap"})
+        assert p.preset == "map-pb"
+
+    def test_short_read_preset_is_rejected(self):
+        """winnowmap has no short-read mode -- it exists purely to
+        cross-check minimap2 on long reads for GCI, so "sr" is not a valid
+        choice the way it is for minimap2."""
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "winnowmap", "preset": "sr"})
+
+    def test_long_read_presets_are_accepted(self):
+        for preset in ("map-pb", "map-ont", "map-hifi"):
+            p = align_params.from_dict({"aligner": "winnowmap", "preset": preset})
+            assert p.preset == preset
+
+    def test_k_defaults_to_gcis_readme_example(self):
+        p = align_params.from_dict({"aligner": "winnowmap"})
+        assert p.k == 15
+
+    def test_k_above_28_is_rejected(self):
+        """winnowmap's own -k help: "k-mer size (no larger than 28)"."""
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "winnowmap", "k": 29})
+
+    def test_k_below_one_is_rejected(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "winnowmap", "k": 0})
+
+    def test_distinct_defaults_to_gcis_readme_example(self):
+        p = align_params.from_dict({"aligner": "winnowmap"})
+        assert p.distinct == 0.9998
+
+    def test_distinct_must_be_a_fraction(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "winnowmap", "distinct": 1.5})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "winnowmap", "distinct": 0.0})
+
+
 class TestRoundTrip:
     def test_as_dict_round_trips_through_from_dict(self):
         """Params are persisted on the run record and read back when a run is
@@ -136,3 +181,10 @@ class TestRoundTrip:
         restored = align_params.from_dict(original.as_dict())
         assert restored == original
         assert restored.out_sam_unmapped is False
+
+    def test_winnowmap_round_trips_too(self):
+        original = align_params.from_dict(
+            {"aligner": "winnowmap", "preset": "map-hifi", "k": 21, "distinct": 0.999}
+        )
+        restored = align_params.from_dict(original.as_dict())
+        assert restored == original

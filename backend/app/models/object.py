@@ -141,6 +141,12 @@ class SidecarRole(StrEnum):
     # both: one build for whichever alignment did not have an annotation
     # available, one for whichever did.
     STAR_ANNOTATED_INDEX = "star-annotated-index"
+    # winnowmap's repetitive-k-mer file (`meryl count` + `meryl print
+    # greater-than`), passed via `-W` at alignment time. Built by meryl, not
+    # winnowmap -- the same separate-builder shape as BOWTIE2_INDEX and
+    # HISAT2_INDEX -- and per-reference like every other index here, reused
+    # across every read set aligned against that reference.
+    WINNOWMAP_INDEX = "winnowmap-index"
     FAI = "fai"
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.

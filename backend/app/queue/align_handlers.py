@@ -23,6 +23,7 @@ from app.pipelines import (
     aligners,
     bam_stats_runner,
     tools,
+    winnowmap_runner,
 )
 from app.pipelines.aligners import Aligner
 from app.queue.executor import run_subprocess
@@ -149,6 +150,56 @@ def _fai_geometry(fai: Path) -> tuple[int, int]:
     return total, contigs
 
 
+def _run_winnowmap_meryl_index(
+    *, ctx: JobContext, meryl_path: str, reference: Path, work: Path, log_path: Path
+) -> None:
+    """Build winnowmap's repetitive-k-mer file with two meryl commands.
+
+    `k` and `distinct` come from the payload's `params` dict -- the same
+    `WinnowmapParams` an align_reads job for this aligner would carry --
+    with GCI's own README defaults (k=15, distinct=0.9998) when absent,
+    since `build_index` can run before an alignment's params exist.
+
+    Raises via `_failure` on either step, exactly like a single-command
+    branch would via the shared `run_subprocess` call in the caller -- kept
+    as two explicit calls here rather than forced into that shared call
+    because there is no single winnowmap_runner command covering both meryl
+    invocations (see that module's docstring).
+    """
+    params_payload = ctx.payload.get("params") or {}
+    k = int(params_payload.get("k") or 15)
+    distinct = float(params_payload.get("distinct") or 0.9998)
+
+    database = work / "winnowmap.meryl"
+    count_cmd = winnowmap_runner.build_meryl_count_command(
+        meryl_path=meryl_path,
+        k=k,
+        reference=reference,
+        output=database,
+        threads=max(1, int(ctx.payload.get("threads") or 4)),
+    )
+    log.info("winnowmap_meryl_count_started", job_id=ctx.job_id, cmd=" ".join(count_cmd))
+    code = run_subprocess(ctx, count_cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "meryl count")
+
+    output = reference.parent / (
+        f"{reference.name}{aligners.WINNOWMAP_REPETITIVE_KMER_SUFFIX}"
+    )
+    print_cmd = winnowmap_runner.build_meryl_print_repetitive_shell_command(
+        meryl_path=meryl_path, distinct=distinct, database=database, output=output
+    )
+    log.info("winnowmap_meryl_print_started", job_id=ctx.job_id, cmd=" ".join(print_cmd))
+    code = run_subprocess(ctx, print_cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "meryl print greater-than")
+
+    if not output.exists():
+        raise RetryableError(
+            f"meryl exited 0 but did not produce {output.name}"
+        )
+
+
 @handler(
     "build_index",
     mode=HandlerMode.SUBPROCESS,
@@ -261,17 +312,37 @@ def build_index(ctx: JobContext) -> dict:
             output=ref.reference.parent
             / f"{ref.reference.name}{aligners.MINIMAP2_SUFFIX}",
         )
+    elif aligner is Aligner.WINNOWMAP:
+        # Two meryl commands, not one `align_runner.build_index_command`
+        # call -- see winnowmap_runner's module docstring for why this is
+        # not folded into the shared four-aligner dispatch. `index_tool`
+        # here is meryl (`_index_tool` resolves it via `builder_tool`), not
+        # winnowmap itself. Both must succeed in order, so this branch runs
+        # them directly rather than handing a single `cmd` to the shared
+        # run_subprocess call below -- there is no single command to hand.
+        _run_winnowmap_meryl_index(
+            ctx=ctx,
+            meryl_path=index_tool.path,
+            reference=ref.reference,
+            work=work,
+            log_path=log_path,
+        )
+        cmd = None
     else:
         cmd = align_runner.build_index_command(
             aligner=aligner, tool_path=index_tool.path, reference=ref.reference
         )
 
-    log.info(
-        "index_build_started", job_id=ctx.job_id, aligner=aligner.value, cmd=" ".join(cmd)
-    )
-    code = run_subprocess(ctx, cmd, log_path=str(log_path))
-    if code != 0:
-        raise _failure(code, log_path, aligner.value)
+    if cmd is not None:
+        log.info(
+            "index_build_started",
+            job_id=ctx.job_id,
+            aligner=aligner.value,
+            cmd=" ".join(cmd),
+        )
+        code = run_subprocess(ctx, cmd, log_path=str(log_path))
+        if code != 0:
+            raise _failure(code, log_path, aligner.value)
 
     index_role = aligners.index_role(aligner, annotated=annotated).value
     layout = aligners.layout_for(aligner, annotated=annotated)

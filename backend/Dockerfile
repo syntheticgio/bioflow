@@ -9,6 +9,22 @@
 # tools.meryl()'s probe.
 FROM debian:bullseye-slim AS legacy-ssl
 
+# Winnowmap ships NO binary releases (v2.03's GitHub release asset list is
+# empty), so it has to be compiled -- and that toolchain (build-essential,
+# zlib1g-dev, git) has no reason to live in the shipped image once the one
+# ~1.5 MB binary it produces exists. This stage builds it and stage two
+# COPYs only the binary out. See install-winnowmap.sh for the two
+# aarch64-specific build gotchas (the top-level Makefile's `-e` discarding
+# the aarch64 `-fsigned-char` flag, and the bundled ext/meryl that must not
+# be built) this script's own header documents in full.
+FROM python:3.12-slim AS winnowmap-build
+WORKDIR /srv
+ARG WINNOWMAP_VERSION=2.03
+COPY scripts/install-winnowmap.sh /srv/scripts/install-winnowmap.sh
+RUN chmod +x /srv/scripts/install-winnowmap.sh \
+    && WINNOWMAP_VERSION="${WINNOWMAP_VERSION}" \
+       /srv/scripts/install-winnowmap.sh
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -449,6 +465,18 @@ COPY scripts/install-gci.sh /srv/scripts/install-gci.sh
 RUN chmod +x /srv/scripts/install-gci.sh \
     && GCI_COMMIT="${GCI_COMMIT}" \
        /srv/scripts/install-gci.sh
+
+# --- winnowmap -----------------------------------------------------------
+#
+# GCI's own FAQ recommends pairing winnowmap with minimap2 for higher
+# sensitivity in repetitive regions -- see gci_runner.py's module docstring.
+# The binary itself was built in the winnowmap-build stage above; only the
+# ~1.5 MB result is copied in here, not the compiler toolchain that built
+# it. `ldd` against a real build showed no dependency beyond libz,
+# libstdc++, libm, libgomp, libgcc_s, libc -- all already present in this
+# image, so no vendoring is needed the way meryl needed OpenSSL 1.1.
+COPY --from=winnowmap-build /opt/winnowmap/bin/winnowmap /opt/winnowmap/bin/winnowmap
+ENV PATH="/opt/winnowmap/bin:${PATH}"
 
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \

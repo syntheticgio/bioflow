@@ -7,6 +7,14 @@ long-read, and so superficially eligible -- must be refused outright rather
 than folded into either slot (`pipeline_service.gci_slot_for_chemistry`).
 This file locks that refusal at the launch-path level, not just in the
 pure-function unit tests in `test_pipeline_service.py`.
+
+Since winnowmap: each slot carries a *list* of BAMs, not one, because GCI's
+own `--hifi`/`--nano` are `nargs='+'` and two aligners (minimap2 + winnowmap)
+against the same reads is the routine case, not the ambiguous one. The
+ambiguity refusal now fires only when a single aligner contributed more than
+one BAM to a slot -- see `TestAutoPairChemistryRouting`'s
+`test_refuses_ambiguous_same_aligner_candidates` and the accompanying
+`test_two_different_aligners_are_not_ambiguous`.
 """
 
 from types import SimpleNamespace
@@ -44,9 +52,15 @@ def _assembly(**kwargs):
     return _obj(name="draft.fasta", kind=FormatKind.FASTA, **kwargs)
 
 
-def _bam(assembly, *, name="reads.bam"):
-    return _obj(name=name, kind=FormatKind.BAM, derived_from=[assembly.id],
-                project_id=assembly.project_id)
+def _bam(assembly, *, name="reads.bam", aligned_by="minimap2"):
+    facts = {"aligned_by": aligned_by} if aligned_by is not None else {}
+    return _obj(
+        name=name,
+        kind=FormatKind.BAM,
+        derived_from=[assembly.id],
+        project_id=assembly.project_id,
+        facts=facts,
+    )
 
 
 def _bai_sidecar(bam):
@@ -58,17 +72,18 @@ def _bai_sidecar(bam):
 async def _run(
     *,
     assembly,
-    hifi_bam=None,
-    nano_bam=None,
-    hifi_bam_id=None,
-    nano_bam_id=None,
+    hifi_bams=(),
+    nano_bams=(),
+    hifi_bam_ids=None,
+    nano_bam_ids=None,
     sidecars_by_bam=(),
     alignments=(([], [], [])),
     chemistry_by_bam=None,
     map_qual=None,
     plot=None,
 ):
-    objects = {o.id: o for o in [assembly, hifi_bam, nano_bam] if o is not None}
+    all_bams = [*hifi_bams, *nano_bams]
+    objects = {o.id: o for o in [assembly, *all_bams]}
     chemistry_by_bam = chemistry_by_bam or {}
 
     async def _get_object(object_id, *, owner):
@@ -119,12 +134,20 @@ async def _run(
         job = await pipeline_service.launch_continuity_qc(
             object_id=assembly.id,
             owner="local",
-            hifi_bam_id=hifi_bam_id or (hifi_bam.id if hifi_bam else None),
-            nano_bam_id=nano_bam_id or (nano_bam.id if nano_bam else None),
+            hifi_bam_ids=hifi_bam_ids
+            if hifi_bam_ids is not None
+            else ([b.id for b in hifi_bams] if hifi_bams else None),
+            nano_bam_ids=nano_bam_ids
+            if nano_bam_ids is not None
+            else ([b.id for b in nano_bams] if nano_bams else None),
             map_qual=map_qual,
             plot=plot,
         )
     return job, enqueued
+
+
+def _entry_object_ids(payload, slot):
+    return {e["object_id"] for e in payload.get(slot, [])}
 
 
 class TestAutoPairChemistryRouting:
@@ -140,8 +163,8 @@ class TestAutoPairChemistryRouting:
 
         payload = enqueued["payload"]
         assert enqueued["type"] == "assess_assembly_continuity"
-        assert payload["hifi_bam_object_id"] == str(hifi_bam.id)
-        assert "nano_bam_object_id" not in payload
+        assert _entry_object_ids(payload, "hifi_bams") == {str(hifi_bam.id)}
+        assert payload.get("nano_bams") == []
 
     async def test_auto_pairs_single_ont_bam_into_nano_slot(self):
         assembly = _assembly()
@@ -154,8 +177,8 @@ class TestAutoPairChemistryRouting:
         )
 
         payload = enqueued["payload"]
-        assert payload["nano_bam_object_id"] == str(ont_bam.id)
-        assert "hifi_bam_object_id" not in payload
+        assert _entry_object_ids(payload, "nano_bams") == {str(ont_bam.id)}
+        assert payload.get("hifi_bams") == []
 
     async def test_auto_pairs_one_hifi_and_one_nano(self):
         assembly = _assembly()
@@ -172,8 +195,8 @@ class TestAutoPairChemistryRouting:
         )
 
         payload = enqueued["payload"]
-        assert payload["hifi_bam_object_id"] == str(hifi_bam.id)
-        assert payload["nano_bam_object_id"] == str(ont_bam.id)
+        assert _entry_object_ids(payload, "hifi_bams") == {str(hifi_bam.id)}
+        assert _entry_object_ids(payload, "nano_bams") == {str(ont_bam.id)}
 
     async def test_refuses_clr_only_long_reads(self):
         """A CLR BAM is long-read and so appears in `alignments_against`'s
@@ -207,18 +230,64 @@ class TestAutoPairChemistryRouting:
         with pytest.raises(ValidationError):
             await _run(assembly=assembly, alignments=([], [], []))
 
-    async def test_refuses_ambiguous_hifi_candidates(self):
+    async def test_refuses_ambiguous_same_aligner_candidates(self):
+        """Two HiFi BAMs from the *same* aligner is still ambiguous -- there
+        is no way to tell which one is meant, unlike two BAMs from two
+        different aligners cross-checking the same reads."""
         assembly = _assembly()
-        hifi_a = _bam(assembly, name="hifi_a.bam")
-        hifi_b = _bam(assembly, name="hifi_b.bam")
+        hifi_a = _bam(assembly, name="hifi_a.bam", aligned_by="minimap2")
+        hifi_b = _bam(assembly, name="hifi_b.bam", aligned_by="minimap2")
 
-        with pytest.raises(ValidationError, match="several"):
+        with pytest.raises(ValidationError, match="same aligner"):
             await _run(
                 assembly=assembly,
                 alignments=([], [hifi_a, hifi_b], []),
                 chemistry_by_bam={
                     hifi_a.id: ReadChemistry.HIFI,
                     hifi_b.id: ReadChemistry.HIFI,
+                },
+            )
+
+    async def test_two_different_aligners_are_not_ambiguous(self):
+        """The routine winnowmap case: two HiFi BAMs against the same
+        assembly, one from each aligner, both pass straight through to the
+        payload rather than tripping the ambiguity refusal."""
+        assembly = _assembly()
+        mm2_bam = _bam(assembly, name="mm2.bam", aligned_by="minimap2")
+        wm2_bam = _bam(assembly, name="wm2.bam", aligned_by="winnowmap")
+
+        job, enqueued = await _run(
+            assembly=assembly,
+            alignments=([], [mm2_bam, wm2_bam], []),
+            chemistry_by_bam={
+                mm2_bam.id: ReadChemistry.HIFI,
+                wm2_bam.id: ReadChemistry.HIFI,
+            },
+        )
+
+        payload = enqueued["payload"]
+        assert _entry_object_ids(payload, "hifi_bams") == {
+            str(mm2_bam.id),
+            str(wm2_bam.id),
+        }
+
+    async def test_three_aligners_one_duplicated_is_still_ambiguous(self):
+        """Grouping is per-aligner: a duplicate within one aligner's group
+        must still raise even when a different aligner's single BAM is
+        present alongside it."""
+        assembly = _assembly()
+        mm2_a = _bam(assembly, name="mm2_a.bam", aligned_by="minimap2")
+        mm2_b = _bam(assembly, name="mm2_b.bam", aligned_by="minimap2")
+        wm2 = _bam(assembly, name="wm2.bam", aligned_by="winnowmap")
+
+        with pytest.raises(ValidationError, match="same aligner"):
+            await _run(
+                assembly=assembly,
+                alignments=([], [mm2_a, mm2_b, wm2], []),
+                chemistry_by_bam={
+                    mm2_a.id: ReadChemistry.HIFI,
+                    mm2_b.id: ReadChemistry.HIFI,
+                    wm2.id: ReadChemistry.HIFI,
                 },
             )
 
@@ -230,14 +299,36 @@ class TestExplicitIdChemistryRouting:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
         )
 
-        assert enqueued["payload"]["hifi_bam_object_id"] == str(hifi_bam.id)
+        assert _entry_object_ids(enqueued["payload"], "hifi_bams") == {str(hifi_bam.id)}
+
+    async def test_explicit_hifi_bam_ids_accepted_for_two_aligners(self):
+        assembly = _assembly()
+        mm2_bam = _bam(assembly, name="mm2.bam", aligned_by="minimap2")
+        wm2_bam = _bam(assembly, name="wm2.bam", aligned_by="winnowmap")
+
+        job, enqueued = await _run(
+            assembly=assembly,
+            hifi_bams=[mm2_bam, wm2_bam],
+            chemistry_by_bam={
+                mm2_bam.id: ReadChemistry.HIFI,
+                wm2_bam.id: ReadChemistry.HIFI,
+            },
+        )
+
+        payload = enqueued["payload"]
+        assert _entry_object_ids(payload, "hifi_bams") == {
+            str(mm2_bam.id),
+            str(wm2_bam.id),
+        }
+        aligned_by = {e["aligned_by"] for e in payload["hifi_bams"]}
+        assert aligned_by == {"minimap2", "winnowmap"}
 
     async def test_explicit_hifi_bam_id_refused_when_bam_is_clr(self):
-        """The dialog client could pass any BAM id under `hifi_bam_id`
+        """The dialog client could pass any BAM id under `hifi_bam_ids`
         regardless of its actual chemistry -- the explicit-id path must not
         be a bypass for the CLR refusal the auto-pair path enforces."""
         assembly = _assembly()
@@ -246,7 +337,7 @@ class TestExplicitIdChemistryRouting:
         with pytest.raises(ValidationError, match="not a HIFI alignment"):
             await _run(
                 assembly=assembly,
-                hifi_bam=clr_bam,
+                hifi_bams=[clr_bam],
                 chemistry_by_bam={clr_bam.id: ReadChemistry.CLR},
             )
 
@@ -257,7 +348,7 @@ class TestExplicitIdChemistryRouting:
         with pytest.raises(ValidationError, match="not a NANO alignment"):
             await _run(
                 assembly=assembly,
-                nano_bam=hifi_bam,
+                nano_bams=[hifi_bam],
                 chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             )
 
@@ -269,46 +360,44 @@ class TestExplicitIdChemistryRouting:
         with pytest.raises(ValidationError, match="was not aligned"):
             await _run(
                 assembly=assembly,
-                hifi_bam=stray_bam,
+                hifi_bams=[stray_bam],
                 chemistry_by_bam={stray_bam.id: ReadChemistry.HIFI},
             )
 
 
 class TestBaiPayloadKeysMatchWhatTheHandlerReads:
-    async def test_hifi_bam_bai_keys_are_exactly_hifi_bai_prefixed(self):
+    async def test_hifi_bam_bai_keys_are_exactly_bai_prefixed(self):
         assembly = _assembly()
         hifi_bam = _bam(assembly, name="hifi.bam")
         bai = _bai_sidecar(hifi_bam)
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             sidecars_by_bam=[(hifi_bam, [bai])],
         )
 
-        payload = enqueued["payload"]
-        assert payload["hifi_bai_sha256"] == "a" * 64
-        assert "hifi_bam_bai_sha256" not in payload
-        assert payload["hifi_bam_sha256"] == "a" * 64
-        assert payload["hifi_bam_object_id"] == str(hifi_bam.id)
+        entry = enqueued["payload"]["hifi_bams"][0]
+        assert entry["bai_sha256"] == "a" * 64
+        assert entry["bam_sha256"] == "a" * 64
+        assert entry["object_id"] == str(hifi_bam.id)
 
-    async def test_nano_bam_bai_keys_are_exactly_nano_bai_prefixed(self):
+    async def test_nano_bam_bai_keys_are_exactly_bai_prefixed(self):
         assembly = _assembly()
         nano_bam = _bam(assembly, name="nano.bam")
         bai = _bai_sidecar(nano_bam)
 
         job, enqueued = await _run(
             assembly=assembly,
-            nano_bam=nano_bam,
+            nano_bams=[nano_bam],
             chemistry_by_bam={nano_bam.id: ReadChemistry.ONT_SIMPLEX},
             sidecars_by_bam=[(nano_bam, [bai])],
         )
 
-        payload = enqueued["payload"]
-        assert payload["nano_bai_sha256"] == "a" * 64
-        assert "nano_bam_bai_sha256" not in payload
-        assert payload["nano_bam_sha256"] == "a" * 64
+        entry = enqueued["payload"]["nano_bams"][0]
+        assert entry["bai_sha256"] == "a" * 64
+        assert entry["bam_sha256"] == "a" * 64
 
 
 class TestPlotGating:
@@ -318,7 +407,7 @@ class TestPlotGating:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             plot=True,
         )
@@ -331,7 +420,7 @@ class TestPlotGating:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             plot=True,
         )
@@ -344,7 +433,7 @@ class TestPlotGating:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             plot=True,
         )
@@ -357,7 +446,7 @@ class TestPlotGating:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             plot=False,
         )
@@ -372,7 +461,7 @@ class TestMapQualDefault:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
         )
 
@@ -384,7 +473,7 @@ class TestMapQualDefault:
 
         job, enqueued = await _run(
             assembly=assembly,
-            hifi_bam=hifi_bam,
+            hifi_bams=[hifi_bam],
             chemistry_by_bam={hifi_bam.id: ReadChemistry.HIFI},
             map_qual=20,
         )

@@ -9,8 +9,7 @@ def test_command_routes_hifi_bam_to_hifi_flag():
     cmd = gci_runner.build_gci_command(
         gci_path="/usr/local/bin/gci",
         assembly=Path("/work/assembly.fasta"),
-        hifi_bam=Path("/work/hifi.bam"),
-        nano_bam=None,
+        hifi_bams=[Path("/work/hifi.bam")],
         out_dir=Path("/work/out"),
         prefix="gci",
         threads=8,
@@ -26,8 +25,8 @@ def test_command_routes_both_slots_when_both_present():
     cmd = gci_runner.build_gci_command(
         gci_path="/usr/local/bin/gci",
         assembly=Path("/work/assembly.fasta"),
-        hifi_bam=Path("/work/hifi.bam"),
-        nano_bam=Path("/work/nano.bam"),
+        hifi_bams=[Path("/work/hifi.bam")],
+        nano_bams=[Path("/work/nano.bam")],
         out_dir=Path("/work/out"),
         prefix="gci",
         threads=8,
@@ -45,8 +44,7 @@ def test_command_records_map_qual():
     cmd = gci_runner.build_gci_command(
         gci_path="/usr/local/bin/gci",
         assembly=Path("/work/assembly.fasta"),
-        hifi_bam=Path("/work/hifi.bam"),
-        nano_bam=None,
+        hifi_bams=[Path("/work/hifi.bam")],
         out_dir=Path("/work/out"),
         prefix="gci",
         threads=8,
@@ -64,8 +62,7 @@ def test_command_omits_plot_flag_when_disabled():
     cmd = gci_runner.build_gci_command(
         gci_path="/usr/local/bin/gci",
         assembly=Path("/work/assembly.fasta"),
-        hifi_bam=Path("/work/hifi.bam"),
-        nano_bam=None,
+        hifi_bams=[Path("/work/hifi.bam")],
         out_dir=Path("/work/out"),
         prefix="gci",
         threads=8,
@@ -83,8 +80,7 @@ def test_command_uses_fixed_input_names():
     cmd = gci_runner.build_gci_command(
         gci_path="/usr/local/bin/gci",
         assembly=Path("/work/assembly.fasta"),
-        hifi_bam=Path("/work/hifi.bam"),
-        nano_bam=None,
+        hifi_bams=[Path("/work/hifi.bam")],
         out_dir=Path("/work/out"),
         prefix="gci",
         threads=8,
@@ -92,6 +88,83 @@ def test_command_uses_fixed_input_names():
         plot=False,
     )
     assert not any(";" in part or "<" in part for part in cmd)
+
+
+def test_command_passes_single_hifi_bam_without_cross_check_flags():
+    """A single BAM in a slot must not carry --mq-cutoff/-op: GCI's own help
+    says both are "only used when inputting more than one alignment file",
+    so passing them here would record a filter that never ran.
+    """
+    cmd = gci_runner.build_gci_command(
+        gci_path="/usr/local/bin/gci",
+        assembly=Path("/work/assembly.fasta"),
+        hifi_bams=[Path("/work/hifi.bam")],
+        out_dir=Path("/work/out"),
+        prefix="gci",
+        threads=8,
+        map_qual=30,
+        plot=False,
+    )
+    assert "--mq-cutoff" not in cmd
+    assert "-op" not in cmd
+
+
+def test_command_passes_two_hifi_bams_to_one_hifi_flag():
+    """GCI's --hifi is nargs='+': two BAMs (minimap2 + winnowmap) for the
+    same read set go on one --hifi flag, not two separate invocations.
+    """
+    cmd = gci_runner.build_gci_command(
+        gci_path="/usr/local/bin/gci",
+        assembly=Path("/work/assembly.fasta"),
+        hifi_bams=[Path("/work/mm2.bam"), Path("/work/wm2.bam")],
+        out_dir=Path("/work/out"),
+        prefix="gci",
+        threads=8,
+        map_qual=30,
+        plot=False,
+    )
+    hifi_idx = cmd.index("--hifi")
+    assert cmd[hifi_idx + 1] == "/work/mm2.bam"
+    assert cmd[hifi_idx + 2] == "/work/wm2.bam"
+    # Only one --hifi flag on the whole command line.
+    assert cmd.count("--hifi") == 1
+
+
+def test_command_adds_cross_check_flags_when_hifi_slot_has_two_bams():
+    cmd = gci_runner.build_gci_command(
+        gci_path="/usr/local/bin/gci",
+        assembly=Path("/work/assembly.fasta"),
+        hifi_bams=[Path("/work/mm2.bam"), Path("/work/wm2.bam")],
+        out_dir=Path("/work/out"),
+        prefix="gci",
+        threads=8,
+        map_qual=30,
+        mq_cutoff=55,
+        ovlp_percent=0.85,
+        plot=False,
+    )
+    assert "--mq-cutoff" in cmd
+    assert "55" in cmd
+    assert "-op" in cmd
+    assert "0.85" in cmd
+
+
+def test_command_adds_cross_check_flags_when_nano_slot_has_two_bams():
+    """The multi-BAM check is per-slot: a two-BAM nano slot needs the flags
+    even when hifi has zero or one BAM.
+    """
+    cmd = gci_runner.build_gci_command(
+        gci_path="/usr/local/bin/gci",
+        assembly=Path("/work/assembly.fasta"),
+        nano_bams=[Path("/work/mm2.bam"), Path("/work/wm2.bam")],
+        out_dir=Path("/work/out"),
+        prefix="gci",
+        threads=8,
+        map_qual=30,
+        plot=False,
+    )
+    assert "--mq-cutoff" in cmd
+    assert "-op" in cmd
 
 
 def test_parse_gci_returns_typed_facts():
@@ -216,8 +289,6 @@ def test_build_gci_command_raises_when_no_bam_at_all():
         gci_runner.build_gci_command(
             gci_path="/usr/local/bin/gci",
             assembly=Path("/work/assembly.fasta"),
-            hifi_bam=None,
-            nano_bam=None,
             out_dir=Path("/work/out"),
             prefix="gci",
             threads=8,

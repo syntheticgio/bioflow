@@ -27,6 +27,7 @@ from app.pipelines.align_params import (
     Bwa2Params,
     Hisat2Params,
     Minimap2Params,
+    WinnowmapParams,
 )
 
 log = get_logger(__name__)
@@ -370,6 +371,7 @@ def build_align_command(
     params: AlignParams,
     tmp_prefix: Path | None = None,
     scratch: Path | None = None,
+    winnowmap_repetitive_kmers: Path | None = None,
 ) -> list[str]:
     """Align and coordinate-sort in one pipeline, as a `/bin/sh` invocation.
 
@@ -385,6 +387,11 @@ def build_align_command(
 
     `sh` rather than `bash`: the base image has no bash, and `-o pipefail` is
     supported by Debian's dash as of the version trixie ships.
+
+    `winnowmap_repetitive_kmers` is required exactly when `aligner is
+    Aligner.WINNOWMAP` -- checked in `_aligner_argv`, not here, so the one
+    place that raises on a missing extra input is the same place that
+    consumes it.
     """
     align_argv = _aligner_argv(
         aligner=aligner,
@@ -395,6 +402,7 @@ def build_align_command(
         read_group=read_group,
         params=params,
         scratch=scratch,
+        winnowmap_repetitive_kmers=winnowmap_repetitive_kmers,
     )
 
     sort_argv = [
@@ -426,16 +434,42 @@ def _aligner_argv(
     read_group: ReadGroup,
     params,
     scratch: Path | None = None,
+    winnowmap_repetitive_kmers: Path | None = None,
 ) -> list[str]:
     """The aligner half of the pipeline, before samtools.
 
-    Five tools, four calling conventions. bwa-mem2 and minimap2 take reads
+    Six tools, five calling conventions. bwa-mem2 and minimap2 take reads
     positionally and the reference as a path; bowtie2 and HISAT2 take the
     index basename via -x and the reads via -U or -1/-2; STAR takes a genome
     *directory* via --genomeDir and has to be told to write SAM to stdout at
-    all. Getting that wrong does not fail cleanly -- bowtie2 reads a stray
-    positional argument as its index basename and reports a missing index.
+    all; winnowmap is minimap2's own convention plus one extra flag. Getting
+    that wrong does not fail cleanly -- bowtie2 reads a stray positional
+    argument as its index basename and reports a missing index.
     """
+    if aligner is Aligner.WINNOWMAP:
+        if winnowmap_repetitive_kmers is None:
+            raise ValidationError(
+                "winnowmap needs the repetitive-k-mer file meryl produces"
+            )
+        # `-ax <preset>` and `-R` are minimap2's own flags, verified against
+        # a real build of winnowmap (it shares minimap2's argument parser);
+        # `-W` is the one addition, the file that makes this a cross-check
+        # aligner rather than a second minimap2 run.
+        argv = [
+            aligner_path,
+            "-W",
+            str(winnowmap_repetitive_kmers),
+            "-a",
+            "-x",
+            params.preset,
+            "-t",
+            str(params.threads),
+        ]
+        argv += ["-R", read_group.as_sam_header(), str(reference), str(r1)]
+        if r2 is not None:
+            argv.append(str(r2))
+        return argv
+
     if aligner is Aligner.STAR:
         return _star_argv(
             aligner_path=aligner_path,

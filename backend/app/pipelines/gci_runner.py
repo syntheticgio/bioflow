@@ -9,6 +9,14 @@ every aligner in its Requirements list is a suggestion for producing input,
 not a dependency. This module therefore builds no alignment command and the
 handler runs no aligner.
 
+**`--hifi`/`--nano` each take a list, natively.** Read from the installed
+`/opt/gci/GCI.py:1041-1042`: both are `nargs='+'`, documented as "at least
+one bam file". So pairing minimap2 with winnowmap needs no merge step and
+no second GCI invocation -- both BAMs go on the same command line, in the
+same slot. GCI's own README (line 157) states the intended shape directly:
+"We recommend to input only one alignment file per software (minimap2 and
+winnowmap) using the same set of long reads."
+
 **Two aligners are upstream's recommendation, and the score records which
 were used.** GCI's FAQ reports that WM2+MM2 and VM+MM2 yield similar issues
 and scores, and recommends WM2+MM2 because two aligners cross-check in
@@ -20,6 +28,16 @@ runs because upstream says it is "hardly detected", while upstream here says
 the scores are similar. The rule is driven by what upstream says the
 degraded mode measures, not by a general preference for omitting things.
 
+**`--mq-cutoff` and `-op`/`--ovlp-percent` only mean something in multi-BAM
+mode.** GCI's own help text: `--mq-cutoff` is "only used when inputting more
+than one alignment file", and `--ovlp-percent` is "minimum overlapping
+percentage of the same read alignment if inputting more than one alignment
+file". `-op` is how GCI actually cross-checks two aligners -- a read is kept
+only when both alignments place it compatibly -- so the same reasoning that
+makes `-mq`/`map_qual` explicit here applies to these two: passing them in
+single-BAM mode would record a filter GCI's own help says never ran, so they
+are appended only when a slot carries more than one BAM.
+
 **GCI's N50s are its own.** `assembly_continuity_expected_n50` and
 `_observed_n50` are computed from filtered read depth, not from contig
 lengths, and must never be written into the `sequence_*` namespace that
@@ -29,35 +47,47 @@ one object, is the bug the epic recorded when it deleted `assembly_n50`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+
+# GCI's own defaults for these two flags (`GCI.py:1053,1055`), used only
+# when they are actually passed -- see build_gci_command's docstring for why
+# that is conditional on more than one BAM being in a slot.
+DEFAULT_MQ_CUTOFF = 50
+DEFAULT_OVLP_PERCENT = 0.9
 
 
 def build_gci_command(
     *,
     gci_path: str,
     assembly: Path,
-    hifi_bam: Path | None,
-    nano_bam: Path | None,
+    hifi_bams: Sequence[Path] = (),
+    nano_bams: Sequence[Path] = (),
     out_dir: Path,
     prefix: str,
     threads: int = 8,
     map_qual: int = 30,
+    mq_cutoff: int = DEFAULT_MQ_CUTOFF,
+    ovlp_percent: float = DEFAULT_OVLP_PERCENT,
     plot: bool = False,
 ) -> list[str]:
     """Build the `GCI.py` invocation.
 
-    At least one of `hifi_bam` / `nano_bam` must be set; reaching here with
-    neither is a caller bug rather than a user error, same as
+    At least one BAM across `hifi_bams`/`nano_bams` must be given; reaching
+    here with both empty is a caller bug rather than a user error, same as
     `craq_runner.build_craq_command` -- there is no short-read slot to
     degrade into.
 
     `map_qual` is passed explicitly rather than left to GCI's default so
     that the value is always recorded as a fact: upstream is explicit that
     lowering it admits multi-mapping reads from repetitive regions, which
-    makes runs at different thresholds incomparable.
+    makes runs at different thresholds incomparable. `mq_cutoff` and
+    `ovlp_percent` get the identical treatment, but only reach the command
+    line when a slot has more than one BAM -- see the module docstring for
+    why passing them otherwise would misrecord a filter that never ran.
     """
-    if hifi_bam is None and nano_bam is None:
-        raise ValueError("GCI needs at least one of hifi_bam or nano_bam")
+    if not hifi_bams and not nano_bams:
+        raise ValueError("GCI needs at least one of hifi_bams or nano_bams")
 
     cmd = [
         gci_path,
@@ -72,10 +102,12 @@ def build_gci_command(
         "-mq",
         str(map_qual),
     ]
-    if hifi_bam is not None:
-        cmd += ["--hifi", str(hifi_bam)]
-    if nano_bam is not None:
-        cmd += ["--nano", str(nano_bam)]
+    if hifi_bams:
+        cmd += ["--hifi", *(str(b) for b in hifi_bams)]
+    if nano_bams:
+        cmd += ["--nano", *(str(b) for b in nano_bams)]
+    if len(hifi_bams) > 1 or len(nano_bams) > 1:
+        cmd += ["--mq-cutoff", str(mq_cutoff), "-op", str(ovlp_percent)]
     if plot:
         cmd += ["-p", "-it", "pdf"]
     return cmd

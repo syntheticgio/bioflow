@@ -36,6 +36,7 @@ class Aligner(StrEnum):
     BOWTIE2 = "bowtie2"
     HISAT2 = "hisat2"
     STAR = "star"
+    WINNOWMAP = "winnowmap"
 
 
 # bwa-mem2's index is a five-file set, all named by appending to the reference
@@ -47,6 +48,14 @@ BWA_MEM2_SUFFIXES: tuple[str, ...] = (".0123", ".amb", ".ann", ".bwt.2bit.64", "
 # explicitly rather than discovered by suffix. Keeping the reference filename as
 # the stem means the workdir listing reads the same for both aligners.
 MINIMAP2_SUFFIX = ".mmi"
+
+# winnowmap's "index" is the repetitive-k-mer list meryl produces (`meryl
+# count` then `meryl print greater-than`), passed via `-W` rather than
+# discovered by suffix -- same shape as minimap2's `.mmi`, a single file
+# whose name is ours to choose. It is not a minimizer index the way the
+# other four aligners' are; winnowmap re-derives its own index from the
+# reference at alignment time and only consumes this file as an extra input.
+WINNOWMAP_REPETITIVE_KMER_SUFFIX = ".repetitive_k15.txt"
 
 # samtools indexes a FASTA to `<name>.fai` and a coordinate-sorted BAM to
 # `<name>.bam.bai`, both by appending, both discovered rather than passed.
@@ -132,6 +141,7 @@ INDEX_ROLE: dict[Aligner, SidecarRole] = {
     Aligner.BOWTIE2: SidecarRole.BOWTIE2_INDEX,
     Aligner.HISAT2: SidecarRole.HISAT2_INDEX,
     Aligner.STAR: SidecarRole.STAR_INDEX,
+    Aligner.WINNOWMAP: SidecarRole.WINNOWMAP_INDEX,
 }
 
 
@@ -181,6 +191,8 @@ def index_suffixes(aligner: Aligner, *, annotated: bool = False) -> tuple[str, .
         return HISAT2_SUFFIXES
     if aligner is Aligner.STAR:
         return STAR_SUFFIXES
+    if aligner is Aligner.WINNOWMAP:
+        return (WINNOWMAP_REPETITIVE_KMER_SUFFIX,)
     return (MINIMAP2_SUFFIX,)
 
 
@@ -295,6 +307,13 @@ _LAYOUTS: dict[Aligner, IndexLayout] = {
     # is no separate builder the way bowtie2-build is one.
     Aligner.STAR: IndexLayout(
         suffixes=STAR_SUFFIXES, directory_suffix=STAR_DIR_SUFFIX
+    ),
+    # winnowmap's builder is meryl, not winnowmap itself -- the same
+    # separate-binary shape as bowtie2-build/hisat2-build, except the
+    # produced file is consumed via `-W` rather than discovered by suffix at
+    # alignment time the way a minimizer index would be.
+    Aligner.WINNOWMAP: IndexLayout(
+        suffixes=(WINNOWMAP_REPETITIVE_KMER_SUFFIX,), builder="meryl"
     ),
 }
 

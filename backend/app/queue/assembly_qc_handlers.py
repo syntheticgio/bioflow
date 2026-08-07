@@ -383,8 +383,6 @@ _CRAQ_NGS_LINK = "ngs_sort.bam"
 _CRAQ_SMS_LINK = "sms_sort.bam"
 
 _GCI_ASSEMBLY_LINK = "assembly.fasta"
-_GCI_HIFI_LINK = "hifi.bam"
-_GCI_NANO_LINK = "nano.bam"
 ASSEMBLY_CONTINUITY_LEASE_SECONDS = 3600
 
 # One image per chromosome, so a fragmented assembly produces hundreds of
@@ -812,6 +810,22 @@ def _resolve_read_inputs(work: Path, payload: dict) -> list[Path]:
     return resolved
 
 
+def _resolve_gci_bam_entry(work: Path, index: int, slot: str, entry: dict) -> Path:
+    """Link one BAM from a GCI `{hifi,nano}_bams` list entry, plus its `.bai`.
+
+    Named `<slot>.<index>.bam` rather than a fixed `hifi.bam`/`nano.bam`:
+    two BAMs in one slot (minimap2 + winnowmap, cross-checking each other)
+    cannot both link to the same name. `index` is the entry's position in
+    the payload list, not tied to which aligner produced it -- order is
+    otherwise unobserved by GCI, which takes the whole `--hifi`/`--nano`
+    argument list as one undifferentiated set of alignments.
+    """
+    raw = _resolve_input(entry, "bam")
+    linked = _named_link(work, raw, f"{slot}.{index}.bam")
+    _link_bam_index(entry, "bai", raw, linked)
+    return linked
+
+
 @handler(
     "assess_assembly_continuity",
     mode=HandlerMode.SUBPROCESS,
@@ -826,20 +840,31 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
     scored, plus optional depth plots under qc_reports/.
 
     **GCI runs no aligner.** It consumes the sorted, indexed BAMs the align
-    pipeline already produced. A QC job that silently ran minimap2 would
-    duplicate work the user can see and make the job's cost unpredictable.
+    pipeline already produced. A QC job that silently ran minimap2 or
+    winnowmap would duplicate work the user can see and make the job's cost
+    unpredictable.
+
+    **Each slot is a list, because GCI's `--hifi`/`--nano` are `nargs='+'`.**
+    Verified against the installed `/opt/gci/GCI.py:1041-1042`: both flags
+    take one or more BAM paths natively, so pairing minimap2 with winnowmap
+    needs no merge step -- both BAMs go on the same flag. `hifi_bams` and
+    `nano_bams` are each a list of `{sha256|path, bai_sha256|bai_path}`
+    dicts, resolved and linked by `_resolve_gci_bam_entry`.
 
     **Each BAM's .bai must be linked beside it.** Storage is
     content-addressed, so a managed BAM and its index are two unrelated
-    DataObjects; the launch path supplies `{hifi,nano}_bai_sha256`/`_path`
+    DataObjects; the launch path supplies each entry's `bai_sha256`/`_path`
     the way `launch_bam_stats` does, and a register-in-place BAM falls back
     to a sibling `.bai`, which is the only case where that guess is valid.
     GCI's README says of the index: "this is necessary!!!"
 
-    **The aligners are recorded, not assumed.** Upstream recommends pairing
-    winnowmap with minimap2 for sensitivity in repetitive regions; BioFlow
-    supplies minimap2 alignments only, and that fact travels with the score
-    rather than being silently dropped.
+    **The aligners are derived from what was actually linked, not asserted
+    by the payload.** Each entry names the object id it came from, and this
+    handler reads that object's `aligned_by` fact rather than trusting a
+    payload-level `aligners` list -- a payload claiming
+    `["minimap2", "winnowmap"]` while only one BAM actually reached the
+    command line would otherwise store a score labeled as cross-checked
+    when it was not, which is the whole point of the field.
     """
     tool = tools.require(tools.gci())
 
@@ -848,25 +873,29 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
     assembly = _resolve_input(ctx.payload, "assembly")
     assembly = _named_link(work, assembly, _GCI_ASSEMBLY_LINK)
 
-    hifi_bam = None
-    if ctx.payload.get("hifi_bam_path") or ctx.payload.get("hifi_bam_sha256"):
-        raw = _resolve_input(ctx.payload, "hifi_bam")
-        hifi_bam = _named_link(work, raw, _GCI_HIFI_LINK)
-        _link_bam_index(ctx.payload, "hifi_bai", raw, hifi_bam)
+    hifi_entries = ctx.payload.get("hifi_bams") or []
+    nano_entries = ctx.payload.get("nano_bams") or []
 
-    nano_bam = None
-    if ctx.payload.get("nano_bam_path") or ctx.payload.get("nano_bam_sha256"):
-        raw = _resolve_input(ctx.payload, "nano_bam")
-        nano_bam = _named_link(work, raw, _GCI_NANO_LINK)
-        _link_bam_index(ctx.payload, "nano_bai", raw, nano_bam)
+    hifi_bams = [
+        _resolve_gci_bam_entry(work, i, "hifi", entry)
+        for i, entry in enumerate(hifi_entries)
+    ]
+    nano_bams = [
+        _resolve_gci_bam_entry(work, i, "nano", entry)
+        for i, entry in enumerate(nano_entries)
+    ]
 
-    if hifi_bam is None and nano_bam is None:
+    if not hifi_bams and not nano_bams:
         raise PermanentError(
             "Continuity inspection needs long reads aligned to this assembly."
         )
 
     threads = max(1, int(ctx.payload.get("threads") or 8))
     map_qual = int(ctx.payload.get("map_qual") or 30)
+    mq_cutoff = int(ctx.payload.get("mq_cutoff") or gci_runner.DEFAULT_MQ_CUTOFF)
+    ovlp_percent = float(
+        ctx.payload.get("ovlp_percent") or gci_runner.DEFAULT_OVLP_PERCENT
+    )
     plot = bool(ctx.payload.get("plot"))
 
     log_path = settings.logs_dir / f"{ctx.job_id}.log"
@@ -878,12 +907,14 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
     cmd = gci_runner.build_gci_command(
         gci_path=tool.path,
         assembly=assembly,
-        hifi_bam=hifi_bam,
-        nano_bam=nano_bam,
+        hifi_bams=hifi_bams,
+        nano_bams=nano_bams,
         out_dir=out_dir,
         prefix="gci",
         threads=threads,
         map_qual=map_qual,
+        mq_cutoff=mq_cutoff,
+        ovlp_percent=ovlp_percent,
         plot=plot,
     )
 
@@ -893,8 +924,8 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
     log.info(
         "assembly_continuity_started",
         job_id=ctx.job_id,
-        has_hifi=hifi_bam is not None,
-        has_nano=nano_bam is not None,
+        hifi_bams=len(hifi_bams),
+        nano_bams=len(nano_bams),
         map_qual=map_qual,
         plot=plot,
         threads=threads,
@@ -910,16 +941,31 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
 
     facts = gci_runner.parse_gci(gci_file.read_text())
 
-    aligners = list(ctx.payload.get("aligners") or ["minimap2"])
+    # `aligned_by` from each entry, in the order BAMs actually reached the
+    # command line -- sorted and deduplicated so the value describes *which*
+    # aligners cross-checked, not how many BAMs of each ran. An entry with
+    # no `aligned_by` (a register-in-place import predating that field, or
+    # one that genuinely was never recorded) contributes "unknown" rather
+    # than being silently skipped or guessed as "minimap2" -- a guess here
+    # is the same class of error this whole derivation replaces.
+    aligned_by = sorted(
+        {
+            str(entry.get("aligned_by") or "unknown")
+            for entry in (*hifi_entries, *nano_entries)
+        }
+    )
     facts.update(
         {
-            "assembly_continuity_aligners": aligners,
+            "assembly_continuity_aligners": aligned_by,
             "assembly_continuity_map_qual": map_qual,
             "assembly_continuity_threshold": int(ctx.payload.get("threshold") or 0),
             "assembly_continuity_tool": "gci",
             "assembly_continuity_tool_version": tool.version or "",
         }
     )
+    if len(hifi_bams) > 1 or len(nano_bams) > 1:
+        facts["assembly_continuity_mq_cutoff"] = mq_cutoff
+        facts["assembly_continuity_ovlp_percent"] = ovlp_percent
 
     if plot:
         report_dir = settings.qc_reports_dir / str(ctx.payload.get("object_id"))

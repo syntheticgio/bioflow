@@ -450,8 +450,13 @@ class TestAssessAssemblyContinuity:
         payload = {
             "object_id": "obj1",
             "assembly_path": str(assembly_src),
-            "hifi_bam_path": str(hifi_bam_src),
-            "hifi_bai_path": str(hifi_bai_src),
+            "hifi_bams": [
+                {
+                    "bam_path": str(hifi_bam_src),
+                    "bai_path": str(hifi_bai_src),
+                    "aligned_by": "minimap2",
+                }
+            ],
         }
         ctx = self._ctx(payload)
 
@@ -480,8 +485,9 @@ class TestAssessAssemblyContinuity:
         out_dir = captured_out_dir["path"]
         work = out_dir.parent
         # `_named_link` places the link at work / f"in_{name}", not the bare
-        # name -- see pipeline_handlers._named_link.
-        linked_bam = work / f"in_{handlers._GCI_HIFI_LINK}"
+        # name -- see pipeline_handlers._named_link. Entries are named
+        # <slot>.<index>.bam, so the first hifi entry is hifi.0.bam.
+        linked_bam = work / "in_hifi.0.bam"
         linked_bai = Path(f"{linked_bam}.bai")
 
         assert linked_bam.exists() or linked_bam.is_symlink()
@@ -490,6 +496,147 @@ class TestAssessAssemblyContinuity:
 
         assert result["facts"]["assembly_continuity_gci"] == 0.95
         assert result["facts"]["assembly_continuity_observed_n50"] == 950
+        assert result["facts"]["assembly_continuity_aligners"] == ["minimap2"]
+
+    def test_two_hifi_bams_are_both_linked_and_aligners_combined(
+        self, tmp_path, monkeypatch
+    ):
+        """Two BAMs in one slot (minimap2 + winnowmap cross-checking the
+        same reads) must both be linked under distinct names, both flow
+        into --hifi, and their aligned_by facts combine and sort rather
+        than one silently overwriting the other."""
+        from app.config import settings
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        mm2_bam_src = tmp_path / "src" / "mm2.bam"
+        mm2_bai_src = tmp_path / "src" / "mm2.bam.bai"
+        wm2_bam_src = tmp_path / "src" / "wm2.bam"
+        wm2_bai_src = tmp_path / "src" / "wm2.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (mm2_bam_src, "not a real bam"),
+            (mm2_bai_src, "not a real bai"),
+            (wm2_bam_src, "not a real bam"),
+            (wm2_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "hifi_bams": [
+                {
+                    "bam_path": str(mm2_bam_src),
+                    "bai_path": str(mm2_bai_src),
+                    "aligned_by": "minimap2",
+                },
+                {
+                    "bam_path": str(wm2_bam_src),
+                    "bai_path": str(wm2_bai_src),
+                    "aligned_by": "winnowmap",
+                },
+            ],
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        captured_cmd = {}
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            captured_cmd["cmd"] = cmd
+            out_dir = Path(cmd[cmd.index("-d") + 1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "gci.gci").write_text(self._fake_gci_output())
+            return 0
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        result = handlers.assess_assembly_continuity(ctx)
+
+        work = Path(result["workdir"])
+        assert (work / "in_hifi.0.bam").exists() or (work / "in_hifi.0.bam").is_symlink()
+        assert (work / "in_hifi.1.bam").exists() or (work / "in_hifi.1.bam").is_symlink()
+        assert Path(f"{work / 'in_hifi.0.bam'}.bai").resolve() == mm2_bai_src.resolve()
+        assert Path(f"{work / 'in_hifi.1.bam'}.bai").resolve() == wm2_bai_src.resolve()
+
+        cmd = captured_cmd["cmd"]
+        hifi_idx = cmd.index("--hifi")
+        assert cmd[hifi_idx + 1].endswith("in_hifi.0.bam")
+        assert cmd[hifi_idx + 2].endswith("in_hifi.1.bam")
+        assert "--mq-cutoff" in cmd
+        assert "-op" in cmd
+
+        assert result["facts"]["assembly_continuity_aligners"] == [
+            "minimap2",
+            "winnowmap",
+        ]
+        assert "assembly_continuity_mq_cutoff" in result["facts"]
+        assert "assembly_continuity_ovlp_percent" in result["facts"]
+
+    def test_missing_aligned_by_records_unknown_not_a_guess(
+        self, tmp_path, monkeypatch
+    ):
+        """An entry with no aligned_by (e.g. a register-in-place BAM
+        predating that field) must not be silently assumed to be minimap2
+        -- that would misrepresent what actually produced the score."""
+        from app.config import settings
+        from app.pipelines import tools as tools_module
+        from app.pipelines.tools import InstallState, Tool
+        from app.queue import assembly_qc_handlers as handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+
+        assembly_src = tmp_path / "src" / "assembly.fasta"
+        hifi_bam_src = tmp_path / "src" / "hifi.bam"
+        hifi_bai_src = tmp_path / "src" / "hifi.bam.bai"
+        for f, content in (
+            (assembly_src, ">chr1\nACGT\n"),
+            (hifi_bam_src, "not a real bam"),
+            (hifi_bai_src, "not a real bai"),
+        ):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(content)
+
+        payload = {
+            "object_id": "obj1",
+            "assembly_path": str(assembly_src),
+            "hifi_bams": [
+                {"bam_path": str(hifi_bam_src), "bai_path": str(hifi_bai_src)}
+            ],
+        }
+        ctx = self._ctx(payload)
+
+        fake_tool = Tool(
+            name="gci",
+            path="/usr/bin/gci",
+            version="1.0",
+            install_state=InstallState.INSTALLED,
+        )
+        monkeypatch.setattr(tools_module, "gci", lambda: fake_tool)
+
+        def fake_run_subprocess(ctx, cmd, log_path=None, parser=None):
+            out_dir = Path(cmd[cmd.index("-d") + 1])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "gci.gci").write_text(self._fake_gci_output())
+            return 0
+
+        monkeypatch.setattr(handlers, "run_subprocess", fake_run_subprocess)
+
+        result = handlers.assess_assembly_continuity(ctx)
+        assert result["facts"]["assembly_continuity_aligners"] == ["unknown"]
 
     def test_no_long_read_bam_raises_permanent_error(self, tmp_path, monkeypatch):
         from app.config import settings
@@ -543,8 +690,13 @@ class TestAssessAssemblyContinuity:
         payload = {
             "object_id": "obj1",
             "assembly_path": str(assembly_src),
-            "nano_bam_path": str(nano_bam_src),
-            "nano_bai_path": str(nano_bai_src),
+            "nano_bams": [
+                {
+                    "bam_path": str(nano_bam_src),
+                    "bai_path": str(nano_bai_src),
+                    "aligned_by": "minimap2",
+                }
+            ],
         }
         ctx = self._ctx(payload)
 
@@ -571,7 +723,7 @@ class TestAssessAssemblyContinuity:
 
         out_dir = captured_out_dir["path"]
         work = out_dir.parent
-        linked_bam = work / f"in_{handlers._GCI_NANO_LINK}"
+        linked_bam = work / "in_nano.0.bam"
         linked_bai = Path(f"{linked_bam}.bai")
 
         assert linked_bam.exists() or linked_bam.is_symlink()
@@ -606,8 +758,9 @@ class TestAssessAssemblyContinuity:
         payload = {
             "object_id": "obj1",
             "assembly_path": str(assembly_src),
-            "hifi_bam_path": str(hifi_bam_src),
-            "hifi_bai_path": str(hifi_bai_src),
+            "hifi_bams": [
+                {"bam_path": str(hifi_bam_src), "bai_path": str(hifi_bai_src)}
+            ],
             "plot": True,
         }
         ctx = self._ctx(payload)
@@ -663,8 +816,9 @@ class TestAssessAssemblyContinuity:
         payload = {
             "object_id": "obj1",
             "assembly_path": str(assembly_src),
-            "hifi_bam_path": str(hifi_bam_src),
-            "hifi_bai_path": str(hifi_bai_src),
+            "hifi_bams": [
+                {"bam_path": str(hifi_bam_src), "bai_path": str(hifi_bai_src)}
+            ],
         }
         ctx = self._ctx(payload)
 
@@ -710,8 +864,9 @@ class TestAssessAssemblyContinuity:
         payload = {
             "object_id": "obj1",
             "assembly_path": str(assembly_src),
-            "hifi_bam_path": str(hifi_bam_src),
-            "hifi_bai_path": str(hifi_bai_src),
+            "hifi_bams": [
+                {"bam_path": str(hifi_bam_src), "bai_path": str(hifi_bai_src)}
+            ],
         }
         ctx = self._ctx(payload)
 

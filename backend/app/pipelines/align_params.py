@@ -265,12 +265,75 @@ class StarParams(BaseAlignParams):
         )
 
 
+# winnowmap has no short-read mode -- it exists to cross-check minimap2 on
+# long reads for GCI, so offering "sr" here would be offering a run that
+# cannot work. Kept as its own tuple rather than reusing MINIMAP2_PRESETS,
+# which includes "sr".
+WINNOWMAP_PRESETS: tuple[str, ...] = ("map-pb", "map-ont", "map-hifi")
+
+
+@dataclass
+class WinnowmapParams(BaseAlignParams):
+    """winnowmap's knobs, plus the meryl parameters that build its `-W` file.
+
+    `k` and `distinct` govern the meryl index (`meryl count k=... output
+    ...` then `meryl print greater-than distinct=... ...`), not winnowmap
+    itself -- they are here rather than on a separate params class because
+    the meryl step has no independent existence in this application: it is
+    always in service of one winnowmap alignment, the same reasoning that
+    keeps sort_memory_mb on BaseAlignParams even though samtools, not the
+    aligner, reads it.
+    """
+
+    aligner: Aligner = Aligner.WINNOWMAP
+    preset: str = "map-pb"
+    # GCI's own README example: `meryl count k=15`.
+    k: int = 15
+    # GCI's own README example: `meryl print greater-than distinct=0.9998`.
+    distinct: float = 0.9998
+
+    def as_dict(self) -> dict:
+        return {
+            **super().as_dict(),
+            "preset": self.preset,
+            "k": self.k,
+            "distinct": self.distinct,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WinnowmapParams":
+        preset = data.get("preset") or "map-pb"
+        if preset not in WINNOWMAP_PRESETS:
+            raise ValidationError(
+                f"Unknown winnowmap preset {preset!r}",
+                details={"valid": list(WINNOWMAP_PRESETS)},
+            )
+
+        k = int(data.get("k", 15))
+        if k < 1 or k > 28:
+            # winnowmap's own -k help: "k-mer size (no larger than 28)".
+            raise ValidationError("k must be between 1 and 28")
+
+        distinct = float(data.get("distinct", 0.9998))
+        if not (0.0 < distinct <= 1.0):
+            raise ValidationError("distinct must be between 0 and 1")
+
+        return cls(
+            aligner=Aligner.WINNOWMAP,
+            preset=preset,
+            k=k,
+            distinct=distinct,
+            **cls._shared(data),
+        )
+
+
 PARAMS_CLASSES: dict[Aligner, type[BaseAlignParams]] = {
     Aligner.BWA_MEM2: Bwa2Params,
     Aligner.MINIMAP2: Minimap2Params,
     Aligner.BOWTIE2: Bowtie2Params,
     Aligner.HISAT2: Hisat2Params,
     Aligner.STAR: StarParams,
+    Aligner.WINNOWMAP: WinnowmapParams,
 }
 
 

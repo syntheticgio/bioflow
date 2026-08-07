@@ -2073,3 +2073,51 @@ class TestContinuityCard:
             )
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
+
+    def test_available_with_two_hifi_candidates_from_different_aligners(self):
+        """Since winnowmap: two HiFi candidates is not ambiguous when they
+        came from two different aligners -- that is GCI's own recommended
+        cross-check setup, not a pick-one situation. Mirrors
+        `launch_continuity_qc`'s `_group_gci_candidates_by_aligner`."""
+        from app.services import suggestion_service
+
+        mm2 = _bam_object("asm1", obj_id="bam1")
+        mm2.facts = {"aligned_by": "minimap2"}
+        wm2 = _bam_object("asm1", obj_id="bam2")
+        wm2.facts = {"aligned_by": "winnowmap"}
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                ([], [mm2, wm2], []),
+                ([mm2, wm2], []),
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert "cross-check" in card.why.lower()
+
+    def test_unavailable_with_two_hifi_candidates_from_same_aligner_despite_a_third(self):
+        """A duplicate within one aligner's group must still refuse even
+        when a different aligner's single candidate is also present."""
+        from app.services import suggestion_service
+
+        mm2_a = _bam_object("asm1", obj_id="bam1")
+        mm2_a.facts = {"aligned_by": "minimap2"}
+        mm2_b = _bam_object("asm1", obj_id="bam2")
+        mm2_b.facts = {"aligned_by": "minimap2"}
+        wm2 = _bam_object("asm1", obj_id="bam3")
+        wm2.facts = {"aligned_by": "winnowmap"}
+
+        with patch.object(
+            suggestion_service.tools, "gci", return_value=_FakeTool(True, name="gci")
+        ):
+            card = suggestion_service.build_continuity_card(
+                _assembly_object(),
+                ([], [mm2_a, mm2_b, wm2], []),
+                ([mm2_a, mm2_b, wm2], []),
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "same aligner" in card.reason.lower()

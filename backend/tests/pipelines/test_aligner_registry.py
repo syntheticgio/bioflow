@@ -43,8 +43,10 @@ class TestCompleteness:
         hisat2-build); bwa-mem2 and minimap2 do not. `align_handlers.build_index`
         dispatches on `builder_tool` being set, so a spec that disagrees with
         `IndexLayout.builder` here would silently point the index build at the
-        wrong binary."""
-        with_builder = {Aligner.BOWTIE2, Aligner.HISAT2}
+        wrong binary. winnowmap's builder is meryl -- the same separate-binary
+        shape, except what meryl produces is consumed via -W rather than
+        discovered by suffix."""
+        with_builder = {Aligner.BOWTIE2, Aligner.HISAT2, Aligner.WINNOWMAP}
         for aligner in Aligner:
             spec = aligner_registry.spec_for(aligner)
             has_builder_tool = spec.builder_tool is not None

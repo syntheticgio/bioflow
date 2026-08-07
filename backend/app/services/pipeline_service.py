@@ -4422,23 +4422,61 @@ async def _gci_candidates(
     return hifi_candidates, nano_candidates
 
 
+def _group_gci_candidates_by_aligner(
+    candidates: list[DataObject],
+) -> dict[str, list[DataObject]]:
+    """Group one GCI slot's candidates by which aligner produced them.
+
+    Two aligners means two usable HiFi BAMs against one assembly becomes
+    the *routine* case (minimap2 + winnowmap, same reads, cross-checking
+    each other) rather than the ambiguous one `launch_continuity_qc`'s
+    "several long-read alignments; name the ones to use" refusal was
+    written for. That refusal still applies when it is genuinely ambiguous
+    -- two BAMs from the *same* aligner, which is not a cross-check, it is
+    two candidates with no way to tell which one is meant. Grouping by
+    `aligned_by` is what lets the caller tell the two cases apart: every
+    group holding exactly one BAM is safe to pass all of, any group holding
+    more than one is the refusal case.
+
+    A BAM with no `aligned_by` (register-in-place, or predating the field)
+    groups under `"unknown"` rather than being merged into whichever named
+    aligner happens to also be present -- an unknown-provenance BAM sharing
+    a group with a real "minimap2" entry would silently treat two unrelated
+    alignments as safe to combine.
+    """
+    groups: dict[str, list[DataObject]] = {}
+    for bam in candidates:
+        key = str((bam.facts or {}).get("aligned_by") or "unknown")
+        groups.setdefault(key, []).append(bam)
+    return groups
+
+
 async def launch_continuity_qc(
     *,
     object_id: PydanticObjectId,
     owner: str,
-    hifi_bam_id: PydanticObjectId | None = None,
-    nano_bam_id: PydanticObjectId | None = None,
+    hifi_bam_ids: list[PydanticObjectId] | None = None,
+    nano_bam_ids: list[PydanticObjectId] | None = None,
     map_qual: int | None = None,
     plot: bool | None = None,
 ) -> Job:
     """Queue a GCI run: long-read assembly continuity inspection.
 
-    Auto-pairs when unambiguous -- at most one usable HiFi BAM and/or one
-    usable ONT BAM against this assembly -- and refuses otherwise, the same
-    rule `launch_assembly_error_qc` follows. Unlike CRAQ, "usable" excludes
-    CLR: `gci_slot_for_chemistry` refuses it, and a CLR BAM found among the
-    project's long-read alignments simply never becomes a candidate, in
-    either the auto-pair or the explicit-id path.
+    Auto-pairs when unambiguous. "Unambiguous" now means "at most one usable
+    BAM per aligner per slot", not "at most one BAM per slot" -- two
+    aligners (minimap2 and, when installed, winnowmap) make two usable HiFi
+    BAMs against one assembly the routine case, not the ambiguous one: they
+    are the same reads, meant to be paired for GCI's own cross-check
+    recommendation, not two candidates to choose between. The refusal this
+    function still raises -- "several long-read alignments; name the ones
+    to use" -- fires only when a single aligner contributed more than one
+    BAM to a slot, which is the case with no way to tell which one is
+    meant. See `_group_gci_candidates_by_aligner`.
+
+    Unlike CRAQ, "usable" excludes CLR: `gci_slot_for_chemistry` refuses it,
+    and a CLR BAM found among the project's long-read alignments simply
+    never becomes a candidate, in either the auto-pair or the explicit-id
+    path.
 
     Read-only: no derived object, only facts and (optionally) a depth plot.
     """
@@ -4451,7 +4489,10 @@ async def launch_continuity_qc(
     assembly = await object_service.get_object(object_id, owner=owner)
     reference_assembly.check_draft_assembly(assembly)
 
-    if hifi_bam_id is None and nano_bam_id is None:
+    hifi_bam_ids = hifi_bam_ids or []
+    nano_bam_ids = nano_bam_ids or []
+
+    if not hifi_bam_ids and not nano_bam_ids:
         short, long_, _unknown = await alignments_against(assembly, owner=owner)
         hifi_candidates, nano_candidates = await _gci_candidates(long_)
 
@@ -4473,57 +4514,63 @@ async def launch_continuity_qc(
                 "assembly, and this project has none",
                 details={"object_id": str(assembly.id)},
             )
-        if len(hifi_candidates) > 1 or len(nano_candidates) > 1:
+
+        hifi_groups = _group_gci_candidates_by_aligner(hifi_candidates)
+        nano_groups = _group_gci_candidates_by_aligner(nano_candidates)
+        ambiguous = {
+            aligner: [str(o.id) for o in group]
+            for groups in (hifi_groups, nano_groups)
+            for aligner, group in groups.items()
+            if len(group) > 1
+        }
+        if ambiguous:
             raise ValidationError(
-                "This assembly has several long-read alignments; name the "
-                "ones to use",
-                details={
-                    "hifi": [str(o.id) for o in hifi_candidates],
-                    "nano": [str(o.id) for o in nano_candidates],
-                },
+                "This assembly has several long-read alignments from the "
+                "same aligner; name the ones to use",
+                details={"by_aligner": ambiguous},
             )
-        hifi_bam = hifi_candidates[0] if hifi_candidates else None
-        nano_bam = nano_candidates[0] if nano_candidates else None
+        hifi_bams = [group[0] for group in hifi_groups.values()]
+        nano_bams = [group[0] for group in nano_groups.values()]
     else:
-        hifi_bam = (
-            await object_service.get_object(hifi_bam_id, owner=owner)
-            if hifi_bam_id
-            else None
-        )
-        nano_bam = (
-            await object_service.get_object(nano_bam_id, owner=owner)
-            if nano_bam_id
-            else None
-        )
+        hifi_bams = [
+            await object_service.get_object(bam_id, owner=owner)
+            for bam_id in hifi_bam_ids
+        ]
+        nano_bams = [
+            await object_service.get_object(bam_id, owner=owner)
+            for bam_id in nano_bam_ids
+        ]
         # The explicit-id path must enforce the same chemistry routing the
         # auto-pair path enforces, or a dialog client could pass any BAM id
-        # under `hifi_bam_id` regardless of what it actually is -- silently
+        # under `hifi_bam_ids` regardless of what it actually is -- silently
         # bypassing the CLR refusal that is this task's whole point.
-        for bam, bam_id_name, expected_slot in (
-            (hifi_bam, "hifi_bam_id", "hifi"),
-            (nano_bam, "nano_bam_id", "nano"),
+        for bams, ids_field, expected_slot in (
+            (hifi_bams, "hifi_bam_ids", "hifi"),
+            (nano_bams, "nano_bam_ids", "nano"),
         ):
-            if bam is None:
-                continue
-            if assembly.id not in bam.derived_from:
-                raise ValidationError(
-                    f"{bam.name} was not aligned against this assembly",
-                    details={"bam_id": str(bam.id), "object_id": str(assembly.id)},
-                )
-            chemistry = await read_chemistry_for_alignment(bam)
-            slot = gci_slot_for_chemistry(chemistry)
-            if slot != expected_slot:
-                raise ValidationError(
-                    f"{bam.name} is not a {expected_slot.upper()} alignment "
-                    f"({bam_id_name} expects {expected_slot})",
-                    details={
-                        "bam_id": str(bam.id),
-                        "object_id": str(assembly.id),
-                        "chemistry": chemistry.value if chemistry else None,
-                    },
-                )
+            for bam in bams:
+                if assembly.id not in bam.derived_from:
+                    raise ValidationError(
+                        f"{bam.name} was not aligned against this assembly",
+                        details={
+                            "bam_id": str(bam.id),
+                            "object_id": str(assembly.id),
+                        },
+                    )
+                chemistry = await read_chemistry_for_alignment(bam)
+                slot = gci_slot_for_chemistry(chemistry)
+                if slot != expected_slot:
+                    raise ValidationError(
+                        f"{bam.name} is not a {expected_slot.upper()} "
+                        f"alignment ({ids_field} expects {expected_slot})",
+                        details={
+                            "bam_id": str(bam.id),
+                            "object_id": str(assembly.id),
+                            "chemistry": chemistry.value if chemistry else None,
+                        },
+                    )
 
-    if hifi_bam is None and nano_bam is None:
+    if not hifi_bams and not nano_bams:
         raise ValidationError(
             "Continuity inspection needs long reads aligned to this "
             "assembly, and this project has none",
@@ -4549,42 +4596,42 @@ async def launch_continuity_qc(
     if asm_path:
         payload["assembly_path"] = asm_path
 
-    for bam, prefix, bai_prefix in (
-        (hifi_bam, "hifi_bam", "hifi_bai"),
-        (nano_bam, "nano_bam", "nano_bai"),
-    ):
-        if bam is None:
-            continue
-        # Validated provenance, not trust -- same reasoning as
-        # `launch_assembly_error_qc`.
-        if assembly.id not in bam.derived_from:
-            raise ValidationError(
-                f"{bam.name} was not aligned against this assembly",
-                details={"bam_id": str(bam.id), "object_id": str(assembly.id)},
-            )
-        digest, path = await _resolve_readable(bam)
-        if digest:
-            payload[f"{prefix}_sha256"] = digest
-        if path:
-            payload[f"{prefix}_path"] = path
-        payload[f"{prefix}_object_id"] = str(bam.id)
+    for bams, slot_key in ((hifi_bams, "hifi_bams"), (nano_bams, "nano_bams")):
+        entries: list[dict] = []
+        for bam in bams:
+            # Validated provenance, not trust -- same reasoning as
+            # `launch_assembly_error_qc`.
+            if assembly.id not in bam.derived_from:
+                raise ValidationError(
+                    f"{bam.name} was not aligned against this assembly",
+                    details={"bam_id": str(bam.id), "object_id": str(assembly.id)},
+                )
+            entry: dict = {
+                "object_id": str(bam.id),
+                "aligned_by": (bam.facts or {}).get("aligned_by"),
+            }
+            digest, path = await _resolve_readable(bam)
+            if digest:
+                entry["bam_sha256"] = digest
+            if path:
+                entry["bam_path"] = path
 
-        # BAM and its .bai are separate content-addressed DataObjects --
-        # resolve the sidecar explicitly, the same way
-        # `launch_assembly_error_qc` does. The handler reads
-        # `{bai_prefix}_sha256`/`{bai_prefix}_path` via
-        # `_resolve_input(payload, bai_prefix)` (called with `"hifi_bai"` /
-        # `"nano_bai"`, NOT `f"{prefix}_bai"`).
-        bai = await _sidecar_of_role(bam, SidecarRole.BAI)
-        if bai is not None:
-            bai_digest, bai_path = await _resolve_readable(bai)
-            if bai_digest:
-                payload[f"{bai_prefix}_sha256"] = bai_digest
-            if bai_path:
-                payload[f"{bai_prefix}_path"] = bai_path
+            # BAM and its .bai are separate content-addressed DataObjects --
+            # resolve the sidecar explicitly, the same way
+            # `launch_assembly_error_qc` does.
+            bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+            if bai is not None:
+                bai_digest, bai_path = await _resolve_readable(bai)
+                if bai_digest:
+                    entry["bai_sha256"] = bai_digest
+                if bai_path:
+                    entry["bai_path"] = bai_path
+            entries.append(entry)
+        payload[slot_key] = entries
 
-    dedup = f"assess_assembly_continuity:{assembly.id}:{hifi_bam.id if hifi_bam else '-'}"
-    dedup += f":{nano_bam.id if nano_bam else '-'}"
+    dedup_hifi = ":".join(sorted(str(b.id) for b in hifi_bams)) or "-"
+    dedup_nano = ":".join(sorted(str(b.id) for b in nano_bams)) or "-"
+    dedup = f"assess_assembly_continuity:{assembly.id}:{dedup_hifi}:{dedup_nano}"
 
     job = await queue.enqueue(
         "assess_assembly_continuity",
@@ -4604,8 +4651,8 @@ async def launch_continuity_qc(
         "assembly_continuity_qc_launched",
         job_id=str(job.id),
         object_id=str(assembly.id),
-        hifi_bam_id=str(hifi_bam.id) if hifi_bam else None,
-        nano_bam_id=str(nano_bam.id) if nano_bam else None,
+        hifi_bam_ids=[str(b.id) for b in hifi_bams],
+        nano_bam_ids=[str(b.id) for b in nano_bams],
         map_qual=payload["map_qual"],
         plot=payload["plot"],
         tool_version=tool.version,

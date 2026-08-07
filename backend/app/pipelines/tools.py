@@ -730,6 +730,14 @@ def gci() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def winnowmap() -> Tool:
+    # Verified against a real build of v2.03 (2026-08-07): `winnowmap
+    # --version` prints a bare "2.03" (no tool name prefix, unlike
+    # minimap2) and exits zero.
+    return _probe("winnowmap", settings.winnowmap_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -806,6 +814,7 @@ def all_tools() -> list[Tool]:
         meryl(),
         merqury(),
         gci(),
+        winnowmap(),
     ]
 
 
@@ -1791,12 +1800,60 @@ TOOL_META: dict[str, ToolMeta] = {
         license="MIT",
         usage=(
             "Scores assembly continuity from long reads aligned back to the "
-            "assembly, reporting regions unsupported by read evidence. Runs "
-            "against BioFlow-produced minimap2 alignments only -- upstream "
-            "recommends pairing two aligners for higher sensitivity in "
-            "repetitive regions, and the aligners used are recorded with "
-            "the score. Whole-assembly only; regions mode and trio binning "
-            "are not used."
+            "assembly. Runs against BioFlow-produced minimap2 alignments "
+            "alone, or minimap2 paired with winnowmap when both are "
+            "available for the same reads -- upstream recommends the pair "
+            "for higher sensitivity in repetitive regions -- and the "
+            "aligners actually used are recorded with the score. "
+            "Whole-assembly only; regions mode and trio binning are not "
+            "used."
+        ),
+    ),
+    "winnowmap": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Repeat-aware long-read aligner, GCI's second cross-check aligner",
+        summary=(
+            "Aligns long reads to an assembly using minimizers weighted by "
+            "how repetitive they are, computed by meryl -- so highly "
+            "repetitive k-mers contribute less to seeding than they would "
+            "under a plain minimizer scheme. This is specifically tuned "
+            "for repetitive regions, where a uniform scheme like "
+            "minimap2's over-samples common k-mers and mis-seeds."
+        ),
+        strengths=(
+            "Cross-checks minimap2's alignments in repetitive regions, "
+            "which is what GCI's own FAQ recommends pairing two aligners "
+            "for",
+            "Shares minimap2's calling convention (presets, -a, -R), so it "
+            "slots into the same align pipeline as every other aligner "
+            "here rather than needing a bespoke run path",
+        ),
+        homepage="https://github.com/marbl/Winnowmap",
+        repository="https://github.com/marbl/Winnowmap",
+        citation=(
+            "Jain, C., Rhie, A., Hansen, N.F. et al. Long-read mapping to "
+            "repetitive reference sequences using Winnowmap2. Nat Methods "
+            "19, 705-710 (2022)."
+        ),
+        citation_url="https://doi.org/10.1038/s41592-022-01457-8",
+        # GitHub reports license.spdx_id "NOASSERTION" for this repo, which
+        # is GitHub failing to classify the file, not an absent license.
+        # Verified 2026-08-07 via `gh api repos/marbl/Winnowmap/contents/LICENSE`:
+        # an NIH/NHGRI public-domain dedication ("This software is freely
+        # available to the public for use without a copyright notice"),
+        # noting the codebase is a joint work whose individual contributions
+        # may carry their own licenses per source file.
+        license="Public domain (NIH/NHGRI); some files under other licenses",
+        usage=(
+            "Runs as a second long-read aligner alongside minimap2, purely "
+            "to give GCI's continuity score a repeat-aware cross-check. "
+            "Ships no binary release -- built from source at image build "
+            "time -- and needs a repetitive-k-mer file meryl builds per "
+            "reference (`meryl count` then `meryl print greater-than`), "
+            "modeled as this aligner's index. No short-read mode, no "
+            "annotation-aware mode; never chosen as the default aligner for "
+            "a general alignment, only picked explicitly from the align "
+            "dialog."
         ),
     ),
     "ragtag": ToolMeta(
@@ -2117,3 +2174,4 @@ def reset_cache() -> None:
     meryl.cache_clear()
     merqury.cache_clear()
     gci.cache_clear()
+    winnowmap.cache_clear()
