@@ -26,6 +26,8 @@ choose to launch anyway.
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.services import timing_service
+
 
 class EstimateSource(StrEnum):
     MEASURED = "measured"
@@ -59,6 +61,14 @@ class MemoryEstimate:
     fell_back_from_measured: bool = False
 
 
+def _is_trustworthy(measured: dict) -> bool:
+    """Whether a known measured estimate should outrank the heuristic.
+
+    Placeholder until Task 4 wires the guards -- a known estimate is trusted.
+    """
+    return True
+
+
 async def resolve(
     *,
     job_type: str,
@@ -74,11 +84,35 @@ async def resolve(
     size resolve to "256 MB, source: declared" and sail through a BLOCK check
     that should have stayed silent -- strictly worse than no estimate.
     """
+    measured = None
+    if input_bytes is not None:
+        measured = await timing_service.estimate_memory(job_type, input_bytes)
+
+    if measured is not None and measured.get("known"):
+        if _is_trustworthy(measured):
+            samples = measured["samples"]
+            return MemoryEstimate(
+                mb=int(measured["estimate_bytes"] / (1024 * 1024)),
+                source=EstimateSource.MEASURED,
+                detail=f"from {samples} previous runs on this machine",
+                samples=samples,
+                r_squared=measured.get("r_squared"),
+            )
+        rejected = True
+    else:
+        rejected = False
+
     if heuristic_mb is not None:
         return MemoryEstimate(
             mb=heuristic_mb,
             source=EstimateSource.HEURISTIC,
             detail="from published tool coefficients",
+            fell_back_from_measured=rejected,
         )
 
-    return MemoryEstimate(mb=None, source=EstimateSource.UNKNOWN, detail="")
+    return MemoryEstimate(
+        mb=None,
+        source=EstimateSource.UNKNOWN,
+        detail="",
+        fell_back_from_measured=rejected,
+    )
