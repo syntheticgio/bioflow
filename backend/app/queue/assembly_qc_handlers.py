@@ -387,8 +387,9 @@ _GCI_NANO_LINK = "nano.bam"
 ASSEMBLY_CONTINUITY_LEASE_SECONDS = 3600
 
 # One image per chromosome, so a fragmented assembly produces hundreds of
-# files. Plotting is offered below this contig count and off above it --
-# a QC job that quietly writes 800 PDFs is a storage surprise.
+# files. The launch path (not this handler) gates on this before ever
+# setting payload["plot"] -- by the time this handler runs, `plot` in the
+# payload is already a decision that's been made, not a check to repeat.
 GCI_PLOT_MAX_CONTIGS = 50
 
 
@@ -710,7 +711,7 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
     )
 
     if plot:
-        report_dir = settings.qc_reports_dir / str(ctx.payload["object_id"])
+        report_dir = settings.qc_reports_dir / str(ctx.payload.get("object_id"))
         report_dir.mkdir(parents=True, exist_ok=True)
         images = out_dir / "images"
         if images.is_dir():
@@ -726,7 +727,8 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
     )
 
     return {
-        "object_id": ctx.payload["object_id"],
+        "object_id": ctx.payload.get("object_id"),
         "job_id": ctx.job_id,
         "facts": facts,
+        "workdir": str(work),
     }
