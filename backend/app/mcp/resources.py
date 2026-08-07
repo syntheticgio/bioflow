@@ -22,6 +22,11 @@ class GuideTopic(StrEnum):
     """
 
     GETTING_STARTED = "getting-started"
+    ACQUIRING_DATA = "acquiring-data"
+    READ_QC_AND_TRIMMING = "read-qc-and-trimming"
+    ALIGNMENT_AND_VARIANTS = "alignment-and-variants"
+    DE_NOVO_ASSEMBLY = "de-novo-assembly"
+    RNA_QUANTIFICATION = "rna-quantification"
 
 
 def load_guide(topic: GuideTopic) -> str:

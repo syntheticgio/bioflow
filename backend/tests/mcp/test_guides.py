@@ -68,6 +68,16 @@ def _all_guide_symbols() -> set[str]:
 def test_job_type_names_are_real():
     """A guide naming a job type that isn't registered would send an agent to
     `bioflow_run_pipeline` with a kind that can never run."""
+    # Handler modules are imported for their registration side effects only at
+    # app/worker startup, not merely by importing app.queue.registry -- so a
+    # test process that never started either needs this explicit load first.
+    # See tests/mcp/test_tools.py and tests/services/test_provenance_verbs.py
+    # for the same pattern. Without it, `all_handlers()` is empty whenever
+    # this module runs before anything else that happens to load them, which
+    # made every real job type a guide names look unregistered.
+    from app.queue import registry
+
+    registry.load_handlers()
     registered = set(all_handlers())
     # Only check symbols that look like job types -- lowercase words with
     # underscores. A guide also backticks tool names, paths and parameters,
@@ -93,6 +103,7 @@ def test_job_type_names_are_real():
         "kind",
         "params",
         "object_id",
+        "accession",
     }
 
     assert unknown <= allowed_prose, f"Guides name unknown symbols: {unknown - allowed_prose}"
