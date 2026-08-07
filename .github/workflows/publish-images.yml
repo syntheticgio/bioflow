@@ -247,22 +247,30 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           notes_file="$(mktemp)"
-          cat > "$notes_file" <<EOF
-          Container images published for this release:
-
-          \`\`\`
-          ${NAMESPACE}/bioflow-backend:${version}
-          ${NAMESPACE}/bioflow-web:${version}
-          \`\`\`
-
-          Both serve linux/amd64 and linux/arm64. \`:latest\` now points here.
-
-          Update an existing install with the launcher's Update button, or:
-
-          \`\`\`
-          docker compose pull && docker compose up -d
-          \`\`\`
-          EOF
+          # Built line-by-line with `echo` rather than a heredoc: this script
+          # lives inside an indented YAML block scalar (`run: |`), which
+          # indents every line including what would be the heredoc's closing
+          # delimiter. Bash only recognizes an unindented `<<EOF` terminator
+          # at column 0, so an indented one is never matched -- the heredoc
+          # silently swallows the rest of the script (including both `gh`
+          # calls below) as body text, and the step exits 0 having published
+          # nothing. `echo` has no delimiter to misplace.
+          {
+            echo "Container images published for this release:"
+            echo
+            echo '```'
+            echo "${NAMESPACE}/bioflow-backend:${version}"
+            echo "${NAMESPACE}/bioflow-web:${version}"
+            echo '```'
+            echo
+            echo "Both serve linux/amd64 and linux/arm64. \`:latest\` now points here."
+            echo
+            echo "Update an existing install with the launcher's Update button, or:"
+            echo
+            echo '```'
+            echo "docker compose pull && docker compose up -d"
+            echo '```'
+          } > "$notes_file"
 
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
