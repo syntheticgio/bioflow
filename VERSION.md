@@ -107,6 +107,45 @@ A failed version-guard means the tag was created by hand rather than by
 `ops/release.sh`. Delete the tag (it has published nothing yet), then use the
 `make release` command.
 
+### If `docker/login-action` fails on the arm64 build with `-25308`
+
+`error saving credentials ... User interaction is not allowed. (-25308)` on
+the self-hosted macOS runner. Both self-hosted runners here are launchd
+LaunchAgents with `SessionCreate: true`, which puts every job in its own
+macOS security session rather than the interactive login session — and
+`docker login`'s default credential store on macOS is `osxkeychain`,
+compiled in as the unconditional platform default. An unset, empty, or
+bogus `credsStore` in `config.json` does not avoid it, and `login-action`
+has no silent plaintext fallback: a helper it can't exec is a fatal error,
+not a degrade. Keychain refuses a cross-session credential write without an
+interactive prompt, which a background session can never answer.
+
+The fix ([docker/login-action#566](https://github.com/docker/login-action/issues/566)):
+unlock the login keychain with the real password immediately before
+`docker/login-action`, in its own step:
+
+```yaml
+- name: Unlock the login keychain
+  if: matrix.arch == 'arm64'
+  env:
+    KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
+  run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
+```
+
+A `SessionCreate` session can still *unlock* a keychain given the real
+password — it just can't get an *interactive* unlock prompt answered, which
+is what `-25308` is actually complaining about. `publish-images.yml`'s
+`build` job carries this today, gated to `matrix.arch == 'arm64'` only: the
+`amd64` leg runs on the Linux runner, where `security(1)` doesn't exist at
+all, and running this unconditionally there fails immediately with
+`security: command not found`. `manifest` never needs it — it always runs
+on the Linux runner.
+
+Requires the repo secret `MACOS_LOGIN_KEYCHAIN_PASSWORD`: the runner's own
+macOS account login password (the login keychain's password matches it
+unless changed separately). If this ever needs rotating, update the secret
+with `gh secret set MACOS_LOGIN_KEYCHAIN_PASSWORD --repo syntheticgio/bioflow`.
+
 ## Verifying a release landed
 
 ```bash
@@ -144,4 +183,14 @@ make release VERSION=0.2.1
 ```
 
 Deleting is only correct for a tag whose CI has not yet published anything —
-in practice, one that failed the version-guard.
+in practice, one that failed the version-guard, or failed partway through
+`build` before `manifest`/`release` ran. Both leave nothing tagged in GHCR
+and no GitHub release, so nothing downstream has a stale reference to clean
+up. Check `gh release list` and `docker buildx imagetools inspect
+<image>:<version>` before deleting, not just the run's pass/fail status —
+those are what confirm nothing actually published, not the CI conclusion
+alone. A workflow-infrastructure failure (a broken CI step unrelated to the
+code being released, like the keychain issue above) can take several
+attempts to resolve; each failed attempt gets a fresh patch version and
+its tag deleted once confirmed to have published nothing, same as any
+other unpublished failure.
