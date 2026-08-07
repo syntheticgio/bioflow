@@ -1182,6 +1182,22 @@ export interface AiSummaryFacts {
   ai_summary_fingerprint?: string;
 }
 
+/** Same shape as AiSummaryFacts, for a differential-expression result. */
+export interface DeSummaryFacts {
+  ai_de_summary?: string;
+  ai_de_summary_model?: string | null;
+  ai_de_summary_at?: string;
+  ai_de_summary_fingerprint?: string;
+}
+
+/** Same shape as AiSummaryFacts, for a VCF's call-set statistics. */
+export interface VariantSummaryFacts {
+  ai_variant_summary?: string;
+  ai_variant_summary_model?: string | null;
+  ai_variant_summary_at?: string;
+  ai_variant_summary_fingerprint?: string;
+}
+
 // --- NCBI SRA ---
 
 /** One sequencing run: the unit that can actually be downloaded. */
