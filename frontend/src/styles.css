@@ -4926,6 +4926,10 @@ table.software-matrix thead th.software-matrix-corner {
 
 .settings-hint-warn {
   color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: var(--radius);
+  padding: 8px 10px;
 }
 
 .mcp-config {

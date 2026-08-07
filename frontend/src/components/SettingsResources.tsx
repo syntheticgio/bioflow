@@ -147,7 +147,7 @@ export function SettingsResources() {
       )}
 
       {overHardLimit && (
-        <p className="settings-hint settings-hint-warn" role="alert">
+        <p className="settings-hint settings-hint-warn">
           This budget is above the {hardMemGb} GB hard limit. Jobs admitted
           above the limit would be killed by the kernel.
         </p>
