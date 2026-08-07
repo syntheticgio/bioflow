@@ -132,6 +132,7 @@ docker run --rm \
   --network biopipe_default \
   -v "$REPO_ROOT/backend/app:/srv/app" \
   -v "$REPO_ROOT/backend/tests:/srv/tests" \
+  -v "$REPO_ROOT/VERSION:/VERSION:ro" \
   -v "$DATA_SOURCE:/data" \
   -w /srv \
   -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \

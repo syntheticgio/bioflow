@@ -1,4 +1,4 @@
-.PHONY: up down logs ps build test test-queue lint shell mongo redis clean check-home
+.PHONY: up down logs ps build test test-queue lint shell mongo redis clean check-home release release-launcher
 
 COMPOSE := docker compose
 
@@ -57,3 +57,11 @@ check-home: ## Verify BIOINFO_HOME exists and is writable on the host
 	if [ ! -w "$$PARENT" ]; then \
 	  echo "ERROR: $$PARENT is not writable."; exit 1; fi; \
 	echo "BIOINFO_HOME parent OK: $$PARENT"
+
+release: ## Cut an app release: make release VERSION=0.2.0
+	@test -n "$(VERSION)" || (echo "usage: make release VERSION=0.2.0"; exit 2)
+	./ops/release.sh app $(VERSION)
+
+release-launcher: ## Cut a launcher release: make release-launcher VERSION=0.1.1
+	@test -n "$(VERSION)" || (echo "usage: make release-launcher VERSION=0.1.1"; exit 2)
+	./ops/release.sh launcher $(VERSION)

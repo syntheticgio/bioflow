@@ -25,11 +25,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  version-guard:
+    name: Tag matches Cargo.toml
+    if: startsWith(github.ref, 'refs/tags/launcher-v')
+    runs-on: [self-hosted, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
+
   # Both jobs run on self-hosted runners: this repo has no GitHub-hosted ones.
   # See docs/ci-runners.md -- the repo is private under a personal account, so
   # hosted macOS and arm64 Linux runners are not on the plan.
   macos:
     name: macOS bundle (arm64)
+    needs: [version-guard]
     # The same Apple Silicon machine that builds linux/arm64 images in
     # publish-images.yml. It also holds the Developer ID certificate in its
     # login keychain -- so unlike a hosted runner, there is no need to ship a
@@ -156,6 +165,7 @@ jobs:
 
   linux:
     name: Linux bundle (amd64)
+    needs: [version-guard]
     runs-on: [self-hosted, X64]
     permissions:
       contents: write

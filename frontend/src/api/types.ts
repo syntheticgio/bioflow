@@ -1751,3 +1751,7 @@ export interface AiProviderInput {
   model?: string;
   api_key?: string | null;
 }
+
+export interface VersionInfo {
+  version: string;
+}

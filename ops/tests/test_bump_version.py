@@ -1,0 +1,113 @@
+"""Bumping rewrites every declaration for a line, and nothing else."""
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+BUMP = Path(__file__).resolve().parents[1] / "lib" / "bump_version.py"
+
+
+def run_bump(root: Path, line: str, version: str):
+    return subprocess.run(
+        [sys.executable, str(BUMP), line, version, "--root", str(root)],
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.fixture
+def app_tree(tmp_path):
+    """A minimal tree with the app line's four declarations."""
+    (tmp_path / "VERSION").write_text("0.1.0\n")
+    (tmp_path / "backend" / "app").mkdir(parents=True)
+    (tmp_path / "backend" / "app" / "version.py").write_text('__version__ = "0.1.0"\n')
+    (tmp_path / "backend" / "pyproject.toml").write_text(
+        '[project]\nname = "biopipe-backend"\nversion = "0.1.0"\ndescription = "x"\n'
+    )
+    (tmp_path / "frontend").mkdir()
+    (tmp_path / "frontend" / "package.json").write_text(
+        json.dumps({"name": "biopipe-frontend", "private": True, "version": "0.1.0"}, indent=2)
+        + "\n"
+    )
+    return tmp_path
+
+
+@pytest.fixture
+def launcher_tree(tmp_path):
+    (tmp_path / "launcher" / "src-tauri").mkdir(parents=True)
+    (tmp_path / "launcher" / "src-tauri" / "Cargo.toml").write_text(
+        '[package]\nname = "bioflow-launcher"\nversion = "0.1.0"\nedition = "2021"\n'
+    )
+    (tmp_path / "launcher" / "package.json").write_text(
+        json.dumps({"name": "bioflow-launcher", "version": "0.1.0"}, indent=2) + "\n"
+    )
+    return tmp_path
+
+
+class TestAppLine:
+    def test_writes_every_app_declaration(self, app_tree):
+        r = run_bump(app_tree, "app", "0.2.0")
+        assert r.returncode == 0, r.stderr
+
+        assert (app_tree / "VERSION").read_text() == "0.2.0\n"
+        assert '__version__ = "0.2.0"' in (app_tree / "backend" / "app" / "version.py").read_text()
+        assert 'version = "0.2.0"' in (app_tree / "backend" / "pyproject.toml").read_text()
+        assert json.loads((app_tree / "frontend" / "package.json").read_text())["version"] == "0.2.0"
+
+    def test_leaves_other_fields_intact(self, app_tree):
+        run_bump(app_tree, "app", "0.2.0")
+
+        pyproject = (app_tree / "backend" / "pyproject.toml").read_text()
+        assert 'name = "biopipe-backend"' in pyproject
+        pkg = json.loads((app_tree / "frontend" / "package.json").read_text())
+        assert pkg["name"] == "biopipe-frontend"
+        assert pkg["private"] is True
+
+    def test_does_not_touch_the_launcher_line(self, app_tree, launcher_tree):
+        # Both fixtures use tmp_path, so this reads the same tree.
+        run_bump(app_tree, "app", "0.2.0")
+        cargo = (app_tree / "launcher" / "src-tauri" / "Cargo.toml").read_text()
+        assert 'version = "0.1.0"' in cargo
+
+    def test_only_the_first_version_key_in_cargo_style_toml(self, app_tree):
+        """A dependency's `version = ` must never be mistaken for the package's."""
+        (app_tree / "backend" / "pyproject.toml").write_text(
+            '[project]\nversion = "0.1.0"\n\n[tool.other]\nversion = "9.9.9"\n'
+        )
+        run_bump(app_tree, "app", "0.2.0")
+        text = (app_tree / "backend" / "pyproject.toml").read_text()
+        assert 'version = "0.2.0"' in text
+        assert 'version = "9.9.9"' in text
+
+
+class TestLauncherLine:
+    def test_writes_cargo_and_package_json(self, launcher_tree):
+        r = run_bump(launcher_tree, "launcher", "0.1.1")
+        assert r.returncode == 0, r.stderr
+
+        assert 'version = "0.1.1"' in (
+            launcher_tree / "launcher" / "src-tauri" / "Cargo.toml"
+        ).read_text()
+        assert (
+            json.loads((launcher_tree / "launcher" / "package.json").read_text())["version"]
+            == "0.1.1"
+        )
+
+
+class TestValidation:
+    def test_rejects_a_non_semver_version(self, app_tree):
+        r = run_bump(app_tree, "app", "0.2")
+        assert r.returncode != 0
+        assert "semver" in r.stderr.lower()
+
+    def test_rejects_an_unknown_line(self, app_tree):
+        r = run_bump(app_tree, "nonsense", "0.2.0")
+        assert r.returncode != 0
+
+    def test_rejects_a_missing_file(self, tmp_path):
+        r = run_bump(tmp_path, "app", "0.2.0")
+        assert r.returncode != 0
+        assert "VERSION" in r.stderr
