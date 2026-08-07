@@ -764,10 +764,23 @@ def _failure(code: int, log_path: Path, tool: str = "fastp") -> Exception:
     if tail:
         detail = f"{detail}: {tail}"
 
-    # 137 is SIGKILL, which on this stack means the OOM killer -- a bigger
-    # machine or fewer threads might succeed, so it is worth one retry.
     if code == 137:
+        # 137 is SIGKILL, which on this stack means the OOM killer.
+        #
+        # Under a cgroup hard limit the ceiling does not move, so the job dies
+        # identically on every attempt -- job_max_attempts turns one dead job
+        # into five full-length dead ones. Terminal, and the message names the
+        # cause, which is only possible because the ceiling is known.
+        hard_mem_mb = settings.bioflow_hard_mem_mb
+        if hard_mem_mb:
+            return PermanentError(
+                f"{detail} (killed at the {hard_mem_mb} MB hard limit -- "
+                f"this job needs more memory than the limit allows)"
+            )
+        # With no ceiling, this was the host OOM killer under transient
+        # pressure: a quieter machine or fewer threads may well succeed.
         return RetryableError(f"{detail} (killed, most likely out of memory)")
+
     return PermanentError(detail)
 
 
