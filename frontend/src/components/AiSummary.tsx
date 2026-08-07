@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "../api/client";
-import type { AiSummaryFacts } from "../api/types";
 import { notify } from "../stores/messageStore";
 
 /**
@@ -23,6 +22,10 @@ export function AiSummary({
   facts,
   objectId,
   fingerprint,
+  factPrefix = "ai_summary",
+  statusFn = () => api.summaryStatus(),
+  launchFn = (id: string) => api.launchSummary(id),
+  emptyLabel = "No summary yet for this file.",
 }: {
   facts: Record<string, unknown>;
   objectId: string;
@@ -33,23 +36,37 @@ export function AiSummary({
    * staleness is simply not claimed either way.
    */
   fingerprint?: string;
+  /** The fact-key prefix this instance reads/writes, e.g. "ai_de_summary". */
+  factPrefix?: string;
+  /** Overridable for slots other than FILE_SUMMARY. */
+  statusFn?: () => ReturnType<typeof api.summaryStatus>;
+  launchFn?: (objectId: string) => ReturnType<typeof api.launchSummary>;
+  /** Shown when there is no stored summary and generation is unavailable, or
+   * before the first one is written. */
+  emptyLabel?: string;
 }) {
-  const summary = facts as AiSummaryFacts;
+  const raw = facts as Record<string, unknown>;
+  const existing = (raw[factPrefix] as string | undefined)?.trim();
+  const model = raw[`${factPrefix}_model`] as string | null | undefined;
+  const writtenAt = raw[`${factPrefix}_at`] as string | undefined;
+  const storedFingerprint = raw[`${factPrefix}_fingerprint`] as
+    | string
+    | undefined;
   const queryClient = useQueryClient();
 
   // Whether a model is reachable right now. Not retried and not refetched on
   // focus: a down server is an ordinary state here, and hammering a port that
   // is not listening to re-confirm that would be noise for no benefit.
   const { data: status } = useQuery({
-    queryKey: ["summary", "status"],
-    queryFn: () => api.summaryStatus(),
+    queryKey: ["summary", "status", factPrefix],
+    queryFn: statusFn,
     retry: false,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
   });
 
   const regenerate = useMutation({
-    mutationFn: () => api.launchSummary(objectId),
+    mutationFn: () => launchFn(objectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       notify.info("Summary queued");
@@ -57,7 +74,6 @@ export function AiSummary({
     onError: (e: Error) => notify.error(e.message),
   });
 
-  const existing = summary.ai_summary?.trim();
   const available = status?.available === true;
 
   // Nothing stored and nowhere to generate from: render nothing rather than an
@@ -67,8 +83,8 @@ export function AiSummary({
   const stale =
     existing != null &&
     fingerprint != null &&
-    summary.ai_summary_fingerprint != null &&
-    summary.ai_summary_fingerprint !== fingerprint;
+    storedFingerprint != null &&
+    storedFingerprint !== fingerprint;
 
   return (
     <div className="section">
@@ -86,13 +102,13 @@ export function AiSummary({
             {stale
               ? "Written before the most recent changes to this file's data — regenerate to bring it up to date."
               : "Generated from this file's measurements and metadata."}
-            {summary.ai_summary_model && ` Model: ${summary.ai_summary_model}.`}
-            {summary.ai_summary_at && ` ${formatWhen(summary.ai_summary_at)}.`}
+            {model && ` Model: ${model}.`}
+            {writtenAt && ` ${formatWhen(writtenAt)}.`}
           </div>
         </>
       ) : (
         <div className="section-note">
-          No summary yet for this file.
+          {emptyLabel}
         </div>
       )}
 
