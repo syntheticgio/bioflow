@@ -345,12 +345,23 @@ async def claim(
     worker_id: str,
     *,
     allowed_classes: list[str],
-    cpu_free: int,
-    mem_mb_free: int,
-    io_heavy_free: int,
+    cpu_budget: int,
+    mem_mb_budget: int,
+    io_heavy_budget: int,
+    ignore_reservations: bool = False,
     lease_seconds: int | None = None,
 ) -> ClaimedJob | None:
-    """Atomically claim the best dispatchable job, or None."""
+    """Atomically claim the best dispatchable job, or None.
+
+    Budgets are the ceiling before reservations, not headroom after them:
+    claim.lua reads the live `bp:conc:*` counters itself, inside the same
+    atomic execution that reserves and grants the lease, rather than trusting
+    a free-capacity value the caller computed moments earlier from a separate
+    round trip. `ignore_reservations` carries the caller's in-flight
+    self-healing clamp (see worker.compute_free_resources) through to the
+    script, since that decision depends on per-worker local state Lua cannot
+    see.
+    """
     lease_ms = int((lease_seconds or settings.lease_ttl_seconds) * 1000)
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
 
@@ -361,10 +372,11 @@ async def claim(
             lease_ms,
             worker_id,
             ",".join(allowed_classes),
-            cpu_free,
-            mem_mb_free,
-            io_heavy_free,
+            cpu_budget,
+            mem_mb_budget,
+            io_heavy_budget,
             CLAIM_SCAN_LIMIT,
+            "1" if ignore_reservations else "0",
         ],
     )
     if not result:
