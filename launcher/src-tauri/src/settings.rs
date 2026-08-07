@@ -68,7 +68,7 @@ pub fn apply<D: DockerBackend>(
     }
 }
 
-fn render_env(settings: &CurrentSettings, env_extra: &[(String, String)]) -> String {
+pub(crate) fn render_env(settings: &CurrentSettings, env_extra: &[(String, String)]) -> String {
     let mut lines = vec![
         format!("BIOINFO_HOME={}", settings.storage_location.display()),
         format!("WEB_PORT={}", settings.port),

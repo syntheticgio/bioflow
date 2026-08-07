@@ -501,7 +501,7 @@ pub async fn install_optional_tool(image: String) -> Result<(), String> {
 /// Anything unparseable reads as `None` rather than erroring: a hand-edited
 /// `.env` must not stop the launcher from opening, and "no hard cap" is the
 /// safe reading of a value nobody can interpret.
-fn parse_hard_mem_mb(env_contents: &str) -> Option<u32> {
+pub(crate) fn parse_hard_mem_mb(env_contents: &str) -> Option<u32> {
     env_contents
         .lines()
         .find_map(|line| line.strip_prefix("BIOFLOW_HARD_MEM_MB="))
@@ -553,5 +553,20 @@ mod tests {
         // A hand-edited .env should not stop the launcher from opening.
         let env = "BIOFLOW_HARD_MEM_MB=not-a-number\n";
         assert_eq!(parse_hard_mem_mb(env), None);
+    }
+
+    #[test]
+    fn round_trips_through_render_env() {
+        // Guards against settings::render_env's write format and this
+        // module's parse_hard_mem_mb silently drifting apart -- they agree
+        // by convention only, with no shared constant tying them together.
+        let settings = crate::settings::CurrentSettings {
+            storage_location: std::path::PathBuf::from("/data"),
+            port: 5173,
+            network_exposed: false,
+            hard_mem_mb: Some(16384),
+        };
+        let env = crate::settings::render_env(&settings, &[]);
+        assert_eq!(parse_hard_mem_mb(&env), Some(16384));
     }
 }
