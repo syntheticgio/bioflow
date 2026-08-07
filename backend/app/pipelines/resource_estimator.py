@@ -133,12 +133,19 @@ def explain(
     sort_memory_mb: int,
     building_index: bool,
     mem_budget_mb: int | None,
+    provenance: str = "",
 ) -> str:
     """A sentence naming the dominant term and both numbers.
 
     "Estimated 14 GB of 16 GB" is a fact; "Sort buffer is 8 GB of that (8
     threads x 1024 MB)" is what tells someone which slider to move. A warning
     without the second half is not actionable.
+
+    `provenance` names the model the number came from. This stays the
+    *heuristic's* explainer: when the measured model wins there is no
+    sort-buffer breakdown to give, because that model does not have one. So
+    the "which slider to move" half below appears only when the heuristic is
+    what is being reported -- which is exactly when it is true.
     """
     total = estimate_mb(
         aligner=aligner,
@@ -178,5 +185,8 @@ def explain(
         # heuristic doesn't have.
         what = "building the index" if building_index else "the aligner itself"
         parts.append(f"Most of it is {what}: about {aligner_side_mb:,.0f} MB.")
+
+    if provenance:
+        parts.append(f"Estimate {provenance}.")
 
     return " ".join(parts)
