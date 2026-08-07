@@ -33,6 +33,18 @@ env:
   IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
 
 jobs:
+  # A hand-rolled tag publishes images labelled with a version the tree does
+  # not have. ops/release.sh makes that unreachable; this catches the tag
+  # someone typed by hand anyway. Tag-only: this workflow also runs on every
+  # push to main, where there is no tag to check.
+  version-guard:
+    name: Tag matches VERSION
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: [self-hosted, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
+
   # One job per (image, architecture). Each pushes an untagged, single-arch
   # manifest and reports its digest; the `manifest` job below stitches the
   # digests into one multi-arch tag. This is what lets each architecture build
@@ -42,6 +54,7 @@ jobs:
   # Clair3, and builds compleasm.
   build:
     name: Build ${{ matrix.image }} (${{ matrix.arch }})
+    needs: [version-guard]
     runs-on: [self-hosted, "${{ matrix.runner_arch }}"]
     permissions:
       contents: read
