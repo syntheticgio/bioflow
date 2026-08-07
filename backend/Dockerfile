@@ -115,6 +115,33 @@ RUN apt-get update \
 # Python's stdlib gzip rather than failing an ingest, so this package is a
 # performance and seekability dependency, not a hard one.
 
+# --- flye-samtools shim -----------------------------------------------------
+#
+# Flye 2.9.5 upstream vendors its own samtools build and invokes it as
+# `flye-samtools`. Debian's flye 2.9.5+dfsg-1 unbundles that binary -- the
+# +dfsg suffix says so -- and declares `Depends: minimap2, samtools`,
+# expecting the packaged /usr/bin/samtools to serve instead.
+#
+# The unbundling patched one of the two call sites and missed the other:
+# flye/polishing/alignment.py:27 was rewritten to "/usr/bin/samtools", but
+# flye/utils/sam_parser.py:43 still reads SAMTOOLS_BIN = "flye-samtools" and
+# reaches it from three places (two `depth` calls and a `view`). `dpkg -L
+# flye` ships no such binary, so every assembly died at the consensus stage
+# with "flye-samtools: not found" and an empty consensus.fasta. See
+# https://github.com/syntheticgio/bioflow/issues/67.
+#
+# A wrapper rather than a symlink. Either works -- unlike bwa-mem2 below,
+# samtools has no argv[0]-relative dispatch to break -- but the wrapper
+# matches that precedent and states the indirection outright.
+#
+# The trailing --version is a build-time assertion, in this same RUN so it
+# cannot drift from what it checks: the build fails if samtools ever moves off
+# /usr/bin/samtools. Same shape as the `datasets --version` and
+# `docker --version` checks further down this file.
+RUN printf '#!/bin/sh\nexec /usr/bin/samtools "$@"\n' > /usr/local/bin/flye-samtools \
+    && chmod +x /usr/local/bin/flye-samtools \
+    && flye-samtools --version
+
 # bwa-mem2 is the exception: it is not packaged for Debian, so it comes from
 # the project's own release. On x86-64 the upstream prebuilt binary is the
 # recommended way to install it -- it is built with the Intel compiler and
