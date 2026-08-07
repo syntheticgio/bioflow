@@ -64,6 +64,12 @@ class Settings(BaseSettings):
     bioinfo_cpu_budget: float | None = None
     bioinfo_mem_budget_mb: int | None = None
 
+    # Kernel-enforced ceiling on the worker container, set by the launcher.
+    # None means no hard cap. `api` is not itself capped, so this arrives as
+    # an env var rather than being read from a cgroup -- see
+    # docs/superpowers/specs/2026-08-07-cgroup-hard-limits-design.md.
+    bioflow_hard_mem_mb: int | None = None
+
     # --- Metadata enrichment ---
     # Looks up SRR/SRX accessions at NCBI during ingest. Outbound network call;
     # set false to keep the stack fully offline.

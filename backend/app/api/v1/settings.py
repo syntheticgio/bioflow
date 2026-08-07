@@ -106,6 +106,9 @@ class ResourceLimitsOut(BaseModel):
     max_threads: int | None
     machine_mem_mb: int
     machine_cpu: float
+    # The kernel-enforced ceiling, when hard limits are on. None means the
+    # soft budget is the only ceiling and nothing is ever killed.
+    hard_mem_mb: int | None
 
 
 class ResourceLimitsIn(BaseModel):
@@ -290,6 +293,7 @@ def _limits_out(limits) -> ResourceLimitsOut:
         max_threads=limits.max_threads,
         machine_mem_mb=machine_mem_mb,
         machine_cpu=machine_cpu,
+        hard_mem_mb=resource_limit_service.hard_mem_mb(),
     )
 
 
@@ -300,6 +304,17 @@ async def get_resource_limits() -> ResourceLimitsOut:
 
 @router.put("/resources", response_model=ResourceLimitsOut)
 async def set_resource_limits(body: ResourceLimitsIn) -> ResourceLimitsOut:
+    # Refused rather than silently clamped: a budget that saves as a number
+    # the user did not type is worse than an error saying why.
+    hard = resource_limit_service.hard_mem_mb()
+    if hard is not None and body.max_mem_mb is not None and body.max_mem_mb > hard:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"A hard limit of {hard} MB is enforced on this machine. "
+                f"The memory budget cannot exceed it."
+            ),
+        )
     limits = await resource_limit_service.save(
         max_mem_mb=body.max_mem_mb,
         max_cpu=body.max_cpu,
