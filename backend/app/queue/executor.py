@@ -1,6 +1,7 @@
 """Job execution: dispatch by mode, progress throttling, cancellation, results."""
 
 import asyncio
+import codecs
 import contextlib
 import os
 import signal
@@ -653,9 +654,12 @@ def _run_streaming(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         start_new_session=True,
-        bufsize=1,
-        text=True,
-        errors="replace",  # tool output is not guaranteed to be valid UTF-8
+        bufsize=0,
+        # Binary, unbuffered: a `\r`-redrawn progress bar (fasterq-dump,
+        # prefetch) never emits a `\n`, so Python's text-mode line iteration
+        # (which only splits on `\n`) would sit on it until the process exits.
+        # Reading raw bytes and splitting on either `\r` or `\n` ourselves is
+        # what lets that kind of bar reach `on_line`/`parser` mid-transfer.
     )
 
     log_file = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
@@ -673,23 +677,57 @@ def _run_streaming(
         elif on_line is not None:
             on_line(line)
 
-    def pump() -> None:
+    def handle_line(line: str) -> None:
         nonlocal line_count
+        if not line and line_count == 0:
+            # A `\r`-first stream (fasterq-dump's progress bar redraws before
+            # printing anything else) splits on that leading `\r` with nothing
+            # before it -- an artifact of the delimiter, not a line the tool
+            # printed. A later empty line (a bare `print()`) is real output
+            # and still delivered.
+            return
+        line_count += 1
+        if log_file is not None:
+            with contextlib.suppress(Exception):
+                log_file.write(line + "\n")
+                log_file.flush()
+        # An observer that raises must not kill the job: the work itself is
+        # still valid, and progress is advisory everywhere else too.
         try:
-            for line in proc.stdout:
-                line = line.rstrip("\n")
-                line_count += 1
-                if log_file is not None:
-                    with contextlib.suppress(Exception):
-                        log_file.write(line + "\n")
-                        log_file.flush()
-                # An observer that raises must not kill the job: the work
-                # itself is still valid, and progress is advisory everywhere
-                # else too.
-                try:
-                    observe(line)
-                except Exception as e:  # noqa: BLE001
-                    log.debug("on_line_failed", job_id=ctx.job_id, error=str(e))
+            observe(line)
+        except Exception as e:  # noqa: BLE001
+            log.debug("on_line_failed", job_id=ctx.job_id, error=str(e))
+
+    def pump() -> None:
+        # Read raw bytes and split on `\r` or `\n` ourselves: a `\r`-redrawn
+        # progress bar has no `\n` until the tool is done, so text-mode
+        # line iteration (`for line in proc.stdout`) would never yield it
+        # until the process exits.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        buf = ""
+        try:
+            while True:
+                chunk = (
+                    proc.stdout.read1(4096)
+                    if hasattr(proc.stdout, "read1")
+                    else proc.stdout.read(4096)
+                )
+                if not chunk:
+                    break
+                buf += decoder.decode(chunk)
+                # `\r\n` is one delimiter, not two blank-line-producing ones --
+                # matches Python's own universal-newlines handling.
+                buf = buf.replace("\r\n", "\n")
+                while True:
+                    nl, cr = buf.find("\n"), buf.find("\r")
+                    if nl == -1 and cr == -1:
+                        break
+                    split = nl if cr == -1 else (cr if nl == -1 else min(nl, cr))
+                    line, buf = buf[:split], buf[split + 1 :]
+                    handle_line(line)
+            buf += decoder.decode(b"", final=True)
+            if buf:
+                handle_line(buf)
         except Exception as e:  # noqa: BLE001 - the pipe dies when the child is killed
             log.debug("output_pump_ended", job_id=ctx.job_id, error=str(e))
 
