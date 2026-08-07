@@ -4,6 +4,7 @@ Split from the model so the arithmetic is pure and testable without a worker
 or a host probe -- the same reason `worker.compute_free_resources` is pure.
 """
 
+from app.models.base import utcnow
 from app.models.resource_limits import ResourceLimits
 
 
@@ -44,8 +45,6 @@ async def save(
     ProviderUpdate's three-way api_key semantics, and deliberately simpler
     because there is no secret to preserve.
     """
-    from app.models.base import utcnow
-
     limits = await ResourceLimits.load()
     limits.max_mem_mb = max_mem_mb
     limits.max_cpu = max_cpu

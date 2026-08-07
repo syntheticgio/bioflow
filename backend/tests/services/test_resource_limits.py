@@ -57,6 +57,10 @@ class TestResolveMemBudget:
     """A stored limit resolved against what the machine actually has.
 
     Pure, so the clamping rules are testable without a worker or a host probe.
+    These are plain sync tests; the module's asyncio pytestmark (needed by
+    TestLoad above) applies to them too and pytest-asyncio warns about it on
+    every run. Harmless -- verified the bodies still execute for real, not
+    silently skipped -- and not worth a file split for a cosmetic warning.
     """
 
     def test_no_stored_limit_uses_the_machine_budget(self):
