@@ -890,4 +890,5 @@ from app.queue import (  # noqa: E402, F401
     tool_handlers,
     uniprot_handlers,
     variant_handlers,
+    variant_summary_handlers,
 )
