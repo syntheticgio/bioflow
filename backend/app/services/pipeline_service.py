@@ -6,6 +6,7 @@ handler expects. Kept out of the router so the launch rules are testable
 without HTTP.
 """
 
+import shutil
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -65,6 +66,12 @@ from app.storage.paths import blob_path
 log = get_logger(__name__)
 
 TRIMMABLE_KINDS = {FormatKind.FASTQ}
+
+# Merqury ships `best_k.sh` to derive k from genome size; 21 is its own
+# commonly-used default for small-to-mid genomes. Task 7 (real-data
+# verification) should sanity-check this against the genome sizes BioFlow
+# actually sees rather than trusting it forever.
+DEFAULT_MERYL_K = 21
 
 
 async def suggest_mate(obj: DataObject) -> DataObject | None:
@@ -4079,6 +4086,313 @@ async def launch_assembly_error_qc(
         ngs_bam_id=str(ngs_bam.id) if ngs_bam else None,
         sms_bam_id=str(sms_bam.id) if sms_bam else None,
         break_chimera=break_chimera,
+        tool_version=tool.version,
+    )
+    return job
+
+
+async def _materialize_meryl_cache(
+    read_object: DataObject, k: int, *, owner: str
+) -> Path | None:
+    """Reassemble a cached MERYL_DB sidecar group for `read_object` at `k`
+    into a directory on local disk, or return None if no usable cache exists.
+
+    Task 4's applier (`_apply_assess_assembly_qv` in `app/queue/results.py`)
+    ingests every file inside a fresh meryl database as its own sidecar on
+    the read object, tagged `SidecarRole.MERYL_DB` and named
+    `f"{db_dir.name}__{relative_path_with_slashes_as_underscoreunderscore}"`,
+    with `facts={"meryl_db_k": k, "meryl_db_name": db_dir.name}`. This is the
+    read side of that scheme -- nothing else in the codebase reassembles a
+    flat sidecar group back into a directory the way STAR's index does for
+    aligners, so this is new logic, not a reuse of an existing helper.
+
+    Grouped by `meryl_db_name` first (a read object could in principle carry
+    more than one cached database if k ever changed across runs), then
+    filtered to the group whose every member's `meryl_db_k` matches `k`.
+    Meryl's own `qv.sh` reads k back out of the database rather than taking
+    it as an argument, so a database built at a different k cannot serve a
+    run wanting this one -- it is simply a different, unusable database.
+
+    A member with no resolvable name-encoded relative path, a group whose
+    size does not match the `meryl_db_expected_count` the applier stamped on
+    each member, or a group where resolving any member's bytes fails, is
+    treated as a broken cache: this function returns None (never raises) so
+    the caller falls back to a full rebuild. Correctness over cleverness --
+    a rebuild costs time; silently running Merqury against a partial
+    database would produce a confidently wrong QV rather than a visible
+    error, and there's no way to detect that afterward from the QV number
+    alone.
+    """
+    from app.services import object_service
+
+    try:
+        sidecars = await object_service.list_sidecars(read_object.id, owner=owner)
+    except Exception:  # noqa: BLE001 - a lookup failure means "no cache", not a crash
+        log.warning(
+            "meryl_cache_lookup_failed", read_object_id=str(read_object.id), exc_info=True
+        )
+        return None
+
+    groups: dict[str, list[DataObject]] = {}
+    for sc in sidecars:
+        if sc.sidecar_role is not SidecarRole.MERYL_DB:
+            continue
+        facts = sc.facts or {}
+        name = facts.get("meryl_db_name")
+        if not name:
+            continue
+        groups.setdefault(name, []).append(sc)
+
+    for db_name, members in groups.items():
+        if not members:
+            continue
+        if any((m.facts or {}).get("meryl_db_k") != k for m in members):
+            continue
+
+        # The applier stamps the total file count it intended to ingest on
+        # every member that made it (`meryl_db_expected_count`). Comparing
+        # against the group's actual size is the only way to tell a complete
+        # database from one a partial ingest silently shrank -- without it, a
+        # database that lost files to `meryl_db_partially_applied` looks
+        # identical to a genuinely complete one, and this function would
+        # materialize a truncated database that Merqury would score as if it
+        # were whole. A group with no `meryl_db_expected_count` at all
+        # predates this field and is treated the same as a mismatch: unknown
+        # completeness is not evidence of completeness.
+        expected_counts = {(m.facts or {}).get("meryl_db_expected_count") for m in members}
+        if len(expected_counts) != 1 or expected_counts != {len(members)}:
+            log.warning(
+                "meryl_cache_group_incomplete",
+                read_object_id=str(read_object.id),
+                db_name=db_name,
+                found=len(members),
+                expected=next(iter(expected_counts), None),
+            )
+            continue
+
+        prefix = f"{db_name}__"
+        dest_dir = settings.tmp_dir / "meryl_cache" / str(read_object.id) / db_name
+        try:
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir, ignore_errors=True)
+            dest_dir.mkdir(parents=True, exist_ok=True)
+
+            linked_any = False
+            for member in members:
+                if not member.name.startswith(prefix):
+                    # Reverse of the applier's own flattening rule -- a
+                    # member whose stored name does not carry this
+                    # database's prefix cannot be placed correctly, and
+                    # guessing would risk writing a file under the wrong
+                    # relative path inside the reconstructed database.
+                    log.warning(
+                        "meryl_cache_member_name_mismatch",
+                        read_object_id=str(read_object.id),
+                        db_name=db_name,
+                        member_name=member.name,
+                    )
+                    raise ValueError("unrecoverable member name")
+
+                relative = member.name[len(prefix) :].replace("__", "/")
+                if not relative or ".." in Path(relative).parts:
+                    log.warning(
+                        "meryl_cache_member_path_unsafe",
+                        read_object_id=str(read_object.id),
+                        db_name=db_name,
+                        member_name=member.name,
+                    )
+                    raise ValueError("unsafe member path")
+
+                digest, ext_path = await _resolve_readable(member)
+                if ext_path:
+                    source = Path(ext_path)
+                elif digest:
+                    source = blob_path(digest)
+                else:
+                    raise ValueError("member has no resolvable content")
+                if not source.exists():
+                    raise ValueError(f"blob missing on disk: {source}")
+
+                target = dest_dir / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.unlink(missing_ok=True)
+                target.symlink_to(source)
+                linked_any = True
+
+            if not linked_any:
+                raise ValueError("no members linked")
+        except Exception as e:  # noqa: BLE001 - any reconstruction failure -> rebuild, never crash
+            log.warning(
+                "meryl_cache_materialize_failed",
+                read_object_id=str(read_object.id),
+                db_name=db_name,
+                k=k,
+                error=str(e),
+            )
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            return None
+
+        log.info(
+            "meryl_cache_hit",
+            read_object_id=str(read_object.id),
+            db_name=db_name,
+            k=k,
+            members=len(members),
+        )
+        return dest_dir
+
+    return None
+
+
+async def launch_qv_qc(
+    object_id: PydanticObjectId,
+    *,
+    owner: str,
+    read_object_id: PydanticObjectId | None = None,
+    k: int | None = None,
+) -> Job:
+    """Queue a Merqury QV run: reference-free k-mer base accuracy for one
+    assembly, scored against the reads it came from.
+
+    Ambiguity is unavailable, not a guess, the same rule
+    `launch_assembly_error_qc` and `build_polish_card` both follow: an
+    explicit `read_object_id` is always honored, and with none given this
+    auto-picks only when the project holds exactly one read set. A wrong
+    pairing here would not error -- it would produce a plausible, confidently
+    wrong QV number for a genome the reads never came from.
+
+    Unlike polish, this is not restricted to short reads: Merqury's k-mer
+    comparison works for any read chemistry, so every read set in the
+    project -- grouped by `reference_assembly.group_read_sets`, the same
+    mate-pairing logic `short_read_sets` itself is built on -- is a
+    candidate.
+
+    A cached MERYL_DB sidecar group on the chosen read set at this exact `k`
+    is reused via `_materialize_meryl_cache`; otherwise `read_db_path` is
+    left unset and the handler builds a fresh database (and Task 4's
+    applier caches it for next time).
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tools.require(tools.meryl())
+    tool = tools.require(tools.merqury())
+
+    assembly = await object_service.get_object(object_id, owner=owner)
+    reference_assembly.check_draft_assembly(assembly)
+
+    if read_object_id is None:
+        candidates = reference_assembly.group_read_sets(
+            [
+                o
+                for o in await object_service.list_objects(
+                    assembly.project_id, owner=owner, status=ObjectStatus.READY
+                )
+                if o.format.kind is FormatKind.FASTQ
+            ]
+        )
+        if not candidates:
+            raise ValidationError(
+                "QV assessment needs the reads this assembly was built "
+                "from, and this project has none",
+                details={"object_id": str(assembly.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several read sets; name the one to score "
+                "QV against",
+                details={
+                    "object_id": str(assembly.id),
+                    "candidates": [
+                        [str(o.id) for o in group] for group in candidates
+                    ],
+                },
+            )
+        chosen = candidates[0]
+    else:
+        primary = await object_service.get_object(read_object_id, owner=owner)
+        # get_object scopes by owner, not project -- a read set from another
+        # project of the same owner would otherwise enqueue without error
+        # and score this assembly's QV against reads it has nothing to do
+        # with, exactly the "plausible, confidently wrong" outcome this
+        # function's docstring warns about. The auto-pick branch above is
+        # safe by construction (candidates are drawn from
+        # assembly.project_id already); this is the one path where a wrong
+        # pairing is actually reachable.
+        if primary.project_id != assembly.project_id:
+            raise ValidationError(
+                "Reads and assembly must be in the same project",
+                details={
+                    "object_id": str(assembly.id),
+                    "read_object_id": str(primary.id),
+                },
+            )
+        chosen = [primary]
+        mate_id = getattr(primary, "mate_object_id", None)
+        if mate_id is not None:
+            chosen.append(await object_service.get_object(mate_id, owner=owner))
+
+    resolved_k = int(k) if k else DEFAULT_MERYL_K
+    read_obj = chosen[0]
+
+    read_db_path = await _materialize_meryl_cache(read_obj, resolved_k, owner=owner)
+
+    asm_digest, asm_path = await _resolve_readable(assembly)
+    payload: dict = {
+        "object_id": str(assembly.id),
+        "k": resolved_k,
+        "threads": 4,
+        "read_object_id": str(read_obj.id),
+        "read_object_name": read_obj.name,
+    }
+    if asm_digest:
+        payload["assembly_sha256"] = asm_digest
+    if asm_path:
+        payload["assembly_path"] = asm_path
+
+    reads_payload = []
+    for r in chosen:
+        digest, path = await _resolve_readable(r)
+        # name rides along so the handler can link this file under its own
+        # extension rather than a hardcoded one -- meryl (like every other
+        # read-consuming tool here) detects gzip by suffix, and a plain
+        # FASTQ linked as .fastq.gz silently counts zero k-mers rather than
+        # erroring, confirmed against a real DRR1066343_1.fastq run.
+        entry: dict = {"read_name": r.name}
+        if digest:
+            entry["read_sha256"] = digest
+        if path:
+            entry["read_path"] = path
+        reads_payload.append(entry)
+    payload["reads"] = reads_payload
+
+    if read_db_path is not None:
+        payload["read_db_path"] = str(read_db_path)
+
+    job = await queue.enqueue(
+        "assess_assembly_qv",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        # Matches the handler's own @handler(...) registration -- see
+        # assess_assembly_qv's docstring for the real-data measurement this
+        # figure is based on.
+        resources=JobResources(cpu=4, mem_mb=12288, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"assess_assembly_qv:{assembly.id}:{read_obj.id}:{resolved_k}",
+        project_id=assembly.project_id,
+        object_id=assembly.id,
+    )
+    if job is None:
+        raise ConflictError("This QV assessment job is already queued")
+
+    log.info(
+        "assembly_qv_launched",
+        job_id=str(job.id),
+        object_id=str(assembly.id),
+        read_object_id=str(read_obj.id),
+        k=resolved_k,
+        cached=read_db_path is not None,
         tool_version=tool.version,
     )
     return job

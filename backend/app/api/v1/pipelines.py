@@ -1199,6 +1199,33 @@ async def launch_assembly_error_qc_route(
     return JobOut.of(job)
 
 
+class AssemblyQvRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Both optional, same reasoning AssemblyErrorRequest gives: the Actions
+    # card only fires when exactly one read set exists in the project, so it
+    # never needs to supply these. A dialog handling the ambiguous case (or a
+    # user wanting a non-default k) names them explicitly.
+    read_object_id: PydanticObjectId | None = None
+    k: int | None = None
+
+
+@router.post("/assembly-qv", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_assembly_qv_route(body: AssemblyQvRequest, owner: OwnerDep) -> JobOut:
+    """Queue a Merqury run: reference-free k-mer base accuracy (QV) for one
+    assembly, scored against the reads it came from.
+
+    Read-only: produces facts on the assembly plus a cached k-mer database on
+    the read object, no derived object -- like /assembly-errors and
+    /misassemblies."""
+    job = await pipeline_service.launch_qv_qc(
+        body.object_id,
+        owner=owner,
+        read_object_id=body.read_object_id,
+        k=body.k,
+    )
+    return JobOut.of(job)
+
+
 class AssemblyContinuityRequest(BaseModel):
     object_id: PydanticObjectId
     # Both optional, same reasoning as AssemblyErrorRequest's ngs_bam_id /

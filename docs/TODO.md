@@ -519,8 +519,9 @@ file rather than moving to `docs/TODO-done.md`.
   user's own assembly has worked since the assembly work landed, and Merqury
   is k-mer based and needs no alignment at all. GitHub #63 (CRAQ), #64
   (Merqury), #65 (GCI). ~~**CRAQ**~~ **FIXED, 2026-08-06.** Shipped as CRAQ
-  1.10, GitHub #63. See below. ~~**GCI**~~ **FIXED, 2026-08-07.** Shipped as
-  GCI 1.0, GitHub #65. See below. Merqury is still open.
+  1.10, GitHub #63. See below. ~~**Merqury**~~ **FIXED, 2026-08-07.** Shipped
+  as Merqury 1.4.1 + meryl 1.4.2, GitHub #64. See below. ~~**GCI**~~ **FIXED,
+  2026-08-07.** Shipped as GCI 1.0, GitHub #65. See below.
 - **gfastats** is superseded by computing contiguity here, not built.
 - **Contamination screening** is a real axis nothing here covers and is a
   named non-goal: FCS-GX's database is ~470 GB.
@@ -743,6 +744,108 @@ needing two real end-to-end runs before every fact matched:
   and CRE (656) with the caveat "Short reads only: structural errors are not
   reported, because CRAQ can barely detect them without long reads" -- and
   genuinely no AQI/S-AQI/CSE rows, not a blank or a zero.
+
+### Merqury k-mer QV assessment shipped, 2026-08-07
+
+Design: `docs/superpowers/specs/2026-08-06-merqury-kmer-qv-design.md`. Plan:
+`docs/superpowers/plans/2026-08-06-merqury-kmer-qv.md`. GitHub #64.
+
+Reference-*free* base-level accuracy (QV): a meryl k-mer database built from
+the reads, compared against the assembly's own k-mers, with no alignment and
+no reference genome -- the fourth QC axis alongside completeness (compleasm),
+contiguity, and error detection (CRAQ, #63). The design's central premise
+(meryl 1.4.2 is the first-ever Marbl release to ship a Linux-arm64 binary, so
+this slice is a tarball extract rather than a source build) held: measured
+0.2s to extract vs. the C++ source build the design was written expecting to
+need.
+
+Code: `backend/app/pipelines/merqury_runner.py` (command builders, `.qv` /
+`completeness.stats` parsers), `backend/app/queue/assembly_qc_handlers.py::
+assess_assembly_qv` (the job) and `_apply_assess_assembly_qv` in `results.py`
+(facts merge plus meryl-db sidecar caching), `backend/app/services/
+pipeline_service.py::launch_qv_qc` and `_materialize_meryl_cache`,
+`POST /pipelines/assembly-qv`, `suggestion_service.build_qv_card`,
+`AssemblyFacts.tsx`'s K-mer accuracy block and spectra-cn plot gallery.
+`SidecarRole.MERYL_DB` (confirmed the derivable-registry kind per this file's
+"Hand-maintained registries" entry, so no `_SIDECAR_ROLES` edit was needed
+beyond the enum member itself).
+
+**The k-mer database cache works end to end, confirmed against real data, not
+just unit tests.** A second QV run against a different assembly from the same
+reads hit the cache (`meryl_cache_hit` logged, no `meryl count` subprocess,
+the job's own log jumping straight to `merqury.sh`'s output) rather than
+rebuilding -- the whole point of caching a multi-hour-scale artifact, and
+nothing in the unit tests exercised the real round trip end to end.
+
+**What the implementation found running against real data (S. cerevisiae R64
++ DRR1066343, 2026-08-07) that no amount of re-reading Merqury's source would
+have caught**, the same lesson QUAST's and CRAQ's slices already recorded
+here, again:
+
+- **A plain-text FASTQ, linked under a fixed `.fastq.gz` name, silently built
+  an empty 0-kmer database instead of erroring.** `_resolve_read_inputs`
+  hardcoded every read file's link name to `.fastq.gz`, so `meryl count`
+  tried to decompress a file that was not gzipped. The `meryl count` step
+  still reported "Finished counting" against 23.7 billion input bases, and
+  the resulting database was silently empty (`meryl statistics` reported 0
+  unique/distinct/present k-mers) -- a green subprocess exit hiding a
+  correctness bug identical in shape to the exit-0-but-wrong output CRAQ's
+  slice already hit with its report filename. Fixed to preserve the source
+  object's real suffix, matching the by-name gzip-detection convention
+  `align_runner._is_gzipped` already established for aligner inputs.
+- **Merqury's own k-detection line is incompatible with meryl 1.4.2's output
+  format, and merqury.sh does not check for this failure.**
+  `eval/spectra-cn.sh` detects k via
+  `meryl print $read | head -n 2 | tail -n 1 | awk '{print length($1)}'`,
+  written against a meryl whose `print` emitted k-mer data starting at line
+  2. Marbl meryl 1.4.2 -- the version this image pins specifically for its
+  arm64 binary -- prints an 11-line diagnostic banner before any k-mer data,
+  so line 2 is always blank, `k` ends up empty, `meryl count k=` fails with
+  "Kmer size not supplied", and every downstream step in the script silently
+  produces empty output. `merqury.sh` itself still exits 0, because it never
+  checks `spectra-cn.sh`'s exit code -- a job that "succeeds" while writing
+  no `.qv` file at all, until the handler's own `if not qv_file.exists()`
+  check catches it. Patched at install time (`install-merqury.sh`) to filter
+  for a line that looks like actual k-mer data rather than trusting a fixed
+  line number.
+- **The guessed spectra-cn plot filenames were wrong.** The frontend task
+  guessed `qv.spectra-cn.{fl,ln,st}.png` and `qv.qv.png` from documentation,
+  explicitly flagged at the time as needing real-run verification. Merqury
+  actually writes `qv.in_assembly.spectra-cn.{fl,ln,st}.png` and
+  `qv.spectra-asm.{fl,ln,st}.png` -- none of the four guessed names matched
+  any real output file. The `in_assembly` component comes from the handler's
+  fixed assembly link name (`assembly.fasta` -> `in_assembly.fasta` via
+  `_named_link`), stable across every run rather than something to
+  rediscover per run. Confirmed in a real browser session after the fix: all
+  six corrected plot URLs return 200.
+- **`assembly_qv_tool_version` stored merqury.sh's usage banner, not a
+  version.** `tools.merqury()`'s probe reports the bare-call usage text as
+  `version` because that is genuinely the only output the tool ever produces
+  (no `--version` flag exists) -- confirmed a real run wrote the literal
+  string `"Usage: merqury.sh [-c] <read-db.meryl> [<mat.meryl> <pat.meryl>]
+  <asm1.fasta> [asm2.fasta] <out>"` into this fact and, before the fix, onto
+  the Quality tab's header line. Replaced with a `MERQURY_PINNED_VERSION`
+  constant matching what `install-merqury.sh` actually installs.
+- **`mem_mb=16384` was a directionally-reasonable but untested placeholder.**
+  Measured: 8531324928 bytes (~8.14 GiB) peak RSS, 5m50s wall time, for
+  23.7 billion input bases (21.4M reads) against a 12 Mb genome. Corrected to
+  `12288` for headroom over the measured figure rather than the original
+  guess.
+- **The Celera-meryl rejection regex matched a version string the binary
+  never actually prints.** Caught in code review before this shipped, not by
+  a real run: the original check matched Debian's dpkg *package* version
+  (`0~20150903+r2013-9+b1`), but the real Celera `meryl --version` prints
+  `"Unknown option '--version'."` and exits 0 -- the dpkg version string
+  never reaches the probe at all. Fixed to match the actual message text.
+- **A partially-cached meryl database had no way to be told apart from a
+  complete one**, also caught in code review. The applier that ingests a
+  fresh k-mer database as sidecar files recorded nothing about how many
+  files it expected to produce, so a partial-ingest failure (one file lost,
+  the rest cached) looked identical to success from the cache-reading side
+  -- the same STAR-index failure shape this file's own registry-audit entry
+  already documents, recurring in a new place. Fixed by stamping
+  `meryl_db_expected_count` on every ingested member and refusing any group
+  whose size does not match.
 
 ### GCI assembly continuity inspection shipped, 2026-08-07
 

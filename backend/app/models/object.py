@@ -145,6 +145,22 @@ class SidecarRole(StrEnum):
     BAI = "bai"
     # The tabix index beside a bgzipped VCF -- to a VCF what BAI is to a BAM.
     TBI = "tbi"
+    # A meryl k-mer database built from a read set, cached on the read
+    # object so a second assembly from the same reads does not rebuild it.
+    # Merqury's expensive artifact: the assembly-side database is cheap and
+    # stays in job scratch, but this one is derived from every read and is
+    # reusable across every assembly those reads produced.
+    #
+    # The database is a directory, not a file. It is stored as a single
+    # archive member the way STAR_INDEX stores its eight files flat, and
+    # reassembled at materialize time.
+    #
+    # `k` is part of this database's identity, not a parameter that can vary
+    # against it -- meryl's own qv.sh reads k back out of the database
+    # rather than accepting it as an argument. The k a database was built at
+    # is recorded in its facts, and a run wanting a different k builds a new
+    # database rather than reusing this one.
+    MERYL_DB = "meryl-db"
 
 
 class SequenceType(StrEnum):

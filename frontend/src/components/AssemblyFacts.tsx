@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { accessionUrl } from "../lib/format";
 
 interface Props {
   facts: Record<string, unknown>;
   objectId: string;
+  projectId: string;
 }
 
 /**
@@ -33,8 +35,9 @@ const MAX_VISIBLE_CONTIGS = 25;
  * that actually characterize a genome build. This shows those, and nothing
  * else.
  */
-export function AssemblyFacts({ facts, objectId }: Props) {
+export function AssemblyFacts({ facts, objectId, projectId }: Props) {
   const [showAllContigs, setShowAllContigs] = useState(false);
+  const navigate = useNavigate();
 
   const exactCount = facts.sequence_count as number | undefined;
   const estimatedCount = facts.sequence_count_estimate as number | undefined;
@@ -145,6 +148,30 @@ export function AssemblyFacts({ facts, objectId }: Props) {
   const errorHasSms = facts.assembly_error_has_sms as boolean | undefined;
   const hasAssemblyErrors = errorTool !== undefined;
 
+  // K-mer QV: Merqury, reference-free base-level accuracy measured against a
+  // read set. Gated on the QV score itself (the primary number), not on the
+  // completeness percentage, which may be absent if completeness.stats
+  // didn't exist for this run.
+  const assemblyQv = facts.assembly_qv as number | undefined;
+  const assemblyQvErrorRate = facts.assembly_qv_error_rate as number | undefined;
+  const assemblyQvCompletenessPct = facts.assembly_qv_completeness_pct as
+    | number
+    | undefined;
+  const assemblyQvK = facts.assembly_qv_k as number | undefined;
+  const assemblyQvReadObjectId = facts.assembly_qv_read_object_id as
+    | string
+    | undefined;
+  const assemblyQvReadObjectName = facts.assembly_qv_read_object_name as
+    | string
+    | undefined;
+  const assemblyQvToolVersion = facts.assembly_qv_tool_version as
+    | string
+    | undefined;
+  const assemblyQvMerylVersion = facts.assembly_qv_meryl_version as
+    | string
+    | undefined;
+  const hasAssemblyQv = assemblyQv !== undefined;
+
   // Continuity: GCI, long-read only. Score has no upstream-published quality
   // bands (unlike CRAQ's AQI) -- see aqiBand's docstring for the contrast --
   // so only the raw published benchmark range is shown as context, never a
@@ -187,6 +214,7 @@ export function AssemblyFacts({ facts, objectId }: Props) {
     !hasCompleteness &&
     !hasMisassembly &&
     !hasAssemblyErrors &&
+    !hasAssemblyQv &&
     !hasContinuity
   ) {
     return (
@@ -573,6 +601,75 @@ export function AssemblyFacts({ facts, objectId }: Props) {
         </div>
       )}
 
+      {hasAssemblyQv && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            K-mer accuracy (Merqury
+            {assemblyQvToolVersion ? ` ${assemblyQvToolVersion}` : ""}
+            {assemblyQvMerylVersion ? `, meryl ${assemblyQvMerylVersion}` : ""}
+            {assemblyQvK !== undefined ? `, k=${assemblyQvK}` : ""})
+          </div>
+          {/* The read set is not a footnote: a QV is a statement about this
+              assembly against those specific reads, and reads from a
+              different individual measure real biology as error. Shown
+              beside the headline number, not tucked into a collapsed
+              provenance section. */}
+          {assemblyQvReadObjectName && (
+            <div style={{ fontSize: 12, marginBottom: 8 }}>
+              Measured against{" "}
+              {assemblyQvReadObjectId ? (
+                <button
+                  type="button"
+                  style={{
+                    font: "inherit",
+                    color: "var(--accent, #4a9eff)",
+                    background: "none",
+                    border: "none",
+                    padding: 0,
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                  }}
+                  onClick={() =>
+                    navigate(
+                      `/p/${projectId}?sel=object:${assemblyQvReadObjectId}`,
+                    )
+                  }
+                >
+                  {assemblyQvReadObjectName}
+                </button>
+              ) : (
+                <span>{assemblyQvReadObjectName}</span>
+              )}
+            </div>
+          )}
+          <dl className="kv">
+            {assemblyQv !== undefined && (
+              <>
+                <dt>QV</dt>
+                <dd>
+                  {assemblyQv.toFixed(1)}
+                  {assemblyQvErrorRate !== undefined && (
+                    <span style={{ color: "var(--text-faint)" }}>
+                      {" "}
+                      ({(assemblyQvErrorRate * 100).toPrecision(2)}% error rate)
+                    </span>
+                  )}
+                </dd>
+              </>
+            )}
+            {assemblyQvCompletenessPct !== undefined && (
+              <>
+                <dt>k-mer completeness</dt>
+                <dd>{assemblyQvCompletenessPct}%</dd>
+              </>
+            )}
+          </dl>
+          <SpectraCnPlots objectId={objectId} />
+        </div>
+      )}
+
       {hasContinuity && (
         <div style={{ marginTop: 14 }}>
           <div
@@ -634,6 +731,60 @@ export function AssemblyFacts({ facts, objectId }: Props) {
           NCBI lookup: {assemblyError}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Merqury's spectra-cn/QV plots, copied server-side into
+ * qc_reports/<object_id>/. Filenames verified against a real run (2026-08-07,
+ * S. cerevisiae R64 assembly + DRR1066343 reads) rather than guessed from
+ * documentation -- the earlier guess (`qv.spectra-cn.*.png`, `qv.qv.png`)
+ * did not match any file Merqury actually wrote.
+ *
+ * The handler always links the assembly as `assembly.fasta`, which
+ * `_named_link` resolves to `in_assembly.fasta` on disk (see
+ * `_MERQURY_ASSEMBLY_LINK` in `assembly_qc_handlers.py`) -- Merqury strips
+ * the extension for its own naming, so every run's plots are prefixed
+ * `qv.in_assembly.*` and `qv.spectra-asm.*`, not just this one's. Facts
+ * carries no filename list, so each candidate is rendered optimistically and
+ * hidden with onError if a particular run didn't produce it.
+ */
+function SpectraCnPlots({ objectId }: { objectId: string }) {
+  const [hidden, setHidden] = useState<Record<string, boolean>>({});
+  const candidates = [
+    "qv.in_assembly.spectra-cn.fl.png",
+    "qv.in_assembly.spectra-cn.ln.png",
+    "qv.in_assembly.spectra-cn.st.png",
+    "qv.spectra-asm.fl.png",
+    "qv.spectra-asm.ln.png",
+    "qv.spectra-asm.st.png",
+  ];
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 10,
+      }}
+    >
+      {candidates.map((file) => (
+        <img
+          key={file}
+          src={api.qcReportUrl(objectId, file)}
+          alt={file}
+          style={{
+            display: hidden[file] ? "none" : "block",
+            maxWidth: 280,
+            width: "100%",
+            border: "1px solid var(--border, #333)",
+            borderRadius: 4,
+          }}
+          onError={() => setHidden((prev) => ({ ...prev, [file]: true }))}
+        />
+      ))}
     </div>
   );
 }

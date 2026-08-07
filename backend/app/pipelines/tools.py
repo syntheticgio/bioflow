@@ -672,6 +672,57 @@ def craq() -> Tool:
     return _probe("craq", settings.craq_path, ["-h"])
 
 
+# Debian's `meryl` package is `0~20150903+r2013-9+b1` -- the Celera
+# Assembler k-mer suite, an unrelated program that happens to share the
+# name. Merqury needs Marbl meryl 1.3+. A probe that merely reported
+# whatever version string it found would call that install green and then
+# fail at runtime on arguments the binary has never heard of, which is the
+# same shape as Debian's BUSCO.
+#
+# Verified against the real Debian package (2026-08-07): `meryl --version`
+# does NOT exit non-zero and does NOT print a dpkg-style version string.
+# It exits 0 and prints "Unknown option '--version'." to stdout, because
+# Celera meryl's argument parser doesn't recognise `--version` at all and
+# treats it like any other bad flag. That output doesn't match
+# `_VERSION_PATTERN`, so `_probe` leaves it in `Tool.version` verbatim
+# rather than routing it through the exit-code mismatch branch -- an
+# earlier version of this check matched on the dpkg version string shape
+# (`0~20150903...`), which the binary itself never prints, so it never
+# fired. The message text itself is what actually distinguishes the two
+# programs.
+_CELERA_MERYL_UNKNOWN_OPTION = re.compile(r"^Unknown option ")
+
+
+@lru_cache(maxsize=1)
+def meryl() -> Tool:
+    # Verified against a real installed 1.4.2 (2026-08-06): `meryl --version`
+    # prints "meryl 1.4.2" and exits zero.
+    probed = _probe("meryl", settings.meryl_path, ["--version"])
+    if probed.version and _CELERA_MERYL_UNKNOWN_OPTION.match(probed.version):
+        return Tool(
+            name="meryl",
+            path=probed.path,
+            version=None,
+            error=(
+                f"Found meryl at {probed.path}, but it does not understand "
+                f"--version ({probed.version!r}) -- this is Debian's Celera "
+                f"Assembler k-mer suite, not Marbl meryl. Merqury needs "
+                f"Marbl meryl 1.3 or newer (this image installs 1.4.2 at "
+                f"/opt/meryl/bin/meryl). Set MERYL_PATH to a Marbl build."
+            ),
+        )
+    return probed
+
+
+@lru_cache(maxsize=1)
+def merqury() -> Tool:
+    # merqury.sh prints its usage banner (which carries no version) on a bare
+    # call and exits 0, so the version comes from the install directory
+    # rather than from the tool. `_probe` with no version args still answers
+    # the question that matters -- is it on PATH and executable.
+    return _probe("merqury", settings.merqury_path, [])
+
+
 @lru_cache(maxsize=1)
 def gci() -> Tool:
     # GCI.py takes -v/--version via argparse and exits zero.
@@ -752,6 +803,8 @@ def all_tools() -> list[Tool]:
         pydeseq2(),
         quast(),
         craq(),
+        meryl(),
+        merqury(),
         gci(),
     ]
 
@@ -1627,6 +1680,84 @@ TOOL_META: dict[str, ToolMeta] = {
             "it came from."
         ),
     ),
+    "meryl": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="K-mer database builder used by Merqury for QV assessment",
+        summary=(
+            "Builds and manipulates k-mer count databases. Merqury uses it "
+            "to build a k-mer database from a read set and another from an "
+            "assembly, then compares the two -- k-mers in the assembly but "
+            "absent from the reads are evidence of base errors, which is "
+            "how Merqury derives its reference-free QV score."
+        ),
+        strengths=(
+            "Reference-free: needs only the reads an assembly was built "
+            "from, no related reference genome",
+            "The k-mer database it builds from a read set is reusable "
+            "across every assembly evaluated against those reads",
+        ),
+        homepage="https://github.com/marbl/meryl",
+        repository="https://github.com/marbl/meryl",
+        citation=(
+            "Rhie, A., Walenz, B.P., Koren, S. et al. Merqury: reference-free "
+            "quality, completeness, and phasing assessment for genome "
+            "assemblies. Genome Biol 21, 245 (2020)."
+        ),
+        citation_url="https://doi.org/10.1186/s13059-020-02134-9",
+        # No top-level LICENSE file in the repo; its README.licenses states
+        # the code is a "United States Government Work" (public domain),
+        # the same notice Merqury's own LICENSE carries, with a note that
+        # individual contributions may carry other licenses per source file.
+        # Verified 2026-08-06 via `gh api repos/marbl/meryl/contents/README.licenses`.
+        license="Public domain (US Government work); some files under other licenses",
+        usage=(
+            "Builds the k-mer databases Merqury compares. The database "
+            "built from a read set is cached as a sidecar on that read "
+            "object and reused across assemblies; the one built from an "
+            "assembly is rebuilt per run and discarded. Note this is Marbl "
+            "meryl, not Debian's same-named Celera Assembler k-mer suite."
+        ),
+        runnable=True,
+    ),
+    "merqury": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Reference-free k-mer QV and completeness assessment",
+        summary=(
+            "Scores an assembly's base-level accuracy (QV) and k-mer "
+            "completeness against the reads it was built from, with no "
+            "reference genome required, and renders copy-number spectra "
+            "plots. A high QV means few k-mers appear in the assembly that "
+            "are absent from the reads -- evidence of few base errors."
+        ),
+        strengths=(
+            "Reference-free: works for organisms with no related reference "
+            "assembly to compare against",
+            "A single QV number that is directly comparable across "
+            "assemblies of the same organism",
+            "Spectra-cn plots show copy-number errors a single QV score "
+            "cannot distinguish",
+        ),
+        homepage="https://github.com/marbl/merqury",
+        repository="https://github.com/marbl/merqury",
+        citation=(
+            "Rhie, A., Walenz, B.P., Koren, S. et al. Merqury: reference-free "
+            "quality, completeness, and phasing assessment for genome "
+            "assemblies. Genome Biol 21, 245 (2020)."
+        ),
+        citation_url="https://doi.org/10.1186/s13059-020-02134-9",
+        # From the repository's own LICENSE file, checked 2026-08-06 via
+        # `gh api repos/marbl/merqury/contents/LICENSE`: public-domain notice,
+        # "United States Government Work" under the US Copyright Act.
+        license="Public domain (US Government work)",
+        usage=(
+            "Scores an assembly's base-level accuracy (QV) and k-mer "
+            "completeness against the reads it was built from, with no "
+            "reference genome, and renders the copy-number spectra plots. "
+            "Trio and hap-mer modes are never used -- BioFlow has no "
+            "parental read-set concept."
+        ),
+        runnable=True,
+    ),
     "gci": ToolMeta(
         pipelines=(PipelineType.ASSEMBLY_QC,),
         one_liner="Assembly continuity scoring from long-read alignment gaps",
@@ -1983,4 +2114,6 @@ def reset_cache() -> None:
     pydeseq2.cache_clear()
     quast.cache_clear()
     craq.cache_clear()
+    meryl.cache_clear()
+    merqury.cache_clear()
     gci.cache_clear()

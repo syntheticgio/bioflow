@@ -1,3 +1,14 @@
+# meryl 1.4.2's Linux-arm64 release binary links against OpenSSL 1.1
+# (libssl.so.1.1 / libcrypto.so.1.1), which Debian trixie's own archive no
+# longer carries (trixie ships OpenSSL 3.x only, no libssl1.1 apt candidate).
+# bullseye-slim still has it -- Debian's oldstable-of-oldstable, still
+# resolvable via debian-security as of 2026-08-07 (libssl1.1 1.1.1w-0+deb11u8)
+# -- so this stage exists only to donate those two .so files via a
+# multi-stage COPY. No RUN needed: bullseye-slim has them installed by
+# default. See install-meryl.sh's own header for the full story and
+# tools.meryl()'s probe.
+FROM debian:bullseye-slim AS legacy-ssl
+
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -71,7 +82,17 @@ RUN apt-get update \
         flye \
         hmmer \
         ivar \
+        bedtools \
+        r-cran-argparse \
+        r-cran-ggplot2 \
+        r-cran-scales \
+        libcurl4t64 \
+        libgomp1 \
     && rm -rf /var/lib/apt/lists/*
+# libcurl4t64 and libgomp1 are meryl's release binary's remaining runtime
+# deps beyond OpenSSL -- both present normally in trixie's own archive, no
+# vendoring needed. See the legacy-ssl build stage above and
+# install-meryl.sh for the two that are.
 # hmmer is compleasm's dependency, not a standalone BioFlow tool -- see the
 # compleasm install below and its own comment for why miniprot and compleasm
 # itself are not on this list.
@@ -347,6 +368,50 @@ COPY scripts/install-craq.sh /srv/scripts/install-craq.sh
 RUN chmod +x /srv/scripts/install-craq.sh \
     && CRAQ_COMMIT="${CRAQ_COMMIT}" \
        /srv/scripts/install-craq.sh
+
+# --- meryl / Merqury -----------------------------------------------------
+#
+# Merqury needs meryl, and specifically Marbl's meryl -- Debian's `meryl`
+# package is the unrelated Celera Assembler k-mer suite. Both installs are
+# binary/source extracts with no compilation; see each script's header for
+# why the meryl version pin is load-bearing.
+COPY scripts/install-meryl.sh /srv/scripts/install-meryl.sh
+RUN chmod +x /srv/scripts/install-meryl.sh \
+    && /srv/scripts/install-meryl.sh
+
+# meryl's release binary needs OpenSSL 1.1, gone from trixie's own archive on
+# both architectures (verified: neither libssl1.1 nor libssl3 has an apt
+# candidate on trixie amd64 either -- trixie ships OpenSSL 3.x via libssl3t64
+# instead, and nothing here links against that). Vendored from bullseye-slim
+# via the legacy-ssl stage above rather than downloaded at install-script run
+# time, since apt has no candidate for it in this image at all. Copied
+# unconditionally for both arches rather than gated on arm64 -- on amd64
+# these two files are a few hundred KB of unused dead weight if the amd64
+# release binary turns out to link against system OpenSSL fine, which is
+# cheaper than adding arch-conditional COPY logic to find out.
+# Globbed rather than hardcoded to aarch64-linux-gnu: legacy-ssl builds
+# natively for whatever platform this build targets, so the multiarch
+# triplet directory it populates is amd64's x86_64-linux-gnu on an amd64
+# build and arm64's aarch64-linux-gnu on an arm64 build. Verified both
+# resolve on debian:bullseye-slim via `docker run --platform linux/amd64|
+# linux/arm64 debian:bullseye-slim sh -c 'ls /usr/lib/*-linux-gnu/libssl.so.1.1'`
+# on 2026-08-07. Exactly one file matches per build since only one triplet
+# directory exists in a single-arch stage.
+COPY --from=legacy-ssl /usr/lib/*-linux-gnu/libssl.so.1.1 /opt/meryl/lib/
+COPY --from=legacy-ssl /usr/lib/*-linux-gnu/libcrypto.so.1.1 /opt/meryl/lib/
+
+COPY scripts/install-merqury.sh /srv/scripts/install-merqury.sh
+RUN chmod +x /srv/scripts/install-merqury.sh \
+    && /srv/scripts/install-merqury.sh
+
+# Every Merqury script begins `source $MERQURY/util/util.sh` and fails
+# immediately without it, so this belongs in the image ENV rather than in
+# the install script's shell.
+ENV MERQURY=/opt/merqury
+ENV PATH="/opt/meryl/bin:${PATH}"
+# See the vendored libssl.so.1.1/libcrypto.so.1.1 COPY above -- meryl's
+# release binary needs them and trixie's archive no longer carries them.
+ENV LD_LIBRARY_PATH="/opt/meryl/lib:${LD_LIBRARY_PATH:-}"
 
 # --- GCI ---------------------------------------------------------------
 #

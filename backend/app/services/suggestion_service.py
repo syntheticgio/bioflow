@@ -1318,6 +1318,86 @@ def build_assembly_error_card(
     )
 
 
+def build_qv_card(obj, read_sets) -> SuggestionCard | None:
+    """Reference-free base-level accuracy (QV) for an assembly, by Merqury.
+
+    Anchored on the assembly, matching `build_polish_card` and
+    `build_assembly_error_card`. `read_sets` is every read set in the
+    project -- grouped mate pairs or singletons, via
+    `reference_assembly.group_read_sets` -- resolved by the orchestrator the
+    same way `read_sets` is for polishing.
+
+    **Not restricted to short reads.** Merqury's comparison is k-mer based,
+    which works against short or long reads alike -- unlike Polypolish,
+    which is meaningless on long reads. Gating this card on short reads the
+    way `build_polish_card` does would be the same "protein.faa" mistake
+    CLAUDE.md warns about: excluding a read set that is actually usable
+    because of an assumption that happens to be true for a different tool.
+
+    `category="ASSEMBLY_QC"`, matching completeness/misassembly/
+    assembly_errors, not `REFERENCE_ASSEMBLY` like polish or scaffold -- QV
+    evaluates an assembly, it does not change it.
+
+    Same "ambiguity is unavailable, not a guess" rule every sibling card
+    documents: more than one read set in the project is refused rather than
+    picked, since the card's launch body has no room for a chooser and a
+    wrong pairing would silently score QV against the wrong sample's reads.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Assess base accuracy (QV)"
+    description = (
+        "Score this assembly's base-level accuracy against the reads it "
+        "came from, with Merqury's reference-free k-mer comparison."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="assembly_qv",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    meryl_tool = tools.meryl()
+    if not meryl_tool.available:
+        return unavailable(meryl_tool.error or "meryl is not installed.")
+
+    merqury_tool = tools.merqury()
+    if not merqury_tool.available:
+        return unavailable(merqury_tool.error or "Merqury is not installed.")
+
+    if not read_sets:
+        return unavailable(
+            "QV assessment needs the reads this assembly was built from, "
+            "and this project has none."
+        )
+    if len(read_sets) > 1:
+        return unavailable(
+            f"This project has {len(read_sets)} read sets. QV assessment "
+            "needs a specific one, and picking for you could score this "
+            "assembly against the wrong sample's reads."
+        )
+
+    chosen = read_sets[0]
+    body = {"object_id": str(obj.id), "read_object_id": str(chosen[0].id)}
+
+    return SuggestionCard(
+        kind="assembly_qv",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"Reads: {', '.join(o.name for o in chosen)}.",
+        status=CardStatus.AVAILABLE,
+        launch={"endpoint": "/pipelines/assembly-qv", "body": body},
+    )
+
+
 def build_continuity_card(
     obj,
     alignments: tuple[list, list, list] | None,
@@ -1603,6 +1683,27 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             scaffold_references = None
 
+    all_read_sets = None
+    if reference_assembly._is_assembly_like(obj):
+        # Same reasoning as read_sets above, but not filtered to short reads:
+        # QV's k-mer comparison works for any chemistry, unlike Polypolish,
+        # so `build_qv_card` needs every read set in the project rather than
+        # `short_read_sets`'s narrower candidate list. `group_read_sets` is
+        # the same mate-pairing logic `short_read_sets` itself is built on,
+        # just without the chemistry filter.
+        try:
+            all_read_sets = reference_assembly.group_read_sets(
+                [
+                    o
+                    for o in await object_service.list_objects(
+                        obj.project_id, owner=obj.owner, status=ObjectStatus.READY
+                    )
+                    if o.format.kind is FormatKind.FASTQ
+                ]
+            )
+        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            all_read_sets = None
+
     assembly_alignments = None
     if reference_assembly._is_assembly_like(obj):
         # Same reasoning as scaffold_references above: an async project
@@ -1652,6 +1753,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
         ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
         ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
+        ("assembly_qv", lambda: build_qv_card(obj, all_read_sets)),
         (
             "assembly_continuity",
             lambda: build_continuity_card(
