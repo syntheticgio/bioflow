@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 
 from app.models.resource_limits import ResourceLimits
+from app.services import resource_limit_service
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -50,3 +51,38 @@ class TestLoad:
         await ResourceLimits.load()
         await ResourceLimits.load()
         assert await ResourceLimits.count() == 1
+
+
+class TestResolveMemBudget:
+    """A stored limit resolved against what the machine actually has.
+
+    Pure, so the clamping rules are testable without a worker or a host probe.
+    """
+
+    def test_no_stored_limit_uses_the_machine_budget(self):
+        assert resource_limit_service.resolve_mem_budget_mb(
+            stored_mb=None, machine_mb=16384
+        ) == 16384
+
+    def test_a_stored_limit_below_the_machine_budget_wins(self):
+        """The whole point: the user asked for less than the host has."""
+        assert resource_limit_service.resolve_mem_budget_mb(
+            stored_mb=8192, machine_mb=16384
+        ) == 8192
+
+    def test_a_stored_limit_above_the_machine_budget_is_clamped(self):
+        """Typing 64 GB on a 16 GB machine cannot conjure headroom. The limit
+        is a budget to stay under, not a claim about the hardware."""
+        assert resource_limit_service.resolve_mem_budget_mb(
+            stored_mb=65536, machine_mb=16384
+        ) == 16384
+
+    def test_a_zero_or_negative_stored_limit_is_ignored(self):
+        """Zero would admit nothing at all and stall the queue silently.
+        Treated as 'no opinion' rather than as a real ceiling."""
+        assert resource_limit_service.resolve_mem_budget_mb(
+            stored_mb=0, machine_mb=16384
+        ) == 16384
+        assert resource_limit_service.resolve_mem_budget_mb(
+            stored_mb=-5, machine_mb=16384
+        ) == 16384
