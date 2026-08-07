@@ -388,6 +388,8 @@ pub struct ApplySettingsArgs {
     pub storage_location: String,
     pub port: u16,
     pub network_exposed: bool,
+    /// `None` when the user left the field blank -- no hard cap.
+    pub hard_mem_mb: Option<u32>,
 }
 
 /// `async`/`spawn_blocking` for the same reason as `run_stack` above --
@@ -406,10 +408,7 @@ pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs
         storage_location: PathBuf::from(args.storage_location),
         port: args.port,
         network_exposed: args.network_exposed,
-        // TODO(#72 task 2): wire this through `ApplySettingsArgs` and the
-        // Tauri command layer. Hardcoded to keep the crate compiling after
-        // `CurrentSettings` grew the field in task 1.
-        hard_mem_mb: None,
+        hard_mem_mb: args.hard_mem_mb,
     };
 
     tauri::async_runtime::spawn_blocking(move || {
