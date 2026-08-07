@@ -28,6 +28,7 @@ pub fn run() {
       commands::check_for_update,
       commands::fetch_optional_tools,
       commands::install_optional_tool,
+      commands::current_settings,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

@@ -108,6 +108,19 @@ export function runFirstSetup(args: {
   });
 }
 
+export interface CurrentSettings {
+  hardMemMb: number | null;
+}
+
+// Reads back whatever settings can be recovered from .env on disk -- today
+// just the hard memory limit, since it's the only field the UI could not
+// otherwise reconstruct. See App.tsx's mount effect for why this exists.
+export function currentSettings(): Promise<CurrentSettings> {
+  return invoke<{ hard_mem_mb: number | null }>("current_settings").then((d) => ({
+    hardMemMb: d.hard_mem_mb,
+  }));
+}
+
 export function applySettings(args: {
   storageLocation: string;
   port: number;

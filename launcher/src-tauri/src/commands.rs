@@ -495,3 +495,64 @@ pub async fn install_optional_tool(image: String) -> Result<(), String> {
     .await
     .map_err(|e| e.to_string())?
 }
+
+/// Reads `BIOFLOW_HARD_MEM_MB` out of a `.env` body.
+///
+/// Anything unparseable reads as `None` rather than erroring: a hand-edited
+/// `.env` must not stop the launcher from opening, and "no hard cap" is the
+/// safe reading of a value nobody can interpret.
+fn parse_hard_mem_mb(env_contents: &str) -> Option<u32> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOFLOW_HARD_MEM_MB="))
+        .and_then(|value| value.trim().parse().ok())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CurrentSettingsDto {
+    /// `None` when there is no install yet, or `.env` has no hard-limit line.
+    pub hard_mem_mb: Option<u32>,
+}
+
+/// Reads whatever settings can be recovered from `.env` on disk -- currently
+/// just the hard memory limit, since it is the only setting the UI could
+/// not otherwise reconstruct (port/storage/network-exposed all have
+/// separate flows already; see App.tsx's comment on why this didn't exist
+/// before this field needed it).
+#[tauri::command]
+pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSettingsDto, ()> {
+    let install_dir = app.install_dir.lock().unwrap().clone();
+    let Some(install_dir) = install_dir else {
+        return Ok(CurrentSettingsDto { hard_mem_mb: None });
+    };
+
+    let hard_mem_mb = std::fs::read_to_string(install_dir.join(".env"))
+        .ok()
+        .and_then(|contents| parse_hard_mem_mb(&contents));
+
+    Ok(CurrentSettingsDto { hard_mem_mb })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_hard_mem_mb_back_from_env() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIOFLOW_HARD_MEM_MB=16384\n";
+        assert_eq!(parse_hard_mem_mb(env), Some(16384));
+    }
+
+    #[test]
+    fn absent_hard_mem_reads_as_no_limit() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\n";
+        assert_eq!(parse_hard_mem_mb(env), None);
+    }
+
+    #[test]
+    fn malformed_hard_mem_reads_as_no_limit() {
+        // A hand-edited .env should not stop the launcher from opening.
+        let env = "BIOFLOW_HARD_MEM_MB=not-a-number\n";
+        assert_eq!(parse_hard_mem_mb(env), None);
+    }
+}
