@@ -60,7 +60,7 @@ from app.pipelines import (
     variant_runner,
 )
 from app.pipelines.aligners import Aligner
-from app.services import blob_service, run_service
+from app.services import blob_service, memory_estimate, run_service
 from app.storage.paths import blob_path
 
 log = get_logger(__name__)
@@ -1235,14 +1235,22 @@ MIN_DECLARED_MEM_MB = 2048
 # computed against the same number the job will actually use.
 INDEX_BUILD_THREADS = 4
 
+# The job types whose memory the resolver arbitrates. These must match the
+# strings the handlers register under (align_handlers.py:307,
+# assembly_handlers.py:45) -- a typo here resolves against an empty history
+# and silently falls back to the heuristic forever, with nothing failing.
+JOB_TYPE_ALIGN_READS = "align_reads"
+JOB_TYPE_ASSEMBLE = "assemble_reads"
 
-def declared_align_mem_mb(
+
+async def declared_align_mem_mb(
     *,
     aligner: Aligner,
     reference_bases: int,
     threads: int,
     sort_memory_mb: int,
     building_index: bool,
+    input_bytes: int | None = None,
 ) -> int:
     """What to reserve with the queue for an alignment or index build.
 
@@ -1260,15 +1268,27 @@ def declared_align_mem_mb(
     Note this is a *reservation*, not a limit: nothing enforces it on the
     process. Its job is to stop the governor from running two heavy jobs whose
     combined footprint does not fit.
+
+    The number is resolved through `memory_estimate.resolve`, so once a job
+    type has enough trustworthy history on this machine the reservation stops
+    being a published coefficient and becomes a measurement. `input_bytes` is
+    what makes that possible; without it only the heuristic can answer.
+
+    The floor applies whatever the source, including UNKNOWN.
     """
-    estimate = resource_estimator.estimate_mb(
+    heuristic_mb = resource_estimator.estimate_mb(
         aligner=aligner,
         reference_bases=reference_bases,
         threads=threads,
         sort_memory_mb=sort_memory_mb,
         building_index=building_index,
     )
-    return max(estimate, MIN_DECLARED_MEM_MB)
+    resolved = await memory_estimate.resolve(
+        job_type=JOB_TYPE_ALIGN_READS,
+        input_bytes=input_bytes,
+        heuristic_mb=heuristic_mb,
+    )
+    return max(resolved.mb or 0, MIN_DECLARED_MEM_MB)
 
 
 async def _enqueue_build_index(
@@ -1331,7 +1351,7 @@ async def _enqueue_build_index(
     # `sort_memory_mb=0` because an index build runs no samtools sort -- the
     # estimator's sort term would otherwise reserve memory for a step that is
     # not in this job.
-    mem_mb = declared_align_mem_mb(
+    mem_mb = await declared_align_mem_mb(
         aligner=aligner,
         reference_bases=reference.size or 0,
         threads=INDEX_BUILD_THREADS,
@@ -1586,6 +1606,15 @@ async def launch_alignment(
         ]
     )
 
+    align_mem_mb = await declared_align_mem_mb(
+        aligner=aligner,
+        reference_bases=reference.size or 0,
+        threads=align_params.threads,
+        sort_memory_mb=align_params.sort_memory_mb,
+        building_index=False,
+        input_bytes=obj.size or None,
+    )
+
     job = await queue.enqueue(
         "align_reads",
         owner=owner,
@@ -1604,13 +1633,7 @@ async def launch_alignment(
         # every alignment against a not-yet-indexed reference.
         resources=JobResources(
             cpu=align_params.threads,
-            mem_mb=declared_align_mem_mb(
-                aligner=aligner,
-                reference_bases=reference.size or 0,
-                threads=align_params.threads,
-                sort_memory_mb=align_params.sort_memory_mb,
-                building_index=False,
-            ),
+            mem_mb=align_mem_mb,
             io=IoClass.HEAVY,
         ),
         max_attempts=2,
