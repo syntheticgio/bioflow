@@ -205,6 +205,7 @@ def build_mcp_app() -> Starlette:
     _register_resources(srv)
 
     return srv.streamable_http_app(
+        streamable_http_path="/",
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=False
         )
@@ -218,6 +219,15 @@ def mount_mcp_app(app: FastAPI) -> None:
     so this versioned path is reachable with no new proxy rule from either
     the dev-server origin (5173) or the API's own origin (8000). See
     tests/mcp/test_mount.py for the regression test.
+
+    `build_mcp_app` passes `streamable_http_path="/"` so the sub-app serves
+    its endpoint at its own root -- otherwise `MCPServer.streamable_http_app`
+    defaults that path to `/mcp` too, and the externally-reachable URL ends
+    up as `/api/v1/mcp/mcp` instead of `/api/v1/mcp`. Starlette's `Mount`
+    still 307-redirects a bare `/api/v1/mcp` (no trailing slash) request to
+    `/api/v1/mcp/`, since the sub-app's only route is `/` -- callers should
+    request the slashed form directly (see `SettingsMcp.tsx`) rather than
+    rely on redirect-following.
     """
     mcp_app = build_mcp_app()
     app.mount(MOUNT_PATH, mcp_app)

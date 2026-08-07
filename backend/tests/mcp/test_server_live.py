@@ -99,7 +99,7 @@ async def test_profile_query_param_reaches_the_tool_through_the_real_mount():
     owner = profile.owner_id()
 
     test_app = _build_test_app()
-    mcp_url = f"/api/v1/mcp/mcp?profile={owner}"
+    mcp_url = f"/api/v1/mcp/?profile={owner}"
 
     async with test_app.router.lifespan_context(test_app):
         async with httpx.AsyncClient(
@@ -170,7 +170,7 @@ async def test_ambiguous_profile_is_a_clean_tool_error_not_a_500():
     await profile_service.create_profile(username="mcp-live-ambiguous-b")
 
     test_app = _build_test_app()
-    mcp_url = "/api/v1/mcp/mcp"  # no ?profile=
+    mcp_url = "/api/v1/mcp/"  # no ?profile=
 
     async with test_app.router.lifespan_context(test_app):
         async with httpx.AsyncClient(
@@ -226,7 +226,7 @@ async def test_ambiguous_profile_is_a_clean_tool_error_not_a_500():
 
 async def test_resources_list_includes_the_derived_and_guide_resources():
     test_app = _build_test_app()
-    mcp_url = "/api/v1/mcp/mcp"
+    mcp_url = "/api/v1/mcp/"
 
     async with test_app.router.lifespan_context(test_app):
         async with httpx.AsyncClient(

@@ -11,18 +11,20 @@ import { useProfileStore } from "../stores/profileStore";
  * handed whichever port they already have open -- nobody has to learn that
  * 8000 exists alongside 5173.
  *
- * The path has two `/mcp` segments: `/api/v1/mcp` is where `mount_mcp_app`
- * (backend/app/mcp/server.py) mounts the sub-app, but the mounted app itself
- * -- `MCPServer.streamable_http_app()` -- adds its own default
- * `streamable_http_path` of `/mcp` for the actual endpoint. So the real,
- * externally-reachable URL is `/api/v1/mcp/mcp`, not `/api/v1/mcp`.
+ * `/api/v1/mcp/` is where `mount_mcp_app` (backend/app/mcp/server.py) mounts
+ * the sub-app; `build_mcp_app` passes `streamable_http_path="/"` so the
+ * mounted app serves its endpoint at that same path rather than appending
+ * its own default `/mcp` underneath it. The trailing slash is required --
+ * Starlette's `Mount` 307-redirects a bare `/api/v1/mcp` request to the
+ * slashed form, and handing out the slashed URL directly saves every
+ * connecting client that hop.
  */
 export function SettingsMcp() {
   const profile = useProfileStore((s) => s.current);
   const [copied, setCopied] = useState(false);
 
   const url = profile
-    ? `${window.location.origin}/api/v1/mcp/mcp?profile=${profile.id}`
+    ? `${window.location.origin}/api/v1/mcp/?profile=${profile.id}`
     : "";
 
   const config = JSON.stringify(
