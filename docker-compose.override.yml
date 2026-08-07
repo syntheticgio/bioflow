@@ -14,6 +14,10 @@ services:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
       - ./backend/tests:/srv/tests:ro
+      # /srv/tests resolves repo root as parents[2] (/srv/tests -> /srv -> /),
+      # same as ops/tests' throwaway container -- VERSION must be mounted at
+      # that root or tests/test_version_consistency.py's repo-root read 404s.
+      - ./VERSION:/VERSION:ro
       # Docker socket and BIOINFO_HOME_HOST moved to docker-compose.yml: they
       # are needed by the shipped stack too, not just local development. See
       # the comment on the api service there.
