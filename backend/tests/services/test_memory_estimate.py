@@ -180,3 +180,21 @@ class TestGuards:
         assert result.source is EstimateSource.UNKNOWN
         assert result.mb is None
         assert result.fell_back_from_measured is True
+
+
+class TestAssemblyShape:
+    async def test_history_answers_even_when_the_heuristic_declines(self):
+        """New capability, and correct: `estimate_assembly_mb` returns None
+        when there is no genome size, but history about this job type is real
+        evidence where a missing genome size was merely absent evidence. So an
+        assembly with no genome size becomes refusable once it has runs."""
+        await _insert_runs("assemble_reads", peak_base=8 * 1024**3)
+
+        result = await memory_estimate.resolve(
+            job_type="assemble_reads",
+            input_bytes=5_000_000,
+            heuristic_mb=None,
+        )
+
+        assert result.source is EstimateSource.MEASURED
+        assert result.mb > 0

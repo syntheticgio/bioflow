@@ -1242,6 +1242,13 @@ INDEX_BUILD_THREADS = 4
 JOB_TYPE_ALIGN_READS = "align_reads"
 JOB_TYPE_ASSEMBLE = "assemble_reads"
 
+# What to reserve for an assembly nothing can estimate. Assemblies are the
+# heaviest thing this tool runs, and de novo assembly with no genome size is
+# the normal case rather than a misconfigured one -- so this is deliberately
+# generous. Reserving too little would let the governor admit an assembly
+# alongside other work and drive the machine into swap.
+UNKNOWN_ASSEMBLY_MEM_MB = 16384
+
 
 async def declared_align_mem_mb(
     *,
@@ -3250,11 +3257,17 @@ async def launch_assembly(
     # read a job's mem_mb, so declaring it reserves nothing. A missing genome
     # size yields no estimate and therefore no refusal -- see
     # estimate_assembly_mb on why that asymmetry is deliberate.
-    estimate = resource_estimator.estimate_assembly_mb(
+    heuristic_mb = resource_estimator.estimate_assembly_mb(
         assembler=parsed.assembler,
         genome_bases=parsed.genome_size,
         threads=parsed.threads,
     )
+    resolved = await memory_estimate.resolve(
+        job_type=JOB_TYPE_ASSEMBLE,
+        input_bytes=reads.size or None,
+        heuristic_mb=heuristic_mb,
+    )
+    estimate = resolved.mb
     if estimate is not None:
         mem_budget_mb = int(LoadGovernor().mem_budget_bytes() / (1024 * 1024))
         band = resource_estimator.classify(
@@ -3265,10 +3278,15 @@ async def launch_assembly(
         )
         if band is resource_estimator.Band.BLOCK:
             raise ValidationError(
-                f"This assembly needs about {estimate:,} MB, more than the "
+                f"This assembly needs about {estimate:,} MB "
+                f"({resolved.detail}), more than the "
                 f"{mem_budget_mb:,} MB available. Assembling a genome this "
                 "size needs a bigger machine.",
-                details={"estimate_mb": estimate, "budget_mb": mem_budget_mb},
+                details={
+                    "estimate_mb": estimate,
+                    "budget_mb": mem_budget_mb,
+                    "estimate_source": resolved.source.value,
+                },
             )
 
     digest, path = await _resolve_readable(reads)
@@ -3313,7 +3331,7 @@ async def launch_assembly(
         # for whenever the governor learns to read it.
         resources=JobResources(
             cpu=parsed.threads,
-            mem_mb=estimate or 16384,
+            mem_mb=estimate or UNKNOWN_ASSEMBLY_MEM_MB,
             io=IoClass.HEAVY,
         ),
         # One attempt, matching the handler: a retried assembly costs hours and
