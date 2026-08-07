@@ -96,7 +96,16 @@ jobs:
       # so every later step in this job inherits it without repeating it.
       - name: Scope Docker's config to this job
         run: |
+          set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/docker-config"
+          # An empty directory isn't enough: with no config.json to read,
+          # the Docker CLI falls back to its own default credential
+          # resolution, which still probes for docker-credential-osxkeychain
+          # on macOS -- reproduced this exact -25308 failure even with
+          # DOCKER_CONFIG pointed at a directory that had no config.json in
+          # it. A config.json with no `credsStore` key is what actually
+          # turns that probing off.
+          echo '{}' > "${RUNNER_TEMP}/docker-config/config.json"
           echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
 
       # A fixed builder name plus keep-state is what makes layer caching work
@@ -186,7 +195,16 @@ jobs:
       # inside a step, so this exports to $GITHUB_ENV for later steps.
       - name: Scope Docker's config to this job
         run: |
+          set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/docker-config"
+          # An empty directory isn't enough: with no config.json to read,
+          # the Docker CLI falls back to its own default credential
+          # resolution, which still probes for docker-credential-osxkeychain
+          # on macOS -- reproduced this exact -25308 failure even with
+          # DOCKER_CONFIG pointed at a directory that had no config.json in
+          # it. A config.json with no `credsStore` key is what actually
+          # turns that probing off.
+          echo '{}' > "${RUNNER_TEMP}/docker-config/config.json"
           echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
