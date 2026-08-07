@@ -44,6 +44,20 @@ _SEVERITY = (
 )
 _RANK = {name: i for i, name in enumerate(_SEVERITY)}
 
+# The subset of _SEVERITY worth surfacing as a named "severe variant" in a
+# summary -- the loss-of-function and protein-changing prefix of the same
+# ordering, stopping before the benign tail (splice_region and onward).
+# Deliberately the same vocabulary _SEVERITY uses (bcftools csq's own
+# consequence strings: "missense", "stop_gained", ... with no "_variant"
+# suffix) rather than Ensembl VEP's naming -- parse_bcsq is the only source
+# of these strings in this codebase, so a consumer matching against a
+# different vocabulary silently ranks everything as unrecognised.
+#
+# Shared by vcf_stats_runner.py (which builds the list from parsed records)
+# and pipeline_service.py (which ranks/caps it for the summary prompt) so
+# the two agree on both membership and order without either redefining it.
+SEVERITY_ORDER = _SEVERITY[: _RANK["missense"] + 1]
+
 # Where a consequence type we do not know about sorts. Deliberately above the
 # benign tail rather than below everything: an unrecognised type is more
 # likely to be a new bcftools vocabulary entry than something harmless, and a

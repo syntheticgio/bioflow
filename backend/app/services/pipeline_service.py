@@ -44,6 +44,7 @@ from app.pipelines import (
     assemblers,
     assembly_qc_registry,
     counts_runner,
+    csq_parse,
     cutadapt_runner,
     de_runner,
     fastp_runner,
@@ -742,31 +743,19 @@ async def launch_variant_summary(
     return job
 
 
-# Ordered most-severe-first. Anything not in this table is left out of the
-# top-N list rather than guessed at -- an unrecognized consequence string is
-# not necessarily mild, but this feature only speaks for the ones it can
-# rank with confidence.
-_SEVERITY_ORDER = (
-    "stop_gained",
-    "frameshift_variant",
-    "stop_lost",
-    "start_lost",
-    "splice_acceptor_variant",
-    "splice_donor_variant",
-    "missense_variant",
-    "inframe_deletion",
-    "inframe_insertion",
-)
-
-
 def _top_severe_variants(facts: dict, limit: int = 20) -> list[dict]:
     """The variant rows facts already carries, ranked by consequence severity.
 
     Reads from `facts["severe_variants"]` -- populated by run_vcf_stats
     alongside consequence_counts, one row per variant with a consequence in
-    _SEVERITY_ORDER, capped there at the same limit this function also
-    respects. Nothing here re-parses the VCF. Absent (Task 7 not yet run, or
-    an older object predating it), this simply returns [].
+    csq_parse.SEVERITY_ORDER, capped there at the same limit this function
+    also respects. Nothing here re-parses the VCF. Absent (Task 7 not yet
+    run, or an older object predating it), this simply returns [].
+
+    The severity vocabulary lives in csq_parse.py, not here: it must match
+    the consequence strings parse_bcsq actually returns (bcftools csq's own
+    "missense"/"stop_gained"/... vocabulary), and csq_parse is the only
+    place that produces those strings.
     """
     rows = facts.get("severe_variants")
     if not isinstance(rows, list):
@@ -775,9 +764,9 @@ def _top_severe_variants(facts: dict, limit: int = 20) -> list[dict]:
     def rank(row: dict) -> int:
         consequence = row.get("consequence")
         try:
-            return _SEVERITY_ORDER.index(consequence)
+            return csq_parse.SEVERITY_ORDER.index(consequence)
         except ValueError:
-            return len(_SEVERITY_ORDER)
+            return len(csq_parse.SEVERITY_ORDER)
 
     ranked = sorted(rows, key=rank)
     return ranked[:limit]
