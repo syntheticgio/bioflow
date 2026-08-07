@@ -38,32 +38,32 @@ export function SettingsMcp() {
   };
 
   return (
-    <div className="settings-view">
+    <div className="settings-page">
       <SettingsNav />
-      <div className="settings-section">
-        <h2>MCP server</h2>
-        <p>
-          BioFlow exposes an MCP server so an AI coding agent can browse your
-          projects, ask what to run next, and launch pipelines. Paste this into
-          your agent's MCP configuration.
-        </p>
+      <h1>Settings · MCP</h1>
+      <p className="settings-hint">
+        BioFlow exposes an MCP server so an AI coding agent can browse your
+        projects, ask what to run next, and launch pipelines. Paste this into
+        your agent's MCP configuration.
+      </p>
 
-        {profile ? (
-          <>
-            <pre className="mcp-config">{config}</pre>
-            <button className="btn" onClick={copy}>
-              {copied ? "Copied" : "Copy configuration"}
-            </button>
-            <p className="hint">
-              Acting as <strong>{profile.username}</strong>. An agent connected
-              with this URL sees only this profile's data and cannot switch
-              profiles or delete anything.
-            </p>
-          </>
-        ) : (
-          <p className="hint">Select a profile to see its connection URL.</p>
-        )}
-      </div>
+      {profile ? (
+        <>
+          <pre className="mono mcp-config">{config}</pre>
+          <button className="btn" onClick={copy}>
+            {copied ? "Copied" : "Copy configuration"}
+          </button>
+          <p className="settings-hint">
+            Acting as <strong>{profile.username}</strong>. An agent connected
+            with this URL sees only this profile's data and cannot switch
+            profiles or delete anything.
+          </p>
+        </>
+      ) : (
+        <p className="settings-hint">
+          Select a profile to see its connection URL.
+        </p>
+      )}
     </div>
   );
 }

@@ -4918,6 +4918,16 @@ table.software-matrix thead th.software-matrix-corner {
   margin: 4px 0 0;
 }
 
+.mcp-config {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin: 12px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .settings-status {
   font-size: 13px;
   margin: 8px 0 0;
