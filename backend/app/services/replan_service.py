@@ -281,3 +281,86 @@ def _propose_align(*, params: dict, budget_mb: int, cpu_budget: float) -> Replan
 
 _PROPOSERS[JOB_TYPE_ALIGN_READS] = _propose_align
 _VERIFIERS[JOB_TYPE_ALIGN_READS] = _align_estimate
+
+
+def _assembly_estimate(params: dict) -> int | None:
+    """Re-estimate an assembly. None when genome size is unknown."""
+    from app.pipelines import resource_estimator
+    from app.pipelines.assemblers import Assembler
+
+    return resource_estimator.estimate_assembly_mb(
+        assembler=Assembler(params["assembler"]),
+        genome_bases=params["genome_bases"],
+        threads=params["threads"],
+    )
+
+
+def _propose_assembly(
+    *, params: dict, budget_mb: int, cpu_budget: float
+) -> ReplanResult:
+    """Assembly: one knob, and a graph term that plays the index's role.
+
+    The repeat graph is fixed by the genome size and cannot be reduced by any
+    setting here, so it is the floor the feasibility test checks.
+    """
+    from app.pipelines.assembly_params import MIN_THREADS
+
+    original_threads = params["threads"]
+
+    baseline_threads, note = _clamp_threads(
+        threads=original_threads, cpu_budget=cpu_budget
+    )
+
+    thread_floor = max(MIN_THREADS, baseline_threads // 2)
+    floor_estimate = _assembly_estimate({**params, "threads": thread_floor})
+
+    # None means the genome size is unknown. Not knowing is not a refusal --
+    # see estimate_assembly_mb's docstring, which makes the same point.
+    if floor_estimate is None:
+        return NoKnobs()
+
+    if floor_estimate > budget_mb:
+        return Infeasible(
+            f"This assembly needs about {floor_estimate:,} MB even at "
+            f"{thread_floor} threads, more than the {budget_mb:,} MB budget. "
+            f"Most of that is the repeat graph, which is fixed by the genome "
+            f"size rather than by any setting here."
+        )
+
+    threads = baseline_threads
+    while threads > thread_floor:
+        current = _assembly_estimate({**params, "threads": threads})
+        if current is not None and current <= budget_mb:
+            break
+        threads = max(thread_floor, threads // 2)
+
+    changes = []
+    if threads != original_threads:
+        changes.append(Change(name="threads", before=original_threads, after=threads))
+
+    if not changes:
+        return NoKnobs()
+
+    final = {**params, "threads": threads}
+    estimate = _assembly_estimate(final)
+    # Cannot be None: the floor estimate above already answered for these
+    # inputs, and threads do not affect whether genome_bases is known.
+    assert estimate is not None
+    return Proposal(
+        params=final,
+        estimate_mb=estimate,
+        changes=changes,
+        note=note,
+    )
+
+
+def _assembly_verifier(params: dict) -> int:
+    """Verification wants a number, and by this point there always is one."""
+    estimate = _assembly_estimate(params)
+    # A proposal is only produced when the estimate is known, so a None here
+    # means the params were mutated between proposal and verification.
+    return estimate if estimate is not None else 2**31
+
+
+_PROPOSERS[JOB_TYPE_ASSEMBLE] = _propose_assembly
+_VERIFIERS[JOB_TYPE_ASSEMBLE] = _assembly_verifier

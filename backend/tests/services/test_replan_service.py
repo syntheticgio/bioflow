@@ -1,6 +1,7 @@
 from app.pipelines.aligners import Aligner
+from app.pipelines.assemblers import Assembler
 from app.services import replan_service
-from app.services.replan_service import JOB_TYPE_ALIGN_READS
+from app.services.replan_service import JOB_TYPE_ALIGN_READS, JOB_TYPE_ASSEMBLE
 
 
 def test_unregistered_job_type_reports_no_knobs():
@@ -210,3 +211,63 @@ def test_proposal_records_before_and_after_for_each_moved_knob():
     threads_change = next(c for c in result.changes if c.name == "threads")
     assert threads_change.before == 100
     assert threads_change.after == result.params["threads"]
+
+
+def _assembly_params(**overrides) -> dict:
+    base = {
+        "assembler": Assembler.FLYE.value,
+        "threads": 16,
+        "genome_bases": 100_000_000,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_assembly_without_a_genome_size_reports_no_knobs():
+    """No opinion is not a refusal.
+
+    estimate_assembly_mb returns None when genome size is unknown, which is the
+    normal case for de novo assembly rather than a misconfiguration. Reporting
+    Infeasible here would refuse a job we simply cannot predict.
+    """
+    result = replan_service.replan(
+        job_type=JOB_TYPE_ASSEMBLE,
+        params=_assembly_params(genome_bases=None),
+        budget_mb=16_000,
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.NoKnobs)
+
+
+def test_graph_dominated_assembly_is_infeasible():
+    """Flye is 40 bytes/base, so a 3 Gbase genome needs ~114 GB of graph.
+
+    Verified: at the 8-thread floor the estimate is 117,513 MB, far over the
+    16,000 MB budget, and no thread count touches the graph term.
+    """
+    result = replan_service.replan(
+        job_type=JOB_TYPE_ASSEMBLE,
+        params=_assembly_params(genome_bases=3_000_000_000),
+        budget_mb=16_000,
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.Infeasible)
+    assert "16,000 MB" in result.reason
+
+
+def test_assembly_descends_threads_to_fit():
+    params = _assembly_params(genome_bases=100_000_000, threads=16)
+    at_eight = replan_service._assembly_estimate({**params, "threads": 8})
+
+    result = replan_service.replan(
+        job_type=JOB_TYPE_ASSEMBLE,
+        params=params,
+        budget_mb=at_eight,
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.Proposal)
+    assert result.params["threads"] == 8
+    assert result.estimate_mb <= at_eight
