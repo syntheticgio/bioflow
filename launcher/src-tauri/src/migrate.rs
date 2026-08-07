@@ -50,6 +50,68 @@ pub fn has_sufficient_space(scan: &SourceScan, available_bytes: u64) -> bool {
     available_bytes >= scan.total_bytes.saturating_add(MIGRATION_SPACE_MARGIN_BYTES)
 }
 
+/// Recursively copies `source` into `dest`, creating `dest` if needed.
+/// Symlinks are recreated as symlinks (not followed/dereferenced) --
+/// matching `cp -a` semantics per the design spec, since a followed
+/// symlink could silently balloon the copy size or duplicate data that
+/// was deliberately shared on disk.
+///
+/// `on_progress` is called after each file (not directory, not symlink) is
+/// copied, with the cumulative byte count copied so far -- this is what
+/// drives the launcher UI's progress bar and the CLI script's terminal
+/// output.
+pub fn copy_tree(
+    source: &Path,
+    dest: &Path,
+    mut on_progress: impl FnMut(u64),
+) -> std::io::Result<()> {
+    let mut bytes_so_far = 0u64;
+    copy_dir_recursive(source, dest, &mut bytes_so_far, &mut on_progress)
+}
+
+fn copy_dir_recursive(
+    source: &Path,
+    dest: &Path,
+    bytes_so_far: &mut u64,
+    on_progress: &mut impl FnMut(u64),
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dest_path = dest.join(entry.file_name());
+
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dest_path, bytes_so_far, on_progress)?;
+        } else if file_type.is_symlink() {
+            copy_symlink(&src_path, &dest_path)?;
+        } else {
+            let bytes_copied = std::fs::copy(&src_path, &dest_path)?;
+            *bytes_so_far += bytes_copied;
+            on_progress(*bytes_so_far);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn copy_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
+    let target = std::fs::read_link(src)?;
+    std::os::unix::fs::symlink(target, dest)
+}
+
+#[cfg(not(unix))]
+fn copy_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
+    // The launcher targets macOS and Linux only (see
+    // launcher/src-tauri/tauri.macos.conf.json / tauri.linux.conf.json) --
+    // this arm exists only so the crate compiles on any other host during
+    // development; it is not a supported migration path.
+    std::fs::copy(src, dest).map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +157,54 @@ mod tests {
         let scan = SourceScan { file_count: 1, total_bytes: 1_000 };
         let available = scan.total_bytes + MIGRATION_SPACE_MARGIN_BYTES;
         assert!(has_sufficient_space(&scan, available));
+    }
+
+    #[test]
+    fn copies_a_flat_directory_and_reports_progress_per_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("a.txt"), b"12345").unwrap();
+        std::fs::write(source.join("b.txt"), b"1234567890").unwrap();
+
+        let mut progress_calls: Vec<u64> = Vec::new();
+        copy_tree(&source, &dest, |bytes_so_far| progress_calls.push(bytes_so_far)).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("a.txt")).unwrap(), b"12345");
+        assert_eq!(std::fs::read(dest.join("b.txt")).unwrap(), b"1234567890");
+        // One callback per file copied, cumulative, ending at the total.
+        assert_eq!(progress_calls.last(), Some(&15u64));
+    }
+
+    #[test]
+    fn copies_nested_directories_preserving_structure() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir_all(source.join("objects/ab")).unwrap();
+        std::fs::write(source.join("objects/ab/blob1"), b"hello").unwrap();
+
+        copy_tree(&source, &dest, |_| {}).unwrap();
+
+        assert_eq!(std::fs::read(dest.join("objects/ab/blob1")).unwrap(), b"hello");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn preserves_symlinks_rather_than_following_them() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("real.txt"), b"target").unwrap();
+        symlink(source.join("real.txt"), source.join("link.txt")).unwrap();
+        let dest = tmp.path().join("dest");
+
+        copy_tree(&source, &dest, |_| {}).unwrap();
+
+        let dest_link = dest.join("link.txt");
+        assert!(dest_link.symlink_metadata().unwrap().file_type().is_symlink());
     }
 }
