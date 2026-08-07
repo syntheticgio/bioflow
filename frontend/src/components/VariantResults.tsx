@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
+import { AiSummary } from "./AiSummary";
 import { DistributionChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
@@ -100,6 +101,16 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
               <SummaryRow summary={summary} />
             </div>
           )}
+
+          <AiSummary
+            facts={obj.facts}
+            objectId={obj.id}
+            fingerprint={obj.summary_fingerprint ?? undefined}
+            factPrefix="ai_variant_summary"
+            statusFn={() => api.variantSummaryStatus()}
+            launchFn={(id) => api.launchVariantSummary(id)}
+            emptyLabel="No summary yet for this file."
+          />
 
           {f.vcf_stats_density_bins && f.vcf_stats_density_bounds && (
             <div className="section">
