@@ -1656,8 +1656,9 @@ async def _apply_assess_assembly_qv(result: dict, *, owner: str) -> None:
     db_dir = Path(read_db_dir)
     job_id = result.get("job_id")
     k = result.get("k")
+    members = sorted(p for p in db_dir.rglob("*") if p.is_file())
     created = []
-    for member in sorted(p for p in db_dir.rglob("*") if p.is_file()):
+    for member in members:
         try:
             obj_out = await object_service.ingest_local_file(
                 owner=read_obj.owner,
@@ -1702,6 +1703,21 @@ async def _apply_assess_assembly_qv(result: dict, *, owner: str) -> None:
         files=len(created),
         k=k,
     )
+
+    if len(created) != len(members):
+        # Loud, because the alternative was measured on STAR: when every
+        # index file was dropped here, the build job still finished green
+        # and the failure only surfaced later as a downstream job reporting
+        # a missing index -- pointing at the wrong step. A meryl database
+        # that only partially cached is the same shape: the next run would
+        # symlink an incomplete directory and fail deep inside merqury.sh
+        # rather than here, where the actual cause is known.
+        log.error(
+            "meryl_db_partially_applied",
+            read_object_id=read_object_id,
+            produced=len(members),
+            stored=len(created),
+        )
 
 
 async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:

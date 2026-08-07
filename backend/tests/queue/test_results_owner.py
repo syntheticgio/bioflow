@@ -783,6 +783,48 @@ class TestApplyAssessAssemblyQV:
         sidecars = await object_service.list_sidecars(reads.id, owner=owner)
         assert sidecars == []
 
+    async def test_partial_ingest_stores_only_the_files_that_succeeded(
+        self, monkeypatch
+    ):
+        """One bad file among several must not silently look like a
+        complete cache. Adding STAR cost a build_index job all eight of its
+        index files while the suite stayed green, because nothing compared
+        what was produced against what actually got stored -- this asserts
+        the analogous case here: a partial ingest leaves fewer sidecars than
+        source files, observable rather than indistinguishable from success.
+        """
+        owner = "results-qv-g"
+        assembly = await _parent(owner, "draft.fasta")
+        reads = await _parent(owner, "reads.fastq.gz")
+        db_dir = _meryl_db_dir(num_files=3)
+
+        real_ingest = object_service.ingest_local_file
+        calls = {"n": 0}
+
+        async def _fail_second(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("disk full")
+            return await real_ingest(*args, **kwargs)
+
+        monkeypatch.setattr(object_service, "ingest_local_file", _fail_second)
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_qv": 30.0},
+                "read_db_dir": str(db_dir),
+                "read_object_id": str(reads.id),
+                "k": 21,
+            },
+            owner=owner,
+        )
+
+        refreshed_assembly = await DataObject.get(assembly.id)
+        assert refreshed_assembly.facts["assembly_qv"] == 30.0
+        sidecars = await object_service.list_sidecars(reads.id, owner=owner)
+        assert len(sidecars) == 2
+
     async def test_missing_read_object_is_logged_not_raised(self):
         """A read object that has since been deleted must not blow up the
         applier -- the facts merge on the assembly already committed."""
