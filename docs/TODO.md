@@ -259,6 +259,38 @@ overruns its prediction is not stopped -- see the spec for why cgroup
 enforcement (option 1 below) was rejected as the *default*; it survives as
 opt-in follow-up work.
 
+**The opt-in cgroup enforcement (option 1) shipped 2026-08-07 as
+[#72](https://github.com/syntheticgio/bioflow/issues/72):** design in
+`docs/superpowers/specs/2026-08-07-cgroup-hard-limits-design.md`, plan in
+`docs/superpowers/plans/2026-08-07-cgroup-hard-limits.md`. The setting lives
+in the Tauri launcher, not the web UI or `docker-compose.override.yml` --
+a cgroup limit applies at container creation, so changing it means
+recreating the container, and the API cannot recreate the container it runs
+inside. The launcher writes `BIOFLOW_HARD_MEM_LIMIT`/`BIOFLOW_HARD_MEM_MB` to
+`.env` and pins `WORKER_REPLICAS=1` (a limit is per-container; two replicas
+would double the effective wall). `governor.mem_budget_bytes()` already fell
+back to reading the cgroup, so admission picked up the ceiling automatically
+with no change -- confirmed against a real stack, not assumed.
+
+Two things beyond the original "configuration, not new code" framing: the
+web UI's soft admission budget is now clamped to the hard limit when one
+exists (`PUT /settings/resources` returns 422 above it), since an unclamped
+soft budget above a hard limit meant every admitted job got OOM-killed --
+the worst version of the feature. And exit 137 (SIGKILL) is terminal rather
+than retryable when a hard limit is set, since a job killed by an immovable
+ceiling dies identically on all `job_max_attempts`; the message now names
+the ceiling instead of guessing "most likely out of memory."
+
+Real end-to-end verification (bringing up a full stack via
+`./ops/worktree-up.sh`, not just unit tests) caught a bug none of the unit
+suites could see: Compose's `${BIOFLOW_HARD_MEM_MB:-}` always sets the env
+var, resolving to an empty string when no hard limit is configured -- the
+default state -- and pydantic-settings does not treat `""` as `None` for an
+`int | None` field. This crashed the `api` container at startup on every
+ordinary install. Fixed with a `field_validator` mapping `""` to `None`;
+every prior unit test had monkeypatched the already-parsed settings
+attribute directly, never exercising real pydantic-settings env parsing.
+
 **A narrower version of the concurrency bug remains, found during final
 review and filed as
 [#74](https://github.com/syntheticgio/bioflow/issues/74).** `claim.lua`
@@ -319,9 +351,9 @@ Touches: `backend/app/models/job.py`, `backend/app/queue/governor.py`,
 Remaining open issues:
 [#70](https://github.com/syntheticgio/bioflow/issues/70)
 (four-choice refusal card), [#71](https://github.com/syntheticgio/bioflow/issues/71)
-(auto re-plan), [#72](https://github.com/syntheticgio/bioflow/issues/72)
-(cgroup enforcement, opt-in), [#74](https://github.com/syntheticgio/bioflow/issues/74)
-(remaining cross-worker admission race).
+(auto re-plan), [#74](https://github.com/syntheticgio/bioflow/issues/74)
+(remaining cross-worker admission race). #72 (cgroup enforcement, opt-in)
+shipped -- see above.
 
 ---
 

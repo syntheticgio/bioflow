@@ -67,6 +67,11 @@ services:
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       <<: *backend-env
+      # For the admission-budget clamp only; `api` itself is NOT capped.
+      # It cannot read the worker's cgroup, and reading its own would return
+      # `max` and silently skip the clamp -- failing open exactly when a
+      # guarantee was requested.
+      BIOFLOW_HARD_MEM_MB: ${BIOFLOW_HARD_MEM_MB:-}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       # The api never *runs* a sibling container -- the worker does -- but it
@@ -132,6 +137,27 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    # Opt-in kernel-enforced ceiling. `0` (the default, and what an unset
+    # BIOFLOW_HARD_MEM_LIMIT resolves to) is Docker's own "no limit" value --
+    # matching `docker run --memory=0` -- not a sentinel this repo invented.
+    # An empty string was tried first and rejected: Compose v5's schema
+    # type-checks mem_limit as a byte-size field and errors on ''. `0` is the
+    # value Compose accepts that Docker already treats as unlimited, so
+    # off-by-default still costs no code -- the launcher simply omits the
+    # variable and this default fills in.
+    #
+    # If you are hand-editing .env: do not "fix" BIOFLOW_HARD_MEM_LIMIT=0 by
+    # replacing it with a small positive number thinking that is a safer
+    # minimum. 0 IS the correct off state, not a placeholder -- a small
+    # positive value here is a real, low ceiling that will OOM-kill the
+    # worker almost immediately.
+    #
+    # Worker only: capping `api` would put the web UI under an OOM ceiling,
+    # and a user who set the limit too low would lose the interface they need
+    # in order to raise it. (BIOFLOW_HARD_MEM_MB below, passed to `api`,
+    # defaults to plain empty string rather than `0` -- it is not a
+    # byte-size-typed field, so it has no equivalent parsing constraint.)
+    mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}
     deploy:
       replicas: ${WORKER_REPLICAS:-2}
     # The default 10s would SIGKILL mid-drain, stranding leases. Drain is 60s.

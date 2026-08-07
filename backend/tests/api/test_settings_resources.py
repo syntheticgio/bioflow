@@ -37,6 +37,11 @@ class TestGetLimits:
         assert body["machine_mem_mb"] > 0
         assert body["machine_cpu"] > 0
 
+    async def test_it_reports_the_hard_limit_when_one_is_configured(self, client, monkeypatch):
+        monkeypatch.setattr("app.config.settings.bioflow_hard_mem_mb", 16384)
+        resp = await client.get("/api/v1/settings/resources")
+        assert resp.json()["hard_mem_mb"] == 16384
+
 
 class TestPutLimits:
     async def test_it_stores_a_limit(self, client):
@@ -74,3 +79,22 @@ class TestPutLimits:
             json={"max_mem_mb": 0, "max_cpu": None, "max_threads": None},
         )
         assert resp.status_code == 422
+
+    async def test_it_rejects_a_soft_budget_above_the_hard_limit(self, client, monkeypatch):
+        """Without this, admission would approve a budget the kernel then
+        kills every job for -- the worst version of this feature."""
+        monkeypatch.setattr("app.config.settings.bioflow_hard_mem_mb", 16384)
+        resp = await client.put(
+            "/api/v1/settings/resources",
+            json={"max_mem_mb": 32768, "max_cpu": None, "max_threads": None},
+        )
+        assert resp.status_code == 422
+        assert "16384" in resp.json()["detail"]
+
+    async def test_a_soft_budget_below_the_hard_limit_is_accepted(self, client, monkeypatch):
+        monkeypatch.setattr("app.config.settings.bioflow_hard_mem_mb", 16384)
+        resp = await client.put(
+            "/api/v1/settings/resources",
+            json={"max_mem_mb": 8192, "max_cpu": None, "max_threads": None},
+        )
+        assert resp.status_code == 200

@@ -1741,6 +1741,8 @@ export interface ResourceLimits {
   max_threads: number | null;
   machine_mem_mb: number;
   machine_cpu: number;
+  /** Kernel-enforced ceiling, or null when hard limits are off. */
+  hard_mem_mb: number | null;
 }
 
 export interface ResourceLimitsIn {

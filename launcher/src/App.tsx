@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
-import { checkForUpdate, runStack, status, stopStack, updateStack } from "./commands";
+import { checkForUpdate, currentSettings, runStack, status, stopStack, updateStack } from "./commands";
 import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
@@ -28,14 +28,34 @@ export function App() {
   // skipped; there is no "ask again later" path back into it this session.
   const [showPrefetch, setShowPrefetch] = useState(false);
   // Populated once first-run setup completes (or, on a relaunch of an
-  // already-installed stack, left at these placeholders -- there is no
-  // command yet to read .env back out, since nothing before this needed
-  // to know the values outside of setup/settings themselves).
+  // already-installed stack, left at these placeholders until the mount
+  // effect below reads the hard memory limit back out of .env).
   const [settings, setSettings] = useState<SettingsValues>({
     storageLocation: "",
     port: 5173,
     networkExposed: false,
+    hardMemGb: "",
   });
+
+  // Runs once on mount to recover the hard memory limit from .env, since it
+  // is the one setting field that a relaunch cannot otherwise reconstruct
+  // (port/storage/network-exposed all come from run_first_setup's own
+  // return path or the fixed defaults). Only overwrites hardMemGb when a
+  // real value is found -- leaving the placeholder "" alone otherwise -- and
+  // this runs before Settings.tsx can ever be opened, so there is no race
+  // with a value the user is mid-typing there.
+  useEffect(() => {
+    let cancelled = false;
+    currentSettings().then(({ hardMemMb }) => {
+      if (cancelled) return;
+      if (hardMemMb != null) {
+        setSettings((prev) => ({ ...prev, hardMemGb: String(hardMemMb / 1024) }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

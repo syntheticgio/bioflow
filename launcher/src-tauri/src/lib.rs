@@ -32,6 +32,7 @@ pub fn run() {
       commands::start_storage_migration,
       commands::migration_progress,
       commands::finish_storage_migration,
+      commands::current_settings,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

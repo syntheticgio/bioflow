@@ -63,3 +63,33 @@ class TestDeepVariantImage:
         specific build must stay possible on either machine."""
         s = Settings(deepvariant_image="pinned/dv:9.9.9")
         assert s.deepvariant_image == "pinned/dv:9.9.9"
+
+
+class TestHardMemMbEmptyString:
+    """docker-compose.yml sets BIOFLOW_HARD_MEM_MB: ${BIOFLOW_HARD_MEM_MB:-} on
+    the api service unconditionally, so it always resolves to at least an
+    empty string when the launcher has not configured a hard limit -- the
+    default, off state. pydantic-settings does not treat '' as None for an
+    int field on its own, so without a validator, `Settings()` raises a
+    ValidationError and the api container fails to start at all.
+
+    Uses monkeypatch.setenv + a bare Settings() rather than
+    Settings(bioflow_hard_mem_mb=...) like the tests above: constructing the
+    field directly bypasses pydantic-settings' own env-var string parsing,
+    which is exactly the layer this bug lives in.
+    """
+
+    def test_empty_string_env_var_resolves_to_none(self, monkeypatch):
+        monkeypatch.setenv("BIOFLOW_HARD_MEM_MB", "")
+        s = Settings()
+        assert s.bioflow_hard_mem_mb is None
+
+    def test_real_integer_env_var_still_resolves(self, monkeypatch):
+        monkeypatch.setenv("BIOFLOW_HARD_MEM_MB", "16384")
+        s = Settings()
+        assert s.bioflow_hard_mem_mb == 16384
+
+    def test_unset_env_var_still_resolves_to_none(self, monkeypatch):
+        monkeypatch.delenv("BIOFLOW_HARD_MEM_MB", raising=False)
+        s = Settings()
+        assert s.bioflow_hard_mem_mb is None

@@ -4,11 +4,14 @@ Split from the model so the arithmetic is pure and testable without a worker
 or a host probe -- the same reason `worker.compute_free_resources` is pure.
 """
 
+from app.config import settings
 from app.models.base import utcnow
 from app.models.resource_limits import ResourceLimits
 
 
-def resolve_mem_budget_mb(*, stored_mb: int | None, machine_mb: int) -> int:
+def resolve_mem_budget_mb(
+    *, stored_mb: int | None, machine_mb: int, hard_mem_mb: int | None = None
+) -> int:
     """The memory ceiling admission should compute headroom against.
 
     A stored limit only ever *lowers* the budget. Typing 64 GB on a 16 GB
@@ -20,10 +23,30 @@ def resolve_mem_budget_mb(*, stored_mb: int | None, machine_mb: int) -> int:
     ceiling of nothing. A literal zero budget would admit no job ever and
     stall the queue with no error anywhere, which is the silent-failure shape
     this codebase already goes out of its way to avoid.
+
+    `hard_mem_mb` is the kernel-enforced cgroup ceiling when one is set. It
+    binds unconditionally: a soft budget above it would admit jobs the kernel
+    then kills, which is the worst available outcome. Below it is normal and
+    expected -- that is admission doing its job and the wall never being hit.
     """
-    if stored_mb is None or stored_mb <= 0:
-        return machine_mb
-    return min(stored_mb, machine_mb)
+    budget = machine_mb
+    if stored_mb is not None and stored_mb > 0:
+        budget = min(stored_mb, machine_mb)
+    if hard_mem_mb is not None and hard_mem_mb > 0:
+        budget = min(budget, hard_mem_mb)
+    return budget
+
+
+def hard_mem_mb() -> int | None:
+    """The kernel-enforced ceiling, or None when hard limits are off.
+
+    Reads the value the launcher passed in rather than a cgroup file: `api`
+    is deliberately uncapped, so its own cgroup reports `max`.
+    """
+    configured = settings.bioflow_hard_mem_mb
+    if configured is None or configured <= 0:
+        return None
+    return configured
 
 
 async def load() -> ResourceLimits:

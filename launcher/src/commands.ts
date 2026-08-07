@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LauncherState } from "./types";
+import { parseHardMemGb } from "./settings-logic";
 
 export function status(): Promise<LauncherState> {
   return invoke("status");
@@ -107,16 +108,32 @@ export function runFirstSetup(args: {
   });
 }
 
+export interface CurrentSettings {
+  hardMemMb: number | null;
+}
+
+// Reads back whatever settings can be recovered from .env on disk -- today
+// just the hard memory limit, since it's the only field the UI could not
+// otherwise reconstruct. See App.tsx's mount effect for why this exists.
+export function currentSettings(): Promise<CurrentSettings> {
+  return invoke<{ hard_mem_mb: number | null }>("current_settings").then((d) => ({
+    hardMemMb: d.hard_mem_mb,
+  }));
+}
+
 export function applySettings(args: {
   storageLocation: string;
   port: number;
   networkExposed: boolean;
+  hardMemGb: string;
 }): Promise<void> {
+  const hard = parseHardMemGb(args.hardMemGb);
   return invoke("apply_settings", {
     args: {
       storage_location: args.storageLocation,
       port: args.port,
       network_exposed: args.networkExposed,
+      hard_mem_mb: hard.kind === "set" ? hard.mb : null,
     },
   });
 }

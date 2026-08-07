@@ -439,6 +439,8 @@ pub struct ApplySettingsArgs {
     pub storage_location: String,
     pub port: u16,
     pub network_exposed: bool,
+    /// `None` when the user left the field blank -- no hard cap.
+    pub hard_mem_mb: Option<u32>,
 }
 
 /// `async`/`spawn_blocking` for the same reason as `run_stack` above --
@@ -457,6 +459,7 @@ pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs
         storage_location: PathBuf::from(args.storage_location),
         port: args.port,
         network_exposed: args.network_exposed,
+        hard_mem_mb: args.hard_mem_mb,
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -702,10 +705,21 @@ pub struct FinishStorageMigrationArgs {
 pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishStorageMigrationArgs) -> Result<(), String> {
     let install_dir = app.install_dir.lock().unwrap().clone().ok_or("not installed")?;
 
+    // The migration dialog carries no hard-limit control of its own, so this
+    // preserves whatever is already on disk rather than clobbering it on
+    // every migration -- same reasoning as apply_settings not being the
+    // place that introduces a limit change. Read directly rather than via
+    // the current_settings command, matching how the BIOINFO_HOME read above
+    // in start_storage_migration already treats .env as the source of truth.
+    let hard_mem_mb = std::fs::read_to_string(install_dir.join(".env"))
+        .ok()
+        .and_then(|contents| parse_hard_mem_mb(&contents));
+
     let settings = CurrentSettings {
         storage_location: PathBuf::from(args.new_location),
         port: args.port,
         network_exposed: args.network_exposed,
+        hard_mem_mb,
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -727,4 +741,79 @@ pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishS
     // stale relative to the file `apply` just wrote.
     *app.port.lock().unwrap() = Some(args.port);
     Ok(())
+}
+
+/// Reads `BIOFLOW_HARD_MEM_MB` out of a `.env` body.
+///
+/// Anything unparseable reads as `None` rather than erroring: a hand-edited
+/// `.env` must not stop the launcher from opening, and "no hard cap" is the
+/// safe reading of a value nobody can interpret.
+pub(crate) fn parse_hard_mem_mb(env_contents: &str) -> Option<u32> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOFLOW_HARD_MEM_MB="))
+        .and_then(|value| value.trim().parse().ok())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CurrentSettingsDto {
+    /// `None` when there is no install yet, or `.env` has no hard-limit line.
+    pub hard_mem_mb: Option<u32>,
+}
+
+/// Reads whatever settings can be recovered from `.env` on disk -- currently
+/// just the hard memory limit, since it is the only setting the UI could
+/// not otherwise reconstruct (port/storage/network-exposed all have
+/// separate flows already; see App.tsx's comment on why this didn't exist
+/// before this field needed it).
+#[tauri::command]
+pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSettingsDto, ()> {
+    let Some(install_dir) = install_dir_str(&app) else {
+        return Ok(CurrentSettingsDto { hard_mem_mb: None });
+    };
+
+    let hard_mem_mb = std::fs::read_to_string(std::path::Path::new(&install_dir).join(".env"))
+        .ok()
+        .and_then(|contents| parse_hard_mem_mb(&contents));
+
+    Ok(CurrentSettingsDto { hard_mem_mb })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_hard_mem_mb_back_from_env() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIOFLOW_HARD_MEM_MB=16384\n";
+        assert_eq!(parse_hard_mem_mb(env), Some(16384));
+    }
+
+    #[test]
+    fn absent_hard_mem_reads_as_no_limit() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\n";
+        assert_eq!(parse_hard_mem_mb(env), None);
+    }
+
+    #[test]
+    fn malformed_hard_mem_reads_as_no_limit() {
+        // A hand-edited .env should not stop the launcher from opening.
+        let env = "BIOFLOW_HARD_MEM_MB=not-a-number\n";
+        assert_eq!(parse_hard_mem_mb(env), None);
+    }
+
+    #[test]
+    fn round_trips_through_render_env() {
+        // Guards against settings::render_env's write format and this
+        // module's parse_hard_mem_mb silently drifting apart -- they agree
+        // by convention only, with no shared constant tying them together.
+        let settings = crate::settings::CurrentSettings {
+            storage_location: std::path::PathBuf::from("/data"),
+            port: 5173,
+            network_exposed: false,
+            hard_mem_mb: Some(16384),
+        };
+        let env = crate::settings::render_env(&settings, &[]);
+        assert_eq!(parse_hard_mem_mb(&env), Some(16384));
+    }
 }

@@ -88,9 +88,14 @@ export function SettingsResources() {
   }
 
   const machineMemGb = (limits.data.machine_mem_mb / MB_PER_GB).toFixed(1);
+  const hardMemMb = limits.data.hard_mem_mb;
+  const hardMemGb = hardMemMb == null ? null : (hardMemMb / MB_PER_GB).toFixed(1);
+  const overHardLimit =
+    hardMemMb != null && !noLimit && parseFloat(memGb || "0") * MB_PER_GB > hardMemMb;
   const invalidMem =
-    !noLimit &&
-    (memGb.trim() === "" || Number.isNaN(parseFloat(memGb)) || parseFloat(memGb) <= 0);
+    (!noLimit &&
+      (memGb.trim() === "" || Number.isNaN(parseFloat(memGb)) || parseFloat(memGb) <= 0)) ||
+    overHardLimit;
 
   return (
     <div className="settings-page">
@@ -108,6 +113,7 @@ export function SettingsResources() {
           type="number"
           min="0"
           step="0.5"
+          max={hardMemMb == null ? undefined : hardMemMb / MB_PER_GB}
           value={memGb}
           disabled={noLimit}
           onChange={(e) => setMemGb(e.target.value)}
@@ -125,11 +131,27 @@ export function SettingsResources() {
         </span>
       </label>
 
-      <p className="settings-hint">
-        BioFlow will not start work it expects to exceed this. A job that ends
-        up using more than predicted is not stopped -- this is an admission
-        check on new work, not a running cap.
-      </p>
+      {hardMemGb == null ? (
+        <p className="settings-hint">
+          BioFlow will not start work it expects to exceed this. A job that ends
+          up using more than predicted is not stopped -- this is an admission
+          check on new work, not a running cap. No hard cap is enforced.
+        </p>
+      ) : (
+        <p className="settings-hint">
+          A hard limit of {hardMemGb} GB is enforced on this machine: a job that
+          exceeds it is killed and loses its work. This budget is the softer
+          check that keeps jobs from reaching that limit, and cannot be set
+          above it. Change the hard limit in the BioFlow launcher.
+        </p>
+      )}
+
+      {overHardLimit && (
+        <p className="settings-hint settings-hint-warn">
+          This budget is above the {hardMemGb} GB hard limit. Jobs admitted
+          above the limit would be killed by the kernel.
+        </p>
+      )}
 
       <div className="settings-actions">
         <button onClick={() => save.mutate()} disabled={save.isPending || invalidMem}>
