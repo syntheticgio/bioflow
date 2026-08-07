@@ -52,6 +52,7 @@ def compute_free_resources(
     cpu_budget: int,
     mem_mb: int,
     reserved_cpu: int,
+    reserved_mem: int,
     reserved_io_heavy: int,
     in_flight: int,
 ) -> dict:
@@ -64,26 +65,31 @@ def compute_free_resources(
 
     The defence is the `in_flight` clamp. Reservations are cluster-wide, but a
     worker also knows how many jobs it is actually running, and a single worker
-    cannot be responsible for more reserved CPU than the jobs it holds. Taking
-    the smaller of the two means a leaked counter costs at most the capacity of
-    the jobs genuinely in flight, and an idle worker always recovers full
-    headroom no matter what the counters claim.
+    cannot be responsible for more reserved capacity than the jobs it holds.
+    Taking the smaller of the two means a leaked counter costs at most the
+    capacity of the jobs genuinely in flight, and an idle worker always
+    recovers full headroom no matter what the counters claim.
 
     At least 1 CPU is always offered so a fully-reserved queue still drains
-    rather than deadlocking against its own bookkeeping.
+    rather than deadlocking against its own bookkeeping. Memory has no such
+    floor: offering a phantom megabyte would admit a job that does not fit,
+    which is the failure this exists to prevent, and `claim.lua` compares
+    `mem <= mem_free` so zero simply admits nothing until something releases.
     """
     if in_flight == 0:
         # Nothing running here, so nothing this worker reserved can still be
         # outstanding. This is the line that makes a leak self-healing.
         effective_cpu_reserved = 0
+        effective_mem_reserved = 0
         effective_io_reserved = 0
     else:
         effective_cpu_reserved = reserved_cpu
+        effective_mem_reserved = reserved_mem
         effective_io_reserved = reserved_io_heavy
 
     return {
         "cpu": max(cpu_budget - effective_cpu_reserved, 1),
-        "mem_mb": mem_mb,
+        "mem_mb": max(mem_mb - effective_mem_reserved, 0),
         "io_heavy": max(IO_HEAVY_LIMIT - effective_io_reserved, 0),
     }
 
@@ -253,6 +259,7 @@ class Worker:
             cpu_budget=int(cpu_budget),
             mem_mb=max(min(available_mb, budget_mb), 128),
             reserved_cpu=reserved["cpu"],
+            reserved_mem=reserved["mem_mb"],
             reserved_io_heavy=reserved["io_heavy"],
             in_flight=len(self._running),
         )
@@ -266,14 +273,17 @@ class Worker:
         """
         try:
             values = await get_redis().mget(
-                keys.conc_key("cpu"), keys.conc_key("io_heavy")
+                keys.conc_key("cpu"),
+                keys.conc_key("mem_mb"),
+                keys.conc_key("io_heavy"),
             )
         except Exception as e:  # noqa: BLE001 - dispatch must survive a Redis blip
             log.warning("reservation_read_failed", error=str(e))
-            return {"cpu": 0, "io_heavy": 0}
+            return {"cpu": 0, "mem_mb": 0, "io_heavy": 0}
         return {
             "cpu": _as_int(values[0]),
-            "io_heavy": _as_int(values[1]),
+            "mem_mb": _as_int(values[1]),
+            "io_heavy": _as_int(values[2]),
         }
 
     async def _start_job(self, claimed) -> None:
