@@ -84,11 +84,20 @@ def build_gci_command(
 def parse_gci(text: str) -> dict[str, float | int]:
     """Parse GCI's `<prefix>.gci` summary.
 
-    Tab-separated with a header row, one row per chromosome plus a
-    whole-assembly aggregate row labeled `"Genome"`. Only the `Genome` row
-    is read; per-chromosome rows are skipped regardless of where they fall
-    in the file, the same `parts[0] != "Genome"` filter
-    `craq_runner.parse_final_report` uses for its own whole-assembly row.
+    Verified against a real run: GCI v1.0 on the Zenodo `example.tar.gz`
+    dataset (`GCI.py -r MH63.fasta --hifi ... -o MH63`) writes a leading
+    chemistry label line (`"HiFi:"` or `"ONT:"`), then a tab-separated
+    header row, one row per chromosome, the whole-assembly `"Genome"`
+    aggregate row, and a trailing line of dashes. Only the `Genome` row is
+    read. The label line and the per-chromosome rows are skipped by the
+    same `fields[0] != "Genome"` filter `craq_runner.parse_final_report`
+    uses for its own whole-assembly row (the label line's single field
+    never equals `"Genome"` either); the trailing dash line is skipped by
+    the `len(fields) < 6` check since it has no tabs at all. Column
+    headers read "Theoretical maximum N50" / "Curated N50" / "Theoretical
+    minimum contigs number" / "Curated contigs number" / "GCI score" in
+    the real output, not the README's prose names, but header text is
+    never parsed -- only column position -- so this is cosmetic.
 
     Counts and N50s parse as int, the continuity index as float. Asserting
     the type rather than the value is what catches the class of bug QUAST's

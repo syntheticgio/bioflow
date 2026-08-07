@@ -162,6 +162,51 @@ def test_parse_gci_raises_with_context_on_non_numeric_field():
         gci_runner.parse_gci(text)
 
 
+def test_parse_gci_matches_real_zenodo_example_output():
+    """Fixture captured verbatim from a real GCI v1.0 run against upstream's
+    own example dataset (Zenodo record 12748594, `example.tar.gz`):
+
+        GCI.py -r MH63.fasta \
+            --hifi MH63_winnowmap_hifi.subsample.bam MH63.minimap2_hifi.subsample.paf \
+            -d out -o MH63
+
+    Byte-identical to the `MH63.gci` shipped in the tarball. Confirms the
+    parser survives the leading `"HiFi:"` chemistry label line and the
+    trailing dash separator that upstream's prose description omits.
+    """
+    text = (
+        "HiFi:\n"
+        "Chromosome\tTheoretical maximum N50\tCurated N50\t"
+        "Theoretical minimum contigs number\tCurated contigs number\tGCI score\n"
+        "Chr01_MH63\t45027022\t266013\t1\t65\t0.1406\n"
+        "Chr02_MH63\t37301368\t282516\t1\t74\t0.1748\n"
+        "Chr03_MH63\t39893253\t216310\t1\t64\t0.1295\n"
+        "Chr04_MH63\t37319239\t266049\t1\t75\t0.164\n"
+        "Chr05_MH63\t31307418\t261452\t1\t62\t0.2007\n"
+        "Chr06_MH63\t31921180\t292575\t1\t77\t0.2094\n"
+        "Chr07_MH63\t30877072\t306329\t1\t76\t0.2273\n"
+        "Chr08_MH63\t30492302\t282597\t1\t68\t0.2179\n"
+        "Chr09_MH63\t24892599\t208687\t1\t75\t0.1928\n"
+        "Chr10_MH63\t25690566\t284384\t1\t69\t0.2591\n"
+        "Chr11_MH63\t34100580\t295041\t1\t72\t0.2008\n"
+        "Chr12_MH63\t26942889\t237900\t1\t73\t0.2042\n"
+        "Genome\t31921180\t259735\t12\t850\t0.1896\n"
+        "----------------------------------------------------------------"
+        "----------------------------------------------------------------"
+        "------------------------\n"
+    )
+    parsed = gci_runner.parse_gci(text)
+    assert parsed == {
+        "assembly_continuity_expected_n50": 31921180,
+        "assembly_continuity_observed_n50": 259735,
+        "assembly_continuity_expected_contigs": 12,
+        "assembly_continuity_observed_contigs": 850,
+        "assembly_continuity_gci": pytest.approx(0.1896),
+    }
+    assert isinstance(parsed["assembly_continuity_expected_n50"], int)
+    assert isinstance(parsed["assembly_continuity_gci"], float)
+
+
 def test_build_gci_command_raises_when_no_bam_at_all():
     """Reaching the command builder with neither BAM slot set is a caller
     bug -- the same invariant `craq_runner.build_craq_command` enforces for
