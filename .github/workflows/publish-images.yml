@@ -59,19 +59,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # These self-hosted runners are launchd LaunchAgents with SessionCreate:
-    # true, which puts every job in its own macOS security session rather
-    # than the interactive login session. The default `credsStore: desktop`
-    # in ~/.docker/config.json then fails to save the ghcr.io login with
-    # "error saving credentials ... User interaction is not allowed.
-    # (-25308)" -- Keychain refuses to grant a cross-session credential
-    # write without a prompt, and a background session can't answer one.
-    # Point Docker at a config scoped to this job instead of the shared
-    # user config: no credsStore means the token goes in this throwaway
-    # file in plaintext, in a directory the runner deletes after the job,
-    # rather than through the keychain at all.
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/docker-config
     strategy:
       fail-fast: false
       matrix:
@@ -94,7 +81,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: mkdir -p "$DOCKER_CONFIG"
+      # These self-hosted runners are launchd LaunchAgents with SessionCreate:
+      # true, which puts every job in its own macOS security session rather
+      # than the interactive login session. The default `credsStore: desktop`
+      # in ~/.docker/config.json then fails to save the ghcr.io login with
+      # "error saving credentials ... User interaction is not allowed.
+      # (-25308)" -- Keychain refuses to grant a cross-session credential
+      # write without a prompt, and a background session can't answer one.
+      # Point Docker at a config scoped to this job instead of the shared
+      # user config: no credsStore means the token goes in this throwaway
+      # file in plaintext, in a directory the runner deletes after the job,
+      # rather than through the keychain at all. `runner.temp` is only valid
+      # inside a step, not a job-level `env:` -- exported to $GITHUB_ENV here
+      # so every later step in this job inherits it without repeating it.
+      - name: Scope Docker's config to this job
+        run: |
+          mkdir -p "${RUNNER_TEMP}/docker-config"
+          echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
 
       # A fixed builder name plus keep-state is what makes layer caching work
       # on self-hosted runners: the BuildKit state volume survives the job, so
@@ -165,12 +168,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    # See the identical comment on the build job: launchd's SessionCreate
-    # isolation means the shared ~/.docker/config.json's keychain-backed
-    # credsStore can't save a login here, so this job gets its own
-    # throwaway, plaintext config instead.
-    env:
-      DOCKER_CONFIG: ${{ runner.temp }}/docker-config
     strategy:
       fail-fast: false
       matrix:
@@ -182,7 +179,15 @@ jobs:
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
 
-      - run: mkdir -p "$DOCKER_CONFIG"
+      # See the identical comment on the build job: launchd's SessionCreate
+      # isolation means the shared ~/.docker/config.json's keychain-backed
+      # credsStore can't save a login here, so this job gets its own
+      # throwaway, plaintext config instead. `runner.temp` is only valid
+      # inside a step, so this exports to $GITHUB_ENV for later steps.
+      - name: Scope Docker's config to this job
+        run: |
+          mkdir -p "${RUNNER_TEMP}/docker-config"
+          echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
