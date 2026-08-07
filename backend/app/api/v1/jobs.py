@@ -253,7 +253,28 @@ async def get_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
             size = obj.size if obj and obj.owner == owner else 0
         if size:
             out["timing_estimate"] = await timing_service.estimate(job.type, size)
+            # The raw model output stays, for the diagnostics view that shows
+            # sample counts and fit quality. `resolution` is what the launch
+            # dialog reads: the number actually used, and which layer produced
+            # it. `heuristic_mb=None` because this endpoint has no run
+            # structure to derive one from -- so an untrustworthy measurement
+            # resolves to UNKNOWN here rather than silently to coefficients.
             out["memory_estimate"] = await timing_service.estimate_memory(job.type, size)
+            from app.services import memory_estimate
+
+            resolved = await memory_estimate.resolve(
+                job_type=job.type,
+                input_bytes=size,
+                heuristic_mb=None,
+            )
+            out["memory_estimate_resolution"] = {
+                "mb": resolved.mb,
+                "source": resolved.source.value,
+                "detail": resolved.detail,
+                "samples": resolved.samples,
+                "r_squared": resolved.r_squared,
+                "fell_back_from_measured": resolved.fell_back_from_measured,
+            }
 
         # eta_seconds is not timing_estimate's replacement: the estimate
         # describes what runs of this type usually cost, this is a single
