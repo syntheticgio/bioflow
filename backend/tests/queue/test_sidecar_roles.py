@@ -31,3 +31,11 @@ class TestSidecarRoleMapping:
         string no enum member matches is a handler bug, and silently coercing
         it would store a sidecar nothing knows how to find again."""
         assert results._SIDECAR_ROLES.get("not-a-real-index") is None
+
+    def test_meryl_db_is_a_known_sidecar_role(self):
+        """A meryl database built from a read set is scaffolding, not something
+        a person opens -- the same category as a BWA index. Absent from
+        _SIDECAR_ROLES it would be silently skipped at ingest, which is how
+        STAR's index lost all eight of its files while the suite stayed green.
+        """
+        assert SidecarRole.MERYL_DB.value in results._SIDECAR_ROLES
