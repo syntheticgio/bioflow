@@ -335,3 +335,36 @@ need a real run in this image:
   meryl, which is winnowmap's only unusual dependency. See the GCI design
   ([#65](https://github.com/syntheticgio/bioflow/issues/65)), where that
   matters.
+
+## Closeout, shipped 2026-08-07
+
+Implemented per plan; see `docs/TODO.md`'s "Merqury k-mer QV assessment
+shipped, 2026-08-07" entry for the full list of what a real run against
+S. cerevisiae R64 + DRR1066343 found and fixed. The "Verify before
+implementing" section above resolved as follows:
+
+- **The arm64 tarball runs here, once vendored libraries are added.** The
+  binary itself is arm64-native, but it links against OpenSSL 1.1
+  (`libssl.so.1.1`/`libcrypto.so.1.1`), which Debian trixie's own archive no
+  longer carries at all -- not a naming issue, a genuinely removed package.
+  Fixed with a Dockerfile multi-stage `COPY --from=debian:bullseye-slim`
+  vendoring just those two `.so` files (still available via Debian's
+  security archive), plus `libcurl4t64`/`libgomp1` from trixie's own apt
+  (both present normally, no vendoring needed). Not anticipated by this
+  design; found and fixed during Task 1's hard verification gate.
+- **Read-db build cost, measured:** 8531324928 bytes (~8.14 GiB) peak RSS,
+  5m50s wall time, for DRR1066343's 23.7 billion input bases (21.4M reads)
+  against S. cerevisiae's ~12 Mb genome. `mem_mb` set to 12288 (headroom
+  over the measured peak), not the original 16384 placeholder. The cache's
+  complexity is justified by this number alone: a second QV run against a
+  different assembly from the same reads confirmed the cache hit skips the
+  entire `meryl count` step.
+- **The `.qv` and `completeness.stats` column layouts were correct as
+  designed** -- unlike CRAQ's slice, no parser fix was needed here.
+  `parse_qv`/`parse_completeness` matched real output exactly on the first
+  real run.
+- **`merqury.sh` did not fail on R/headless grounds.** It failed instead on
+  an unanticipated meryl-version incompatibility in its own k-detection
+  logic -- see the TODO.md entry's second bullet. The headless-`ggsave`
+  concern this section flagged never materialized; the R plotting step ran
+  fine once k-detection was fixed.
