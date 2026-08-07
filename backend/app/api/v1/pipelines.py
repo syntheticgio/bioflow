@@ -324,6 +324,40 @@ async def get_organism_blurb(organism: str, refresh: bool = False) -> OrganismBl
     return OrganismBlurbOut(organism=blurb.organism, text=blurb.text, model=blurb.model)
 
 
+class FailureExplanationOut(BaseModel):
+    text: str
+    model: str | None = None
+
+
+@router.get("/failure-explanation", response_model=FailureExplanationOut | None)
+async def get_failure_explanation(code: str, message: str) -> FailureExplanationOut | None:
+    """A plain-language explanation of a job error, from cache or freshly
+    generated.
+
+    Mirrors get_organism_blurb exactly: returns null rather than 404 when
+    there is nothing to say -- no provider configured and a model that
+    produced nothing are both ordinary states for this decorative field.
+
+    Deliberately *not* owner-scoped, same reasoning as get_organism_blurb:
+    there is one provider routing for the whole machine, and the
+    explanation depends only on the error text, not on who is looking at
+    it -- two profiles hitting the identical tool crash should share the
+    one generation.
+
+    GET with query params rather than the POST-with-body shape
+    /pipelines/summary uses: this is a read (cache lookup, generating only
+    on a miss) with no side effect the caller directs, matching
+    /pipelines/organism/{organism}'s shape more closely than the job-launch
+    endpoints'.
+    """
+    from app.services import failure_explanation_service
+
+    explanation = await failure_explanation_service.get_or_generate(code, message)
+    if explanation is None:
+        return None
+    return FailureExplanationOut(text=explanation.text, model=explanation.model)
+
+
 @router.get("/qc/report/{object_id}/{report_path:path}")
 async def get_qc_report(
     object_id: PydanticObjectId, report_path: str, owner: LinkableOwnerDep

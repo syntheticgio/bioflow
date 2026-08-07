@@ -592,6 +592,20 @@ export const api = {
       `/pipelines/organism/${encodeURIComponent(organism)}`,
     ),
 
+  /**
+   * A plain-language explanation of a job error, from cache or freshly
+   * generated. Returns null when there is no provider configured or the
+   * model produced nothing -- both ordinary states, not an error for a
+   * decorative field.
+   *
+   * Cached server-side per (code, message) pair, so re-explaining the same
+   * underlying error on a different job is an indexed read.
+   */
+  failureExplanation: (code: string, message: string) =>
+    request<{ text: string; model: string | null } | null>(
+      `/pipelines/failure-explanation?code=${encodeURIComponent(code)}&message=${encodeURIComponent(message)}`,
+    ),
+
   /** Queue a narrative summary of a file's QC data and metadata. */
   launchSummary: (objectId: string) =>
     request<JobSummary>("/pipelines/summary", {
