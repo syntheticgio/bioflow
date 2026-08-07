@@ -10,10 +10,33 @@ NOW_MS = 1_767_300_000_000
 LEASE_MS = 30_000
 
 
-async def claim(scripts, *, worker="w1", classes=ALL_CLASSES, cpu=8, mem=8192, io=2, limit=50):
+async def claim(
+    scripts,
+    *,
+    worker="w1",
+    classes=ALL_CLASSES,
+    cpu=8,
+    mem=8192,
+    io=2,
+    limit=50,
+    ignore_reservations=False,
+):
+    """cpu/mem/io are budgets, not precomputed free amounts: claim.lua reads
+    the live bp:conc:* counters itself and subtracts them from these ceilings
+    as part of its own atomic execution."""
     return await scripts["claim"](
         keys=["bp:q:ready", "bp:q:running"],
-        args=[NOW_MS, LEASE_MS, worker, classes, cpu, mem, io, limit],
+        args=[
+            NOW_MS,
+            LEASE_MS,
+            worker,
+            classes,
+            cpu,
+            mem,
+            io,
+            limit,
+            "1" if ignore_reservations else "0",
+        ],
     )
 
 
@@ -106,6 +129,42 @@ class TestResourceGating:
     async def test_zero_cost_jobs_always_fit(self, scripts, job_factory):
         await job_factory("free", cpu=0, mem_mb=0)
         assert (await claim(scripts, cpu=0, mem=0))[0] == "free"
+
+
+class TestLiveReservationRead:
+    """The fix for #74: claim.lua reads bp:conc:* live instead of trusting a
+    caller-supplied free value computed moments earlier."""
+
+    async def test_a_reservation_written_after_the_caller_computed_its_budget_is_still_honoured(
+        self, redis, scripts, job_factory
+    ):
+        """The caller's budget argument is the raw ceiling (8192), same as if
+        nothing were reserved yet. If claim.lua trusted that number instead of
+        reading the counter itself, this job would wrongly be admitted."""
+        await job_factory("job1", mem_mb=6144)
+        await redis.set("bp:conc:mem_mb", 6000)  # reserved by "another worker" after budgeting
+
+        assert await claim(scripts, mem=8192) is None
+
+    async def test_ignore_reservations_skips_the_live_read(self, redis, scripts, job_factory):
+        """The in-flight self-healing clamp: an idle worker's own reservations
+        cannot still be outstanding, so it is told to disregard the counter
+        entirely rather than have it read (correctly) as leaked capacity."""
+        await job_factory("job1", mem_mb=6144)
+        await redis.set("bp:conc:mem_mb", 99999)
+
+        result = await claim(scripts, mem=8192, ignore_reservations=True)
+        assert result is not None
+        assert result[0] == "job1"
+
+    async def test_a_negative_counter_is_not_read_as_extra_capacity(
+        self, redis, scripts, job_factory
+    ):
+        await job_factory("job1", mem_mb=100)
+        await redis.set("bp:conc:mem_mb", -50)
+
+        result = await claim(scripts, mem=0)
+        assert result is None, "a negative counter must clamp to zero reserved, not add headroom"
 
 
 class TestExactlyOnceClaiming:

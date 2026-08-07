@@ -185,13 +185,14 @@ class Worker:
         if self._local_governor is not None and not self._local_governor.may_admit_now():
             return None
 
-        free = await self._free_resources()
+        budgets = await self._resource_budgets()
         claimed = await queue.claim(
             self.worker_id,
             allowed_classes=sorted(allowed),
-            cpu_free=free["cpu"],
-            mem_mb_free=free["mem_mb"],
-            io_heavy_free=free["io_heavy"],
+            cpu_budget=budgets["cpu"],
+            mem_mb_budget=budgets["mem_mb"],
+            io_heavy_budget=budgets["io_heavy"],
+            ignore_reservations=len(self._running) == 0,
         )
         if claimed is not None and self._local_governor is not None:
             self._local_governor.record_admission()
@@ -229,18 +230,15 @@ class Worker:
             )
         return self._starvation_cached
 
-    async def _free_resources(self) -> dict:
-        """Capacity headroom this worker will admit against.
+    async def _resource_budgets(self) -> dict:
+        """The ceiling to admit against, before any reservation is subtracted.
 
         Budgets come from the governor, which reads cgroup limits where Docker
-        sets them and falls back to the VM's own resources otherwise.
-
-        Reserved amounts come from the `bp:conc:*` counters that `claim.lua`
-        maintains, not from a count of running jobs. The counters are what the
-        reservation actually is: with every handler declaring cpu=1 the two
-        agreed, but `trim_reads` and `align_reads` declare the user's thread
-        count, so a 16-thread alignment and a single-CPU job are the same
-        number to a count and very different to the machine.
+        sets them and falls back to the VM's own resources otherwise. This is
+        the pre-reservation number: claim.lua subtracts the live `bp:conc:*`
+        counters from it atomically as part of claiming, so no reservation
+        arithmetic belongs here -- see _free_resources for the analogous
+        Python-side computation used for logging and non-claim callers.
         """
         if self._local_governor is not None:
             cpu_budget = self._local_governor.cpu_budget()
@@ -253,10 +251,11 @@ class Worker:
         # the ceiling -- see resource_limit_service.resolve_mem_budget_mb.
         #
         # This is the entire enforcement path for the setting: `claim.lua`
-        # already refuses any candidate whose declared mem_mb exceeds
-        # mem_mb_free, so a smaller ceiling here *is* the limit taking effect.
-        # A read failure falls back to the machine budget rather than stalling
-        # dispatch, matching _read_reservations' policy for the same reason.
+        # already refuses any candidate whose declared mem_mb exceeds the
+        # live-computed free amount, so a smaller ceiling here *is* the limit
+        # taking effect. A read failure falls back to the machine budget
+        # rather than stalling dispatch, matching _read_reservations' policy
+        # for the same reason.
         machine_mb = int(mem_budget / (1024 * 1024))
         try:
             stored = await resource_limit_service.load()
@@ -274,10 +273,33 @@ class Worker:
         # slightly overshoots its declared demand does not push into swap.
         budget_mb = int(budget_source_mb * 0.7)
 
+        return {
+            "cpu": int(cpu_budget),
+            "mem_mb": max(min(available_mb, budget_mb), 128),
+            "io_heavy": IO_HEAVY_LIMIT,
+        }
+
+    async def _free_resources(self) -> dict:
+        """Capacity headroom this worker will admit against.
+
+        Reserved amounts come from the `bp:conc:*` counters that `claim.lua`
+        maintains, not from a count of running jobs. The counters are what the
+        reservation actually is: with every handler declaring cpu=1 the two
+        agreed, but `trim_reads` and `align_reads` declare the user's thread
+        count, so a 16-thread alignment and a single-CPU job are the same
+        number to a count and very different to the machine.
+
+        This is a Python-side estimate for logging and callers other than
+        claiming: it reads reservations one round trip before use, which is
+        exactly the staleness window claim.lua closes for the actual claim by
+        reading the same counters live inside its own atomic execution
+        instead. See _try_claim, which calls _resource_budgets directly.
+        """
+        budgets = await self._resource_budgets()
         reserved = await self._read_reservations()
         return compute_free_resources(
-            cpu_budget=int(cpu_budget),
-            mem_mb=max(min(available_mb, budget_mb), 128),
+            cpu_budget=budgets["cpu"],
+            mem_mb=budgets["mem_mb"],
             reserved_cpu=reserved["cpu"],
             reserved_mem=reserved["mem_mb"],
             reserved_io_heavy=reserved["io_heavy"],
