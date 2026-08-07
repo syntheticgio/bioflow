@@ -42,6 +42,10 @@ const BUNDLED_COMPOSE_RESOURCE: &str = "docker-compose.yml";
 pub struct LauncherApp {
     pub install_dir: Mutex<Option<PathBuf>>,
     pub port: Mutex<Option<u16>>,
+    /// Shared with the background migration thread spawned by
+    /// `start_storage_migration`; `migration_progress` polls this. `None`
+    /// until a migration has been started at least once this session.
+    pub migration_progress: std::sync::Arc<Mutex<Option<crate::migrate::MigrationProgress>>>,
 }
 
 impl Default for LauncherApp {
@@ -49,6 +53,7 @@ impl Default for LauncherApp {
         Self {
             install_dir: Mutex::new(None),
             port: Mutex::new(None),
+            migration_progress: std::sync::Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -491,4 +496,97 @@ pub async fn install_optional_tool(image: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "phase")]
+pub enum MigrationPhaseDto {
+    Scanning,
+    Copying,
+    Validating,
+    Removing,
+    Complete,
+}
+
+impl From<crate::migrate::MigrationPhase> for MigrationPhaseDto {
+    fn from(phase: crate::migrate::MigrationPhase) -> Self {
+        match phase {
+            crate::migrate::MigrationPhase::Scanning => Self::Scanning,
+            crate::migrate::MigrationPhase::Copying => Self::Copying,
+            crate::migrate::MigrationPhase::Validating => Self::Validating,
+            crate::migrate::MigrationPhase::Removing => Self::Removing,
+            crate::migrate::MigrationPhase::Complete => Self::Complete,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MigrationProgressDto {
+    pub phase: MigrationPhaseDto,
+    pub bytes_copied: u64,
+    pub total_bytes: u64,
+}
+
+impl From<crate::migrate::MigrationProgress> for MigrationProgressDto {
+    fn from(p: crate::migrate::MigrationProgress) -> Self {
+        Self {
+            phase: p.phase.into(),
+            bytes_copied: p.bytes_copied,
+            total_bytes: p.total_bytes,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StartStorageMigrationArgs {
+    pub new_location: String,
+    pub keep_original: bool,
+    pub validate_by_hash: bool,
+}
+
+/// Kicks off the migration on a background thread and returns immediately
+/// -- unlike every other blocking command in this file, this one is not
+/// `async`/`spawn_blocking`-and-await, because the frontend needs to poll
+/// `migration_progress` *while* the copy is still running, not receive a
+/// single result at the end. The spawned thread writes into
+/// `app.migration_progress` as it goes; `finish_storage_migration` (a
+/// second command) is what the frontend calls once `migration_progress`
+/// reports `Complete`, to perform the `.env` rewrite + stack restart this
+/// function deliberately does not do itself (see `run_migration`'s doc
+/// comment in migrate.rs on why that split exists).
+///
+/// Errors from a failed migration are not returned here (the call returns
+/// before the migration finishes) -- they are surfaced through
+/// `migration_progress`'s stored error field instead. See Step 3 below,
+/// which extends `MigrationProgress`'s DTO with an optional error.
+#[tauri::command]
+pub fn start_storage_migration(app: State<'_, LauncherApp>, args: StartStorageMigrationArgs) {
+    let source = app.install_dir.lock().unwrap().clone();
+    // The storage location, not the install dir, is what's being migrated
+    // -- callers must have already resolved the *current* BIOINFO_HOME via
+    // the same settings the Settings dialog reads. See MigrateStorage.tsx
+    // (Task 9) for how the frontend supplies this.
+    let _ = source; // placeholder wiring resolved fully in Task 7 below.
+    let dest = PathBuf::from(args.new_location);
+    let options = crate::migrate::MigrationOptions {
+        keep_original: args.keep_original,
+        validate_by_hash: args.validate_by_hash,
+    };
+    let progress_handle = std::sync::Arc::clone(&app.migration_progress);
+
+    std::thread::spawn(move || {
+        // Filled in fully by Task 7, which resolves the real source path
+        // from CurrentSettings rather than install_dir. This task's job is
+        // the command plumbing and progress polling; Task 7 wires the real
+        // source/dest/env-rewrite sequence end to end.
+        let _ = (dest, options, progress_handle);
+    });
+}
+
+/// Polled by the frontend (see `App.tsx`'s existing `status` polling for
+/// the pattern) while a migration is in flight. Returns `None` if no
+/// migration has been started yet this session.
+#[tauri::command]
+pub fn migration_progress(app: State<'_, LauncherApp>) -> Option<MigrationProgressDto> {
+    app.migration_progress.lock().unwrap().clone().map(Into::into)
 }
