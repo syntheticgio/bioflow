@@ -31,6 +31,20 @@ log = get_logger(__name__)
 # Below this, report no estimate. Five points is the minimum at which a slope
 # means anything; the UI says how many more are needed.
 MIN_SAMPLES = 5
+
+# Guards on trusting the measured model over the heuristic. Both are judgment
+# calls rather than derived values -- the same honesty resource_estimator's
+# module docstring practices about its own coefficients.
+#
+# A pure extrapolation check is not enough on its own. `_fit_memory` falls back
+# to a flat model, and memory genuinely is flat in input size for many tools
+# (the reference or index dominates). A flat model extrapolates fine: 14 GB
+# regardless of input is still 14 GB at 10x the input. A model with a real
+# slope, fit on five scattered test rows, does not -- and both report the same
+# factor_beyond. r_squared is what separates them.
+MAX_EXTRAPOLATION_FACTOR = 2.0
+MIN_R_SQUARED = 0.5
+
 # Only recent runs: hardware and code both change over time.
 MAX_SAMPLES = 200
 OUTLIER_FACTOR = 3.0
