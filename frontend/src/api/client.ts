@@ -536,7 +536,7 @@ export const api = {
     ),
 
   deSummaryStatus: () =>
-    request<{ available: boolean; reason?: string; model?: string; provider_name?: string }>(
+    request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
       "/pipelines/de-summary/status"
     ),
   launchDeSummary: (objectId: string) =>
@@ -545,7 +545,7 @@ export const api = {
       body: JSON.stringify({ object_id: objectId }),
     }),
   variantSummaryStatus: () =>
-    request<{ available: boolean; reason?: string; model?: string; provider_name?: string }>(
+    request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
       "/pipelines/variant-summary/status"
     ),
   launchVariantSummary: (objectId: string) =>
