@@ -227,8 +227,56 @@ def _propose_align(*, params: dict, budget_mb: int, cpu_budget: float) -> Replan
             )
         )
 
-    # Descent lands in the next task.
-    return NoKnobs()
+    # Stage two. Descend the cheaper knob first: halving the sort buffer costs
+    # some I/O, halving threads costs wall-clock roughly proportionally.
+    sort_mb = original_sort_mb
+    threads = baseline_threads
+
+    while True:
+        current = {**params, "threads": threads, "sort_memory_mb": sort_mb}
+        if _align_estimate(current) <= budget_mb:
+            break
+
+        if sort_mb > MIN_SORT_MEMORY_MB:
+            sort_mb = max(MIN_SORT_MEMORY_MB, sort_mb // 2)
+            continue
+
+        # Sort buffer is at its floor; threads are the only knob left. Halve
+        # rather than decrement: the terms are linear in threads, so a linear
+        # scan buys nothing but iterations.
+        if threads > thread_floor:
+            threads = max(thread_floor, threads // 2)
+            continue
+
+        # Unreachable: the feasibility test above already proved the floor
+        # configuration fits. Kept because a future knob added to the descent
+        # without updating that test would otherwise loop forever.
+        return Infeasible(
+            f"No configuration within the available settings fits the "
+            f"{budget_mb:,} MB budget."
+        )
+
+    changes = []
+    if threads != original_threads:
+        changes.append(Change(name="threads", before=original_threads, after=threads))
+    if sort_mb != original_sort_mb:
+        changes.append(
+            Change(name="sort_memory_mb", before=original_sort_mb, after=sort_mb)
+        )
+
+    if not changes:
+        # Nothing needed to move -- the configuration already fits. Callers
+        # reach this only if they asked for a re-plan of a job that was not
+        # actually refused.
+        return NoKnobs()
+
+    final = {**params, "threads": threads, "sort_memory_mb": sort_mb}
+    return Proposal(
+        params=final,
+        estimate_mb=_align_estimate(final),
+        changes=changes,
+        note=note,
+    )
 
 
 _PROPOSERS[JOB_TYPE_ALIGN_READS] = _propose_align

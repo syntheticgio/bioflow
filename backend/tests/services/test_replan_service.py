@@ -141,3 +141,72 @@ def test_thread_floor_prevents_an_absurd_single_threaded_proposal():
     )
 
     assert isinstance(result, replan_service.Infeasible)
+
+
+def test_sort_buffer_descends_before_threads():
+    """A job that fits by halving the sort buffer keeps all its threads.
+
+    Halving the sort buffer costs some I/O; halving threads costs wall-clock
+    roughly proportionally. The cheaper knob has to move first.
+    """
+    # 8 threads x 1024 MB sort = 8192 MB of sort buffer alone (of a 12,944 MB
+    # total). Budget set to exactly the halved-sort estimate, 8,848 MB: it
+    # fits the aligner side plus a reduced sort buffer, but not the full one.
+    params = _align_params(reference_bases=100_000_000, threads=8, sort_memory_mb=1024)
+    full = replan_service._align_estimate(params)
+    halved = replan_service._align_estimate({**params, "sort_memory_mb": 512})
+
+    result = replan_service.replan(
+        job_type=JOB_TYPE_ALIGN_READS,
+        params=params,
+        budget_mb=halved,  # exactly fits the halved-sort configuration
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.Proposal)
+    assert result.params["threads"] == 8, "threads must not move when sort alone fits"
+    assert result.params["sort_memory_mb"] < 1024
+    assert result.estimate_mb <= halved
+    assert full > halved  # guards the fixture's own premise
+
+
+def test_hundred_thread_request_is_clamped_to_core_count():
+    """The case issue #71 as written would have refused.
+
+    A floor of "half the original" would put this at 50 threads, which does not
+    fit, reporting infeasible. Halving the post-clamp baseline gives a floor of
+    8 instead, and the descent finds a fit before reaching it.
+
+    Verified arithmetic: clamped to 16 threads the estimate is 25,232 MB,
+    still over the 16,000 MB budget, so the sort buffer descends 1024 -> 512
+    -> 256, at which point it fits. Threads therefore land at exactly the
+    clamp, and the sort buffer moves too.
+    """
+    result = replan_service.replan(
+        job_type=JOB_TYPE_ALIGN_READS,
+        params=_align_params(reference_bases=100_000_000, threads=100),
+        budget_mb=16_000,
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.Proposal)
+    assert result.params["threads"] == 16, "clamped to the core count"
+    assert result.params["sort_memory_mb"] == 256
+    assert result.estimate_mb <= 16_000
+    assert "16 cores" in result.note
+    names = {c.name for c in result.changes}
+    assert names == {"threads", "sort_memory_mb"}
+
+
+def test_proposal_records_before_and_after_for_each_moved_knob():
+    result = replan_service.replan(
+        job_type=JOB_TYPE_ALIGN_READS,
+        params=_align_params(reference_bases=100_000_000, threads=100),
+        budget_mb=16_000,
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.Proposal)
+    threads_change = next(c for c in result.changes if c.name == "threads")
+    assert threads_change.before == 100
+    assert threads_change.after == result.params["threads"]
