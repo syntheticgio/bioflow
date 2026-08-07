@@ -18,7 +18,7 @@ from app.pipelines import tool_cache
 from app.queue import governor, keys, queue
 from app.queue.executor import JobExecutor
 from app.queue.registry import JobContext, get_handler, load_handlers
-from app.services import run_service
+from app.services import resource_limit_service, run_service
 
 log = get_logger(__name__)
 
@@ -249,10 +249,30 @@ class Worker:
             cpu_budget = float(psutil.cpu_count() or 4)
             mem_budget = psutil.virtual_memory().total
 
+        # The user's admission budget, if they set one. It only ever lowers
+        # the ceiling -- see resource_limit_service.resolve_mem_budget_mb.
+        #
+        # This is the entire enforcement path for the setting: `claim.lua`
+        # already refuses any candidate whose declared mem_mb exceeds
+        # mem_mb_free, so a smaller ceiling here *is* the limit taking effect.
+        # A read failure falls back to the machine budget rather than stalling
+        # dispatch, matching _read_reservations' policy for the same reason.
+        machine_mb = int(mem_budget / (1024 * 1024))
+        try:
+            stored = await resource_limit_service.load()
+            budget_source_mb = resource_limit_service.resolve_mem_budget_mb(
+                stored_mb=stored.max_mem_mb, machine_mb=machine_mb
+            )
+            if stored.max_cpu:
+                cpu_budget = min(cpu_budget, stored.max_cpu)
+        except Exception as e:  # noqa: BLE001 - dispatch must survive a DB blip
+            log.warning("resource_limits_read_failed", error=str(e))
+            budget_source_mb = machine_mb
+
         available_mb = int(psutil.virtual_memory().available / (1024 * 1024))
         # Never hand out the last of memory: leave headroom so a job that
         # slightly overshoots its declared demand does not push into swap.
-        budget_mb = int(mem_budget / (1024 * 1024) * 0.7)
+        budget_mb = int(budget_source_mb * 0.7)
 
         reserved = await self._read_reservations()
         return compute_free_resources(
