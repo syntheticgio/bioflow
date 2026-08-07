@@ -1454,31 +1454,45 @@ async def launch_alignment(
     index_status = await reference_index_status(reference)
     building = not index_status.get(aligner.value) or not index_status.get("fai")
 
-    estimate = resource_estimator.estimate_mb(
+    heuristic_mb = resource_estimator.estimate_mb(
         aligner=aligner,
         reference_bases=reference.size or 0,
         threads=align_params.threads,
         sort_memory_mb=align_params.sort_memory_mb,
         building_index=building,
     )
-    band = resource_estimator.classify(
-        estimated_mb=estimate,
-        mem_budget_mb=mem_budget_mb,
-        threads=align_params.threads,
-        cpu_budget=governor.cpu_budget(),
+    resolved = await memory_estimate.resolve(
+        job_type=JOB_TYPE_ALIGN_READS,
+        input_bytes=obj.size or None,
+        heuristic_mb=heuristic_mb,
     )
-    if band is resource_estimator.Band.BLOCK:
-        raise ValidationError(
-            resource_estimator.explain(
-                aligner=aligner,
-                reference_bases=reference.size or 0,
-                threads=align_params.threads,
-                sort_memory_mb=align_params.sort_memory_mb,
-                building_index=building,
-                mem_budget_mb=mem_budget_mb,
-            ),
-            details={"estimate_mb": estimate, "budget_mb": mem_budget_mb},
+    estimate = resolved.mb
+    # UNKNOWN cannot arise here (the heuristic always answers for an
+    # alignment), but classifying None would be a crash rather than a refusal.
+    if estimate is not None:
+        band = resource_estimator.classify(
+            estimated_mb=estimate,
+            mem_budget_mb=mem_budget_mb,
+            threads=align_params.threads,
+            cpu_budget=governor.cpu_budget(),
         )
+        if band is resource_estimator.Band.BLOCK:
+            raise ValidationError(
+                resource_estimator.explain(
+                    aligner=aligner,
+                    reference_bases=reference.size or 0,
+                    threads=align_params.threads,
+                    sort_memory_mb=align_params.sort_memory_mb,
+                    building_index=building,
+                    mem_budget_mb=mem_budget_mb,
+                    provenance=resolved.detail,
+                ),
+                details={
+                    "estimate_mb": estimate,
+                    "budget_mb": mem_budget_mb,
+                    "estimate_source": resolved.source.value,
+                },
+            )
 
     mate: DataObject | None = None
     if paired:
