@@ -13,3 +13,27 @@ services:
   web:
     ports: !override
       - "${WT_WEB_PORT:-5273}:80"
+
+  # docker-compose.yml bind-mounts mongo/redis to a single fixed host path
+  # (~/.bioflow) for the one real installation. That path has no per-project
+  # namespacing, so left alone every worktree stack would point at the exact
+  # same directory as the main stack and as each other -- breaking
+  # ops/worktree-up.sh's mongodump/mongorestore seeding and its
+  # `compose down -v` cleanup, with real corruption risk if two mongod
+  # processes ever pointed at the same WiredTiger files concurrently. These
+  # overrides restore the isolated, project-namespaced named volumes that
+  # worktree stacks relied on before that change. See
+  # docs/superpowers/specs/2026-08-07-mongo-redis-bioflow-home-design.md.
+  mongo:
+    volumes: !override
+      - mongo-data:/data/db
+      - ./ops/mongo-init:/docker-entrypoint-initdb.d:ro
+
+  redis:
+    volumes: !override
+      - redis-data:/data
+      - ./ops/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+volumes:
+  mongo-data:
+  redis-data:

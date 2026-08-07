@@ -8,6 +8,7 @@ provide. `aligners.materialize` is the shared answer, and these are its callers.
 Imported by `handlers.py` for the `@handler` registration side effects.
 """
 
+import gzip
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -125,6 +126,35 @@ def _star_scratch(work: Path, name: str) -> Path:
     shutil.rmtree(scratch, ignore_errors=True)
     scratch.mkdir(parents=True, exist_ok=True)
     return scratch
+
+
+def _is_gzip(path: Path) -> bool:
+    """Sniff the gzip magic bytes rather than trusting the `.gz` suffix.
+
+    NCBI assemblies are downloaded and stored compressed, but the object's
+    stored name is a user-facing label, not a format guarantee -- registered
+    or renamed files can carry a mismatched extension.
+    """
+    with open(path, "rb") as handle:
+        return handle.read(2) == b"\x1f\x8b"
+
+
+def _ensure_uncompressed(path: Path, dest_dir: Path) -> Path:
+    """STAR's `genomeGenerate` reads FASTA/GTF as plain text, unlike every
+    other aligner here, which accepts gzip transparently. `materialize`
+    symlinks blobs under their stored name with no format conversion, so a
+    gzip-compressed reference or annotation -- the normal case for anything
+    downloaded from NCBI -- reaches STAR unusable and it fails with an
+    "is not fasta" or GTF-parsing error thousands of reads into what looks
+    like a routine index build.
+    """
+    if not _is_gzip(path):
+        return path
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    out = dest_dir / path.with_suffix("").name
+    with gzip.open(path, "rb") as src, open(out, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    return out
 
 
 def _fai_geometry(fai: Path) -> tuple[int, int]:
@@ -284,15 +314,20 @@ def build_index(ctx: JobContext) -> dict:
             Aligner.STAR, annotated=annotated
         ).directory_name(ref.reference.name)
         genome_length, contigs = _fai_geometry(fai)
+        star_scratch = _star_scratch(work, "index")
+        star_reference = _ensure_uncompressed(ref.reference, work / "star-input")
+        star_gtf = (
+            _ensure_uncompressed(gtf, work / "star-input") if gtf is not None else None
+        )
         cmd = align_runner.build_star_index_command(
             tool_path=index_tool.path,
-            reference=ref.reference,
+            reference=star_reference,
             genome_dir=genome_dir,
             threads=ctx.payload.get("threads") or 4,
             genome_length=genome_length,
             contigs=contigs,
-            scratch=_star_scratch(work, "index"),
-            gtf=gtf,
+            scratch=star_scratch,
+            gtf=star_gtf,
         )
         # STAR requires the directory to exist before it will write into it,
         # unlike every other builder here, which creates its own output.

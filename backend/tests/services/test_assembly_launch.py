@@ -202,6 +202,7 @@ class TestLaunchReachesTheQueue:
             project_id=PydanticObjectId(),
             owner="local",
             blob_sha256="a" * 64,
+            size=None,
         )
 
     async def test_a_hifi_fastq_reaches_the_queue_with_a_valid_run(self):

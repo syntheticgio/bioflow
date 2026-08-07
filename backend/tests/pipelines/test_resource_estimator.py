@@ -183,3 +183,33 @@ class TestExplain:
         lower = msg.lower()
         assert "sort" not in lower
         assert "aligner itself" in lower
+
+
+class TestExplainProvenance:
+    def test_provenance_clause_is_appended_when_given(self):
+        """The user is told which model produced the number they are about to
+        override. Without it, 'Estimated 14 GB' from coefficients and from 23
+        measured runs are indistinguishable, and they justify very different
+        confidence."""
+        text = est.explain(
+            aligner=Aligner.BWA_MEM2,
+            reference_bases=3_000_000_000,
+            threads=8,
+            sort_memory_mb=1024,
+            building_index=False,
+            mem_budget_mb=16384,
+            provenance="from 23 previous runs on this machine",
+        )
+        assert "from 23 previous runs on this machine" in text
+
+    def test_omitting_provenance_leaves_the_message_unchanged(self):
+        """Existing callers pass nothing and must be unaffected."""
+        kwargs = dict(
+            aligner=Aligner.BWA_MEM2,
+            reference_bases=3_000_000_000,
+            threads=8,
+            sort_memory_mb=1024,
+            building_index=False,
+            mem_budget_mb=16384,
+        )
+        assert est.explain(**kwargs) == est.explain(**kwargs, provenance="")

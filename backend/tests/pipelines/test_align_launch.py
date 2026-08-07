@@ -404,8 +404,8 @@ class TestDeclaredMemory:
     HUMAN_BASES = 3_100_000_000
     YEAST_BASES = 12_000_000
 
-    def test_star_reserves_far_more_than_the_old_flat_8gb(self):
-        mem = pipeline_service.declared_align_mem_mb(
+    async def test_star_reserves_far_more_than_the_old_flat_8gb(self):
+        mem = await pipeline_service.declared_align_mem_mb(
             aligner=Aligner.STAR,
             reference_bases=self.HUMAN_BASES,
             threads=4,
@@ -416,7 +416,7 @@ class TestDeclaredMemory:
         assert mem > 8192
         assert mem > 25_000
 
-    def test_star_reserves_more_than_bwa_for_the_same_genome(self):
+    async def test_star_reserves_more_than_bwa_for_the_same_genome(self):
         """The comparison the flat number could not express. Both were 8192
         before, so the governor could not tell them apart."""
         common = dict(
@@ -425,14 +425,18 @@ class TestDeclaredMemory:
             sort_memory_mb=1024,
             building_index=False,
         )
-        star = pipeline_service.declared_align_mem_mb(aligner=Aligner.STAR, **common)
-        bwa = pipeline_service.declared_align_mem_mb(aligner=Aligner.BWA_MEM2, **common)
+        star = await pipeline_service.declared_align_mem_mb(
+            aligner=Aligner.STAR, **common
+        )
+        bwa = await pipeline_service.declared_align_mem_mb(
+            aligner=Aligner.BWA_MEM2, **common
+        )
         assert star > bwa * 3
 
-    def test_a_small_genome_reserves_less_than_the_old_flat_8gb(self):
+    async def test_a_small_genome_reserves_less_than_the_old_flat_8gb(self):
         """The other direction, which is what stops one yeast alignment from
         occupying the budget for four."""
-        mem = pipeline_service.declared_align_mem_mb(
+        mem = await pipeline_service.declared_align_mem_mb(
             aligner=Aligner.BWA_MEM2,
             reference_bases=self.YEAST_BASES,
             threads=2,
@@ -441,10 +445,10 @@ class TestDeclaredMemory:
         )
         assert mem < 8192
 
-    def test_a_floor_applies_when_the_reference_size_is_unknown(self):
+    async def test_a_floor_applies_when_the_reference_size_is_unknown(self):
         """`reference.size` can be missing, and an estimate near zero would
         let the governor admit the job alongside everything else."""
-        mem = pipeline_service.declared_align_mem_mb(
+        mem = await pipeline_service.declared_align_mem_mb(
             aligner=Aligner.BWA_MEM2,
             reference_bases=0,
             threads=1,
@@ -453,7 +457,7 @@ class TestDeclaredMemory:
         )
         assert mem == pipeline_service.MIN_DECLARED_MEM_MB
 
-    def test_building_an_index_reserves_more_than_loading_one(self):
+    async def test_building_an_index_reserves_more_than_loading_one(self):
         """The multiplier is why the two jobs declare different numbers, and
         is most of the reason bowtie2 and HISAT2 need their own figure."""
         common = dict(
@@ -462,10 +466,10 @@ class TestDeclaredMemory:
             threads=4,
             sort_memory_mb=1024,
         )
-        building = pipeline_service.declared_align_mem_mb(
+        building = await pipeline_service.declared_align_mem_mb(
             building_index=True, **common
         )
-        loading = pipeline_service.declared_align_mem_mb(
+        loading = await pipeline_service.declared_align_mem_mb(
             building_index=False, **common
         )
         assert building > loading
