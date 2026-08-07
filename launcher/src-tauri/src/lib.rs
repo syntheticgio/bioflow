@@ -1,6 +1,7 @@
 pub mod actions;
 pub mod commands;
 pub mod docker;
+pub mod migrate;
 pub mod optional_tools;
 pub mod settings;
 pub mod setup;
