@@ -338,7 +338,7 @@ async def launch_de_summary(body: SummaryRequest, owner: OwnerDep) -> JobOut:
     )
     if job is None:
         raise ConflictError(
-            "Summaries are disabled or this result has nothing to summarize",
+            "Summaries are disabled or this file has nothing to summarize",
             details={"object_id": str(body.object_id)},
         )
     return JobOut.of(job)
