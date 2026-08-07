@@ -44,6 +44,7 @@ from app.pipelines import (
     assemblers,
     assembly_qc_registry,
     counts_runner,
+    csq_parse,
     cutadapt_runner,
     de_runner,
     fastp_runner,
@@ -478,18 +479,34 @@ async def launch_qc(*, object_id: PydanticObjectId, owner: str):
 # --- Narrative summaries ----------------------------------------------------
 
 
+# Prefixes of the bookkeeping keys each summary applier writes onto
+# obj.facts (the narrative, model name, timestamp, and the fingerprint
+# itself). One shared function computes the dedup fingerprint for all three
+# summary kinds, so it has to exclude all three prefixes -- missing one means
+# that once its applier lands, its own bookkeeping keys become part of the
+# material the next fingerprint is computed from, so the "unchanged inputs"
+# case can never match again and force=False stops deduping forever. Add a
+# prefix here whenever a new summary_fingerprint()-based dedup check is added.
+_SUMMARY_FACT_PREFIXES = ("ai_summary", "ai_de_summary", "ai_variant_summary")
+
+
 def summary_fingerprint(obj: DataObject) -> str:
     """A digest of the inputs a summary would be written from.
 
-    Covers facts and metadata but deliberately excludes the `ai_summary_*` keys
-    themselves -- otherwise writing a summary would change the fingerprint that
-    describes what it summarized, and every summary would be born stale.
+    Covers facts and metadata but deliberately excludes the summary
+    bookkeeping keys themselves (see `_SUMMARY_FACT_PREFIXES`) -- otherwise
+    writing a summary would change the fingerprint that describes what it
+    summarized, and every summary would be born stale.
     """
     import hashlib
     import json
 
     material = {
-        "facts": {k: v for k, v in obj.facts.items() if not k.startswith("ai_summary")},
+        "facts": {
+            k: v
+            for k, v in obj.facts.items()
+            if not k.startswith(_SUMMARY_FACT_PREFIXES)
+        },
         "metadata": obj.metadata,
         "role": obj.role.value if obj.role else None,
     }
@@ -578,6 +595,181 @@ async def launch_summary(
     if job is not None:
         log.info("summary_launched", job_id=str(job.id), object_id=str(obj.id))
     return job
+
+
+async def launch_de_summary(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    force: bool = False,
+) -> Job | None:
+    """Queue a narrative summary of a differential-expression result.
+
+    Same "additive, both no's are ordinary" contract as launch_summary. The
+    top-gene table is read from the DE results TSV rather than facts, since
+    facts holds aggregate counts only -- de_runner.read_results() is the same
+    reader ExpressionResults' gene-table endpoint already uses. Resolving the
+    file goes through object_service.object_with_blob(), the same
+    blob/external-path resolution the results-table route uses; DataObject has
+    no storage_path attribute of its own.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not settings.llm_summaries_enabled:
+        return None
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    if obj.role != ObjectRole.DE_RESULTS:
+        return None
+
+    facts = {k: v for k, v in obj.facts.items() if not k.startswith("ai_de_summary")}
+    fingerprint = summary_fingerprint(obj)
+    if not force and obj.facts.get("ai_de_summary_fingerprint") == fingerprint:
+        return None
+
+    significant_up = facts.get("significant_up") or 0
+    significant_down = facts.get("significant_down") or 0
+    top_genes: list[dict] = []
+    if significant_up or significant_down:
+        _, blob = await object_service.object_with_blob(object_id, owner=owner)
+        if blob is not None:
+            target = (
+                Path(blob.external_path)
+                if blob.storage is BlobStorage.EXTERNAL and blob.external_path
+                else blob_path(obj.blob_sha256)
+            )
+            if target.is_file():
+                rows = de_runner.read_results(target)
+                sorted_rows = de_runner.sort_rows(rows, sort="padj", direction="asc")
+                top_genes = [
+                    {
+                        "gene": row.get("gene") or None,
+                        "log2fc": row.get("log2_fold_change"),
+                        "padj": row.get("padj"),
+                    }
+                    for row in sorted_rows[:20]
+                ]
+
+    if not significant_up and not significant_down and not top_genes:
+        return None
+
+    payload = {
+        "object_id": str(obj.id),
+        "facts": facts,
+        "top_genes": top_genes,
+        "facts_fingerprint": fingerprint,
+    }
+
+    dedup = f"de_summary:{obj.id}:{fingerprint}"
+    if force:
+        from uuid import uuid4
+
+        dedup = f"{dedup}:{uuid4().hex[:8]}"
+
+    job = await queue.enqueue(
+        "summarize_de_results",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.USER_BACKGROUND,
+        resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=dedup,
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is not None:
+        log.info("de_summary_launched", job_id=str(job.id), object_id=str(obj.id))
+    return job
+
+
+async def launch_variant_summary(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    force: bool = False,
+) -> Job | None:
+    """Queue a narrative summary of a VCF's call-set statistics.
+
+    Same contract as launch_de_summary. The top-N-by-severity variant list
+    comes from `facts["severe_variants"]`, populated by run_vcf_stats -- see
+    _top_severe_variants.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not settings.llm_summaries_enabled:
+        return None
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    facts = {k: v for k, v in obj.facts.items() if not k.startswith("ai_variant_summary")}
+    variant_count = (facts.get("vcf_stats_summary") or {}).get("variants") or 0
+
+    fingerprint = summary_fingerprint(obj)
+    if not force and obj.facts.get("ai_variant_summary_fingerprint") == fingerprint:
+        return None
+
+    top_variants = _top_severe_variants(facts)
+
+    if not variant_count and not top_variants:
+        return None
+
+    payload = {
+        "object_id": str(obj.id),
+        "facts": facts,
+        "top_variants": top_variants,
+        "facts_fingerprint": fingerprint,
+    }
+
+    dedup = f"variant_summary:{obj.id}:{fingerprint}"
+    if force:
+        from uuid import uuid4
+
+        dedup = f"{dedup}:{uuid4().hex[:8]}"
+
+    job = await queue.enqueue(
+        "summarize_variant_results",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.USER_BACKGROUND,
+        resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=dedup,
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is not None:
+        log.info("variant_summary_launched", job_id=str(job.id), object_id=str(obj.id))
+    return job
+
+
+def _top_severe_variants(facts: dict, limit: int = 20) -> list[dict]:
+    """The variant rows facts already carries, ranked by consequence severity.
+
+    Reads from `facts["severe_variants"]` -- populated by run_vcf_stats
+    alongside consequence_counts, one row per variant with a consequence in
+    csq_parse.SEVERITY_ORDER, capped there at the same limit this function
+    also respects. Nothing here re-parses the VCF. Absent (Task 7 not yet
+    run, or an older object predating it), this simply returns [].
+
+    The severity vocabulary lives in csq_parse.py, not here: it must match
+    the consequence strings parse_bcsq actually returns (bcftools csq's own
+    "missense"/"stop_gained"/... vocabulary), and csq_parse is the only
+    place that produces those strings.
+    """
+    rows = facts.get("severe_variants")
+    if not isinstance(rows, list):
+        return []
+
+    def rank(row: dict) -> int:
+        consequence = row.get("consequence")
+        try:
+            return csq_parse.SEVERITY_ORDER.index(consequence)
+        except ValueError:
+            return len(csq_parse.SEVERITY_ORDER)
+
+    ranked = sorted(rows, key=rank)
+    return ranked[:limit]
 
 
 def _params_fingerprint(params: dict) -> str:

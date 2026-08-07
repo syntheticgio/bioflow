@@ -9,6 +9,7 @@ DRR1066343.bcftools.vcf.gz (6,641 variants, 17 contigs, S. cerevisiae).
 from pathlib import Path
 
 from app.pipelines.vcf_stats_runner import (
+    ConsequenceAccumulator,
     DensityAccumulator,
     build_query_command,
     build_stats_command,
@@ -356,3 +357,68 @@ class TestDensityAccumulator:
         assert row["variants"] == 1
         assert row["snps"] == 0
         assert row["indels"] == 0
+
+
+class TestConsequenceAccumulator:
+    def test_consequence_counts_tally_every_parsed_record(self):
+        acc = ConsequenceAccumulator()
+        acc.add(chrom="chr1", pos=10, bcsq="missense|GENE1|rna-1|protein_coding|+|1K>1M|1A>T")
+        acc.add(chrom="chr1", pos=20, bcsq="missense|GENE2|rna-2|protein_coding|+|2K>2M|2A>T")
+        acc.add(chrom="chr1", pos=30, bcsq="synonymous|GENE1|rna-1|protein_coding|+|3P|3A>T")
+        assert acc.consequence_counts() == {"missense": 2, "synonymous": 1}
+
+    def test_records_with_no_consequence_are_not_counted(self):
+        """'.' (unannotated) and '@123' (haplotype pointer only) hold no
+        consequence at all -- they must not appear in the counts."""
+        acc = ConsequenceAccumulator()
+        acc.add(chrom="chr1", pos=10, bcsq=".")
+        acc.add(chrom="chr1", pos=20, bcsq="@123")
+        acc.add(chrom="chr1", pos=30, bcsq=None)
+        assert acc.consequence_counts() == {}
+        assert acc.severe_variants() == []
+
+    def test_severe_variants_are_capped_at_twenty_and_ranked_by_severity(self):
+        """A VCF with more than 20 stop-gained/frameshift/missense calls
+        should not hand the summary prompt an unbounded list."""
+        acc = ConsequenceAccumulator()
+        # 25 missense calls, weakest severity rank kept in this test.
+        for i in range(25):
+            acc.add(
+                chrom="chr1",
+                pos=1000 + i,
+                bcsq=f"missense|GENE{i}|rna-{i}|protein_coding|+|1K>1M|1A>T",
+            )
+        # One frameshift, strictly more severe than missense -- must survive
+        # the cap even though it arrives last.
+        acc.add(
+            chrom="chr1",
+            pos=9999,
+            bcsq="frameshift|GENEFS|rna-fs|protein_coding|+",
+        )
+
+        severe = acc.severe_variants()
+        assert len(severe) == 20
+        assert severe[0]["consequence"] == "frameshift"
+        assert severe[0]["gene"] == "GENEFS"
+        assert severe[0]["position"] == "chr1:9999"
+        for row in severe:
+            assert set(row) == {"gene", "position", "consequence"}
+
+    def test_a_variant_with_no_gene_annotation_is_still_included(self):
+        """Intergenic variants must reach the prompt builder's fallback
+        path, not be silently dropped at the source."""
+        acc = ConsequenceAccumulator()
+        acc.add(chrom="chr3", pos=555, bcsq="stop_gained||rna-1|protein_coding|+")
+        severe = acc.severe_variants()
+        assert len(severe) == 1
+        assert severe[0]["gene"] is None
+        assert severe[0]["consequence"] == "stop_gained"
+        assert severe[0]["position"] == "chr3:555"
+
+    def test_a_consequence_outside_severity_order_is_counted_but_not_severe(self):
+        """synonymous is real and countable, but not on the severe list --
+        it must not silently occupy one of the 20 severe-list slots."""
+        acc = ConsequenceAccumulator()
+        acc.add(chrom="chr1", pos=1, bcsq="synonymous|GENE1|rna-1|protein_coding|+|1P|1A>T")
+        assert acc.consequence_counts() == {"synonymous": 1}
+        assert acc.severe_variants() == []

@@ -448,11 +448,20 @@ def run_vcf_stats(ctx: JobContext) -> dict:
         for name, length in (ctx.payload.get("contig_lengths") or [])
     ]
     density = vcf_stats_runner.DensityAccumulator(contig_lengths=contig_lengths)
+    consequences = vcf_stats_runner.ConsequenceAccumulator()
     filter_counts: dict[str, int] = {}
 
     def _rows():
-        """One pass: every line reaches the database, the density bins and
-        the FILTER tally without the file being read three times."""
+        """One pass: every line reaches the database, the density bins, the
+        FILTER tally, and the consequence/severe-variant accumulator without
+        the file being read more than once.
+
+        Field 6 (index 6) is BCSQ -- ahead of the repeating sample block, see
+        QUERY_FORMAT's docstring in vcf_stats_runner.py -- and present
+        whether or not the VCF was annotated: an un-annotated file's rows
+        carry "." there via bcftools query's -u flag, which parse_bcsq (and
+        so ConsequenceAccumulator.add) already treats as "no consequence".
+        """
         with open(query_path, errors="replace") as fh:
             for line in fh:
                 parts = line.rstrip("\n").split("\t")
@@ -464,6 +473,7 @@ def run_vcf_stats(ctx: JobContext) -> dict:
                     continue
                 filter_counts[parts[5]] = filter_counts.get(parts[5], 0) + 1
                 density.add(parts[0], pos, ref=parts[2], alt=parts[3])
+                consequences.add(chrom=parts[0], pos=pos, bcsq=parts[6])
                 yield line
 
     ctx.progress(phase="index", pct=0.7, message="building the variant index")
@@ -504,6 +514,8 @@ def run_vcf_stats(ctx: JobContext) -> dict:
         "vcf_stats_contigs": density.contigs(),
         "vcf_stats_report": "variants.tsv",
         "vcf_stats_db": "variants.db",
+        "consequence_counts": consequences.consequence_counts(),
+        "severe_variants": consequences.severe_variants(),
     }
 
     log.info("vcf_stats_done", object_id=object_id, variants=total)

@@ -59,6 +59,8 @@ class TaskSlot(StrEnum):
     PROJECT_QA = "project_qa"
     PROVENANCE_NARRATIVE = "provenance_narrative"
     FAILURE_EXPLANATION = "failure_explanation"
+    DE_SUMMARY = "de_summary"
+    VARIANT_SUMMARY = "variant_summary"
 
     @property
     def label(self) -> str:
@@ -71,6 +73,8 @@ _SLOT_LABELS = {
     TaskSlot.PROJECT_QA: "Project Q&A chat",
     TaskSlot.PROVENANCE_NARRATIVE: "Methods narratives",
     TaskSlot.FAILURE_EXPLANATION: "Job failure explanations",
+    TaskSlot.DE_SUMMARY: "Differential expression summaries",
+    TaskSlot.VARIANT_SUMMARY: "Variant call summaries",
 }
 
 

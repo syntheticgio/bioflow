@@ -6,6 +6,9 @@ functions over strings, with no queue or filesystem involved. Mirrors
 bam_stats_runner.py's split for the same reason.
 """
 
+import heapq
+
+from app.pipelines import csq_parse
 from app.pipelines.bam_stats_runner import allocate_bins
 
 # The columns of the variant table, in the order build_query_command emits
@@ -307,3 +310,83 @@ class DensityAccumulator:
                 }
             )
         return out
+
+
+# How many rows the severe-variant list keeps. Matches the limit
+# pipeline_service._top_severe_variants applies when building the summary
+# prompt, so nothing is thrown away here that the prompt would still want --
+# capping earlier, at collection time, is what keeps facts (and the Mongo
+# document it is stored in) bounded for a callset with thousands of
+# loss-of-function calls.
+SEVERE_VARIANT_LIMIT = 20
+
+
+class ConsequenceAccumulator:
+    """Consequence-type counts and the top severe-variant rows, in one pass.
+
+    Built the same way DensityAccumulator is: the query output is a stream,
+    read once per handler.add() call from the same loop that already feeds
+    the density accumulator and the FILTER tally, so a callset with tens of
+    millions of records is never parsed for BCSQ a second time.
+
+    Every record with a parsed consequence -- including one with no gene
+    (intergenic) -- is counted in consequence_counts. Only records whose
+    consequence is in csq_parse.SEVERITY_ORDER are candidates for the severe
+    list, which is kept at its target size throughout rather than
+    accumulated unbounded and truncated at the end: a heap of size
+    SEVERE_VARIANT_LIMIT holding the least-severe kept row, popped whenever a
+    more severe row arrives once the heap is full.
+    """
+
+    def __init__(self, *, limit: int = SEVERE_VARIANT_LIMIT):
+        self._limit = limit
+        self._counts: dict[str, int] = {}
+        # (rank, tie_breaker, row) -- rank is negated so heapq's min-heap
+        # keeps the *least* severe of the currently-kept rows at index 0,
+        # which is exactly the one to evict when a more severe row arrives.
+        # tie_breaker is a strictly increasing counter: dicts are not
+        # orderable, and two rows can share a rank.
+        self._heap: list[tuple[int, int, dict]] = []
+        self._seq = 0
+
+    def add(self, *, chrom: str, pos: int, bcsq: str | None) -> None:
+        consequence = csq_parse.parse_bcsq(bcsq)
+        if consequence is None:
+            return
+
+        self._counts[consequence.consequence] = (
+            self._counts.get(consequence.consequence, 0) + 1
+        )
+
+        try:
+            rank = csq_parse.SEVERITY_ORDER.index(consequence.consequence)
+        except ValueError:
+            return
+
+        row = {
+            "gene": consequence.gene,
+            "position": f"{chrom}:{pos}",
+            "consequence": consequence.consequence,
+        }
+        self._seq += 1
+        entry = (-rank, self._seq, row)
+
+        if len(self._heap) < self._limit:
+            heapq.heappush(self._heap, entry)
+        elif entry > self._heap[0]:
+            heapq.heapreplace(self._heap, entry)
+
+    def consequence_counts(self) -> dict[str, int]:
+        return dict(self._counts)
+
+    def severe_variants(self) -> list[dict]:
+        """Kept rows, most-severe first -- so a caller that doesn't re-sort
+        (e.g. a UI listing) still shows the worst variant first.
+
+        Heap entries store -rank (see add()), so the most severe row -- the
+        smallest real rank, e.g. frameshift at 0 -- has the largest -rank.
+        Sorting by -rank descending (equivalently rank ascending) puts it
+        first.
+        """
+        ranked = sorted(self._heap, key=lambda entry: (-entry[0], entry[1]))
+        return [row for _neg_rank, _seq, row in ranked]

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DeRow, ObjectDetail as ObjectDetailData } from "../api/types";
+import { AiSummary } from "./AiSummary";
 import { MAPlot, SamplePcaPlot, VolcanoPlot, type PcaPoint } from "./ExpressionCharts";
 
 const PAGE_SIZE = 50;
@@ -175,6 +176,16 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
           </tbody>
         </table>
       </div>
+
+      <AiSummary
+        facts={obj.facts}
+        objectId={obj.id}
+        fingerprint={obj.summary_fingerprint ?? undefined}
+        factPrefix="ai_de_summary"
+        statusFn={() => api.deSummaryStatus()}
+        launchFn={(id) => api.launchDeSummary(id)}
+        emptyLabel="No summary yet for this result."
+      />
 
       {f.sample_pca && f.sample_pca.length > 0 && (
         <div className="section">

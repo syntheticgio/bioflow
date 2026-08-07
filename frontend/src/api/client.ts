@@ -535,6 +535,25 @@ export const api = {
       "/pipelines/summary/status",
     ),
 
+  deSummaryStatus: () =>
+    request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
+      "/pipelines/de-summary/status"
+    ),
+  launchDeSummary: (objectId: string) =>
+    request<JobSummary>("/pipelines/de-summary", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+  variantSummaryStatus: () =>
+    request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
+      "/pipelines/variant-summary/status"
+    ),
+  launchVariantSummary: (objectId: string) =>
+    request<JobSummary>("/pipelines/variant-summary", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
   /** The known-provider table. Static; safe to cache indefinitely. */
   aiPresets: () => request<AiPreset[]>("/settings/ai/presets"),
 

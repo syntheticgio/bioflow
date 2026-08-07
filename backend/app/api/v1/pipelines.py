@@ -290,6 +290,115 @@ async def launch_summary(body: SummaryRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+@router.get("/de-summary/status")
+async def de_summary_status() -> dict:
+    """Whether DE narrative summaries can be produced right now.
+
+    Mirrors /pipelines/summary/status exactly, routed to DE_SUMMARY. See
+    that endpoint's docstring for why this is not owner-scoped.
+    """
+    import asyncio
+
+    from app.models.ai import TaskSlot
+    from app.services.ai import provider_service
+    from app.services.ai import router as ai_router
+
+    if not settings.llm_summaries_enabled:
+        return {"available": False, "reason": "disabled"}
+
+    provider = await ai_router.resolve(TaskSlot.DE_SUMMARY)
+    if provider is None:
+        return {"available": False, "reason": "no_provider"}
+
+    if _is_local(provider.base_url):
+        alive = await asyncio.to_thread(_probe_local, provider)
+        if not alive:
+            return {"available": False, "reason": "server_unavailable"}
+    else:
+        stored = await provider_service.get(provider.provider_id)
+        if stored is not None and stored.status == "failed":
+            return {
+                "available": False,
+                "reason": str(stored.status_reason) if stored.status_reason else "failed",
+                "provider_name": provider.name,
+            }
+
+    return {
+        "available": True,
+        "model": provider.model or (provider.models_cache[0] if provider.models_cache else None),
+        "provider_name": provider.name,
+    }
+
+
+@router.post("/de-summary", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_de_summary(body: SummaryRequest, owner: OwnerDep) -> JobOut:
+    """Queue a narrative summary of a differential-expression result."""
+    job = await pipeline_service.launch_de_summary(
+        object_id=body.object_id, owner=owner, force=body.force
+    )
+    if job is None:
+        raise ConflictError(
+            "Summaries are disabled or this file has nothing to summarize",
+            details={"object_id": str(body.object_id)},
+        )
+    return JobOut.of(job)
+
+
+@router.get("/variant-summary/status")
+async def variant_summary_status() -> dict:
+    """Whether variant-call narrative summaries can be produced right now.
+
+    Mirrors /pipelines/summary/status, routed to VARIANT_SUMMARY.
+    """
+    import asyncio
+
+    from app.models.ai import TaskSlot
+    from app.services.ai import provider_service
+    from app.services.ai import router as ai_router
+
+    if not settings.llm_summaries_enabled:
+        return {"available": False, "reason": "disabled"}
+
+    provider = await ai_router.resolve(TaskSlot.VARIANT_SUMMARY)
+    if provider is None:
+        return {"available": False, "reason": "no_provider"}
+
+    if _is_local(provider.base_url):
+        alive = await asyncio.to_thread(_probe_local, provider)
+        if not alive:
+            return {"available": False, "reason": "server_unavailable"}
+    else:
+        stored = await provider_service.get(provider.provider_id)
+        if stored is not None and stored.status == "failed":
+            return {
+                "available": False,
+                "reason": str(stored.status_reason) if stored.status_reason else "failed",
+                "provider_name": provider.name,
+            }
+
+    return {
+        "available": True,
+        "model": provider.model or (provider.models_cache[0] if provider.models_cache else None),
+        "provider_name": provider.name,
+    }
+
+
+@router.post(
+    "/variant-summary", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_variant_summary(body: SummaryRequest, owner: OwnerDep) -> JobOut:
+    """Queue a narrative summary of a VCF's call-set statistics."""
+    job = await pipeline_service.launch_variant_summary(
+        object_id=body.object_id, owner=owner, force=body.force
+    )
+    if job is None:
+        raise ConflictError(
+            "Summaries are disabled or this file has nothing to summarize",
+            details={"object_id": str(body.object_id)},
+        )
+    return JobOut.of(job)
+
+
 class OrganismBlurbOut(BaseModel):
     organism: str
     text: str
