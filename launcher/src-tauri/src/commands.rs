@@ -525,6 +525,7 @@ pub struct MigrationProgressDto {
     pub phase: MigrationPhaseDto,
     pub bytes_copied: u64,
     pub total_bytes: u64,
+    pub error: Option<String>,
 }
 
 impl From<crate::migrate::MigrationProgress> for MigrationProgressDto {
@@ -533,6 +534,7 @@ impl From<crate::migrate::MigrationProgress> for MigrationProgressDto {
             phase: p.phase.into(),
             bytes_copied: p.bytes_copied,
             total_bytes: p.total_bytes,
+            error: p.error,
         }
     }
 }
@@ -560,27 +562,71 @@ pub struct StartStorageMigrationArgs {
 /// `migration_progress`'s stored error field instead. See Step 3 below,
 /// which extends `MigrationProgress`'s DTO with an optional error.
 #[tauri::command]
-pub fn start_storage_migration(app: State<'_, LauncherApp>, args: StartStorageMigrationArgs) {
-    let source = app.install_dir.lock().unwrap().clone();
-    // The storage location, not the install dir, is what's being migrated
-    // -- callers must have already resolved the *current* BIOINFO_HOME via
-    // the same settings the Settings dialog reads. See MigrateStorage.tsx
-    // (Task 9) for how the frontend supplies this.
-    let _ = source; // placeholder wiring resolved fully in Task 7 below.
+pub fn start_storage_migration(app: State<'_, LauncherApp>, args: StartStorageMigrationArgs) -> Result<(), String> {
+    let install_dir = app.install_dir.lock().unwrap().clone().ok_or("not installed")?;
+    // The current storage location lives in .env, not in LauncherApp's
+    // in-memory state (which only tracks install_dir and port) -- read it
+    // the same way settings::CurrentSettings would be reconstructed, by
+    // parsing .env. A dedicated read here (rather than extending
+    // LauncherApp with a third mutex) keeps the source of truth as the
+    // file on disk, matching how settings::apply already treats .env as
+    // the one thing it writes and nothing else caches.
+    let env_path = install_dir.join(".env");
+    let env_contents = std::fs::read_to_string(&env_path).map_err(|e| format!("could not read .env: {e}"))?;
+    let current_storage = env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOINFO_HOME="))
+        .ok_or("BIOINFO_HOME not found in .env")?
+        .to_string();
+
+    let source = PathBuf::from(current_storage);
     let dest = PathBuf::from(args.new_location);
     let options = crate::migrate::MigrationOptions {
         keep_original: args.keep_original,
         validate_by_hash: args.validate_by_hash,
     };
     let progress_handle = std::sync::Arc::clone(&app.migration_progress);
+    *progress_handle.lock().unwrap() = Some(crate::migrate::MigrationProgress::default());
 
     std::thread::spawn(move || {
-        // Filled in fully by Task 7, which resolves the real source path
-        // from CurrentSettings rather than install_dir. This task's job is
-        // the command plumbing and progress polling; Task 7 wires the real
-        // source/dest/env-rewrite sequence end to end.
-        let _ = (dest, options, progress_handle);
+        let progress_state = std::sync::Arc::new(std::sync::Mutex::new(crate::migrate::MigrationProgress::default()));
+
+        // Mirror progress_state into the app-visible progress_handle every
+        // 250ms while the migration runs, so migration_progress (polled by
+        // the frontend) sees live updates rather than only the final
+        // state. Stopped by the done flag once run_migration_with_space_check
+        // returns, below.
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mirror_progress_state = std::sync::Arc::clone(&progress_state);
+        let mirror_progress_handle = std::sync::Arc::clone(&progress_handle);
+        let mirror_done = std::sync::Arc::clone(&done);
+        let mirror_thread = std::thread::spawn(move || {
+            while !mirror_done.load(std::sync::atomic::Ordering::Relaxed) {
+                let snapshot = mirror_progress_state.lock().unwrap().clone();
+                *mirror_progress_handle.lock().unwrap() = Some(snapshot);
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        });
+
+        let result = crate::migrate::run_migration_with_space_check(
+            &source,
+            &dest,
+            &options,
+            &progress_state,
+            crate::migrate::available_space_at,
+        );
+
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = mirror_thread.join();
+
+        let mut final_state = progress_state.lock().unwrap().clone();
+        if let Err(e) = &result {
+            final_state.error = Some(e.to_string());
+        }
+        *progress_handle.lock().unwrap() = Some(final_state);
     });
+
+    Ok(())
 }
 
 /// Polled by the frontend (see `App.tsx`'s existing `status` polling for

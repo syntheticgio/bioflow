@@ -242,6 +242,10 @@ pub struct MigrationProgress {
     pub phase: MigrationPhase,
     pub bytes_copied: u64,
     pub total_bytes: u64,
+    /// Set once if `run_migration` returns an error, so a background
+    /// thread (which cannot return a value the frontend awaits) has
+    /// somewhere to leave the failure for `migration_progress` to report.
+    pub error: Option<String>,
 }
 
 /// The two checkboxes the migration dialog exposes, per the design spec.
@@ -258,6 +262,30 @@ pub enum MigrationError {
     CopyFailed { reason: String },
     ValidationFailed(ValidationResult),
     RemoveOriginalFailed { reason: String },
+}
+
+impl std::fmt::Display for MigrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ScanFailed { reason } => write!(f, "could not read the source directory: {reason}"),
+            Self::InsufficientSpace { needed_bytes, available_bytes } => write!(
+                f,
+                "not enough free space at the destination: need {needed_bytes} bytes, have {available_bytes}"
+            ),
+            Self::CopyFailed { reason } => write!(f, "copy failed: {reason}"),
+            Self::ValidationFailed(ValidationResult::Mismatch { expected_files, actual_files, expected_bytes, actual_bytes }) => write!(
+                f,
+                "validation failed: expected {expected_files} files ({expected_bytes} bytes), found {actual_files} files ({actual_bytes} bytes) at the destination"
+            ),
+            Self::ValidationFailed(ValidationResult::HashMismatch { file }) => write!(
+                f,
+                "validation failed: {} does not match between source and destination",
+                file.display()
+            ),
+            Self::ValidationFailed(ValidationResult::Ok) => unreachable!("ValidationFailed is never constructed with ValidationResult::Ok"),
+            Self::RemoveOriginalFailed { reason } => write!(f, "copy and validation succeeded, but removing the original location failed: {reason}"),
+        }
+    }
 }
 
 /// Runs the full migration sequence: scan, space-check, copy, validate,
@@ -359,6 +387,32 @@ pub fn run_migration_with_space_check(
         p.phase = MigrationPhase::Complete;
     }
     Ok(())
+}
+
+/// Real free-space query for the destination's filesystem, used by the
+/// shipped Tauri command (unlike `run_migration`'s test-facing default of
+/// `u64::MAX`). `dest`'s parent must exist even if `dest` itself does not
+/// yet (the migration dialog validates the destination before this is
+/// called, same as `setup::validate_storage_path` does for first-run
+/// setup).
+#[cfg(unix)]
+pub fn available_space_at(dest: &Path) -> u64 {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let probe_path = if dest.exists() { dest } else { dest.parent().unwrap_or(dest) };
+    let c_path = match CString::new(probe_path.as_os_str().as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+
+    unsafe {
+        let mut stat: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c_path.as_ptr(), &mut stat) != 0 {
+            return 0;
+        }
+        stat.f_bavail as u64 * stat.f_frsize as u64
+    }
 }
 
 #[cfg(test)]
