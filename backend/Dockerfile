@@ -348,6 +348,14 @@ RUN chmod +x /srv/scripts/install-craq.sh \
     && CRAQ_COMMIT="${CRAQ_COMMIT}" \
        /srv/scripts/install-craq.sh
 
+# --- GCI ---------------------------------------------------------------
+#
+# GCI consumes finished long-read alignments; it never runs an aligner
+# itself, so there is no winnowmap dependency and nothing to compile.
+COPY scripts/install-gci.sh /srv/scripts/install-gci.sh
+RUN chmod +x /srv/scripts/install-gci.sh \
+    && /srv/scripts/install-gci.sh
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \

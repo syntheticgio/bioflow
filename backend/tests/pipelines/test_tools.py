@@ -281,6 +281,7 @@ class TestSerialization:
             "ivar",
             "quast",
             "craq",
+            "gci",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that
@@ -370,6 +371,19 @@ class TestCraqProbe:
         assert meta.citation
         assert meta.license
         assert meta.usage
+
+
+def test_gci_probe_reports_version(monkeypatch, tmp_path):
+    fake = tmp_path / "gci"
+    fake.write_text("#!/bin/sh\necho 'GCI v1.0'\n")
+    fake.chmod(0o755)
+
+    monkeypatch.setattr(tools.settings, "gci_path", str(fake))
+    tools.gci.cache_clear()
+
+    probed = tools.gci()
+    assert probed.error is None
+    assert probed.version is not None
 
 
 class TestToolMeta:
