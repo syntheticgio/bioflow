@@ -83,10 +83,15 @@ GREATER="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
 
 echo "Releasing $LINE $CURRENT -> $VERSION (tag $TAG)"
 
+# Command substitution (not process substitution) so a nonzero exit from
+# bump_version.py is seen by `set -e` and aborts the script immediately --
+# a `while ... done < <(cmd)` pipeline's exit status is the loop's, not
+# cmd's, so `set -e` can't catch a failure inside it.
+BUMP_OUTPUT="$(python3 "$SCRIPT_DIR/lib/bump_version.py" "$LINE" "$VERSION" --root "$REPO_ROOT")"
 WRITTEN=()
 while IFS= read -r line; do
-  WRITTEN+=("$line")
-done < <(python3 "$SCRIPT_DIR/lib/bump_version.py" "$LINE" "$VERSION" --root "$REPO_ROOT")
+  [ -n "$line" ] && WRITTEN+=("$line")
+done <<< "$BUMP_OUTPUT"
 [ "${#WRITTEN[@]}" -gt 0 ] || die "bump wrote no files"
 
 git add -- "${WRITTEN[@]}"

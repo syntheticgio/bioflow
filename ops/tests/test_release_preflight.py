@@ -147,3 +147,45 @@ class TestSuccessfulRelease:
         run_release(repo, "app", "0.2.0")
         cargo = (repo / "launcher" / "src-tauri" / "Cargo.toml").read_text()
         assert 'version = "0.1.0"' in cargo
+
+
+class TestBumpFailurePartway:
+    """bump_version.py failing after printing some output must abort the
+    release, not slip past the emptiness check.
+
+    Regression test for the process-substitution bug: `while read; done <
+    <(cmd)` hides a nonzero exit from `set -e`, because the loop's own exit
+    status -- not the command's -- is what the pipeline reports. A
+    bump_version.py that prints a path and then fails used to leave WRITTEN
+    non-empty, satisfy the `-gt 0` guard, and let release.sh continue on to
+    commit/tag/push a partially-bumped release.
+    """
+
+    def test_refuses_when_bump_fails_after_partial_output(self, repo):
+        # Replace the real bump_version.py with a fake that prints one
+        # already-written path (simulating partial progress) and then exits
+        # nonzero, as a future --verbose bump_version.py might on a mid-run
+        # failure.
+        fake = (
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "print('VERSION')\n"
+            "sys.exit(1)\n"
+        )
+        bump_path = repo / "ops" / "lib" / "bump_version.py"
+        bump_path.write_text(fake)
+        bump_path.chmod(0o755)
+
+        before_head = git(repo, "rev-parse", "HEAD").stdout.strip()
+        before_tags = set(git(repo, "tag", "-l").stdout.split())
+        before_remote_tags = git(repo, "ls-remote", "--tags", "origin").stdout
+
+        r = run_release(repo, "app", "0.2.0")
+
+        assert r.returncode != 0
+
+        # No new commit, no new local tag, nothing new pushed to origin.
+        assert git(repo, "rev-parse", "HEAD").stdout.strip() == before_head
+        assert set(git(repo, "tag", "-l").stdout.split()) == before_tags
+        assert git(repo, "ls-remote", "--tags", "origin").stdout == before_remote_tags
+        assert (repo / "VERSION").read_text() == "0.1.0\n"
