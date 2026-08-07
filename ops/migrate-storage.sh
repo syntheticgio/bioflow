@@ -42,7 +42,7 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-CURRENT_PATH="$(grep '^BIOINFO_HOME=' "$ENV_FILE" | cut -d= -f2-)"
+CURRENT_PATH="$(grep '^BIOINFO_HOME=' "$ENV_FILE" | cut -d= -f2- || true)"
 if [ -z "$CURRENT_PATH" ]; then
   echo "BIOINFO_HOME not found in $ENV_FILE" >&2
   exit 1
@@ -86,10 +86,12 @@ fi
 
 echo "Copying $CURRENT_PATH -> $NEW_PATH ..."
 # -a: archive mode (preserves permissions, symlinks, timestamps).
-# --info=progress2: aggregate progress output, matching the launcher
-# dialog's bytes/total/percentage display as closely as rsync allows.
+# Plain -av (no --info=progress2): macOS ships BSD/openrsync, which does
+# not understand GNU rsync's --info=progress2 flag and errors out
+# immediately if it's passed. -v at least streams per-file names as they
+# copy, which both rsync implementations support identically.
 if command -v rsync >/dev/null 2>&1; then
-  rsync -a --info=progress2 "$CURRENT_PATH"/ "$NEW_PATH"/
+  rsync -av "$CURRENT_PATH"/ "$NEW_PATH"/
 else
   cp -a "$CURRENT_PATH"/. "$NEW_PATH"/
 fi
