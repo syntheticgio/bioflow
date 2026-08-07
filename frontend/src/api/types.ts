@@ -1735,6 +1735,20 @@ export interface AiRouting {
   catalog: AiSlot[];
 }
 
+export interface ResourceLimits {
+  max_mem_mb: number | null;
+  max_cpu: number | null;
+  max_threads: number | null;
+  machine_mem_mb: number;
+  machine_cpu: number;
+}
+
+export interface ResourceLimitsIn {
+  max_mem_mb: number | null;
+  max_cpu: number | null;
+  max_threads: number | null;
+}
+
 export interface AiFetchModelsResult {
   status: "ok" | "failed";
   models: string[];
