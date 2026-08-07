@@ -31,6 +31,7 @@ pub fn run() {
       commands::install_optional_tool,
       commands::start_storage_migration,
       commands::migration_progress,
+      commands::finish_storage_migration,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

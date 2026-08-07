@@ -636,3 +636,40 @@ pub fn start_storage_migration(app: State<'_, LauncherApp>, args: StartStorageMi
 pub fn migration_progress(app: State<'_, LauncherApp>) -> Option<MigrationProgressDto> {
     app.migration_progress.lock().unwrap().clone().map(Into::into)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct FinishStorageMigrationArgs {
+    pub new_location: String,
+    pub port: u16,
+    pub network_exposed: bool,
+}
+
+/// Rewrites `.env` to point at the migrated location and restarts the
+/// stack -- reuses `settings::apply` unchanged, exactly as a plain
+/// Settings repoint already does. Callers (the frontend) must only invoke
+/// this after `migration_progress` has reported `phase: Complete` with no
+/// `error` -- this command does not re-verify that the migration actually
+/// succeeded, since `settings.rs`'s `apply` has no concept of a
+/// migration, only of writing `.env` and recreating the stack. See
+/// MigrateStorage.tsx (a later task) for where that gating lives.
+#[tauri::command]
+pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishStorageMigrationArgs) -> Result<(), String> {
+    let install_dir = app.install_dir.lock().unwrap().clone().ok_or("not installed")?;
+
+    let settings = CurrentSettings {
+        storage_location: PathBuf::from(args.new_location),
+        port: args.port,
+        network_exposed: args.network_exposed,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        settings::apply(&docker, &install_dir, &settings, &[])
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| match e {
+        SettingsUpdateError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
+        SettingsUpdateError::RecreateFailed { output } => output,
+    })
+}
