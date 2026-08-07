@@ -4,7 +4,7 @@ import platform
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # DeepVariant ships as a sibling container rather than a binary in our image,
@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     # an env var rather than being read from a cgroup -- see
     # docs/superpowers/specs/2026-08-07-cgroup-hard-limits-design.md.
     bioflow_hard_mem_mb: int | None = None
+
+    @field_validator("bioflow_hard_mem_mb", mode="before")
+    @classmethod
+    def _empty_string_hard_mem_mb_is_none(cls, v):
+        """Compose always sets BIOFLOW_HARD_MEM_MB, resolving to '' when the
+        launcher has not configured a hard limit (the default, off state) --
+        pydantic-settings does not treat '' as None for an int field on its
+        own, so without this the api container fails to even start whenever
+        no hard limit is set, which is the common case.
+        """
+        if v == "":
+            return None
+        return v
 
     # --- Metadata enrichment ---
     # Looks up SRR/SRX accessions at NCBI during ingest. Outbound network call;
