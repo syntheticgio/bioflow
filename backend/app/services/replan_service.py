@@ -145,3 +145,25 @@ def replan(
         )
 
     return result
+
+
+def _clamp_threads(*, threads: int, cpu_budget: float) -> tuple[int, str]:
+    """Stage one: reduce a thread count the machine cannot deliver.
+
+    Unconditional and budget-independent. A hundred threads on a sixteen core
+    machine is incoherent whether or not memory happens to fit -- this is not a
+    memory negotiation, it is a request that was never coherent.
+
+    Returns the clamped count and a sentence explaining it, or the original
+    count and an empty string when no clamp was needed. The sentence matters
+    more than it looks: the user launching a hundred-thread job may simply not
+    know what their machine can do, and this is the line that teaches them.
+    """
+    capacity = max(1, int(cpu_budget))
+    if threads <= capacity:
+        return threads, ""
+
+    return capacity, (
+        f"{threads} threads is more than this machine can run; "
+        f"it has {capacity} cores."
+    )
