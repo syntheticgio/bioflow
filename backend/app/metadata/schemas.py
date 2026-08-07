@@ -39,6 +39,17 @@ class FieldDef:
     # Marks fields worth prompting for. Nothing is ever *required*: a file with
     # incomplete metadata is still a file we must not refuse to store.
     suggested: bool = False
+    # True when the values come from outside this repo -- NCBI, an instrument
+    # vendor, a lab's own kit names -- so `options` is a set of suggestions
+    # that will never be complete. The UI renders these as a free-text combo
+    # rather than a <select>, and an off-list value is not a warning.
+    #
+    # Inclusion rule: open if the vocabulary is owned elsewhere; closed if this
+    # repo or a published spec defines the complete set. Deliberately a
+    # hand-maintained per-field flag and deliberately without an exhaustiveness
+    # test -- see the spec's note on CLAUDE.md's three-way registry split. This
+    # is the middle case, where forcing coverage would make a detector guess.
+    open_vocabulary: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +61,7 @@ class FieldDef:
             "help": self.help,
             "group": self.group,
             "suggested": self.suggested,
+            "open_vocabulary": self.open_vocabulary,
         }
 
 
@@ -96,10 +108,10 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
             "Caenorhabditis elegans",
             "Saccharomyces cerevisiae",
             "Escherichia coli",
-            "Other",
         ),
         group="Sample",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef(
         "tissue",
@@ -122,9 +134,10 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
         "Assay",
         type=FieldType.ENUM,
         options=("WGS", "WES", "RNA-seq", "scRNA-seq", "ATAC-seq", "ChIP-seq",
-                 "Bisulfite-seq", "Amplicon", "Targeted panel", "Other"),
+                 "Bisulfite-seq", "Amplicon", "Targeted panel"),
         group="Experiment",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef("batch", "Batch", help="Sequencing or processing batch.",
              group="Experiment"),
@@ -162,9 +175,10 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
         "library_prep",
         "Library prep",
         type=FieldType.ENUM,
-        options=("TruSeq", "Nextera", "NEBNext", "KAPA", "SMART-seq", "10x", "Other"),
+        options=("TruSeq", "Nextera", "NEBNext", "KAPA", "SMART-seq", "10x"),
         group="Library",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef("library_id", "Library ID", group="Library"),
     FieldDef(
@@ -185,9 +199,10 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
         "Sequencing platform",
         type=FieldType.ENUM,
         options=("Illumina NovaSeq", "Illumina NextSeq", "Illumina MiSeq",
-                 "Illumina HiSeq", "Oxford Nanopore", "PacBio", "Element", "Other"),
+                 "Illumina HiSeq", "Oxford Nanopore", "PacBio", "Element"),
         group="Sequencing",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef("run_id", "Run ID", group="Sequencing"),
     FieldDef("flowcell", "Flowcell", group="Sequencing"),
@@ -199,20 +214,22 @@ ALIGNMENT_FIELDS: tuple[FieldDef, ...] = (
         "reference_build",
         "Reference build",
         type=FieldType.ENUM,
-        options=("GRCh38", "GRCh37/hg19", "T2T-CHM13", "GRCm39", "GRCm38/mm10", "Other"),
+        options=("GRCh38", "GRCh37/hg19", "T2T-CHM13", "GRCm39", "GRCm38/mm10"),
         help="Which genome build the reads were aligned to. Mixing builds is a "
              "common and costly mistake, so it is worth recording explicitly.",
         group="Alignment",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef(
         "aligner",
         "Aligner",
         type=FieldType.ENUM,
         options=("BWA-MEM", "BWA-MEM2", "Bowtie2", "STAR", "HISAT2", "minimap2",
-                 "DRAGEN", "Other"),
+                 "DRAGEN"),
         group="Alignment",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef("aligner_version", "Aligner version", group="Alignment"),
     FieldDef("duplicates_marked", "Duplicates marked", type=FieldType.BOOLEAN,
@@ -230,18 +247,20 @@ VARIANT_FIELDS: tuple[FieldDef, ...] = (
         "reference_build",
         "Reference build",
         type=FieldType.ENUM,
-        options=("GRCh38", "GRCh37/hg19", "T2T-CHM13", "GRCm39", "GRCm38/mm10", "Other"),
+        options=("GRCh38", "GRCh37/hg19", "T2T-CHM13", "GRCm39", "GRCm38/mm10"),
         group="Variants",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef(
         "variant_caller",
         "Variant caller",
         type=FieldType.ENUM,
         options=("GATK HaplotypeCaller", "GATK Mutect2", "DeepVariant", "FreeBayes",
-                 "bcftools", "Strelka2", "DRAGEN", "Other"),
+                 "bcftools", "Strelka2", "DRAGEN"),
         group="Variants",
         suggested=True,
+        open_vocabulary=True,
     ),
     FieldDef("caller_version", "Caller version", group="Variants"),
     FieldDef(
@@ -317,8 +336,8 @@ INTERVAL_FIELDS: tuple[FieldDef, ...] = (
     FieldDef("reference_build", "Reference build", group="Intervals", suggested=True),
     FieldDef("interval_type", "Interval type", type=FieldType.ENUM,
              options=("capture targets", "exons", "genes", "regions of interest",
-                      "blacklist", "Other"),
-             group="Intervals"),
+                      "blacklist"),
+             group="Intervals", open_vocabulary=True),
     FieldDef("source", "Source", group="Intervals"),
 )
 
@@ -547,8 +566,14 @@ def _coerce(spec: FieldDef, raw):
             return _coerce_date(raw), None
         if spec.type is FieldType.ENUM:
             s = str(raw).strip()
-            if spec.options and s not in spec.options:
-                # Kept: lab vocabularies always outgrow a fixed list.
+            # An open field's options are suggestions from a vocabulary this
+            # repo does not own, so an off-list value is the normal case rather
+            # than a mistake -- SRA writes instrument models the dropdown never
+            # listed. Warning on those was wrong about which value was
+            # authoritative. A closed field's list really is complete, so an
+            # off-list value there still earns the warning.
+            if spec.options and not spec.open_vocabulary and s not in spec.options:
+                # Kept regardless: lab vocabularies always outgrow a fixed list.
                 return s, (
                     f"{spec.label}: {s!r} is not one of the suggested options; "
                     "stored anyway"

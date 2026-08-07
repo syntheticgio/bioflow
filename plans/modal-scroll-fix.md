@@ -154,7 +154,6 @@ with:
 **Step 4: Verify CSS is valid**
 
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner
 npx --prefix frontend tsc --noEmit -p frontend/tsconfig.json
 ```
 
@@ -250,7 +249,6 @@ The `h2` stays outside `.modal-body` so the heading never scrolls away. The `.mo
 **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner
 npx --prefix frontend tsc --noEmit -p frontend/tsconfig.json
 ```
 
@@ -357,7 +355,6 @@ Wrap everything between `</h2>` and `<div className="modal-actions">`:
 **Step 2: Verify TypeScript compiles**
 
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner
 npx --prefix frontend tsc --noEmit -p frontend/tsconfig.json
 ```
 
@@ -379,7 +376,6 @@ git commit -m "fix: wrap AlignDialog content in modal-body scroll region"
 **Step 1: Ensure the stack is running**
 
 ```bash
-cd /Users/syntheticgio/Programming/local-bio-pipeliner
 make up
 ```
 

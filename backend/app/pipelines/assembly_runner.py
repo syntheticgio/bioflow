@@ -13,7 +13,7 @@ docstring refuses for inapplicable aligner fields.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.logging import get_logger
@@ -59,32 +59,66 @@ def build_assembly_command(
 # updating rather than one that fails.
 _STAGE_RE = re.compile(r">>>STAGE:\s*(\w+)")
 
+# The stages Flye runs, in order. Not a guess and not open-ended:
+# `flye/main.py:_create_job_list` appends these seven jobs at launch, before
+# any work starts, so the sequence is knowable before the process runs.
+_FLYE_STAGES: tuple[str, ...] = (
+    "configure",
+    "assembly",
+    "consensus",
+    "repeat",
+    "contigger",
+    "polishing",
+    "finalize",
+)
+
 _STAGE_LABELS: dict[str, str] = {
     "configure": "configuring",
     "assembly": "assembling draft",
     "consensus": "building consensus",
     "repeat": "resolving repeats",
     "contigger": "generating contigs",
-    "trestle": "resolving repeats",
     "polishing": "polishing",
     "finalize": "finishing",
 }
 
 
+def flye_stage_order(params: FlyeParams) -> tuple[str, ...]:
+    """The stages this particular run will execute, in order.
+
+    Mirrors the two conditionals in `_create_job_list`. Only one of them can
+    fire here: `consensus` is skipped for `read_type == "subasm"`, which is
+    not among the modes `assembler_registry` offers, while `--iterations 0`
+    genuinely does drop polishing and is selectable in the dialog
+    (`MIN_ITERATIONS = 0`).
+    """
+    if params.iterations > 0:
+        return _FLYE_STAGES
+    return tuple(stage for stage in _FLYE_STAGES if stage != "polishing")
+
+
 @dataclass
 class AssemblyProgress:
-    """Turns Flye's own log into a phase name.
+    """Turns Flye's own log into a phase name and a "step N of M".
 
-    Deliberately no percentage. Flye's five stages differ in duration by more
-    than an order of magnitude -- polishing alone can outlast everything before
-    it -- so a bar derived from "stage 3 of 5" would sit at 60% for most of a
-    run and then jump. `align_runner`'s progress at least counts reads against
-    an estimated total; there is no equivalent countable unit here, and a
-    fabricated fraction is worse than an honest phase name.
+    Deliberately no percentage. Flye's stages differ in duration by more than
+    an order of magnitude -- polishing alone can outlast everything before it
+    -- so a bar derived from stage position would sit at one value for most
+    of a run and then jump. A step counter makes no duration claim, which is
+    why it is safe here where a bar is not.
+
+    `stage_order` comes from `flye_stage_order(params)` and defaults to empty,
+    in which case no phase structure is reported at all and the display falls
+    back to the phase name alone.
     """
 
     name: str = "flye"
     phase: str = "starting"
+    stage_order: tuple[str, ...] = ()
+    # The raw Flye stage name behind `phase`. Kept separately because
+    # `_STAGE_LABELS` is not injective by construction -- two stages sharing a
+    # display label would otherwise both resolve to the first one's index.
+    _stage: str | None = field(default=None, init=False, repr=False)
 
     def feed(self, line: str) -> bool:
         """Consume a log line. True if the phase changed."""
@@ -98,16 +132,38 @@ class AssemblyProgress:
         phase = _STAGE_LABELS.get(stage, stage)
         if phase == self.phase:
             return False
+        self._stage = stage
         self.phase = phase
         return True
+
+    @property
+    def phase_index(self) -> int | None:
+        """Position in `stage_order`, 1-based for "step N of M" display.
+
+        None for a stage this run did not declare -- a future Flye stage
+        borrowing the previous stage's number would be worse than no number.
+        """
+        if self._stage is None or self._stage not in self.stage_order:
+            return None
+        return self.stage_order.index(self._stage) + 1
+
+    @property
+    def phase_total(self) -> int | None:
+        return len(self.stage_order) or None
 
     def message(self) -> str:
         return self.phase
 
     def snapshot(self) -> dict:
-        # No pct, no phase_index/phase_total: see the class docstring for why
-        # a fraction or a "step N of M" would both be fabricated here.
-        return {"pct": None, "phase": self.phase, "message": self.message()}
+        # No pct: see the class docstring. phase_index/phase_total appear only
+        # when a stage order was declared -- a parser omits keys it does not
+        # know rather than passing None over a value ctx.progress() would
+        # otherwise leave alone.
+        snap = {"pct": None, "phase": self.phase, "message": self.message()}
+        if self.stage_order:
+            snap["phase_index"] = self.phase_index
+            snap["phase_total"] = self.phase_total
+        return snap
 
 
 # assembly_info.txt is tab-separated with a `#seq_name` header:

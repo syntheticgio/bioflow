@@ -52,17 +52,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Unlock the CI signing keychain
+        # The Developer ID identity lives in a dedicated ci-signing.keychain-db,
+        # not the login keychain. codesign run from this LaunchAgent's job
+        # context fails with errSecInternalComponent against the login
+        # keychain regardless of ACLs or session state -- see
+        # docs/macos-signing.md. The CI keychain sidesteps that by being a
+        # keychain this job unlocks and owns outright, added to the runner
+        # user's search list once during setup (not per-job, since the search
+        # list itself is host state, not job state).
+        env:
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$HOME/Library/Keychains/ci-signing.keychain-db"
+          security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/ci-signing.keychain-db"
+
       - name: Verify the signing identity is present
         # Fail in five seconds rather than after the full release build. The
         # certificate expires yearly, and the failure mode when it lapses is a
         # build that succeeds and produces an unsignable bundle.
         run: |
           set -euo pipefail
-          if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
-            echo "::error::No Developer ID Application identity in the runner keychain."
+          if ! security find-identity -v -p codesigning "$HOME/Library/Keychains/ci-signing.keychain-db" | grep -q "Developer ID Application"; then
+            echo "::error::No Developer ID Application identity in the CI signing keychain."
             exit 1
           fi
-          security find-identity -v -p codesigning | grep "Developer ID Application"
+          security find-identity -v -p codesigning "$HOME/Library/Keychains/ci-signing.keychain-db" | grep "Developer ID Application"
 
       - name: Write the notarization API key
         # RUNNER_TEMP is per-job and self-hosted-runner-local, not shared
@@ -93,6 +109,13 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_API_KEY_PATH: ${{ steps.apikey.outputs.path }}
+          # Re-unlocking here (build-macos.sh does this itself when
+          # CI_KEYCHAIN_PATH is set) because `tauri build`'s codesign call
+          # happens well after the previous step, and a keychain's unlock
+          # only lasts until its own timeout regardless of which step
+          # unlocked it.
+          CI_KEYCHAIN_PATH: /Users/syntheticgio/Library/Keychains/ci-signing.keychain-db
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
           if [ "${{ inputs.notarize == false }}" = "true" ]; then
@@ -190,10 +213,17 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          ls -la bundles/
+          # The linux artifact preserves its bundle/deb, bundle/rpm subpaths
+          # under bundles/ (merge-multiple flattens artifact *names*, not the
+          # directory structure inside each one), while the macOS .dmg lands
+          # flat. A `bundles/*` glob therefore includes the deb/ and rpm/
+          # directories themselves, and `gh release create` fails trying to
+          # upload a directory as a release asset. Find actual files instead.
+          find bundles -type f -print
+          mapfile -t assets < <(find bundles -type f)
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "BioFlow Launcher ${TAG#launcher-v}" \
             --generate-notes \
-            bundles/* \
-            || gh release upload "$TAG" --repo "${{ github.repository }}" bundles/* --clobber
+            "${assets[@]}" \
+            || gh release upload "$TAG" --repo "${{ github.repository }}" "${assets[@]}" --clobber

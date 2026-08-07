@@ -1,18 +1,97 @@
-# local-bio-pipeliner
+<div align="center">
 
-A local, single-user web application for managing bioinformatics data files: projects,
-uploads, metadata, and a priority- and load-aware background job queue. Built as the
-foundation for later work — assigning rich metadata to files and launching computations
-and pipelines (alignment, variant calling).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-horizontal-reverse.png">
+  <img src="assets/lockup-horizontal-color.png" alt="bioflow" width="420">
+</picture>
+
+<br><br>
+
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue.svg)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/syntheticgio/bioflow)](https://github.com/syntheticgio/bioflow/commits/main)
+[![Top language](https://img.shields.io/github/languages/top/syntheticgio/bioflow)](https://github.com/syntheticgio/bioflow)
+[![Open issues](https://img.shields.io/github/issues/syntheticgio/bioflow)](https://github.com/syntheticgio/bioflow/issues)
+[![Noncommercial use only](https://img.shields.io/badge/use-noncommercial%20only-orange.svg)](LICENSE)
+[![Single-user, local-only](https://img.shields.io/badge/design-single--user%2C%20local--only-lightgrey.svg)](#security)
+
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](docker-compose.yml)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](backend/pyproject.toml)
+[![React + TypeScript](https://img.shields.io/badge/React-TypeScript-61DAFB?logo=react&logoColor=white)](frontend)
+[![MongoDB](https://img.shields.io/badge/MongoDB-replica%20set-47A248?logo=mongodb&logoColor=white)](#storage-layout)
+
+<strong>A local, single-user web app for managing bioinformatics data: projects, uploads,
+metadata, and a priority- and load-aware background job queue.</strong>
+
+</div>
+
+<p align="center">
+  <img src="docs/images/screenshot-main.png" alt="bioflow main project view — two-pane file browser with metadata panel" width="100%">
+</p>
+
+[Quick start](#quick-start) •
+[Background](#background) •
+[Security](#security) •
+[Architecture](#architecture) •
+[Job queue](#job-queue) •
+[Optional AI Integration](#optional-ai-integration) •
+[Metadata and search](#metadata-and-search) •
+[Read preparation](#read-preparation) •
+[License](#license) •
+[Contributing](#contributing)
 
 ## Quick start
 
+> [Docker](https://docs.docker.com/engine/install/) is a requirement.  If you're using an external drive and MacOS, see Required MacOS Setup for additional preparation needed.
+
+#### From Cloned Repo
 ```bash
 cp .env.example .env
 make up
+Then open <http://localhost:5173>
 ```
 
-Then open <http://localhost:5173>. The API is at <http://localhost:8000/docs>.
+#### From Launcher
+```
+1. Download Launcher executable for either arm64 (MacOS M series) or amd64 (Linux, Intel/AMD processors)
+2. Run and follow installer to set up.  Cloning the repo is unnecessary.
+3. Click the Install button.
+4. Run the Launcher after install to start or stop the application.
+5. Then open <http://localhost:5173>.
+```
+
+## Background
+BioFlow is a local UI/UX web app that is trying to solve the problem of managing your bioinformatics data, keeping track of provenance, having a central place to run computations on software that you don’t remember the 100 different command line flags for, and to visualize some of the basic outputs that are common in this type of research.  There are many other projects out there which probably do this.  I know of ones like Galaxy, FDA HIVE, DNANexus, etc.  One thing that BioFlow doesn’t do thought - it is not for distributed computing like these other ones target.  Instead, all of the development time is put into making the UI responsive, easy to use and intuitive, along with some slight load balancing and queueing work.  In other words, it is letting those other platforms handle the ‘hard’ problems of bioinformatics and just addresses the ‘easy’ problems so it feels like you are doing a little more biology than informatics. Oh, and BioFlow can make use of your AI agent and offers a RESTful API (see http://localhost:8000 when running).
+
+### Why I am writing this application
+I’ve been writing this software really for my own research purposes but thought maybe some others will get use out of it.  This is the type of thing that, even though I’ve spent 15+ years in bioinformatics, I’d never have written before the AI era streamlining it.  Claude Code is doing most of the heavy lifting, guided by me.  That means I can focus on the biological science and less on the computer science.  I want to be clear though, this isn’t ‘vibe coded’.  There was no prompt to ‘write bioinformatics software and push it to GitHub’.  It has been a steady stream of features, fixes, tweaks, and updates as I use the software and find shortcomings.  If you have an issue with software written with the help of AI, this application is not for you.
+
+### Allowable usage
+This software isn’t licensed for commercial purposes (targeted for researchers and hobbyists).  If you would like to use it commercially you’ll need to reach out to me and we’ll figure out some type of licensing.  This includes running it as a SaaS service (although it’s not built for that so you’ll have to do a lot of tweaking!).  Other than commercial licensing, which I don’t honestly expect, this application is not being monetized.  There is no collection of data to sell to third parties🙈, no subscriptions🙉, and no account creation🙊.  See the [license](LICENSE) for more information.  I will point out, though, that if you fork and change, you have to make the code freely available under the terms of the license.
+
+>🙈 There is (or will be) an optional, _opt in_ feature where you can submit data about the computations you run - the time it took & size of the various parts of it, the type of processor you have, etc.  This is purely to support the equations used for predicting how long a computation will take given the user’s machine.
+
+>🙉 There are some AI features where you will need to BYOK or otherwise provide your own AI.  _I_ am not selling any subscription or tokens.
+
+>🙊 There are profiles, which are just local on your computer and essentially just act as separate workspaces if you have a couple people using it.  There is no account creation in its typical meaning, and nothing that goes to any server I control.  I will not know you exist most likely.
+
+### Support (or lack of it)
+Because of all of this, I can’t offer personal support - if you’re not able to run it yourself or it doesn’t run on your machine, that is unfortunate.  I’ve taken some time to brush it off and spiff it up (added a launcher and some ability for it to run beyond my machine).  It is primarily targeted for M series Macs, although I do also use it on an Ubuntu flavored linux box on occasion.  All the instructions are in the [README.md](README.md) and I’ve made it as painless as I possibly can.  Please do not create an issue for Tech Support!  
+
+### Issues, bugs, feature requests
+If you run into any problems or bugs you’re welcome to open an issue.  If it is something I can replicate then I’ll likely fix it.  If not, I encourage you to fork the repo, fix the issue, and open a PR.  You’ll have an easier time fixing it on your machine than I will.  I’ll take a look at the PR and I may or may not merge it.  If I don’t, don’t take it personally - you have the fork after all and can run your fixed version.  I’m only accepting PRs where I completely understand the changes being made.  
+
+For feature requests, you can open an issue if you like, or fork the repo and implement it and create a PR.  I want to be very clear though, I’m not planning on bloating this with every feature that everyone wants.  This is primarily for my personal research purposes and while I’ll take into consideration some scope change for people who request it, ultimately it gets to follow my vision.  But remember, this is open source, you are more than welcome to fork and build on it yourself so it suits your needs!  If you do make a feature request on the issues, please make sure you’re filling it out completely (there is a Feature request path when you want to create a new issue).  If I have to try to figure out what you mean because its not clear, I’m going to just simply close there issue and move on with my day. 
+
+## Security
+Before you go any further, make sure you understand how this is intended to be used from a security perspective. 
+**The API has no authentication.** It's built for a single trusted user on
+their own machine, and `BIND_ADDRESS=127.0.0.1` in `.env.example` keeps it
+reachable only from localhost by default. Setting `BIND_ADDRESS=0.0.0.0` (or
+otherwise exposing the port to a network) hands anyone who can reach it full
+read/write access to every project and file — there is no login, and the
+`X-BioFlow-Profile` header used to separate projects is an organizational
+convenience, not an access control. Only do this on a network you trust, and
+understand that's what you're doing.
 
 ## Required macOS setup
 
@@ -22,7 +101,7 @@ Docker Desktop on macOS runs a Linux VM. It cannot see `/Volumes/*` unless you g
 access explicitly:
 
 1. Docker Desktop → **Settings → Resources → File Sharing**
-2. Add `/Volumes/ModelExtension`
+2. Add `/Volumes/ExternalSSD` or whatever your external drive is mounted as.
 3. **Apply & Restart**
 
 Also recommended, under **Settings → General**: enable **VirtualizationFramework** and
@@ -143,12 +222,31 @@ entire batch aborts if the drive is gone, and no file is marked missing until tw
 consecutive misses at least 60 seconds apart. Files registered in place are additionally
 watched for size/mtime drift and quarantined if they change underneath us.
 
+## Optional AI Integration
+
+In the settings you can specify an AI provider, if you would like the AI features to work.
+These include things like summarizing various sets of information and providing some additional
+color to organism descriptions.  There is also a chatbot feature, which will use your AI provider if
+specified, and there will be an AI agent integrated.
+
+Not adding any providers will turn off any AI features.  Different models can be 
+specified for different features.
+
 ## Metadata and search
 
 Each format has a suggested field set — FASTQ gets library prep and platform, BAM gets
 reference build and aligner, VCF gets caller and variant type — on top of common sample
 fields. The schema drives a proper form (dropdowns for enums, number inputs with units,
 date pickers) and gives values a declared type so they sort and compare correctly.
+
+<p align="center">
+  <img src="docs/images/screenshot-metadata-search.png" alt="bioflow metadata search — typed field filters and tag search" width="100%">
+</p>
+
+<!--
+  Screenshot placeholder: docs/images/screenshot-metadata-search.png
+  A shot of the search bar with an active metadata filter and results.
+-->
 
 **Schemas suggest; they do not restrict.** An unknown key is stored as-is. A value that
 does not match its declared type produces a *warning* and is still saved — refusing to
@@ -194,7 +292,10 @@ Set `SRA_ENRICHMENT_ENABLED=false` to disable all outbound lookups.
 
 ## Feedback notifications
 
-When someone submits feedback from the **Help → Feedback** page, the submission
+This is a small feature that can allow you to collect feedback from others 
+using this if you have it installed on a shared machine.  For a single user this isn't 
+particularly useful unless you want to use it for notes or something.  When someone submits 
+feedback from the **Help → Feedback** page, the submission
 is saved to the database and a Discord notification is fired to your
 configured channel. This requires a Discord webhook URL.
 
@@ -290,7 +391,7 @@ broke the running stack:
 - **Phase 6a** — read preparation: adapter trimming and QC (fastp), with an
   activity view and object lineage
 
-All three phases are verified running under `docker compose` against the real
+All phases are verified running under `docker compose` against the real
 drive. Phase 0/1: an uploaded FASTQ lands at `objects/a3/a31741…` with a matching
 SHA-256, identical bytes deduplicate to one blob with refcount 2, priority
 classes dispatch in order, a killed worker's job is requeued by the reaper and
@@ -356,6 +457,15 @@ Select a FASTQ and click **Trim** to adapter-trim and quality-filter it with
 [fastp](https://github.com/OpenGene/fastp), which is installed in the backend
 image along with FastQC.
 
+<p align="center">
+  <img src="docs/images/screenshot-activity-view.png" alt="bioflow activity view — running, queued, and finished jobs with before/after QC" width="100%">
+</p>
+
+<!--
+  Screenshot placeholder: docs/images/screenshot-activity-view.png
+  A shot of the Activity panel mid-trim, or the fastp before/after comparison.
+-->
+
 **Paired reads are trimmed together.** Mates must stay synchronized or
 downstream alignment breaks, so the launch dialog detects the R1/R2 partner and
 selects it by default. Trimming them separately is allowed but warns first.
@@ -404,8 +514,20 @@ the activity view, so it fails loudly rather than silently.
 A run's scratch directory and captured log are reclaimed by
 `reap_pipeline_scratch`; without it a cancelled run would strand whole FASTQ
 files.
-- Phase 2 — chunked/resumable uploads, register-in-place, GC
-- Phase 3 — format detection and header parsing (pysam)
-- Phase 4 — periodic jobs and the load-aware governor
-- Phase 5 — metadata schemas and search
-- Phase 6a — read preparation: adapter trimming and QC (fastp)
+
+## License
+
+Licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)** —
+free to use, modify, and redistribute for any noncommercial purpose.
+**Commercial use requires a separate agreement** with the copyright holder.
+
+## Contributing
+
+See **[CONTRIBUTING.md](CONTRIBUTING.md)**. Contributions are welcome; a first
+pull request requires agreeing to a lightweight CLA (you keep copyright on
+what you write, I get a license broad enough to not be hobbled with altering things
+in the future, up to and including relicense the project).  While contributions are welcome
+whether or not a feature is added is at my discretion.  I have a vision for the project and
+will try to keep to that - which means not including every feature that is theoretically
+posible.  But fortunately it is open source, so you're free to fork it and update your
+local version with whatever features you'd like!

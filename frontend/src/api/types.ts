@@ -395,6 +395,10 @@ export interface MetadataField {
   help: string | null;
   group: string;
   suggested: boolean;
+  /** True when `options` is a set of suggestions from a vocabulary owned
+   *  elsewhere (NCBI, an instrument vendor). Renders as a free-text combo
+   *  rather than a <select>; see SchemaMetadataEditor. */
+  open_vocabulary: boolean;
 }
 
 export interface MetadataSchema {

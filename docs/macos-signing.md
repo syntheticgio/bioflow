@@ -234,12 +234,55 @@ pipelines do — the keychain is already there. The tradeoff is that the signing
 key lives on a dev machine rather than in GitHub's secret store, which for a
 single-maintainer project is the simpler and less leaky of the two.
 
-The runner's keychain must be **unlocked** for signing to work non-interactively.
-A runner installed via `svc.sh` runs as a LaunchAgent at user login, so the
-login keychain is normally unlocked already — but a machine that has been
-locked or is sitting at the login window will fail signing with
-`errSecInternalComponent`, which is an unhelpfully generic error for "the
-keychain is locked."
+### Signing keychain: dedicated, not the login keychain
+
+The Developer ID identity lives in **`~/Library/Keychains/ci-signing.keychain-db`**,
+a keychain created specifically for CI signing — not the login keychain.
+
+That split exists because of a real failure, not caution for its own sake:
+`codesign` invoked from the runner's LaunchAgent job context failed with
+`errSecInternalComponent` against the login keychain, reproducibly, even with
+all of the following true at once — the machine actively logged in and
+unlocked, the LaunchAgent's `SessionCreate` set to `true`, the plist bootstrapped
+into the `gui/<uid>` domain (confirmed via `launchctl print`), and the private
+key's ACL explicitly granted to `codesign`/`apple-tool`/`apple` via
+`security set-key-partition-list`. A manual `codesign` against the same
+identity, in an interactive Terminal on the same machine at the same time,
+succeeded every time. Only the LaunchAgent-spawned job process failed —
+something about that process's security session, not the keychain's lock
+state or ACLs, made Developer ID signing (which touches the Secure Enclave)
+reject it. A dedicated keychain that the job unlocks explicitly and owns
+outright sidesteps the question entirely, rather than depending on session
+state the job doesn't fully control.
+
+Setup (one-time, on the runner):
+
+```bash
+security create-keychain -p "<ci-keychain-password>" ~/Library/Keychains/ci-signing.keychain-db
+security set-keychain-settings -lut 21600 ~/Library/Keychains/ci-signing.keychain-db
+security unlock-keychain -p "<ci-keychain-password>" ~/Library/Keychains/ci-signing.keychain-db
+
+# Export the Developer ID cert+key from the login keychain via Keychain
+# Access.app first (My Certificates → right-click → Export), then:
+security import ~/Desktop/bioflow-ci-signing.p12 \
+  -k ~/Library/Keychains/ci-signing.keychain-db \
+  -P "<p12-export-password>" \
+  -T /usr/bin/codesign -T /usr/bin/security
+
+security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+  -k "<ci-keychain-password>" ~/Library/Keychains/ci-signing.keychain-db
+
+# Add it to the search list so codesign/security find it without an explicit path.
+security list-keychains -d user -s ~/Library/Keychains/ci-signing.keychain-db \
+  $(security list-keychains -d user | sed s/\"//g)
+```
+
+`build-macos.sh` unlocks this keychain itself when `CI_KEYCHAIN_PATH` and
+`CI_KEYCHAIN_PASSWORD` are set in its environment; the workflow sets both
+(the password from a new `CI_KEYCHAIN_PASSWORD` secret, see the table below)
+and unlocks it a second time in its own step before the build, since a
+keychain's unlock only lasts until its own timeout regardless of which
+process unlocked it first.
 
 ### Notarization secrets
 
@@ -258,6 +301,7 @@ Variables — these are credentials, not configuration):
 | `APPLE_API_KEY_ID` | the Key ID | Filename of the `.p8`, e.g. `AuthKey_G3RTU78U5S.p8` → `G3RTU78U5S` |
 | `APPLE_API_ISSUER_ID` | the Issuer ID | The UUID shown above the key list at [appstoreconnect.apple.com/access/integrations/api](https://appstoreconnect.apple.com/access/integrations/api) |
 | `APPLE_API_KEY_P8_BASE64` | the `.p8` file, base64-encoded, single line | `base64 -i AuthKey_XXXXXXXX.p8` (macOS) |
+| `CI_KEYCHAIN_PASSWORD` | the CI signing keychain's password | Chosen when running `security create-keychain -p ...` above |
 
 The workflow also reads `APPLE_TEAM_ID` as a repository **variable** (not a
 secret — it's not sensitive on its own) under the same Settings page's
@@ -272,7 +316,7 @@ rather than being split across Secrets and Variables.
 
 | Symptom | Cause |
 | --- | --- |
-| `errSecInternalComponent` at signing | Keychain locked, or private key missing for the certificate |
+| `errSecInternalComponent` at signing | Keychain locked, private key missing for the certificate, or (self-hosted runner specifically) codesign running from the LaunchAgent job context against the *login* keychain rather than the dedicated `ci-signing.keychain-db` — see the "Signing keychain" section above |
 | App crashes immediately after a successful notarization | Missing JIT entitlements — see above |
 | Build log says `skipping app notarization, no APPLE_ID & ...` | `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` not all set — this is a silent skip, not a build failure, so the build otherwise looks successful |
 | `.app` shows `Notarized`, `.dmg` right next to it shows `Unnotarized` | The Tauri gap described above — the `.dmg` needs its own notarize+staple pass, which `build-macos.sh` now does automatically |

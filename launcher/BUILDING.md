@@ -63,6 +63,7 @@ cd launcher
 ./build-macos.sh              # sign + notarize
 ./build-macos.sh --no-notarize  # sign only, fast, local smoke test
 ```
+> You may have to run `npm install` first if you haven't set up the launcher requirements previously.
 
 This signs the `.app`, notarizes and staples it, builds the `.dmg`, and then
 **separately notarizes and staples the `.dmg` itself** — Tauri's built-in

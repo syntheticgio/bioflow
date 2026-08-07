@@ -88,13 +88,34 @@ class TestValidationIsAdvisory:
         assert r.values["lane"] == "not a number"
         assert any(w["key"] == "lane" for w in r.warnings)
 
-    def test_enum_value_outside_the_options_is_kept(self):
-        """Lab vocabularies always outgrow a fixed list."""
-        r = schemas.coerce_and_validate(
-            {"aligner": "SomeNewAligner-2026"}, FormatKind.BAM
-        )
-        assert r.values["aligner"] == "SomeNewAligner-2026"
+    def test_enum_value_outside_a_closed_field_is_kept_with_a_warning(self):
+        """Lab vocabularies always outgrow a fixed list, so the value is kept.
+
+        Uses read_type, a closed vocabulary: single/paired is the complete
+        set, so an off-list value here really is worth flagging. This test
+        used `aligner` until #66 made that an open vocabulary -- see
+        test_open_vocabulary_value_is_not_a_warning below for that direction.
+        """
+        r = schemas.coerce_and_validate({"read_type": "triple-end"}, FormatKind.FASTQ)
+        assert r.values["read_type"] == "triple-end"
         assert any("not one of the suggested" in w["message"] for w in r.warnings)
+
+    def test_open_vocabulary_value_is_not_a_warning(self):
+        """The defect from #66: every SRA-enriched file carried a warning
+        that was wrong about which value was the authoritative one."""
+        r = schemas.coerce_and_validate({"platform": "NextSeq 550"}, FormatKind.FASTQ)
+        assert r.values["platform"] == "NextSeq 550"
+        assert r.warnings == []
+
+    def test_open_vocabulary_suppression_is_per_field(self):
+        """One metadata dict, one open and one closed field, so a blanket
+        suppression that ignores the flag fails here."""
+        r = schemas.coerce_and_validate(
+            {"platform": "NextSeq 550", "read_type": "triple-end"},
+            FormatKind.FASTQ,
+        )
+        keys = {w["key"] for w in r.warnings}
+        assert keys == {"read_type"}
 
     def test_valid_enum_value_produces_no_warning(self):
         r = schemas.coerce_and_validate({"aligner": "BWA-MEM"}, FormatKind.BAM)
@@ -138,6 +159,15 @@ class TestApiShape:
         flat = {f["key"]: f for g in out["groups"] for f in g["fields"]}
         assert "GATK HaplotypeCaller" in flat["variant_caller"]["options"]
         assert flat["variant_caller"]["type"] == FieldType.ENUM.value
+
+    def test_open_vocabulary_reaches_the_api(self):
+        """The frontend picks its widget from this flag, so a field that is
+        open on the backend and closed on the wire renders as a <select>
+        and silently blocks the values SRA writes."""
+        out = schemas.schema_for_api(FormatKind.FASTQ)
+        flat = {f["key"]: f for g in out["groups"] for f in g["fields"]}
+        assert flat["platform"]["open_vocabulary"] is True
+        assert flat["read_type"]["open_vocabulary"] is False
 
 
 class TestRoleAwareFields:
@@ -241,12 +271,19 @@ class TestReferenceFieldDefinitions:
         assert result.values["reference_build"] == "T2T-CHM13-patch1"
         assert result.warnings == []
 
-    def test_alignment_reference_build_still_warns_on_an_unknown_option(self):
-        """The enum behavior must survive for formats that legitimately use it."""
+    def test_alignment_reference_build_no_longer_warns_on_an_unknown_value(self):
+        """reference_build's alignment/variant ENUM copy became open-vocabulary
+        in #66: real values are NCBI assembly accessions (ASM231043v1, R64),
+        none of which were ever in the closed suggestion list, so every one of
+        them used to warn. This used to assert the opposite -- that an
+        off-list value here still warned -- before that was recognized as the
+        same defect #66 fixed for `platform`. See the design spec's measured
+        6-warnings-on-reference_build finding."""
         result = schemas.coerce_and_validate(
             {"reference_build": "not-a-real-build"}, FormatKind.BAM
         )
-        assert result.warnings, "a BAM's reference_build should still be enum-checked"
+        assert result.values["reference_build"] == "not-a-real-build"
+        assert result.warnings == []
 
     def test_every_role_is_accounted_for(self):
         """A new ObjectRole must either carry its own field group or be

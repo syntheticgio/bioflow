@@ -62,8 +62,10 @@ _MERGING_RE = re.compile(r"merging from \d+ files", re.IGNORECASE)
 # bar driven by it must never claim completion.
 MAX_MEASURED_PCT = 0.95
 
-# aligning always precedes sorting; the run has no other phases, and unlike
-# Flye's open-ended stage list this one is fixed and known ahead of time.
+# aligning always precedes sorting; the run has no other phases. Assembly's
+# Flye stage list is similarly closed and known ahead of time -- see
+# assembly_runner.flye_stage_order -- it just varies per run instead of
+# being a flat constant like this one.
 PHASE_ORDER: tuple[str, ...] = ("aligning", "sorting")
 
 
