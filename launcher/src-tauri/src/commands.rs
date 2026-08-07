@@ -521,12 +521,11 @@ pub struct CurrentSettingsDto {
 /// before this field needed it).
 #[tauri::command]
 pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSettingsDto, ()> {
-    let install_dir = app.install_dir.lock().unwrap().clone();
-    let Some(install_dir) = install_dir else {
+    let Some(install_dir) = install_dir_str(&app) else {
         return Ok(CurrentSettingsDto { hard_mem_mb: None });
     };
 
-    let hard_mem_mb = std::fs::read_to_string(install_dir.join(".env"))
+    let hard_mem_mb = std::fs::read_to_string(std::path::Path::new(&install_dir).join(".env"))
         .ok()
         .and_then(|contents| parse_hard_mem_mb(&contents));
 
