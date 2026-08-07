@@ -145,6 +145,64 @@ impl DockerBackend for ShellDocker {
         None
     }
 
+    fn discover_running_project_dir(&self, project_name: &str) -> Option<String> {
+        // `docker compose ls` lists every running Compose project on the
+        // machine, by name -- exactly what's needed to find a `biopipe`
+        // stack wherever it was started from, without depending on
+        // `--project-directory` (which is the very thing being looked
+        // for). `-a` is deliberately omitted: a stopped project with
+        // leftover containers should not be "discovered" as if it were
+        // running.
+        let output = Command::new("docker")
+            .arg("compose")
+            .arg("ls")
+            .arg("--format")
+            .arg("json")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let projects: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+        let matched = projects.as_array()?.iter().find(|p| {
+            p.get("Name").and_then(|n| n.as_str()) == Some(project_name)
+        })?;
+
+        // `docker compose ls` reports config file paths but not the
+        // working directory those paths were resolved from -- the two
+        // differ whenever compose is invoked with `--project-directory`
+        // explicitly (as this launcher itself always does), so config
+        // file paths are not reliable here. `working_dir` is carried on
+        // every container's own compose labels instead, and is exactly
+        // the value this launcher needs to pass back into
+        // `--project-directory` on every subsequent call.
+        let config_files = matched.get("ConfigFiles")?.as_str()?;
+        let first_compose_file = config_files.split(',').next()?;
+
+        let inspect_output = Command::new("docker")
+            .arg("inspect")
+            .arg("--format")
+            .arg("{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}")
+            .arg(format!("{project_name}-mongo-1"))
+            .output()
+            .ok()?;
+        if inspect_output.status.success() {
+            let working_dir = String::from_utf8_lossy(&inspect_output.stdout).trim().to_string();
+            if !working_dir.is_empty() {
+                return Some(working_dir);
+            }
+        }
+
+        // Fall back to the directory containing the first compose file if
+        // the label lookup above failed for any reason (e.g. no `mongo`
+        // service, an unexpected container naming scheme) -- still better
+        // than reporting nothing, since a discovered project with any
+        // running container at all should be usable.
+        std::path::Path::new(first_compose_file)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+    }
+
     fn attempt_daemon_start(&self) {
         #[cfg(target_os = "macos")]
         {

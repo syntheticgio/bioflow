@@ -26,6 +26,9 @@ pub struct FakeDocker {
     /// after `daemon_start_calls` was last incremented, letting a test model
     /// the daemon coming up after a delay rather than instantly or never.
     pub probe_after_start_sequence: RefCell<Vec<DockerPresence>>,
+    /// What `discover_running_project_dir` returns for any project name,
+    /// or `None` to model "nothing found."
+    pub discovered_project_dir: RefCell<Option<String>>,
 }
 
 impl Default for FakeDocker {
@@ -42,6 +45,7 @@ impl Default for FakeDocker {
             manifest_differs: Cell::new(None),
             daemon_start_calls: Cell::new(0),
             probe_after_start_sequence: RefCell::new(Vec::new()),
+            discovered_project_dir: RefCell::new(None),
         }
     }
 }
@@ -115,5 +119,9 @@ impl DockerBackend for FakeDocker {
 
     fn attempt_daemon_start(&self) {
         self.daemon_start_calls.set(self.daemon_start_calls.get() + 1);
+    }
+
+    fn discover_running_project_dir(&self, _project_name: &str) -> Option<String> {
+        self.discovered_project_dir.borrow().clone()
     }
 }

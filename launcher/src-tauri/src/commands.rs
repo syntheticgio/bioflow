@@ -69,21 +69,25 @@ fn fixed_install_dir() -> PathBuf {
     SetupDefaults::for_this_os().install_dir
 }
 
-/// Resolves the install directory for this call: the in-memory value if one
-/// is already known (set by a `run_first_setup` earlier this session), or --
-/// checked fresh on every call rather than cached, so a relaunch of the
-/// launcher after an install from a *previous* session still finds it -- the
-/// fixed default path if `setup::install_exists` finds a real install
-/// sitting there on disk. Populates `app.install_dir` when the disk check
-/// finds one, so later calls in the same session (`run_stack`,
-/// `apply_settings`, ...) don't need to repeat the disk check themselves.
+/// The Compose project name every install this launcher can ever discover
+/// uses -- `docker-compose.yml`'s own `name: biopipe` (both the shipped
+/// bundle and this repo's own copy pin the same value), so this is not a
+/// guess, it is the one name a `biopipe` stack can ever have.
+const BIOPIPE_PROJECT_NAME: &str = "biopipe";
+
+/// The fast path: the in-memory value if one is already known, or the
+/// fixed `~/.bioflow` path if a real launcher install sits there on disk.
+/// Both checks are cheap (a lock, a couple of `stat`s) and were already
+/// synchronous before the Docker-discovery fallback below existed --
+/// kept as its own function so every caller can still avoid
+/// `spawn_blocking` entirely in the common case where this already finds
+/// an answer.
 fn install_dir_str(app: &State<LauncherApp>) -> Option<String> {
-    {
-        let existing = app.install_dir.lock().unwrap();
-        if let Some(dir) = existing.as_ref() {
-            return Some(dir.to_string_lossy().into_owned());
-        }
+    let existing = app.install_dir.lock().unwrap();
+    if let Some(dir) = existing.as_ref() {
+        return Some(dir.to_string_lossy().into_owned());
     }
+    drop(existing);
 
     let fixed = fixed_install_dir();
     if setup::install_exists(&fixed) {
@@ -95,6 +99,48 @@ fn install_dir_str(app: &State<LauncherApp>) -> Option<String> {
     None
 }
 
+/// The full resolution, including the Docker-discovery fallback: if
+/// `install_dir_str` finds nothing, shells out to look for a *running*
+/// `biopipe` Compose project anywhere else on the machine.
+///
+/// This is what lets the launcher recognize a stack started by hand with
+/// plain `docker compose up` from a repo checkout (this repo's own
+/// documented dev-trunk workflow) -- without it, the launcher reports
+/// `NotInstalled` even while a `biopipe` stack is genuinely running,
+/// because nothing before this method ever looked anywhere but the fixed
+/// path. This is a debug/dev affordance, not a redefinition of
+/// "installed": a discovered project is treated identically to a real
+/// install for display and Run/Stop purposes, but nothing about this
+/// changes which install first-run setup writes to, or verifies that a
+/// discovered `.env` has the shape the launcher's own Settings/migration
+/// code expects -- those may simply not work correctly against a
+/// discovered install, which is an accepted trade for a debug case.
+///
+/// `async`, unlike `install_dir_str` above: the discovery fallback shells
+/// out (`docker compose ls`), so this must run inside `spawn_blocking`
+/// like every other Docker-touching call in this file. Callers that
+/// already know they're inside a `spawn_blocking` closure with a `docker`
+/// value in scope should call `install_dir_str` then
+/// `docker.discover_running_project_dir` directly instead of this
+/// wrapper, to avoid nesting `spawn_blocking` calls.
+async fn install_dir_str_blocking(app: &State<'_, LauncherApp>) -> Option<String> {
+    if let Some(dir) = install_dir_str(app) {
+        return Some(dir);
+    }
+
+    let discovered = tauri::async_runtime::spawn_blocking(|| {
+        ShellDocker::new().discover_running_project_dir(BIOPIPE_PROJECT_NAME)
+    })
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(dir_str) = &discovered {
+        *app.install_dir.lock().unwrap() = Some(PathBuf::from(dir_str));
+    }
+    discovered
+}
+
 /// `async`/`spawn_blocking` for the same reason as `run_stack` above --
 /// `evaluate` shells out to `docker` (`probe`, and on the happy path `ps`
 /// and `health` too), and the frontend polls this every
@@ -103,7 +149,7 @@ fn install_dir_str(app: &State<LauncherApp>) -> Option<String> {
 /// steady cadence rather than just during Run/Stop/Update.
 #[tauri::command]
 pub async fn status(app: State<'_, LauncherApp>) -> Result<LauncherStateDto, ()> {
-    let install_dir = install_dir_str(&app);
+    let install_dir = install_dir_str_blocking(&app).await;
 
     let state = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
@@ -179,7 +225,7 @@ const RUN_HEALTH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_
 /// OS offered to force-quit it, even though nothing had actually hung.
 #[tauri::command]
 pub async fn run_stack(app: tauri::AppHandle, state: State<'_, LauncherApp>) -> Result<(), String> {
-    let install_dir = install_dir_str(&state).ok_or("not installed")?;
+    let install_dir = install_dir_str_blocking(&state).await.ok_or("not installed")?;
     let port = *state.port.lock().unwrap();
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -211,7 +257,7 @@ pub async fn run_stack(app: tauri::AppHandle, state: State<'_, LauncherApp>) -> 
 /// `docker compose down` is a real blocking subprocess call.
 #[tauri::command]
 pub async fn stop_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
-    let install_dir = install_dir_str(&app).ok_or("not installed")?;
+    let install_dir = install_dir_str_blocking(&app).await.ok_or("not installed")?;
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
@@ -231,7 +277,7 @@ pub async fn stop_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
 /// calls, and a pull in particular can run long on a slow connection.
 #[tauri::command]
 pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
-    let install_dir = install_dir_str(&app).ok_or("not installed")?;
+    let install_dir = install_dir_str_blocking(&app).await.ok_or("not installed")?;
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
