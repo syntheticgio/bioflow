@@ -5,18 +5,26 @@ import { storageLocationChanged } from "./wizard-logic";
 
 interface Props {
   current: SettingsValues;
+  /** Whether the stack is currently Running -- storage location and port
+   * can't be changed from here while it is (recreating containers under a
+   * live session is a Stop-first operation, and for storage specifically,
+   * this field never moves data -- see MigrateStorage.tsx for that flow,
+   * only offered once Stopped). Both render as plain text instead of
+   * inputs in that state, informative rather than an editable-looking
+   * field that silently does nothing. */
+  running: boolean;
   onClose: () => void;
   onApplied: (settings: SettingsValues) => void;
 }
 
-export function Settings({ current, onClose, onApplied }: Props) {
+export function Settings({ current, running, onClose, onApplied }: Props) {
   const [storageLocation, setStorageLocation] = useState(current.storageLocation);
   const [port, setPort] = useState(current.port);
   const [networkExposed, setNetworkExposed] = useState(current.networkExposed);
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
 
-  const storageChanged = storageLocationChanged(current.storageLocation, storageLocation);
+  const storageChanged = !running && storageLocationChanged(current.storageLocation, storageLocation);
 
   async function handleApply() {
     setApplying(true);
@@ -42,13 +50,24 @@ export function Settings({ current, onClose, onApplied }: Props) {
             <div className="field-head">
               <span className="field-label">Storage location</span>
             </div>
-            <input
-              className="field-value-input"
-              value={storageLocation}
-              onChange={(e) => setStorageLocation(e.target.value)}
-              disabled={applying}
-              aria-label="Storage location"
-            />
+            {running ? (
+              <span className="field-value" aria-label="Storage location">
+                {storageLocation}
+              </span>
+            ) : (
+              <input
+                className="field-value-input"
+                value={storageLocation}
+                onChange={(e) => setStorageLocation(e.target.value)}
+                disabled={applying}
+                aria-label="Storage location"
+              />
+            )}
+            {running && (
+              <span className="field-hint" role="note">
+                Stop the stack to change this.
+              </span>
+            )}
             {storageChanged && (
               <span className="field-hint-warn" role="note">
                 Changing the storage location points BioFlow at a different folder.
@@ -60,14 +79,25 @@ export function Settings({ current, onClose, onApplied }: Props) {
 
           <div className="field dialog-field-narrow">
             <span className="field-label">Port</span>
-            <input
-              className="field-value-input field-value-numeric"
-              type="number"
-              value={port}
-              onChange={(e) => setPort(Number(e.target.value))}
-              disabled={applying}
-              aria-label="Port"
-            />
+            {running ? (
+              <span className="field-value field-value-numeric" aria-label="Port">
+                {port}
+              </span>
+            ) : (
+              <input
+                className="field-value-input field-value-numeric"
+                type="number"
+                value={port}
+                onChange={(e) => setPort(Number(e.target.value))}
+                disabled={applying}
+                aria-label="Port"
+              />
+            )}
+            {running && (
+              <span className="field-hint" role="note">
+                Stop the stack to change this.
+              </span>
+            )}
           </div>
 
           <div className="field">

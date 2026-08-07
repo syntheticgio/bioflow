@@ -320,6 +320,7 @@ export function App() {
       {showSettings && (
         <Settings
           current={settings}
+          running={state.kind === "Running"}
           onClose={() => setShowSettings(false)}
           onApplied={(next) => {
             setSettings(next);
