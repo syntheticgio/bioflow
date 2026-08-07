@@ -286,3 +286,50 @@ def test_assembly_descends_threads_to_fit():
     assert isinstance(result, replan_service.Proposal)
     assert result.params["threads"] == 8
     assert result.estimate_mb <= at_eight
+
+
+# Inputs that should produce a Proposal for each registered job type. A new
+# registry entry without a row here fails the test below, which is the point:
+# a proposer that can never fire is invisible otherwise.
+_REACHABILITY_CASES = {
+    JOB_TYPE_ALIGN_READS: (
+        {
+            "aligner": Aligner.MINIMAP2.value,
+            "threads": 100,
+            "sort_memory_mb": 1024,
+            "reference_bases": 100_000_000,
+            "building_index": False,
+        },
+        16_000,
+    ),
+    JOB_TYPE_ASSEMBLE: (
+        {
+            "assembler": Assembler.FLYE.value,
+            "threads": 100,
+            "genome_bases": 100_000_000,
+        },
+        16_000,
+    ),
+}
+
+
+def test_every_registered_proposer_is_reachable():
+    assert set(_REACHABILITY_CASES) == set(replan_service._PROPOSERS), (
+        "every registered proposer needs a reachability case"
+    )
+
+    for job_type, (params, budget_mb) in _REACHABILITY_CASES.items():
+        result = replan_service.replan(
+            job_type=job_type,
+            params=params,
+            budget_mb=budget_mb,
+            cpu_budget=16.0,
+        )
+        assert isinstance(result, replan_service.Proposal), (
+            f"{job_type} produced {type(result).__name__}, not a Proposal"
+        )
+
+
+def test_every_proposer_has_a_verifier():
+    """A proposer without a verifier can never offer anything."""
+    assert set(replan_service._PROPOSERS) == set(replan_service._VERIFIERS)
