@@ -26,6 +26,12 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# Redefined rather than imported from pipeline_service: that module will import
+# this one once the refusal card is wired up, and the constant is a string
+# literal that has never changed.
+JOB_TYPE_ALIGN_READS = "align_reads"
+JOB_TYPE_ASSEMBLE = "assemble_reads"
+
 
 @dataclass(frozen=True)
 class Change:
@@ -167,3 +173,63 @@ def _clamp_threads(*, threads: int, cpu_budget: float) -> tuple[int, str]:
         f"{threads} threads is more than this machine can run; "
         f"it has {capacity} cores."
     )
+
+
+def _align_estimate(params: dict) -> int:
+    """Re-estimate an alignment from a params dict.
+
+    Used both by the descent and by the verification wrapper, so a proposal is
+    always confirmed against the identical arithmetic that produced it.
+    """
+    from app.pipelines import resource_estimator
+    from app.pipelines.aligners import Aligner
+
+    return resource_estimator.estimate_mb(
+        aligner=Aligner(params["aligner"]),
+        reference_bases=params["reference_bases"],
+        threads=params["threads"],
+        sort_memory_mb=params["sort_memory_mb"],
+        building_index=params["building_index"],
+    )
+
+
+def _propose_align(*, params: dict, budget_mb: int, cpu_budget: float) -> ReplanResult:
+    """Alignment: clamp threads, then descend sort buffer, then threads."""
+    from app.pipelines import resource_estimator
+    from app.pipelines.align_params import MIN_SORT_MEMORY_MB
+    from app.pipelines.aligners import Aligner
+
+    original_threads = params["threads"]
+    original_sort_mb = params["sort_memory_mb"]
+
+    baseline_threads, note = _clamp_threads(
+        threads=original_threads, cpu_budget=cpu_budget
+    )
+
+    # The feasibility test. If the cheapest configuration the floors permit is
+    # still over budget, no descent can succeed -- the fixed index term
+    # dominates, and threads cannot reduce it. One estimate call answers this.
+    thread_floor = max(1, baseline_threads // 2)
+    floor_params = {
+        **params,
+        "threads": thread_floor,
+        "sort_memory_mb": MIN_SORT_MEMORY_MB,
+    }
+    if _align_estimate(floor_params) > budget_mb:
+        return Infeasible(
+            resource_estimator.explain(
+                aligner=Aligner(params["aligner"]),
+                reference_bases=params["reference_bases"],
+                threads=thread_floor,
+                sort_memory_mb=MIN_SORT_MEMORY_MB,
+                building_index=params["building_index"],
+                mem_budget_mb=budget_mb,
+            )
+        )
+
+    # Descent lands in the next task.
+    return NoKnobs()
+
+
+_PROPOSERS[JOB_TYPE_ALIGN_READS] = _propose_align
+_VERIFIERS[JOB_TYPE_ALIGN_READS] = _align_estimate
