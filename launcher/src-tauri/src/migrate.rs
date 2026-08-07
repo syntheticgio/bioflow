@@ -112,6 +112,103 @@ fn copy_symlink(src: &Path, dest: &Path) -> std::io::Result<()> {
     std::fs::copy(src, dest).map(|_| ())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidationResult {
+    Ok,
+    /// Count/size validation failed: what the pre-copy scan expected vs.
+    /// what actually landed at the destination.
+    Mismatch {
+        expected_files: u64,
+        actual_files: u64,
+        expected_bytes: u64,
+        actual_bytes: u64,
+    },
+    /// Hash validation failed: this specific file's contents differ
+    /// between source and destination. Relative to the tree root, not an
+    /// absolute path, so the message stays meaningful regardless of where
+    /// source/dest happen to live on this machine.
+    HashMismatch { file: PathBuf },
+}
+
+/// The fast default validation: does the destination have the same file
+/// count and total byte size the pre-copy scan of the source found. This
+/// is what actually catches the realistic failure mode (copy interrupted,
+/// disk filled mid-copy) without re-reading every byte of potentially very
+/// large files.
+pub fn validate_count_and_size(
+    source_scan: &SourceScan,
+    dest: &Path,
+) -> std::io::Result<ValidationResult> {
+    let dest_scan = scan_source(dest)?;
+    if dest_scan.file_count == source_scan.file_count
+        && dest_scan.total_bytes == source_scan.total_bytes
+    {
+        Ok(ValidationResult::Ok)
+    } else {
+        Ok(ValidationResult::Mismatch {
+            expected_files: source_scan.file_count,
+            actual_files: dest_scan.file_count,
+            expected_bytes: source_scan.total_bytes,
+            actual_bytes: dest_scan.total_bytes,
+        })
+    }
+}
+
+/// The slow, opt-in validation: hash every file on both sides and compare.
+/// Stops at the first mismatch rather than collecting all of them -- one
+/// mismatch is already enough to fail the migration and report a concrete,
+/// actionable file.
+pub fn validate_by_hash(source: &Path, dest: &Path) -> std::io::Result<ValidationResult> {
+    validate_hash_dir(source, dest, Path::new(""))
+}
+
+fn validate_hash_dir(
+    source_root: &Path,
+    dest_root: &Path,
+    relative: &Path,
+) -> std::io::Result<ValidationResult> {
+    let source_dir = source_root.join(relative);
+    for entry in std::fs::read_dir(&source_dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let entry_relative = relative.join(entry.file_name());
+
+        if file_type.is_dir() {
+            let result = validate_hash_dir(source_root, dest_root, &entry_relative)?;
+            if result != ValidationResult::Ok {
+                return Ok(result);
+            }
+        } else if file_type.is_file() {
+            let source_hash = hash_file(&source_root.join(&entry_relative))?;
+            let dest_hash = hash_file(&dest_root.join(&entry_relative))?;
+            if source_hash != dest_hash {
+                return Ok(ValidationResult::HashMismatch { file: entry_relative });
+            }
+        }
+        // Symlinks are not hashed -- validate_count_and_size already
+        // covers their presence via file_count, and hashing a link target
+        // that may point outside the tree is out of scope here.
+    }
+    Ok(ValidationResult::Ok)
+}
+
+fn hash_file(path: &Path) -> std::io::Result<[u8; 32]> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+    Ok(hasher.finalize().into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +303,79 @@ mod tests {
 
         let dest_link = dest.join("link.txt");
         assert!(dest_link.symlink_metadata().unwrap().file_type().is_symlink());
+    }
+
+    #[test]
+    fn count_and_size_validation_passes_for_a_correct_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("a.txt"), b"12345").unwrap();
+
+        copy_tree(&source, &dest, |_| {}).unwrap();
+        let source_scan = scan_source(&source).unwrap();
+
+        assert_eq!(
+            validate_count_and_size(&source_scan, &dest).unwrap(),
+            ValidationResult::Ok
+        );
+    }
+
+    #[test]
+    fn count_and_size_validation_fails_when_a_file_is_missing_from_the_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("a.txt"), b"12345").unwrap();
+        std::fs::write(source.join("b.txt"), b"1234567890").unwrap();
+
+        // Simulate an interrupted copy: only one of two files landed.
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("a.txt"), b"12345").unwrap();
+        let source_scan = scan_source(&source).unwrap();
+
+        let result = validate_count_and_size(&source_scan, &dest).unwrap();
+        assert_eq!(
+            result,
+            ValidationResult::Mismatch {
+                expected_files: 2,
+                actual_files: 1,
+                expected_bytes: 15,
+                actual_bytes: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn hash_validation_passes_for_a_correct_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("a.txt"), b"12345").unwrap();
+        std::fs::create_dir_all(source.join("nested")).unwrap();
+        std::fs::write(source.join("nested/b.txt"), b"1234567890").unwrap();
+
+        copy_tree(&source, &dest, |_| {}).unwrap();
+
+        assert_eq!(validate_by_hash(&source, &dest).unwrap(), ValidationResult::Ok);
+    }
+
+    #[test]
+    fn hash_validation_fails_when_a_copied_file_has_different_contents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source");
+        let dest = tmp.path().join("dest");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("a.txt"), b"original").unwrap();
+
+        copy_tree(&source, &dest, |_| {}).unwrap();
+        // Corrupt the copy after the fact.
+        std::fs::write(dest.join("a.txt"), b"corrupted").unwrap();
+
+        let result = validate_by_hash(&source, &dest).unwrap();
+        assert_eq!(result, ValidationResult::HashMismatch { file: PathBuf::from("a.txt") });
     }
 }
