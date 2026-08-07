@@ -8,9 +8,11 @@ way: an object in the project, with its format and role detected.
 If the human already has the file on disk, they upload it through the
 BioFlow UI (`POST /api/v1/uploads` and its chunk endpoints) -- there is no
 MCP tool for this, since the bytes have to move from the human's machine,
-not from here. Once an upload completes, BioFlow runs `ingest_headers` on it
-automatically to detect the format and pull out header facts; nothing
-further to launch or poll from this side.
+not from here. This is still a job, like everything else: completing the
+upload returns a job id for `assemble_upload`, and once that succeeds it
+enqueues a second job, `ingest_headers`, to detect the format and pull out
+header facts. Poll `bioflow_get_job` for both before treating the object as
+ready -- there is no fire-and-forget path here.
 
 ## Downloading an NCBI assembly
 
