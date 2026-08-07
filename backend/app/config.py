@@ -153,6 +153,18 @@ class Settings(BaseSettings):
     # at its install location -- bin/craq resolves its src/ siblings
     # relative to its own path, so it cannot be symlinked.
     craq_path: str = "craq"
+    # An absolute path, not a bare name, and deliberately so: Debian ships a
+    # `meryl` package that is the Celera Assembler k-mer suite, a different
+    # program with the same name. A bare PATH lookup would let a future
+    # transitive `apt-get install meryl` shadow the correct binary with one
+    # that reports a version, passes a naive probe, and fails at runtime.
+    # See tools.meryl(), which also rejects that version string explicitly.
+    meryl_path: str = "/opt/meryl/bin/meryl"
+    # A wrapper script installed by backend/scripts/install-merqury.sh at
+    # /usr/local/bin/merqury that sets $MERQURY and execs merqury.sh --
+    # merqury.sh resolves its own siblings through that variable and cannot
+    # simply be symlinked onto PATH.
+    merqury_path: str = "merqury"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

@@ -281,6 +281,8 @@ class TestSerialization:
             "ivar",
             "quast",
             "craq",
+            "meryl",
+            "merqury",
             # Not a binary at all -- a Python library, probed by import rather
             # than by shutil.which. It is in `all_tools` deliberately: the
             # version that ran a differential expression test is half that
@@ -366,6 +368,80 @@ class TestCraqProbe:
     def test_craq_is_documented_and_probeable(self):
         assert "craq" in tools.TOOL_META
         meta = tools.TOOL_META["craq"]
+        assert meta.homepage
+        assert meta.citation
+        assert meta.license
+        assert meta.usage
+
+
+class TestMerylProbe:
+    def test_meryl_probe_rejects_debian_celera_build(self, monkeypatch, tmp_path):
+        """Debian's `meryl` is 0~20150903+r2013-9+b1 -- the Celera Assembler
+        k-mer suite, not Marbl meryl. It reports a version and would pass a
+        naive probe, then fail at runtime on arguments it has never heard of.
+        This is the acceptance criterion on issue #64.
+        """
+        fake = tmp_path / "meryl"
+        fake.write_text("#!/bin/sh\necho '0~20150903+r2013-9+b1'\n")
+        fake.chmod(0o755)
+
+        monkeypatch.setattr(tools.settings, "meryl_path", str(fake))
+        tools.meryl.cache_clear()
+
+        probed = tools.meryl()
+        assert probed.version is None
+        assert probed.error is not None
+        assert "Marbl" in probed.error
+
+    def test_meryl_probe_accepts_marbl_build(self, monkeypatch, tmp_path):
+        fake = tmp_path / "meryl"
+        fake.write_text("#!/bin/sh\necho 'meryl 1.4.2'\n")
+        fake.chmod(0o755)
+
+        monkeypatch.setattr(tools.settings, "meryl_path", str(fake))
+        tools.meryl.cache_clear()
+
+        probed = tools.meryl()
+        assert probed.error is None
+        assert probed.version is not None
+        assert "1.4.2" in probed.version
+
+    def test_meryl_is_an_assembly_qc_tool(self):
+        assert tools.PipelineType.ASSEMBLY_QC in tools.TOOL_META["meryl"].pipelines
+
+    def test_meryl_is_runnable(self):
+        assert tools.TOOL_META["meryl"].runnable
+
+    def test_meryl_is_in_all_tools(self):
+        assert "meryl" in {t.name for t in tools.all_tools()}
+
+    def test_meryl_is_documented_and_probeable(self):
+        assert "meryl" in tools.TOOL_META
+        meta = tools.TOOL_META["meryl"]
+        assert meta.homepage
+        assert meta.citation
+        assert meta.license
+        assert meta.usage
+
+
+class TestMerquryProbe:
+    def test_merqury_probes(self):
+        tool = tools.merqury()
+        assert tool.name == "merqury"
+        assert isinstance(tool.available, bool)
+
+    def test_merqury_is_an_assembly_qc_tool(self):
+        assert tools.PipelineType.ASSEMBLY_QC in tools.TOOL_META["merqury"].pipelines
+
+    def test_merqury_is_runnable(self):
+        assert tools.TOOL_META["merqury"].runnable
+
+    def test_merqury_is_in_all_tools(self):
+        assert "merqury" in {t.name for t in tools.all_tools()}
+
+    def test_merqury_is_documented_and_probeable(self):
+        assert "merqury" in tools.TOOL_META
+        meta = tools.TOOL_META["merqury"]
         assert meta.homepage
         assert meta.citation
         assert meta.license
