@@ -192,6 +192,16 @@ fn validate_hash_dir(
     Ok(ValidationResult::Ok)
 }
 
+/// Deletes the entire original storage directory -- not just its contents
+/// -- per the design spec's "just a single directory... gone" framing.
+/// Callers must only invoke this after validation (`validate_count_and_size`
+/// or `validate_by_hash`) has already returned `ValidationResult::Ok` for
+/// the new location; this function itself does not re-check that, since it
+/// is a pure "delete this path" primitive.
+pub fn remove_original(original: &Path) -> std::io::Result<()> {
+    std::fs::remove_dir_all(original)
+}
+
 fn hash_file(path: &Path) -> std::io::Result<[u8; 32]> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
@@ -377,5 +387,17 @@ mod tests {
 
         let result = validate_by_hash(&source, &dest).unwrap();
         assert_eq!(result, ValidationResult::HashMismatch { file: PathBuf::from("a.txt") });
+    }
+
+    #[test]
+    fn remove_original_deletes_the_whole_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let original = tmp.path().join("old-storage");
+        std::fs::create_dir_all(original.join("objects")).unwrap();
+        std::fs::write(original.join("objects/blob1"), b"data").unwrap();
+
+        remove_original(&original).unwrap();
+
+        assert!(!original.exists(), "the whole directory should be gone, not just its contents");
     }
 }
