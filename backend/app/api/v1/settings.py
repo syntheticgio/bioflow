@@ -312,7 +312,8 @@ async def set_resource_limits(body: ResourceLimitsIn) -> ResourceLimitsOut:
             status_code=422,
             detail=(
                 f"A hard limit of {hard} MB is enforced on this machine. "
-                f"The memory budget cannot exceed it."
+                f"The memory budget cannot exceed it. Change the hard limit "
+                f"in the BioFlow launcher's settings."
             ),
         )
     limits = await resource_limit_service.save(
