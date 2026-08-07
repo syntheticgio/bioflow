@@ -4924,6 +4924,10 @@ table.software-matrix thead th.software-matrix-corner {
   margin: 4px 0 0;
 }
 
+.settings-hint-warn {
+  color: var(--warn);
+}
+
 .mcp-config {
   background: var(--bg-panel);
   border: 1px solid var(--border);
