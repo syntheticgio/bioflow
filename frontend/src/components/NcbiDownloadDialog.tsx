@@ -382,9 +382,19 @@ export function NcbiDownloadDialog({
           }}
         >
           <label className="sra-search-accession sra-organism-anchor">
-            <span>Accession or organism</span>
+            <span id="sra-organism-label">Accession or organism</span>
             <input
               autoFocus
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={showSuggestions && suggestions.length > 0}
+              aria-controls="sra-organism-listbox"
+              aria-activedescendant={
+                showSuggestions && suggestions.length > 0
+                  ? `sra-organism-option-${suggestions[highlighted]?.tax_id}`
+                  : undefined
+              }
+              aria-labelledby="sra-organism-label"
               value={accession}
               placeholder="SRR11768093, PRJNA1495534, GCF_000002445.2, Homo sapiens…"
               onChange={(e) => {
@@ -412,11 +422,14 @@ export function NcbiDownloadDialog({
               }}
             />
             {showSuggestions && suggestions.length > 0 && (
-              <ul className="sra-organism-suggestions">
+              <ul className="sra-organism-suggestions" role="listbox" id="sra-organism-listbox">
                 {suggestions.map((s, i) => (
-                  <li key={s.tax_id}>
+                  <li key={s.tax_id} role="presentation">
                     <button
                       type="button"
+                      id={`sra-organism-option-${s.tax_id}`}
+                      role="option"
+                      aria-selected={i === highlighted}
                       className={i === highlighted ? "active" : undefined}
                       onMouseEnter={() => setHighlighted(i)}
                       onClick={() => pickOrganism(s)}
