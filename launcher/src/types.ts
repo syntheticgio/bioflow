@@ -11,4 +11,6 @@ export interface Settings {
   storageLocation: string;
   port: number;
   networkExposed: boolean;
+  /** GB as typed, or "" for no hard cap. Converted to MB at the IPC edge. */
+  hardMemGb: string;
 }

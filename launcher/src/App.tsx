@@ -33,6 +33,7 @@ export function App() {
     storageLocation: "",
     port: 5173,
     networkExposed: false,
+    hardMemGb: "",
   });
 
   useEffect(() => {

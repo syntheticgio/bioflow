@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { LauncherState } from "./types";
+import { parseHardMemGb } from "./settings-logic";
 
 export function status(): Promise<LauncherState> {
   return invoke("status");
@@ -111,12 +112,15 @@ export function applySettings(args: {
   storageLocation: string;
   port: number;
   networkExposed: boolean;
+  hardMemGb: string;
 }): Promise<void> {
+  const hard = parseHardMemGb(args.hardMemGb);
   return invoke("apply_settings", {
     args: {
       storage_location: args.storageLocation,
       port: args.port,
       network_exposed: args.networkExposed,
+      hard_mem_mb: hard.kind === "set" ? hard.mb : null,
     },
   });
 }
