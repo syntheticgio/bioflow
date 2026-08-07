@@ -149,6 +149,22 @@ class TestReadSetResolution:
 
         assert enqueued["payload"]["read_object_id"] == str(reads_a.id)
 
+    async def test_explicit_read_object_id_from_another_project_is_rejected(self):
+        """get_object scopes by owner, not project -- without this check a
+        read set from a different project of the same owner would enqueue
+        without error and score this assembly's QV against reads it has
+        nothing to do with, the exact 'plausible, confidently wrong' outcome
+        the ambiguity rule exists to prevent."""
+        assembly = _assembly()
+        other_project_reads = _reads(name="other.fastq.gz")
+
+        with pytest.raises(ValidationError):
+            await _run(
+                assembly=assembly,
+                read_sets=[[other_project_reads]],
+                read_object_id=other_project_reads.id,
+            )
+
     async def test_explicit_read_object_id_pulls_in_its_mate(self):
         assembly = _assembly()
         mate = _reads(name="r2.fastq.gz", project_id=assembly.project_id)

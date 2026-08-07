@@ -4088,6 +4088,22 @@ async def launch_qv_qc(
         chosen = candidates[0]
     else:
         primary = await object_service.get_object(read_object_id, owner=owner)
+        # get_object scopes by owner, not project -- a read set from another
+        # project of the same owner would otherwise enqueue without error
+        # and score this assembly's QV against reads it has nothing to do
+        # with, exactly the "plausible, confidently wrong" outcome this
+        # function's docstring warns about. The auto-pick branch above is
+        # safe by construction (candidates are drawn from
+        # assembly.project_id already); this is the one path where a wrong
+        # pairing is actually reachable.
+        if primary.project_id != assembly.project_id:
+            raise ValidationError(
+                "Reads and assembly must be in the same project",
+                details={
+                    "object_id": str(assembly.id),
+                    "read_object_id": str(primary.id),
+                },
+            )
         chosen = [primary]
         mate_id = getattr(primary, "mate_object_id", None)
         if mate_id is not None:
