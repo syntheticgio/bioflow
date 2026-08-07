@@ -59,6 +59,8 @@ Then open <http://localhost:5173>
 5. Then open <http://localhost:5173>.
 ```
 
+Releases and versioning: see [`VERSION.md`](VERSION.md).
+
 ## Background
 BioFlow is a local UI/UX web app that is trying to solve the problem of managing your bioinformatics data, keeping track of provenance, having a central place to run computations on software that you don’t remember the 100 different command line flags for, and to visualize some of the basic outputs that are common in this type of research.  There are many other projects out there which probably do this.  I know of ones like Galaxy, FDA HIVE, DNANexus, etc.  One thing that BioFlow doesn’t do thought - it is not for distributed computing like these other ones target.  Instead, all of the development time is put into making the UI responsive, easy to use and intuitive, along with some slight load balancing and queueing work.  In other words, it is letting those other platforms handle the ‘hard’ problems of bioinformatics and just addresses the ‘easy’ problems so it feels like you are doing a little more biology than informatics. Oh, and BioFlow can make use of your AI agent and offers a RESTful API (see http://localhost:8000 when running).
 
