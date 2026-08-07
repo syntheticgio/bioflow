@@ -45,6 +45,7 @@ from app.pipelines import (
     assemblers,
     assembly_qc_registry,
     counts_runner,
+    csq_parse,
     cutadapt_runner,
     de_runner,
     fastp_runner,
@@ -485,18 +486,34 @@ async def launch_qc(*, object_id: PydanticObjectId, owner: str):
 # --- Narrative summaries ----------------------------------------------------
 
 
+# Prefixes of the bookkeeping keys each summary applier writes onto
+# obj.facts (the narrative, model name, timestamp, and the fingerprint
+# itself). One shared function computes the dedup fingerprint for all three
+# summary kinds, so it has to exclude all three prefixes -- missing one means
+# that once its applier lands, its own bookkeeping keys become part of the
+# material the next fingerprint is computed from, so the "unchanged inputs"
+# case can never match again and force=False stops deduping forever. Add a
+# prefix here whenever a new summary_fingerprint()-based dedup check is added.
+_SUMMARY_FACT_PREFIXES = ("ai_summary", "ai_de_summary", "ai_variant_summary")
+
+
 def summary_fingerprint(obj: DataObject) -> str:
     """A digest of the inputs a summary would be written from.
 
-    Covers facts and metadata but deliberately excludes the `ai_summary_*` keys
-    themselves -- otherwise writing a summary would change the fingerprint that
-    describes what it summarized, and every summary would be born stale.
+    Covers facts and metadata but deliberately excludes the summary
+    bookkeeping keys themselves (see `_SUMMARY_FACT_PREFIXES`) -- otherwise
+    writing a summary would change the fingerprint that describes what it
+    summarized, and every summary would be born stale.
     """
     import hashlib
     import json
 
     material = {
-        "facts": {k: v for k, v in obj.facts.items() if not k.startswith("ai_summary")},
+        "facts": {
+            k: v
+            for k, v in obj.facts.items()
+            if not k.startswith(_SUMMARY_FACT_PREFIXES)
+        },
         "metadata": obj.metadata,
         "role": obj.role.value if obj.role else None,
     }
@@ -585,6 +602,181 @@ async def launch_summary(
     if job is not None:
         log.info("summary_launched", job_id=str(job.id), object_id=str(obj.id))
     return job
+
+
+async def launch_de_summary(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    force: bool = False,
+) -> Job | None:
+    """Queue a narrative summary of a differential-expression result.
+
+    Same "additive, both no's are ordinary" contract as launch_summary. The
+    top-gene table is read from the DE results TSV rather than facts, since
+    facts holds aggregate counts only -- de_runner.read_results() is the same
+    reader ExpressionResults' gene-table endpoint already uses. Resolving the
+    file goes through object_service.object_with_blob(), the same
+    blob/external-path resolution the results-table route uses; DataObject has
+    no storage_path attribute of its own.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not settings.llm_summaries_enabled:
+        return None
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    if obj.role != ObjectRole.DE_RESULTS:
+        return None
+
+    facts = {k: v for k, v in obj.facts.items() if not k.startswith("ai_de_summary")}
+    fingerprint = summary_fingerprint(obj)
+    if not force and obj.facts.get("ai_de_summary_fingerprint") == fingerprint:
+        return None
+
+    significant_up = facts.get("significant_up") or 0
+    significant_down = facts.get("significant_down") or 0
+    top_genes: list[dict] = []
+    if significant_up or significant_down:
+        _, blob = await object_service.object_with_blob(object_id, owner=owner)
+        if blob is not None:
+            target = (
+                Path(blob.external_path)
+                if blob.storage is BlobStorage.EXTERNAL and blob.external_path
+                else blob_path(obj.blob_sha256)
+            )
+            if target.is_file():
+                rows = de_runner.read_results(target)
+                sorted_rows = de_runner.sort_rows(rows, sort="padj", direction="asc")
+                top_genes = [
+                    {
+                        "gene": row.get("gene") or None,
+                        "log2fc": row.get("log2_fold_change"),
+                        "padj": row.get("padj"),
+                    }
+                    for row in sorted_rows[:20]
+                ]
+
+    if not significant_up and not significant_down and not top_genes:
+        return None
+
+    payload = {
+        "object_id": str(obj.id),
+        "facts": facts,
+        "top_genes": top_genes,
+        "facts_fingerprint": fingerprint,
+    }
+
+    dedup = f"de_summary:{obj.id}:{fingerprint}"
+    if force:
+        from uuid import uuid4
+
+        dedup = f"{dedup}:{uuid4().hex[:8]}"
+
+    job = await queue.enqueue(
+        "summarize_de_results",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.USER_BACKGROUND,
+        resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=dedup,
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is not None:
+        log.info("de_summary_launched", job_id=str(job.id), object_id=str(obj.id))
+    return job
+
+
+async def launch_variant_summary(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    force: bool = False,
+) -> Job | None:
+    """Queue a narrative summary of a VCF's call-set statistics.
+
+    Same contract as launch_de_summary. The top-N-by-severity variant list
+    comes from `facts["severe_variants"]`, populated by run_vcf_stats -- see
+    _top_severe_variants.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    if not settings.llm_summaries_enabled:
+        return None
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    facts = {k: v for k, v in obj.facts.items() if not k.startswith("ai_variant_summary")}
+    variant_count = (facts.get("vcf_stats_summary") or {}).get("variants") or 0
+
+    fingerprint = summary_fingerprint(obj)
+    if not force and obj.facts.get("ai_variant_summary_fingerprint") == fingerprint:
+        return None
+
+    top_variants = _top_severe_variants(facts)
+
+    if not variant_count and not top_variants:
+        return None
+
+    payload = {
+        "object_id": str(obj.id),
+        "facts": facts,
+        "top_variants": top_variants,
+        "facts_fingerprint": fingerprint,
+    }
+
+    dedup = f"variant_summary:{obj.id}:{fingerprint}"
+    if force:
+        from uuid import uuid4
+
+        dedup = f"{dedup}:{uuid4().hex[:8]}"
+
+    job = await queue.enqueue(
+        "summarize_variant_results",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.USER_BACKGROUND,
+        resources=JobResources(cpu=0, mem_mb=64, io=IoClass.LIGHT),
+        max_attempts=2,
+        dedup_key=dedup,
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is not None:
+        log.info("variant_summary_launched", job_id=str(job.id), object_id=str(obj.id))
+    return job
+
+
+def _top_severe_variants(facts: dict, limit: int = 20) -> list[dict]:
+    """The variant rows facts already carries, ranked by consequence severity.
+
+    Reads from `facts["severe_variants"]` -- populated by run_vcf_stats
+    alongside consequence_counts, one row per variant with a consequence in
+    csq_parse.SEVERITY_ORDER, capped there at the same limit this function
+    also respects. Nothing here re-parses the VCF. Absent (Task 7 not yet
+    run, or an older object predating it), this simply returns [].
+
+    The severity vocabulary lives in csq_parse.py, not here: it must match
+    the consequence strings parse_bcsq actually returns (bcftools csq's own
+    "missense"/"stop_gained"/... vocabulary), and csq_parse is the only
+    place that produces those strings.
+    """
+    rows = facts.get("severe_variants")
+    if not isinstance(rows, list):
+        return []
+
+    def rank(row: dict) -> int:
+        consequence = row.get("consequence")
+        try:
+            return csq_parse.SEVERITY_ORDER.index(consequence)
+        except ValueError:
+            return len(csq_parse.SEVERITY_ORDER)
+
+    ranked = sorted(rows, key=rank)
+    return ranked[:limit]
 
 
 def _params_fingerprint(params: dict) -> str:
@@ -809,6 +1001,37 @@ async def read_chemistry_for_alignment(
         chemistry = read_chemistry(parent)
         if chemistry is not None:
             return chemistry
+    return None
+
+
+def gci_slot_for_chemistry(chemistry: align_runner.ReadChemistry | None) -> str | None:
+    """Which GCI input slot a read chemistry belongs in, or None to refuse.
+
+    GCI has exactly two slots and no short-read input exists at all, which
+    makes this stricter than CRAQ's `-ngs`/`-sms` routing:
+
+      HIFI                      -> --hifi
+      ONT_SIMPLEX, ONT_DUPLEX   -> --nano
+      CLR                       -> refuse
+      SHORT                     -> refuse
+      UNKNOWN / None            -> refuse (the dialog asks)
+
+    CLR is the case worth spelling out, because it is long-read and
+    therefore looks eligible. PacBio CLR is not HiFi: GCI's identity and
+    clipping filters assume HiFi-grade per-read accuracy, and CLR's error
+    profile is nothing like it. Routing CLR to --hifi does not degrade
+    gracefully, it mislabels the evidence.
+
+    Refusing UNKNOWN follows CRAQ's rule.
+    `read_chemistry_for_alignment`'s docstring says callers "fall back to
+    the conservative short-read default rather than guessing" -- correct
+    for picking an alignment preset, wrong here, and doubly so when SHORT
+    is not even a valid input.
+    """
+    if chemistry == align_runner.ReadChemistry.HIFI:
+        return "hifi"
+    if chemistry in (align_runner.ReadChemistry.ONT_SIMPLEX, align_runner.ReadChemistry.ONT_DUPLEX):
+        return "nano"
     return None
 
 
@@ -4170,6 +4393,221 @@ async def launch_qv_qc(
         read_object_id=str(read_obj.id),
         k=resolved_k,
         cached=read_db_path is not None,
+        tool_version=tool.version,
+    )
+    return job
+
+
+async def _gci_candidates(
+    long_: list[DataObject],
+) -> tuple[list[DataObject], list[DataObject]]:
+    """Split `alignments_against`'s `long_` bucket into GCI's two slots.
+
+    `alignments_against` folds HIFI/CLR/ONT_SIMPLEX/ONT_DUPLEX into one
+    "long-read" bucket, which is right for CRAQ (one long-read slot) and
+    not fine-grained enough for GCI (two slots, and CLR refused outright --
+    see `gci_slot_for_chemistry`). Any BAM whose chemistry resolves to
+    `None` here -- CLR, or truly unknown -- is dropped rather than folded
+    into either bucket, so it can never be silently auto-paired.
+    """
+    hifi_candidates: list[DataObject] = []
+    nano_candidates: list[DataObject] = []
+    for bam in long_:
+        chemistry = await read_chemistry_for_alignment(bam)
+        slot = gci_slot_for_chemistry(chemistry)
+        if slot == "hifi":
+            hifi_candidates.append(bam)
+        elif slot == "nano":
+            nano_candidates.append(bam)
+    return hifi_candidates, nano_candidates
+
+
+async def launch_continuity_qc(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    hifi_bam_id: PydanticObjectId | None = None,
+    nano_bam_id: PydanticObjectId | None = None,
+    map_qual: int | None = None,
+    plot: bool | None = None,
+) -> Job:
+    """Queue a GCI run: long-read assembly continuity inspection.
+
+    Auto-pairs when unambiguous -- at most one usable HiFi BAM and/or one
+    usable ONT BAM against this assembly -- and refuses otherwise, the same
+    rule `launch_assembly_error_qc` follows. Unlike CRAQ, "usable" excludes
+    CLR: `gci_slot_for_chemistry` refuses it, and a CLR BAM found among the
+    project's long-read alignments simply never becomes a candidate, in
+    either the auto-pair or the explicit-id path.
+
+    Read-only: no derived object, only facts and (optionally) a depth plot.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+    from app.queue.assembly_qc_handlers import GCI_PLOT_MAX_CONTIGS
+
+    tool = tools.require(tools.gci())
+
+    assembly = await object_service.get_object(object_id, owner=owner)
+    reference_assembly.check_draft_assembly(assembly)
+
+    if hifi_bam_id is None and nano_bam_id is None:
+        short, long_, _unknown = await alignments_against(assembly, owner=owner)
+        hifi_candidates, nano_candidates = await _gci_candidates(long_)
+
+        if not hifi_candidates and not nano_candidates:
+            if short and not long_:
+                raise ValidationError(
+                    "GCI needs long reads aligned to this assembly; only "
+                    "short-read alignments are available",
+                    details={"object_id": str(assembly.id)},
+                )
+            if long_:
+                raise ValidationError(
+                    "This assembly has long-read alignments, but none are "
+                    "HiFi or ONT -- GCI cannot use PacBio CLR reads",
+                    details={"object_id": str(assembly.id)},
+                )
+            raise ValidationError(
+                "Continuity inspection needs long reads aligned to this "
+                "assembly, and this project has none",
+                details={"object_id": str(assembly.id)},
+            )
+        if len(hifi_candidates) > 1 or len(nano_candidates) > 1:
+            raise ValidationError(
+                "This assembly has several long-read alignments; name the "
+                "ones to use",
+                details={
+                    "hifi": [str(o.id) for o in hifi_candidates],
+                    "nano": [str(o.id) for o in nano_candidates],
+                },
+            )
+        hifi_bam = hifi_candidates[0] if hifi_candidates else None
+        nano_bam = nano_candidates[0] if nano_candidates else None
+    else:
+        hifi_bam = (
+            await object_service.get_object(hifi_bam_id, owner=owner)
+            if hifi_bam_id
+            else None
+        )
+        nano_bam = (
+            await object_service.get_object(nano_bam_id, owner=owner)
+            if nano_bam_id
+            else None
+        )
+        # The explicit-id path must enforce the same chemistry routing the
+        # auto-pair path enforces, or a dialog client could pass any BAM id
+        # under `hifi_bam_id` regardless of what it actually is -- silently
+        # bypassing the CLR refusal that is this task's whole point.
+        for bam, bam_id_name, expected_slot in (
+            (hifi_bam, "hifi_bam_id", "hifi"),
+            (nano_bam, "nano_bam_id", "nano"),
+        ):
+            if bam is None:
+                continue
+            if assembly.id not in bam.derived_from:
+                raise ValidationError(
+                    f"{bam.name} was not aligned against this assembly",
+                    details={"bam_id": str(bam.id), "object_id": str(assembly.id)},
+                )
+            chemistry = await read_chemistry_for_alignment(bam)
+            slot = gci_slot_for_chemistry(chemistry)
+            if slot != expected_slot:
+                raise ValidationError(
+                    f"{bam.name} is not a {expected_slot.upper()} alignment "
+                    f"({bam_id_name} expects {expected_slot})",
+                    details={
+                        "bam_id": str(bam.id),
+                        "object_id": str(assembly.id),
+                        "chemistry": chemistry.value if chemistry else None,
+                    },
+                )
+
+    if hifi_bam is None and nano_bam is None:
+        raise ValidationError(
+            "Continuity inspection needs long reads aligned to this "
+            "assembly, and this project has none",
+            details={"object_id": str(assembly.id)},
+        )
+
+    contig_count = (assembly.facts or {}).get("sequence_count")
+    if contig_count is None:
+        contig_count = (assembly.facts or {}).get("sequence_count_estimate")
+    want_plot = bool(plot)
+    allow_plot = want_plot and contig_count is not None and contig_count <= GCI_PLOT_MAX_CONTIGS
+
+    payload: dict = {
+        "object_id": str(assembly.id),
+        "threads": 8,
+        "map_qual": map_qual if map_qual is not None else 30,
+        "plot": allow_plot,
+    }
+
+    asm_digest, asm_path = await _resolve_readable(assembly)
+    if asm_digest:
+        payload["assembly_sha256"] = asm_digest
+    if asm_path:
+        payload["assembly_path"] = asm_path
+
+    for bam, prefix, bai_prefix in (
+        (hifi_bam, "hifi_bam", "hifi_bai"),
+        (nano_bam, "nano_bam", "nano_bai"),
+    ):
+        if bam is None:
+            continue
+        # Validated provenance, not trust -- same reasoning as
+        # `launch_assembly_error_qc`.
+        if assembly.id not in bam.derived_from:
+            raise ValidationError(
+                f"{bam.name} was not aligned against this assembly",
+                details={"bam_id": str(bam.id), "object_id": str(assembly.id)},
+            )
+        digest, path = await _resolve_readable(bam)
+        if digest:
+            payload[f"{prefix}_sha256"] = digest
+        if path:
+            payload[f"{prefix}_path"] = path
+        payload[f"{prefix}_object_id"] = str(bam.id)
+
+        # BAM and its .bai are separate content-addressed DataObjects --
+        # resolve the sidecar explicitly, the same way
+        # `launch_assembly_error_qc` does. The handler reads
+        # `{bai_prefix}_sha256`/`{bai_prefix}_path` via
+        # `_resolve_input(payload, bai_prefix)` (called with `"hifi_bai"` /
+        # `"nano_bai"`, NOT `f"{prefix}_bai"`).
+        bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+        if bai is not None:
+            bai_digest, bai_path = await _resolve_readable(bai)
+            if bai_digest:
+                payload[f"{bai_prefix}_sha256"] = bai_digest
+            if bai_path:
+                payload[f"{bai_prefix}_path"] = bai_path
+
+    dedup = f"assess_assembly_continuity:{assembly.id}:{hifi_bam.id if hifi_bam else '-'}"
+    dedup += f":{nano_bam.id if nano_bam else '-'}"
+
+    job = await queue.enqueue(
+        "assess_assembly_continuity",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=dedup,
+        project_id=assembly.project_id,
+        object_id=assembly.id,
+    )
+    if job is None:
+        raise ConflictError("This assembly continuity QC job is already queued")
+
+    log.info(
+        "assembly_continuity_qc_launched",
+        job_id=str(job.id),
+        object_id=str(assembly.id),
+        hifi_bam_id=str(hifi_bam.id) if hifi_bam else None,
+        nano_bam_id=str(nano_bam.id) if nano_bam else None,
+        map_qual=payload["map_qual"],
+        plot=payload["plot"],
         tool_version=tool.version,
     )
     return job

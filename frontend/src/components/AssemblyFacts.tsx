@@ -172,6 +172,30 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
     | undefined;
   const hasAssemblyQv = assemblyQv !== undefined;
 
+  // Continuity: GCI, long-read only. Score has no upstream-published quality
+  // bands (unlike CRAQ's AQI) -- see aqiBand's docstring for the contrast --
+  // so only the raw published benchmark range is shown as context, never a
+  // classification.
+  const continuityTool = facts.assembly_continuity_tool as string | undefined;
+  const continuityGci = facts.assembly_continuity_gci as number | undefined;
+  const continuityExpectedN50 = facts.assembly_continuity_expected_n50 as
+    | number
+    | undefined;
+  const continuityObservedN50 = facts.assembly_continuity_observed_n50 as
+    | number
+    | undefined;
+  const continuityExpectedContigs = facts.assembly_continuity_expected_contigs as
+    | number
+    | undefined;
+  const continuityObservedContigs = facts.assembly_continuity_observed_contigs as
+    | number
+    | undefined;
+  const continuityAligners = Array.isArray(facts.assembly_continuity_aligners)
+    ? (facts.assembly_continuity_aligners as string[])
+    : [];
+  const continuityMapQual = facts.assembly_continuity_map_qual as number | undefined;
+  const hasContinuity = continuityGci !== undefined;
+
   // A file named for a full assembly that holds one chromosome is a real and
   // easily-missed problem. Compare only when both sides are known.
   const countDiverges =
@@ -190,7 +214,8 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
     !hasCompleteness &&
     !hasMisassembly &&
     !hasAssemblyErrors &&
-    !hasAssemblyQv
+    !hasAssemblyQv &&
+    !hasContinuity
   ) {
     return (
       <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
@@ -645,6 +670,62 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
         </div>
       )}
 
+      {hasContinuity && (
+        <div style={{ marginTop: 14 }}>
+          <div
+            style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 6 }}
+          >
+            Continuity ({continuityTool}, long reads)
+          </div>
+          <dl className="kv">
+            {continuityGci !== undefined && (
+              <>
+                <dt>GCI</dt>
+                <dd>
+                  {continuityGci.toFixed(1)}{" "}
+                  <span style={{ color: "var(--text-faint)" }}>
+                    {continuityBenchmarkNote()}
+                  </span>
+                </dd>
+              </>
+            )}
+            {continuityObservedN50 !== undefined &&
+              continuityExpectedN50 !== undefined && (
+                <>
+                  <dt>N50</dt>
+                  <dd>
+                    {formatBases(continuityObservedN50)} observed /{" "}
+                    {formatBases(continuityExpectedN50)} expected
+                  </dd>
+                </>
+              )}
+            {continuityObservedContigs !== undefined &&
+              continuityExpectedContigs !== undefined && (
+                <>
+                  <dt>Contigs</dt>
+                  <dd>
+                    {continuityObservedContigs.toLocaleString()} observed /{" "}
+                    {continuityExpectedContigs.toLocaleString()} expected
+                  </dd>
+                </>
+              )}
+            {continuityMapQual !== undefined && (
+              <>
+                <dt>Mapping quality threshold (-mq)</dt>
+                <dd>{continuityMapQual}</dd>
+              </>
+            )}
+          </dl>
+          {continuityAligners.length > 0 && (
+            <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 4 }}>
+              Aligned with {continuityAligners.join(", ")}. A single aligner
+              undercounts issues in repetitive regions; upstream recommends
+              pairing two aligners (e.g. winnowmap + minimap2).
+            </div>
+          )}
+        </div>
+      )}
+
       {assemblyError && (
         <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 10 }}>
           NCBI lookup: {assemblyError}
@@ -720,6 +801,16 @@ function aqiBand(aqi: number): string {
   if (aqi >= 80) return "high quality";
   if (aqi >= 60) return "draft quality";
   return "low quality";
+}
+
+/**
+ * GCI publishes no quality bands the way CRAQ's AQI does (see aqiBand
+ * above), so this deliberately does not classify the score -- only states
+ * the raw range GCI's own paper reports across real T2T assemblies, for
+ * context.
+ */
+function continuityBenchmarkNote(): string {
+  return "published range across T2T assemblies: 7.26–99.99";
 }
 
 /** Base counts read better in Gb/Mb than as raw digits. */

@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     # merqury.sh resolves its own siblings through that variable and cannot
     # simply be symlinked onto PATH.
     merqury_path: str = "merqury"
+    # A pure-Python tool with no compiled binary; installed by
+    # backend/scripts/install-gci.sh as a wrapper at /usr/local/bin/gci that
+    # execs /opt/gci/GCI.py -- see that script for why it is a wrapper
+    # rather than a symlink.
+    gci_path: str = "gci"
     # Model directories, one per Clair3 --platform. The install script
     # normalizes each to hold the checkpoint files directly.
     clair3_models_dir: str = "/opt/clair3/models"

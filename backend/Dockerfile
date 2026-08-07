@@ -413,6 +413,16 @@ ENV PATH="/opt/meryl/bin:${PATH}"
 # release binary needs them and trixie's archive no longer carries them.
 ENV LD_LIBRARY_PATH="/opt/meryl/lib:${LD_LIBRARY_PATH:-}"
 
+# --- GCI ---------------------------------------------------------------
+#
+# GCI consumes finished long-read alignments; it never runs an aligner
+# itself, so there is no winnowmap dependency and nothing to compile.
+ARG GCI_COMMIT=543cd4136187ff3ddd3ba4d1585626dbcdef6af6
+COPY scripts/install-gci.sh /srv/scripts/install-gci.sh
+RUN chmod +x /srv/scripts/install-gci.sh \
+    && GCI_COMMIT="${GCI_COMMIT}" \
+       /srv/scripts/install-gci.sh
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \

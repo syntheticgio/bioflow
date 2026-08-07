@@ -520,7 +520,8 @@ file rather than moving to `docs/TODO-done.md`.
   is k-mer based and needs no alignment at all. GitHub #63 (CRAQ), #64
   (Merqury), #65 (GCI). ~~**CRAQ**~~ **FIXED, 2026-08-06.** Shipped as CRAQ
   1.10, GitHub #63. See below. ~~**Merqury**~~ **FIXED, 2026-08-07.** Shipped
-  as Merqury 1.4.1 + meryl 1.4.2, GitHub #64. See below. GCI is still open.
+  as Merqury 1.4.1 + meryl 1.4.2, GitHub #64. See below. ~~**GCI**~~ **FIXED,
+  2026-08-07.** Shipped as GCI 1.0, GitHub #65. See below.
 - **gfastats** is superseded by computing contiguity here, not built.
 - **Contamination screening** is a real axis nothing here covers and is a
   named non-goal: FCS-GX's database is ~470 GB.
@@ -845,6 +846,98 @@ here, again:
   already documents, recurring in a new place. Fixed by stamping
   `meryl_db_expected_count` on every ingested member and refusing any group
   whose size does not match.
+
+### GCI assembly continuity inspection shipped, 2026-08-07
+
+Design: `docs/superpowers/specs/2026-08-06-gci-assembly-continuity-design.md`
+(committed on a sibling branch alongside #64's spec, not yet merged to `main`
+as of this entry). Plan: `docs/superpowers/plans/2026-08-06-gci-assembly-
+continuity.md` (same branch). GitHub #65.
+
+Long-read continuity inspection: scores an assembly by aligning long reads
+back to it and finding regions unsupported by read evidence, complementary to
+CRAQ (#63, reference-free structural/regional errors) and QUAST (#62,
+reference-based misassemblies) rather than a third flavour of either. Gates
+on a long-read BAM aligned to the assembly, same "consume BioFlow's own align
+output" shape CRAQ established.
+
+**The issue's own gating question -- "is a minimap2-only GCI run
+methodologically honest, or a misuse of the tool?" -- was answered before any
+implementation planning, per the issue's own requirement, and the answer
+reversed the issue's premise.** GCI never invokes an aligner: every aligner in
+its Requirements list, including winnowmap, carries the same "(optional, but
+wanted for mapping)" parenthetical, and GCI consumes finished BAM/PAF through
+`--hifi`/`--nano`. The issue was filed believing "the real prerequisite is a
+second aligner" (winnowmap, no Debian candidate) -- reading a suggestion list
+as a dependency list. This slice needed no source build at all: GCI is pure
+Python, MIT licensed, installed via `backend/scripts/install-gci.sh` as a
+pinned-commit clone (`543cd41`, GCI's `main` HEAD as of 2026-08-06), the same
+pattern a build-requiring tool would use minus the build. A minimap2-only run
+is genuinely honest, with a disclosed sensitivity cost recorded as a fact
+(`assembly_continuity_aligners`) rather than omitted -- upstream's own FAQ
+reports similar scores between aligner pairs, unlike CRAQ's CSE, which
+upstream says is "hardly detected" on NGS-only runs and is omitted outright.
+Winnowmap itself is filed as a future enhancement, now unblocked by #64
+(Marbl meryl 1.4.2, arm64).
+
+Code: `backend/app/pipelines/gci_runner.py` (command builder, `.gci` parser),
+`backend/app/queue/assembly_qc_handlers.py::assess_assembly_continuity` (the
+job), `backend/app/services/pipeline_service.py::launch_continuity_qc`,
+`gci_slot_for_chemistry`, and `_gci_candidates`, `POST
+/pipelines/assembly-continuity`, `suggestion_service.build_continuity_card`,
+`AssemblyFacts.tsx`'s Continuity block.
+
+**The load-bearing decision, called out before implementation and re-verified
+at every layer through to merge: PacBio CLR is refused, never routed to
+`--hifi`.** CLR is long-read and therefore looks eligible, but GCI has
+exactly two slots and its identity/clipping filters assume HiFi-grade
+per-read accuracy -- CLR's error profile isn't close enough, and routing it
+anyway would produce a confidently wrong score rather than an error.
+`gci_slot_for_chemistry` is the single function every layer routes through
+(the auto-pair path, the explicit-BAM-id path -- which re-derives chemistry
+rather than trusting the id's label, closing the one bypass a naive
+implementation would leave open -- and the suggestion card, which consumes
+the same candidate-splitting helper the launch path uses rather than an
+independently-derived approximation). `SHORT` and `UNKNOWN` are refused
+alongside CLR: GCI has no short-read slot at all, and `UNKNOWN` diverges
+deliberately from `read_chemistry_for_alignment`'s usual "fall back to a
+conservative short-read default" contract, which is correct for picking an
+alignment preset and wrong here.
+
+**Verified against upstream's own real test data before merge, following the
+lesson CRAQ's and QUAST's slices both paid for.** The `.gci` parser was
+written from the README's prose description of the file, not from a run --
+flagged as unverified at every step of the plan. A real run against GCI's own
+Zenodo example dataset (`https://zenodo.org/records/12748594`, the MH63 rice
+assembly) produced output the existing parser handled correctly without any
+code change: the parser's existing `len(fields) < 6` and `fields[0] !=
+"Genome"` filters happened to already skip both an undocumented leading
+`"HiFi:"` label line and a trailing dash-separator line that neither the
+README's prose nor the plan anticipated. Locked in with a regression test
+built from the real captured output rather than left as an accident. Also
+confirmed against the real run: `-o MH63` produces `MH63.gci` exactly, so the
+handler's `out_dir / "gci.gci"` assumption (given `prefix="gci"`) holds.
+
+**Two hand-maintained-registry entries this repo's own CLAUDE.md warns
+about, both caught by running the full suite rather than by the plan
+anticipating them:** the new job handler needed an entry in
+`provenance_walker.py`'s `_STEP_VERBS` (silently un-narrated otherwise, the
+exact shape the STAR incident recorded), and the new tool needed adding to
+`tools.py`'s exhaustiveness set covering `all_tools()`. Neither was in the
+plan's file list; both were required for the suite to stay green.
+
+**One review-driven correction to the Dockerfile install**: the first draft
+had no `ARG GCI_COMMIT` threading the pinned commit through as a build-time
+override, unlike every other pinned-commit tool in the same file (CRAQ,
+BWA-MEM2, Clair3, compleasm, polypolish, QUAST) -- `install-gci.sh` already
+supported the override via its own default, but nothing in the Dockerfile
+exercised it. Fixed to match the established pattern.
+
+No `JobResources` correction was made: the Zenodo example dataset is
+subsampled and completed in under a minute against the declared `cpu=8,
+mem_mb=16384`, nowhere near stressing either figure -- a real production-scale
+genome would need separate re-measurement, left as a known gap rather than
+guessed at from an unrepresentative run.
 
 ## The in-app DESeq2 path has never been run end to end
 

@@ -23,6 +23,7 @@ from app.pipelines import (
     assembly_qc_registry,
     completeness_runner,
     craq_runner,
+    gci_runner,
     merqury_runner,
     quast_runner,
     tools,
@@ -380,6 +381,17 @@ ASSEMBLY_ERROR_LEASE_SECONDS = 3600
 _CRAQ_ASSEMBLY_LINK = "assembly.fasta"
 _CRAQ_NGS_LINK = "ngs_sort.bam"
 _CRAQ_SMS_LINK = "sms_sort.bam"
+
+_GCI_ASSEMBLY_LINK = "assembly.fasta"
+_GCI_HIFI_LINK = "hifi.bam"
+_GCI_NANO_LINK = "nano.bam"
+ASSEMBLY_CONTINUITY_LEASE_SECONDS = 3600
+
+# One image per chromosome, so a fragmented assembly produces hundreds of
+# files. The launch path (not this handler) gates on this before ever
+# setting payload["plot"] -- by the time this handler runs, `plot` in the
+# payload is already a decision that's been made, not a check to repeat.
+GCI_PLOT_MAX_CONTIGS = 50
 
 
 @handler(
@@ -798,3 +810,136 @@ def _resolve_read_inputs(work: Path, payload: dict) -> list[Path]:
         suffix = "".join(Path(source_name).suffixes) or ".fastq"
         resolved.append(_named_link(work, raw, f"reads_{i}{suffix}"))
     return resolved
+
+
+@handler(
+    "assess_assembly_continuity",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def assess_assembly_continuity(ctx: JobContext) -> dict:
+    """Long-read continuity inspection for one assembly, with GCI.
+
+    Read-only: no new object, only facts merged onto the assembly that was
+    scored, plus optional depth plots under qc_reports/.
+
+    **GCI runs no aligner.** It consumes the sorted, indexed BAMs the align
+    pipeline already produced. A QC job that silently ran minimap2 would
+    duplicate work the user can see and make the job's cost unpredictable.
+
+    **Each BAM's .bai must be linked beside it.** Storage is
+    content-addressed, so a managed BAM and its index are two unrelated
+    DataObjects; the launch path supplies `{hifi,nano}_bai_sha256`/`_path`
+    the way `launch_bam_stats` does, and a register-in-place BAM falls back
+    to a sibling `.bai`, which is the only case where that guess is valid.
+    GCI's README says of the index: "this is necessary!!!"
+
+    **The aligners are recorded, not assumed.** Upstream recommends pairing
+    winnowmap with minimap2 for sensitivity in repetitive regions; BioFlow
+    supplies minimap2 alignments only, and that fact travels with the score
+    rather than being silently dropped.
+    """
+    tool = tools.require(tools.gci())
+
+    work = _prepare_workdir(ctx, "assembly_continuity")
+
+    assembly = _resolve_input(ctx.payload, "assembly")
+    assembly = _named_link(work, assembly, _GCI_ASSEMBLY_LINK)
+
+    hifi_bam = None
+    if ctx.payload.get("hifi_bam_path") or ctx.payload.get("hifi_bam_sha256"):
+        raw = _resolve_input(ctx.payload, "hifi_bam")
+        hifi_bam = _named_link(work, raw, _GCI_HIFI_LINK)
+        _link_bam_index(ctx.payload, "hifi_bai", raw, hifi_bam)
+
+    nano_bam = None
+    if ctx.payload.get("nano_bam_path") or ctx.payload.get("nano_bam_sha256"):
+        raw = _resolve_input(ctx.payload, "nano_bam")
+        nano_bam = _named_link(work, raw, _GCI_NANO_LINK)
+        _link_bam_index(ctx.payload, "nano_bai", raw, nano_bam)
+
+    if hifi_bam is None and nano_bam is None:
+        raise PermanentError(
+            "Continuity inspection needs long reads aligned to this assembly."
+        )
+
+    threads = max(1, int(ctx.payload.get("threads") or 8))
+    map_qual = int(ctx.payload.get("map_qual") or 30)
+    plot = bool(ctx.payload.get("plot"))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    out_dir = work / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = gci_runner.build_gci_command(
+        gci_path=tool.path,
+        assembly=assembly,
+        hifi_bam=hifi_bam,
+        nano_bam=nano_bam,
+        out_dir=out_dir,
+        prefix="gci",
+        threads=threads,
+        map_qual=map_qual,
+        plot=plot,
+    )
+
+    ctx.progress(phase="starting", pct=None, message="starting gci")
+    ctx.extend_lease(ASSEMBLY_CONTINUITY_LEASE_SECONDS)
+
+    log.info(
+        "assembly_continuity_started",
+        job_id=ctx.job_id,
+        has_hifi=hifi_bam is not None,
+        has_nano=nano_bam is not None,
+        map_qual=map_qual,
+        plot=plot,
+        threads=threads,
+    )
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise RetryableError(f"gci exited {code}; see {log_path}")
+
+    gci_file = out_dir / "gci.gci"
+    if not gci_file.exists():
+        raise RetryableError(f"gci produced no gci.gci in {out_dir}; see {log_path}")
+
+    facts = gci_runner.parse_gci(gci_file.read_text())
+
+    aligners = list(ctx.payload.get("aligners") or ["minimap2"])
+    facts.update(
+        {
+            "assembly_continuity_aligners": aligners,
+            "assembly_continuity_map_qual": map_qual,
+            "assembly_continuity_threshold": int(ctx.payload.get("threshold") or 0),
+            "assembly_continuity_tool": "gci",
+            "assembly_continuity_tool_version": tool.version or "",
+        }
+    )
+
+    if plot:
+        report_dir = settings.qc_reports_dir / str(ctx.payload.get("object_id"))
+        report_dir.mkdir(parents=True, exist_ok=True)
+        images = out_dir / "images"
+        if images.is_dir():
+            for image in images.iterdir():
+                if image.suffix in {".pdf", ".png"}:
+                    shutil.copy2(image, report_dir / image.name)
+
+    ctx.progress(phase="done", pct=1.0, message="continuity scored")
+    log.info(
+        "assembly_continuity_finished",
+        job_id=ctx.job_id,
+        gci=facts.get("assembly_continuity_gci"),
+    )
+
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
+        "workdir": str(work),
+    }

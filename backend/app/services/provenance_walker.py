@@ -123,6 +123,7 @@ _STEP_VERBS: dict[str, str] = {
     "assess_misassemblies": "assessed for misassemblies with",
     "assess_assembly_errors": "assessed for assembly errors with",
     "assess_assembly_qv": "assessed for k-mer QV with",
+    "assess_assembly_continuity": "assessed for continuity with",
     "download_sra_run": "downloaded from the SRA",
     "download_assembly": "downloaded from NCBI",
     "download_uniprot": "downloaded from UniProt",
@@ -155,6 +156,8 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "reap_uploads",
         # AI features that write a field rather than producing an object.
         "summarize_object",
+        "summarize_de_results",
+        "summarize_variant_results",
         "answer_project_question",
         # Test-only. `worker_run_ids_probe` is registered by
         # tests/queue/test_worker_run_ids.py with no teardown, so it is

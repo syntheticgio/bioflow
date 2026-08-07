@@ -535,6 +535,25 @@ export const api = {
       "/pipelines/summary/status",
     ),
 
+  deSummaryStatus: () =>
+    request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
+      "/pipelines/de-summary/status"
+    ),
+  launchDeSummary: (objectId: string) =>
+    request<JobSummary>("/pipelines/de-summary", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+  variantSummaryStatus: () =>
+    request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
+      "/pipelines/variant-summary/status"
+    ),
+  launchVariantSummary: (objectId: string) =>
+    request<JobSummary>("/pipelines/variant-summary", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
   /** The known-provider table. Static; safe to cache indefinitely. */
   aiPresets: () => request<AiPreset[]>("/settings/ai/presets"),
 
@@ -590,6 +609,20 @@ export const api = {
   organismBlurb: (organism: string) =>
     request<{ organism: string; text: string; model: string | null } | null>(
       `/pipelines/organism/${encodeURIComponent(organism)}`,
+    ),
+
+  /**
+   * A plain-language explanation of a job error, from cache or freshly
+   * generated. Returns null when there is no provider configured or the
+   * model produced nothing -- both ordinary states, not an error for a
+   * decorative field.
+   *
+   * Cached server-side per (code, message) pair, so re-explaining the same
+   * underlying error on a different job is an indexed read.
+   */
+  failureExplanation: (code: string, message: string) =>
+    request<{ text: string; model: string | null } | null>(
+      `/pipelines/failure-explanation?code=${encodeURIComponent(code)}&message=${encodeURIComponent(message)}`,
     ),
 
   /** Queue a narrative summary of a file's QC data and metadata. */

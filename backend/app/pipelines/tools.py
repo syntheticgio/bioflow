@@ -724,6 +724,12 @@ def merqury() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def gci() -> Tool:
+    # GCI.py takes -v/--version via argparse and exits zero.
+    return _probe("gci", settings.gci_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def featurecounts() -> Tool:
     # Writes its banner to stderr and exits non-zero on `-v` with no input
     # files. `_probe` already reads whichever stream produced something, and
@@ -799,6 +805,7 @@ def all_tools() -> list[Tool]:
         craq(),
         meryl(),
         merqury(),
+        gci(),
     ]
 
 
@@ -1751,6 +1758,47 @@ TOOL_META: dict[str, ToolMeta] = {
         ),
         runnable=True,
     ),
+    "gci": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLY_QC,),
+        one_liner="Assembly continuity scoring from long-read alignment gaps",
+        summary=(
+            "Scores how well long reads support an assembly's continuity by "
+            "finding regions with no read coverage, or coverage that "
+            "contradicts a contiguous assembly (clipped or split "
+            "alignments piling up at the same position). Reports both "
+            "per-contig and whole-assembly continuity scores rather than "
+            "a single pass/fail number."
+        ),
+        strengths=(
+            "Reference-free, like CRAQ -- scores continuity from the "
+            "reads alone, with no related assembly required",
+            "Works from a single alignment file (BAM or PAF), so it adds "
+            "no new aligner dependency on top of what BioFlow already "
+            "runs for long reads",
+            "Flags unsupported regions with their coordinates, not just "
+            "an aggregate score, so a low score can be traced to specific "
+            "contigs",
+        ),
+        homepage="https://github.com/yeeus/GCI",
+        repository="https://github.com/yeeus/GCI",
+        citation=(
+            "Chen, Quanyu, et al. GCI: a continuity inspector for complete "
+            "genome assembly. Bioinformatics 40.11 (2024): btae633."
+        ),
+        citation_url="https://doi.org/10.1093/bioinformatics/btae633",
+        # From the repository's own metadata, checked 2026-08-07 via
+        # `gh api repos/yeeus/GCI` -> license.spdx_id: MIT.
+        license="MIT",
+        usage=(
+            "Scores assembly continuity from long reads aligned back to the "
+            "assembly, reporting regions unsupported by read evidence. Runs "
+            "against BioFlow-produced minimap2 alignments only -- upstream "
+            "recommends pairing two aligners for higher sensitivity in "
+            "repetitive regions, and the aligners used are recorded with "
+            "the score. Whole-assembly only; regions mode and trio binning "
+            "are not used."
+        ),
+    ),
     "ragtag": ToolMeta(
         pipelines=(PipelineType.REFERENCE_ASSEMBLY,),
         one_liner="Reference-guided assembly scaffolding",
@@ -2068,3 +2116,4 @@ def reset_cache() -> None:
     craq.cache_clear()
     meryl.cache_clear()
     merqury.cache_clear()
+    gci.cache_clear()

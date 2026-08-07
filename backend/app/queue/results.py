@@ -932,6 +932,77 @@ async def _apply_summarize_object(result: dict, *, owner: str) -> None:
     log.info("summary_applied", object_id=object_id, model=result.get("model"))
 
 
+async def _apply_summarize_de_results(result: dict, *, owner: str) -> None:
+    """Record a generated DE narrative summary on the results object.
+
+    Same no-op-on-skip contract as _apply_summarize_object: a down model
+    server or an unremarkable result must leave whatever summary already
+    exists alone rather than clearing it.
+    """
+    object_id = result.get("object_id")
+    summary = result.get("summary")
+    if not object_id or not summary:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("de_summary_object_missing", object_id=object_id)
+        return
+
+    facts = {
+        **obj.facts,
+        "ai_de_summary": summary,
+        "ai_de_summary_model": result.get("model"),
+        "ai_de_summary_at": datetime.now(UTC).isoformat(),
+    }
+    fingerprint = result.get("facts_fingerprint")
+    if fingerprint:
+        facts["ai_de_summary_fingerprint"] = fingerprint
+
+    await obj.set(
+        {
+            DataObject.facts: facts,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info("de_summary_applied", object_id=object_id, model=result.get("model"))
+
+
+async def _apply_summarize_variant_results(result: dict, *, owner: str) -> None:
+    """Record a generated variant-call narrative summary on the VCF object."""
+    object_id = result.get("object_id")
+    summary = result.get("summary")
+    if not object_id or not summary:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("variant_summary_object_missing", object_id=object_id)
+        return
+
+    facts = {
+        **obj.facts,
+        "ai_variant_summary": summary,
+        "ai_variant_summary_model": result.get("model"),
+        "ai_variant_summary_at": datetime.now(UTC).isoformat(),
+    }
+    fingerprint = result.get("facts_fingerprint")
+    if fingerprint:
+        facts["ai_variant_summary_fingerprint"] = fingerprint
+
+    await obj.set(
+        {
+            DataObject.facts: facts,
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "variant_summary_applied", object_id=object_id, model=result.get("model")
+    )
+
+
 async def _apply_answer_project_question(result: dict, *, owner: str) -> None:
     """A structural no-op on the data model -- there is no object this job is
     "about", so nothing gets merged into `facts` the way every other applier
@@ -1445,6 +1516,13 @@ async def _apply_run_vcf_stats(result: dict, *, owner: str) -> None:
         variants=facts.get("vcf_stats_summary", {}).get("variants"),
     )
 
+    from app.services import pipeline_service
+
+    try:
+        await pipeline_service.launch_variant_summary(object_id=obj.id, owner=owner)
+    except Exception as e:  # noqa: BLE001 - an additive extra cannot fail vcf_stats
+        log.warning("variant_summary_launch_failed", object_id=object_id, error=str(e))
+
 
 async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     """Record compleasm's completeness scores on the assembly it described.
@@ -1511,6 +1589,37 @@ async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
         object_id=object_id,
         total=facts.get("assembly_misassembly_total"),
         reference_id=facts.get("assembly_reference_id"),
+    )
+
+
+async def _apply_assess_assembly_continuity(result: dict, *, owner: str) -> None:
+    """Record GCI's continuity facts on the assembly they describe.
+
+    Near-copy of `_apply_assess_assembly_errors`: read-only, nothing to
+    ingest, and an uploaded assembly is scored exactly like one this
+    application produced.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("assembly_continuity_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "assembly_continuity_applied",
+        object_id=object_id,
+        gci=facts.get("assembly_continuity_gci"),
     )
 
 
@@ -2164,6 +2273,16 @@ async def _apply_differential_expression(result: dict, *, owner: str) -> None:
         if run_id is not None:
             await run_service.record_outputs(run_id, [de.id], owner=de.owner)
 
+    from app.services import pipeline_service
+
+    try:
+        # Additive extra, same reasoning as QC's chained launch_summary call:
+        # a failure to queue the DE summary must not undo the DE results
+        # ingest that just succeeded.
+        await pipeline_service.launch_de_summary(object_id=de.id, owner=owner)
+    except Exception as e:  # noqa: BLE001 - an additive extra cannot fail DE
+        log.warning("de_summary_launch_failed", object_id=str(de.id), error=str(e))
+
 
 def annotation_provenance(result: dict) -> dict:
     """The facts an annotation run stamps onto the VCF it produced."""
@@ -2269,6 +2388,8 @@ _APPLIERS = {
     "trim_reads": _apply_trim_reads,
     "run_qc": _apply_run_qc,
     "summarize_object": _apply_summarize_object,
+    "summarize_de_results": _apply_summarize_de_results,
+    "summarize_variant_results": _apply_summarize_variant_results,
     "answer_project_question": _apply_answer_project_question,
     "download_sra_run": _apply_sra_download,
     "download_assembly": _apply_assembly_download,
@@ -2287,6 +2408,7 @@ _APPLIERS = {
     "assess_misassemblies": _apply_assess_misassemblies,
     "assess_assembly_errors": _apply_assess_assembly_errors,
     "assess_assembly_qv": _apply_assess_assembly_qv,
+    "assess_assembly_continuity": _apply_assess_assembly_continuity,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,

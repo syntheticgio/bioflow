@@ -7,6 +7,7 @@ its indexes.
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.conversation import ConversationTurn, ProjectConversation
+from app.models.failure_explanation import FailureExplanation, normalize_failure
 from app.models.feedback import Feedback
 from app.models.job import (
     ACTIVE_STATES,
@@ -69,6 +70,7 @@ ALL_MODELS = [
     PipelineRun,
     RunJob,
     OrganismBlurb,
+    FailureExplanation,
     Profile,
     StructureLookup,
     Feedback,
@@ -89,6 +91,7 @@ __all__ = [
     "Compression",
     "ConversationTurn",
     "DataObject",
+    "FailureExplanation",
     "FailureReason",
     "Feedback",
     "FormatConfidence",
@@ -134,5 +137,6 @@ __all__ = [
     "TaskSlot",
     "UploadSession",
     "UploadState",
+    "normalize_failure",
     "normalize_organism",
 ]
