@@ -1777,3 +1777,134 @@ class TestAssemblyErrorCard:
             )
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
+
+
+def _read_object(obj_id="reads1", name="reads.fastq.gz"):
+    """A READY FASTQ object, matching `_fake_obj`'s pattern. `read_sets` for
+    `build_qv_card` is a list of these grouped into sets (each a list of one
+    or two objects), the same shape `build_polish_card` consumes.
+
+    `_fake_obj` itself carries no `.name` -- the builders that need it
+    (`build_polish_card`'s `why=` string, mirrored here) set it on the
+    returned namespace, same as `_bam_object`'s callers do elsewhere in this
+    file."""
+    obj = _fake_obj(kind=FormatKind.FASTQ, obj_id=obj_id, facts={})
+    obj.name = name
+    return obj
+
+
+class TestQvCard:
+    """`read_sets` is a `list[list[DataObject]]`, matching
+    `build_polish_card`'s contract -- but unlike polish, not filtered to
+    short reads, since Merqury's k-mer comparison works for any chemistry.
+    """
+
+    def test_unavailable_when_meryl_is_not_installed(self):
+        """Assert the UNAVAILABLE direction. The image ships every tool
+        installed by default, so an available-direction assertion alone
+        would pass whether or not the patch actually reached the card."""
+        from app.pipelines import tools as tools_module
+        from app.services import suggestion_service
+
+        broken = tools_module.Tool(
+            name="meryl", path=None, version=None, error="meryl is not installed.",
+        )
+        with (
+            patch.object(suggestion_service.tools, "meryl", return_value=broken),
+            patch.object(
+                suggestion_service.tools, "merqury",
+                return_value=_FakeTool(True, name="merqury"),
+            ),
+        ):
+            card = suggestion_service.build_qv_card(
+                _assembly_object(), [[_read_object()]]
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason.lower()
+
+    def test_unavailable_when_merqury_is_not_installed(self):
+        from app.pipelines import tools as tools_module
+        from app.services import suggestion_service
+
+        broken = tools_module.Tool(
+            name="merqury", path=None, version=None, error="Merqury is not installed.",
+        )
+        with (
+            patch.object(
+                suggestion_service.tools, "meryl",
+                return_value=_FakeTool(True, name="meryl"),
+            ),
+            patch.object(suggestion_service.tools, "merqury", return_value=broken),
+        ):
+            card = suggestion_service.build_qv_card(
+                _assembly_object(), [[_read_object()]]
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason.lower()
+
+    def test_unavailable_without_read_sets(self):
+        from app.services import suggestion_service
+
+        with (
+            patch.object(
+                suggestion_service.tools, "meryl",
+                return_value=_FakeTool(True, name="meryl"),
+            ),
+            patch.object(
+                suggestion_service.tools, "merqury",
+                return_value=_FakeTool(True, name="merqury"),
+            ),
+        ):
+            card = suggestion_service.build_qv_card(_assembly_object(), [])
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "read" in card.reason.lower()
+
+    def test_unavailable_when_ambiguous(self):
+        from app.services import suggestion_service
+
+        with (
+            patch.object(
+                suggestion_service.tools, "meryl",
+                return_value=_FakeTool(True, name="meryl"),
+            ),
+            patch.object(
+                suggestion_service.tools, "merqury",
+                return_value=_FakeTool(True, name="merqury"),
+            ),
+        ):
+            card = suggestion_service.build_qv_card(
+                _assembly_object(),
+                [
+                    [_read_object(obj_id="reads1", name="a.fastq.gz")],
+                    [_read_object(obj_id="reads2", name="b.fastq.gz")],
+                ],
+            )
+        assert card is not None
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "read set" in card.reason.lower()
+
+    def test_available_with_exactly_one_read_set(self):
+        from app.services import suggestion_service
+
+        reads = _read_object(obj_id="reads1", name="a.fastq.gz")
+        with (
+            patch.object(
+                suggestion_service.tools, "meryl",
+                return_value=_FakeTool(True, name="meryl"),
+            ),
+            patch.object(
+                suggestion_service.tools, "merqury",
+                return_value=_FakeTool(True, name="merqury"),
+            ),
+        ):
+            card = suggestion_service.build_qv_card(
+                _assembly_object(), [[reads]]
+            )
+        assert card is not None
+        assert card.status is CardStatus.AVAILABLE
+        assert card.launch["endpoint"] == "/pipelines/assembly-qv"
+        assert card.launch["body"]["object_id"] == "asm1"
+        assert card.launch["body"]["read_object_id"] == "reads1"
