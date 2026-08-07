@@ -671,5 +671,14 @@ pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishS
     .map_err(|e| match e {
         SettingsUpdateError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
         SettingsUpdateError::RecreateFailed { output } => output,
-    })
+    })?;
+
+    // Keep LauncherApp's in-memory port in sync with what was just written
+    // to .env, matching apply_settings's own behavior above -- the
+    // migration dialog does not offer a port change today, but args.port
+    // is still an explicit input here, and a caller that resolved this
+    // command's own DTO should not silently leave the in-memory value
+    // stale relative to the file `apply` just wrote.
+    *app.port.lock().unwrap() = Some(args.port);
+    Ok(())
 }
