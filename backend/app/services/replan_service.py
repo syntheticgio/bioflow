@@ -21,7 +21,10 @@ at least one computational setting that measurably changes predicted memory and
 can be lowered without changing what the job computes.
 """
 
+import logging
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -80,6 +83,12 @@ ReplanResult = Proposal | Infeasible | NoKnobs
 # job type -> propose(). Populated in later tasks.
 _PROPOSERS: dict = {}
 
+# job type -> a function mapping proposed params to an estimate in MB.
+# Kept parallel to _PROPOSERS rather than bundled into one entry so the
+# verification path cannot be satisfied by whatever the proposer felt like
+# reporting: the wrapper calls this, never `Proposal.estimate_mb`.
+_VERIFIERS: dict = {}
+
 
 def replan(
     *,
@@ -88,9 +97,51 @@ def replan(
     budget_mb: int,
     cpu_budget: float,
 ) -> ReplanResult:
-    """Propose a fitting configuration for this job, or say why there is none."""
+    """Propose a fitting configuration for this job, or say why there is none.
+
+    Every `Proposal` is verified here against the same estimator that produced
+    the refusal, before it is returned. A per-type function that miscomputes
+    degrades to `Infeasible` -- never to a button that is offered and then
+    refused.
+
+    Verification failure is a bug in the per-type function, not a user-facing
+    condition, so it logs rather than raises: raising at enqueue time would
+    turn a refusal card into a 500.
+    """
     proposer = _PROPOSERS.get(job_type)
     if proposer is None:
         return NoKnobs()
 
-    return proposer(params=params, budget_mb=budget_mb, cpu_budget=cpu_budget)
+    result = proposer(params=params, budget_mb=budget_mb, cpu_budget=cpu_budget)
+    if not isinstance(result, Proposal):
+        return result
+
+    verifier = _VERIFIERS.get(job_type)
+    if verifier is None:
+        logger.error(
+            "replan: %s has a proposer but no verifier; refusing to offer "
+            "an unverified proposal",
+            job_type,
+        )
+        return Infeasible(
+            "A smaller configuration was found but could not be confirmed to "
+            "fit. Nothing has been changed."
+        )
+
+    confirmed_mb = verifier(result.params)
+    if confirmed_mb > budget_mb:
+        logger.error(
+            "replan: %s proposed %s claiming %d MB, but verification says "
+            "%d MB against a %d MB budget",
+            job_type,
+            result.params,
+            result.estimate_mb,
+            confirmed_mb,
+            budget_mb,
+        )
+        return Infeasible(
+            "A smaller configuration was found but could not be confirmed to "
+            "fit. Nothing has been changed."
+        )
+
+    return result
