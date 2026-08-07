@@ -478,18 +478,34 @@ async def launch_qc(*, object_id: PydanticObjectId, owner: str):
 # --- Narrative summaries ----------------------------------------------------
 
 
+# Prefixes of the bookkeeping keys each summary applier writes onto
+# obj.facts (the narrative, model name, timestamp, and the fingerprint
+# itself). One shared function computes the dedup fingerprint for all three
+# summary kinds, so it has to exclude all three prefixes -- missing one means
+# that once its applier lands, its own bookkeeping keys become part of the
+# material the next fingerprint is computed from, so the "unchanged inputs"
+# case can never match again and force=False stops deduping forever. Add a
+# prefix here whenever a new summary_fingerprint()-based dedup check is added.
+_SUMMARY_FACT_PREFIXES = ("ai_summary", "ai_de_summary", "ai_variant_summary")
+
+
 def summary_fingerprint(obj: DataObject) -> str:
     """A digest of the inputs a summary would be written from.
 
-    Covers facts and metadata but deliberately excludes the `ai_summary_*` keys
-    themselves -- otherwise writing a summary would change the fingerprint that
-    describes what it summarized, and every summary would be born stale.
+    Covers facts and metadata but deliberately excludes the summary
+    bookkeeping keys themselves (see `_SUMMARY_FACT_PREFIXES`) -- otherwise
+    writing a summary would change the fingerprint that describes what it
+    summarized, and every summary would be born stale.
     """
     import hashlib
     import json
 
     material = {
-        "facts": {k: v for k, v in obj.facts.items() if not k.startswith("ai_summary")},
+        "facts": {
+            k: v
+            for k, v in obj.facts.items()
+            if not k.startswith(_SUMMARY_FACT_PREFIXES)
+        },
         "metadata": obj.metadata,
         "role": obj.role.value if obj.role else None,
     }
