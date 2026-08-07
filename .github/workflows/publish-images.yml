@@ -59,6 +59,19 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # These self-hosted runners are launchd LaunchAgents with SessionCreate:
+    # true, which puts every job in its own macOS security session rather
+    # than the interactive login session. The default `credsStore: desktop`
+    # in ~/.docker/config.json then fails to save the ghcr.io login with
+    # "error saving credentials ... User interaction is not allowed.
+    # (-25308)" -- Keychain refuses to grant a cross-session credential
+    # write without a prompt, and a background session can't answer one.
+    # Point Docker at a config scoped to this job instead of the shared
+    # user config: no credsStore means the token goes in this throwaway
+    # file in plaintext, in a directory the runner deletes after the job,
+    # rather than through the keychain at all.
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/docker-config
     strategy:
       fail-fast: false
       matrix:
@@ -80,6 +93,8 @@ jobs:
             runner_arch: ARM64
     steps:
       - uses: actions/checkout@v4
+
+      - run: mkdir -p "$DOCKER_CONFIG"
 
       # A fixed builder name plus keep-state is what makes layer caching work
       # on self-hosted runners: the BuildKit state volume survives the job, so
@@ -150,6 +165,12 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # See the identical comment on the build job: launchd's SessionCreate
+    # isolation means the shared ~/.docker/config.json's keychain-backed
+    # credsStore can't save a login here, so this job gets its own
+    # throwaway, plaintext config instead.
+    env:
+      DOCKER_CONFIG: ${{ runner.temp }}/docker-config
     strategy:
       fail-fast: false
       matrix:
@@ -160,6 +181,8 @@ jobs:
           path: ${{ runner.temp }}/digests
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
+
+      - run: mkdir -p "$DOCKER_CONFIG"
 
       - uses: docker/setup-buildx-action@v3
 
