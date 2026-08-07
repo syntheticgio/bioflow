@@ -21,8 +21,19 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def run_release(repo: Path, line: str, version: str) -> subprocess.CompletedProcess:
+    # Invoke the fixture repo's OWN copy of release.sh, not the real
+    # worktree's. release.sh resolves its own lib directory via
+    # `dirname "${BASH_SOURCE[0]}"`, which follows the path it was invoked
+    # with -- so calling the module-level RELEASE constant here (the real
+    # worktree's ops/release.sh) makes it resolve SCRIPT_DIR to the real
+    # worktree's ops/, and load the real, unmodified bump_version.py
+    # instead of the fixture's copy. Any test that swaps in a fake
+    # bump_version.py (see TestBumpFailurePartway) would silently run the
+    # real one with this bug -- the fixture copy at repo/ops/release.sh
+    # made at setup time (see the `repo` fixture above) must be the one
+    # actually executed.
     return subprocess.run(
-        [str(RELEASE), line, version],
+        [str(repo / "ops" / "release.sh"), line, version],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -162,19 +173,36 @@ class TestBumpFailurePartway:
     """
 
     def test_refuses_when_bump_fails_after_partial_output(self, repo):
-        # Replace the real bump_version.py with a fake that prints one
-        # already-written path (simulating partial progress) and then exits
-        # nonzero, as a future --verbose bump_version.py might on a mid-run
-        # failure.
+        # Replace the real bump_version.py with a fake that actually mutates
+        # VERSION's content (simulating partial progress -- a file genuinely
+        # written mid-run), prints that one path, and then exits nonzero, as
+        # a future --verbose bump_version.py might on a mid-run failure.
+        #
+        # The mutation matters: a fake that prints "VERSION" without touching
+        # its content leaves `git commit` with nothing to commit, so the
+        # commit fails on its own regardless of whether release.sh's `set -e`
+        # actually caught bump_version.py's exit code. That made the original
+        # version of this test pass even against the buggy process-
+        # substitution script -- it was accidentally asserting that a no-op
+        # commit fails, not that the script aborted before trying.
         fake = (
             "#!/usr/bin/env python3\n"
             "import sys\n"
+            "with open('VERSION', 'w') as f:\n"
+            "    f.write('9.9.9\\n')\n"
             "print('VERSION')\n"
             "sys.exit(1)\n"
         )
+        # Committed, not left as a dirty-tree edit: the fixture repo starts
+        # clean, and release.sh's own preflight refuses to run at all on a
+        # dirty tree. Leaving this swap uncommitted would trip that check
+        # before bump_version.py ever runs, which is a different refusal
+        # than the one this test means to exercise.
         bump_path = repo / "ops" / "lib" / "bump_version.py"
         bump_path.write_text(fake)
         bump_path.chmod(0o755)
+        git(repo, "add", "--", "ops/lib/bump_version.py")
+        git(repo, "commit", "-m", "swap in fake bump_version.py")
 
         before_head = git(repo, "rev-parse", "HEAD").stdout.strip()
         before_tags = set(git(repo, "tag", "-l").stdout.split())
@@ -184,8 +212,16 @@ class TestBumpFailurePartway:
 
         assert r.returncode != 0
 
-        # No new commit, no new local tag, nothing new pushed to origin.
+        # The fake script's own file write happens regardless of release.sh:
+        # it runs before bump_version.py exits, so VERSION on disk is 9.9.9.
+        # That's expected and not what proves the fix -- it only proves the
+        # fake did its job.
+        assert (repo / "VERSION").read_text() == "9.9.9\n"
+
+        # What's load-bearing: release.sh must abort BEFORE `git add`/`git
+        # commit`/`git tag`/`git push` ever run, despite the mutated VERSION
+        # sitting in the working tree ready to be staged. No new commit, no
+        # new local tag, nothing new pushed to origin.
         assert git(repo, "rev-parse", "HEAD").stdout.strip() == before_head
         assert set(git(repo, "tag", "-l").stdout.split()) == before_tags
         assert git(repo, "ls-remote", "--tags", "origin").stdout == before_remote_tags
-        assert (repo / "VERSION").read_text() == "0.1.0\n"
