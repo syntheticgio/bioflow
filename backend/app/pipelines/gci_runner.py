@@ -46,15 +46,19 @@ def build_gci_command(
 ) -> list[str]:
     """Build the `GCI.py` invocation.
 
-    At least one of `hifi_bam` / `nano_bam` must be set; the launch path
-    enforces that and refuses the ambiguous cases rather than guessing,
-    because there is no short-read slot to degrade into.
+    At least one of `hifi_bam` / `nano_bam` must be set; reaching here with
+    neither is a caller bug rather than a user error, same as
+    `craq_runner.build_craq_command` -- there is no short-read slot to
+    degrade into.
 
     `map_qual` is passed explicitly rather than left to GCI's default so
     that the value is always recorded as a fact: upstream is explicit that
     lowering it admits multi-mapping reads from repetitive regions, which
     makes runs at different thresholds incomparable.
     """
+    if hifi_bam is None and nano_bam is None:
+        raise ValueError("GCI needs at least one of hifi_bam or nano_bam")
+
     cmd = [
         gci_path,
         "-r",
@@ -80,30 +84,43 @@ def build_gci_command(
 def parse_gci(text: str) -> dict[str, float | int]:
     """Parse GCI's `<prefix>.gci` summary.
 
-    Tab-separated with a header row. The whole-assembly row is what this
-    reads; per-chromosome rows are not stored as facts.
+    Tab-separated with a header row, one row per chromosome plus a
+    whole-assembly aggregate row labeled `"Genome"`. Only the `Genome` row
+    is read; per-chromosome rows are skipped regardless of where they fall
+    in the file, the same `parts[0] != "Genome"` filter
+    `craq_runner.parse_final_report` uses for its own whole-assembly row.
 
     Counts and N50s parse as int, the continuity index as float. Asserting
     the type rather than the value is what catches the class of bug QUAST's
     slice shipped, where `2 == 2.0` hid a wrong type for a whole release.
+
+    Unlike `craq_runner._float`, a bad numeric field here raises rather than
+    being dropped and the row treated as partial. CRAQ's fields are each
+    independently meaningful facts, so a summary that cannot be read in full
+    must not fail a run that already produced real output. GCI's whole
+    point is producing these five numbers together as its score; a
+    `Genome` row with one unparseable field means something went wrong
+    upstream, and a partial GCI result is not a valid GCI score at all.
     """
     rows = [
         line.strip()
         for line in text.splitlines()
         if line.strip() and not line.startswith("#")
     ]
-    if len(rows) < 2:
-        raise ValueError("no parseable data row found in GCI output")
 
     for row in rows[1:]:
         fields = row.split("\t")
-        if len(fields) < 6:
+        if len(fields) < 6 or fields[0] != "Genome":
             continue
-        return {
-            "assembly_continuity_expected_n50": int(float(fields[1])),
-            "assembly_continuity_observed_n50": int(float(fields[2])),
-            "assembly_continuity_expected_contigs": int(float(fields[3])),
-            "assembly_continuity_observed_contigs": int(float(fields[4])),
-            "assembly_continuity_gci": float(fields[5]),
-        }
+        try:
+            return {
+                "assembly_continuity_expected_n50": int(float(fields[1])),
+                "assembly_continuity_observed_n50": int(float(fields[2])),
+                "assembly_continuity_expected_contigs": int(float(fields[3])),
+                "assembly_continuity_observed_contigs": int(float(fields[4])),
+                "assembly_continuity_gci": float(fields[5]),
+            }
+        except ValueError as exc:
+            raise ValueError(f"could not parse GCI Genome row: {row!r}") from exc
+
     raise ValueError("no parseable data row found in GCI output")
