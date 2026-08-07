@@ -16,6 +16,7 @@ from app.mcp.server import mount_mcp_app
 from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
 from app.storage.home import initialize_home
+from app.version import __version__
 
 log = get_logger(__name__)
 
@@ -90,7 +91,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="BioFlow",
         description="Local bioinformatics data manager",
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
     )
     register_exception_handlers(app)

@@ -25,3 +25,25 @@ def test_version_file_exists_and_is_semver():
 def test_generated_module_matches_version_file():
     expected = (REPO_ROOT / "VERSION").read_text().strip()
     assert __version__ == expected
+
+
+def test_fastapi_app_reports_the_generated_version():
+    """The OpenAPI version is the one place a stale literal was user-visible."""
+    from app.main import app
+
+    assert app.version == __version__
+
+
+def test_main_py_holds_no_hardcoded_version_literal():
+    """A second declaration that only exists to be kept in sync is the same
+    trap one level down -- main.py must import, not restate.
+
+    Located via app.main.__file__ rather than REPO_ROOT / "backend" / "app":
+    the worktree test runner mounts backend/app directly at /srv/app inside
+    the container, with no /backend prefix, so a path built from REPO_ROOT
+    would silently look in the wrong place there.
+    """
+    import app.main
+
+    main_py = Path(app.main.__file__).read_text()
+    assert 'version="0.' not in main_py
