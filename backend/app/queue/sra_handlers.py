@@ -190,6 +190,16 @@ def _prefetch(
         log.info("sra_prefetch_unavailable", job_id=ctx.job_id)
         return
 
+    def on_line(line: str) -> None:
+        # prefetch's own `\r`-redrawn bar reports bytes downloaded rather than
+        # a clean percentage, and its exact wording has moved across toolkit
+        # versions -- not worth guessing a regex for. What matters is that the
+        # bar keeps moving during a multi-minute fetch instead of sitting at
+        # the phase's opening pct=0.0 the whole time it runs.
+        stripped = line.strip()
+        if stripped:
+            ctx.progress(phase="prefetch", message=stripped)
+
     code = run_subprocess(
         ctx,
         [
@@ -202,6 +212,7 @@ def _prefetch(
         ],
         log_path=str(log_path),
         env=env,
+        on_line=on_line,
     )
     if code != 0:
         log.warning("sra_prefetch_failed", job_id=ctx.job_id, accession=accession, code=code)

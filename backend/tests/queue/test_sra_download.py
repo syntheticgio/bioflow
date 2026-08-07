@@ -7,12 +7,15 @@ retryable and permanent, since that decides whether a user waits through three
 attempts for an error that will never change.
 """
 
+import sys
+import textwrap
 import threading
 from pathlib import Path
 
 import pytest
 
 from app.errors import JobCancelled, PermanentError, RetryableError
+from app.pipelines.tools import Tool
 from app.queue import sra_handlers
 from app.queue.registry import JobContext
 
@@ -279,3 +282,55 @@ class TestProgressParsing:
     def test_ignores_everything_else(self, line):
         """Other output lines must not be mistaken for progress."""
         assert sra_handlers._PROGRESS_RE.match(line) is None
+
+
+class TestPrefetchProgress:
+    """prefetch's own bar is `\\r`-redrawn like fasterq-dump's, but its wording
+    is not stable enough across toolkit versions to parse a percentage out of
+    -- so this only checks that the phase keeps reporting activity via
+    `message` as output arrives, rather than sitting frozen until it exits.
+
+    `prefetch_tool.path` is pointed at a fake executable script (a shebang'd
+    Python file) so `_prefetch`'s own argv-building is exercised unchanged --
+    the fake just ignores the `--output-directory`/`--max-size`/accession
+    arguments it is called with and prints a `\\r`-redrawn bar.
+    """
+
+    def _fake_prefetch(self, tmp_path: Path) -> str:
+        script = tmp_path / "fake_prefetch.py"
+        script.write_text(
+            "#!"
+            + sys.executable
+            + "\n"
+            + textwrap.dedent(
+                """
+                import sys, time
+                sys.stdout.write("\\rSRR1: downloaded 10%")
+                sys.stdout.flush()
+                time.sleep(0.2)
+                sys.stdout.write("\\rSRR1: downloaded 100%")
+                sys.stdout.flush()
+                sys.stdout.write("\\n")
+                """
+            )
+        )
+        script.chmod(0o755)
+        return str(script)
+
+    def test_progress_arrives_before_the_process_exits(self, tmp_path, monkeypatch):
+        fake_path = self._fake_prefetch(tmp_path)
+        monkeypatch.setattr(
+            sra_handlers.tools,
+            "prefetch",
+            lambda: Tool(name="prefetch", path=fake_path, version="3.0.0"),
+        )
+
+        received: list[dict] = []
+        ctx = _ctx()
+        ctx._progress_cb = received.append
+
+        sra_handlers._prefetch(ctx, "SRR1", tmp_path, tmp_path / "job.log", {})
+
+        messages = [u.get("message") for u in received if u.get("message")]
+        assert any("10%" in m for m in messages)
+        assert any("100%" in m for m in messages)

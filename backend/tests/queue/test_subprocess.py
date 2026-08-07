@@ -143,6 +143,27 @@ class TestOnLine:
         )
         assert arrived.is_set()
 
+    def test_carriage_return_redraws_are_delivered_as_lines(self):
+        """fasterq-dump/prefetch redraw a single progress line with `\\r`
+        rather than printing a new line each time. A reader that only splits
+        on `\\n` never sees these mid-transfer -- the callback fires once at
+        the end when the process closes stdout, which is what made the SRA
+        download progress bar look frozen the whole transfer."""
+        seen: list[str] = []
+        code = run_subprocess(
+            make_ctx(),
+            py("""
+                import sys
+                for pct in (10, 50, 100):
+                    sys.stdout.write(f'\\rprogress: {pct}%')
+                    sys.stdout.flush()
+                sys.stdout.write('\\n')
+            """),
+            on_line=seen.append,
+        )
+        assert code == 0
+        assert seen == ["progress: 10%", "progress: 50%", "progress: 100%"]
+
     def test_handles_a_large_volume_of_output(self):
         """A chatty tool must not deadlock on a full pipe buffer -- the reason
         the reader runs on its own thread."""
