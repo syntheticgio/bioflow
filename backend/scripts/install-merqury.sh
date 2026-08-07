@@ -37,6 +37,40 @@ rm -f merqury.tar.gz
 
 chmod +x "${INSTALL_DIR}"/*.sh "${INSTALL_DIR}"/eval/*.sh "${INSTALL_DIR}"/util/*.sh
 
+# eval/spectra-cn.sh detects k by piping `meryl print` through
+# `head -n 2 | tail -n 1`, expecting line 2 to be the first k-mer row. That
+# was true against the meryl this script was written for, but Marbl meryl
+# 1.4.2 (see install-meryl.sh -- the version this image pins, for the arm64
+# binary) prints an 11-line banner ("Found 1 command tree.", "PROCESSING
+# TREE #1...", etc.) before any k-mer data, so line 2 is always blank. `k`
+# ends up empty, `meryl count k=` fails with "Kmer size not supplied", and
+# every downstream step in the script silently produces empty output --
+# confirmed against a real run: an empty spectra-cn.hist, no .qv file, and
+# `merqury.sh` still exits 0 because it never checks spectra-cn.sh's result.
+# Patched here rather than left to fail at runtime: filter for a line that
+# actually looks like `<kmer><whitespace>...` instead of trusting a fixed
+# line number, which works against both the old and new banner shapes.
+python3 - "${INSTALL_DIR}/eval/spectra-cn.sh" <<'PATCH'
+import re
+import sys
+
+path = sys.argv[1]
+text = open(path).read()
+old = "k=`meryl print $read | head -n 2 | tail -n 1 | awk '{print length($1)}'`"
+new = (
+    "k=`meryl print $read | grep -m1 -E '^[ACGT]+[[:space:]]' "
+    "| awk '{print length($1)}'`"
+)
+if old not in text:
+    raise SystemExit(
+        f"expected k-detection line not found in {path} -- "
+        "spectra-cn.sh's source changed; re-check this patch against the "
+        "new content before dropping it"
+    )
+open(path, "w").write(text.replace(old, new))
+print(f"patched k-detection in {path}")
+PATCH
+
 # A wrapper, not a symlink: merqury.sh resolves its siblings through
 # $MERQURY and must run with it set even if the caller's environment
 # lacks it.
