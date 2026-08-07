@@ -120,3 +120,54 @@ export function applySettings(args: {
     },
   });
 }
+
+export interface MigrationProgress {
+  phase: "Scanning" | "Copying" | "Validating" | "Removing" | "Complete";
+  bytesCopied: number;
+  totalBytes: number;
+  error: string | null;
+}
+
+export async function startStorageMigration(args: {
+  newLocation: string;
+  keepOriginal: boolean;
+  validateByHash: boolean;
+}): Promise<void> {
+  return invoke("start_storage_migration", {
+    args: {
+      new_location: args.newLocation,
+      keep_original: args.keepOriginal,
+      validate_by_hash: args.validateByHash,
+    },
+  });
+}
+
+export async function migrationProgress(): Promise<MigrationProgress | null> {
+  const raw = await invoke<{
+    phase: { phase: MigrationProgress["phase"] };
+    bytes_copied: number;
+    total_bytes: number;
+    error: string | null;
+  } | null>("migration_progress");
+  if (!raw) return null;
+  return {
+    phase: raw.phase.phase,
+    bytesCopied: raw.bytes_copied,
+    totalBytes: raw.total_bytes,
+    error: raw.error,
+  };
+}
+
+export async function finishStorageMigration(args: {
+  newLocation: string;
+  port: number;
+  networkExposed: boolean;
+}): Promise<void> {
+  return invoke("finish_storage_migration", {
+    args: {
+      new_location: args.newLocation,
+      port: args.port,
+      network_exposed: args.networkExposed,
+    },
+  });
+}

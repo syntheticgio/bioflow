@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
 import { checkForUpdate, runStack, status, stopStack, updateStack } from "./commands";
+import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
@@ -18,6 +19,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMigrateStorage, setShowMigrateStorage] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   // Set only on the transition out of SetupWizard, never on an ordinary
   // Stop -> Run click -- the prefetch offer is a first-run thing, asked
@@ -166,6 +168,18 @@ export function App() {
               Settings
             </a>
           )}
+          {state.kind === "Stopped" && (
+            <a
+              href="#migrate-storage"
+              className="masthead-settings-link"
+              onClick={(e) => {
+                e.preventDefault();
+                setShowMigrateStorage(true);
+              }}
+            >
+              Migrate storage location…
+            </a>
+          )}
         </div>
         <div className="masthead-rule-thick" />
 
@@ -310,6 +324,19 @@ export function App() {
           onApplied={(next) => {
             setSettings(next);
             setShowSettings(false);
+          }}
+        />
+      )}
+
+      {showMigrateStorage && (
+        <MigrateStorage
+          currentLocation={settings.storageLocation}
+          port={settings.port}
+          networkExposed={settings.networkExposed}
+          onClose={() => setShowMigrateStorage(false)}
+          onMigrated={(newLocation) => {
+            setSettings((prev) => ({ ...prev, storageLocation: newLocation }));
+            setShowMigrateStorage(false);
           }}
         />
       )}
