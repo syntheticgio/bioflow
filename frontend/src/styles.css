@@ -2563,6 +2563,12 @@ a.btn {
   margin: 0 0 4px;
 }
 
+.help-version {
+  margin: -0.5rem 0 1rem;
+  opacity: 0.6;
+  font-size: 0.9em;
+}
+
 .help-intro {
   color: var(--text-dim);
   margin: 0 0 24px;

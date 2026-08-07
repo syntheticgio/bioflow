@@ -1,13 +1,38 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+
+import { api } from "../api/client";
 
 /**
  * What BioFlow is, for anyone who lands on this page without the context
  * everyone building it already has.
  */
 export function HelpAbout() {
+  // Null until it arrives, and null forever if the fetch fails. A version
+  // nobody can read is a missing line; a version that throws is a broken
+  // page, and this page's job is to explain the app to someone who may
+  // already be confused by it.
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getVersion()
+      .then((v) => {
+        if (!cancelled) setVersion(v.version);
+      })
+      .catch(() => {
+        /* no version line */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div className="help-page">
       <h1>About BioFlow</h1>
+      {version && <p className="help-version">Version {version}</p>}
       <p className="help-intro">
         A local, single-user web application for managing bioinformatics data
         files — projects, uploads, metadata, and a priority- and load-aware

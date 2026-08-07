@@ -78,6 +78,7 @@ import type {
   VariantRequest,
   VariantsPage,
   VariantStructure,
+  VersionInfo,
 } from "./types";
 
 import { useProfileStore } from "../stores/profileStore";
@@ -402,6 +403,8 @@ export const api = {
   systemStats: () => request<SystemStats>("/system/stats"),
 
   systemLoad: () => request<SystemLoad>("/system/load"),
+
+  getVersion: () => request<VersionInfo>("/version"),
 
   sources: () => request<DataSources>("/system/sources"),
 
