@@ -11,22 +11,31 @@ import { Link, useLocation } from "react-router-dom";
  */
 export function SettingsNav() {
   const { pathname } = useLocation();
-  const onTools = pathname.startsWith("/settings/tools");
+
+  const items = [
+    { to: "/settings/ai", label: "AI" },
+    { to: "/settings/tools", label: "Tools" },
+    { to: "/settings/mcp", label: "MCP" },
+  ];
+
+  // `/settings` with no section renders the AI page, so it counts as AI being
+  // active -- otherwise landing on the bare path shows no item selected.
+  const active =
+    items.find((i) => pathname.startsWith(i.to))?.to ?? "/settings/ai";
 
   return (
     <nav className="settings-section-nav">
-      <Link
-        to="/settings/ai"
-        className={`settings-section-nav-item${onTools ? "" : " active"}`}
-      >
-        AI
-      </Link>
-      <Link
-        to="/settings/tools"
-        className={`settings-section-nav-item${onTools ? " active" : ""}`}
-      >
-        Tools
-      </Link>
+      {items.map((item) => (
+        <Link
+          key={item.to}
+          to={item.to}
+          className={`settings-section-nav-item${
+            active === item.to ? " active" : ""
+          }`}
+        >
+          {item.label}
+        </Link>
+      ))}
     </nav>
   );
 }

@@ -26,6 +26,7 @@ import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
+import { SettingsMcp } from "./components/SettingsMcp";
 import { SettingsTools } from "./components/SettingsTools";
 import { SettingsView } from "./components/SettingsView";
 import { SharesView } from "./components/SharesView";
@@ -108,6 +109,7 @@ function Shell() {
           <Route path="/settings" element={<SettingsView />} />
           <Route path="/settings/ai" element={<SettingsView />} />
           <Route path="/settings/tools" element={<SettingsTools />} />
+          <Route path="/settings/mcp" element={<SettingsMcp />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
