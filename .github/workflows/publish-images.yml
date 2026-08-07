@@ -225,3 +225,51 @@ jobs:
               || { echo "::error::${tag} is missing linux/${arch}"; exit 1; }
           done
           echo "${tag} serves linux/amd64 and linux/arm64"
+
+  # A v* tag publishes images but, before #53, created nothing a person could
+  # link to. This is the half that makes a tag a release rather than just a
+  # registry push.
+  release:
+    name: Create the GitHub release
+    needs: manifest
+    # Tag-only: this workflow also runs on every push to main.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: [self-hosted, X64]
+    permissions:
+      contents: write
+    steps:
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          NAMESPACE: ${{ env.IMAGE_NAMESPACE }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          notes_file="$(mktemp)"
+          cat > "$notes_file" <<EOF
+          Container images published for this release:
+
+          \`\`\`
+          ${NAMESPACE}/bioflow-backend:${version}
+          ${NAMESPACE}/bioflow-web:${version}
+          \`\`\`
+
+          Both serve linux/amd64 and linux/arm64. \`:latest\` now points here.
+
+          Update an existing install with the launcher's Update button, or:
+
+          \`\`\`
+          docker compose pull && docker compose up -d
+          \`\`\`
+          EOF
+
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "BioFlow ${version}" \
+            --generate-notes \
+            --notes-file "$notes_file" \
+          || gh release edit "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "BioFlow ${version}" \
+            --notes-file "$notes_file"
