@@ -86,7 +86,7 @@ class NoKnobs:
 
 ReplanResult = Proposal | Infeasible | NoKnobs
 
-# job type -> propose(). Populated in later tasks.
+# job type -> propose(). See registrations at the bottom of this file.
 _PROPOSERS: dict = {}
 
 # job type -> a function mapping proposed params to an estimate in MB.
