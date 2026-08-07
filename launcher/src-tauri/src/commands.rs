@@ -406,6 +406,10 @@ pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs
         storage_location: PathBuf::from(args.storage_location),
         port: args.port,
         network_exposed: args.network_exposed,
+        // TODO(#72 task 2): wire this through `ApplySettingsArgs` and the
+        // Tauri command layer. Hardcoded to keep the crate compiling after
+        // `CurrentSettings` grew the field in task 1.
+        hard_mem_mb: None,
     };
 
     tauri::async_runtime::spawn_blocking(move || {

@@ -20,6 +20,12 @@ pub struct CurrentSettings {
     /// framed as turning exposure *on*, never as turning safety on, so the
     /// locked-down state is always the one a user does not have to find.
     pub network_exposed: bool,
+    /// Kernel-enforced memory ceiling for the worker container, in MB.
+    /// `None` means no hard cap -- the default, and what Compose sees as an
+    /// unset `mem_limit`. There is deliberately no separate on/off flag: a
+    /// toggle plus a number is two controls that can disagree, and the
+    /// number alone already expresses off.
+    pub hard_mem_mb: Option<u32>,
 }
 
 impl CurrentSettings {
@@ -69,6 +75,18 @@ fn render_env(settings: &CurrentSettings, env_extra: &[(String, String)]) -> Str
         format!("BIND_ADDRESS={}", settings.bind_address()),
         "BIOFLOW_TAG=latest".to_string(),
     ];
+
+    // Emitted only when a limit is set, so "off" is the variable being
+    // absent rather than present-and-empty. Replicas are pinned because
+    // mem_limit is per-container: two workers under a 16 GB limit would
+    // let the machine reach 32 GB, and the wall would sit at twice the
+    // number the user typed.
+    if let Some(mb) = settings.hard_mem_mb {
+        lines.push(format!("BIOFLOW_HARD_MEM_LIMIT={mb}m"));
+        lines.push(format!("BIOFLOW_HARD_MEM_MB={mb}"));
+        lines.push("WORKER_REPLICAS=1".to_string());
+    }
+
     for (key, value) in env_extra {
         lines.push(format!("{key}={value}"));
     }
@@ -81,12 +99,22 @@ mod tests {
     use super::*;
     use crate::docker::FakeDocker;
 
+    fn settings_with_hard_mem(hard_mem_mb: Option<u32>) -> CurrentSettings {
+        CurrentSettings {
+            storage_location: PathBuf::from("/data"),
+            port: 5173,
+            network_exposed: false,
+            hard_mem_mb,
+        }
+    }
+
     #[test]
     fn default_settings_bind_to_loopback() {
         let settings = CurrentSettings {
             storage_location: PathBuf::from("/data"),
             port: 5173,
             network_exposed: false,
+            hard_mem_mb: None,
         };
         assert_eq!(settings.bind_address(), "127.0.0.1");
     }
@@ -97,6 +125,7 @@ mod tests {
             storage_location: PathBuf::from("/data"),
             port: 5173,
             network_exposed: true,
+            hard_mem_mb: None,
         };
         assert_eq!(settings.bind_address(), "0.0.0.0");
     }
@@ -109,6 +138,7 @@ mod tests {
             storage_location: PathBuf::from("/new/data"),
             port: 9000,
             network_exposed: true,
+            hard_mem_mb: None,
         };
         let extra = vec![("MONGO_URL".to_string(), "mongodb://mongo:27017".to_string())];
 
@@ -132,6 +162,7 @@ mod tests {
             storage_location: PathBuf::from("/data"),
             port: 5173,
             network_exposed: false,
+            hard_mem_mb: None,
         };
 
         let result = apply(&docker, tmp.path(), &settings, &[]);
@@ -145,5 +176,41 @@ mod tests {
         // .env was still written even though the recreate failed -- the
         // setting itself took, only starting the stack with it didn't.
         assert!(tmp.path().join(".env").exists());
+    }
+
+    #[test]
+    fn blank_hard_limit_writes_no_limit_lines_at_all() {
+        // Absence, not an empty assignment. `BIOFLOW_HARD_MEM_LIMIT=` would
+        // also read as unlimited to Compose today, but that makes the "off"
+        // state depend on Compose's empty-value handling rather than on the
+        // variable simply being unset.
+        let env = render_env(&settings_with_hard_mem(None), &[]);
+        assert!(!env.contains("BIOFLOW_HARD_MEM_LIMIT"));
+        assert!(!env.contains("BIOFLOW_HARD_MEM_MB"));
+        assert!(!env.contains("WORKER_REPLICAS"));
+    }
+
+    #[test]
+    fn set_hard_limit_writes_both_vars_and_pins_replicas() {
+        let env = render_env(&settings_with_hard_mem(Some(16384)), &[]);
+        assert!(env.contains("BIOFLOW_HARD_MEM_LIMIT=16384m"));
+        assert!(env.contains("BIOFLOW_HARD_MEM_MB=16384"));
+        // mem_limit is per-container; 2 replicas would double the wall.
+        assert!(env.contains("WORKER_REPLICAS=1"));
+    }
+
+    #[test]
+    fn clearing_a_previously_set_limit_removes_every_trace() {
+        // The direction that regresses silently: a stale
+        // BIOFLOW_HARD_MEM_LIMIT left behind would keep enforcing a limit the
+        // user believes they removed. render_env is a full replace, so this
+        // asserts the replace is genuinely total.
+        let was_set = render_env(&settings_with_hard_mem(Some(8192)), &[]);
+        assert!(was_set.contains("BIOFLOW_HARD_MEM_LIMIT=8192m"));
+
+        let now_clear = render_env(&settings_with_hard_mem(None), &[]);
+        assert!(!now_clear.contains("BIOFLOW_HARD_MEM_LIMIT"));
+        assert!(!now_clear.contains("BIOFLOW_HARD_MEM_MB"));
+        assert!(!now_clear.contains("WORKER_REPLICAS"));
     }
 }
