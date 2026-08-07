@@ -23,6 +23,7 @@ from app.pipelines import (
     assembly_qc_registry,
     completeness_runner,
     craq_runner,
+    merqury_runner,
     quast_runner,
     tools,
 )
@@ -587,3 +588,184 @@ def _link_bam_index(payload: dict, prefix: str, raw_bam: Path, linked_bam: Path)
     target = Path(f"{linked_bam}.bai")
     if not target.exists():
         target.symlink_to(source)
+
+
+_MERQURY_ASSEMBLY_LINK = "assembly.fasta"
+_MERQURY_READ_DB_LINK = "reads.meryl"
+ASSEMBLY_QV_LEASE_SECONDS = 3600
+
+
+@handler(
+    "assess_assembly_qv",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=16384, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def assess_assembly_qv(ctx: JobContext) -> dict:
+    """Reference-free base-level accuracy (QV) for one assembly, with Merqury.
+
+    Read-only: no new object, only facts merged onto the assembly that was
+    scored, plus spectra-cn plots written under qc_reports/.
+
+    **Input filenames never reach the command line.** merqury.sh derives
+    every output filename from its input basenames, so an object named
+    `ev<img src=x>.fasta` would otherwise put that string into an output
+    path -- the same shape as the stored XSS QUAST's slice found, and
+    prevented here the same way: every input is linked under a fixed name.
+
+    **The read database may arrive prebuilt.** When the launch path resolved
+    a cached MERYL_DB sidecar for this read set at this k, `read_db_path` is
+    set and this handler skips the `meryl count`. Otherwise it builds one and
+    reports its location in the result so the applier can ingest it as a
+    sidecar for the next run. Rebuilding per assembly is the wasteful
+    default this cache exists to avoid.
+
+    **mem_mb is 16384, not CRAQ's 8192.** A meryl database over a real read
+    set is memory-hungry in a way a BAM scan is not. Task 7 measures this
+    against real data and corrects it if wrong.
+    """
+    meryl_tool = tools.require(tools.meryl())
+    merqury_tool = tools.require(tools.merqury())
+
+    work = _prepare_workdir(ctx, "assembly_qv")
+
+    assembly = _resolve_input(ctx.payload, "assembly")
+    assembly = _named_link(work, assembly, _MERQURY_ASSEMBLY_LINK)
+
+    k = int(ctx.payload.get("k") or 21)
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    read_db = work / _MERQURY_READ_DB_LINK
+    built_read_db = False
+
+    cached = ctx.payload.get("read_db_path")
+    if cached:
+        _link_tree(Path(cached), read_db)
+    else:
+        read_files = _resolve_read_inputs(work, ctx.payload)
+        if not read_files:
+            raise PermanentError(
+                "QV assessment needs the reads this assembly was built from."
+            )
+        ctx.progress(phase="counting", pct=None, message="building k-mer database")
+        ctx.extend_lease(ASSEMBLY_QV_LEASE_SECONDS)
+        count_cmd = merqury_runner.build_meryl_count_command(
+            meryl_path=meryl_tool.path,
+            k=k,
+            reads=read_files,
+            output=read_db,
+            threads=threads,
+        )
+        code = run_subprocess(ctx, count_cmd, log_path=str(log_path))
+        if code != 0:
+            raise _failure(code, log_path, "meryl")
+        built_read_db = True
+
+    out_dir = work / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = merqury_runner.build_merqury_command(
+        merqury_path=merqury_tool.path,
+        read_db=read_db,
+        assembly=assembly,
+        out_prefix="qv",
+    )
+
+    ctx.progress(phase="scoring", pct=None, message="starting merqury")
+    ctx.extend_lease(ASSEMBLY_QV_LEASE_SECONDS)
+
+    log.info(
+        "assembly_qv_started",
+        job_id=ctx.job_id,
+        k=k,
+        read_db_cached=not built_read_db,
+        threads=threads,
+    )
+
+    code = run_subprocess(ctx, cmd, log_path=str(log_path), cwd=str(out_dir))
+    if code != 0:
+        raise _failure(code, log_path, "merqury")
+
+    qv_file = out_dir / "qv.qv"
+    completeness_file = out_dir / "qv.completeness.stats"
+    if not qv_file.exists():
+        raise _failure(code, log_path, "merqury")
+
+    facts = merqury_runner.parse_qv(qv_file.read_text())
+    if completeness_file.exists():
+        facts.update(merqury_runner.parse_completeness(completeness_file.read_text()))
+
+    facts.update(
+        {
+            "assembly_qv_k": k,
+            "assembly_qv_read_object_id": str(ctx.payload.get("read_object_id") or ""),
+            "assembly_qv_read_object_name": str(
+                ctx.payload.get("read_object_name") or ""
+            ),
+            "assembly_qv_tool": "merqury",
+            "assembly_qv_tool_version": merqury_tool.version or "",
+            "assembly_qv_meryl_version": meryl_tool.version or "",
+        }
+    )
+
+    report_dir = settings.qc_reports_dir / str(ctx.payload["object_id"])
+    report_dir.mkdir(parents=True, exist_ok=True)
+    for png in out_dir.glob("*.png"):
+        shutil.copy2(png, report_dir / png.name)
+
+    ctx.progress(phase="done", pct=1.0, message="QV assessment complete")
+    log.info(
+        "assembly_qv_finished",
+        job_id=ctx.job_id,
+        qv=facts.get("assembly_qv"),
+        completeness=facts.get("assembly_qv_completeness_pct"),
+    )
+
+    result = {
+        "object_id": ctx.payload["object_id"],
+        "job_id": ctx.job_id,
+        "facts": facts,
+        "read_object_id": ctx.payload.get("read_object_id"),
+        "k": k,
+    }
+    if built_read_db:
+        # The applier (Task 4's other half, in results.py) ingests each file
+        # inside this directory as its own MERYL_DB sidecar on the read
+        # object -- see _apply_assess_assembly_qv for exactly what shape it
+        # expects here.
+        result["read_db_dir"] = str(read_db)
+    return result
+
+
+def _link_tree(source: Path, dest: Path) -> None:
+    """Link a meryl database directory into the work dir under a fixed name.
+
+    A meryl database is a directory, not a file, so `_named_link`'s
+    single-file symlink does not apply. A symlink to the directory is
+    enough: meryl reads it and never writes into it during a QV run.
+    """
+    if dest.exists() or dest.is_symlink():
+        dest.unlink()
+    dest.symlink_to(source, target_is_directory=True)
+
+
+def _resolve_read_inputs(work: Path, payload: dict) -> list[Path]:
+    """Every read file in the set, linked under fixed sequential names.
+
+    Paired-end reads are two files whose k-mers belong in one database --
+    the QV denominator is the whole read set, not one mate.
+
+    Each entry is its own mini-payload with `read_path`/`read_sha256` keys,
+    so `_resolve_input` applies per entry. Fixed sequential names keep any
+    object's own name off the command line, the same reason the assembly
+    gets a fixed link.
+    """
+    resolved: list[Path] = []
+    for i, entry in enumerate(payload.get("reads") or []):
+        raw = _resolve_input(entry, "read")
+        resolved.append(_named_link(work, raw, f"reads_{i}.fastq.gz"))
+    return resolved

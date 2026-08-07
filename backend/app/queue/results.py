@@ -1595,6 +1595,115 @@ async def _apply_assess_assembly_errors(result: dict, *, owner: str) -> None:
             )
 
 
+async def _apply_assess_assembly_qv(result: dict, *, owner: str) -> None:
+    """Record Merqury's QV facts on the assembly they describe, and cache
+    the read k-mer database as sidecars on the read object.
+
+    Facts half is a near-copy of `_apply_assess_assembly_errors`. The
+    sidecar half follows `_apply_build_index`'s pattern for STAR's
+    multi-file index: every file inside the meryl database directory
+    becomes its own sidecar object on the READ object (not the assembly --
+    the database is derived from the reads and has nothing to do with any
+    particular assembly), tagged `SidecarRole.MERYL_DB` and carrying the k
+    it was built at plus the database's own directory name in its facts,
+    since meryl's own qv.sh reads k back out of the database rather than
+    taking it as an argument -- a database at a different k cannot serve a
+    run wanting this one, and `meryl_db_name` is what lets a later read
+    (Task 5) group the flat sidecar list back into one directory per
+    database.
+
+    Unlike `_apply_build_index`'s fixed, hand-enumerated STAR outputs, a
+    meryl database's file list is only known at runtime -- so this walks
+    `read_db_dir` (set by the handler only when it built a fresh database)
+    rather than being handed an explicit `outputs` list.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("assembly_qv_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "assembly_qv_applied",
+        object_id=object_id,
+        qv=facts.get("assembly_qv"),
+        completeness=facts.get("assembly_qv_completeness_pct"),
+    )
+
+    read_db_dir = result.get("read_db_dir")
+    read_object_id = result.get("read_object_id")
+    if not read_db_dir or not read_object_id:
+        return
+
+    read_obj = await DataObject.get(PydanticObjectId(read_object_id))
+    if read_obj is None:
+        log.warning("meryl_db_read_object_missing", object_id=read_object_id)
+        return
+
+    from app.services import object_service
+
+    db_dir = Path(read_db_dir)
+    job_id = result.get("job_id")
+    k = result.get("k")
+    created = []
+    for member in sorted(p for p in db_dir.rglob("*") if p.is_file()):
+        try:
+            obj_out = await object_service.ingest_local_file(
+                owner=read_obj.owner,
+                project_id=read_obj.project_id,
+                path=member,
+                # Relative path under the db directory, flattened with a
+                # separator that survives as an object name -- mirrors how
+                # index files keep their own names in _apply_build_index.
+                name=f"{db_dir.name}__{member.relative_to(db_dir).as_posix().replace('/', '__')}",
+                derived_from=[read_obj.id],
+                produced_by_job=PydanticObjectId(job_id) if job_id else None,
+                facts={"meryl_db_k": k, "meryl_db_name": db_dir.name},
+                sidecar_of=read_obj.id,
+                sidecar_role=SidecarRole.MERYL_DB,
+            )
+        except Exception as e:  # noqa: BLE001 - one bad file must not lose the rest
+            # A sidecar that fails to ingest costs the next run a rebuild.
+            # Must never destroy the QV facts already written above -- same
+            # separate-applier discipline every other secondary output here
+            # follows.
+            log.error(
+                "meryl_db_member_ingest_failed",
+                read_object_id=read_object_id,
+                member=str(member),
+                error=str(e),
+            )
+            continue
+        created.append(obj_out)
+
+    if job_id and created:
+        from app.services import run_service
+
+        run_id = await run_service.run_for_job(PydanticObjectId(job_id))
+        if run_id is not None:
+            await run_service.record_outputs(
+                run_id, [o.id for o in created], owner=created[0].owner
+            )
+
+    log.info(
+        "meryl_db_cached",
+        read_object_id=read_object_id,
+        files=len(created),
+        k=k,
+    )
+
+
 async def _apply_consensus_from_alignment(result: dict, *, owner: str) -> None:
     """Turn a finished iVar consensus run into a new reference object.
 
@@ -2150,6 +2259,7 @@ _APPLIERS = {
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
     "assess_assembly_errors": _apply_assess_assembly_errors,
+    "assess_assembly_qv": _apply_assess_assembly_qv,
     "consensus_from_alignment": _apply_consensus_from_alignment,
     "polish_assembly": _apply_polish_assembly,
     "scaffold_assembly": _apply_scaffold_assembly,

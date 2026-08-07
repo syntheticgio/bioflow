@@ -623,3 +623,183 @@ class TestApplyAssessAssemblyErrors:
 
         refreshed = await DataObject.get(assembly.id)
         assert refreshed.facts["assembly_error_cre_count"] == 2
+
+
+def _meryl_db_dir(*, num_files: int = 3) -> Path:
+    """A scratch directory shaped like a meryl database: several small
+    files under one directory, none of them byte-identical (so each
+    ingests as its own object rather than deduplicating onto a sibling)."""
+    settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+    db_dir = settings.tmp_dir / f"meryl-db-{uuid.uuid4().hex}.meryl"
+    db_dir.mkdir(parents=True)
+    for i in range(num_files):
+        (db_dir / f"0x{i:06x}.merylIndex").write_bytes(uuid.uuid4().bytes)
+    return db_dir
+
+
+class TestApplyAssessAssemblyQV:
+    """`_apply_assess_assembly_qv` -- Merqury's facts merge onto the scored
+    assembly, plus an opt-in ingest of the freshly built meryl database as
+    sidecars on the READ object (not the assembly)."""
+
+    async def test_facts_are_merged_onto_the_assembly(self):
+        owner = "results-qv-a"
+        assembly = await _parent(owner, "draft.fasta")
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_qv": 41.2, "assembly_qv_completeness_pct": 96.3},
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.facts["assembly_qv"] == 41.2
+        assert refreshed.facts["assembly_qv_completeness_pct"] == 96.3
+
+    async def test_no_read_db_dir_does_not_ingest(self, monkeypatch):
+        """The default, cached-database run: `read_db_dir` is absent, so the
+        applier must return after the facts merge without touching
+        ingest_local_file at all."""
+        owner = "results-qv-b"
+        assembly = await _parent(owner, "draft.fasta")
+
+        called = False
+
+        async def _spy(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(object_service, "ingest_local_file", _spy)
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_qv": 30.0},
+            },
+            owner=owner,
+        )
+
+        assert called is False
+
+    async def test_read_db_dir_is_ingested_as_sidecars_on_the_read_object(self):
+        """The core of the cache: every file inside read_db_dir becomes its
+        own MERYL_DB sidecar on the READ object, not the assembly -- the
+        database describes the reads, and is reusable by any other
+        assembly built from the same reads."""
+        owner = "results-qv-c"
+        assembly = await _parent(owner, "draft.fasta")
+        reads = await _parent(owner, "reads.fastq.gz")
+        db_dir = _meryl_db_dir(num_files=3)
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "job_id": str(reads.id),
+                "facts": {"assembly_qv": 35.5},
+                "read_db_dir": str(db_dir),
+                "read_object_id": str(reads.id),
+                "k": 21,
+            },
+            owner=owner,
+        )
+
+        sidecars = await object_service.list_sidecars(reads.id, owner=owner)
+        assert len(sidecars) == 3
+        assert all(s.sidecar_role == SidecarRole.MERYL_DB for s in sidecars)
+        assert all(s.facts.get("meryl_db_k") == 21 for s in sidecars)
+        assert all(s.facts.get("meryl_db_name") == db_dir.name for s in sidecars)
+        assert all(s.owner == owner for s in sidecars)
+        # Every member's flattened name carries the shared db_dir.name
+        # prefix, which is what a later reconstruction (Task 5) groups on.
+        assert all(s.name.startswith(f"{db_dir.name}__") for s in sidecars)
+
+        # The assembly's own facts are untouched by the sidecar ingest.
+        refreshed_assembly = await DataObject.get(assembly.id)
+        assert refreshed_assembly.facts["assembly_qv"] == 35.5
+
+    async def test_read_db_dir_ingest_records_outputs_on_the_run(self, monkeypatch):
+        """Matches every other applier that ingests new objects from a job's
+        output: the new sidecars must be recorded as run outputs, or they
+        never show up in the pipeline run's Runs history/UI."""
+        owner = "results-qv-d"
+        assembly = await _parent(owner, "draft.fasta")
+        reads = await _parent(owner, "reads.fastq.gz")
+        db_dir = _meryl_db_dir(num_files=2)
+
+        run_id = PydanticObjectId()
+        run_for_job = AsyncMock(return_value=run_id)
+        record_outputs = AsyncMock()
+        monkeypatch.setattr(run_service, "run_for_job", run_for_job)
+        monkeypatch.setattr(run_service, "record_outputs", record_outputs)
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "job_id": str(reads.id),
+                "facts": {"assembly_qv": 30.0},
+                "read_db_dir": str(db_dir),
+                "read_object_id": str(reads.id),
+                "k": 21,
+            },
+            owner=owner,
+        )
+
+        run_for_job.assert_awaited_once_with(PydanticObjectId(str(reads.id)))
+        record_outputs.assert_awaited_once()
+        args, kwargs = record_outputs.await_args
+        assert args[0] == run_id
+        assert len(args[1]) == 2
+        assert kwargs["owner"] == owner
+
+    async def test_member_ingest_failure_is_logged_not_raised(self, monkeypatch):
+        """Matches CRAQ's posture for a secondary output: the facts merge
+        already committed, so a failing sidecar ingest must not propagate
+        and must not undo it."""
+        owner = "results-qv-e"
+        assembly = await _parent(owner, "draft.fasta")
+        reads = await _parent(owner, "reads.fastq.gz")
+        db_dir = _meryl_db_dir(num_files=2)
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("disk full")
+
+        monkeypatch.setattr(object_service, "ingest_local_file", _boom)
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_qv": 30.0},
+                "read_db_dir": str(db_dir),
+                "read_object_id": str(reads.id),
+                "k": 21,
+            },
+            owner=owner,
+        )
+
+        refreshed_assembly = await DataObject.get(assembly.id)
+        assert refreshed_assembly.facts["assembly_qv"] == 30.0
+        sidecars = await object_service.list_sidecars(reads.id, owner=owner)
+        assert sidecars == []
+
+    async def test_missing_read_object_is_logged_not_raised(self):
+        """A read object that has since been deleted must not blow up the
+        applier -- the facts merge on the assembly already committed."""
+        owner = "results-qv-f"
+        assembly = await _parent(owner, "draft.fasta")
+        db_dir = _meryl_db_dir(num_files=1)
+
+        await results._apply_assess_assembly_qv(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"assembly_qv": 30.0},
+                "read_db_dir": str(db_dir),
+                "read_object_id": str(PydanticObjectId()),
+                "k": 21,
+            },
+            owner=owner,
+        )
+
+        refreshed_assembly = await DataObject.get(assembly.id)
+        assert refreshed_assembly.facts["assembly_qv"] == 30.0

@@ -10,6 +10,8 @@ that at the seam, independent of the SUBPROCESS body itself: a test that
 only asserted "the report renders" would pass whether or not the fix held.
 """
 
+from pathlib import Path
+
 from app.queue import assembly_qc_handlers as handlers
 from app.pipelines import quast_runner
 
@@ -180,3 +182,203 @@ class TestCopyReport:
         ctx.payload["object_id"] = None
 
         assert handlers._copy_report(ctx, out_dir) is None
+
+
+class TestAssessAssemblyQV:
+    """`assess_assembly_qv` -- meryl+Merqury k-mer QV assessment.
+
+    Merqury names every output from its inputs' basenames (like CRAQ's
+    shell-metacharacter risk, not QUAST's HTML-injection one -- but the
+    fix is the same: never let the object's own name reach the command).
+    """
+
+    def _ctx(self, tmp_path, payload_extra=None, job_id="job-qv-1"):
+        from app.queue.registry import JobContext
+
+        payload = {"object_id": "obj-assembly-1", "assembly_path": None}
+        payload.update(payload_extra or {})
+        return JobContext(
+            job_id=job_id, payload=payload, epoch=1, attempts=1, owner="local"
+        )
+
+    def _fake_tools(self, monkeypatch):
+        from app.pipelines.tools import Tool
+
+        meryl_tool = Tool(name="meryl", path="/usr/local/bin/meryl", version="1.4.1")
+        merqury_tool = Tool(
+            name="merqury", path="/usr/local/bin/merqury.sh", version="1.3"
+        )
+        monkeypatch.setattr(handlers.tools, "meryl", lambda: meryl_tool)
+        monkeypatch.setattr(handlers.tools, "merqury", lambda: merqury_tool)
+        return meryl_tool, merqury_tool
+
+    def _write_assembly_and_reads(self, tmp_path, *, malicious_name=False):
+        assembly = tmp_path / "sources" / "assembly.fasta"
+        assembly.parent.mkdir(parents=True, exist_ok=True)
+        assembly.write_text(">contig1\nACGT\n")
+
+        reads = tmp_path / "sources" / "reads_R1.fastq.gz"
+        reads.write_bytes(b"not real gzip but never read by the fake subprocess")
+
+        name = 'ev<img src=x onerror=alert(7)>; rm -rf /.fasta' if malicious_name else "assembly.fasta"
+        return assembly, reads, name
+
+    def test_assess_assembly_qv_links_inputs_under_fixed_names(
+        self, monkeypatch, tmp_path
+    ):
+        """merqury.sh names every output from its input basenames, so the
+        object's own name must never reach the command line. Assert the
+        linked path, not just that the command was built.
+        """
+        from app.config import settings
+        from app.queue import assembly_qc_handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        self._fake_tools(monkeypatch)
+
+        assembly, reads, hostile_name = self._write_assembly_and_reads(
+            tmp_path, malicious_name=True
+        )
+
+        captured = {}
+
+        def fake_run(ctx, cmd, log_path=None, cwd=None, **kwargs):
+            captured.setdefault("cmds", []).append(cmd)
+            if len(captured["cmds"]) == 1:
+                # meryl count: create the output db directory so _link_tree's
+                # sibling code (merqury command build) has something to point
+                # at, and so the handler's own out_dir logic proceeds.
+                out = Path(cmd[cmd.index("output") + 1])
+                out.mkdir(parents=True, exist_ok=True)
+            else:
+                # merqury.sh: write the two output files it's expected to
+                # produce, into cwd.
+                out_dir = Path(cwd)
+                (out_dir / "qv.qv").write_text("assembly\t10\t1000\t35.5\t0.0002\n")
+                (out_dir / "qv.completeness.stats").write_text(
+                    "assembly\tall\t950\t1000\t95.0\n"
+                )
+            return 0
+
+        monkeypatch.setattr(assembly_qc_handlers, "run_subprocess", fake_run)
+
+        ctx = self._ctx(
+            tmp_path,
+            {
+                "object_id": "obj-assembly-1",
+                "assembly_path": str(assembly),
+                "assembly_name": hostile_name,
+                "reads": [{"read_path": str(reads)}],
+                "read_object_id": "obj-reads-1",
+                "read_object_name": hostile_name,
+            },
+        )
+
+        result = assembly_qc_handlers.assess_assembly_qv(ctx)
+
+        all_cmd_parts = [part for cmd in captured["cmds"] for part in cmd]
+        assert not any(";" in part for part in all_cmd_parts)
+        assert not any("<img" in part for part in all_cmd_parts)
+        assert any(part.endswith("in_assembly.fasta") for part in all_cmd_parts)
+        assert result["facts"]["assembly_qv"] == 35.5
+        assert result["facts"]["assembly_qv_completeness_pct"] == 95.0
+
+    def test_parsers_populate_facts_dict_from_real_fixture_content(
+        self, monkeypatch, tmp_path
+    ):
+        from app.config import settings
+        from app.queue import assembly_qc_handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        self._fake_tools(monkeypatch)
+
+        assembly, reads, name = self._write_assembly_and_reads(tmp_path)
+
+        def fake_run(ctx, cmd, log_path=None, cwd=None, **kwargs):
+            if "count" in cmd:
+                out = Path(cmd[cmd.index("output") + 1])
+                out.mkdir(parents=True, exist_ok=True)
+            else:
+                out_dir = Path(cwd)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "qv.qv").write_text(
+                    "assembly\t123\t45678\t41.2\t0.0000758\n"
+                )
+                (out_dir / "qv.completeness.stats").write_text(
+                    "assembly\tall\t44000\t45678\t96.33\n"
+                )
+            return 0
+
+        monkeypatch.setattr(assembly_qc_handlers, "run_subprocess", fake_run)
+
+        ctx = self._ctx(
+            tmp_path,
+            {
+                "object_id": "obj-assembly-2",
+                "assembly_path": str(assembly),
+                "assembly_name": name,
+                "reads": [{"read_path": str(reads)}],
+                "k": 21,
+            },
+        )
+
+        result = assembly_qc_handlers.assess_assembly_qv(ctx)
+        facts = result["facts"]
+
+        assert facts["assembly_qv"] == 41.2
+        assert facts["assembly_qv_completeness_pct"] == 96.33
+        assert facts["assembly_qv_k"] == 21
+        assert facts["assembly_qv_tool"] == "merqury"
+        assert facts["assembly_qv_tool_version"] == "1.3"
+        assert facts["assembly_qv_meryl_version"] == "1.4.1"
+
+    def test_meryl_count_is_skipped_when_read_db_path_is_cached(
+        self, monkeypatch, tmp_path
+    ):
+        """The whole point of the sidecar cache: a payload carrying
+        `read_db_path` must never trigger a `meryl count` subprocess call."""
+        from app.config import settings
+        from app.queue import assembly_qc_handlers
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        self._fake_tools(monkeypatch)
+
+        assembly, _reads, name = self._write_assembly_and_reads(tmp_path)
+
+        cached_db = tmp_path / "cached_reads.meryl"
+        cached_db.mkdir(parents=True)
+        (cached_db / "0x000000.merylIndex").write_text("fake index contents")
+
+        calls = []
+
+        def fake_run(ctx, cmd, log_path=None, cwd=None, **kwargs):
+            calls.append(cmd)
+            out_dir = Path(cwd) if cwd else None
+            if out_dir is not None:
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "qv.qv").write_text("assembly\t1\t2\t30.0\t0.001\n")
+                (out_dir / "qv.completeness.stats").write_text(
+                    "assembly\tall\t2\t2\t100.0\n"
+                )
+            return 0
+
+        monkeypatch.setattr(assembly_qc_handlers, "run_subprocess", fake_run)
+
+        ctx = self._ctx(
+            tmp_path,
+            {
+                "object_id": "obj-assembly-3",
+                "assembly_path": str(assembly),
+                "assembly_name": name,
+                "read_db_path": str(cached_db),
+            },
+        )
+
+        result = assembly_qc_handlers.assess_assembly_qv(ctx)
+
+        assert len(calls) == 1, "meryl count must be skipped when a cache is given"
+        assert "count" not in calls[0]
+        assert "read_db_dir" not in result, (
+            "no new database was built, so nothing new should be offered "
+            "for the applier to ingest"
+        )
