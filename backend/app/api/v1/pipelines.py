@@ -1056,6 +1056,36 @@ async def launch_assembly_error_qc_route(
     return JobOut.of(job)
 
 
+class AssemblyContinuityRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Both optional, same reasoning as AssemblyErrorRequest's ngs_bam_id /
+    # sms_bam_id: the Actions card only fires when auto-pairing is
+    # unambiguous, so it never needs to supply these. A dialog handling the
+    # ambiguous case, or a CLR-only project, names them explicitly.
+    hifi_bam_id: PydanticObjectId | None = None
+    nano_bam_id: PydanticObjectId | None = None
+    map_qual: int | None = None
+    plot: bool | None = None
+
+
+@router.post("/assembly-continuity", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_assembly_continuity_route(
+    body: AssemblyContinuityRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a GCI run: long-read assembly continuity inspection.
+
+    Read-only, like /assembly-errors -- produces facts, no derived object."""
+    job = await pipeline_service.launch_continuity_qc(
+        object_id=body.object_id,
+        owner=owner,
+        hifi_bam_id=body.hifi_bam_id,
+        nano_bam_id=body.nano_bam_id,
+        map_qual=body.map_qual,
+        plot=body.plot,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep

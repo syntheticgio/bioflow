@@ -1318,6 +1318,97 @@ def build_assembly_error_card(
     )
 
 
+def build_continuity_card(
+    obj,
+    alignments: tuple[list, list, list] | None,
+    gci_candidates: tuple[list, list] | None,
+) -> SuggestionCard | None:
+    """Long-read assembly continuity inspection for an assembly, by GCI.
+
+    Anchored on the assembly, same as `build_assembly_error_card` beside it.
+    `alignments` is the `(short, long, unknown)` split
+    `pipeline_service.alignments_against` returns, used only to tell "no
+    long reads at all" apart from "short-read alignments only" for the
+    unavailable message. `gci_candidates` is `(hifi_candidates,
+    nano_candidates)`, GCI's own further split of `long_` by chemistry into
+    the two slots it actually accepts (`--hifi`/`--nano`) -- computed by
+    `pipeline_service._gci_candidates`, the exact helper
+    `launch_continuity_qc` uses to auto-pair, so this card applies the
+    identical gate the launch path enforces rather than a re-derived
+    approximation. CLR BAMs (and anything else `gci_slot_for_chemistry`
+    refuses) are dropped by that helper, never counted here.
+
+    Short-read-only projects get their own message rather than the generic
+    "align reads first" -- that advice would send the user to redo work
+    that cannot help, since GCI takes no short-read input at all.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Inspect assembly continuity"
+    description = (
+        "Score how well long reads agree with this assembly's structure -- "
+        "flagging low-support and low-coverage regions -- with GCI."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="assembly_continuity",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.gci()
+    if not tool.available:
+        return unavailable(tool.error or "GCI is not installed.")
+
+    short, long_, _unknown = alignments or ([], [], [])
+    hifi_candidates, nano_candidates = gci_candidates or ([], [])
+
+    if not long_:
+        if short:
+            return unavailable(
+                "GCI needs long reads, and this assembly only has "
+                "short-read alignments."
+            )
+        return unavailable(
+            "Continuity inspection needs long reads aligned to this "
+            "assembly. Align a read set against it first."
+        )
+
+    if not hifi_candidates and not nano_candidates:
+        return unavailable(
+            "This assembly has long-read alignments, but none are HiFi or "
+            "ONT -- GCI cannot use PacBio CLR reads."
+        )
+
+    if len(hifi_candidates) > 1 or len(nano_candidates) > 1:
+        total = len(hifi_candidates) + len(nano_candidates)
+        return unavailable(
+            f"This assembly has {total} usable long-read alignment(s); use "
+            "the tool to pick which ones to use."
+        )
+
+    return SuggestionCard(
+        kind="assembly_continuity",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"{len(hifi_candidates) + len(nano_candidates)} long-read "
+        "alignment(s) against this assembly.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/assembly-continuity",
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     """Count reads per gene for this alignment.
 
@@ -1531,6 +1622,23 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             assembly_alignments = None
 
+    # GCI needs its `long_` bucket split further, into the two slots it
+    # actually accepts (`--hifi`/`--nano`), refusing CLR the way
+    # `launch_continuity_qc` does -- `pipeline_service._gci_candidates` is
+    # the exact split that launch path uses to auto-pair, so the card
+    # applies the identical gate rather than a re-derived approximation.
+    # Computed here (async) rather than inside the sync card builder so it
+    # uses the same `read_chemistry_for_alignment` the launch path uses,
+    # including its FASTQ-provenance fallback for BAMs aligned before
+    # chemistry was copied onto the BAM itself.
+    continuity_candidates = None
+    if assembly_alignments is not None:
+        try:
+            _short, long_, _unknown = assembly_alignments
+            continuity_candidates = await pipeline_service._gci_candidates(long_)
+        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            continuity_candidates = None
+
     builders = (
         ("preprocess", lambda: build_preprocess_card(obj)),
         ("align", lambda: build_align_card(obj, references)),
@@ -1544,6 +1652,12 @@ async def suggestions_for(obj) -> list[dict]:
         ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
         ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
         ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
+        (
+            "assembly_continuity",
+            lambda: build_continuity_card(
+                obj, assembly_alignments, continuity_candidates
+            ),
+        ),
     )
 
     cards: list[dict] = []
