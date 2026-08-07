@@ -88,7 +88,9 @@ export function SettingsResources() {
   }
 
   const machineMemGb = (limits.data.machine_mem_mb / MB_PER_GB).toFixed(1);
-  const invalidMem = !noLimit && (memGb.trim() === "" || parseFloat(memGb) <= 0);
+  const invalidMem =
+    !noLimit &&
+    (memGb.trim() === "" || Number.isNaN(parseFloat(memGb)) || parseFloat(memGb) <= 0);
 
   return (
     <div className="settings-page">
