@@ -83,33 +83,27 @@ jobs:
 
       # These self-hosted runners are launchd LaunchAgents with SessionCreate:
       # true, which puts every job in its own macOS security session rather
-      # than the interactive login session. The default `credsStore: desktop`
-      # in ~/.docker/config.json then fails to save the ghcr.io login with
-      # "error saving credentials ... User interaction is not allowed.
-      # (-25308)" -- Keychain refuses to grant a cross-session credential
-      # write without a prompt, and a background session can't answer one.
-      # Point Docker at a config scoped to this job instead of the shared
-      # user config: no credsStore means the token goes in this throwaway
-      # file in plaintext, in a directory the runner deletes after the job,
-      # rather than through the keychain at all. `runner.temp` is only valid
-      # inside a step, not a job-level `env:` -- exported to $GITHUB_ENV here
-      # so every later step in this job inherits it without repeating it.
-      - name: Scope Docker's config to this job
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/docker-config"
-          # An empty config.json isn't enough: `strings` on this runner's
-          # docker binary (29.6.2) shows "osxkeychain" compiled in as the
-          # unconditional macOS default credsStore, used whenever credsStore
-          # is unset in config.json -- not "no credential storage," an
-          # explicit default. Pointing credsStore at a helper name that
-          # doesn't exist is what actually disables it: `docker login`
-          # can't exec docker-credential-nonexistent, so it falls back to
-          # its documented last resort of writing the base64 auth into
-          # config.json directly, in a directory scoped to this job and
-          # deleted by the runner afterward.
-          echo '{"credsStore": "nonexistent-on-purpose"}' > "${RUNNER_TEMP}/docker-config/config.json"
-          echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
+      # than the interactive login session. `docker login`'s default
+      # credsStore (osxkeychain -- compiled in as the unconditional macOS
+      # default, so an unset/empty/bogus credsStore in config.json doesn't
+      # avoid it) then fails to save the ghcr.io login with "error saving
+      # credentials ... User interaction is not allowed. (-25308)": Keychain
+      # refuses a cross-session credential write without a prompt, and a
+      # background session can't answer one. Neither can it be avoided by
+      # steering Docker away from a helper -- login-action's write still
+      # errors if no working helper is on PATH at all (confirmed: pointing
+      # credsStore at a nonexistent helper name produces a different, but
+      # still fatal, "executable file not found" error instead).
+      #
+      # The fix that actually works (docker/login-action#566): explicitly
+      # unlock the login keychain right before logging in. A SessionCreate
+      # session can still unlock a keychain given the real password -- it
+      # just can't get an *interactive* unlock prompt answered, which is
+      # what -25308 is actually complaining about.
+      - name: Unlock the login keychain
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
+        run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
 
       # A fixed builder name plus keep-state is what makes layer caching work
       # on self-hosted runners: the BuildKit state volume survives the job, so
@@ -191,24 +185,14 @@ jobs:
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
 
-      # See the identical comment on the build job: launchd's SessionCreate
-      # isolation means the shared ~/.docker/config.json's keychain-backed
-      # credsStore can't save a login here, so this job gets its own
-      # throwaway, plaintext config instead. `runner.temp` is only valid
-      # inside a step, so this exports to $GITHUB_ENV for later steps.
-      - name: Scope Docker's config to this job
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/docker-config"
-          # See the identical comment on the build job: `strings` on this
-          # runner's docker binary shows "osxkeychain" compiled in as the
-          # unconditional macOS default whenever credsStore is unset, so an
-          # empty config.json doesn't disable it. Pointing credsStore at a
-          # helper name that doesn't exist does -- docker login can't exec
-          # it, and falls back to writing the base64 auth into config.json
-          # directly.
-          echo '{"credsStore": "nonexistent-on-purpose"}' > "${RUNNER_TEMP}/docker-config/config.json"
-          echo "DOCKER_CONFIG=${RUNNER_TEMP}/docker-config" >> "$GITHUB_ENV"
+      # See the identical comment on the build job: SessionCreate isolation
+      # means -25308 on docker login, and the actual fix is unlocking the
+      # login keychain right before it, not steering Docker away from a
+      # credential helper (which just produces a different fatal error).
+      - name: Unlock the login keychain
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
+        run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
 
       - uses: docker/setup-buildx-action@v3
 
