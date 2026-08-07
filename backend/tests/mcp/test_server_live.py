@@ -155,6 +155,75 @@ async def test_profile_query_param_reaches_the_tool_through_the_real_mount():
     assert whoami_result["username"] == "mcp-live-e2e"
 
 
+async def test_ambiguous_profile_is_a_clean_tool_error_not_a_500():
+    """The most likely real-world error path: two profiles exist and the
+    connection URL omits `?profile=`.
+
+    `context.owner_for` raises `ProfileUnresolvedError`, a plain `AppError`
+    the `mcp` library knows nothing about. Every other test here only
+    exercises the success path, so whether that exception turns into a
+    clean `tools/call` error the calling agent can read, or an unhandled
+    500 through the streamable-HTTP transport, was unverified -- and two
+    profiles is a completely ordinary state for this app, not an edge case.
+    """
+    await profile_service.create_profile(username="mcp-live-ambiguous-a")
+    await profile_service.create_profile(username="mcp-live-ambiguous-b")
+
+    test_app = _build_test_app()
+    mcp_url = "/api/v1/mcp/mcp"  # no ?profile=
+
+    async with test_app.router.lifespan_context(test_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=test_app), base_url="http://test"
+        ) as client:
+            init_resp = await client.post(
+                mcp_url,
+                headers=_JSONRPC_HEADERS,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test-client", "version": "0.0.1"},
+                    },
+                },
+            )
+            assert init_resp.status_code == 200, init_resp.text
+            session_id = init_resp.headers["mcp-session-id"]
+            session_headers = {**_JSONRPC_HEADERS, "mcp-session-id": session_id}
+
+            await client.post(
+                mcp_url,
+                headers=session_headers,
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            )
+
+            call_resp = await client.post(
+                mcp_url,
+                headers=session_headers,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {"name": "bioflow_whoami", "arguments": {}},
+                },
+            )
+
+    # A clean JSON-RPC response, not a transport-level failure: the
+    # streamable-HTTP endpoint itself must still answer 200, with the error
+    # carried inside the tool result rather than as an HTTP-level fault.
+    assert call_resp.status_code == 200, call_resp.text
+    payload = _extract_result(call_resp.text)
+
+    assert "error" not in payload, payload
+    assert payload["result"]["isError"] is True, payload
+
+    message = payload["result"]["content"][0]["text"]
+    assert "?profile=" in message
+
+
 async def test_resources_list_includes_the_derived_and_guide_resources():
     test_app = _build_test_app()
     mcp_url = "/api/v1/mcp/mcp"
