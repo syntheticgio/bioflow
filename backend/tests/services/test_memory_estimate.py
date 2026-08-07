@@ -112,3 +112,71 @@ class TestMeasured:
         assert result.source is EstimateSource.MEASURED
         # ~2 GB of peak RSS is ~2048 MB, not ~2.1 billion.
         assert 1500 < result.mb < 3000
+
+
+class TestGuards:
+    """The falling-back direction. Per CLAUDE.md's note on tool-availability
+    tests, asserting that a well-behaved case resolves to MEASURED passes
+    whether or not these guards exist -- only the rejections prove them."""
+
+    async def test_far_extrapolation_falls_back_to_the_heuristic(self):
+        """The admission design's core warning: every row in this database
+        today is test data, so without this guard five small runs would
+        confidently refuse the first real one."""
+        largest = await _insert_runs("extrapolation_job")
+
+        result = await memory_estimate.resolve(
+            job_type="extrapolation_job",
+            input_bytes=largest * 10,
+            heuristic_mb=4096,
+        )
+
+        assert result.source is EstimateSource.HEURISTIC
+        assert result.mb == 4096
+        assert result.fell_back_from_measured is True
+
+    async def test_a_poor_fit_falls_back_to_the_heuristic(self):
+        """Scattered peaks with no relationship to input size. factor_beyond
+        alone would not catch this -- the input is inside the observed range,
+        so only r_squared can reject it.
+
+        Values are chosen to stay within `_fit`'s outlier factor (3x the
+        median) so all 8 rows survive to the fit -- otherwise the outlier
+        filter alone drops it below MIN_SAMPLES and the test would pass for
+        the wrong reason (no history) rather than exercising r_squared."""
+        for i, peak in enumerate(
+            [100_000_000, 500_000_000, 150_000_000, 450_000_000,
+             200_000_000, 400_000_000, 250_000_000, 350_000_000],
+            start=1,
+        ):
+            await JobRunTiming(
+                job_type="noisy_fit_job",
+                input_bytes=1_000_000 * i,
+                duration_ms=120_000,
+                outcome=RunOutcome.SUCCEEDED,
+                resources=RunResources(peak_rss_bytes=peak),
+            ).insert()
+
+        result = await memory_estimate.resolve(
+            job_type="noisy_fit_job",
+            input_bytes=4_000_000,
+            heuristic_mb=4096,
+        )
+
+        assert result.source is EstimateSource.HEURISTIC
+        assert result.fell_back_from_measured is True
+
+    async def test_a_rejected_measurement_with_no_heuristic_is_unknown(self):
+        """Falling back needs somewhere to fall. An assembly with no genome
+        size and untrustworthy history is UNKNOWN, not a guess."""
+        largest = await _insert_runs("rejected_no_heuristic_job")
+
+        result = await memory_estimate.resolve(
+            job_type="rejected_no_heuristic_job",
+            input_bytes=largest * 10,
+            heuristic_mb=None,
+        )
+
+        assert result.source is EstimateSource.UNKNOWN
+        assert result.mb is None
+        assert result.fell_back_from_measured is True

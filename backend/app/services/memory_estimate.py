@@ -64,8 +64,29 @@ class MemoryEstimate:
 def _is_trustworthy(measured: dict) -> bool:
     """Whether a known measured estimate should outrank the heuristic.
 
-    Placeholder until Task 4 wires the guards -- a known estimate is trusted.
+    Two independent ways a fit can be real and still not worth believing, and
+    neither subsumes the other:
+
+      * **Extrapolated too far.** The slope compounds past the largest input
+        actually observed.
+      * **A poor fit.** Scattered points still produce a line. This is the one
+        an extrapolation check cannot see, because a bad fit inside the
+        observed range is not extrapolating at all.
     """
+    quality = measured.get("r_squared")
+    if quality is not None and quality < timing_service.MIN_R_SQUARED:
+        return False
+
+    # `range` is present only when `known` is True, which the caller checked.
+    observed = measured.get("range") or {}
+    if observed.get("extrapolating"):
+        factor = observed.get("factor_beyond")
+        # None with extrapolating=True means every observed sample was
+        # zero-sized: there is no ratio to report, but the input is still
+        # outside what was measured. Not trustworthy.
+        if factor is None or factor > timing_service.MAX_EXTRAPOLATION_FACTOR:
+            return False
+
     return True
 
 
