@@ -268,6 +268,24 @@ itself. Two workers can still both compute stale headroom and both admit in
 the same tick -- narrowed from unbounded staleness (the pre-#68 bug) to about
 one Redis round-trip's worth of clock skew, not eliminated.
 
+**The layered memory estimate resolver shipped 2026-08-07 as
+[#69](https://github.com/syntheticgio/bioflow/issues/69):** design in
+`docs/superpowers/specs/2026-08-07-layered-memory-estimate-resolver-design.md`,
+plan in
+`docs/superpowers/plans/2026-08-07-layered-memory-estimate-resolver.md`.
+`backend/app/services/memory_estimate.py` arbitrates between the measured
+model (`timing_service.estimate_memory()`) and the heuristic estimator
+(`resource_estimator`), reporting which source it used. Wired into all four
+consumers of a memory number, not just the two the admission design
+originally named -- notably including the reservation `claim.lua` gates on
+(`declared_align_mem_mb`), not only the two advisory BLOCK-check sites.
+Guarded independently on extrapolation distance and fit quality, since a
+poor fit inside the observed range is invisible to an extrapolation check
+alone. Checked against real `job_timings` rows on the running stack: all 15
+job types with history resolved to `heuristic` (none yet have enough rows to
+attempt a fit), confirming the guards were never exercised against a false
+positive on today's data.
+
 Original text follows, for the reasoning that produced the above:
 
 Allow users to set global resource constraints (max memory, max CPU %, max CPU
@@ -299,8 +317,7 @@ Touches: `backend/app/models/job.py`, `backend/app/queue/governor.py`,
 `docker-compose.yml`, `docker-compose.override.yml`.
 
 Remaining open issues:
-[#69](https://github.com/syntheticgio/bioflow/issues/69) (layered memory
-estimate resolver), [#70](https://github.com/syntheticgio/bioflow/issues/70)
+[#70](https://github.com/syntheticgio/bioflow/issues/70)
 (four-choice refusal card), [#71](https://github.com/syntheticgio/bioflow/issues/71)
 (auto re-plan), [#72](https://github.com/syntheticgio/bioflow/issues/72)
 (cgroup enforcement, opt-in), [#74](https://github.com/syntheticgio/bioflow/issues/74)
