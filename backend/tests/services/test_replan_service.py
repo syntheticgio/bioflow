@@ -240,6 +240,21 @@ def test_assembly_without_a_genome_size_reports_no_knobs():
     assert isinstance(result, replan_service.NoKnobs)
 
 
+def test_propose_assembly_directly_returns_no_knobs_for_unknown_genome_size():
+    """Distinguishes the real None-genome-size branch from the registry
+    fallback: calling _propose_assembly directly bypasses replan()'s
+    "unregistered job type" fallback, so this only passes if the function's
+    own `if floor_estimate is None: return NoKnobs()` branch actually fires.
+    """
+    result = replan_service._propose_assembly(
+        params=_assembly_params(genome_bases=None),
+        budget_mb=16_000,
+        cpu_budget=16.0,
+    )
+
+    assert isinstance(result, replan_service.NoKnobs)
+
+
 def test_graph_dominated_assembly_is_infeasible():
     """Flye is 40 bytes/base, so a 3 Gbase genome needs ~114 GB of graph.
 
