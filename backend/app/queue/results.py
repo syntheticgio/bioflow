@@ -1670,7 +1670,18 @@ async def _apply_assess_assembly_qv(result: dict, *, owner: str) -> None:
                 name=f"{db_dir.name}__{member.relative_to(db_dir).as_posix().replace('/', '__')}",
                 derived_from=[read_obj.id],
                 produced_by_job=PydanticObjectId(job_id) if job_id else None,
-                facts={"meryl_db_k": k, "meryl_db_name": db_dir.name},
+                # `meryl_db_expected_count` is the total file count this
+                # database was supposed to produce, stamped on every member
+                # -- not just the ones that ingested. Without it, a reader
+                # grouping sidecars by `meryl_db_name` cannot tell a complete
+                # group from one a partial ingest (see meryl_db_partially_
+                # applied below) silently shrank; it would see, say, 3 files
+                # and have no way to know 5 were expected.
+                facts={
+                    "meryl_db_k": k,
+                    "meryl_db_name": db_dir.name,
+                    "meryl_db_expected_count": len(members),
+                },
                 sidecar_of=read_obj.id,
                 sidecar_role=SidecarRole.MERYL_DB,
             )

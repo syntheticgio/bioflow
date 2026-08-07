@@ -3890,13 +3890,15 @@ async def _materialize_meryl_cache(
     it as an argument, so a database built at a different k cannot serve a
     run wanting this one -- it is simply a different, unusable database.
 
-    A member with no resolvable name-encoded relative path, or a group where
-    resolving any member's bytes fails, is treated as a broken cache: this
-    function returns None (never raises) so the caller falls back to a full
-    rebuild. Correctness over cleverness -- a rebuild costs time; silently
-    running Merqury against a partial database would produce a confidently
-    wrong QV rather than a visible error, and there's no way to detect that
-    afterward from the QV number alone.
+    A member with no resolvable name-encoded relative path, a group whose
+    size does not match the `meryl_db_expected_count` the applier stamped on
+    each member, or a group where resolving any member's bytes fails, is
+    treated as a broken cache: this function returns None (never raises) so
+    the caller falls back to a full rebuild. Correctness over cleverness --
+    a rebuild costs time; silently running Merqury against a partial
+    database would produce a confidently wrong QV rather than a visible
+    error, and there's no way to detect that afterward from the QV number
+    alone.
     """
     from app.services import object_service
 
@@ -3922,6 +3924,27 @@ async def _materialize_meryl_cache(
         if not members:
             continue
         if any((m.facts or {}).get("meryl_db_k") != k for m in members):
+            continue
+
+        # The applier stamps the total file count it intended to ingest on
+        # every member that made it (`meryl_db_expected_count`). Comparing
+        # against the group's actual size is the only way to tell a complete
+        # database from one a partial ingest silently shrank -- without it, a
+        # database that lost files to `meryl_db_partially_applied` looks
+        # identical to a genuinely complete one, and this function would
+        # materialize a truncated database that Merqury would score as if it
+        # were whole. A group with no `meryl_db_expected_count` at all
+        # predates this field and is treated the same as a mismatch: unknown
+        # completeness is not evidence of completeness.
+        expected_counts = {(m.facts or {}).get("meryl_db_expected_count") for m in members}
+        if len(expected_counts) != 1 or expected_counts != {len(members)}:
+            log.warning(
+                "meryl_cache_group_incomplete",
+                read_object_id=str(read_object.id),
+                db_name=db_name,
+                found=len(members),
+                expected=next(iter(expected_counts), None),
+            )
             continue
 
         prefix = f"{db_name}__"

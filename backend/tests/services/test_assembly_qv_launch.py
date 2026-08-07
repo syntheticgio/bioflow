@@ -200,7 +200,10 @@ class TestMerylCacheMaterialization:
     through the launch path.
     """
 
-    def _member(self, *, db_name, rel, k, owner, project_id, content=b"x", digest=None):
+    def _member(
+        self, *, db_name, rel, k, owner, project_id, content=b"x", digest=None,
+        expected_count=1,
+    ):
         digest = digest or "b" * 64
         blob_dir = settings.objects_dir / digest[:2]
         blob_dir.mkdir(parents=True, exist_ok=True)
@@ -213,7 +216,11 @@ class TestMerylCacheMaterialization:
             owner=owner,
             project_id=project_id,
             sidecar_role=SidecarRole.MERYL_DB,
-            facts={"meryl_db_k": k, "meryl_db_name": db_name},
+            facts={
+                "meryl_db_k": k,
+                "meryl_db_name": db_name,
+                "meryl_db_expected_count": expected_count,
+            },
             blob_sha256=digest,
         )
 
@@ -263,7 +270,7 @@ class TestMerylCacheMaterialization:
             self._member(
                 db_name="reads.meryl", rel=f"0x{i:06x}.merylIndex", k=21,
                 owner="local", project_id=reads.project_id, content=bytes([i]) * 8,
-                digest=f"{i}" * 64,
+                digest=f"{i}" * 64, expected_count=3,
             )
             for i in range(3)
         ]
@@ -320,6 +327,36 @@ class TestMerylCacheMaterialization:
                 "app.services.pipeline_service._resolve_readable",
                 AsyncMock(side_effect=_resolve_missing),
             ),
+        ):
+            result = await pipeline_service._materialize_meryl_cache(
+                reads, 21, owner="local"
+            )
+        assert result is None
+
+    async def test_partial_group_smaller_than_expected_falls_back_to_none(self):
+        """A group that lost members to a partial ingest (results.py's
+        meryl_db_partially_applied case) must not be materialized as if it
+        were complete -- Merqury scoring a truncated database would produce
+        a confidently wrong QV with nothing to say so afterward. Two members
+        both claim expected_count=3 (one was dropped during ingest), so the
+        group's actual size never matches what every member says it should
+        be, and the cache must be refused."""
+        reads = _reads()
+        members = [
+            self._member(
+                db_name="reads.meryl", rel=f"0x{i:06x}.merylIndex", k=21,
+                owner="local", project_id=reads.project_id, content=bytes([i]) * 8,
+                digest=f"{i}" * 64, expected_count=3,
+            )
+            for i in range(2)
+        ]
+
+        async def _list_sidecars(object_id, *, owner):
+            return members
+
+        with patch(
+            "app.services.object_service.list_sidecars",
+            AsyncMock(side_effect=_list_sidecars),
         ):
             result = await pipeline_service._materialize_meryl_cache(
                 reads, 21, owner="local"
