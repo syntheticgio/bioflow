@@ -656,19 +656,28 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
 
 /**
  * Merqury's spectra-cn/QV plots, copied server-side into
- * qc_reports/<object_id>/ under their fixed `out_prefix="qv"` names. Facts
- * carries no filename list -- these are Merqury's standard, documented
- * output names, not something discovered per-run -- so each is rendered
- * optimistically and hidden with onError if this particular run didn't
- * produce it (`.fl.` only appears with two read files, for instance).
+ * qc_reports/<object_id>/. Filenames verified against a real run (2026-08-07,
+ * S. cerevisiae R64 assembly + DRR1066343 reads) rather than guessed from
+ * documentation -- the earlier guess (`qv.spectra-cn.*.png`, `qv.qv.png`)
+ * did not match any file Merqury actually wrote.
+ *
+ * The handler always links the assembly as `assembly.fasta`, which
+ * `_named_link` resolves to `in_assembly.fasta` on disk (see
+ * `_MERQURY_ASSEMBLY_LINK` in `assembly_qc_handlers.py`) -- Merqury strips
+ * the extension for its own naming, so every run's plots are prefixed
+ * `qv.in_assembly.*` and `qv.spectra-asm.*`, not just this one's. Facts
+ * carries no filename list, so each candidate is rendered optimistically and
+ * hidden with onError if a particular run didn't produce it.
  */
 function SpectraCnPlots({ objectId }: { objectId: string }) {
   const [hidden, setHidden] = useState<Record<string, boolean>>({});
   const candidates = [
-    "qv.spectra-cn.fl.png",
-    "qv.spectra-cn.ln.png",
-    "qv.spectra-cn.st.png",
-    "qv.qv.png",
+    "qv.in_assembly.spectra-cn.fl.png",
+    "qv.in_assembly.spectra-cn.ln.png",
+    "qv.in_assembly.spectra-cn.st.png",
+    "qv.spectra-asm.fl.png",
+    "qv.spectra-asm.ln.png",
+    "qv.spectra-asm.st.png",
   ];
 
   return (
