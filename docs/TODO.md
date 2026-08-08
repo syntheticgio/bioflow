@@ -363,7 +363,7 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
-## Neither model segments by thread count
+## Neither model segments by thread count — PARTIALLY FIXED
 
 **Partially addressed 2026-08-08:** the segmentation machinery landed --
 `_fit_segmented` in `backend/app/services/timing_service.py` groups
@@ -371,9 +371,10 @@ trust a plan's checkboxes as evidence it shipped.
 `>= MIN_SAMPLES` (5) same-thread-count rows, falling back to the existing
 pooled bytes-only fit otherwise. `estimate()`, `estimate_memory()`, and
 `memory_estimate.resolve()` all take an optional `threads` argument now, and
-the three real callers (`worker.py:_eta_model_ms`, `jobs.py:get_job`) pass
-`job.payload.get("threads")` through. `stats()`'s `/timing-model` output
-gained a `segments` list per job type.
+the three real call sites that pass a job's thread count through
+(`worker.py:_eta_model_ms`, and two calls inside `jobs.py:get_job`) do so via
+`job.payload.get("threads")`. `stats()`'s `/timing-model` output gained a
+`segments` list per job type.
 
 **Still open:** at the time this landed, the real `job_timings` collection
 held only 9 rows with a thread count at all (`align_reads @ 4` x5,
