@@ -144,9 +144,40 @@ observed directly: two prompts written back-to-back yielded a single
 docstring's note on removing the is-it-streaming race).
 
 The drawer's `messages` array assumes one assistant bubble per user bubble,
-so a steered prompt strands a user message with no reply attached to it,
-permanently. Fix in the panel: disable the input while `isStreaming` is
-true. Backend behavior is unchanged.
+so a steered prompt would strand a user message with no reply attached to
+it, permanently. The guard is to disable input while `isStreaming` is true.
+
+**Correction, found while planning: this is already implemented.**
+`AgentPanel.submit` returns early when `isStreaming`, and `AgentPanelInput`
+disables both the textarea and the send button on the same flag — three
+checkpoints. No work is needed here. It is recorded because the underlying
+pi behaviour is real and non-obvious, and because a future change that makes
+the input always-enabled would reintroduce the bug silently.
+
+What *is* needed is making `isStreaming` trustworthy: see the display bugs
+below, which prevent it from ever being set correctly.
+
+### Fix the two display bugs that hide the conversation entirely
+
+Found while planning, by reading `AgentPanel.tsx`. Both are blocking: with
+either present, no multi-turn conversation is visible at all, so none of the
+persistence work above can be verified in the UI.
+
+**The user's prompt never renders.** `ask.onSuccess` builds the optimistic
+user message as `{ role: "user", content: "" }` — the prompt text is
+available as the mutation's variable but is not used. Every user bubble is
+blank.
+
+**Streamed assistant text has nowhere to land.** `ask.onSuccess` appends the
+user message but no assistant placeholder. Every handler
+(`onMessageDelta`, `onToolCall`, `onToolResult`) mutates
+`updated[lastIdx]` only `if (lastIdx >= 0 && updated[lastIdx].isStreaming)`
+— and the last message is the user's, which has no `isStreaming`. So every
+token is silently discarded.
+
+Fix both in the same place: append a user message carrying the prompt text,
+plus an assistant message with `isStreaming: true`, so the handlers have a
+target.
 
 ### Fix the silent failure in event translation
 
@@ -182,8 +213,13 @@ error compounds across restarts rather than dying with the process.
 - `agent_sessions_dir` config property
 - new-session endpoint (stop process + delete session file)
 - "New session" button; session-state indication in the panel
-- input disabled while streaming, to prevent coalescing
 - `errorMessage` translation on `turn_end`
+- the two display bugs: render the user's prompt, and give streamed
+  assistant text a bubble to land in
+
+**Already implemented, no work needed** (recorded so it is not mistaken for
+a gap): input is already disabled while streaming, so prompt coalescing is
+already guarded.
 
 **Out:**
 
