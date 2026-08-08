@@ -3,7 +3,13 @@
 Design note for [#18](https://github.com/syntheticgio/bioflow/issues/18) (epic)
 and its first slice [#20](https://github.com/syntheticgio/bioflow/issues/20).
 
-Status: design agreed 2026-08-07. Not implemented.
+Status: design agreed 2026-08-07. **Implemented 2026-08-08** -- all five §8
+slices shipped via #79 and #80; see
+[`docs/TODO-done.md`](../../TODO-done.md) ("Generic pipeline workflows (DAG)")
+for what landed and where it departed from this note. The significant
+departure: §9's plan to drive activity presentation from `run_ids` on
+`job.progress` does not work, because 13 of the 22 canvas node types create no
+`PipelineRun`; presentation polls derived server-side state instead.
 
 ## What this is
 

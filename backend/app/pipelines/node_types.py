@@ -34,7 +34,7 @@ reference-guided assembly work by the enum's own comment, but none of them
 calls run_service.create_run. This is a real, pre-existing gap (their
 appliers in queue/results.py still record outputs via run_for_job/
 record_outputs when a job happens to be linked to a run some other way, but
-the launch path itself never creates one) -- tracked as GitHub issue #23, not
+the launch path itself never creates one) -- tracked as GitHub issue #91, not
 something this file's job to fix.
 """
 

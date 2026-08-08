@@ -1081,28 +1081,3 @@ rather than synthetic counts: the parts still unexercised are the queue and
 UI wiring, and synthetic files would exercise the runner that already has
 unit tests. Note the tools' own floor -- `min_replicates: 2` -- so a 2x2
 design is the minimum that will launch.
-
-## Generic pipeline workflows (DAG)
-
-Raised: 2026-07-31, requested.
-
-Today each pipeline is a hand-written handler and `Job.depends_on` gates one
-job behind another. That gate is real and exercised (`align_reads` waiting on
-`build_index`), but it is a per-launch decision made in
-`pipeline_service.launch_*`, not a reusable graph.
-
-What this asks for is a user-definable DAG: run QC, then trim, then align, then
-call, as one declared unit that survives a restart and reports progress as a
-whole.
-
-Two things to settle early, because they shape everything after:
-
-- **Does a workflow instance become an object?** The activity view groups by
-  `Run`, and a DAG is naturally a run-of-runs. Extending `Run` beats inventing
-  a parallel concept if it can carry the nesting.
-- **Failure semantics.** If step three of five fails, does the DAG halt, retry,
-  or continue what does not depend on it? The current queue has retries and a
-  reaper but no notion of partial workflow failure.
-
-This is the largest item in this file and probably wants decomposing into its
-own spec before any plan.
