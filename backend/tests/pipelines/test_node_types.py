@@ -9,6 +9,7 @@ the STAR/_SIDECAR_ROLES failure in a new place.
 import inspect
 
 from app.models import FormatKind, ObjectRole
+from app.models.run import RunKind
 from app.pipelines.node_types import (
     EXCLUDED_LAUNCHES,
     NODE_TYPES,
@@ -68,6 +69,40 @@ class TestSpecs:
         assert reads.type.accepts(FormatKind.FASTQ, None)
         out = spec.outputs[0]
         assert out.type.role is ObjectRole.TRIMMED_READS
+
+
+class TestRunKindResolution:
+    """(run_kind, run_tool) is what workflow_derive matches a run against.
+
+    A duplicate pair makes `_node_type_for` return whichever spec the dict
+    happens to list first, silently deriving one tool's run as another tool's
+    node -- the same silent-skip shape as the registries CLAUDE.md warns about,
+    except here the wrong answer is a plausible-looking node rather than an
+    absence.
+    """
+
+    def test_run_kind_and_tool_pairs_are_unique(self):
+        pairs = [
+            (spec.run_kind, spec.run_tool)
+            for spec in NODE_TYPES.values()
+            if spec.run_kind is not None
+        ]
+        assert len(pairs) == len(set(pairs)), (
+            f"duplicate (run_kind, run_tool) among node types: {pairs}"
+        )
+
+    def test_reference_assembly_specs_are_told_apart_by_tool(self):
+        """The one RunKind covered by more than one node type."""
+        by_tool = {
+            spec.run_tool: key
+            for key, spec in NODE_TYPES.items()
+            if spec.run_kind is RunKind.REFERENCE_ASSEMBLY
+        }
+        assert by_tool == {
+            "ivar": "consensus",
+            "polypolish": "polish",
+            "ragtag": "scaffold",
+        }
 
 
 class TestAdapterSignatures:

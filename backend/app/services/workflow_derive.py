@@ -45,34 +45,65 @@ class DerivedGraph:
     skipped: list[SkippedRun] = field(default_factory=list)
 
 
-def _node_type_for(kind: RunKind) -> str | None:
-    """Which node type represents this run kind.
+def _node_type_for(kind: RunKind, tool: str | None = None) -> str | None:
+    """Which node type represents this run.
 
     Derived from the registry rather than hand-written, so a node type added
     there is reachable here without a second list to keep in step -- the
-    hand-maintained-registry hazard CLAUDE.md describes. `reference_assembly`
-    is the one RunKind no node type covers today, and it is reported rather
-    than dropped.
+    hand-maintained-registry hazard CLAUDE.md describes.
+
+    `kind` alone identifies a node type for every RunKind but one.
+    REFERENCE_ASSEMBLY covers three node types (consensus, polish, scaffold),
+    and matching on kind alone would derive all three as whichever spec the
+    registry happens to list first -- a polish run drawn as an iVar node, with
+    ports it never had. Those specs carry `run_tool`, matched against the
+    run's own `tool`, and a REFERENCE_ASSEMBLY run with an unrecognized tool
+    yields None so it is reported as skipped rather than mislabelled.
     """
+    fallback: str | None = None
     for node_type, spec in NODE_TYPES.items():
-        if spec.run_kind is kind:
+        if spec.run_kind is not kind:
+            continue
+        if spec.run_tool is None:
+            fallback = node_type
+        elif spec.run_tool == tool:
             return node_type
-    return None
+    return fallback
+
+
+# The roles whose values do not read the same as the ports they feed. Both
+# come from the reference-guided assembly nodes (#91), and both diverge for the
+# same reason: a role is read in a run's own input list, where it must say what
+# the file *is* ("draft" alone does not say draft what), while a port is read on
+# a node that already names its tool.
+#
+# Kept as aliases rather than renaming either side: role values are stored on
+# every existing run and port names in every saved workflow definition, so
+# either rename needs a migration to fix a cosmetic mismatch. A role missing
+# from here and matching no port draws no wire *and raises nothing* -- the
+# canvas just quietly loses an edge -- so
+# test_every_input_role_reaches_a_port_on_some_node_type asserts the coverage.
+_ROLE_PORT_ALIASES: dict[str, str] = {
+    "draft_assembly": "draft",
+    "primers": "primer_bed",
+}
 
 
 def _port_for_role(node_type: str, role: str | None) -> str | None:
     """The input port a `RunInput` of this role feeds.
 
-    `RunInputRole`'s values were chosen to read the same as the port names
-    (`reads`, `mate`, `reference`, `alignment`, `annotation`), so the mapping is
-    a name match against what the spec declares rather than a second table. A
-    role with no matching port yields None and the edge is simply not drawn --
-    the node is still there for the user to wire by hand.
+    `RunInputRole`'s values were mostly chosen to read the same as the port
+    names (`reads`, `mate`, `reference`, `alignment`, `annotation`), so the
+    mapping is a name match against what the spec declares rather than a second
+    table, with `_ROLE_PORT_ALIASES` covering the one role where they diverge.
+    A role with no matching port yields None and the edge is simply not drawn
+    -- the node is still there for the user to wire by hand.
     """
     spec = NODE_TYPES.get(node_type)
     if spec is None or role is None:
         return None
-    return next((p.name for p in spec.inputs if p.name == role), None)
+    wanted = _ROLE_PORT_ALIASES.get(role, role)
+    return next((p.name for p in spec.inputs if p.name == wanted), None)
 
 
 def _accepts_for(node_type: str, port: str | None) -> PortType | None:
@@ -169,7 +200,7 @@ async def derive_definition(
     action_nodes: list[tuple[PipelineRun, str]] = []
 
     for index, run in enumerate(ordered):
-        node_type = _node_type_for(run.kind)
+        node_type = _node_type_for(run.kind, run.tool)
         if node_type is None:
             graph.skipped.append(
                 SkippedRun(

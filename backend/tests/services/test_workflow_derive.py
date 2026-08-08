@@ -39,12 +39,14 @@ async def _run(
     inputs: list[tuple[PydanticObjectId, str, str]] = (),
     outputs: list[PydanticObjectId] = (),
     label: str = "run",
+    tool: str | None = None,
 ) -> PipelineRun:
     run = PipelineRun(
         kind=kind,
         project_id=PydanticObjectId(),
         label=label,
         owner=OWNER,
+        tool=tool,
         status=RunStatus.SUCCEEDED,
         inputs=[
             RunInput(object_id=oid, name=name, role=role)
@@ -158,12 +160,70 @@ class TestChainedRuns:
         assert len(inputs) == 1
 
 
+class TestReferenceAssemblyRuns:
+    """The one RunKind covering three node types (GitHub #91).
+
+    Before #91 these launchers created no run at all, so `reference_assembly`
+    was the standing example of an unrepresentable kind. Now the kind is
+    representable but ambiguous on its own, and `tool` is what resolves it --
+    a polish run derived as an iVar node would carry ports it never had.
+    """
+
+    @pytest.mark.parametrize(
+        "tool,node_type",
+        [("ivar", "consensus"), ("polypolish", "polish"), ("ragtag", "scaffold")],
+    )
+    async def test_the_tool_picks_which_node_type(self, tool, node_type):
+        run = await _run(RunKind.REFERENCE_ASSEMBLY, label="ra", tool=tool)
+
+        result = await derive_definition([run.id], owner=OWNER)
+
+        assert result.skipped == []
+        assert [n.node_type for n in result.nodes if n.kind.value == "action"] == [
+            node_type
+        ]
+
+    async def test_an_unrecognized_tool_is_reported_not_guessed(self):
+        """Deriving it as whichever spec came first would put a plausible,
+        wrong node on the canvas -- worse than saying so."""
+        run = await _run(RunKind.REFERENCE_ASSEMBLY, label="ra", tool="pilon")
+
+        result = await derive_definition([run.id], owner=OWNER)
+
+        assert [n for n in result.nodes if n.kind.value == "action"] == []
+        assert len(result.skipped) == 1
+        assert result.skipped[0].run_id == str(run.id)
+
+    async def test_a_scaffold_run_wires_its_draft_and_reference(self):
+        """The acceptance criterion end to end: a real scaffold run's inputs
+        become bound slots on the derived node."""
+        draft = PydanticObjectId()
+        reference = PydanticObjectId()
+        run = await _run(
+            RunKind.REFERENCE_ASSEMBLY,
+            tool="ragtag",
+            inputs=[
+                (draft, "assembly.fasta", "draft_assembly"),
+                (reference, "ref.fna", "reference"),
+            ],
+        )
+
+        result = await derive_definition([run.id], owner=OWNER)
+
+        assert result.skipped == []
+        action = next(n for n in result.nodes if n.kind.value == "action")
+        assert action.node_type == "scaffold"
+        # One INPUT node per external object, wired to the ports whose names
+        # match the RunInput roles.
+        ports = {e.to_port for e in result.edges if e.to_node == action.node_id}
+        assert ports == {"draft", "reference"}
+
+
 class TestSkipping:
     async def test_a_run_with_no_node_type_is_reported_not_dropped(self):
-        """`reference_assembly` is a real RunKind that no node type covers.
-        Silently omitting it leaves the user with a canvas quietly missing a
-        step they selected."""
-        run = await _run(RunKind.REFERENCE_ASSEMBLY, label="scaffolding")
+        """Silently omitting an unrepresentable run leaves the user with a
+        canvas quietly missing a step they selected."""
+        run = await _run(RunKind.REFERENCE_ASSEMBLY, label="unknown tool")
 
         result = await derive_definition([run.id], owner=OWNER)
 
@@ -248,3 +308,30 @@ class TestLayout:
         result = await derive_definition([a.id, b.id], owner=OWNER)
 
         assert len([n for n in result.nodes if n.kind.value == "action"]) == 2
+
+
+class TestRolePortNaming:
+    """`_port_for_role` matches a RunInputRole's value against port names.
+
+    That convention is invisible until it breaks: a role that matches nothing
+    draws no wire, and the derived canvas looks complete while quietly missing
+    an edge. DRAFT_ASSEMBLY did exactly that until #91, which is why the alias
+    table and this test exist rather than the convention alone.
+    """
+
+    def test_every_input_role_reaches_a_port_on_some_node_type(self):
+        from app.models.run import RunInputRole
+        from app.pipelines.node_types import NODE_TYPES
+        from app.services.workflow_derive import _port_for_role
+
+        unreachable = [
+            role.value
+            for role in RunInputRole
+            if not any(
+                _port_for_role(node_type, role.value) for node_type in NODE_TYPES
+            )
+        ]
+        assert unreachable == [], (
+            f"these roles match no port on any node type, so a derived run "
+            f"carrying one silently loses its wire: {unreachable}"
+        )

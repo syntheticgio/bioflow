@@ -3586,7 +3586,7 @@ async def launch_consensus(
     bait-capture) is a legitimate consensus target with no primer scheme.
     """
     from app.queue import queue
-    from app.services import object_service, reference_assembly
+    from app.services import object_service, reference_assembly, run_service
 
     tool = tools.require(tools.ivar())
 
@@ -3633,6 +3633,39 @@ async def launch_consensus(
             payload["primer_bed_sha256"] = bed_digest
         if bed_path:
             payload["primer_bed_path"] = bed_path
+        primer_inputs = [
+            RunInput(
+                object_id=primer_bed.id,
+                name=primer_bed.name,
+                role=RunInputRole.PRIMERS,
+            )
+        ]
+    else:
+        primer_inputs = []
+
+    run = await run_service.create_run(
+        kind=RunKind.REFERENCE_ASSEMBLY,
+        project_id=bam.project_id,
+        label=f"Consensus {bam.name}",
+        inputs=[
+            RunInput(
+                object_id=bam.id, name=bam.name, role=RunInputRole.ALIGNMENT
+            ),
+            RunInput(
+                object_id=reference.id,
+                name=reference.name,
+                role=RunInputRole.REFERENCE,
+            ),
+            *primer_inputs,
+        ],
+        # The resolved defaults rather than the caller's Nones, so the record
+        # says what iVar was actually run with -- payload already holds them.
+        params={
+            k: payload[k] for k in ("min_quality", "min_freq", "min_depth")
+        },
+        owner=owner,
+        tool="ivar",
+    )
 
     job = await queue.enqueue(
         "consensus_from_alignment",
@@ -3652,15 +3685,18 @@ async def launch_consensus(
         object_id=bam.id,
     )
     if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "Consensus calling is already queued or running for this "
             "alignment",
             details={"object_id": str(bam.id)},
         )
 
+    await run_service.link_job(run.id, job.id, RunJobRole.CONSENSUS)
     log.info(
         "consensus_launched",
         job_id=str(job.id),
+        run_id=str(run.id),
         bam_id=str(bam.id),
         reference_id=str(reference.id),
         primers=bool(primer_bed_object_id),
@@ -3707,7 +3743,7 @@ async def launch_polish(
     even when their inferred chemistry claims otherwise.
     """
     from app.queue import queue
-    from app.services import object_service, reference_assembly
+    from app.services import object_service, reference_assembly, run_service
 
     tool = tools.require(tools.polypolish())
     tools.require(tools.bwa_mem2())
@@ -3782,6 +3818,28 @@ async def launch_polish(
         assembly_length=int(assembly_length) if assembly_length else None,
     )
 
+    run = await run_service.create_run(
+        kind=RunKind.REFERENCE_ASSEMBLY,
+        project_id=draft.project_id,
+        label=f"Polish {draft.name}",
+        inputs=[
+            RunInput(
+                object_id=draft.id,
+                name=draft.name,
+                role=RunInputRole.DRAFT_ASSEMBLY,
+            ),
+            *[
+                RunInput(object_id=obj.id, name=obj.name, role=role)
+                for role, obj in zip(
+                    (RunInputRole.READS, RunInputRole.MATE), chosen
+                )
+            ],
+        ],
+        params={"threads": payload["threads"], "depth": payload["depth"]},
+        owner=owner,
+        tool="polypolish",
+    )
+
     job = await queue.enqueue(
         "polish_assembly",
         owner=owner,
@@ -3797,14 +3855,17 @@ async def launch_polish(
         object_id=draft.id,
     )
     if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "Polishing is already queued or running for this assembly",
             details={"object_id": str(draft.id)},
         )
 
+    await run_service.link_job(run.id, job.id, RunJobRole.POLISH)
     log.info(
         "polish_launched",
         job_id=str(job.id),
+        run_id=str(run.id),
         draft_id=str(draft.id),
         read_files=len(chosen),
         depth=payload["depth"],
@@ -3838,7 +3899,7 @@ async def launch_scaffold(
     `launch_polish` resolves reads.
     """
     from app.queue import queue
-    from app.services import object_service, reference_assembly
+    from app.services import object_service, reference_assembly, run_service
 
     tool = tools.require(tools.ragtag())
 
@@ -3903,6 +3964,27 @@ async def launch_scaffold(
     if ref_path:
         payload["reference_path"] = ref_path
 
+    run = await run_service.create_run(
+        kind=RunKind.REFERENCE_ASSEMBLY,
+        project_id=draft.project_id,
+        label=f"Scaffold {draft.name} against {reference.name}",
+        inputs=[
+            RunInput(
+                object_id=draft.id,
+                name=draft.name,
+                role=RunInputRole.DRAFT_ASSEMBLY,
+            ),
+            RunInput(
+                object_id=reference.id,
+                name=reference.name,
+                role=RunInputRole.REFERENCE,
+            ),
+        ],
+        params={"divergence": divergence, "threads": payload["threads"]},
+        owner=owner,
+        tool="ragtag",
+    )
+
     job = await queue.enqueue(
         "scaffold_assembly",
         owner=owner,
@@ -3917,15 +3999,18 @@ async def launch_scaffold(
         object_id=draft.id,
     )
     if job is None:
+        await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "Scaffolding is already queued or running for this assembly "
             "against this reference",
             details={"object_id": str(draft.id)},
         )
 
+    await run_service.link_job(run.id, job.id, RunJobRole.SCAFFOLD)
     log.info(
         "scaffold_launched",
         job_id=str(job.id),
+        run_id=str(run.id),
         draft_id=str(draft.id),
         reference_id=str(reference.id),
         divergence=divergence,

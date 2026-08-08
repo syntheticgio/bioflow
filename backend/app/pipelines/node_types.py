@@ -26,16 +26,13 @@ one classifiable unit, defeating the exhaustiveness check it was meant to
 serve. Qualifying by module is what keeps them distinguishable.
 
 Status: every launch_* is classified. 26 launch_* functions exist across
-services/; 9 create a PipelineRun (trim, align, variant_calling, quantify,
-differential_expression, assembly, the three downloads) and the rest do not.
-RunKind.REFERENCE_ASSEMBLY has no launcher creating a PipelineRun of that kind
--- launch_consensus, launch_polish, and launch_scaffold are all
-reference-guided assembly work by the enum's own comment, but none of them
-calls run_service.create_run. This is a real, pre-existing gap (their
-appliers in queue/results.py still record outputs via run_for_job/
-record_outputs when a job happens to be linked to a run some other way, but
-the launch path itself never creates one) -- tracked as GitHub issue #91, not
-something this file's job to fix.
+services/; 12 create a PipelineRun (trim, align, variant_calling, quantify,
+differential_expression, assembly, the three downloads, and -- since GitHub
+issue #91 -- consensus, polish, and scaffold) and the rest do not.
+
+Those last three are the one place a RunKind maps to more than one node type:
+all are RunKind.REFERENCE_ASSEMBLY, so `run_tool` is what tells them apart
+when workflow_derive turns a run back into a node. See NodeTypeSpec.run_tool.
 """
 
 from collections.abc import Callable
@@ -73,6 +70,15 @@ class NodeTypeSpec:
     outputs: tuple[PortSpec, ...]
     # None where the launcher creates no PipelineRun -- true of most of the 24.
     run_kind: RunKind | None = None
+    # Which `PipelineRun.tool` value picks *this* spec when several share a
+    # run_kind. Every kind but REFERENCE_ASSEMBLY maps to exactly one node
+    # type, so this stays None for them; consensus/polish/scaffold are all
+    # RunKind.REFERENCE_ASSEMBLY and are told apart by the tool their
+    # launcher records (ivar, polypolish, ragtag). Uniqueness of
+    # (run_kind, run_tool) is asserted in tests/pipelines/test_node_types.py --
+    # a second spec claiming a kind without a tool would make
+    # workflow_derive._node_type_for silently pick whichever came first.
+    run_tool: str | None = None
 
 
 async def _launch_trim(*, inputs: dict, params: dict, owner: str):
@@ -512,10 +518,8 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         label="Consensus (iVar)",
         launch_name="pipeline_service.launch_consensus",
         launch=_launch_consensus,
-        # No PipelineRun today even though this is reference-guided assembly
-        # work -- see the module docstring's note on RunKind.REFERENCE_ASSEMBLY
-        # and GitHub #23.
-        run_kind=None,
+        run_kind=RunKind.REFERENCE_ASSEMBLY,
+        run_tool="ivar",
         inputs=(
             PortSpec(
                 "alignment",
@@ -543,7 +547,8 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         label="Polish (Polypolish)",
         launch_name="pipeline_service.launch_polish",
         launch=_launch_polish,
-        run_kind=None,  # See "consensus" above -- same #23 gap.
+        run_kind=RunKind.REFERENCE_ASSEMBLY,
+        run_tool="polypolish",
         inputs=(
             PortSpec(
                 "draft",
@@ -566,7 +571,8 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         label="Scaffold (RagTag)",
         launch_name="pipeline_service.launch_scaffold",
         launch=_launch_scaffold,
-        run_kind=None,  # See "consensus" above -- same #23 gap.
+        run_kind=RunKind.REFERENCE_ASSEMBLY,
+        run_tool="ragtag",
         inputs=(
             PortSpec(
                 "draft",

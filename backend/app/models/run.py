@@ -156,16 +156,14 @@ class RunJobRole(StrEnum):
     # reasoning as CONSENSUS above, and likewise the whole point of its run:
     # a polish run whose polish failed produced nothing.
     #
-    # Note both this and CONSENSUS are currently declared but never passed to
-    # `run_service.link_job` -- ASSEMBLE is the only reference-assembly-family
-    # role a launch actually links. That gap predates this member and is not
-    # something adding it creates; it is recorded on GitHub #23 rather than
-    # fixed here, because giving these two handlers Run records is its own
-    # change with its own verification.
+    # This and CONSENSUS were declared but never linked for a long while --
+    # their launchers created no run at all. GitHub #91 gave
+    # launch_consensus/launch_polish/launch_scaffold a
+    # RunKind.REFERENCE_ASSEMBLY run each, so all three roles are now linked
+    # at launch.
     POLISH = "polish"
     # Reference-guided scaffolding. Named for the action, same reasoning as
-    # CONSENSUS and POLISH above. Also currently unlinked -- see POLISH's own
-    # comment; the gap is the same one and not created by adding this member.
+    # CONSENSUS and POLISH above.
     SCAFFOLD = "scaffold"
 
 
