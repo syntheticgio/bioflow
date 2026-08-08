@@ -49,3 +49,33 @@ async def test_resource_override_persists_across_a_reload():
     reloaded = await Job.get(job.id)
     assert reloaded is not None
     assert reloaded.resource_override is True
+
+
+@pytest.mark.asyncio
+async def test_enqueue_writes_override_into_the_redis_hash(redis, monkeypatch):
+    from app.queue import keys, queue
+
+    monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+    job = await queue.enqueue(
+        "align_reads", owner="p1", resource_override=True
+    )
+    assert job is not None
+
+    value = await redis.hget(keys.job_key(str(job.id)), "override")
+    assert value == "1"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_writes_zero_when_not_overridden(redis, monkeypatch):
+    from app.queue import keys, queue
+
+    monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+    job = await queue.enqueue("align_reads", owner="p1")
+    assert job is not None
+
+    value = await redis.hget(keys.job_key(str(job.id)), "override")
+    # Written explicitly rather than omitted: claim.lua reads a fixed HMGET
+    # position, and a missing field there is nil, not "0".
+    assert value == "0"

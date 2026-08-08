@@ -66,6 +66,7 @@ async def enqueue(
     delay_seconds: float = 0,
     depends_on: list[PydanticObjectId] | None = None,
     parent_job_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
 ) -> Job | None:
     """Create and dispatch a job. Returns None if deduplicated away.
 
@@ -132,6 +133,7 @@ async def enqueue(
         available_at=available_at,
         depends_on=depends_on,
         parent_job_id=parent_job_id,
+        resource_override=resource_override,
         timing=JobTiming(enqueued_at=now),
     )
 
@@ -328,6 +330,9 @@ async def _push_to_redis(job: Job, *, delay_seconds: float = 0) -> None:
             "attempts": job.attempts,
             "score": score,
             "epoch": job.lease.epoch if job.lease else 0,
+            # Always written, never omitted: claim.lua reads this at a fixed
+            # HMGET position, where an absent field is nil rather than "0".
+            "override": "1" if job.resource_override else "0",
         },
     )
     if delay_seconds > 0:
