@@ -784,3 +784,29 @@ gh issue close 30 --comment "First slice shipped: project-scoped agent drawer wi
 Following the pattern from CLAUDE.md ("Closing out a TODO entry"), append a
 `— FIXED` entry describing what shipped, what was done differently from the
 plan, and where the code lives.
+
+---
+
+## Deferred work
+
+The following features were identified during implementation but are not part of
+the first slice. They are tracked as separate issues and can be picked up
+independently.
+
+### Conversation persistence [#97](https://github.com/syntheticgio/bioflow/issues/97)
+
+The agent drawer currently has no persistence — closing it loses the
+conversation. Save and restore conversations per (profile, project) so the user
+can close and reopen the drawer without losing context.
+
+### Custom system prompts [#98](https://github.com/syntheticgio/bioflow/issues/98)
+
+The agent uses a hardcoded system prompt with just the project name. Allow users
+to customize the system prompt per project, with options to replace or augment
+the default project-awareness prompt.
+
+### Multi-turn refinement [#99](https://github.com/syntheticgio/bioflow/issues/99)
+
+The agent handles each prompt as a single-turn interaction. Add the ability for
+the agent to maintain context across multiple turns in a session, enabling
+follow-up questions and refinements without starting fresh each time.
