@@ -462,6 +462,33 @@ def align_reads(ctx: JobContext) -> dict:
     if r2 is not None:
         r2 = _named_read_link(work, r2, ctx.payload.get("r2_name"))
 
+    extra_reads_payload = ctx.payload.get("extra_reads") or []
+    if extra_reads_payload:
+        # Several read files bound to the same multi port -- chunked/split
+        # reads, not a mate -- get concatenated into r1 before the aligner
+        # ever sees them. See _concatenate_reads for why concatenation is the
+        # only approach that works across all six aligners this handler
+        # drives.
+        extra_paths = []
+        for entry in extra_reads_payload:
+            path_str = entry.get("path")
+            digest = entry.get("sha256")
+            if path_str:
+                extra_path = Path(path_str)
+            elif digest:
+                extra_path = blob_path(digest)
+            else:
+                raise PermanentError(
+                    "extra_reads entry requires 'sha256' or 'path'"
+                )
+            if not extra_path.exists():
+                raise PermanentError(f"Input not found: {extra_path}")
+            extra_paths.append(extra_path)
+
+        r1_name = ctx.payload.get("r1_name") or "reads.fastq"
+        combined = work / f"combined_{Path(r1_name).name}"
+        r1 = _concatenate_reads(r1, extra_paths, combined)
+
     out_dir = work / "out"
     out_dir.mkdir(exist_ok=True)
     bam_name = ctx.payload.get("output_name") or "aligned.bam"
@@ -580,6 +607,39 @@ def _append_star_summary(scratch: Path, log_path: Path) -> None:
             handle.write(text)
     except OSError as e:
         log.warning("star_summary_not_logged", error=str(e))
+
+
+def _concatenate_reads(primary: Path, extras: list[Path], destination: Path) -> Path:
+    """Combine several FASTQ files into the one file the aligner sees.
+
+    None of the six aligners `align_runner` drives take several read files
+    positionally, and only three of them (bowtie2, HISAT2, STAR) support a
+    comma-separated list at all -- each with its own flag, and bwa-mem2,
+    minimap2, and winnowmap have no multi-file convention whatsoever.
+    Concatenating here, once, is the one approach that works uniformly across
+    every aligner rather than special-casing half of them.
+
+    Compression follows the primary: `_is_gzip` sniffs magic bytes rather than
+    trusting a name, since a resolved blob has no extension until
+    `_named_read_link` gives it one, and every read is decompressed on read
+    and (if the primary was gzipped) recompressed on write so the aligner
+    downstream sees one consistently-encoded file. FASTQ concatenates cleanly
+    this way: each record is self-contained, so files placed end to end are a
+    valid FASTQ of every read from every input, primary first.
+    """
+    primary_gzipped = _is_gzip(primary)
+    sources = [primary, *extras]
+
+    opener = gzip.open if primary_gzipped else open
+    with opener(destination, "wb") as dst:
+        for src in sources:
+            if _is_gzip(src):
+                with gzip.open(src, "rb") as fh:
+                    shutil.copyfileobj(fh, dst)
+            else:
+                with open(src, "rb") as fh:
+                    shutil.copyfileobj(fh, dst)
+    return destination
 
 
 def _named_read_link(work: Path, target: Path, name: str | None) -> Path:

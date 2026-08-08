@@ -1432,6 +1432,10 @@ async def launch_alignment(
     from app.services import object_service
 
     merged_params = {**default_align_params(), **(params or {})}
+    # Not an AlignParams field -- from_dict/as_dict would silently drop it on
+    # the round trip below -- so it is pulled out of the raw dict here and
+    # carried to the payload separately, the same way mate_object_id is.
+    extra_read_ids = merged_params.pop("extra_reads", None) or []
     align_params = align_params_module.from_dict(merged_params)
     aligner = align_params.aligner
     tools.require(_aligner_tool(aligner))
@@ -1444,6 +1448,20 @@ async def launch_alignment(
     # never confirms the id resolves at all.
     obj = await object_service.get_object(object_id, owner=owner)
     _check_alignable(obj)
+
+    # Extra read files (chunked/split reads bound to the same multi port as
+    # the primary) are validated and resolved the same way the primary read
+    # is -- same project, same alignability check -- since the runner will
+    # concatenate their bytes into what the aligner treats as one file.
+    extra_reads: list[DataObject] = []
+    for extra_id in extra_read_ids:
+        extra_obj = await object_service.get_object(
+            PydanticObjectId(extra_id), owner=owner
+        )
+        _check_alignable(extra_obj)
+        if extra_obj.project_id != obj.project_id:
+            raise ValidationError("Reads must be in the same project")
+        extra_reads.append(extra_obj)
 
     reference = await object_service.get_object(reference_id, owner=owner)
     _check_reference(reference)
@@ -1620,6 +1638,18 @@ async def launch_alignment(
         payload["r1_sha256"] = r1_digest
     if r1_path:
         payload["r1_path"] = r1_path
+
+    if extra_reads:
+        extra_payload = []
+        for extra_obj in extra_reads:
+            extra_digest, extra_path = await _resolve_readable(extra_obj)
+            entry: dict = {"name": extra_obj.name}
+            if extra_digest:
+                entry["sha256"] = extra_digest
+            if extra_path:
+                entry["path"] = extra_path
+            extra_payload.append(entry)
+        payload["extra_reads"] = extra_payload
 
     expected = obj.facts.get("read_count_estimate")
     if isinstance(expected, int) and expected > 0:
