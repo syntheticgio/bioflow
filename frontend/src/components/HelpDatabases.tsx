@@ -1,5 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { DATABASES } from "../data/databases";
+import { api } from "../api/client";
+import { LOCAL_DATABASE_CATEGORY_LABELS } from "../api/types";
+import { AddLocalDatabaseModal } from "./AddLocalDatabaseModal";
 
 /**
  * Reference index of external genetics/bioinformatics databases — not
@@ -53,6 +57,13 @@ export function HelpDatabases() {
   const [query, setQuery] = useState("");
   const [access, setAccess] = useState<Access>("");
   const [categories, setCategories] = useState<Set<string>>(new Set());
+  const [showAddLocalDatabase, setShowAddLocalDatabase] = useState(false);
+  const queryClient = useQueryClient();
+  const localDatabasesQuery = useQuery({
+    queryKey: ["local-databases"],
+    queryFn: api.listLocalDatabases,
+  });
+  const localDatabases = localDatabasesQuery.data ?? [];
 
   const allCategories = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -136,6 +147,51 @@ export function HelpDatabases() {
         famous, the specialized, and the obscure. Filter by category or access
         method, or search.
       </p>
+
+      <section className="db-local-section">
+        <div className="db-local-header">
+          <h2>Local Databases</h2>
+          <button type="button" className="db-btn" onClick={() => setShowAddLocalDatabase(true)}>
+            Submit a database
+          </button>
+        </div>
+
+        {localDatabasesQuery.isLoading && <p className="db-empty">Loading…</p>}
+        {localDatabasesQuery.isError && (
+          <p className="db-empty">Could not reach the server to list local databases.</p>
+        )}
+        {!localDatabasesQuery.isLoading && !localDatabasesQuery.isError && localDatabases.length === 0 && (
+          <p className="db-empty">No local databases yet — submit one above.</p>
+        )}
+
+        {localDatabases.length > 0 && (
+          <div className="db-cards">
+            {localDatabases.map((d) => (
+              <article key={d.id} className="db-card">
+                <div className="db-card-top">
+                  <h3 className="db-card-name">
+                    <a href={d.url} target="_blank" rel="noopener noreferrer">
+                      {d.name} ↗
+                    </a>
+                  </h3>
+                  <span className="db-card-cat">{LOCAL_DATABASE_CATEGORY_LABELS[d.category]}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {showAddLocalDatabase && (
+        <AddLocalDatabaseModal
+          onCreated={() => {
+            setShowAddLocalDatabase(false);
+            queryClient.invalidateQueries({ queryKey: ["local-databases"] });
+          }}
+          onClose={() => setShowAddLocalDatabase(false)}
+        />
+      )}
+
       <p className="db-stats">
         <b>{DATABASES.length}</b> databases · <b>{allCategories.length}</b> categories ·
         offline-capable · access methods tagged (API / FTP / bulk / web / controlled / license)
@@ -169,7 +225,7 @@ export function HelpDatabases() {
             el?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
           }}
         >
-          🎲 Surprise me
+          Surprise me
         </button>
       </div>
 
