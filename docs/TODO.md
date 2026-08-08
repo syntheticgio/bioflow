@@ -461,6 +461,22 @@ Touches: `backend/app/queue/handlers.py` (`reap_report_dirs`),
 `backend/app/services/object_service.py` (`remove_report_dirs`,
 `delete_object`).
 
+**Update 2026-08-08:** the logging half of "what would help next time" has
+shipped, tracked as [#10](https://github.com/syntheticgio/bioflow/issues/10).
+`remove_report_dirs` now takes required `caller`/`reason` keywords and stamps
+every `report_dir_removed`/`report_dir_cleanup_failed` line with them
+(`delete_object` passes `caller="delete_object"`; the reaper passes
+`caller="reap_report_dirs"`). `reap_report_dirs` now logs a
+`report_dir_reap_candidate` line per directory it examines --
+object_id, age, the Mongo lookup result, and which branch fired
+(`skip_too_young` / `skip_live_object` / `reap`) -- not just the aggregate
+count it logged before. `ops/migrate-storage.sh` also now appends a
+pre-delete record (paths, file/byte counts) to `ops/migrate-storage.log`
+before its `rm -rf`, since that script's own delete had no log trail at all.
+This entry stays open: the root cause is still unconfirmed, evidence
+retention/durable sink and the mtime-timestamp check are still open, and this
+was written and reasoned about, not yet observed catching a real recurrence.
+
 ## Audit the hand-maintained registries a new tool must reach
 
 Raised: 2026-08-01, after the third instance in one change.

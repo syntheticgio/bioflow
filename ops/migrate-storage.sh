@@ -134,8 +134,20 @@ mv "$TMP_ENV" "$ENV_FILE"
 echo "Updated BIOINFO_HOME in $ENV_FILE"
 
 if [ "$KEEP_ORIGINAL" = false ]; then
+  # Durable record of the pre-delete state, kept outside BIOINFO_HOME (so the
+  # rm -rf below cannot take it with it) and appended rather than overwritten,
+  # so a run months from now doesn't erase the last one's evidence. This is
+  # the only rm -rf in the repo that can remove a live QC/BAM/VCF report tree
+  # in one shot -- see issue #10 -- so the log line has to carry enough to
+  # reconstruct what was deleted without re-running the migration.
+  MIGRATION_LOG="$REPO_ROOT/ops/migrate-storage.log"
+  {
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) pre-delete host=$(hostname) current_path=$CURRENT_PATH new_path=$NEW_PATH source_files=$SOURCE_COUNT source_bytes=$SOURCE_BYTES dest_files=$DEST_COUNT dest_bytes=$DEST_BYTES verify_hash=$VERIFY_HASH"
+  } >> "$MIGRATION_LOG"
   rm -rf "$CURRENT_PATH"
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) removed current_path=$CURRENT_PATH" >> "$MIGRATION_LOG"
   echo "Removed original directory: $CURRENT_PATH"
+  echo "Pre-delete state logged to $MIGRATION_LOG"
 else
   echo "Original directory kept at $CURRENT_PATH (--keep-original)"
 fi
