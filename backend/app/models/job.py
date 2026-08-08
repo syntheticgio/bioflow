@@ -211,6 +211,18 @@ class Job(TimestampedDocument):
     # the hot path to enforce something the enqueue side already knows.
     depends_on: list[PydanticObjectId] = Field(default_factory=list)
 
+    # A subset of `depends_on` whose failure must not cascade -- workflow nodes
+    # marked `continue_on_failure`. Empty for every job outside a workflow, which
+    # is what keeps the default behaviour above exactly as it was: a failed
+    # dependency fails its dependent unless something deliberately said otherwise.
+    #
+    # A subset rather than a flag because tolerance is per-edge: a node depending
+    # on both an optional QC step and a mandatory alignment survives the first and
+    # not the second. Note this tolerates *failure*, not *waiting* -- a tolerated
+    # dependency still blocks while it is in flight, or the dependent would race
+    # the file it is reading.
+    tolerate_failure_of: list[PydanticObjectId] = Field(default_factory=list)
+
     # TTL field: terminal jobs are pruned after ~30 days. Only set on completion,
     # so active jobs are never eligible for expiry.
     expires_at: datetime | None = None
