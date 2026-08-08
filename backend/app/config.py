@@ -307,6 +307,16 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "logs"
 
     @property
+    def agent_sessions_dir(self) -> Path:
+        """Where pi keeps the agent's per-(profile, project) session files.
+
+        Derived from BIOINFO_HOME so it follows a relocated home, and
+        deliberately not under tmp/: unlike ncbi_dir, these files are the
+        conversation itself, not a rebuildable cache.
+        """
+        return self.bioinfo_home / "agent-sessions"
+
+    @property
     def ncbi_dir(self) -> Path:
         """Where the SRA Toolkit keeps its configuration and its cache.
 

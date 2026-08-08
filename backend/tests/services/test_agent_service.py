@@ -364,3 +364,10 @@ class TestLifecycle:
         assert service.get("p", "j1") is None
         assert service.get("p", "j2") is None
         assert a.process is None and b.process is None
+
+
+class TestSessionsDir:
+    def test_sessions_dir_derives_from_bioinfo_home(self):
+        from app.config import settings
+
+        assert settings.agent_sessions_dir == settings.bioinfo_home / "agent-sessions"
