@@ -788,11 +788,28 @@ export function WorkflowCanvas() {
                   const choice = meta?.tool_choice;
                   if (!choice) return null;
                   const tool = node.params?.[choice.param_key];
+                  // Sits under the main label at y+34 when there's room, but
+                  // must never reach the first port dot -- a node with few
+                  // ports (align's 3-port tools) puts that dot at y+30, and
+                  // STAR's 4-port set puts it at y+19, both well above the
+                  // y+34 default. Anchor to the real first-port offset
+                  // (computed the same way `nodePortPosition` does, from the
+                  // node's actual total port count -- the same count
+                  // `nodeHeight` uses) rather than a constant, so this holds
+                  // for any port count a tool-choice node can have, not just
+                  // today's. Clearing PORT_RADIUS plus a few px keeps the
+                  // text's glyph box off the dot even accounting for font
+                  // ascent; align/STAR's only realistic counts (3 and 4) land
+                  // at toolY 22 and 11 respectively -- tighter under the
+                  // label than the 14px default gap, but not overlapping it.
+                  const totalPorts = Math.max(inputs.length, outputs.length, 1);
+                  const firstPortY = nodePortPosition(position, 0, totalPorts, "input").y;
+                  const toolY = Math.min(position.y + 34, firstPortY - PORT_RADIUS - 3);
                   return (
                     <text
                       className="workflow-node-tool"
                       x={position.x + 10}
-                      y={position.y + 34}
+                      y={toolY}
                     >
                       {typeof tool === "string" ? tool : choice.default}
                     </text>

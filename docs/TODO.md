@@ -437,6 +437,38 @@ Fix by summing `obj.size` across the primary and every object in
 Touches: `backend/app/services/pipeline_service.py` (`launch_alignment`),
 `backend/app/pipelines/resource_estimator.py`.
 
+## STAR's `annotation` input port cannot be wired through the UI
+
+Raised: 2026-08-08, deferred during code review of Task 7's tool-selector
+work (GitHub issue #94, Task 7).
+
+Task 4 gave a STAR-configured `align` node an `annotation` input port typed
+`PortType(format=FormatKind.GTF)` (`app/pipelines/tool_choice.py`,
+`_resolve_align_ports`), and Task 7 makes that port render correctly on the
+canvas -- the node grows a fourth port slot and the dot draws in the right
+place. But `ACCEPT_CHOICES` in
+`frontend/src/components/WorkflowCanvas.tsx` -- the list of file types an
+input-slot node can be configured to *produce*, so it has something to wire
+into a downstream port -- has a `gff:annotation` entry (format `"gff"`) and
+no entry for format `"gtf"`. `FormatKind.GTF` is a distinct enum value from
+`FormatKind.GFF` on the backend (`app/models/object.py`), and `portAccepts`
+(`frontend/src/lib/workflowGraph.ts`) matches on format exactly, so a
+`gff`-typed input slot can never satisfy a `gtf`-typed port.
+
+The result is a control that is visible and functionally correct but
+permanently unusable: nothing in today's UI can produce an output typed
+`gtf`, so no edge can ever be drawn into STAR's `annotation` port. A user
+sees the port, sees no way to feed it, and has no reason to suspect the gap
+is one missing dropdown entry rather than a real modeling constraint.
+
+Fix by adding a `gtf:annotation`-shaped entry to `ACCEPT_CHOICES` --
+one line, no other change needed, since `portAccepts` already does the right
+thing once a slot can claim the format. Left for Task 9 (binding files at
+the input node) or a standalone follow-up rather than Task 7, since Task 7's
+scope was rendering the port, not making every input-slot format reachable.
+
+Touches: `frontend/src/components/WorkflowCanvas.tsx` (`ACCEPT_CHOICES`).
+
 ## Neither model segments by thread count
 
 Raised: 2026-08-03, deferred while building computation records
