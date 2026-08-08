@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useAgentSSE } from "../hooks/useAgentSSE";
@@ -32,6 +32,21 @@ export function AgentPanel({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  const [showSettings, setShowSettings] = useState(false);
+  const [draftPrompt, setDraftPrompt] = useState("");
+
+  const project = useQuery({
+    queryKey: ["project", projectId],
+    queryFn: () => api.getProject(projectId),
+  });
+
+  // Load the saved value into the draft whenever the editor is opened.
+  useEffect(() => {
+    if (showSettings) {
+      setDraftPrompt(project.data?.agent_system_prompt ?? "");
+    }
+  }, [showSettings, project.data?.agent_system_prompt]);
 
   // Track the current streaming message content
   const streamingContentRef = useRef<string>("");
@@ -133,6 +148,17 @@ export function AgentPanel({
     },
   });
 
+  const queryClient = useQueryClient();
+
+  const savePrompt = useMutation({
+    mutationFn: (value: string) =>
+      api.updateProject(projectId, { agent_system_prompt: value }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      setShowSettings(false);
+    },
+  });
+
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
   }, [messages, isStreaming]);
@@ -160,9 +186,17 @@ export function AgentPanel({
           <button
             type="button"
             className="icon-btn"
+            onClick={() => setShowSettings((v) => !v)}
+            title="Agent instructions"
+            style={{ marginLeft: "auto" }}
+          >
+            ⚙️
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
             onClick={() => restart.mutate()}
             title="Restart agent"
-            style={{ marginLeft: "auto" }}
           >
             🔄
           </button>
@@ -171,33 +205,79 @@ export function AgentPanel({
           </button>
         </div>
 
-        <div className="agent-drawer-body" ref={bodyRef}>
-          {messages.length === 0 && !isStreaming ? (
-            <div className="queue-empty">
-              Ask the AI agent about your project data. It can run QC, trim, align, and
-              assemble pipelines, inspect jobs, and answer questions about your files.
+        {showSettings ? (
+          <div className="agent-drawer-body agent-prompt-editor">
+            <label className="agent-prompt-label" htmlFor="agent-prompt">
+              Extra instructions for this project
+            </label>
+            <p className="agent-prompt-help">
+              Added on top of the agent's built-in project knowledge — it always
+              knows which project it is in and which tools it has. Saving
+              restarts the agent on your next message, which clears the current
+              conversation.
+            </p>
+            <textarea
+              id="agent-prompt"
+              className="agent-prompt-textarea"
+              value={draftPrompt}
+              maxLength={4000}
+              onChange={(e) => setDraftPrompt(e.target.value)}
+              placeholder="e.g. Always say which tool you used. Assume paired-end Illumina reads."
+            />
+            <div className="agent-prompt-actions">
+              <span className="agent-prompt-count">{draftPrompt.length} / 4000</span>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setDraftPrompt("")}
+                disabled={draftPrompt.length === 0}
+              >
+                Reset to default
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => savePrompt.mutate(draftPrompt)}
+                disabled={savePrompt.isPending}
+              >
+                {savePrompt.isPending ? "Saving…" : "Save"}
+              </button>
             </div>
-          ) : (
-            messages.map((msg) => (
-              <AgentMessageBubble
-                key={msg.id}
-                role={msg.role}
-                content={msg.content}
-                isStreaming={msg.isStreaming}
-                toolCalls={msg.toolCalls}
-              />
-            ))
-          )}
-          {isStreaming && messages.length === 0 && (
-            <div className="agent-loading">Starting agent...</div>
-          )}
-        </div>
+            {savePrompt.isError && (
+              <div className="agent-prompt-error">Could not save. Try again.</div>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="agent-drawer-body" ref={bodyRef}>
+              {messages.length === 0 && !isStreaming ? (
+                <div className="queue-empty">
+                  Ask the AI agent about your project data. It can run QC, trim, align, and
+                  assemble pipelines, inspect jobs, and answer questions about your files.
+                </div>
+              ) : (
+                messages.map((msg) => (
+                  <AgentMessageBubble
+                    key={msg.id}
+                    role={msg.role}
+                    content={msg.content}
+                    isStreaming={msg.isStreaming}
+                    toolCalls={msg.toolCalls}
+                  />
+                ))
+              )}
+              {isStreaming && messages.length === 0 && (
+                <div className="agent-loading">Starting agent...</div>
+              )}
+            </div>
 
-        <AgentPanelInput
-          onSend={submit}
-          disabled={isStreaming}
-          connected={connected}
-        />
+            <AgentPanelInput
+              onSend={submit}
+              disabled={isStreaming}
+              connected={connected}
+            />
+          </>
+        )}
       </div>
     </>
   );
