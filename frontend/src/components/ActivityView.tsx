@@ -8,6 +8,7 @@ import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types
 import { JobLogView } from "./JobLogView";
 import { ActivityDesk } from "./activity/ActivityDesk";
 import { ActivityLead } from "./activity/ActivityLead";
+import { FailureExplanationExpander } from "./activity/FailureExplanationExpander";
 import { RunLedger } from "./activity/RunLedger";
 import { WorkflowRuns } from "./activity/WorkflowRuns";
 import { RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
@@ -419,63 +420,5 @@ function JobRow({
 
       {logOpen && <JobLogView jobId={job.id} live={job.state === "running"} />}
     </div>
-  );
-}
-
-/**
- * "Explain this error" -- click-triggered only, never generated
- * automatically on job failure. A model that is not configured or that
- * produces nothing means the button simply does not appear; the raw
- * error text above it is never replaced or hidden.
- */
-function FailureExplanationExpander({
-  code,
-  message,
-}: {
-  code: string;
-  message: string;
-}) {
-  const [state, setState] = useState<
-    | { status: "idle" }
-    | { status: "loading" }
-    | { status: "unavailable" }
-    | { status: "shown"; text: string; model: string | null }
-  >({ status: "idle" });
-
-  if (state.status === "unavailable") return null;
-
-  if (state.status === "shown") {
-    return (
-      <div style={{ marginTop: 4, color: "var(--text-faint)" }}>
-        {state.text}
-        {state.model && (
-          <span style={{ color: "var(--text-faint)" }}> (AI-generated, {state.model})</span>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      className="btn-text"
-      style={{ marginLeft: 8 }}
-      disabled={state.status === "loading"}
-      onClick={async () => {
-        setState({ status: "loading" });
-        try {
-          const result = await api.failureExplanation(code, message);
-          if (result == null) {
-            setState({ status: "unavailable" });
-          } else {
-            setState({ status: "shown", text: result.text, model: result.model });
-          }
-        } catch {
-          setState({ status: "unavailable" });
-        }
-      }}
-    >
-      {state.status === "loading" ? "Explaining…" : "Explain this error"}
-    </button>
   );
 }
