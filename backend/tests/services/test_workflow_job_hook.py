@@ -288,6 +288,49 @@ class TestCollectingOutputs:
         fresh = await WorkflowNodeRun.get(row.id)
         assert fresh.outputs == [r1.id, r2.id]
 
+    async def test_a_mate_pair_without_read_numbers_is_ordered_by_filename(self):
+        """The bug that stalled a real paired trim -> qc workflow permanently.
+
+        A real trim of `sample_R1.fastq.gz` produces two outputs that are both
+        FASTQ/TRIMMED_READS, are linked to each other by `mate_object_id`, and
+        carry **`read_number=None`** -- the trim applier links mates without
+        setting it (unlike the SRA path at results.py:556). So the
+        `read_number` sort had nothing to sort by, the binder saw two
+        type-identical candidates and correctly refused to guess, and `qc` sat
+        PENDING with `workflow_node_inputs_unresolved missing=['reads']`
+        retrying every 10 seconds forever.
+
+        `split_mate` is the same filename convention the rest of the codebase
+        pairs by, so R1 leads without inventing a new rule.
+        """
+        job = Job(type="run_trim", owner=OWNER, state=JobState.SUCCEEDED)
+        await job.insert()
+        project = PydanticObjectId()
+
+        def fastq(name):
+            return DataObject(
+                name=name,
+                project_id=project,
+                owner=OWNER,
+                format=FormatInfo(kind=FormatKind.FASTQ),
+                role=ObjectRole.TRIMMED_READS,
+                produced_by_job=job.id,
+            )
+
+        # Inserted R2 first, so a stable-sort no-op would leave it leading.
+        r2 = fastq("sample_R2.trimmed.fastq.gz")
+        await r2.insert()
+        r1 = fastq("sample_R1.trimmed.fastq.gz")
+        await r1.insert()
+        await r1.set({DataObject.mate_object_id: r2.id})
+        await r2.set({DataObject.mate_object_id: r1.id})
+        run, row = await _node_run(NodeRunState.RUNNING, job)
+
+        await workflow_hook.on_job_finished(job.id, succeeded=True)
+
+        fresh = await WorkflowNodeRun.get(row.id)
+        assert fresh.outputs == [r1.id, r2.id]
+
     async def test_another_jobs_objects_are_not_collected(self):
         job = Job(type="run_trim", owner=OWNER, state=JobState.SUCCEEDED)
         await job.insert()

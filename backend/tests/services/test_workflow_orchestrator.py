@@ -271,6 +271,49 @@ class TestProgressiveLaunch:
         assert states["trim"] is NodeRunState.FAILED
         assert states["align"] is NodeRunState.SKIPPED
 
+    async def test_an_already_succeeded_node_still_advances_the_graph(self, launches):
+        """The bug that deadlocked every real multi-node workflow, and which
+        `test_the_hook_is_idempotent` below could not catch.
+
+        A node can legitimately already be SUCCEEDED when its own completion
+        arrives -- nothing guarantees the hook is what first records it. The
+        old code returned early on a terminal node, so the successor was never
+        launched: `trim` finished with its output recorded and `qc` sat PENDING
+        forever, with no error anywhere.
+
+        The idempotence test misses this because it fires the hook twice in a
+        row: the first call advances the graph, so the second returning early
+        is invisible. Here the row is terminal *before* the only call.
+        """
+        run, _ = await _linear_run(launches)
+        produced = await _stored_object(FormatKind.FASTQ, ObjectRole.TRIMMED_READS)
+        row = await WorkflowNodeRun.find_one(
+            WorkflowNodeRun.workflow_run_id == run.id,
+            WorkflowNodeRun.node_id == "trim",
+        )
+        await row.set(
+            {
+                WorkflowNodeRun.state: NodeRunState.SUCCEEDED,
+                WorkflowNodeRun.outputs: [produced.id],
+            }
+        )
+        launches.clear()
+
+        await orch.on_node_finished(
+            run.id,
+            "trim",
+            succeeded=True,
+            outputs=[
+                orch.OutputCandidate(
+                    object_id=produced.id,
+                    format=FormatKind.FASTQ,
+                    role=ObjectRole.TRIMMED_READS,
+                )
+            ],
+        )
+
+        assert [node_type for node_type, _ in launches] == ["align"]
+
     async def test_the_hook_is_idempotent(self, launches):
         """The hook runs off job completion, and a job can complete more than
         once from the orchestrator's point of view -- a retry, a duplicate
@@ -370,6 +413,72 @@ class TestProgressiveLaunch:
 
         states = await _states(run)
         assert states["trim"] is NodeRunState.SKIPPED
+
+
+class TestAlreadyRunningWork:
+    async def test_a_conflict_marks_the_node_running_rather_than_failing(
+        self, launches, monkeypatch
+    ):
+        """Launchers raise ConflictError when identical work is already queued
+        -- 'QC is already queued or running for this file'. For a workflow node
+        that is success, not failure: the output it waits for is on its way.
+
+        Observed against the live stack as `workflow_reconcile_failed
+        error='QC is already queued or running for this file'`, where an
+        uncaught one aborted the entire reconcile sweep, so a single node with
+        in-flight work stopped every other stalled run from being recovered.
+        """
+        from app.errors import ConflictError
+
+        run, _ = await _linear_run(launches)
+        produced = await _stored_object(FormatKind.FASTQ, ObjectRole.TRIMMED_READS)
+
+        async def conflicting(node_type, *, inputs, params, owner):
+            raise ConflictError("already queued")
+
+        monkeypatch.setattr(orch, "_launch_node", conflicting)
+
+        await orch.on_node_finished(
+            run.id,
+            "trim",
+            succeeded=True,
+            outputs=[
+                orch.OutputCandidate(
+                    object_id=produced.id,
+                    format=FormatKind.FASTQ,
+                    role=ObjectRole.TRIMMED_READS,
+                )
+            ],
+        )
+
+        states = await _states(run)
+        assert states["align"] is NodeRunState.RUNNING
+
+    async def test_a_conflict_does_not_abort_the_reconcile_sweep(
+        self, launches, monkeypatch
+    ):
+        """One stuck run must not stop every other stalled run from recovering."""
+        from app.errors import ConflictError
+
+        run, _ = await _linear_run(launches)
+        produced = await _stored_object(FormatKind.FASTQ, ObjectRole.TRIMMED_READS)
+        trim = await WorkflowNodeRun.find_one(
+            WorkflowNodeRun.workflow_run_id == run.id,
+            WorkflowNodeRun.node_id == "trim",
+        )
+        await trim.set(
+            {
+                WorkflowNodeRun.state: NodeRunState.SUCCEEDED,
+                WorkflowNodeRun.outputs: [produced.id],
+            }
+        )
+
+        async def conflicting(node_type, *, inputs, params, owner):
+            raise ConflictError("already queued")
+
+        monkeypatch.setattr(orch, "_launch_node", conflicting)
+
+        await orch.reconcile_workflows()  # must not raise
 
 
 class TestDerivedStatus:
@@ -535,6 +644,38 @@ class TestReconcile:
         recovered = await orch.reconcile_workflows()
 
         assert recovered >= 1
+        assert [node_type for node_type, _ in launches] == ["align"]
+
+    async def test_recovers_a_run_whose_advance_failed_transiently(self, launches):
+        """The production failure this was actually needed for, found by
+        running a real trim -> qc workflow against the live stack rather than
+        by review.
+
+        One `_advance` raised on a transient read (the log line was
+        `workflow_node_inputs_unresolved missing=['reads']` while the output
+        object was in fact present and ready a second later). The node stayed
+        PENDING with its upstream SUCCEEDED and its output recorded -- and
+        nothing retried, because the reconciler only ran at worker startup. The
+        run sat there permanently, looking healthy.
+
+        The state below is exactly what was in the database at that point.
+        """
+        run, _ = await _linear_run(launches)
+        produced = await _stored_object(FormatKind.FASTQ, ObjectRole.TRIMMED_READS)
+        trim = await WorkflowNodeRun.find_one(
+            WorkflowNodeRun.workflow_run_id == run.id,
+            WorkflowNodeRun.node_id == "trim",
+        )
+        await trim.set(
+            {
+                WorkflowNodeRun.state: NodeRunState.SUCCEEDED,
+                WorkflowNodeRun.outputs: [produced.id],
+            }
+        )
+        launches.clear()
+
+        await orch.reconcile_workflows()
+
         assert [node_type for node_type, _ in launches] == ["align"]
 
     async def test_leaves_a_healthy_run_alone(self, launches):

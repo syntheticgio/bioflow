@@ -533,9 +533,33 @@ class Worker:
                     await queue.rescue_orphans()
                     await self._maybe_promote_aged()
                     await self._tick_schedules()
+                    await self._reconcile_workflows()
             except Exception as e:  # noqa: BLE001
                 log.warning("leader_duties_failed", error=str(e))
             await asyncio.sleep(settings.reaper_interval_seconds)
+
+    async def _reconcile_workflows(self) -> None:
+        """Relaunch workflow nodes that became runnable but were not launched.
+
+        Periodic rather than startup-only, and the difference is not academic:
+        a real trim -> qc run stalled permanently in testing because one
+        `_advance` failed on a transient read of an output object that was
+        present a second later. The node stayed PENDING with its upstream
+        SUCCEEDED, and with recovery only at startup nothing ever retried --
+        the run looked healthy and was simply finished forever.
+
+        The startup call stays: it covers the crash-between-writes window that
+        the design's §10 names, which a running leader cannot observe.
+
+        Isolated in its own try, so a stuck workflow cannot take the reaper and
+        the schedule beat down with it.
+        """
+        from app.services import workflow_orchestrator
+
+        try:
+            await workflow_orchestrator.reconcile_workflows()
+        except Exception as e:  # noqa: BLE001
+            log.warning("workflow_reconcile_failed", error=str(e))
 
     async def _tick_schedules(self) -> None:
         from app.queue import scheduler

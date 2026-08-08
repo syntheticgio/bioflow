@@ -20,6 +20,32 @@ from beanie import PydanticObjectId
 log = structlog.get_logger(__name__)
 
 
+def _mate_order(obj) -> tuple:
+    """Sort key putting R1 before R2, single-end files last.
+
+    `read_number` first, because it is authoritative where it is set. But it is
+    frequently *not*: the trim applier links mates via `mate_object_id` without
+    setting it (unlike the SRA path, which learns the numbering from
+    fasterq-dump's own labelling). A real paired trim therefore yields two
+    objects with `read_number=None`, and ordering on it alone left them in
+    insertion order -- which the binder saw as two type-identical rivals for
+    one port, refused to choose between, and so stalled the workflow
+    permanently.
+
+    The filename fallback uses `split_mate`, the same convention the rest of
+    the codebase pairs by, rather than inventing a second rule.
+    """
+    from app.pipelines import pairing
+
+    if obj.read_number is not None:
+        return (0, obj.read_number, obj.name)
+    split = pairing.split_mate(obj.name)
+    if split is not None:
+        # split_mate returns (stem, token, suffix); the token is "R1"/"R2".
+        return (0, 1 if split[1] == "R1" else 2, obj.name)
+    return (1, 0, obj.name)
+
+
 async def _outputs_of(job_id: PydanticObjectId) -> list:
     """The objects a job produced, as binding candidates.
 
@@ -51,9 +77,7 @@ async def _outputs_of(job_id: PydanticObjectId) -> list:
         {"sidecar_of": None},
     ).to_list()
 
-    # None sorts with the singles rather than raising; a single-end file has no
-    # read number and its position among unrelated outputs does not matter.
-    objects.sort(key=lambda o: (o.read_number is None, o.read_number or 0))
+    objects.sort(key=_mate_order)
 
     return [
         OutputCandidate(

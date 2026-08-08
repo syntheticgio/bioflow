@@ -60,6 +60,7 @@ def bind_downstream_inputs(
     candidates: list[OutputCandidate],
     *,
     outputs_by_port: dict[str, PydanticObjectId] | None = None,
+    paired: bool = False,
 ) -> dict[tuple[str, str], PydanticObjectId]:
     """Map (downstream node, input port) -> object id, for one finished node.
 
@@ -106,6 +107,23 @@ def bind_downstream_inputs(
         chosen: OutputCandidate | None = None
         if edge.from_port in named:
             chosen = by_object_id.get(named[edge.from_port])
+        elif paired and len(candidates) == 2:
+            # A mate pair from one declared output port. The two are
+            # type-identical by construction, so the generic ambiguity rule
+            # below would refuse both and stall the node -- which is exactly
+            # what a real paired trim -> align workflow did. R1 (first, per
+            # `_outputs_of`'s ordering) fills the wired port; R2 fills the
+            # consumer's `mate` port when it has one. A consumer without one
+            # takes R1 alone: QC is single-file by design, and a paired
+            # library simply gets two QC runs.
+            chosen = candidates[0]
+            mate_port = next(
+                (p for p in target_spec.inputs if p.name == "mate"), None
+            )
+            if mate_port is not None and mate_port.type.accepts(
+                candidates[1].format, candidates[1].role
+            ):
+                bound[(edge.to_node, "mate")] = candidates[1].object_id
         elif len(candidates) == 1:
             chosen = candidates[0]
         else:

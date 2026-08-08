@@ -23,7 +23,7 @@ Design note: docs/superpowers/specs/2026-08-07-workflow-dag-design.md
 import structlog
 from beanie import PydanticObjectId
 
-from app.errors import NotFoundError
+from app.errors import ConflictError, NotFoundError
 from app.models.workflow import (
     NodeRunState,
     WorkflowDefinition,
@@ -152,7 +152,14 @@ async def _advance(
     for node_id, row in latest.items():
         if row.state is NodeRunState.SUCCEEDED and row.outputs:
             candidates = await _candidates_for(row.outputs)
-            resolved.update(bind_downstream_inputs(definition, node_id, candidates))
+            resolved.update(
+                bind_downstream_inputs(
+                    definition,
+                    node_id,
+                    candidates,
+                    paired=await _is_mate_pair(row.outputs),
+                )
+            )
 
     bindings = {b.node_id: b.object_id for b in run.bindings}
     launched = 0
@@ -187,9 +194,29 @@ async def _advance(
                 )
                 continue
 
-        job = await _launch_node(
-            node.node_type, inputs=inputs, params=node.params, owner=owner
-        )
+        try:
+            job = await _launch_node(
+                node.node_type, inputs=inputs, params=node.params, owner=owner
+            )
+        except ConflictError:
+            # The launcher refuses because identical work is already queued or
+            # running -- for a workflow node that is success, not failure: the
+            # output it is waiting for is on its way. Treat it exactly like the
+            # deduplicated-away case below.
+            #
+            # Not merely tidy: launchers raise this from a *reconcile* pass
+            # too, and an uncaught one aborted the whole sweep, so a single
+            # node with in-flight work stopped every other stalled run from
+            # being recovered. Observed as
+            # `workflow_reconcile_failed error='QC is already queued or
+            # running for this file'` against the live stack.
+            log.info(
+                "workflow_node_already_running",
+                workflow_run_id=str(run.id),
+                node_id=node_id,
+                node_type=node.node_type,
+            )
+            job = None
 
         # A launcher returning None means the job was deduplicated away -- the
         # work is already happening (or has happened) under another job. Treat
@@ -213,6 +240,25 @@ async def _advance(
     return launched
 
 
+async def _is_mate_pair(object_ids: list[PydanticObjectId]) -> bool:
+    """Whether these two outputs are the halves of one paired-end library.
+
+    Read from `mate_object_id` rather than inferred from count or name: two
+    outputs of one type are not necessarily mates (an assembly emits a FASTA
+    and a GFA), and binding an unrelated pair into `reads`/`mate` would hand a
+    tool two files it should never have seen together.
+    """
+    from app.models.object import DataObject
+
+    if len(object_ids) != 2:
+        return False
+    objects = await DataObject.find({"_id": {"$in": object_ids}}).to_list()
+    if len(objects) != 2:
+        return False
+    a, b = objects
+    return a.mate_object_id == b.id and b.mate_object_id == a.id
+
+
 async def _candidates_for(object_ids: list[PydanticObjectId]) -> list[OutputCandidate]:
     """Look up the format and role of a node's recorded outputs.
 
@@ -231,6 +277,10 @@ async def _candidates_for(object_ids: list[PydanticObjectId]) -> list[OutputCand
         return []
     objects = await DataObject.find({"_id": {"$in": object_ids}}).to_list()
     by_id = {o.id: o for o in objects}
+    # Iterating `object_ids` rather than the query result preserves the order
+    # the outputs were recorded in, which for a mate pair is R1 then R2 (see
+    # `workflow_hook._mate_order`). A Mongo `$in` does not promise input order,
+    # so reading the result list directly would silently swap the mates.
     return [
         OutputCandidate(
             object_id=obj.id,
@@ -326,8 +376,6 @@ async def on_node_finished(
     row = latest.get(node_id)
     if row is None:
         return
-    if row.state in _TERMINAL:
-        return  # already resolved; a repeat event
 
     # A cancelled run must not be resurrected by a late completion. Running
     # jobs stop cooperatively, so their terminal write lands *after* the
@@ -335,15 +383,31 @@ async def on_node_finished(
     if any(r.state is NodeRunState.CANCELLED for r in latest.values()):
         return
 
-    await row.set(
-        {
-            WorkflowNodeRun.state: (
-                NodeRunState.SUCCEEDED if succeeded else NodeRunState.FAILED
-            ),
-            WorkflowNodeRun.outputs: [o.object_id for o in outputs],
-        }
-    )
-    if not succeeded:
+    # An already-terminal node skips the *write* but must still advance. This
+    # was a `return`, and it deadlocked every real multi-node workflow: a node
+    # can legitimately already be SUCCEEDED when its own completion arrives --
+    # `launch_workflow` and the reconciler both resolve state from the jobs --
+    # so the hook returned before ever launching the successor. The unit test
+    # missed it by calling the hook twice in a row, where the *first* call had
+    # already advanced the graph and the second returning early was invisible.
+    # Advancing is idempotent on its own (`runnable_nodes` returns only PENDING
+    # nodes), so it needs no guard of its own.
+    was_terminal = row.state in _TERMINAL
+    if not was_terminal:
+        await row.set(
+            {
+                WorkflowNodeRun.state: (
+                    NodeRunState.SUCCEEDED if succeeded else NodeRunState.FAILED
+                ),
+                WorkflowNodeRun.outputs: [o.object_id for o in outputs],
+            }
+        )
+    elif outputs and not row.outputs:
+        # Terminal but with nothing recorded: keep the outputs, or the
+        # successor has nothing to bind and the run stalls exactly as before.
+        await row.set({WorkflowNodeRun.outputs: [o.object_id for o in outputs]})
+
+    if not succeeded and not was_terminal:
         states = {nid: r.state for nid, r in latest.items()}
         states[node_id] = NodeRunState.FAILED
         for doomed_id in doomed_nodes(definition, states):
