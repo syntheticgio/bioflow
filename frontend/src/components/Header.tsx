@@ -26,6 +26,7 @@ function useShareInboxCount() {
 const LINKS: { to: string; label: string; title: string }[] = [
   { to: "/search", label: "Search", title: "Search files by metadata" },
   { to: "/activity", label: "Activity", title: "Running and queued jobs" },
+  { to: "/workflows", label: "Workflows", title: "Build and save reusable pipeline graphs" },
 ];
 
 /** Reference menu contents: standalone reference documents, not tied to what
