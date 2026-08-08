@@ -25,7 +25,7 @@ from app.models.workflow import (
     WorkflowNode,
 )
 from app.pipelines.node_types import NODE_TYPES
-from app.services import workflow_orchestrator, workflow_service
+from app.services import workflow_derive, workflow_orchestrator, workflow_service
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
@@ -68,6 +68,28 @@ class NodeTypeOut(BaseModel):
     label: str
     inputs: list[PortOut]
     outputs: list[PortOut]
+
+
+class DeriveIn(BaseModel):
+    run_ids: list[PydanticObjectId]
+
+
+class SkippedRunOut(BaseModel):
+    run_id: str
+    label: str
+    reason: str
+
+
+class DerivedOut(BaseModel):
+    """An *unsaved* graph. §7 introduces no new persistence: the canvas is
+    populated and the user decides whether it is worth keeping."""
+
+    nodes: list[WorkflowNode]
+    edges: list[WorkflowEdge]
+    # Never empty by accident: a run that cannot be represented is reported
+    # here rather than dropped, or the user gets a canvas quietly missing a
+    # step they selected.
+    skipped: list[SkippedRunOut]
 
 
 class LaunchIn(BaseModel):
@@ -134,6 +156,24 @@ async def create_definition(body: DefinitionIn, owner: OwnerDep) -> DefinitionOu
         owner=owner,
     )
     return DefinitionOut.of(definition)
+
+
+@router.post("/derive")
+async def derive_from_runs(body: DeriveIn, owner: OwnerDep) -> DerivedOut:
+    """Populate a canvas from runs the user already did.
+
+    Declared before `/{definition_id}` for the same reason `/node-types` is:
+    a path parameter would otherwise swallow it.
+    """
+    graph = await workflow_derive.derive_definition(body.run_ids, owner=owner)
+    return DerivedOut(
+        nodes=graph.nodes,
+        edges=graph.edges,
+        skipped=[
+            SkippedRunOut(run_id=s.run_id, label=s.label, reason=s.reason)
+            for s in graph.skipped
+        ],
+    )
 
 
 @router.get("/{definition_id}")

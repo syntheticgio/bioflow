@@ -23,6 +23,7 @@ import { ApiRequestError, api } from "../api/client";
 import type {
   GraphValidationError,
   NodeTypeMeta,
+  SkippedRun,
   WorkflowEdge,
   WorkflowNode,
 } from "../api/types";
@@ -103,6 +104,9 @@ export function WorkflowCanvas() {
   const [launching, setLaunching] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [bindings, setBindings] = useState<Record<string, string>>({});
+  const [deriving, setDeriving] = useState(false);
+  const [pickedRuns, setPickedRuns] = useState<string[]>([]);
+  const [skipped, setSkipped] = useState<SkippedRun[]>([]);
   const dragRef = useRef<{ node_id: string; dx: number; dy: number } | null>(null);
 
   const palette = useQuery({
@@ -296,6 +300,33 @@ export function WorkflowCanvas() {
     enabled: launching && Boolean(projectId),
   });
 
+  const runs = useQuery({
+    queryKey: ["runs", "for-derive"],
+    queryFn: () => api.listRuns({ limit: 50 }),
+    enabled: deriving,
+  });
+
+  const derive = useMutation({
+    mutationFn: () => api.deriveWorkflow(pickedRuns),
+    onSuccess: (graph) => {
+      // A fresh unsaved definition: §7 persists nothing, so this replaces the
+      // canvas and leaves saving to the user.
+      setDefinitionId(null);
+      setNodes(graph.nodes);
+      setEdges(graph.edges);
+      setSkipped(graph.skipped);
+      setServerErrors([]);
+      setDeriving(false);
+      setNotice(
+        graph.skipped.length > 0
+          ? `Derived ${graph.nodes.length} nodes; ${graph.skipped.length} run(s) could not be represented.`
+          : `Derived ${graph.nodes.length} nodes from ${pickedRuns.length} run(s).`,
+      );
+    },
+    onError: (error: unknown) =>
+      setNotice(error instanceof Error ? error.message : "Derive failed."),
+  });
+
   const launch = useMutation({
     mutationFn: () =>
       api.launchWorkflow(definitionId!, {
@@ -322,6 +353,7 @@ export function WorkflowCanvas() {
     setNodes([]);
     setEdges([]);
     setServerErrors([]);
+    setSkipped([]);
     setNotice(null);
   }
 
@@ -360,6 +392,17 @@ export function WorkflowCanvas() {
           }
         >
           Run…
+        </button>
+        <button
+          className="btn"
+          onClick={() => {
+            setDeriving(true);
+            setPickedRuns([]);
+            setNotice(null);
+          }}
+          title="Build a graph from runs you already did"
+        >
+          From runs…
         </button>
         <button className="btn" onClick={newDefinition}>
           New
@@ -473,6 +516,59 @@ export function WorkflowCanvas() {
                 }
               >
                 {launch.isPending ? "Starting…" : "Run"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {skipped.length > 0 && (
+        <ul className="workflow-errors skipped">
+          {skipped.map((run) => (
+            <li key={run.run_id}>
+              <strong>{run.label || run.run_id}</strong> — {run.reason}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {deriving && (
+        <div className="workflow-launch" role="dialog" aria-label="Derive from runs">
+          <div className="workflow-launch-panel">
+            <h3>Build from previous runs</h3>
+            <p className="muted">
+              Pick the runs to recover. Anything the canvas cannot represent is
+              reported rather than dropped.
+            </p>
+            <div className="workflow-run-list">
+              {(runs.data ?? []).map((run) => (
+                <label key={run.id}>
+                  <input
+                    type="checkbox"
+                    checked={pickedRuns.includes(run.id)}
+                    onChange={(e) =>
+                      setPickedRuns((current) =>
+                        e.target.checked
+                          ? [...current, run.id]
+                          : current.filter((id) => id !== run.id),
+                      )
+                    }
+                  />
+                  <span>{run.label}</span>
+                  <em>{run.kind}</em>
+                </label>
+              ))}
+            </div>
+            <div className="workflow-launch-actions">
+              <button className="btn" onClick={() => setDeriving(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                disabled={pickedRuns.length === 0 || derive.isPending}
+                onClick={() => derive.mutate()}
+              >
+                {derive.isPending ? "Building…" : `Build from ${pickedRuns.length}`}
               </button>
             </div>
           </div>

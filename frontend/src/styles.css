@@ -5466,3 +5466,39 @@ table.software-matrix thead th.software-matrix-corner {
   font-size: 12px;
   width: 100%;
 }
+
+/* Runs offered for derive-from-runs, and the skipped report. The skipped list
+   is styled as a warning rather than an error: nothing failed, but a run the
+   user selected is not on the canvas and they need to know which. */
+
+.workflow-run-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  margin: 10px 0;
+}
+
+.workflow-run-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.workflow-run-list label:hover {
+  background: var(--bg-hover);
+}
+
+.workflow-run-list em {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-style: normal;
+  font-size: 11px;
+}
+
+.workflow-errors.skipped {
+  color: var(--warn);
+}

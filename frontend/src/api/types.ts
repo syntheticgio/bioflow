@@ -1900,3 +1900,18 @@ export interface GraphValidationError {
   node_id: string | null;
   port: string | null;
 }
+
+export interface SkippedRun {
+  run_id: string;
+  label: string;
+  reason: string;
+}
+
+/** An unsaved graph derived from previous runs. `skipped` is the part that
+ *  must be shown: a run the canvas cannot represent is reported, never
+ *  silently dropped. */
+export interface DerivedGraph {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  skipped: SkippedRun[];
+}

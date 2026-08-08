@@ -81,6 +81,7 @@ import type {
   VariantRequest,
   VariantsPage,
   VariantStructure,
+  DerivedGraph,
   NodeTypeMeta,
   VersionInfo,
   WorkflowDefinition,
@@ -1061,6 +1062,14 @@ export const api = {
     request<WorkflowDefinition>(`/workflows/${id}`, {
       method: "PUT",
       body: JSON.stringify(body),
+    }),
+
+  /** Populate a canvas from runs the user already did. Returns an *unsaved*
+   *  graph -- nothing is persisted until the user saves it. */
+  deriveWorkflow: (runIds: string[]) =>
+    request<DerivedGraph>("/workflows/derive", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds }),
     }),
 
   launchWorkflow: (

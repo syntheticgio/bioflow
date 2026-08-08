@@ -278,3 +278,26 @@ class TestLaunch:
         )
 
         assert resp.status_code == 404
+
+
+class TestDerive:
+    async def test_derive_is_not_swallowed_by_the_id_route(self, client, two_profiles):
+        """`/workflows/derive` sits under the same prefix as
+        `/workflows/{definition_id}`. Declared the wrong way round, "derive"
+        parses as an id and the endpoint 404s or 422s instead of running."""
+        resp = await client.post(
+            "/api/v1/workflows/derive",
+            json={"run_ids": []},
+            headers=two_profiles["a_headers"],
+        )
+        assert resp.status_code == 200
+        assert resp.json() == {"nodes": [], "edges": [], "skipped": []}
+
+    async def test_an_unknown_run_is_reported_as_skipped(self, client, two_profiles):
+        resp = await client.post(
+            "/api/v1/workflows/derive",
+            json={"run_ids": [str(PydanticObjectId())]},
+            headers=two_profiles["a_headers"],
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()["skipped"]) == 1
