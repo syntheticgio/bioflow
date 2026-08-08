@@ -32,7 +32,7 @@ jobs:
         with:
           path-to-signatures: .github/cla-signatures.json
           path-to-document: https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md
-          branch: cla-signatures
+          # branch: cla-signatures
           allowlist: syntheticgio
           # remote-organization-name: ${{ github.repository_owner }}
           # remote-repository-name: ${{ github.event.repository.name }}
