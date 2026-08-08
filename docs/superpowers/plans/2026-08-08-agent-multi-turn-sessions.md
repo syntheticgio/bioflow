@@ -58,51 +58,72 @@ Reuse them; do not build new ones.
 
 ---
 
-## Task 0: Verify pi actually reloads a session (GATE)
+## Task 0: Verify pi actually reloads a session — DONE, verified 2026-08-08
 
-**This task writes no code.** It answers the one question that determines
-whether the rest of the plan is valid.
+**This gate has already been run; do not repeat it.** Recorded here for the
+next engineer, and because it overturns two assumptions the rest of this
+plan was written against.
 
-**Files:** none.
-
-- [ ] **Step 1: Configure a working model for pi in the api container**
-
-pi has no provider configured. Check what is available:
-
-```bash
-docker compose -p biopipe exec -T api sh -c 'pi auth print-api-key --provider anthropic 2>&1 | head -3'
-```
-
-If no credential is available, ask the user which provider to use and how to
-authenticate it. **Do not proceed without a model that can complete a
-turn** — a run that fails at the provider never writes a session file, which
-is exactly what blocked verification during design.
-
-- [ ] **Step 2: Run one prompt with a session id and confirm a file appears**
+**pi has no provider configured, and `OPENAI_BASE_URL` does not work** —
+confirmed twice, at design time and again here. pi's providers are resolved
+through its own provider registry, not env vars; routing to a local server
+requires a custom-provider extension file. Working example, used for this
+verification and needed again for any future manual pi run against the
+project's local models:
 
 ```bash
-docker compose -p biopipe exec -T api sh -c 'rm -rf /tmp/sess && mkdir -p /tmp/sess && { printf "%s\n" "{\"type\":\"prompt\",\"message\":\"My favorite enzyme is helicase. Reply with just: OK\",\"streamingBehavior\":\"steer\"}"; sleep 45; } | timeout 90 pi --mode rpc --session-dir /tmp/sess --session-id bioflow-test --no-tools >/dev/null 2>&1; find /tmp/sess -type f'
+docker compose -p biopipe exec -T api sh -c '
+mkdir -p /tmp/pi-ext
+cat > /tmp/pi-ext/local-provider.js <<EOF
+export default function (pi) {
+  pi.registerProvider("openai", {
+    baseUrl: "http://host.docker.internal:11234/v1",
+    apiKey: "dummy",
+  });
+}
+EOF
+'
 ```
 
-Expected: at least one file listed. If the directory is empty, the turn did
-not complete — go back to Step 1.
+(`host.docker.internal:11234` is "MLX Core", one of the two local providers
+already configured in BioFlow's own AI settings.)
 
-- [ ] **Step 3: Start a SECOND process with the same id and confirm it remembers**
+**The gate itself, run and passed:**
 
 ```bash
-docker compose -p biopipe exec -T api sh -c '{ printf "%s\n" "{\"type\":\"prompt\",\"message\":\"What is my favorite enzyme? Answer in one word.\",\"streamingBehavior\":\"steer\"}"; sleep 45; } | timeout 90 pi --mode rpc --session-dir /tmp/sess --session-id bioflow-test --no-tools 2>/dev/null | grep -o "helicase" | head -1'
+# Process 1: one turn, fresh session id "gate-test"
+docker compose -p biopipe exec -T api sh -c '
+{ printf "%s\n" "{\"type\":\"prompt\",\"message\":\"Reply with exactly: HELLO-LOCAL\",\"streamingBehavior\":\"steer\"}"; sleep 40; } \
+  | timeout 90 pi --mode rpc --extension /tmp/pi-ext/local-provider.js \
+      --provider openai --model gemma-4-E2B-it-Q6_K --no-tools \
+      --session-dir /tmp/pi-ext/sess --session-id gate-test
+'
+# -> assistant replied "HELLO-LOCAL"; session file appeared:
+#    /tmp/pi-ext/sess/2026-08-08T23-18-19-668Z_gate-test.jsonl
+
+# Process 2: brand-new pi process, SAME session id, different question
+docker compose -p biopipe exec -T api sh -c '
+{ printf "%s\n" "{\"type\":\"prompt\",\"message\":\"What did I ask you to reply with exactly? Quote it back, nothing else.\",\"streamingBehavior\":\"steer\"}"; sleep 40; } \
+  | timeout 90 pi --mode rpc --extension /tmp/pi-ext/local-provider.js \
+      --provider openai --model gemma-4-E2B-it-Q6_K --no-tools \
+      --session-dir /tmp/pi-ext/sess --session-id gate-test
+'
+# -> replied "HELLO-LOCAL" -- recalled process 1's turn.
+#    No "creating a new session" warning this time: it resumed the
+#    existing file rather than starting fresh.
 ```
 
-Expected: prints `helicase`. This is a *different process* answering from
-the first one's context — the whole design in one command.
+**Verdict: PASS.** A second, independent process recovered the first
+process's context using only `--session-dir` + `--session-id`. This is the
+whole design proven in two commands. Task 1 onward may proceed.
 
-- [ ] **Step 4: Decide**
-
-If Step 3 printed `helicase`, continue to Task 1.
-
-If it did not: **stop and report to the user.** Record what pi did instead.
-The fallback is Mongo-side transcript persistence (#97's original shape),
-which is a different plan.
+**One finding that changes Task 4:** the session filename is
+**`{ISO-8601-timestamp}_{session-id}.jsonl`**, not `{session-id}.jsonl` as
+originally assumed when this plan was drafted. `new_session()`'s cleanup
+must match on a suffix (`*_{session_id}.jsonl` and any sibling metadata
+file), not a prefix glob of `{session_id}*`. Task 4 below has already been
+corrected to reflect this — implement it as written there, not as originally
+scoped in the spec.
 
 ---
 
@@ -492,6 +513,13 @@ Stops the process *and* deletes its session file. This is what makes
 - Modify: `backend/app/api/v1/agent.py`
 - Test: `backend/tests/services/test_agent_service.py`, `backend/tests/api/test_agent.py`
 
+**Session filename shape, confirmed against a real run in Task 0:** pi
+writes exactly one file per session, named
+`{ISO-8601-timestamp}_{session-id}.jsonl` — e.g.
+`2026-08-08T23-18-19-668Z_gate-test.jsonl`. Not `{session-id}.jsonl`, and no
+separate metadata file. Cleanup must match on a *suffix*
+(`*_{session_id}.jsonl`), not a prefix glob.
+
 - [ ] **Step 1: Write the failing service test**
 
 ```python
@@ -499,19 +527,18 @@ class TestNewSession:
     async def test_new_session_stops_process_and_deletes_session_files(self, spawn, tmp_path):
         service = make_service(sessions_dir=tmp_path)
         await service.get_or_create("prof-1", "proj-1")
-        # Simulate the session files pi would have written for this pair.
+        # pi's actual naming: {timestamp}_{session-id}.jsonl -- confirmed
+        # against a real pi 0.84.1 run (see Task 0).
         sid = "bioflow-prof-1-proj-1"
-        (tmp_path / f"{sid}.jsonl").write_text("{}\n")
-        (tmp_path / f"{sid}.json").write_text("{}\n")
-        (tmp_path / "bioflow-other-proj-9.jsonl").write_text("{}\n")
+        (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").write_text("{}\n")
+        (tmp_path / f"2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").write_text("{}\n")
 
         await service.new_session("prof-1", "proj-1")
 
         assert service.get("prof-1", "proj-1") is None
-        assert not (tmp_path / f"{sid}.jsonl").exists()
-        assert not (tmp_path / f"{sid}.json").exists()
+        assert not (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").exists()
         # Another pair's session must survive.
-        assert (tmp_path / "bioflow-other-proj-9.jsonl").exists()
+        assert (tmp_path / "2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").exists()
 
     async def test_new_session_is_safe_when_nothing_exists(self, tmp_path):
         service = make_service(sessions_dir=tmp_path)
@@ -532,15 +559,16 @@ In `AgentService`, after `restart_agent`:
         """Stop the process and forget the conversation.
 
         The counterpart to restart_agent, which keeps the session file: this
-        is the only way to clear a context that has gone wrong. Matches every
-        file pi may have written for this id (it keeps the transcript and its
-        metadata under the same stem).
+        is the only way to clear a context that has gone wrong. pi names
+        session files "{timestamp}_{session-id}.jsonl", so matching is a
+        suffix glob, not a prefix one -- a prefix match on the session id
+        would hit nothing, since the id never starts the filename.
         """
         await self.stop_agent(profile_id, str(project_id))
         sid = session_id_for(profile_id, str(project_id))
         if not self._sessions_dir.exists():
             return
-        for path in self._sessions_dir.glob(f"{sid}*"):
+        for path in self._sessions_dir.glob(f"*_{sid}.jsonl"):
             try:
                 path.unlink()
             except OSError as e:
