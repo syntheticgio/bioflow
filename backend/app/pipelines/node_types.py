@@ -4,7 +4,7 @@ Every canvas capability reads from here: which nodes exist, which ports they
 expose, which wires validate, and how a node actually runs.
 
 Keyed by its own string rather than by RunKind, which was the obvious choice
-and is wrong. Measured on main at design time: 24 launch_* functions exist
+and is wrong. Measured on main at design time: 26 launch_* functions exist
 across services/, and only 9 create a PipelineRun -- every QC and stats
 launcher enqueues jobs with no run record, and RunKind.REFERENCE_ASSEMBLY has
 no launcher at all. Keying on RunKind would make most QC nodes unrepresentable,
@@ -25,7 +25,7 @@ bare-string registry would silently collapse three different launchers into
 one classifiable unit, defeating the exhaustiveness check it was meant to
 serve. Qualifying by module is what keeps them distinguishable.
 
-Status: every launch_* is classified. 24 launch_* functions exist across
+Status: every launch_* is classified. 26 launch_* functions exist across
 services/; 9 create a PipelineRun (trim, align, variant_calling, quantify,
 differential_expression, assembly, the three downloads) and the rest do not.
 RunKind.REFERENCE_ASSEMBLY has no launcher creating a PipelineRun of that kind
