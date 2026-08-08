@@ -1,11 +1,16 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { notify } from "../stores/messageStore";
 import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
-import type { AssemblyParams, DataObject } from "../api/types";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
+import type {
+  AssemblyParams,
+  DataObject,
+  ResourceRefusalDetails,
+} from "../api/types";
 
 const CHEMISTRY_LABELS: Record<string, string> = {
   hifi: "PacBio HiFi",
@@ -65,6 +70,10 @@ export function AssembleDialog({
 
   const [overrides, setOverrides] = useState<Partial<AssemblyParams>>({});
   const [advanced, setAdvanced] = useState(false);
+  // Populated from a 422's `details`. This path is reactive rather than
+  // pre-flight: assembly has no envelope endpoint and no client-side mirror
+  // of estimate_assembly_mb, so the server's refusal is what produces the card.
+  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
 
   const params = { ...defaults, ...overrides } as Partial<AssemblyParams>;
   const chemistry = object.facts?.qc_read_chemistry as string | undefined;
@@ -87,6 +96,28 @@ export function AssembleDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Assembly started");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => {
+      if (e instanceof ApiRequestError && "estimate_mb" in e.details) {
+        setRefusal(e.details as unknown as ResourceRefusalDetails);
+        return;
+      }
+      notify.error(e.message);
+    },
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchAssembly({
+        object_id: object.id,
+        params,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
       onClose();
       navigate("/activity");
     },
@@ -210,6 +241,26 @@ export function AssembleDialog({
                 }
               />
             </div>
+          )}
+
+          {refusal && (
+            <ResourceRefusalCard
+              estimateMb={refusal.estimate_mb}
+              budgetMb={refusal.budget_mb}
+              detail={refusal.detail}
+              explanation={
+                `This assembly needs about ${refusal.estimate_mb.toLocaleString()} MB, ` +
+                `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+              }
+              replan={refusal.replan}
+              onCancel={onClose}
+              onEdit={() => setRefusal(null)}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              onAcceptReplan={(p) => {
+                setOverrides((o) => ({ ...o, ...p }));
+                setRefusal(null);
+              }}
+            />
           )}
 
           <div className="trim-mate-note" style={{ marginTop: 12 }}>

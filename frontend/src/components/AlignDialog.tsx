@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { classify, estimateMb, explain } from "../lib/estimate";
 import { notify } from "../stores/messageStore";
 import type {
@@ -11,6 +12,7 @@ import type {
   AlignerName,
   DataObject,
   ReadGroup,
+  ReplanResult,
 } from "../api/types";
 
 /**
@@ -62,6 +64,10 @@ export function AlignDialog({
   const [overrides, setOverrides] = useState<Partial<AlignParams>>({});
   const [rgOverrides, setRgOverrides] = useState<Partial<ReadGroup>>({});
   const [advanced, setAdvanced] = useState(false);
+  // Dismissed by "Edit parameters": the band is still "block", but the user
+  // has asked to go back to the fields rather than be shown the card again.
+  // Reset whenever the band leaves "block" so a fresh refusal re-renders it.
+  const [cardDismissed, setCardDismissed] = useState(false);
 
   // `selectedTool` wins over both the server default and the advanced
   // override, and does so on every render rather than via an effect that
@@ -140,6 +146,19 @@ export function AlignDialog({
         })
       : null;
 
+  // Fetched when the card is about to show, so the button's presence is
+  // decided before the user sees it rather than on click.
+  const { data: replan } = useQuery<ReplanResult>({
+    queryKey: ["pipelines", "replan", "align_reads", params],
+    queryFn: () => api.replan("align_reads", params as unknown as Record<string, unknown>),
+    enabled: band === "block",
+  });
+
+  // A new refusal must re-show the card even if a previous one was dismissed.
+  useEffect(() => {
+    if (band !== "block") setCardDismissed(false);
+  }, [band]);
+
   // The banner below tells the user to change threads/sort_memory_mb, both of
   // which live in the "performance" disclosure -- so once the resource band
   // is anything but "ok", that disclosure must be visible or the fix it's
@@ -172,6 +191,26 @@ export function AlignDialog({
       notify.success(
         needsIndex ? "Building the index, then aligning" : "Alignment started",
       );
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchAlignment({
+        object_id: object.id,
+        reference_id: chosenId!,
+        mate_object_id: usePair ? mate!.object_id : null,
+        paired: usePair,
+        read_group: readGroup,
+        params,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
       onClose();
       navigate("/activity");
     },
@@ -348,16 +387,33 @@ export function AlignDialog({
           </div>
         )}
 
-        {bandMessage && (
-          <div className={band === "block" ? "error-box" : "warn-box"}>
-            {bandMessage}
-            {band === "block" && (
-              <div style={{ marginTop: 4 }}>
-                Reduce threads or sort memory, or choose an aligner with a
-                smaller index.
-              </div>
-            )}
-          </div>
+        {band === "block" && !cardDismissed ? (
+          <ResourceRefusalCard
+            estimateMb={estimate ?? 0}
+            budgetMb={envelope?.mem_budget_mb ?? 0}
+            // The align path computes its estimate client-side from the
+            // envelope's published coefficients (lib/estimate.ts), so it
+            // knows the source without asking the server: these are the
+            // published coefficients by construction, never a measured
+            // number. If the envelope ever starts serving a measured
+            // estimate, this line must change with it.
+            detail="from published tool coefficients"
+            explanation={bandMessage ?? ""}
+            replan={replan ?? null}
+            onCancel={onClose}
+            onEdit={() => setCardDismissed(true)}
+            onLaunchAnyway={() => launchAnyway.mutate()}
+            onAcceptReplan={(p) => {
+              setOverrides((o) => ({ ...o, ...p }));
+              setCardDismissed(true);
+            }}
+          />
+        ) : (
+          bandMessage && (
+            <div className={band === "block" ? "error-box" : "warn-box"}>
+              {bandMessage}
+            </div>
+          )
         )}
         </div>
 

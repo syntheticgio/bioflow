@@ -773,6 +773,7 @@ export interface AssemblyParams {
 export interface AssembleRequest {
   object_id: string;
   params?: Partial<AssemblyParams>;
+  resource_override?: boolean;
 }
 
 export interface CompletenessDefaults {
@@ -909,6 +910,9 @@ export interface AlignRequest {
   paired: boolean;
   read_group: ReadGroup;
   params: Partial<AlignParams>;
+  // "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
+  // persists on the job, where claim.lua admits it only as sole occupant.
+  resource_override?: boolean;
 }
 
 /**
