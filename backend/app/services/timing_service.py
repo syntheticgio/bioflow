@@ -515,6 +515,33 @@ async def stats() -> list[dict]:
         model = _fit(samples)
         memory_samples = _memory_samples_from(records)
         memory_model = _fit_memory(memory_samples)
+
+        thread_counts = sorted(
+            {r.threads for r in records if r.threads is not None}
+        )
+        duration_segments = _fit_segmented(records, _duration_samples_from)
+        segments = [
+            {
+                "threads": threads,
+                "samples": duration_segments[threads]["n"],
+                "model": {
+                    "slope_ms_per_byte": duration_segments[threads]["slope"],
+                    "intercept_ms": round(duration_segments[threads]["intercept"]),
+                    "r_squared": round(
+                        _r_squared(
+                            _duration_samples_from(
+                                [r for r in records if r.threads == threads]
+                            ),
+                            duration_segments[threads],
+                        ),
+                        3,
+                    ),
+                },
+            }
+            for threads in thread_counts
+            if threads in duration_segments
+        ]
+
         out.append(
             {
                 "job_type": t,
@@ -536,6 +563,12 @@ async def stats() -> list[dict]:
                     "intercept_bytes": round(memory_model["intercept"]),
                     "r_squared": round(_r_squared(memory_samples, memory_model), 3),
                 },
+                # Per-thread-count duration fits that qualified (>=
+                # MIN_SAMPLES same-thread rows), for the diagnostics view to
+                # show what's actually segmenting versus falling back. Empty
+                # until real runs at varying thread counts accumulate -- see
+                # docs/superpowers/specs/2026-08-08-thread-count-segmentation-design.md.
+                "segments": segments,
             }
         )
     return out

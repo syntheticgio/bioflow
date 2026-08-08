@@ -261,3 +261,34 @@ class TestThreadSegmentation:
         assert result["known"] is True
         assert result["segment"]["threads"] == 4
         assert result["r_squared"] > 0.99
+
+
+class TestStatsSegments:
+    async def test_segments_list_is_empty_with_no_thread_data(self):
+        for _ in range(MIN_SAMPLES):
+            await _record(RunOutcome.SUCCEEDED)
+        rows = await timing_service.stats()
+        row = next(r for r in rows if r["job_type"] == "align_reads")
+        assert row["segments"] == []
+
+    async def test_segments_list_reports_a_qualifying_thread_count(self):
+        for i in range(1, MIN_SAMPLES + 1):
+            await _record(
+                RunOutcome.SUCCEEDED,
+                duration_ms=1000 * i,
+                input_bytes=1000 * i,
+                threads=4,
+            )
+        rows = await timing_service.stats()
+        row = next(r for r in rows if r["job_type"] == "align_reads")
+        assert len(row["segments"]) == 1
+        assert row["segments"][0]["threads"] == 4
+        assert row["segments"][0]["samples"] == MIN_SAMPLES
+        assert row["segments"][0]["model"] is not None
+
+    async def test_sparse_thread_count_is_omitted_from_segments(self):
+        for _ in range(MIN_SAMPLES - 1):
+            await _record(RunOutcome.SUCCEEDED, threads=4)
+        rows = await timing_service.stats()
+        row = next(r for r in rows if r["job_type"] == "align_reads")
+        assert row["segments"] == []
