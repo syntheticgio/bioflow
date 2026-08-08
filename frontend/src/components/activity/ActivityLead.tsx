@@ -66,7 +66,7 @@ export function ActivityLead({
           key={run.id}
           run={run}
           index={i + 2}
-          jobs={details.get(run.id)?.jobs.length}
+          jobs={details.get(run.id)?.jobs}
           open={open === run.id}
           onToggle={() => setOpen((o) => (o === run.id ? null : run.id))}
           onSelect={onSelect}

@@ -159,9 +159,9 @@ export function ActivityView() {
 
         <RunLedger
           runs={finishedRuns.slice(0, LEDGER_LIMIT)}
-          jobCounts={
+          jobsByRun={
             new Map(
-              finishedRuns.map((r) => [r.id, details.get(r.id)?.jobs.length ?? 0]),
+              finishedRuns.map((r) => [r.id, details.get(r.id)?.jobs ?? []]),
             )
           }
           onSelect={selectObject}
