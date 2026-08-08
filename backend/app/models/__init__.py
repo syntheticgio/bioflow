@@ -6,7 +6,11 @@ its indexes.
 
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.models.blob import Blob, BlobState, BlobStorage
-from app.models.conversation import ConversationTurn, ProjectConversation
+from app.models.conversation import (
+    ConversationTurn,
+    ProjectConversation,
+    ToolCallTurn,
+)
 from app.models.failure_explanation import FailureExplanation, normalize_failure
 from app.models.feedback import Feedback
 from app.models.job import (
@@ -103,6 +107,7 @@ __all__ = [
     "BlobStorage",
     "Compression",
     "ConversationTurn",
+    "ToolCallTurn",
     "DataObject",
     "FailureExplanation",
     "FailureReason",

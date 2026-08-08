@@ -5,7 +5,7 @@ from beanie import PydanticObjectId
 from pymongo.errors import DuplicateKeyError
 
 from app.models.base import utcnow
-from app.models.conversation import ConversationTurn, ProjectConversation
+from app.models.conversation import ConversationTurn, ProjectConversation, ToolCallTurn
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 
@@ -48,3 +48,39 @@ class TestConversationTurn:
         user/assistant exchange -- tool-call turns are never saved."""
         with pytest.raises(ValueError):
             ConversationTurn(role="tool_call", content="x", created_at=utcnow())
+
+    def test_tool_calls_defaults_to_none(self):
+        """A turn with no tool calls (Q&A or user) leaves tool_calls unset,
+        so the persisted document does not grow a redundant null field."""
+        turn = ConversationTurn(role="user", content="hi", created_at=utcnow())
+        assert turn.tool_calls is None
+
+    def test_assistant_turn_can_carry_tool_calls(self):
+        """The agent drawer records each bioflow_* tool call it made."""
+        turn = ConversationTurn(
+            role="assistant",
+            content="I'll run QC for you.",
+            created_at=utcnow(),
+            tool_calls=[
+                ToolCallTurn(
+                    id="c1",
+                    name="bioflow_run_pipeline",
+                    args={"kind": "run_qc"},
+                    result="{'ok': true}",
+                    ok=True,
+                )
+            ],
+        )
+        assert turn.tool_calls[0].name == "bioflow_run_pipeline"
+        assert turn.tool_calls[0].ok is True
+
+    def test_tool_call_turn_args_default_to_empty_dict(self):
+        turn = ConversationTurn(
+            role="assistant",
+            content="done",
+            created_at=utcnow(),
+            tool_calls=[ToolCallTurn(id="c1", name="bioflow_get_job")],
+        )
+        assert turn.tool_calls[0].args == {}
+        assert turn.tool_calls[0].result is None
+        assert turn.tool_calls[0].ok is None

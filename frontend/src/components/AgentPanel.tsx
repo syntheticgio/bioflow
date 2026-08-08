@@ -1,6 +1,7 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import type { AgentConversationTurn } from "../api/types";
 import { useAgentSSE } from "../hooks/useAgentSSE";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentPanelInput } from "./AgentPanelInput";
@@ -21,6 +22,24 @@ interface Message {
   toolCalls?: ToolCallInfo[];
 }
 
+/** Map a saved API turn into the panel's internal Message type. */
+function _mapTurn(t: AgentConversationTurn): Message {
+  return {
+    id: crypto.randomUUID(),
+    role: t.role,
+    content: t.content,
+    toolCalls: t.tool_calls
+      ? t.tool_calls.map((tc) => ({
+          id: tc.id,
+          name: tc.name,
+          args: tc.args,
+          result: tc.result ?? undefined,
+          ok: tc.ok ?? undefined,
+        }))
+      : undefined,
+  };
+}
+
 export function AgentPanel({
   projectId,
   onClose,
@@ -28,10 +47,29 @@ export function AgentPanel({
   projectId: string;
   onClose: () => void;
 }) {
+  const qc = useQueryClient();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+
+  // Load saved conversation on mount (issue #97). The query is keyed by
+  // projectId, so TanStack Query caches it across close/reopen cycles --
+  // a quick reopen reads from cache instantly, a slower one refetches.
+  const { data: savedConversation } = useQuery({
+    queryKey: ["agent-conversation", projectId],
+    queryFn: () => api.getAgentConversation(projectId),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Initialize messages from the saved conversation once, on first load.
+  useEffect(() => {
+    if (!initialized && savedConversation?.turns) {
+      setMessages(savedConversation.turns.map(_mapTurn));
+      setInitialized(true);
+    }
+  }, [savedConversation, initialized]);
 
   // Track the current streaming message content
   const streamingContentRef = useRef<string>("");
@@ -92,6 +130,8 @@ export function AgentPanel({
         }
         return updated;
       });
+      // The backend SSE generator persists the full assistant turn (text +
+      // tool calls) to ProjectConversation. No frontend save needed here.
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
     },
@@ -113,7 +153,8 @@ export function AgentPanel({
   const ask = useMutation({
     mutationFn: (q: string) => api.askAgent(projectId, q),
     onSuccess: () => {
-      // Optimistic: add the user message immediately
+      // Optimistic: add the user message immediately. The backend's /ask
+      // handler also persists it to ProjectConversation for durability.
       const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: "" };
       setMessages((prev) => [...prev, userMsg]);
       setIsStreaming(true);
@@ -128,8 +169,23 @@ export function AgentPanel({
       setMessages([]);
       setError(null);
       setIsStreaming(false);
+      setInitialized(false);
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
+    },
+  });
+
+  const clear = useMutation({
+    mutationFn: () => api.clearAgentConversation(projectId),
+    onSuccess: () => {
+      setMessages([]);
+      setError(null);
+      setIsStreaming(false);
+      setInitialized(false);
+      streamingContentRef.current = "";
+      currentToolCallsRef.current = [];
+      // Invalidate so a reopen re-fetches the now-empty conversation.
+      qc.invalidateQueries({ queryKey: ["agent-conversation", projectId] });
     },
   });
 
@@ -165,6 +221,15 @@ export function AgentPanel({
             style={{ marginLeft: "auto" }}
           >
             🔄
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => clear.mutate()}
+            title="Clear conversation"
+            disabled={messages.length === 0 && !isStreaming}
+          >
+            🗑
           </button>
           <button type="button" className="icon-btn" onClick={onClose} title="Close">
             ×

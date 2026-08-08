@@ -2,6 +2,9 @@ import type {
   AiFetchModelsResult,
   AiPreset,
   AiProvider,
+  AgentConversation,
+  ConversationTurnIn,
+  ConversationTurnOut,
   AiProviderInput,
   AiRouting,
   AlignDefaults,
@@ -1128,4 +1131,17 @@ export const api = {
 
   stopAgent: (projectId: string) =>
     request<void>(`/projects/${projectId}/agent`, { method: "DELETE" }),
+
+  // --- Agent conversation persistence (issue #97) ---
+  getAgentConversation: (projectId: string) =>
+    request<AgentConversation>(`/projects/${projectId}/agent/conversation`),
+
+  saveAgentTurn: (projectId: string, turn: ConversationTurnIn) =>
+    request<ConversationTurnOut>(`/projects/${projectId}/agent/conversation/turns`, {
+      method: "POST",
+      body: JSON.stringify(turn),
+    }),
+
+  clearAgentConversation: (projectId: string) =>
+    request<void>(`/projects/${projectId}/agent/conversation`, { method: "DELETE" }),
 };

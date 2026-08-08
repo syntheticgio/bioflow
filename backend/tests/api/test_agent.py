@@ -20,12 +20,13 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 
 from app.api.v1.agent import router as agent_router
+from app.models.base import utcnow
+from app.models.conversation import ConversationTurn, ProjectConversation
 from app.services import project_service
 from app.services.agent_service import agent_service
 from tests.services.test_agent_service import FakeProcess
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
-
 
 @pytest.fixture
 def spawn(monkeypatch):
@@ -42,10 +43,8 @@ def spawn(monkeypatch):
     monkeypatch.setattr("app.services.agent_service.create_subprocess_exec", fake_spawn)
     return cmds, spawned
 
-
 async def _project(owner: str):
     return await project_service.create_project(name="agent-project", owner=owner, parent_id=None)
-
 
 def _prompt_lines(fake: FakeProcess) -> list[dict]:
     return [
@@ -54,12 +53,10 @@ def _prompt_lines(fake: FakeProcess) -> list[dict]:
         if line.strip()
     ]
 
-
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def live_server():
@@ -98,7 +95,6 @@ async def live_server():
     server.should_exit = True
     await task
 
-
 async def _sse_events(response):
     """Yield (event_type, data) pairs from an open SSE response.
 
@@ -115,7 +111,6 @@ async def _sse_events(response):
         else:
             lines.append(line)
 
-
 def _parse_event(block: str) -> tuple[str, dict]:
     etype = data = None
     for line in block.splitlines():
@@ -125,7 +120,6 @@ def _parse_event(block: str) -> tuple[str, dict]:
             data = json.loads(line[len("data:"):].strip())
     assert etype is not None and data is not None, f"malformed SSE block: {block!r}"
     return etype, data
-
 
 class TestAsk:
     async def test_requires_a_profile(self, client, two_profiles):
@@ -201,7 +195,6 @@ class TestAsk:
         )
         assert response.status_code == 503
         assert response.json()["code"] == "agent_unavailable"
-
 
 class TestEvents:
     async def test_reports_status_then_forwards_translations(
@@ -300,7 +293,6 @@ class TestEvents:
                     etype, _ = await anext(events)
                 assert etype == "agent_start"
 
-
 class TestLifecycle:
     async def test_delete_stops_the_agent(self, client, two_profiles, spawn):
         project = await _project(two_profiles["a"].owner_id())
@@ -328,3 +320,307 @@ class TestLifecycle:
         assert second is not None and second is not first
         _, spawned = spawn
         assert len(spawned) == 2
+
+
+class TestConversationPersistence:
+    """Issue #97: conversations survive closing and reopening the drawer."""
+
+    async def test_ask_persists_user_turn(self, client, two_profiles, spawn):
+        """POST /ask saves the user message to ProjectConversation."""
+        project = await _project(two_profiles["a"].owner_id())
+        response = await client.post(
+            f"/api/v1/projects/{project.id}/agent/ask",
+            json={"message": "run qc"},
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 200
+        # Let the background save task complete.
+        await asyncio.sleep(0.1)
+
+        convo = await ProjectConversation.find_one(
+            ProjectConversation.owner == two_profiles["a"].owner_id(),
+            ProjectConversation.project_id == project.id,
+        )
+        assert convo is not None
+        assert len(convo.turns) == 1
+        assert convo.turns[0].role == "user"
+        assert convo.turns[0].content == "run qc"
+        assert convo.turns[0].tool_calls is None
+
+    async def test_get_conversation_loads_saved_turns(self, client, two_profiles, spawn):
+        """GET /conversation returns saved turns for the same owner."""
+        project = await _project(two_profiles["a"].owner_id())
+        # Pre-seed a conversation with turns.
+        convo = ProjectConversation(
+            owner=two_profiles["a"].owner_id(),
+            project_id=project.id,
+            turns=[
+                ConversationTurn(role="user", content="question 1", created_at=utcnow()),
+                ConversationTurn(
+                    role="assistant",
+                    content="answer 1",
+                    created_at=utcnow(),
+                    tool_calls=None,
+                ),
+            ],
+        )
+        await convo.insert()
+
+        response = await client.get(
+            f"/api/v1/projects/{project.id}/agent/conversation",
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body["turns"]) == 2
+        assert body["turns"][0]["role"] == "user"
+        assert body["turns"][0]["content"] == "question 1"
+        assert body["turns"][0]["tool_calls"] is None
+        assert body["turns"][1]["role"] == "assistant"
+        assert body["turns"][1]["content"] == "answer 1"
+
+    async def test_get_conversation_creates_empty_on_first_access(
+        self, client, two_profiles
+    ):
+        """No conversation yet -> an empty one is created, matching Q&A."""
+        project = await _project(two_profiles["a"].owner_id())
+        response = await client.get(
+            f"/api/v1/projects/{project.id}/agent/conversation",
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 200
+        assert response.json()["turns"] == []
+
+    async def test_get_conversation_is_owner_scoped(self, client, two_profiles):
+        """Owner B must not see owner A's conversation -- gets its own empty one."""
+        project = await _project(two_profiles["a"].owner_id())
+        convo = ProjectConversation(
+            owner=two_profiles["a"].owner_id(),
+            project_id=project.id,
+            turns=[ConversationTurn(role="user", content="secret", created_at=utcnow())],
+        )
+        await convo.insert()
+
+        response = await client.get(
+            f"/api/v1/projects/{project.id}/agent/conversation",
+            headers=two_profiles["b_headers"],
+        )
+        assert response.status_code == 200
+        assert response.json()["turns"] == []
+
+    async def test_get_conversation_requires_profile(self, client, two_profiles):
+        project = await _project(two_profiles["a"].owner_id())
+        response = await client.get(
+            f"/api/v1/projects/{project.id}/agent/conversation"
+        )
+        assert response.status_code == 400
+
+    async def test_save_turn_appends_to_existing(self, client, two_profiles):
+        """POST /conversation/turns appends a turn to the document."""
+        project = await _project(two_profiles["a"].owner_id())
+        # Pre-seed
+        convo = ProjectConversation(
+            owner=two_profiles["a"].owner_id(),
+            project_id=project.id,
+            turns=[ConversationTurn(role="user", content="first", created_at=utcnow())],
+        )
+        await convo.insert()
+
+        response = await client.post(
+            f"/api/v1/projects/{project.id}/agent/conversation/turns",
+            json={"role": "assistant", "content": "second", "tool_calls": None},
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 201
+        assert response.json()["role"] == "assistant"
+        assert response.json()["content"] == "second"
+
+        refreshed = await ProjectConversation.find_one(
+            ProjectConversation.owner == two_profiles["a"].owner_id(),
+            ProjectConversation.project_id == project.id,
+        )
+        assert len(refreshed.turns) == 2
+        assert refreshed.turns[1].role == "assistant"
+        assert refreshed.turns[1].content == "second"
+
+    async def test_clear_conversation(self, client, two_profiles):
+        """DELETE resets turns and compaction state."""
+        project = await _project(two_profiles["a"].owner_id())
+        convo = ProjectConversation(
+            owner=two_profiles["a"].owner_id(),
+            project_id=project.id,
+            turns=[ConversationTurn(role="user", content="hi", created_at=utcnow())],
+        )
+        await convo.insert()
+
+        response = await client.delete(
+            f"/api/v1/projects/{project.id}/agent/conversation",
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 204
+
+        refreshed = await ProjectConversation.get(convo.id)
+        assert refreshed.turns == []
+        assert refreshed.compacted_summary is None
+        assert refreshed.compacted_through == 0
+
+    async def test_clear_with_no_existing_conversation_is_not_an_error(
+        self, client, two_profiles
+    ):
+        project = await _project(two_profiles["a"].owner_id())
+        response = await client.delete(
+            f"/api/v1/projects/{project.id}/agent/conversation",
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 204
+
+    async def test_cannot_clear_another_owners_conversation(self, client, two_profiles):
+        project = await _project(two_profiles["a"].owner_id())
+        convo = ProjectConversation(
+            owner=two_profiles["a"].owner_id(),
+            project_id=project.id,
+            turns=[ConversationTurn(role="user", content="hi", created_at=utcnow())],
+        )
+        await convo.insert()
+
+        response = await client.delete(
+            f"/api/v1/projects/{project.id}/agent/conversation",
+            headers=two_profiles["b_headers"],
+        )
+        # Owner B's delete hits a different (empty) conversation -- 204, but
+        # owner A's data survives.
+        assert response.status_code == 204
+        refreshed = await ProjectConversation.get(convo.id)
+        assert len(refreshed.turns) == 1
+
+    async def test_assistant_turn_saved_on_done_via_sse(
+        self, two_profiles, spawn, live_server
+    ):
+        """The SSE stream saves the assistant's full response when 'done' fires."""
+        project = await _project(two_profiles["a"].owner_id())
+        headers = two_profiles["a_headers"]
+        owner = two_profiles["a"].owner_id()
+        profile_id = two_profiles["a"].id
+        url = f"{live_server}/api/v1/projects/{project.id}/agent/events"
+
+        async with AsyncClient(timeout=None) as http:
+            async with http.stream("GET", url, params={"profile": str(profile_id)}) as stream:
+                events = _sse_events(stream)
+                async with asyncio.timeout(10):
+                    await anext(events)  # agent_status
+
+                # Ask -- triggers the user-turn background save.
+                await http.post(
+                    f"{live_server}/api/v1/projects/{project.id}/agent/ask",
+                    json={"message": "what pipelines can I run?"},
+                    headers=headers,
+                )
+                await asyncio.sleep(0.1)  # let user-turn save complete
+
+                # Verify user turn saved.
+                convo = await ProjectConversation.find_one(
+                    ProjectConversation.owner == owner,
+                    ProjectConversation.project_id == project.id,
+                )
+                assert convo is not None
+                assert len(convo.turns) == 1
+                assert convo.turns[0].role == "user"
+
+                _, spawned = spawn
+                fake = spawned[0]
+                fake.stdout.feed(
+                    {"type": "response", "command": "prompt", "success": True}
+                )
+                fake.stdout.feed({"type": "agent_start"})
+                fake.stdout.feed(
+                    {"type": "message_update",
+                     "assistantMessageEvent": {
+                         "type": "text_delta", "contentIndex": 0, "delta": "You can run QC."}}
+                )
+                fake.stdout.feed(
+                    {"type": "tool_execution_start", "toolCallId": "c1",
+                     "toolName": "mcp",
+                     "args": {"tool": "bioflow_list_objects", "args": {}}}
+                )
+                fake.stdout.feed(
+                    {"type": "tool_execution_end", "toolCallId": "c1",
+                     "toolName": "mcp", "isError": False,
+                     "args": {"tool": "bioflow_list_objects", "args": {}},
+                     "result": {"content": [{"type": "text", "text": "3 files"}]}}
+                )
+                fake.stdout.feed(
+                    {"type": "message_update",
+                     "assistantMessageEvent": {
+                         "type": "text_delta", "contentIndex": 0, "delta": " Try fastp."}}
+                )
+                fake.stdout.feed({"type": "agent_settled"})
+
+                # Consume the SSE events up to 'done'.
+                async with asyncio.timeout(10):
+                    for _ in range(8):
+                        etype, _ = await anext(events)
+                        if etype == "done":
+                            break
+                    else:
+                        assert False, "did not see 'done' event"
+
+                # Let the assistant-turn background save complete.
+                await asyncio.sleep(0.2)
+
+                refreshed = await ProjectConversation.find_one(
+                    ProjectConversation.owner == owner,
+                    ProjectConversation.project_id == project.id,
+                )
+                assert refreshed is not None
+                assert len(refreshed.turns) == 2
+                assistant_turn = refreshed.turns[1]
+                assert assistant_turn.role == "assistant"
+                assert "You can run QC. Try fastp." in assistant_turn.content
+                assert assistant_turn.tool_calls is not None
+                assert len(assistant_turn.tool_calls) == 1
+                assert assistant_turn.tool_calls[0].name == "bioflow_list_objects"
+                assert assistant_turn.tool_calls[0].ok is True
+                assert "3 files" in (assistant_turn.tool_calls[0].result or "")
+
+    async def test_save_turn_with_tool_calls_round_trips(
+        self, client, two_profiles, spawn
+    ):
+        """POST /conversation/turns accepts and persists tool_calls in the turn."""
+        from app.models.conversation import ToolCallTurn
+
+        project = await _project(two_profiles["a"].owner_id())
+        # Pre-seed empty conversation
+        convo = ProjectConversation(
+            owner=two_profiles["a"].owner_id(),
+            project_id=project.id,
+        )
+        await convo.insert()
+
+        response = await client.post(
+            f"/api/v1/projects/{project.id}/agent/conversation/turns",
+            json={
+                "role": "assistant",
+                "content": "I found your files.",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "name": "bioflow_list_objects",
+                        "args": {"project_id": str(project.id)},
+                        "result": "3 files",
+                        "ok": True,
+                    }
+                ],
+            },
+            headers=two_profiles["a_headers"],
+        )
+        assert response.status_code == 201
+        assert response.json()["tool_calls"][0]["name"] == "bioflow_list_objects"
+        assert response.json()["tool_calls"][0]["ok"] is True
+
+        refreshed = await ProjectConversation.get(convo.id)
+        assert len(refreshed.turns) == 1
+        assert refreshed.turns[0].tool_calls is not None
+        assert refreshed.turns[0].tool_calls[0].name == "bioflow_list_objects"
+        assert refreshed.turns[0].tool_calls[0].args == {"project_id": str(project.id)}
+        assert refreshed.turns[0].tool_calls[0].result == "3 files"
+        assert refreshed.turns[0].tool_calls[0].ok is True
