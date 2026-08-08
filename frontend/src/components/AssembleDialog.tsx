@@ -256,6 +256,7 @@ export function AssembleDialog({
               onCancel={onClose}
               onEdit={() => setRefusal(null)}
               onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
               onAcceptReplan={(p) => {
                 setOverrides((o) => ({ ...o, ...p }));
                 setRefusal(null);

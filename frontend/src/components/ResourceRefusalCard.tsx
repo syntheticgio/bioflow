@@ -21,6 +21,10 @@ export interface ResourceRefusalCardProps {
   onEdit: () => void;
   onLaunchAnyway: () => void;
   onAcceptReplan: (params: Record<string, unknown>) => void;
+  /** Disables "Launch anyway" while its mutation is in flight, mirroring the
+   *  primary Launch button's own pending guard -- without it a double-click
+   *  before the modal closes can enqueue the job twice. */
+  launchAnywayPending?: boolean;
 }
 
 export function ResourceRefusalCard({
@@ -33,6 +37,7 @@ export function ResourceRefusalCard({
   onEdit,
   onLaunchAnyway,
   onAcceptReplan,
+  launchAnywayPending,
 }: ResourceRefusalCardProps) {
   const proposal = replan?.kind === "proposal" ? replan : null;
 
@@ -116,8 +121,13 @@ export function ResourceRefusalCard({
             Use the smaller configuration
           </button>
         )}
-        <button type="button" className="btn" onClick={onLaunchAnyway}>
-          Launch anyway
+        <button
+          type="button"
+          className="btn"
+          onClick={onLaunchAnyway}
+          disabled={launchAnywayPending}
+        >
+          {launchAnywayPending ? "Launching…" : "Launch anyway"}
         </button>
       </div>
 

@@ -403,6 +403,7 @@ export function AlignDialog({
             onCancel={onClose}
             onEdit={() => setCardDismissed(true)}
             onLaunchAnyway={() => launchAnyway.mutate()}
+            launchAnywayPending={launchAnyway.isPending}
             onAcceptReplan={(p) => {
               setOverrides((o) => ({ ...o, ...p }));
               setCardDismissed(true);
