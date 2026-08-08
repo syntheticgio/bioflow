@@ -159,3 +159,16 @@ async def stop_agent(project_id: PydanticObjectId, profile_id: ProfileIdDep) -> 
 async def restart_agent(project_id: PydanticObjectId, profile_id: ProfileIdDep) -> AgentAskResponse:
     await agent_service.restart_agent(profile_id, str(project_id))
     return AgentAskResponse(status="restarting")
+
+
+@router.post("/new-session", response_model=AgentAskResponse)
+async def new_agent_session(
+    project_id: PydanticObjectId, profile_id: ProfileIdDep
+) -> AgentAskResponse:
+    """Clear the conversation: stop the process and delete its session file.
+
+    Distinct from /restart, which respawns against the same session and so
+    keeps the agent's memory.
+    """
+    await agent_service.new_session(profile_id, str(project_id))
+    return AgentAskResponse(status="cleared")

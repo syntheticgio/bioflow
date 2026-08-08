@@ -466,6 +466,25 @@ class AgentService:
         await self.stop_agent(profile_id, project_id)
         return await self.get_or_create(profile_id, project_id)
 
+    async def new_session(self, profile_id: str, project_id: str) -> None:
+        """Stop the process and forget the conversation.
+
+        The counterpart to restart_agent, which keeps the session file: this
+        is the only way to clear a context that has gone wrong. pi names
+        session files "{timestamp}_{session-id}.jsonl", so matching is a
+        suffix glob, not a prefix one -- a prefix match on the session id
+        would hit nothing, since the id never starts the filename.
+        """
+        await self.stop_agent(profile_id, str(project_id))
+        sid = session_id_for(profile_id, str(project_id))
+        if not self._sessions_dir.exists():
+            return
+        for path in self._sessions_dir.glob(f"*_{sid}.jsonl"):
+            try:
+                path.unlink()
+            except OSError as e:
+                log.warning("agent_session_unlink_failed", path=str(path), error=str(e))
+
     async def cleanup_idle(self) -> None:
         """Stop processes that have been silent (and not mid-run) past the
         idle timeout. The api's lifespan calls this on a schedule."""

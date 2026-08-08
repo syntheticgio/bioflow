@@ -459,3 +459,25 @@ class TestSessionsDir:
         from app.config import settings
 
         assert settings.agent_sessions_dir == settings.bioinfo_home / "agent-sessions"
+
+
+class TestNewSession:
+    async def test_new_session_stops_process_and_deletes_session_files(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-1", "proj-1")
+        # pi's actual naming: {timestamp}_{session-id}.jsonl -- confirmed
+        # against a real pi 0.84.1 run (see Task 0).
+        sid = "bioflow-prof-1-proj-1"
+        (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").write_text("{}\n")
+        (tmp_path / f"2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").write_text("{}\n")
+
+        await service.new_session("prof-1", "proj-1")
+
+        assert service.get("prof-1", "proj-1") is None
+        assert not (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").exists()
+        # Another pair's session must survive.
+        assert (tmp_path / "2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").exists()
+
+    async def test_new_session_is_safe_when_nothing_exists(self, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.new_session("nobody", "nothing")  # must not raise
