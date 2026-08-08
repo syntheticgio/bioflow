@@ -357,6 +357,45 @@ class TestEventTranslation:
         await proc.stop()
 
 
+class TestTurnEndErrors:
+    async def test_turn_end_error_message_becomes_an_error_event(self, spawn):
+        service = make_service()
+        proc = await service.get_or_create("p", "j")
+        _, fake = spawn()
+        # Real capture from a pi 0.84.1 run against a bad API key.
+        fake.stdout.feed(
+            {
+                "type": "turn_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "api": "openai-responses",
+                    "provider": "openai",
+                    "model": "gemma-4-E2B-it-Q6_K",
+                    "stopReason": "error",
+                    "errorMessage": 'OpenAI API error (401): {"message":"Incorrect API key provided: dummy."}',
+                },
+            }
+        )
+        events = await collect(proc, 1)
+        assert events[0].type == "error"
+        assert "401" in events[0].data["message"]
+        await service.stop_agent("p", "j")
+
+    async def test_turn_end_without_an_error_emits_nothing(self, spawn):
+        """A normal turn must stay silent -- agent_settled already ends it."""
+        service = make_service()
+        proc = await service.get_or_create("p", "j")
+        _, fake = spawn()
+        fake.stdout.feed(
+            {"type": "turn_end", "message": {"role": "assistant", "content": [], "stopReason": "end_turn"}}
+        )
+        fake.stdout.feed({"type": "agent_settled"})
+        events = await collect(proc, 1)
+        assert events[0].type == "done", f"expected only done, got {events[0].type}"
+        await service.stop_agent("p", "j")
+
+
 class TestLifecycle:
     async def test_unexpected_exit_emits_error(self, spawn):
         service = make_service()

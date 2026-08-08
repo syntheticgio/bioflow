@@ -297,6 +297,14 @@ class AgentProcess:
             if text:
                 data["summary"] = text[:300]
             await self._put_event("tool_result", data)
+        elif etype == "turn_end":
+            # A provider failure lands here, not in an error event of its own:
+            # without this the drawer sees agent_start -> done with no text and
+            # reads a hard failure as a successful empty response.
+            message = payload.get("message") or {}
+            error_message = message.get("errorMessage")
+            if error_message:
+                await self._put_event("error", {"message": error_message})
         elif etype == "extension_error":
             await self._put_event(
                 "error", {"message": f"Agent extension error: {payload.get('message')}"}
