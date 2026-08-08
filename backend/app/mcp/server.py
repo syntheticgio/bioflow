@@ -171,9 +171,11 @@ def _register_resources(srv: MCPServer) -> None:
         return _read
 
     for topic in resources.GuideTopic:
-        srv.resource(f"bioflow://guides/{topic.value}", mime_type="text/markdown")(
-            _make_guide_reader(topic)
-        )
+        srv.resource(
+            f"bioflow://guides/{topic.value}",
+            name=f"guide_{topic.value.replace('-', '_')}",
+            mime_type="text/markdown",
+        )(_make_guide_reader(topic))
 
 
 def build_mcp_app() -> Starlette:
