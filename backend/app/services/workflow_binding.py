@@ -18,7 +18,7 @@ from beanie import PydanticObjectId
 
 from app.models.object import FormatKind, ObjectRole
 from app.models.workflow import WorkflowDefinition, WorkflowNode, WorkflowNodeKind
-from app.pipelines.node_types import NODE_TYPES
+from app.pipelines.node_types import NODE_TYPES, ports_for
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,8 @@ def _output_port_type(node: WorkflowNode, port_name: str):
     spec = NODE_TYPES.get(node.node_type)
     if spec is None:
         return None
-    port = next((p for p in spec.outputs if p.name == port_name), None)
+    _, outputs = ports_for(node)
+    port = next((p for p in outputs if p.name == port_name), None)
     return port.type if port else None
 
 
@@ -100,7 +101,8 @@ def bind_downstream_inputs(
         target_spec = NODE_TYPES.get(target.node_type)
         if target_spec is None:
             continue
-        port = next((p for p in target_spec.inputs if p.name == edge.to_port), None)
+        target_inputs, _ = ports_for(target)
+        port = next((p for p in target_inputs if p.name == edge.to_port), None)
         if port is None:
             continue
 
@@ -124,7 +126,7 @@ def bind_downstream_inputs(
             # library simply gets two QC runs.
             chosen = candidates[0]
             mate_port = next(
-                (p for p in target_spec.inputs if p.name == "mate"), None
+                (p for p in target_inputs if p.name == "mate"), None
             )
             if mate_port is not None and mate_port.type.accepts(
                 candidates[1].format, candidates[1].role
