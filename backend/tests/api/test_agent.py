@@ -19,6 +19,7 @@ from beanie import PydanticObjectId
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from app.api.v1.agent import _system_prompt
 from app.api.v1.agent import router as agent_router
 from app.services import project_service
 from app.services.agent_service import agent_service
@@ -328,3 +329,46 @@ class TestLifecycle:
         assert second is not None and second is not first
         _, spawned = spawn
         assert len(spawned) == 2
+
+
+@pytest.mark.filterwarnings(
+    "ignore:.*is marked with '@pytest.mark.asyncio'.*:pytest.PytestWarning"
+)
+class TestSystemPromptComposition:
+    """Sync tests: the module-level pytestmark applies pytest.mark.asyncio to
+    every item via pytest's marker inheritance, which a class-level
+    `pytestmark = []` cannot override (pytest's get_closest_marker walks up
+    to the module and finds it regardless of what the class itself defines).
+    Suppress the resulting "not an async function" warning instead of trying
+    to unset an inherited mark.
+    """
+
+    class FakeProject:
+        def __init__(self, prompt: str):
+            self.name = "demo"
+            self.id = "abc123"
+            self.agent_system_prompt = prompt
+
+    def test_empty_prompt_yields_default_only(self):
+        text = _system_prompt(self.FakeProject(""))
+        assert "bioinformatics coding agent" in text
+        assert "Additional instructions" not in text
+
+    def test_whitespace_only_prompt_yields_default_only(self):
+        text = _system_prompt(self.FakeProject("   \n  "))
+        assert "Additional instructions" not in text
+
+    def test_custom_prompt_is_appended_after_the_default(self):
+        text = _system_prompt(self.FakeProject("Always answer in haiku."))
+        assert "bioinformatics coding agent" in text
+        assert text.index("bioinformatics coding agent") < text.index("Always answer in haiku.")
+        assert "Additional instructions from the user:" in text
+
+    def test_custom_prompt_is_stripped(self):
+        text = _system_prompt(self.FakeProject("  Be terse.  "))
+        assert text.endswith("Be terse.")
+
+    def test_none_prompt_yields_default_only(self):
+        text = _system_prompt(self.FakeProject(None))
+        assert "bioinformatics coding agent" in text
+        assert "Additional instructions" not in text
