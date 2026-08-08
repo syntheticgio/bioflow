@@ -32,6 +32,20 @@ from app.services import workflow_hook
 OWNER = "tester"
 
 
+def _lua_sources() -> dict[str, str]:
+    """Read the Lua scripts synchronously.
+
+    Separate from the async fixture below on purpose: reading files with
+    `pathlib` inside an async function is blocking I/O on the event loop, which
+    ruff's ASYNC240 flags. tests/queue/conftest.py gets this right by keeping
+    its own script fixture sync.
+    """
+    from pathlib import Path
+
+    script_dir = Path(__file__).resolve().parents[2] / "app" / "queue" / "scripts"
+    return {p.stem: p.read_text() for p in script_dir.glob("*.lua")}
+
+
 @pytest.fixture
 async def redis(monkeypatch):
     """Local rather than inherited: tests/queue/conftest.py defines one, but
@@ -40,14 +54,12 @@ async def redis(monkeypatch):
     The real Lua scripts are registered too, because `queue.complete()` calls
     `release` -- mocking that away would skip the very path under test.
     """
-    from pathlib import Path
-
     import fakeredis.aioredis
 
     client = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    script_dir = Path(__file__).resolve().parents[2] / "app" / "queue" / "scripts"
     registered = {
-        p.stem: client.register_script(p.read_text()) for p in script_dir.glob("*.lua")
+        name: client.register_script(source)
+        for name, source in _lua_sources().items()
     }
     monkeypatch.setattr("app.db.redis_client._scripts", registered, raising=False)
     yield client
