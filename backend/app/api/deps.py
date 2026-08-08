@@ -100,3 +100,26 @@ async def get_current_owner_linkable(
 
 
 LinkableOwnerDep = Annotated[str, Depends(get_current_owner_linkable)]
+
+async def get_profile_id(
+    x_bioflow_profile: str | None = Header(default=None),
+    profile: str | None = Query(default=None),
+) -> str:
+    """The raw profile id, for routes that must forward it rather than its owner.
+
+    `get_current_owner` returns the `owner` string because every partitioned
+    query wants that. The agent endpoints want the client-supplied value
+    unchanged: the agent subprocess embeds it in `?profile=` on its MCP
+    connection, and the MCP server accepts exactly these values. Validation
+    still goes through `resolve_owner`, so both routes agree on what a valid
+    id is; only the return value differs.
+
+    Header wins when both are present, matching `profileHeaders()` being the
+    only thing that sets it from application code; the query parameter exists
+    for the SSE stream, which `EventSource` cannot attach a header to.
+    """
+    value = x_bioflow_profile or profile
+    await resolve_owner(value)
+    return value
+
+ProfileIdDep = Annotated[str, Depends(get_profile_id)]

@@ -309,6 +309,9 @@ class AgentProcess:
                 "error",
                 {"message": f"Agent process exited unexpectedly (code {returncode})."},
             )
+            # End the events stream so the router's re-attaching loop can
+            # pick up the replacement process (spawned by the next /ask).
+            await self._put_stop()
 
     async def _response_watchdog(self) -> None:
         """If a run neither starts nor settles within the timeout, say so."""

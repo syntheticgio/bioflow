@@ -15,10 +15,26 @@ from app.logging import configure_logging, get_logger
 from app.mcp.server import mount_mcp_app
 from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
+from app.services.agent_service import agent_service
 from app.storage.home import initialize_home
 from app.version import __version__
 
 log = get_logger(__name__)
+
+# How often the lifespan sweeps for idle agent processes.
+_AGENT_CLEANUP_INTERVAL = 60
+
+
+async def _agent_idle_cleanup() -> None:
+    """Reap agent subprocesses that have been silent past the idle timeout.
+
+    Agent processes are children of this api process, so they live and die
+    with it; this sweep is what keeps a forgotten drawer from holding a pi
+    subprocess open for weeks. A no-op while nothing is idle.
+    """
+    while True:
+        await asyncio.sleep(_AGENT_CLEANUP_INTERVAL)
+        await agent_service.cleanup_idle()
 
 
 async def _warm_tools() -> None:
@@ -76,10 +92,17 @@ async def lifespan(app: FastAPI):
     # cannot reach these tools.
     invalidation_task = asyncio.create_task(tool_cache.listen_for_invalidations(get_redis()))
 
+    # The drawer's agent processes: reap the idle ones on a schedule.
+    agent_cleanup_task = asyncio.create_task(_agent_idle_cleanup())
+
     log.info("started")
     try:
         yield
     finally:
+        agent_cleanup_task.cancel()
+        # Kill any agent subprocess still running; children of this process,
+        # they get no second chance after the api dies.
+        await agent_service.shutdown_all()
         warm_task.cancel()
         invalidation_task.cancel()
         await close_redis()
