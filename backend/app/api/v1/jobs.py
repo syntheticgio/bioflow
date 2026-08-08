@@ -252,20 +252,26 @@ async def get_job(job_id: PydanticObjectId, owner: OwnerDep) -> dict:
             obj = await DataObject.get(job.object_id)
             size = obj.size if obj and obj.owner == owner else 0
         if size:
-            out["timing_estimate"] = await timing_service.estimate(job.type, size)
+            threads = job.payload.get("threads")
+            out["timing_estimate"] = await timing_service.estimate(
+                job.type, size, threads=threads
+            )
             # The raw model output stays, for the diagnostics view that shows
             # sample counts and fit quality. `resolution` is what the launch
             # dialog reads: the number actually used, and which layer produced
             # it. `heuristic_mb=None` because this endpoint has no run
             # structure to derive one from -- so an untrustworthy measurement
             # resolves to UNKNOWN here rather than silently to coefficients.
-            out["memory_estimate"] = await timing_service.estimate_memory(job.type, size)
+            out["memory_estimate"] = await timing_service.estimate_memory(
+                job.type, size, threads=threads
+            )
             from app.services import memory_estimate
 
             resolved = await memory_estimate.resolve(
                 job_type=job.type,
                 input_bytes=size,
                 heuristic_mb=None,
+                threads=threads,
             )
             out["memory_estimate_resolution"] = {
                 "mb": resolved.mb,

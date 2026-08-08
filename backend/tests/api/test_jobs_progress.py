@@ -181,7 +181,7 @@ class TestPctEstimatedOnJobDetail:
     ):
         from app.services import timing_service
 
-        async def _fake_estimate(job_type, input_bytes):
+        async def _fake_estimate(job_type, input_bytes, *, threads=None):
             return {"known": True, "estimate_ms": 60_000, "samples": 10}
 
         monkeypatch.setattr(timing_service, "estimate", _fake_estimate)
@@ -207,7 +207,7 @@ class TestPctEstimatedOnJobDetail:
     ):
         from app.services import timing_service
 
-        async def _fake_estimate(job_type, input_bytes):
+        async def _fake_estimate(job_type, input_bytes, *, threads=None):
             return {"known": True, "estimate_ms": 60_000, "samples": 10}
 
         monkeypatch.setattr(timing_service, "estimate", _fake_estimate)
@@ -252,7 +252,7 @@ class TestPctEstimatedOnJobDetail:
     ):
         from app.services import timing_service
 
-        async def _fake_estimate(job_type, input_bytes):
+        async def _fake_estimate(job_type, input_bytes, *, threads=None):
             return {"known": True, "estimate_ms": 60_000, "samples": 10}
 
         monkeypatch.setattr(timing_service, "estimate", _fake_estimate)
