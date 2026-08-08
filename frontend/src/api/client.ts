@@ -1113,4 +1113,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  // --- Agent chat ---
+  askAgent: (projectId: string, message: string) =>
+    request<{ status: string }>(`/projects/${projectId}/agent/ask`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  restartAgent: (projectId: string) =>
+    request<{ status: string }>(`/projects/${projectId}/agent/restart`, {
+      method: "POST",
+    }),
+
+  stopAgent: (projectId: string) =>
+    request<void>(`/projects/${projectId}/agent`, { method: "DELETE" }),
 };

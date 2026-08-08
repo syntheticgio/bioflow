@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
 import { useMessageStore } from "../stores/messageStore";
+import { AgentPanel } from "./AgentPanel";
 import { ProjectQaDrawer } from "./ProjectQaDrawer";
 import { QueuePanel } from "./QueuePanel";
 
@@ -15,6 +16,7 @@ export function Footer({
   const latest = useMessageStore((s) => s.latest);
   const [queueOpen, setQueueOpen] = useState(false);
   const [qaOpen, setQaOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
 
   const { data, isError } = useQuery({
     queryKey: ["system", "stats"],
@@ -31,6 +33,9 @@ export function Footer({
       {queueOpen && <QueuePanel onClose={() => setQueueOpen(false)} />}
       {qaOpen && projectId && (
         <ProjectQaDrawer projectId={projectId} onClose={() => setQaOpen(false)} />
+      )}
+      {agentOpen && projectId && (
+        <AgentPanel projectId={projectId} onClose={() => setAgentOpen(false)} />
       )}
     <footer className="footer">
       <span className={`footer-message ${latest?.level ?? ""}`}>
@@ -62,6 +67,17 @@ export function Footer({
           onClick={() => setQaOpen((o) => !o)}
         >
           💬 Ask
+        </button>
+      )}
+
+      {projectId && (
+        <button
+          type="button"
+          className="footer-link"
+          title="Open AI agent"
+          onClick={() => setAgentOpen((o) => !o)}
+        >
+          🤖 Agent
         </button>
       )}
 
