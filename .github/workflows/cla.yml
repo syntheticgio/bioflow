@@ -34,5 +34,5 @@ jobs:
           path-to-document: https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md
           branch: cla-signatures
           allowlist: syntheticgio
-          remote-organization-name: ${{ github.repository_owner }}
-          remote-repository-name: ${{ github.event.repository.name }}
+          # remote-organization-name: ${{ github.repository_owner }}
+          # remote-repository-name: ${{ github.event.repository.name }}
