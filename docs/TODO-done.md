@@ -2773,3 +2773,100 @@ Other candidates worth considering under the same heading: explaining *why* a
 QC run failed a threshold, and suggesting the next pipeline step in prose
 alongside the Actions cards.
 
+
+## Generic pipeline workflows (DAG) -- FIXED
+
+Raised: 2026-07-31, requested. Epic:
+[#18](https://github.com/syntheticgio/bioflow/issues/18); first slice
+[#20](https://github.com/syntheticgio/bioflow/issues/20). Design:
+[`docs/superpowers/specs/2026-08-07-workflow-dag-design.md`](superpowers/specs/2026-08-07-workflow-dag-design.md).
+
+**2026-08-08: shipped, all five decomposition slices.** A ComfyUI-style typed
+canvas composes BioFlow's existing launches into a saved, reusable,
+project-independent graph. `WorkflowDefinition`, `WorkflowRun` and
+`WorkflowNodeRun` live in `backend/app/models/workflow.py` (status is derived
+by `derive_status`, never stored); `backend/app/pipelines/node_types.py`
+classifies all 26 `launch_*` functions (22 canvas node types, 4 excluded)
+behind an exhaustiveness test; `workflow_service.py` type-checks wires and
+detects cycles; `workflow_orchestrator.py` does progressive launch,
+retry-in-place, cancellation and derived status;
+`WorkflowCanvas.tsx` is the editor with a registry-generated palette, and
+`activity/WorkflowRuns.tsx` the activity presentation. Merged via #79 and #80.
+Full backend suite green at 4044 passed.
+
+Both questions this entry said to settle early were settled:
+
+- **A workflow instance is not an object, and does not extend `Run`.**
+  `WorkflowRun` is a *parent over* ordinary `PipelineRun`s, which stay
+  unchanged (design §1.5). Extending `Run` was rejected: `models/run.py`'s own
+  docstring test is whether a record "describes a user's request or the
+  machine's plan; only the former belongs," and a DAG instance is the latter.
+- **Failure is branch-scoped, not halt and not continue-everything.**
+  Descendants of a failed node are cancelled, independent branches run to
+  completion, and the workflow ends `PARTIAL` -- a status `RunStatus` already
+  defined for this shape. A per-node `continue_on_failure` overrides, mirroring
+  `OPTIONAL_ROLES`. This needed the queue change the entry anticipated:
+  `tolerate_failure_of` on `Job` and through `queue/queue.py`.
+
+**What the implementation did differently, in four places.**
+
+The most consequential: **`depends_on` cannot express a workflow edge**, which
+the design established rather than discovered late. It links job *ids* known at
+enqueue time, but a downstream node's job does not exist yet -- it cannot be
+created until its input objects exist, because the launchers validate their
+inputs. So workflow edges are resolved by an orchestrator with a completion
+hook, and `depends_on` continues to handle intra-launch ordering untouched.
+This entry's framing assumed the existing gate could be extended; it could not.
+
+**The node-type registry is keyed by `module.function_name`, not a bare name.**
+Writing it exposed a real collision: `launch_download` is independently defined
+in three service modules with unrelated signatures, so a bare-string registry
+would have silently collapsed three launchers into one classifiable unit --
+defeating the exhaustiveness check it existed to serve.
+
+**Activity presentation does not consume `run_ids` from `job.progress`, though
+design §9 said it would.** It cannot: `run_ids` carries `PipelineRun` ids, and
+13 of the 22 canvas node types create no `PipelineRun` at all, so a workflow
+whose QC node was working would report nothing. It uses query invalidation plus
+a 2s poll while a run is active instead, matching the existing runs/jobs
+cadence. The boundary with [#24](https://github.com/syntheticgio/bioflow/issues/24)
+still holds -- this epic aggregates, it does not invent per-job transport --
+but it aggregates by polling derived server-side state. Documented at both
+consumer sites (`hooks/useEvents.ts`, `activity/WorkflowRuns.tsx`).
+
+**A node is a launch, not a job**, and inputs are explicit `INPUT` nodes rather
+than free ports at the graph edge. The first buys `pipeline_service`'s input
+validation, tool selection and index deduplication for free, at the accepted
+cost that a workflow can only compose actions BioFlow already has a launch path
+for. The second keeps definitions free of object ids, so a saved graph never
+goes stale and is never implicitly project-scoped.
+
+The design's §10 named two structural risks; both are covered. The registry's
+exhaustiveness test is `backend/tests/pipelines/test_node_types.py`. The
+stranded-run failure mode -- a crash between a node finishing and its successor
+launching, which nothing would otherwise revive because a workflow has no timer
+and no dependency to release -- is `workflow_orchestrator.reconcile_workflows`,
+wired into `queue/worker.py` both at startup and on the periodic sweep.
+
+Original entry follows.
+
+Today each pipeline is a hand-written handler and `Job.depends_on` gates one
+job behind another. That gate is real and exercised (`align_reads` waiting on
+`build_index`), but it is a per-launch decision made in
+`pipeline_service.launch_*`, not a reusable graph.
+
+What this asks for is a user-definable DAG: run QC, then trim, then align, then
+call, as one declared unit that survives a restart and reports progress as a
+whole.
+
+Two things to settle early, because they shape everything after:
+
+- **Does a workflow instance become an object?** The activity view groups by
+  `Run`, and a DAG is naturally a run-of-runs. Extending `Run` beats inventing
+  a parallel concept if it can carry the nesting.
+- **Failure semantics.** If step three of five fails, does the DAG halt, retry,
+  or continue what does not depend on it? The current queue has retries and a
+  reaper but no notion of partial workflow failure.
+
+This is the largest item in this file and probably wants decomposing into its
+own spec before any plan.
