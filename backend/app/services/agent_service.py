@@ -76,6 +76,10 @@ class AgentProcess:
         self._pi_path = pi_path
         self._response_timeout = response_timeout
         self._system_prompt = system_prompt
+        # Read once, at spawn: it becomes an argv element in start(). The
+        # service compares against this to decide whether a live process is
+        # still running the caller's prompt.
+        self.spawned_with_prompt = system_prompt
 
         self.process: asyncio.subprocess.Process | None = None
         self._queue: asyncio.Queue[AgentEvent] = asyncio.Queue()
@@ -394,7 +398,21 @@ class AgentService:
         key = self._key(profile_id, project_id)
         proc = self._processes.get(key)
         if proc is not None and proc.process is not None:
-            return proc
+            if proc.spawned_with_prompt == system_prompt:
+                return proc
+            if proc._busy:
+                # A prompt change can't reach a running process, but this one
+                # is mid-response -- killing it would silently discard
+                # whatever it's generating. Let it finish under the old
+                # prompt; the mismatch will be caught again next time this
+                # key is requested, once the process is idle.
+                return proc
+            # pi takes its system prompt as an argv element, so a changed
+            # prompt cannot reach a running process. Replace it rather than
+            # answering the next message under the old instructions.
+            log.info("agent_prompt_changed", profile=profile_id, project=str(project_id))
+            await self.stop_agent(profile_id, project_id)
+            proc = None
         if proc is not None:
             # Dead process from a crashed pi; reap it and start over.
             self._processes.pop(key, None)
@@ -424,9 +442,18 @@ class AgentService:
             await proc.stop()
             log.info("agent_stopped", profile=profile_id, project=str(project_id))
 
-    async def restart_agent(self, profile_id: str, project_id: str) -> AgentProcess:
+    async def restart_agent(
+        self, profile_id: str, project_id: str, *, system_prompt: str | None = None
+    ) -> AgentProcess:
+        """Stop and respawn.
+
+        `system_prompt` is forwarded because the respawned process gets its
+        prompt only from here -- omitting it (as this method used to) drops
+        the project grounding, leaving a restarted agent with no idea which
+        project it is in.
+        """
         await self.stop_agent(profile_id, project_id)
-        return await self.get_or_create(profile_id, project_id)
+        return await self.get_or_create(profile_id, project_id, system_prompt=system_prompt)
 
     async def cleanup_idle(self) -> None:
         """Stop processes that have been silent (and not mid-run) past the
