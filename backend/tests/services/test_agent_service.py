@@ -153,20 +153,14 @@ class TestSpawn:
         await service.get_or_create("prof-1", "proj-1")
         calls, fake = spawn()
         assert len(calls) == 1
-        expected_head = [
-            "/usr/local/bin/pi",
-            "--mode",
-            "rpc",
-            "--no-session",
-            "--mcp-config",
-        ]
-        assert calls[0][:5] == expected_head
+        assert calls[0][:3] == ["/usr/local/bin/pi", "--mode", "rpc"]
+        assert "--mcp-config" in calls[0]
         # The temp config file exists and carries the profile URL.
-        config = read_config(calls[0][5])
+        config = read_config(calls[0][calls[0].index("--mcp-config") + 1])
         assert config["mcpServers"]["bioflow"]["url"].endswith("?profile=prof-1")
         assert fake is not None
         await service.stop_agent("prof-1", "proj-1")
-        assert not config_file_exists(calls[0][5])
+        assert not config_file_exists(calls[0][calls[0].index("--mcp-config") + 1])
 
     async def test_system_prompt_is_passed_as_a_flag(self, spawn):
         service = make_service()
@@ -200,6 +194,42 @@ class TestSpawn:
         calls, _ = spawn()
         assert a is not b
         assert len(calls) == 2
+
+
+class TestSessionFlags:
+    async def test_spawn_uses_session_id_and_dir_not_no_session(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-1", "proj-1")
+        calls, _ = spawn()
+        cmd = calls[0]
+        assert "--no-session" not in cmd
+        assert "--session-dir" in cmd
+        assert cmd[cmd.index("--session-dir") + 1] == str(tmp_path)
+        assert "--session-id" in cmd
+        assert cmd[cmd.index("--session-id") + 1] == "bioflow-prof-1-proj-1"
+        await service.stop_agent("prof-1", "proj-1")
+
+    async def test_session_id_is_stable_across_respawns(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-1", "proj-1")
+        await service.stop_agent("prof-1", "proj-1")
+        await service.get_or_create("prof-1", "proj-1")
+        calls, _ = spawn()
+        first = calls[0][calls[0].index("--session-id") + 1]
+        second = calls[1][calls[1].index("--session-id") + 1]
+        assert first == second
+        await service.stop_agent("prof-1", "proj-1")
+
+    async def test_session_id_differs_by_profile_and_by_project(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-A", "proj-1")
+        await service.get_or_create("prof-B", "proj-1")
+        await service.get_or_create("prof-A", "proj-2")
+        calls, _ = spawn()
+        ids = [c[c.index("--session-id") + 1] for c in calls]
+        assert len(set(ids)) == 3, f"session ids must be distinct, got {ids}"
+        for prof, proj in (("prof-A", "proj-1"), ("prof-B", "proj-1"), ("prof-A", "proj-2")):
+            await service.stop_agent(prof, proj)
 
 
 class TestPrompt:

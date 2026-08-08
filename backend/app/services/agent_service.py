@@ -32,6 +32,7 @@ import time
 from asyncio import create_subprocess_exec
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from app.config import settings
 from app.errors import AgentUnavailableError
@@ -68,6 +69,7 @@ class AgentProcess:
         mcp_config: dict,
         pi_path: str,
         response_timeout: float,
+        sessions_dir: Path,
         system_prompt: str | None = None,
     ) -> None:
         self.profile_id = profile_id
@@ -75,6 +77,7 @@ class AgentProcess:
         self._mcp_config = mcp_config
         self._pi_path = pi_path
         self._response_timeout = response_timeout
+        self._sessions_dir = sessions_dir
         self._system_prompt = system_prompt
 
         self.process: asyncio.subprocess.Process | None = None
@@ -105,7 +108,21 @@ class AgentProcess:
             raise
         self._mcp_config_file = path
 
-        cmd = [self._pi_path, "--mode", "rpc", "--no-session", "--mcp-config", path]
+        # Sessions replace --no-session: pi persists the conversation itself,
+        # keyed by (profile, project), so a process lost to the idle reaper,
+        # a crash, or an api restart reloads its memory on respawn.
+        self._sessions_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            self._pi_path,
+            "--mode",
+            "rpc",
+            "--session-dir",
+            str(self._sessions_dir),
+            "--session-id",
+            session_id_for(self.profile_id, self.project_id),
+            "--mcp-config",
+            path,
+        ]
         if self._system_prompt:
             cmd += ["--system-prompt", self._system_prompt]
 
@@ -342,6 +359,16 @@ class AgentProcess:
         await self._queue.put(AgentEvent(type="__stop__"))
 
 
+def session_id_for(profile_id: str, project_id: str) -> str:
+    """The pi session id for one (profile, project) pair.
+
+    Stable across respawns -- that is what lets a reaped or crashed process
+    reload the conversation -- and distinct across both axes, since sharing
+    an id between profiles would leak one user's conversation into another's.
+    """
+    return f"bioflow-{profile_id}-{project_id}"
+
+
 def _tool_call_payload(payload: dict) -> dict:
     """Translate one tool event; unwrap the mcp proxy's nested tool name."""
     name = payload.get("toolName") or "unknown"
@@ -368,12 +395,14 @@ class AgentService:
         extra_mcp_servers: dict | None = None,
         response_timeout: float | None = None,
         idle_timeout: float | None = None,
+        sessions_dir: Path | None = None,
     ) -> None:
         self._pi_path = pi_path or settings.pi_path
         self._mcp_base_url = mcp_base_url
         self._extra_mcp_servers = extra_mcp_servers
         self._response_timeout = response_timeout or settings.agent_response_timeout
         self._idle_timeout = idle_timeout or settings.agent_idle_timeout
+        self._sessions_dir = sessions_dir or settings.agent_sessions_dir
         self._processes: dict[tuple[str, str], AgentProcess] = {}
 
     def _key(self, profile_id: str, project_id: str) -> tuple[str, str]:
@@ -405,6 +434,7 @@ class AgentService:
             mcp_config=self._build_mcp_config(profile_id),
             pi_path=self._pi_path,
             response_timeout=self._response_timeout,
+            sessions_dir=self._sessions_dir,
             system_prompt=system_prompt,
         )
         await proc.start()
