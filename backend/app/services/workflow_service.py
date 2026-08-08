@@ -106,7 +106,11 @@ def validate_definition(definition: WorkflowDefinition) -> list[ValidationError]
             continue
 
         key = (edge.to_node, edge.to_port)
-        if key in wired:
+        # A multi port collects several wires; every other port takes one.
+        # Checked here rather than by skipping the bookkeeping entirely,
+        # because `wired` is also what the required-input check below reads --
+        # a multi port with one wire must still count as satisfied.
+        if key in wired and not port.multiple:
             errors.append(
                 ValidationError(
                     "duplicate_wire",

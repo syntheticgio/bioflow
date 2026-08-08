@@ -54,6 +54,17 @@ class PortSpec:
     name: str
     type: PortType
     required: bool = True
+    # Whether this port accepts several incoming wires, collected into a list
+    # for the launcher. Only the one-wire-per-port rule relaxes -- type
+    # checking still applies to each wire independently, which is what keeps a
+    # multi port from becoming an untyped one.
+    #
+    # `continuity_qc`'s hifi_bam/nano_bam and `differential_expression`'s
+    # counts are the other two ports whose launchers genuinely take lists
+    # today (both currently smuggle the set through `params`). They are left
+    # scalar here deliberately: each needs its own decision about how the
+    # per-sample design travels, and neither is what #94 asks for.
+    multiple: bool = False
 
 
 @dataclass(frozen=True)
@@ -311,7 +322,10 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         launch=_launch_align,
         run_kind=RunKind.ALIGNMENT,
         inputs=(
-            PortSpec("reads", PortType(format=FormatKind.FASTQ)),
+            # Several read files go in together -- chunked/split reads, not
+            # mates. `mate` beside it stays scalar: R2 is one file with a
+            # specific meaning, and collapsing the two concepts would lose it.
+            PortSpec("reads", PortType(format=FormatKind.FASTQ), multiple=True),
             PortSpec("mate", PortType(format=FormatKind.FASTQ), required=False),
             # The role is required here, and it is the whole point: a protein
             # FASTA and a genome are both FormatKind.FASTA.
