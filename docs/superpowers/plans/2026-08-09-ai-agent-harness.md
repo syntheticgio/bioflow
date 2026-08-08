@@ -70,11 +70,16 @@ docker compose up -d --build api
 
 **Files:**
 - Modify: `backend/app/config.py`
-- Modify: `backend/Dockerfile` (or `docker-compose.override.yml`)
-- Create: `pi-skills/` directory with placeholder skills
+- Modify: `backend/Dockerfile`
+- Create: `pi-skills/` directory with four starter skills
 
 Adds config settings, installs Node 22, Pi + pi-mcp-adapter in the api
-container, and sets up skills/extensions directories.
+container, and sets up the skills directory.
+
+**Decisions locked (2026-08-08):** pin pi 0.84.1 and pi-mcp-adapter 2.21.1
+via ARG (repo convention); Node 22 via NodeSource apt; all four starter
+skills (run-qc, interpret-multiqc, suggest-next-steps, debug-failed-job);
+`AGENT_EXTRA_MCP_SERVERS` config setting added now.
 
 - [ ] **Step 1: Add config settings**
 
@@ -85,7 +90,13 @@ PI_PATH: str = "/usr/local/bin/pi"  # Path to pi CLI binary
 PI_DISABLED: bool = False  # Set True to hide agent UI entirely
 AGENT_RESPONSE_TIMEOUT: int = 300  # Seconds before killing unresponsive agent
 AGENT_IDLE_TIMEOUT: int = 1800  # Kill agent after 30 min of inactivity
+# Extra MCP servers merged into every agent's mcp config
+# e.g. '{"ncbi": {"url": "https://...", "lifecycle": "lazy"}}'
+AGENT_EXTRA_MCP_SERVERS: dict = Field(default_factory=dict)
 ```
+
+Note: the Settings class already uses pydantic-settings; `Field` should
+already be imported (check imports when editing).
 
 - [ ] **Step 2: Install Node 22, Pi, and pi-mcp-adapter in the api container**
 
@@ -105,18 +116,26 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Pi coding agent globally
-RUN npm install -g @earendil-works/pi-coding-agent
+# Install Pi coding agent globally (pinned — RPC event shapes are part of
+# the SSE translation contract; a silent pi upgrade could break it)
+ARG PI_VERSION=0.84.1
+RUN npm install -g @earendil-works/pi-coding-agent@${PI_VERSION}
 
 # Install pi-mcp-adapter (required for MCP server connectivity).
 # pi install registers the extension in ~/.pi/agent/settings.json —
 # no interactive prompts, safe to run at build time.
-RUN pi install npm:pi-mcp-adapter \
+ARG PI_MCP_ADAPTER_VERSION=2.21.1
+RUN pi install npm:pi-mcp-adapter@${PI_MCP_ADAPTER_VERSION} \
     && pi --version
 
 # Copy skills (teaches Pi about bioinformatics workflows)
 COPY ./pi-skills/ /root/.pi/agent/skills/
 ```
+
+Build-time smoke check after the install RUN: `pi --version` (already in the
+RUN) plus `pi list` (shows installed extensions, proving the adapter
+registered). If `pi install` ever prompts, fail the build rather than
+auto-answering — it should not prompt (verified headless on 0.84.1).
 
 Or in `docker-compose.override.yml` for development:
 
@@ -130,17 +149,26 @@ services:
       - ./pi-skills:/root/.pi/agent/skills:ro
 ```
 
-- [ ] **Step 3: Create placeholder skills directory**
+- [ ] **Step 3: Create the four starter skills**
 
-Create `pi-skills/` with a README and placeholder skills:
+Create `pi-skills/` with a README and four skills. All skills are written
+against the mcp proxy interface — the agent calls a single `mcp` proxy tool
+(pi-mcp-adapter's default, lazy-connect mode), not raw tools. Tool names
+referenced are the real MCP server tools (verified in
+`backend/app/mcp/server.py`).
 
-```markdown
-# pi-skills/README.md
-Skills that teach the BioFlow agent about bioinformatics workflows.
-See https://agentskills.io/specification for the skill format.
+Each skill is a directory with a `SKILL.md`:
+
+```
+pi-skills/
+├── README.md
+├── run-qc/SKILL.md
+├── interpret-multiqc/SKILL.md
+├── suggest-next-steps/SKILL.md
+└── debug-failed-job/SKILL.md
 ```
 
-Add a starter skill like `pi-skills/run-qc/SKILL.md`:
+**run-qc/SKILL.md** — run a QC pipeline on FASTQ data:
 ```markdown
 ---
 name: run-qc
@@ -148,30 +176,118 @@ name: run-qc
 
 # Run QC Pipeline
 
-How to run a quality control pipeline on sequencing data in BioFlow.
-
 ## When to Use
 
-When the user has raw sequencing data (FASTQ files) in their project and
-wants to assess quality before running further analysis.
+The user has raw sequencing data (FASTQ files) in their project and wants
+to assess quality before running further analysis.
 
 ## Procedure
 
-1. List the FASTQ files in the project using the `bioflow_list_project_objects`
-   tool with type filter "fastq".
+1. List FASTQ files: `mcp({ tool: "bioflow_list_objects", args: { project_id, type: "fastq" } })`
 2. Select paired-end files (typically *_R1_*.fastq.gz and *_R2_*.fastq.gz).
-3. Run the QC pipeline using `bioflow_run_pipeline` with pipeline_id="qc"
-   and the selected files as inputs.
-4. Check the job status with `bioflow_get_job_status`.
-5. Once complete, view the MultiQC report via `bioflow_get_object` on the
-   output HTML file.
+3. Run QC: `mcp({ tool: "bioflow_run_pipeline", args: { pipeline_id: "qc", inputs: [...] } })`
+4. Check job status: `mcp({ tool: "bioflow_get_job", args: { job_id } })`
+5. Once complete, point the user at the MultiQC report via
+   `mcp({ tool: "bioflow_get_object", args: { object_id } })`.
 ```
 
-- [ ] **Step 4: Ensure Pi is on the PATH**
+**interpret-multiqc/SKILL.md** — explain QC numbers in plain terms:
+```markdown
+---
+name: interpret-multiqc
+---
+
+# Interpret MultiQC Report
+
+## When to Use
+
+The user has a completed QC job and wants to know whether the data is good
+enough to proceed.
+
+## Procedure
+
+1. Fetch the MultiQC report object:
+   `mcp({ tool: "bioflow_get_object", args: { object_id } })`.
+2. Read the per-base quality, GC content, adapter content, and duplication
+   sections.
+3. Explain in plain terms: which samples look good, which need trimming or
+   re-sequencing, and why (e.g. adapter contamination, low per-base Q30).
+4. If quality is borderline, suggest trimming (`trim_reads` pipeline) before
+   alignment.
+```
+
+**suggest-next-steps/SKILL.md** — propose next pipeline steps:
+```markdown
+---
+name: suggest-next-steps
+---
+
+# Suggest Next Steps
+
+## When to Use
+
+The user asks "what should I do next?" or is deciding what to run.
+
+## Procedure
+
+1. Call `mcp({ tool: "bioflow_suggest_next", args: { project_id } })` to get
+   BioFlow's own suggestion rules output.
+2. Call `mcp({ tool: "bioflow_list_objects", args: { project_id } })` to see
+   what data exists.
+3. Present 1-3 concrete next steps, each with: what it runs, what input it
+   needs, and what the expected output is.
+4. Offer to launch it via `bioflow_run_pipeline` if the user wants.
+```
+
+**debug-failed-job/SKILL.md** — diagnose a failed pipeline job:
+```markdown
+---
+name: debug-failed-job
+---
+
+# Debug a Failed Job
+
+## When to Use
+
+The user says a pipeline failed, or asks why a job is stuck/failed.
+
+## Procedure
+
+1. Call `mcp({ tool: "bioflow_get_job", args: { job_id } })` for status and
+   error details.
+2. Call `mcp({ tool: "bioflow_list_jobs", args: { project_id } })` if the
+   job_id is unknown, to find the failed one.
+3. Distinguish input problems (missing/corrupt files) from tool failures
+   (tool not installed, resource limits) — check the job's error payload.
+4. Suggest the concrete fix: re-upload input, install the tool, or re-run.
+```
+
+Also add `pi-skills/README.md`:
+```markdown
+# pi-skills
+
+Skills that teach the BioFlow agent about bioinformatics workflows.
+See https://agentskills.io/specification for the skill format.
+Skills are written against the mcp proxy tool (pi-mcp-adapter).
+```
+
+- [ ] **Step 4: Ensure Pi is on the PATH and adapter is registered**
 
 Verify the api container has Node.js available and that `pi` resolves. The
-base image already includes Node.js; the npm install adds `pi` to
-`/usr/local/bin/`.
+npm global install adds `pi` to `/usr/local/bin/`. After building:
+
+```bash
+docker compose exec api node --version   # >= 22.19
+docker compose exec api pi --version
+docker compose exec api pi list          # shows pi-mcp-adapter in extensions
+```
+
+- [ ] **Step 5: Tests for config defaults**
+
+Add a small test asserting the new settings defaults (e.g. `PI_DISABLED`
+is False, `AGENT_EXTRA_MCP_SERVERS` is empty dict) in
+`backend/tests/` — find the existing config tests and extend them rather
+than creating a new file if one exists.
 
 ---
 
