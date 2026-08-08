@@ -3,6 +3,7 @@ import type { RunMemberJob, RunSummary } from "../../api/types";
 import { formatClock } from "../../lib/format";
 import { STATUS_LABELS, runFacts } from "../../lib/runFormat";
 import { SectionHead } from "./SectionHead";
+import { RunFailureBlock } from "./RunFailureBlock";
 
 /**
  * Finished runs as a numbered ledger: one line each, parameters on demand.
@@ -133,6 +134,10 @@ export function LedgerRow({
               ))}
             </div>
           )}
+
+          {/* Only for a run that failed. A succeeded run's expansion is
+              exactly what it was before this existed. */}
+          {run.status === "failed" && <RunFailureBlock jobs={jobs ?? []} />}
         </div>
       )}
     </div>
