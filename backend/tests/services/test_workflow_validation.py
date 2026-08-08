@@ -7,7 +7,9 @@ complete and cannot run.
 """
 
 import pytest
+from beanie import PydanticObjectId
 
+from app.errors import AppError, NotFoundError
 from app.models import FormatKind, ObjectRole
 from app.models.workflow import (
     PortType,
@@ -164,6 +166,38 @@ class TestCrud:
                 owner="test-owner",
             )
         assert any(e.code == "missing_required_input" for e in caught.value.errors)
+
+    async def test_invalid_graph_is_a_real_app_error(self):
+        """InvalidGraph belongs in the app's own error hierarchy (see
+        app/errors.py) rather than being a bare Exception -- a future router
+        calling create_definition/update_definition should get a proper 422,
+        not an unhandled 500."""
+        with pytest.raises(InvalidGraph) as caught:
+            await create_definition(
+                name="bad",
+                description="",
+                nodes=[_input("reads", FormatKind.FASTQ), _action("a", "align")],
+                edges=[
+                    WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads")
+                ],
+                owner="test-owner",
+            )
+        assert isinstance(caught.value, AppError)
+        assert caught.value.status_code == 422
+
+    async def test_editing_a_missing_definition_raises_not_found(self):
+        """A stale definition id (deleted, or simply wrong) is a not-found
+        case, not an invalid-graph case -- the two must not share an error."""
+        with pytest.raises(NotFoundError):
+            await update_definition(
+                PydanticObjectId(),
+                name="anything",
+                description="",
+                nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
+                edges=[
+                    WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")
+                ],
+            )
 
     async def test_an_edit_bumps_the_version(self):
         """Runs pin a version, so an edit must produce a new one."""

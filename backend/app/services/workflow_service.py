@@ -7,6 +7,8 @@ save is a builder you fix by trial and error.
 
 from dataclasses import dataclass
 
+from app import errors
+from app.errors import NotFoundError
 from app.models.workflow import (
     WorkflowDefinition,
     WorkflowEdge,
@@ -199,13 +201,25 @@ def _has_cycle(definition: WorkflowDefinition) -> bool:
     return False
 
 
-class InvalidGraph(Exception):
+class InvalidGraph(errors.AppError):
     """Raised rather than returned, because a caller that ignores a returned
-    error list stores an unrunnable graph."""
+    error list stores an unrunnable graph.
 
-    def __init__(self, errors: list[ValidationError]):
-        self.errors = errors
-        super().__init__(f"{len(errors)} validation error(s)")
+    A validation_error/422 in the app's own error hierarchy (see
+    `app/errors.py`) rather than a bare Exception, so a future router calling
+    `create_definition`/`update_definition` gets a proper HTTP response
+    instead of a 500 -- `.errors` carries the full `ValidationError` list
+    (the dataclass above, not `app.errors.ValidationError`) for a caller that
+    wants to report every problem, while `.message` is a summary for the ones
+    that just want a string.
+    """
+
+    status_code = 422
+    code = "invalid_graph"
+
+    def __init__(self, validation_errors: list[ValidationError]):
+        self.errors = validation_errors
+        super().__init__(f"{len(validation_errors)} validation error(s)")
 
 
 async def create_definition(
@@ -219,9 +233,9 @@ async def create_definition(
     definition = WorkflowDefinition(
         name=name, description=description, nodes=nodes, edges=edges, owner=owner
     )
-    errors = validate_definition(definition)
-    if errors:
-        raise InvalidGraph(errors)
+    validation_errors = validate_definition(definition)
+    if validation_errors:
+        raise InvalidGraph(validation_errors)
     await definition.insert()
     return definition
 
@@ -242,9 +256,7 @@ async def update_definition(
     """
     definition = await WorkflowDefinition.get(definition_id)
     if definition is None:
-        raise InvalidGraph(
-            [ValidationError("not_found", f"No definition {definition_id}.")]
-        )
+        raise NotFoundError(f"No definition {definition_id}.")
 
     candidate = WorkflowDefinition(
         name=name,
@@ -253,9 +265,9 @@ async def update_definition(
         edges=edges,
         owner=definition.owner,
     )
-    errors = validate_definition(candidate)
-    if errors:
-        raise InvalidGraph(errors)
+    validation_errors = validate_definition(candidate)
+    if validation_errors:
+        raise InvalidGraph(validation_errors)
 
     definition.name = name
     definition.description = description
