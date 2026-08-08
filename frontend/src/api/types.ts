@@ -1943,3 +1943,52 @@ export interface DerivedGraph {
   edges: WorkflowEdge[];
   skipped: SkippedRun[];
 }
+
+/** One workflow run in the activity listing.
+ *
+ * `status` is derived server-side from node states, never stored -- the same
+ * vocabulary as `RunStatus`, so the existing STATUS_LABELS apply. The counts
+ * ride along so a collapsed row reads "1 of 3" without a second request. */
+export interface WorkflowRunRow {
+  id: string;
+  definition_id: string;
+  definition_version: number;
+  project_id: string;
+  label: string;
+  status: RunStatus;
+  node_total: number;
+  node_done: number;
+  node_failed: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowNodeJob {
+  job_id: string;
+  /** Null when the job has been pruned by the 30-day TTL. */
+  type: string | null;
+  state: JobState | null;
+  progress: JobSummary["progress"] | null;
+  error: { code: string; message: string } | null;
+}
+
+export interface WorkflowNodeRow {
+  node_id: string;
+  kind: "input" | "action";
+  node_type: string | null;
+  label: string;
+  state: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "skipped";
+  attempt: number;
+  /** Set only for the 9 node types that create a PipelineRun. */
+  run_id: string | null;
+  jobs: WorkflowNodeJob[];
+  outputs: string[];
+}
+
+export interface WorkflowRunDetail {
+  id: string;
+  definition_id: string;
+  label: string;
+  status: RunStatus;
+  nodes: WorkflowNodeRow[];
+}

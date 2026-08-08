@@ -9,6 +9,7 @@ import { JobLogView } from "./JobLogView";
 import { ActivityDesk } from "./activity/ActivityDesk";
 import { ActivityLead } from "./activity/ActivityLead";
 import { RunLedger } from "./activity/RunLedger";
+import { WorkflowRuns } from "./activity/WorkflowRuns";
 import { RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
 
 /** How many finished runs the ledger column carries. */
@@ -139,7 +140,14 @@ export function ActivityView() {
         {load && <GovernorNote load={load} waiting={waiting.length} />}
       </div>
 
-      {/* Runs first: one column per action the user took, rather than the seven
+      {/* Workflows first, above the run columns. A workflow is the largest
+          unit of intent here -- one user action that becomes several runs --
+          so burying it under the columns put the headline below the fold on a
+          4000px page. Renders nothing at all when no workflow has ever run,
+          which is most installs. */}
+      <WorkflowRuns />
+
+      {/* Then runs: one column per action the user took, rather than the seven
           jobs an alignment decomposes into. */}
       <div className="activity-grid">
         <ActivityLead
