@@ -248,6 +248,25 @@ class Settings(BaseSettings):
     # report one (confirmed not universal -- OpenAI's endpoint omits it).
     qa_default_context_tokens: int = 8000
 
+    # --- AI agent (in-app Pi harness) ---
+    # Path to the pi CLI binary. The api image installs it (and its
+    # pi-mcp-adapter extension) at build time -- see backend/Dockerfile.
+    pi_path: str = "/usr/local/bin/pi"
+    # Master switch. Off hides the agent UI entirely, whatever else is set.
+    pi_disabled: bool = False
+    # A prompt that gets no response within this window is treated as a dead
+    # agent: the process is killed and the SSE stream delivers an error event.
+    agent_response_timeout: int = 300
+    # An idle agent process (no prompts, no streaming) is killed after this
+    # long, releasing its memory. First slice is one conversation per project
+    # with no persistence, so killing on idle loses nothing.
+    agent_idle_timeout: int = 1800
+    # Extra MCP servers merged into every agent's --mcp-config, e.g.
+    # '{"ncbi": {"url": "https://...", "lifecycle": "lazy"}}' -- JSON from
+    # the environment, validated by pydantic. See the agent spec's MCP config
+    # builder for how the bioflow server entry itself is generated.
+    agent_extra_mcp_servers: dict = Field(default_factory=dict)
+
     # Read once, at first startup after providers moved into the database, to
     # seed a provider from however this installation was already configured.
     # Nothing else reads these -- the base URL and model now live on the

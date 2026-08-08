@@ -478,6 +478,72 @@ RUN chmod +x /srv/scripts/install-gci.sh \
 COPY --from=winnowmap-build /opt/winnowmap/bin/winnowmap /opt/winnowmap/bin/winnowmap
 ENV PATH="/opt/winnowmap/bin:${PATH}"
 
+# --- Pi coding agent -----------------------------------------------------
+#
+# The in-app AI agent harness (epic #30) spawns `pi --mode rpc` as a
+# subprocess per project; see docs/superpowers/specs/
+# 2026-08-09-ai-agent-harness-design.md.
+#
+# Pinned, same rationale as every other version pin in this file: the RPC
+# event stream is part of the backend's SSE translation contract, and a
+# silent pi upgrade could change its shape without any error anywhere.
+# Local-only tool: no install telemetry.
+ENV PI_TELEMETRY=0
+ARG NODE_VERSION=22.23.2
+ARG PI_VERSION=0.84.1
+ARG PI_MCP_ADAPTER_VERSION=2.21.1
+#
+# pi requires Node >= 22.19 (its package.json engines field). python:3.12-slim
+# ships no Node at all, and trixie's apt nodejs is 20.x, so Node comes from
+# NodeSource. Three traps, two of which already cost a failed build once:
+#
+# - This image ships WITHOUT curl by design: install-meryl.sh and
+#   install-quast.sh purge it after their own downloads, so no later layer
+#   can assume it exists. Install it here, use it, and purge it again so the
+#   end state matches what those scripts established.
+# - The setup script is fetched through a pipe in some docs (`curl | bash -`);
+#   in `sh` the pipeline's exit status is the script's, not curl's, so a
+#   failed fetch silently leaves no repo configured and apt falls back to
+#   trixie's nodejs 20 -- a green build with the wrong Node. Download to a
+#   file so curl's failure aborts the build.
+# - The script's own `apt-get update` can flake, leaving the lists without
+#   the nodistro repo. Re-running update after the script, pinning the exact
+#   package version, and asserting `node --version` make every failure mode
+#   loud instead of silently degrading.
+RUN set -e \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends curl gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/setup-node.sh \
+    && bash /tmp/setup-node.sh \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends nodejs=${NODE_VERSION}-1nodesource1 \
+    && node --version \
+    # Restore the no-curl end state the purge scripts above established.
+    && apt-get purge -y curl \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/setup-node.sh
+
+# pi itself, via npm (the package that ships the `pi` binary and the RPC CLI).
+RUN set -e \
+    && npm install -g @earendil-works/pi-coding-agent@${PI_VERSION} \
+    && pi --version
+
+# pi-mcp-adapter is what lets pi talk to any MCP server: it registers the
+# `--mcp-config` flag the backend passes per spawn, and exposes each server
+# through a single lazy-connecting proxy tool. Installed with pi's own
+# package manager, which must run inside this image (it writes
+# ~/.pi/agent/settings.json). Headless -- no prompts, safe at build time.
+# `pi list` proves the adapter registered; a build that fails here is
+# caught before it can produce an image whose agent has no tools.
+RUN set -e \
+    && pi install npm:pi-mcp-adapter@${PI_MCP_ADAPTER_VERSION} \
+    && pi list
+
+# Skills that teach the agent how to use BioFlow (written against the mcp
+# proxy tool and the real bioflow_* tool names; see pi-skills/README.md).
+COPY pi-skills /root/.pi/agent/skills
+
 COPY pyproject.toml ./
 RUN mkdir -p app && touch app/__init__.py \
     && pip install --no-cache-dir '.[dev]' \

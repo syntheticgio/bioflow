@@ -71,7 +71,9 @@ docker compose up -d --build api
 **Files:**
 - Modify: `backend/app/config.py`
 - Modify: `backend/Dockerfile`
-- Create: `pi-skills/` directory with four starter skills
+- Create: `backend/pi-skills/` directory with four starter skills (the api
+  image's build context is `./backend`, so the skills must live under it for
+  `COPY pi-skills` to reach them)
 
 Adds config settings, installs Node 22, Pi + pi-mcp-adapter in the api
 container, and sets up the skills directory.
@@ -81,7 +83,7 @@ via ARG (repo convention); Node 22 via NodeSource apt; all four starter
 skills (run-qc, interpret-multiqc, suggest-next-steps, debug-failed-job);
 `AGENT_EXTRA_MCP_SERVERS` config setting added now.
 
-- [ ] **Step 1: Add config settings**
+- [x] **Step 1: Add config settings**
 
 In `backend/app/config.py`, add:
 
@@ -98,7 +100,18 @@ AGENT_EXTRA_MCP_SERVERS: dict = Field(default_factory=dict)
 Note: the Settings class already uses pydantic-settings; `Field` should
 already be imported (check imports when editing).
 
-- [ ] **Step 2: Install Node 22, Pi, and pi-mcp-adapter in the api container**
+- [x] **Step 2: Install Node 22, Pi, and pi-mcp-adapter in the api container**
+
+(Implemented; the dockerfile snippet below is superseded by the actual
+section in `backend/Dockerfile`, whose comments record three build traps
+found in practice: this image ships WITHOUT curl by design —
+`install-meryl.sh` and `install-quast.sh` purge it — so the RUN installs and
+re-puries curl itself; `curl | bash -` masks curl failures in `sh` (the
+pipeline's exit status is the script's), so the setup script is downloaded
+to a file instead; and Node is pinned to the exact apt version
+`nodejs=22.23.2-1nodesource1` with a `node --version` assertion so a flaky
+repo fetch fails loudly rather than silently installing trixie's nodejs
+20.)
 
 Pi requires Node >= 22.19. The `python:3.12-slim` base image has no Node at
 all, and Debian bookworm's apt `nodejs` is 18.x — too old. Install Node 22
@@ -146,21 +159,38 @@ services:
       PI_PATH: /usr/local/bin/pi
     volumes:
       - /usr/local/bin/pi:/usr/local/bin/pi:ro
-      - ./pi-skills:/root/.pi/agent/skills:ro
+      - ./backend/pi-skills:/root/.pi/agent/skills:ro
 ```
 
-- [ ] **Step 3: Create the four starter skills**
+- [x] **Step 3: Create the four starter skills**
 
-Create `pi-skills/` with a README and four skills. All skills are written
-against the mcp proxy interface — the agent calls a single `mcp` proxy tool
-(pi-mcp-adapter's default, lazy-connect mode), not raw tools. Tool names
-referenced are the real MCP server tools (verified in
-`backend/app/mcp/server.py`).
+Create the skills under `backend/pi-skills/` — the api image's build context
+is `./backend` (see docker-compose.override.yml), so `COPY pi-skills` in the
+Dockerfile resolves there, not at the repo root. All skills are written
+against the mcp proxy interface (pi-mcp-adapter's default lazy-connect mode)
+and reference the **real** MCP server tools and arguments (verified in
+`backend/app/mcp/server.py` and the guides in `backend/app/mcp/guides/`).
+
+Key facts the skills rely on (all verified against the server, and several
+of them differ from what a first guess would produce):
+
+- `bioflow_suggest_next(object_id)` takes an **object id**, not a project
+  id, and is the authoritative "what can run now" answer — prefer it over
+  reasoning from formats. It returns `available`/`unavailable`/`needs_install`
+  candidates with ready-made `bioflow_run_pipeline` payloads.
+- `bioflow_run_pipeline(kind, params)` — `kind` is a registered job type
+  (`run_qc`, `trim_reads`, `align_reads`, `build_index`, `index_bam`,
+  `call_variants`, `download_sra_run`, ...), not a display name. The valid
+  set lives in the `bioflow://jobs/types` resource.
+- `bioflow_list_objects(project_id)` takes no type filter; to find FASTQs
+  use `bioflow_search_objects(query)`.
+- The QC job kind is `run_qc` (fastp+fastqc for short reads, NanoPlot for
+  long reads); QC produces a report and object facts, not a new file.
 
 Each skill is a directory with a `SKILL.md`:
 
 ```
-pi-skills/
+backend/pi-skills/
 ├── README.md
 ├── run-qc/SKILL.md
 ├── interpret-multiqc/SKILL.md
@@ -168,110 +198,26 @@ pi-skills/
 └── debug-failed-job/SKILL.md
 ```
 
-**run-qc/SKILL.md** — run a QC pipeline on FASTQ data:
-```markdown
----
-name: run-qc
----
+The four skills (full text shipped in the implementation):
 
-# Run QC Pipeline
+- **run-qc** — find reads (`bioflow_list_objects`/`bioflow_search_objects`),
+  confirm with `bioflow_suggest_next`, launch `bioflow_run_pipeline(kind="run_qc",
+  params=<payload from suggest_next>)`, poll `bioflow_get_job`. Notes that
+  QC produces no new object and there is no MCP upload tool.
+- **interpret-multiqc** — explain per-base quality, adapter content, GC and
+  duplication from `bioflow_get_object` facts / `bioflow_get_job` output;
+  gives a concrete proceed/trim/flag recommendation; never fabricates
+  numbers; accounts for the NanoPlot-vs-fastp platform split.
+- **suggest-next-steps** — `bioflow_suggest_next(object_id)` is the answer;
+  explains each candidate (what it runs, input, output), uses the returned
+  payload to launch if asked, names missing tools for `needs_install`.
+- **debug-failed-job** — `bioflow_get_job`/`bioflow_list_jobs`; distinguishes
+  input problems from tool failures (OOM, not installed); suggests cancel
+  before relaunch for stuck jobs; cross-checks `bioflow_suggest_next` to
+  tell "tool broken" from "object never runnable"; warns that long-running
+  pipelines are not necessarily stuck.
 
-## When to Use
-
-The user has raw sequencing data (FASTQ files) in their project and wants
-to assess quality before running further analysis.
-
-## Procedure
-
-1. List FASTQ files: `mcp({ tool: "bioflow_list_objects", args: { project_id, type: "fastq" } })`
-2. Select paired-end files (typically *_R1_*.fastq.gz and *_R2_*.fastq.gz).
-3. Run QC: `mcp({ tool: "bioflow_run_pipeline", args: { pipeline_id: "qc", inputs: [...] } })`
-4. Check job status: `mcp({ tool: "bioflow_get_job", args: { job_id } })`
-5. Once complete, point the user at the MultiQC report via
-   `mcp({ tool: "bioflow_get_object", args: { object_id } })`.
-```
-
-**interpret-multiqc/SKILL.md** — explain QC numbers in plain terms:
-```markdown
----
-name: interpret-multiqc
----
-
-# Interpret MultiQC Report
-
-## When to Use
-
-The user has a completed QC job and wants to know whether the data is good
-enough to proceed.
-
-## Procedure
-
-1. Fetch the MultiQC report object:
-   `mcp({ tool: "bioflow_get_object", args: { object_id } })`.
-2. Read the per-base quality, GC content, adapter content, and duplication
-   sections.
-3. Explain in plain terms: which samples look good, which need trimming or
-   re-sequencing, and why (e.g. adapter contamination, low per-base Q30).
-4. If quality is borderline, suggest trimming (`trim_reads` pipeline) before
-   alignment.
-```
-
-**suggest-next-steps/SKILL.md** — propose next pipeline steps:
-```markdown
----
-name: suggest-next-steps
----
-
-# Suggest Next Steps
-
-## When to Use
-
-The user asks "what should I do next?" or is deciding what to run.
-
-## Procedure
-
-1. Call `mcp({ tool: "bioflow_suggest_next", args: { project_id } })` to get
-   BioFlow's own suggestion rules output.
-2. Call `mcp({ tool: "bioflow_list_objects", args: { project_id } })` to see
-   what data exists.
-3. Present 1-3 concrete next steps, each with: what it runs, what input it
-   needs, and what the expected output is.
-4. Offer to launch it via `bioflow_run_pipeline` if the user wants.
-```
-
-**debug-failed-job/SKILL.md** — diagnose a failed pipeline job:
-```markdown
----
-name: debug-failed-job
----
-
-# Debug a Failed Job
-
-## When to Use
-
-The user says a pipeline failed, or asks why a job is stuck/failed.
-
-## Procedure
-
-1. Call `mcp({ tool: "bioflow_get_job", args: { job_id } })` for status and
-   error details.
-2. Call `mcp({ tool: "bioflow_list_jobs", args: { project_id } })` if the
-   job_id is unknown, to find the failed one.
-3. Distinguish input problems (missing/corrupt files) from tool failures
-   (tool not installed, resource limits) — check the job's error payload.
-4. Suggest the concrete fix: re-upload input, install the tool, or re-run.
-```
-
-Also add `pi-skills/README.md`:
-```markdown
-# pi-skills
-
-Skills that teach the BioFlow agent about bioinformatics workflows.
-See https://agentskills.io/specification for the skill format.
-Skills are written against the mcp proxy tool (pi-mcp-adapter).
-```
-
-- [ ] **Step 4: Ensure Pi is on the PATH and adapter is registered**
+- [x] **Step 4: Ensure Pi is on the PATH and adapter is registered**
 
 Verify the api container has Node.js available and that `pi` resolves. The
 npm global install adds `pi` to `/usr/local/bin/`. After building:
@@ -282,12 +228,31 @@ docker compose exec api pi --version
 docker compose exec api pi list          # shows pi-mcp-adapter in extensions
 ```
 
-- [ ] **Step 5: Tests for config defaults**
+- [x] **Step 5: Tests for config defaults**
 
 Add a small test asserting the new settings defaults (e.g. `PI_DISABLED`
 is False, `AGENT_EXTRA_MCP_SERVERS` is empty dict) in
 `backend/tests/` — find the existing config tests and extend them rather
-than creating a new file if one exists.
+than creating a new file if one exists. DONE in implementation:
+`TestAgentSettings` in `backend/tests/test_config.py` (defaults, env
+override, env-JSON parsing).
+
+**Implementation deltas (2026-08-09):**
+
+- Verified end-to-end against a freshly built image
+  (`ghcr.io/syntheticgio/bioflow-backend:wt-task1`): `node --version` →
+  v22.23.2, `pi --version` → 0.84.1, `pi list` shows
+  `npm:pi-mcp-adapter@2.21.1`, `pi --help` lists the `--mcp-config` flag
+  (proving the adapter registered), and `/root/.pi/agent/skills` contains
+  the four skills. Full backend suite: 4031 passed.
+- The compose-override dev-mount option in Step 2 was NOT used: the worktree
+  workflow already covers dev-time source mounts, and mounting host paths
+  into the worktree stack adds a footgun for no gain at this stage. The
+  skills ship in the image.
+- Step 2's dockerfile snippet drifted from reality in three ways, all
+  recorded in the shipped Dockerfile comments: the base is trixie (not
+  bookworm), Node is pinned exactly (22.23.2), and curl is installed and
+  re-purged inside the RUN. See the diff for the final form.
 
 ---
 

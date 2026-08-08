@@ -65,6 +65,41 @@ class TestDeepVariantImage:
         assert s.deepvariant_image == "pinned/dv:9.9.9"
 
 
+class TestAgentSettings:
+    """Defaults for the in-app Pi agent harness (epic #30).
+
+    The api image installs pi at /usr/local/bin/pi at build time, so the
+    default path is a container fact, not a guess. The settings here are
+    read by AgentService (Task 2) and the MCP config builder (Task 3).
+    """
+
+    def test_defaults(self):
+        s = Settings()
+        assert s.pi_path == "/usr/local/bin/pi"
+        assert s.pi_disabled is False
+        assert s.agent_response_timeout == 300
+        assert s.agent_idle_timeout == 1800
+        assert s.agent_extra_mcp_servers == {}
+
+    def test_pi_disabled_env_override(self, monkeypatch):
+        monkeypatch.setenv("PI_DISABLED", "true")
+        s = Settings()
+        assert s.pi_disabled is True
+
+    def test_extra_mcp_servers_parsed_from_env_json(self, monkeypatch):
+        """AGENT_EXTRA_MCP_SERVERS is env-driven JSON merged into every
+        agent's --mcp-config. pydantic-settings parses complex fields from
+        env vars as JSON, so a dict-typed field accepts a JSON string."""
+        monkeypatch.setenv(
+            "AGENT_EXTRA_MCP_SERVERS",
+            '{"ncbi": {"url": "https://example.com/mcp", "lifecycle": "lazy"}}',
+        )
+        s = Settings()
+        assert s.agent_extra_mcp_servers == {
+            "ncbi": {"url": "https://example.com/mcp", "lifecycle": "lazy"}
+        }
+
+
 class TestHardMemMbEmptyString:
     """docker-compose.yml sets BIOFLOW_HARD_MEM_MB: ${BIOFLOW_HARD_MEM_MB:-} on
     the api service unconditionally, so it always resolves to at least an
