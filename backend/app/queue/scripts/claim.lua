@@ -27,6 +27,13 @@
 -- replicated in-script because in_flight is per-worker local state, not
 -- anything Redis holds.
 --
+-- An `override` job (the user's "Launch anyway") relaxes ONLY the memory gate,
+-- and ONLY when it would be the sole occupant. The budget is a user
+-- preference; the physical RAM ceiling is not, and this relaxes the first
+-- while respecting the second -- an overridden job can never be the cause of a
+-- multi-job overcommit. CPU and io_heavy are untouched: classify() bands a CPU
+-- overcommit to WARN, so it never produces a refusal card to override.
+--
 -- Returns: {job_id, class, cpu, mem_mb, io, epoch} or nil
 
 local now_ms      = tonumber(ARGV[1])
@@ -51,11 +58,21 @@ end
 local reserved_cpu = 0
 local reserved_mem = 0
 local reserved_io  = 0
+-- Read separately from the gating values above, and unconditionally: when
+-- `ignore_reservations` is set the gating locals stay at zero because nothing
+-- was read, which is NOT the same fact as "nothing is running". Deriving
+-- sole-occupancy from them there would fire the override whenever the claiming
+-- worker happened to be idle -- strictly more permissive than an unconditional
+-- exemption, while reading as if it were more conservative.
+local live = redis.call('MGET', 'bp:conc:cpu', 'bp:conc:mem_mb', 'bp:conc:io_heavy')
+local sole = math.max(tonumber(live[1]) or 0, 0) == 0
+             and math.max(tonumber(live[2]) or 0, 0) == 0
+             and math.max(tonumber(live[3]) or 0, 0) == 0
+
 if not ignore_reservations then
-  local counters = redis.call('MGET', 'bp:conc:cpu', 'bp:conc:mem_mb', 'bp:conc:io_heavy')
-  reserved_cpu = math.max(tonumber(counters[1]) or 0, 0)
-  reserved_mem = math.max(tonumber(counters[2]) or 0, 0)
-  reserved_io  = math.max(tonumber(counters[3]) or 0, 0)
+  reserved_cpu = math.max(tonumber(live[1]) or 0, 0)
+  reserved_mem = math.max(tonumber(live[2]) or 0, 0)
+  reserved_io  = math.max(tonumber(live[3]) or 0, 0)
 end
 
 -- Floors mirror compute_free_resources: at least 1 CPU so a fully-reserved
@@ -73,7 +90,7 @@ local candidates = redis.call('ZRANGE', KEYS[1], 0, scan_limit - 1)
 for i = 1, #candidates do
   local job_id = candidates[i]
   local jkey = 'bp:job:' .. job_id
-  local h = redis.call('HMGET', jkey, 'class', 'cpu', 'mem_mb', 'io', 'epoch')
+  local h = redis.call('HMGET', jkey, 'class', 'cpu', 'mem_mb', 'io', 'epoch', 'override')
   local class = h[1]
 
   if class then
@@ -81,10 +98,14 @@ for i = 1, #candidates do
     local mem   = tonumber(h[3]) or 0
     local io    = h[4] or 'none'
     local epoch = tonumber(h[5]) or 0
+    -- Appended field, so h[1]..h[5] keep their positions above.
+    local override = h[6] == '1'
+
+    local mem_ok = mem <= mem_free or (override and sole)
 
     local fits = allowed[class]
                  and cpu <= cpu_free
-                 and mem <= mem_free
+                 and mem_ok
                  and (io ~= 'heavy' or io_free > 0)
 
     if fits then
