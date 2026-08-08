@@ -119,11 +119,25 @@ class Worker:
         self.executor.bind_loop(asyncio.get_running_loop())
 
         restored = await queue.reconcile()
+
+        # The workflow equivalent, and needed for the same reason: a process
+        # that died between a node finishing and its successor launching leaves
+        # a run that nothing will ever revive -- there is no timer on a workflow
+        # and no dependency to release. See the design's §10.
+        from app.services import workflow_orchestrator
+
+        try:
+            recovered = await workflow_orchestrator.reconcile_workflows()
+        except Exception as e:  # noqa: BLE001 - a stuck workflow must not stop the worker
+            log.warning("workflow_reconcile_failed", error=str(e))
+            recovered = 0
+
         log.info(
             "worker_starting",
             worker_id=self.worker_id,
             max_concurrent=self.max_concurrent,
             restored_jobs=restored,
+            recovered_workflow_nodes=recovered,
         )
 
         self._tasks = [

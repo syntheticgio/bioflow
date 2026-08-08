@@ -233,7 +233,19 @@ class WorkflowNodeRun(TimestampedDocument):
     node_id: str
     # The PipelineRun this node produced. None until launched -- and for an
     # INPUT node, forever: an input binds a file, it does not run anything.
+    #
+    # Also None for the 13 of 22 node types that create no run at all (QC,
+    # bam_stats, the assembly QC family...). That is deliberate on their part
+    # rather than a gap: `launch_qc`'s docstring explains that a run wrapping a
+    # single job would add an activity row saying nothing the job does not.
+    # Node state therefore comes from `job_ids` below, not from this -- see the
+    # design deviation recorded on #78.
     run_id: PydanticObjectId | None = None
+    # The jobs this attempt enqueued. The completion hook keys on these, which
+    # is what makes every node type trackable rather than only the 9 that
+    # create a PipelineRun. A list because one launch fans out into several
+    # jobs (an alignment enqueues its index build alongside the align itself).
+    job_ids: list[PydanticObjectId] = Field(default_factory=list)
     attempt: int = 1
     state: NodeRunState = NodeRunState.PENDING
     outputs: list[PydanticObjectId] = Field(default_factory=list)
