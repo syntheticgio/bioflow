@@ -16,7 +16,13 @@ from app.models.workflow import (
     WorkflowNode,
     WorkflowNodeKind,
 )
-from app.services.workflow_service import ValidationError, validate_definition
+from app.services.workflow_service import (
+    InvalidGraph,
+    ValidationError,
+    create_definition,
+    update_definition,
+    validate_definition,
+)
 
 
 def _input(node_id: str, fmt: FormatKind, role: ObjectRole | None = None) -> WorkflowNode:
@@ -140,3 +146,57 @@ class TestStructuralRules:
             name="bad", nodes=[_action("t", "trim"), _action("t", "qc")]
         )
         assert any(e.code == "duplicate_node_id" for e in validate_definition(definition))
+
+
+@pytest.mark.asyncio(loop_scope="module")
+class TestCrud:
+    async def test_saving_an_invalid_graph_is_refused(self):
+        """Invalid graphs must not reach storage: a saved graph that cannot
+        run is a bug that surfaces much later, at launch."""
+        with pytest.raises(InvalidGraph) as caught:
+            await create_definition(
+                name="bad",
+                description="",
+                nodes=[_input("reads", FormatKind.FASTQ), _action("a", "align")],
+                edges=[
+                    WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads")
+                ],
+                owner="test-owner",
+            )
+        assert any(e.code == "missing_required_input" for e in caught.value.errors)
+
+    async def test_an_edit_bumps_the_version(self):
+        """Runs pin a version, so an edit must produce a new one."""
+        created = await create_definition(
+            name="ok",
+            description="",
+            nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
+            edges=[
+                WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")
+            ],
+            owner="test-owner",
+        )
+        assert created.version == 1
+
+        updated = await update_definition(
+            created.id,
+            name="ok, renamed",
+            description="",
+            nodes=created.nodes,
+            edges=created.edges,
+        )
+        assert updated.version == 2
+
+    async def test_a_saved_definition_carries_its_owner(self):
+        """Non-'local' on purpose: every document defaults to 'local', so
+        asserting that value would prove nothing."""
+        created = await create_definition(
+            name="owned",
+            description="",
+            nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
+            edges=[
+                WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")
+            ],
+            owner="profile-123",
+        )
+        assert created.owner == "profile-123"

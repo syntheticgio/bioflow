@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from app.models.workflow import (
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowNode,
     WorkflowNodeKind,
 )
@@ -196,3 +197,71 @@ def _has_cycle(definition: WorkflowDefinition) -> bool:
                 colour[node] = BLACK
                 stack.pop()
     return False
+
+
+class InvalidGraph(Exception):
+    """Raised rather than returned, because a caller that ignores a returned
+    error list stores an unrunnable graph."""
+
+    def __init__(self, errors: list[ValidationError]):
+        self.errors = errors
+        super().__init__(f"{len(errors)} validation error(s)")
+
+
+async def create_definition(
+    *,
+    name: str,
+    description: str,
+    nodes: list[WorkflowNode],
+    edges: list[WorkflowEdge],
+    owner: str,
+) -> WorkflowDefinition:
+    definition = WorkflowDefinition(
+        name=name, description=description, nodes=nodes, edges=edges, owner=owner
+    )
+    errors = validate_definition(definition)
+    if errors:
+        raise InvalidGraph(errors)
+    await definition.insert()
+    return definition
+
+
+async def update_definition(
+    definition_id,
+    *,
+    name: str,
+    description: str,
+    nodes: list[WorkflowNode],
+    edges: list[WorkflowEdge],
+) -> WorkflowDefinition:
+    """Replace a definition's graph, bumping its version.
+
+    The version bump is unconditional rather than change-detecting: a
+    WorkflowRun pins the version it ran, and a cheap extra version is far
+    better than two different graphs sharing one.
+    """
+    definition = await WorkflowDefinition.get(definition_id)
+    if definition is None:
+        raise InvalidGraph(
+            [ValidationError("not_found", f"No definition {definition_id}.")]
+        )
+
+    candidate = WorkflowDefinition(
+        name=name,
+        description=description,
+        nodes=nodes,
+        edges=edges,
+        owner=definition.owner,
+    )
+    errors = validate_definition(candidate)
+    if errors:
+        raise InvalidGraph(errors)
+
+    definition.name = name
+    definition.description = description
+    definition.nodes = nodes
+    definition.edges = edges
+    definition.version += 1
+    definition.touch()
+    await definition.save()
+    return definition
