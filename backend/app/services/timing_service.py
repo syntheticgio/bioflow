@@ -381,6 +381,46 @@ def _fit_memory(samples: list[tuple[int, int]]) -> dict | None:
     return _fit(samples)
 
 
+def _fit_segmented(
+    records: list[JobRunTiming],
+    sample_fn,
+) -> dict[int | None, dict]:
+    """One fit per thread count with `>= MIN_SAMPLES` samples, plus a
+    bytes-only fallback fit over every record regardless of thread count,
+    keyed `None`.
+
+    `sample_fn` is `_duration_samples_from` or `_memory_samples_from` --
+    whichever `(input_bytes, y)` extraction the caller wants segmented, so
+    duration and memory share this grouping logic rather than each
+    reimplementing it. Records with `threads is None` never form or join a
+    per-thread group (an unknown thread count can't be assigned one) but do
+    count toward the `None` fallback, matching today's un-segmented
+    behavior exactly when nothing has a thread count yet.
+
+    Reuses `MIN_SAMPLES`, the same threshold `_fit` already enforces --
+    see the design doc's "Threshold" section for why a separate,
+    segment-specific constant was not introduced.
+    """
+    by_threads: dict[int, list[JobRunTiming]] = {}
+    for record in records:
+        if record.threads is not None:
+            by_threads.setdefault(record.threads, []).append(record)
+
+    out: dict[int | None, dict] = {}
+    for threads, group in by_threads.items():
+        samples = sample_fn(group)
+        if len(samples) >= MIN_SAMPLES:
+            model = _fit(samples)
+            if model is not None:
+                out[threads] = model
+
+    fallback = _fit(sample_fn(records))
+    if fallback is not None:
+        out[None] = fallback
+
+    return out
+
+
 async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
     """Predicted peak RSS in bytes for a run of this type and size.
 
