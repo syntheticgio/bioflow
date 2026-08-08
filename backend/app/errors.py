@@ -97,6 +97,19 @@ class PayloadTooLargeError(AppError):
     code = "payload_too_large"
 
 
+class AgentUnavailableError(AppError):
+    """The Pi subprocess could not be spawned or has died.
+
+    Usually means `pi` is not on the PATH inside the api container (the image
+    installs it via npm, see backend/Dockerfile) or the process crashed at
+    startup. 503 rather than 500 so the drawer can show "agent unavailable"
+    as a state, not a bug report.
+    """
+
+    status_code = 503
+    code = "agent_unavailable"
+
+
 # --- Job handler errors (queue semantics) ---
 
 
