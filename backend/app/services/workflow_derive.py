@@ -28,7 +28,7 @@ from app.models.workflow import (
     WorkflowNode,
     WorkflowNodeKind,
 )
-from app.pipelines.node_types import NODE_TYPES
+from app.pipelines.node_types import NODE_TYPES, ports_for
 
 
 @dataclass(frozen=True)
@@ -89,28 +89,52 @@ _ROLE_PORT_ALIASES: dict[str, str] = {
 }
 
 
-def _port_for_role(node_type: str, role: str | None) -> str | None:
+@dataclass(frozen=True)
+class _NodeRef:
+    """The minimal shape `ports_for` needs: a node type and its params.
+
+    `ports_for` resolves a tool-parameterized node's real port set (e.g. a
+    STAR-configured `align` node's extra `annotation` input) by reading
+    `node.node_type` and `node.params`. A bare `node_type` string -- what this
+    module used before -- cannot carry that, so a STAR run's `annotation`
+    RunInput matched against the *base* (minimap2-shaped) port set and always
+    came back None, silently dropping the edge. This wraps `(node_type,
+    params)` so callers here can go through `ports_for` like every other
+    caller does, without constructing a full `WorkflowNode`.
+    """
+
+    node_type: str
+    params: dict
+
+
+def _port_for_role(node_type: str, params: dict, role: str | None) -> str | None:
     """The input port a `RunInput` of this role feeds.
 
     `RunInputRole`'s values were mostly chosen to read the same as the port
     names (`reads`, `mate`, `reference`, `alignment`, `annotation`), so the
-    mapping is a name match against what the spec declares rather than a second
-    table, with `_ROLE_PORT_ALIASES` covering the one role where they diverge.
-    A role with no matching port yields None and the edge is simply not drawn
-    -- the node is still there for the user to wire by hand.
+    mapping is a name match against what the resolved port set declares
+    rather than a second table, with `_ROLE_PORT_ALIASES` covering the one
+    role where they diverge. A role with no matching port yields None and the
+    edge is simply not drawn -- the node is still there for the user to wire
+    by hand.
+
+    Resolved via `ports_for`, not `NODE_TYPES[node_type].inputs` directly:
+    the static spec is only the base port set, and a tool-added port (STAR's
+    `annotation` input on `align`) only shows up once the node's actual
+    `params` are taken into account.
     """
-    spec = NODE_TYPES.get(node_type)
-    if spec is None or role is None:
+    if node_type not in NODE_TYPES or role is None:
         return None
+    inputs, _ = ports_for(_NodeRef(node_type=node_type, params=params))
     wanted = _ROLE_PORT_ALIASES.get(role, role)
-    return next((p.name for p in spec.inputs if p.name == wanted), None)
+    return next((p.name for p in inputs if p.name == wanted), None)
 
 
-def _accepts_for(node_type: str, port: str | None) -> PortType | None:
-    spec = NODE_TYPES.get(node_type)
-    if spec is None or port is None:
+def _accepts_for(node_type: str, params: dict, port: str | None) -> PortType | None:
+    if node_type not in NODE_TYPES or port is None:
         return None
-    match = next((p for p in spec.inputs if p.name == port), None)
+    inputs, _ = ports_for(_NodeRef(node_type=node_type, params=params))
+    match = next((p for p in inputs if p.name == port), None)
     return match.type if match else None
 
 
@@ -230,19 +254,35 @@ async def derive_definition(
 
     for run, node_type in action_nodes:
         target = node_for_run[run.id]
+        params = dict(run.params or {})
         for run_input in run.inputs:
-            port = _port_for_role(node_type, run_input.role.value if run_input.role else None)
+            port = _port_for_role(
+                node_type, params, run_input.role.value if run_input.role else None
+            )
             if port is None:
                 continue
 
             upstream = producer.get(run_input.object_id)
             if upstream is not None and upstream.id in node_for_run:
                 # Produced by another selected run: an edge, not a slot.
-                source_type = next(
-                    (t for r, t in action_nodes if r.id == upstream.id), None
+                # Resolved via `ports_for` using the *producing* run's own
+                # params -- the same rule as the input side -- though no tool
+                # choice changes a node's outputs today (`_resolve_align_ports`
+                # only ever adds an input port), so this only matters if that
+                # changes later.
+                source = next(
+                    ((r, t) for r, t in action_nodes if r.id == upstream.id), None
                 )
-                spec = NODE_TYPES.get(source_type or "")
-                from_port = spec.outputs[0].name if spec and spec.outputs else None
+                from_port = None
+                if source is not None:
+                    source_run, source_type = source
+                    _, outputs = ports_for(
+                        _NodeRef(
+                            node_type=source_type,
+                            params=dict(source_run.params or {}),
+                        )
+                    )
+                    from_port = outputs[0].name if outputs else None
                 if from_port:
                     graph.edges.append(
                         WorkflowEdge(
@@ -263,7 +303,7 @@ async def derive_definition(
                         node_id=node_id,
                         kind=WorkflowNodeKind.INPUT,
                         label=run_input.name,
-                        accepts=_accepts_for(node_type, port),
+                        accepts=_accepts_for(node_type, params, port),
                         position=NodePosition(
                             x=40.0, y=60.0 + len(input_node_for) * 90.0
                         ),
