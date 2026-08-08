@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { RunSummary } from "../../api/types";
+import type { RunMemberJob, RunSummary } from "../../api/types";
 import { formatClock } from "../../lib/format";
 import { STATUS_LABELS, runFacts } from "../../lib/runFormat";
 import { SectionHead } from "./SectionHead";
+import { RunFailureBlock } from "./RunFailureBlock";
 
 /**
  * Finished runs as a numbered ledger: one line each, parameters on demand.
@@ -14,12 +15,14 @@ import { SectionHead } from "./SectionHead";
  */
 export function RunLedger({
   runs,
-  jobCounts,
+  jobsByRun,
   onSelect,
 }: {
   runs: RunSummary[];
-  /** Job count per run id, from the details already fetched by the page. */
-  jobCounts: Map<string, number>;
+  /** Member jobs per run id, from the details already fetched by the page.
+   *  The count comes from this too -- the array is what a failed row needs to
+   *  say anything about why it failed. */
+  jobsByRun: Map<string, RunMemberJob[]>;
   onSelect: (objectId: string, projectId: string) => void;
 }) {
   // One open at a time: the column is short, and two expanded rows push the
@@ -39,7 +42,7 @@ export function RunLedger({
               key={run.id}
               run={run}
               index={i + 1}
-              jobs={jobCounts.get(run.id)}
+              jobs={jobsByRun.get(run.id)}
               open={open === run.id}
               onToggle={() => setOpen((o) => (o === run.id ? null : run.id))}
               onSelect={onSelect}
@@ -69,15 +72,16 @@ export function LedgerRow({
 }: {
   run: RunSummary;
   index: number;
-  jobs?: number;
+  jobs?: RunMemberJob[];
   open: boolean;
   onToggle: () => void;
   onSelect: (objectId: string, projectId: string) => void;
 }) {
   const facts = runFacts(run);
+  const jobCount = jobs?.length;
   const meta = [
     STATUS_LABELS[run.status],
-    jobs != null ? `${jobs} ${jobs === 1 ? "job" : "jobs"}` : null,
+    jobCount != null ? `${jobCount} ${jobCount === 1 ? "job" : "jobs"}` : null,
     formatClock(run.updated_at),
   ]
     .filter(Boolean)
@@ -130,6 +134,10 @@ export function LedgerRow({
               ))}
             </div>
           )}
+
+          {/* Only for a run that failed. A succeeded run's expansion is
+              exactly what it was before this existed. */}
+          {run.status === "failed" && <RunFailureBlock jobs={jobs ?? []} />}
         </div>
       )}
     </div>
