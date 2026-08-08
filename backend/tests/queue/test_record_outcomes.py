@@ -292,3 +292,28 @@ class TestStatsSegments:
         rows = await timing_service.stats()
         row = next(r for r in rows if r["job_type"] == "align_reads")
         assert row["segments"] == []
+
+    async def test_segment_r_squared_in_stats_is_scored_against_its_own_samples(self):
+        """stats()'s segment r_squared must reflect how well a thread count's
+        OWN samples fit its own model, not the pooled all-threads samples --
+        same bug shape Task 3 fixed in estimate()/estimate_memory()."""
+        for i in range(1, MIN_SAMPLES + 1):
+            await _record(
+                RunOutcome.SUCCEEDED,
+                duration_ms=1 * i,
+                input_bytes=1000 * i,
+                threads=4,
+            )
+        for i in range(1, MIN_SAMPLES + 1):
+            await _record(
+                RunOutcome.SUCCEEDED,
+                duration_ms=3 * i,
+                input_bytes=1000 * i,
+                threads=8,
+            )
+        rows = await timing_service.stats()
+        row = next(r for r in rows if r["job_type"] == "align_reads")
+        segment_by_threads = {s["threads"]: s for s in row["segments"]}
+        assert len(segment_by_threads) == 2
+        assert segment_by_threads[4]["model"]["r_squared"] > 0.99
+        assert segment_by_threads[8]["model"]["r_squared"] > 0.99
