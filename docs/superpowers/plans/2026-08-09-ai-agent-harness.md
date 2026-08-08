@@ -385,7 +385,7 @@ passed, ruff clean.
 MCP config generation is part of this task because the API layer has access
 to the profile ID from the request context.
 
-- [ ] **Step 1: Implement MCP config builder**
+- [x] **Step 1: Implement MCP config builder**
 
 ```python
 def build_mcp_config(profile_id: str) -> dict:
@@ -403,7 +403,7 @@ def build_mcp_config(profile_id: str) -> dict:
     return config
 ```
 
-- [ ] **Step 2: Create the router**
+- [x] **Step 2: Create the router**
 
 ```python
 from fastapi import APIRouter, Depends
@@ -460,16 +460,45 @@ Note: `get_profile_id` is a dependency that extracts the profile from the
 X-BioFlow-Profile header or query parameter, matching the pattern used by
 the MCP server.
 
-- [ ] **Step 3: Mount the router in main.py**
+- [x] **Step 3: Mount the router in main.py**
 
 ```python
 from app.api.v1.agent import router as agent_router
 app.include_router(agent_router, prefix="/api/v1")
 ```
 
-- [ ] **Step 4: Write API tests**
+- [x] **Step 4: Write API tests**
 
 Test endpoint responses, auth scoping, SSE format, error responses.
+
+**Implemented (71d4aae, issue #87):** router at
+`backend/app/api/v1/agent.py`; mounted through `api_router` in
+`app/api/v1/__init__.py` (the repo pattern — `main.py` mounts `api_router`
+with the `/api/v1` prefix, so no direct include was needed there).
+`get_profile_id` in `app/api/deps.py` validates through `resolve_owner` but
+returns the raw client-supplied id, because the spawned MCP config embeds it
+in `?profile=` and the MCP server accepts exactly those values. The lifespan
+additionally sweeps idle agent processes every 60s and calls
+`shutdown_all()` on exit.
+
+**Delta from plan:** the plan's MCP config builder moved into the service
+(Task 2's delta), so Task 3's router passes the resolved profile id only.
+The plan's `_no_agent_stream()` (empty infinite stream when no process
+exists) was replaced by a re-attaching loop: the stream is opened before any
+process exists, polls for one, forwards its events, and re-attaches when the
+process stops or dies — the drawer would otherwise freeze while the agent
+restarted behind it. `AgentProcess._watch_process` now also puts the
+`__stop__` sentinel after the crash error event so the loop notices.
+
+Two test-infrastructure traps, both documented in the test module: httpx
+0.28's ASGITransport buffers the full response body (an infinite SSE stream
+never arrives through it), so the SSE tests run against a real uvicorn
+server on the test's own event loop with a bare app mounting only the agent
+router; and that server must be module-scoped because the repo's
+sse-starlette fork runs a process-global exit watcher that kills the streams
+of a second sequential server in the same process.
+
+10 new API tests; full suite 4072 passed, ruff clean.
 
 ---
 
