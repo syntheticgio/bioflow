@@ -7,13 +7,20 @@ aligner's reference picker. A canvas refusing that wire is that same rule.
 """
 
 import pytest
+from beanie import PydanticObjectId
 
 from app.models.workflow import (
+    NodeRunState,
     PortType,
+    WorkflowBinding,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
     WorkflowNodeKind,
+    WorkflowNodeRun,
+    WorkflowRun,
+    WorkflowStatus,
+    derive_status,
 )
 from app.models import FormatKind, ObjectRole
 
@@ -104,3 +111,107 @@ class TestWorkflowDefinition:
             node_id="a", kind=WorkflowNodeKind.ACTION, node_type="qc"
         )
         assert node.continue_on_failure is False
+
+
+class TestDerivedStatus:
+    """Status is computed from node states, never stored -- following
+    RunStatus's docstring. A stored status is a second source of truth that
+    drifts the first time a write is lost."""
+
+    def test_nothing_started_is_waiting(self):
+        assert derive_status([NodeRunState.PENDING, NodeRunState.PENDING]) is WorkflowStatus.WAITING
+
+    def test_any_running_is_running(self):
+        assert derive_status([NodeRunState.SUCCEEDED, NodeRunState.RUNNING]) is WorkflowStatus.RUNNING
+
+    def test_all_succeeded_is_succeeded(self):
+        assert derive_status([NodeRunState.SUCCEEDED, NodeRunState.SUCCEEDED]) is WorkflowStatus.SUCCEEDED
+
+    def test_a_finished_run_with_a_failure_is_partial(self):
+        """The branch-scoped failure rule: an independent branch succeeded, so
+        the run is not simply failed -- real outputs exist."""
+        assert derive_status(
+            [NodeRunState.SUCCEEDED, NodeRunState.FAILED]
+        ) is WorkflowStatus.PARTIAL
+
+    def test_everything_failed_is_failed(self):
+        assert derive_status([NodeRunState.FAILED, NodeRunState.CANCELLED]) is WorkflowStatus.FAILED
+
+    def test_a_pending_node_keeps_the_run_running(self):
+        """A node still waiting on an upstream node means the workflow is not
+        finished, even though nothing is executing this instant. Reporting
+        PARTIAL here would call a live run finished."""
+        assert derive_status(
+            [NodeRunState.FAILED, NodeRunState.PENDING]
+        ) is WorkflowStatus.RUNNING
+
+    def test_an_empty_run_is_waiting(self):
+        assert derive_status([]) is WorkflowStatus.WAITING
+
+
+class TestWorkflowNodeRun:
+    async def test_retry_adds_an_attempt_rather_than_overwriting(self, beanie_models):
+        """The reason node runs are their own documents: a DEAD job cannot be
+        un-deaded, so retry points the node at new work while its siblings
+        keep their original links."""
+        workflow_run_id = PydanticObjectId()
+        first = WorkflowNodeRun(
+            workflow_run_id=workflow_run_id,
+            node_id="align1",
+            attempt=1,
+            state=NodeRunState.FAILED,
+        )
+        await first.insert()
+        second = WorkflowNodeRun(
+            workflow_run_id=workflow_run_id,
+            node_id="align1",
+            attempt=2,
+            state=NodeRunState.RUNNING,
+        )
+        await second.insert()
+
+        rows = await WorkflowNodeRun.find(
+            WorkflowNodeRun.workflow_run_id == workflow_run_id
+        ).to_list()
+        assert sorted(r.attempt for r in rows) == [1, 2]
+
+    async def test_one_row_per_node_attempt(self, beanie_models):
+        """Re-linking on a retry must not duplicate a member and double-count
+        it in the derived status -- the guard RunJob.uniq_run_job provides."""
+        import pymongo.errors
+
+        workflow_run_id = PydanticObjectId()
+        await WorkflowNodeRun(
+            workflow_run_id=workflow_run_id, node_id="n", attempt=1,
+            state=NodeRunState.RUNNING,
+        ).insert()
+        with pytest.raises(pymongo.errors.DuplicateKeyError):
+            await WorkflowNodeRun(
+                workflow_run_id=workflow_run_id, node_id="n", attempt=1,
+                state=NodeRunState.RUNNING,
+            ).insert()
+
+
+class TestWorkflowRun:
+    async def test_a_run_pins_its_definition_version(self, beanie_models):
+        run = WorkflowRun(
+            definition_id=PydanticObjectId(),
+            definition_version=3,
+            project_id=PydanticObjectId(),
+            label="trim then align",
+            bindings=[
+                WorkflowBinding(
+                    node_id="reads",
+                    object_id=PydanticObjectId(),
+                    name="specimen_R1.fastq.gz",
+                )
+            ],
+        )
+        await run.insert()
+        found = await WorkflowRun.get(run.id)
+        assert found.definition_version == 3
+        assert found.bindings[0].name == "specimen_R1.fastq.gz"
+
+    def test_status_is_not_a_stored_field(self):
+        """If this fails, someone has added a second source of truth."""
+        assert "status" not in WorkflowRun.model_fields
