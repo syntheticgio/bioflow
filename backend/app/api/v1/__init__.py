@@ -6,6 +6,7 @@ from app.api.v1 import (
     events,
     feedback,
     jobs,
+    local_databases,
     ncbi,
     objects,
     pipelines,
@@ -46,6 +47,7 @@ api_router.include_router(schedules.router)
 api_router.include_router(system.router)
 api_router.include_router(events.router)
 api_router.include_router(feedback.router)
+api_router.include_router(local_databases.router)
 api_router.include_router(settings.router)
 api_router.include_router(version.router)
 
