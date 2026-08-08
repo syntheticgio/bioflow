@@ -178,10 +178,13 @@ class WorkflowRunDetailOut(BaseModel):
 class LaunchIn(BaseModel):
     project_id: PydanticObjectId
     label: str
-    # node_id -> object_id. A dict rather than a list because a binding is
-    # identified by the INPUT node it fills, and two bindings for one node is
-    # not a shape worth representing.
-    bindings: dict[str, PydanticObjectId] = Field(default_factory=dict)
+    # node_id -> object_id, or a list of object_ids for a multi slot
+    # (`PortSpec.multiple`) binding several files under one node_id. A dict
+    # rather than a list-of-bindings because a binding is identified by the
+    # INPUT node it fills.
+    bindings: dict[str, PydanticObjectId | list[PydanticObjectId]] = Field(
+        default_factory=dict
+    )
 
 
 class RunOut(BaseModel):

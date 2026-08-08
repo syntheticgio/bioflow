@@ -5249,6 +5249,14 @@ table.software-matrix thead th.software-matrix-corner {
   margin-left: auto;
 }
 
+.workflow-project {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 8px;
+}
+
 .workflow-notice {
   padding: 8px 14px;
   color: var(--text-dim);
@@ -5353,6 +5361,47 @@ table.software-matrix thead th.software-matrix-corner {
 
 .workflow-node-delete:hover {
   fill: var(--error);
+}
+
+/* Bind a file on the node itself. `foreignObject` is warranted here -- a
+   native select cannot live in an SVG rect, and this is a control rather
+   than a layout choice. */
+.node-binding {
+  width: 100%;
+  font-size: 11px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 2px 4px;
+}
+
+.node-binding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.node-binding-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-binding-list button {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.node-binding-list button:hover {
+  color: var(--error);
 }
 
 .workflow-port {
@@ -5495,6 +5544,26 @@ table.software-matrix thead th.software-matrix-corner {
   padding: 4px 6px;
   font-size: 12px;
   width: 100%;
+}
+
+.workflow-inspector label.checkbox {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.workflow-inspector label.checkbox input {
+  margin-top: 2px;
+  width: auto;
+}
+
+.workflow-inspector label.checkbox em {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: normal;
+  opacity: 0.85;
 }
 
 /* Runs offered for derive-from-runs, and the skipped report. The skipped list

@@ -106,7 +106,10 @@ export function WorkflowCanvas() {
   const [serverErrors, setServerErrors] = useState<GraphValidationError[]>([]);
   const [launching, setLaunching] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [bindings, setBindings] = useState<Record<string, string>>({});
+  // One object id per slot, or several for a slot marked `multiple`. The
+  // union rather than always-an-array keeps the scalar path -- every
+  // existing read and the launch payload -- unchanged for the common case.
+  const [bindings, setBindings] = useState<Record<string, string | string[]>>({});
   const [deriving, setDeriving] = useState(false);
   const [pickedRuns, setPickedRuns] = useState<string[]>([]);
   const [skipped, setSkipped] = useState<SkippedRun[]>([]);
@@ -364,13 +367,12 @@ export function WorkflowCanvas() {
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.listProjects(),
-    enabled: launching,
   });
 
   const projectObjects = useQuery({
     queryKey: ["objects", projectId],
     queryFn: () => api.listObjects(projectId!),
-    enabled: launching && Boolean(projectId),
+    enabled: Boolean(projectId),
   });
 
   const runs = useQuery({
@@ -418,7 +420,10 @@ export function WorkflowCanvas() {
   // Every input slot must have a file before the run can start: the launcher
   // validates its inputs, so an unbound slot fails inside a tool rather than
   // here, where the user can still fix it.
-  const unbound = inputNodes.filter((n) => !bindings[n.node_id]);
+  const unbound = inputNodes.filter((n) => {
+    const bound = bindings[n.node_id];
+    return !bound || (Array.isArray(bound) && bound.length === 0);
+  });
 
   function newDefinition() {
     setDefinitionId(null);
@@ -439,6 +444,25 @@ export function WorkflowCanvas() {
           onChange={(e) => setName(e.target.value)}
           aria-label="Workflow name"
         />
+        <select
+          className="workflow-project"
+          value={projectId ?? ""}
+          onChange={(e) => {
+            setProjectId(e.target.value || null);
+            // Bindings name objects in the old project, so they cannot
+            // survive a project change -- keeping them would submit ids the
+            // new project does not contain.
+            setBindings({});
+          }}
+          aria-label="Project"
+        >
+          <option value="">Choose a project…</option>
+          {(projects.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
         <button className="btn" onClick={addInputNode}>
           Add input
         </button>
@@ -547,29 +571,35 @@ export function WorkflowCanvas() {
                       {node.accepts?.role ? `/${node.accepts.role}` : ""}
                     </em>
                   </span>
-                  <select
-                    value={bindings[node.node_id] ?? ""}
-                    disabled={!projectId}
-                    onChange={(e) =>
-                      setBindings((current) => ({
-                        ...current,
-                        [node.node_id]: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">
-                      {!projectId
-                        ? "Choose a project first"
-                        : candidates.length === 0
-                          ? "No matching files in this project"
-                          : "Choose a file…"}
-                    </option>
-                    {candidates.map((object) => (
-                      <option key={object.id} value={object.id}>
-                        {object.name}
+                  {node.multiple ? (
+                    <span className="muted">
+                      {((bindings[node.node_id] as string[]) ?? []).length} file(s) selected on the canvas
+                    </span>
+                  ) : (
+                    <select
+                      value={(bindings[node.node_id] as string) ?? ""}
+                      disabled={!projectId}
+                      onChange={(e) =>
+                        setBindings((current) => ({
+                          ...current,
+                          [node.node_id]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">
+                        {!projectId
+                          ? "Choose a project first"
+                          : candidates.length === 0
+                            ? "No matching files in this project"
+                            : "Choose a file…"}
                       </option>
-                    ))}
-                  </select>
+                      {candidates.map((object) => (
+                        <option key={object.id} value={object.id}>
+                          {object.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </label>
               );
             })}
@@ -695,6 +725,32 @@ export function WorkflowCanvas() {
                   ))}
                 </select>
               </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedInput.multiple)}
+                  onChange={(e) => {
+                    updateInput(selectedInput.node_id, { multiple: e.target.checked });
+                    // The slot's shape changed, so what it can feed changed
+                    // with it -- a set cannot flow into a scalar port. Same
+                    // reasoning as the `accepts` branch of updateInput.
+                    setEdges((current) =>
+                      current.filter((e2) => e2.from_node !== selectedInput.node_id),
+                    );
+                    setBindings((current) => ({
+                      ...current,
+                      [selectedInput.node_id]: e.target.checked ? [] : "",
+                    }));
+                  }}
+                />
+                <span>
+                  Several files
+                  <em>
+                    Read files split into chunks that all go into one run. Not
+                    mates -- R2 belongs on its own slot.
+                  </em>
+                </span>
+              </label>
             </div>
           )}
           {selectedAction && (() => {
@@ -796,7 +852,13 @@ export function WorkflowCanvas() {
             const meta = node.node_type ? catalog[node.node_type] : undefined;
             const position = node.position ?? { x: 0, y: 0 };
             const { inputs, outputs } = portsFor(node, catalog);
-            const height = node.kind === "input" ? 54 : nodeHeight(node, catalog);
+            const height =
+              node.kind === "input"
+                ? 54 +
+                  (node.multiple
+                    ? 20 + ((bindings[node.node_id] as string[]) ?? []).length * 18
+                    : 0)
+                : nodeHeight(node, catalog);
             const problems = errorsByNode.get(node.node_id);
             return (
               <g key={node.node_id}>
@@ -876,6 +938,93 @@ export function WorkflowCanvas() {
                   >
                     ×
                   </text>
+                )}
+
+                {node.kind === "input" && (
+                  <foreignObject
+                    x={position.x + 8}
+                    y={position.y + 26}
+                    width={NODE_WIDTH - 16}
+                    height={24}
+                  >
+                    <select
+                      className="node-binding"
+                      value={
+                        Array.isArray(bindings[node.node_id])
+                          ? ""
+                          : ((bindings[node.node_id] as string) ?? "")
+                      }
+                      disabled={!projectId}
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (!value) return;
+                        setBindings((current) => ({
+                          ...current,
+                          [node.node_id]: node.multiple
+                            ? [
+                                ...(((current[node.node_id] as string[]) ?? []).filter(
+                                  (id) => id !== value,
+                                )),
+                                value,
+                              ]
+                            : value,
+                        }));
+                      }}
+                    >
+                      <option value="">
+                        {!projectId
+                          ? "Choose a project first"
+                          : node.multiple
+                            ? "Add a file…"
+                            : "Choose a file…"}
+                      </option>
+                      {bindableObjects(projectObjects.data ?? [], node.accepts).map(
+                        (object) => (
+                          <option key={object.id} value={object.id}>
+                            {object.name}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </foreignObject>
+                )}
+
+                {node.kind === "input" && node.multiple && (
+                  <foreignObject
+                    x={position.x + 8}
+                    y={position.y + 52}
+                    width={NODE_WIDTH - 16}
+                    height={Math.max(
+                      ((bindings[node.node_id] as string[]) ?? []).length * 18,
+                      1,
+                    )}
+                  >
+                    <ul className="node-binding-list">
+                      {((bindings[node.node_id] as string[]) ?? []).map((id) => (
+                        <li key={id}>
+                          <span>
+                            {(projectObjects.data ?? []).find((o) => o.id === id)?.name ??
+                              id}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBindings((current) => ({
+                                ...current,
+                                [node.node_id]: (
+                                  (current[node.node_id] as string[]) ?? []
+                                ).filter((x) => x !== id),
+                              }));
+                            }}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </foreignObject>
                 )}
 
                 {inputs.map((port, i) => {

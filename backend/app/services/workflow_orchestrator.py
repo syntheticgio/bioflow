@@ -144,7 +144,7 @@ def _is_multi_port(node: WorkflowNode, port_name: str) -> bool:
 def _bound_inputs(
     definition: WorkflowDefinition,
     node_id: str,
-    bindings: dict[str, PydanticObjectId],
+    bindings: dict[str, PydanticObjectId | list[PydanticObjectId]],
     resolved: dict[tuple[str, str], PydanticObjectId],
 ) -> dict:
     """Every input port of one node, filled from bindings and upstream outputs.
@@ -233,7 +233,19 @@ async def _advance(
                 )
             )
 
-    bindings = {b.node_id: b.object_id for b in run.bindings}
+    # A dict comprehension here would overwrite on a repeated node_id, keeping
+    # only the last of a multi slot's several `WorkflowBinding` rows. Accumulate
+    # instead: a scalar for one row, a list once a second row shares a node_id
+    # -- the same "list only when 2+" convention `_bound_inputs` above uses.
+    bindings: dict[str, PydanticObjectId | list[PydanticObjectId]] = {}
+    for b in run.bindings:
+        existing = bindings.get(b.node_id)
+        if existing is None:
+            bindings[b.node_id] = b.object_id
+        elif isinstance(existing, list):
+            existing.append(b.object_id)
+        else:
+            bindings[b.node_id] = [existing, b.object_id]
     launched = 0
 
     for node_id in sorted(runnable_nodes(definition, states)):
@@ -379,7 +391,7 @@ async def launch_workflow(
     *,
     definition_id: PydanticObjectId,
     project_id: PydanticObjectId,
-    bindings: dict[str, PydanticObjectId],
+    bindings: dict[str, PydanticObjectId | list[PydanticObjectId]],
     owner: str,
     label: str,
 ) -> WorkflowRun:
@@ -395,16 +407,24 @@ async def launch_workflow(
     if definition is None:
         raise NotFoundError(f"No definition {definition_id}.")
 
+    # A multi slot (see PortSpec.multiple) binds several files under one
+    # node_id -- one WorkflowBinding row per file, sharing the node_id. A
+    # scalar binding still produces exactly one row, as before.
+    binding_rows: list[WorkflowBinding] = []
+    for node_id, value in bindings.items():
+        object_ids = value if isinstance(value, list) else [value]
+        for object_id in object_ids:
+            binding_rows.append(
+                WorkflowBinding(node_id=node_id, object_id=object_id, name=node_id)
+            )
+
     run = WorkflowRun(
         definition_id=definition.id,
         definition_version=definition.version,
         project_id=project_id,
         label=label,
         owner=owner,
-        bindings=[
-            WorkflowBinding(node_id=node_id, object_id=object_id, name=node_id)
-            for node_id, object_id in bindings.items()
-        ],
+        bindings=binding_rows,
     )
     await run.insert()
 
