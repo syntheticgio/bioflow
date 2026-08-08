@@ -99,7 +99,15 @@ function LeadStory({
 
   const jobs = detail?.jobs ?? [];
   const done = jobs.filter(isSettled).length;
-  const pct = jobs.length > 0 ? (done / jobs.length) * 100 : 0;
+  // A settled job counts as one whole unit; a running job contributes its own
+  // fractional progress (0 when indeterminate) rather than nothing. Without
+  // this, a run with a single long job -- most SRA downloads -- shows 0% for
+  // its entire duration and jumps straight to 100%, even though the job's own
+  // step line already has a real percentage to show.
+  const runningCredit = jobs
+    .filter((j) => j.state === "running")
+    .reduce((sum, j) => sum + (j.progress?.pct ?? 0), 0);
+  const pct = jobs.length > 0 ? ((done + runningCredit) / jobs.length) * 100 : 0;
 
   const steps = jobs.filter((j) => j.role !== "ingest");
   const ingests = jobs.filter((j) => j.role === "ingest");
