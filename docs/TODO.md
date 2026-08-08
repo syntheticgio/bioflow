@@ -363,6 +363,54 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## Two orchestrator sites resolve ports from the static spec, not `ports_for(node)`
+
+Raised: 2026-08-08, deferred during code review of Task 4's tool-choice ports
+work (GitHub issue #94, Task 4).
+
+Task 4 introduced `ports_for(node)`
+(`backend/app/pipelines/node_types.py`) as the correct way to resolve a
+node's *actual* input/output ports once its chosen tool is taken into
+account -- e.g. a STAR-configured `align` node gains an optional
+`annotation` GTF input that `NODE_TYPES[node.node_type].inputs`, the static
+per-node-type spec, does not know about. Two sites in
+`backend/app/services/workflow_orchestrator.py` still read the static
+`spec.inputs` directly instead:
+
+- `_is_multi_port` (line 140) looks up a port by name in `spec.inputs` to
+  decide whether an edge should be collected into a list. It is reached from
+  `_bound_inputs`, which resolves every input a node launches with.
+- `_advance` (line 259) computes `missing = [p.name for p in spec.inputs if
+  p.required and p.name not in inputs]` to decide whether a node has enough
+  bound inputs to launch.
+
+This is safe today because the only tool-added port that exists yet --
+STAR's `annotation` GTF input, added by
+`tool_choice._resolve_align_ports` -- is `required=False` and not
+`multiple=True`. Neither dormant site can currently produce a wrong answer:
+`_is_multi_port` only misclassifies ports that are `multiple=True` in the
+per-tool set but absent (or non-multiple) in the static set, and `_advance`'s
+missing-input check only misfires on a `required=True` per-tool port the
+static set doesn't have.
+
+The moment a future tool choice adds a `required=True` or `multiple=True`
+port for one tool value, both sites will misbehave silently: `_advance`
+could decide a node's inputs are complete when the tool-specific spec still
+needs one more, launching it with an incomplete `inputs` dict; or
+`_is_multi_port` could fail to collect a multi-port's second edge into a
+list, silently dropping a contribution. Either failure surfaces deep inside
+the launcher as a confusing error attributed to the wrong node, per the
+comment already on `_advance`'s missing-input branch -- not as a validation
+message pointing at the actual gap.
+
+Fix by changing both sites to call `ports_for(node)` and use its returned
+input tuple in place of `spec.inputs`, the same migration Task 4 already
+made at the sites that resolve ports for validation and the API.
+
+Touches: `backend/app/services/workflow_orchestrator.py`
+(`_is_multi_port`, line 140; `_advance`, line 259),
+`backend/app/pipelines/node_types.py` (`ports_for`).
+
 ## Alignment memory estimate does not size extra reads
 
 Raised: 2026-08-08, deferred during code review of extra-reads-for-alignment
