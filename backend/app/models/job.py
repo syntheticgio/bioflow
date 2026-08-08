@@ -193,6 +193,12 @@ class Job(TimestampedDocument):
     resources: JobResources = Field(default_factory=JobResources)
 
     parent_job_id: PydanticObjectId | None = None  # the job that enqueued this one
+    # Set when the user chose "Launch anyway" on the refusal card. Like
+    # `last_attempt_progress`, this must specifically NOT be cleared on retry:
+    # its whole purpose is to survive a requeue after lease expiry. It reaches
+    # claim.lua through the Redis job hash, written by both `_push_to_redis`
+    # and `reconcile`.
+    resource_override: bool = False
 
     # Jobs that must succeed before this one may dispatch. A list rather than a
     # single id because a step can need several independent inputs -- aligning
