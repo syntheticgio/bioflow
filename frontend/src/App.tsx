@@ -26,6 +26,7 @@ import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
+import { WorkflowCanvas } from "./components/WorkflowCanvas";
 import { SettingsMcp } from "./components/SettingsMcp";
 import { SettingsResources } from "./components/SettingsResources";
 import { SettingsTools } from "./components/SettingsTools";
@@ -77,6 +78,9 @@ function Shell() {
   const singleColumn =
     pathname === "/activity" ||
     pathname === "/shares" ||
+    // The canvas needs the whole width to be usable at all -- a graph squeezed
+    // beside the file list and a DetailPanel has no room to lay nodes out.
+    pathname === "/workflows" ||
     pathname.startsWith("/help/") ||
     pathname.startsWith("/settings");
 
@@ -105,6 +109,7 @@ function Shell() {
           <Route path="/p/:projectId" element={<ProjectExplorer />} />
           <Route path="/search" element={<SearchView />} />
           <Route path="/activity" element={<ActivityView />} />
+          <Route path="/workflows" element={<WorkflowCanvas />} />
           <Route path="/shares" element={<SharesView />} />
           <Route path="/help/about" element={<HelpAbout />} />
           <Route path="/settings" element={<SettingsView />} />

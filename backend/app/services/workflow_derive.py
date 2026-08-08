@@ -1,0 +1,264 @@
+"""Deriving a canvas from runs the user already did (design §7).
+
+A convenience, and deliberately a shallow one: it reads `PipelineRun`s, maps
+each to its node type, makes an INPUT node per external `RunInput`, and infers
+edges where one run's output id appears in another's inputs. The result is an
+*unsaved* `WorkflowDefinition` -- nothing here writes.
+
+`RunInput` already carrying `object_id`, `name`, and `role` is what makes the
+input-node derivation nearly mechanical.
+
+Runs that cannot be represented are **reported as skipped, never silently
+dropped**. A user who selects six runs and gets a four-node canvas with no
+explanation has been told something false about their own history.
+
+Design note: docs/superpowers/specs/2026-08-07-workflow-dag-design.md
+"""
+
+from dataclasses import dataclass, field
+
+from beanie import PydanticObjectId
+
+from app.models.run import PipelineRun, RunKind
+from app.models.workflow import (
+    NodePosition,
+    PortType,
+    WorkflowDefinition,
+    WorkflowEdge,
+    WorkflowNode,
+    WorkflowNodeKind,
+)
+from app.pipelines.node_types import NODE_TYPES
+
+
+@dataclass(frozen=True)
+class SkippedRun:
+    run_id: str
+    label: str
+    reason: str
+
+
+@dataclass
+class DerivedGraph:
+    nodes: list[WorkflowNode] = field(default_factory=list)
+    edges: list[WorkflowEdge] = field(default_factory=list)
+    skipped: list[SkippedRun] = field(default_factory=list)
+
+
+def _node_type_for(kind: RunKind) -> str | None:
+    """Which node type represents this run kind.
+
+    Derived from the registry rather than hand-written, so a node type added
+    there is reachable here without a second list to keep in step -- the
+    hand-maintained-registry hazard CLAUDE.md describes. `reference_assembly`
+    is the one RunKind no node type covers today, and it is reported rather
+    than dropped.
+    """
+    for node_type, spec in NODE_TYPES.items():
+        if spec.run_kind is kind:
+            return node_type
+    return None
+
+
+def _port_for_role(node_type: str, role: str | None) -> str | None:
+    """The input port a `RunInput` of this role feeds.
+
+    `RunInputRole`'s values were chosen to read the same as the port names
+    (`reads`, `mate`, `reference`, `alignment`, `annotation`), so the mapping is
+    a name match against what the spec declares rather than a second table. A
+    role with no matching port yields None and the edge is simply not drawn --
+    the node is still there for the user to wire by hand.
+    """
+    spec = NODE_TYPES.get(node_type)
+    if spec is None or role is None:
+        return None
+    return next((p.name for p in spec.inputs if p.name == role), None)
+
+
+def _accepts_for(node_type: str, port: str | None) -> PortType | None:
+    spec = NODE_TYPES.get(node_type)
+    if spec is None or port is None:
+        return None
+    match = next((p for p in spec.inputs if p.name == port), None)
+    return match.type if match else None
+
+
+def _in_dependency_order(
+    runs: list[PipelineRun], producer: dict[PydanticObjectId, PipelineRun]
+) -> list[PipelineRun]:
+    """Runs sorted so a producer comes before its consumers.
+
+    Kahn's algorithm over the producer map. Terminates on any input, including
+    a selection that somehow describes a cycle: whatever is left when no node
+    has zero in-degree is appended in its original order rather than dropped or
+    looped over. Real runs cannot form a cycle -- an object exists before the
+    run that reads it -- but "cannot happen" is a poor reason to hang.
+    """
+    depends_on: dict[PydanticObjectId, set[PydanticObjectId]] = {
+        run.id: set() for run in runs
+    }
+    for run in runs:
+        for run_input in run.inputs:
+            upstream = producer.get(run_input.object_id)
+            if upstream is not None and upstream.id != run.id:
+                depends_on[run.id].add(upstream.id)
+
+    by_id = {run.id: run for run in runs}
+    ordered: list[PipelineRun] = []
+    remaining = dict(depends_on)
+
+    while remaining:
+        ready = [rid for rid, deps in remaining.items() if not (deps & remaining.keys())]
+        if not ready:
+            # Cycle, or something equally impossible. Keep the rest in the
+            # order given rather than spinning.
+            ordered.extend(by_id[rid] for rid in remaining)
+            break
+        # Stable within a layer, so an unrelated pair keeps its selection order.
+        for rid in sorted(ready, key=lambda r: list(depends_on).index(r)):
+            ordered.append(by_id[rid])
+            del remaining[rid]
+
+    return ordered
+
+
+async def derive_definition(
+    run_ids: list[PydanticObjectId], *, owner: str
+) -> DerivedGraph:
+    """Build an unsaved graph from a selection of runs.
+
+    Owner-scoped: this reads someone's history, so a run belonging to another
+    profile is skipped exactly like an unrepresentable one rather than raising
+    -- a mixed selection should still produce the part the caller may see.
+    """
+    graph = DerivedGraph()
+
+    runs = await PipelineRun.find({"_id": {"$in": list(run_ids)}}).to_list()
+    by_id = {run.id: run for run in runs}
+
+    # Ordered by the caller's selection so the canvas lays out predictably, and
+    # so a missing id is visible as a skip rather than by absence.
+    ordered: list[PipelineRun] = []
+    for run_id in run_ids:
+        run = by_id.get(run_id)
+        if run is None or run.owner != owner:
+            graph.skipped.append(
+                SkippedRun(
+                    run_id=str(run_id),
+                    label=run.label if run else "",
+                    reason="Run not found.",
+                )
+            )
+            continue
+        ordered.append(run)
+
+    # Which selected run produced which object: the basis for every inferred
+    # edge, and for knowing that an input is *internal* rather than a slot.
+    producer: dict[PydanticObjectId, PipelineRun] = {}
+    for run in ordered:
+        for object_id in run.outputs:
+            producer[object_id] = run
+
+    # Lay the graph out in dependency order rather than selection order. The
+    # canvas reads left to right, so a run placed left of the run that feeds it
+    # draws every wire backwards -- correct, and unreadable. Runs are usually
+    # selected newest-first, which is exactly the wrong order.
+    ordered = _in_dependency_order(ordered, producer)
+
+    node_for_run: dict[PydanticObjectId, str] = {}
+    action_nodes: list[tuple[PipelineRun, str]] = []
+
+    for index, run in enumerate(ordered):
+        node_type = _node_type_for(run.kind)
+        if node_type is None:
+            graph.skipped.append(
+                SkippedRun(
+                    run_id=str(run.id),
+                    label=run.label,
+                    reason=f"No canvas node type represents a {run.kind.value} run.",
+                )
+            )
+            continue
+        node_id = f"{node_type}_{index + 1}"
+        node_for_run[run.id] = node_id
+        action_nodes.append((run, node_type))
+        graph.nodes.append(
+            WorkflowNode(
+                node_id=node_id,
+                kind=WorkflowNodeKind.ACTION,
+                node_type=node_type,
+                params=dict(run.params or {}),
+                position=NodePosition(x=260.0 + index * 220.0, y=60.0),
+            )
+        )
+
+    # One slot per distinct external object, not per reference to it: two runs
+    # reading the same file describe one input, and duplicating it would ask
+    # the user to bind the same object twice.
+    input_node_for: dict[PydanticObjectId, str] = {}
+
+    for run, node_type in action_nodes:
+        target = node_for_run[run.id]
+        for run_input in run.inputs:
+            port = _port_for_role(node_type, run_input.role.value if run_input.role else None)
+            if port is None:
+                continue
+
+            upstream = producer.get(run_input.object_id)
+            if upstream is not None and upstream.id in node_for_run:
+                # Produced by another selected run: an edge, not a slot.
+                source_type = next(
+                    (t for r, t in action_nodes if r.id == upstream.id), None
+                )
+                spec = NODE_TYPES.get(source_type or "")
+                from_port = spec.outputs[0].name if spec and spec.outputs else None
+                if from_port:
+                    graph.edges.append(
+                        WorkflowEdge(
+                            from_node=node_for_run[upstream.id],
+                            from_port=from_port,
+                            to_node=target,
+                            to_port=port,
+                        )
+                    )
+                continue
+
+            node_id = input_node_for.get(run_input.object_id)
+            if node_id is None:
+                node_id = f"input_{len(input_node_for) + 1}"
+                input_node_for[run_input.object_id] = node_id
+                graph.nodes.append(
+                    WorkflowNode(
+                        node_id=node_id,
+                        kind=WorkflowNodeKind.INPUT,
+                        label=run_input.name,
+                        accepts=_accepts_for(node_type, port),
+                        position=NodePosition(
+                            x=40.0, y=60.0 + len(input_node_for) * 90.0
+                        ),
+                    )
+                )
+            graph.edges.append(
+                WorkflowEdge(
+                    from_node=node_id,
+                    from_port="object",
+                    to_node=target,
+                    to_port=port,
+                )
+            )
+
+    return graph
+
+
+def as_definition(graph: DerivedGraph, *, name: str, owner: str) -> WorkflowDefinition:
+    """The derived graph as an unsaved `WorkflowDefinition`.
+
+    Constructed, never inserted -- §7 introduces no new persistence.
+    """
+    return WorkflowDefinition(
+        name=name,
+        description="Derived from previous runs.",
+        nodes=graph.nodes,
+        edges=graph.edges,
+        owner=owner,
+    )

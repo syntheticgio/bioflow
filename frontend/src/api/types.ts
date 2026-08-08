@@ -1842,3 +1842,104 @@ export interface AiProviderInput {
 export interface VersionInfo {
   version: string;
 }
+
+/* ---------------------------------------------------------------- workflows */
+
+/** What may flow down a wire. Mirrors the backend `PortType`: `role: null`
+ *  means "any role for this format", which is the honest type for a port that
+ *  genuinely does not care -- QC's, for instance. */
+export interface PortType {
+  format: string;
+  role: string | null;
+}
+
+export interface PortMeta {
+  name: string;
+  type: PortType;
+  required: boolean;
+}
+
+/** One entry of the canvas palette, served by `/workflows/node-types`.
+ *  Generated from the backend registry rather than hand-listed here, so a tool
+ *  added there appears in the canvas without a frontend change. */
+export interface NodeTypeMeta {
+  node_type: string;
+  label: string;
+  inputs: PortMeta[];
+  outputs: PortMeta[];
+}
+
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
+export interface WorkflowNode {
+  node_id: string;
+  kind: "input" | "action";
+  /** ACTION only: keys into the palette. */
+  node_type?: string | null;
+  params: Record<string, unknown>;
+  continue_on_failure: boolean;
+  position?: NodePosition;
+  /** INPUT only. The label is why input nodes are explicit rather than implied
+   *  by an unwired port: "tumor reads" and "normal reads" are the same type and
+   *  only a name tells them apart. */
+  label?: string | null;
+  accepts?: PortType | null;
+}
+
+export interface WorkflowEdge {
+  from_node: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  name: string;
+  description: string;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  version: number;
+}
+
+export interface WorkflowDefinitionInput {
+  name: string;
+  description: string;
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+}
+
+export interface WorkflowRunSummary {
+  id: string;
+  definition_id: string;
+  definition_version: number;
+  label: string;
+  status: string;
+}
+
+/** One problem with a saved graph. `node_id`/`port` are what let the canvas
+ *  mark the offending node rather than only showing a message. */
+export interface GraphValidationError {
+  code: string;
+  message: string;
+  node_id: string | null;
+  port: string | null;
+}
+
+export interface SkippedRun {
+  run_id: string;
+  label: string;
+  reason: string;
+}
+
+/** An unsaved graph derived from previous runs. `skipped` is the part that
+ *  must be shown: a run the canvas cannot represent is reported, never
+ *  silently dropped. */
+export interface DerivedGraph {
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  skipped: SkippedRun[];
+}

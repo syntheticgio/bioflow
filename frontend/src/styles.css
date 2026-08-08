@@ -5197,3 +5197,320 @@ table.software-matrix thead th.software-matrix-corner {
 .share-state-withdrawn {
   color: var(--text-faint);
 }
+
+/* ---------------------------------------------------------------- workflows */
+/* The graph editor. Colours come from the same custom properties as the rest
+   of the app so the canvas is not a visually separate island. */
+
+.workflow-canvas {
+  display: flex;
+  flex-direction: column;
+  /* `.main` is a grid with `overflow: hidden`, so a percentage height has no
+     definite parent to resolve against and the page scrolls instead of the
+     palette. Filling the grid cell and clipping here is what keeps the toolbar
+     and palette fixed while only their own contents scroll. */
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workflow-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-name {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 10px;
+  min-width: 220px;
+}
+
+.workflow-open {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 8px;
+  margin-left: auto;
+}
+
+.workflow-notice {
+  padding: 8px 14px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-errors {
+  margin: 0;
+  padding: 8px 14px 8px 32px;
+  color: var(--error);
+  border-bottom: 1px solid var(--border);
+}
+
+.workflow-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.workflow-palette {
+  width: 190px;
+  border-right: 1px solid var(--border);
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.workflow-palette h4 {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.workflow-palette-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.workflow-palette-item:hover {
+  background: var(--bg-hover);
+}
+
+.workflow-svg {
+  flex: 1;
+  background: var(--bg);
+  /* A faint grid, so dragging a node reads as movement against something
+     rather than against a void. */
+  background-image: radial-gradient(var(--border) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.workflow-node {
+  fill: var(--bg-panel);
+  stroke: var(--border);
+  cursor: grab;
+}
+
+.workflow-node.input {
+  fill: var(--bg-elevated);
+  stroke: var(--accent-dim);
+}
+
+.workflow-node.selected {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.workflow-node.invalid {
+  stroke: var(--error);
+  stroke-width: 2;
+}
+
+.workflow-node-label {
+  fill: var(--text);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.workflow-node-delete {
+  fill: var(--text-faint);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.workflow-node-delete:hover {
+  fill: var(--error);
+}
+
+.workflow-port {
+  fill: var(--bg-elevated);
+  stroke: var(--text-faint);
+  cursor: crosshair;
+}
+
+/* A required port reads differently from an optional one, so a graph that will
+   not save is visible before the save. */
+.workflow-port.required {
+  stroke: var(--accent);
+}
+
+.workflow-port.out {
+  fill: var(--accent-dim);
+  stroke: var(--accent);
+}
+
+.workflow-port:hover {
+  fill: var(--accent);
+}
+
+.workflow-port-label {
+  fill: var(--text-faint);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.workflow-edge {
+  fill: none;
+  stroke: var(--accent-dim);
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.workflow-edge:hover {
+  stroke: var(--error);
+}
+
+.workflow-edge.pending {
+  stroke: var(--accent);
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* The run dialog: pick a project, bind each input slot to a real file. */
+
+.workflow-launch {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.workflow-launch-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  min-width: 460px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.workflow-launch-panel h3 {
+  margin: 0 0 14px;
+}
+
+.workflow-launch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.workflow-launch-row > span {
+  width: 170px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+}
+
+/* The accepted type, shown beside each slot: it is the reason a file the user
+   expected is missing from the list, and without it an empty dropdown reads as
+   a bug rather than as a filter doing its job. */
+.workflow-launch-row em {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.workflow-launch-row select {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 8px;
+}
+
+.workflow-launch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Inspector for the selected input slot: its name, and the type it accepts.
+   Without the type control every slot is FASTQ forever and a workflow that
+   takes a reference genome cannot be built at all. */
+
+.workflow-inspector {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.workflow-inspector label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.workflow-inspector span {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.workflow-inspector input,
+.workflow-inspector select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 12px;
+  width: 100%;
+}
+
+/* Runs offered for derive-from-runs, and the skipped report. The skipped list
+   is styled as a warning rather than an error: nothing failed, but a run the
+   user selected is not on the canvas and they need to know which. */
+
+.workflow-run-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  margin: 10px 0;
+}
+
+.workflow-run-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.workflow-run-list label:hover {
+  background: var(--bg-hover);
+}
+
+.workflow-run-list em {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-style: normal;
+  font-size: 11px;
+}
+
+.workflow-errors.skipped {
+  color: var(--warn);
+}

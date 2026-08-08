@@ -83,7 +83,12 @@ import type {
   VariantRequest,
   VariantsPage,
   VariantStructure,
+  DerivedGraph,
+  NodeTypeMeta,
   VersionInfo,
+  WorkflowDefinition,
+  WorkflowDefinitionInput,
+  WorkflowRunSummary,
 } from "./types";
 
 import { useProfileStore } from "../stores/profileStore";
@@ -1041,5 +1046,48 @@ export const api = {
 
       signal?.addEventListener("abort", () => xhr.abort());
       xhr.send(file);
+    }),
+
+  /* -------------------------------------------------------------- workflows */
+
+  /** The canvas palette. Generated from the backend registry, so a tool added
+   *  there appears here with no frontend change -- do not cache it across
+   *  sessions or that property is lost. */
+  listNodeTypes: () => request<NodeTypeMeta[]>("/workflows/node-types"),
+
+  listWorkflows: () => request<WorkflowDefinition[]>("/workflows"),
+
+  getWorkflow: (id: string) => request<WorkflowDefinition>(`/workflows/${id}`),
+
+  /** A 422 carries every validation error under `details.errors`, not just the
+   *  first, so the canvas can mark every bad wire at once. `ApiRequestError`
+   *  already exposes `details`. */
+  createWorkflow: (body: WorkflowDefinitionInput) =>
+    request<WorkflowDefinition>("/workflows", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateWorkflow: (id: string, body: WorkflowDefinitionInput) =>
+    request<WorkflowDefinition>(`/workflows/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  /** Populate a canvas from runs the user already did. Returns an *unsaved*
+   *  graph -- nothing is persisted until the user saves it. */
+  deriveWorkflow: (runIds: string[]) =>
+    request<DerivedGraph>("/workflows/derive", {
+      method: "POST",
+      body: JSON.stringify({ run_ids: runIds }),
+    }),
+
+  launchWorkflow: (
+    id: string,
+    body: { project_id: string; label: string; bindings: Record<string, string> },
+  ) =>
+    request<WorkflowRunSummary>(`/workflows/${id}/runs`, {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 };
