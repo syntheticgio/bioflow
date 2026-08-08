@@ -23,6 +23,7 @@ from app.api.v1 import (
     uniprot,
     uploads,
     version,
+    workflows,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -48,5 +49,6 @@ api_router.include_router(events.router)
 api_router.include_router(feedback.router)
 api_router.include_router(settings.router)
 api_router.include_router(version.router)
+api_router.include_router(workflows.router)
 
 __all__ = ["api_router"]
