@@ -834,6 +834,10 @@ async def reconcile() -> int:
                 "attempts": job.attempts,
                 "score": score,
                 "epoch": job.lease.epoch if job.lease else 0,
+                # Kept in step with _push_to_redis. This is the half that makes
+                # the override survive a requeue: Mongo is the record of truth
+                # and this is where the hash is rebuilt from it.
+                "override": "1" if job.resource_override else "0",
             },
         )
         if job.available_at and job.available_at > datetime.now(UTC):

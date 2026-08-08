@@ -79,3 +79,32 @@ async def test_enqueue_writes_zero_when_not_overridden(redis, monkeypatch):
     # Written explicitly rather than omitted: claim.lua reads a fixed HMGET
     # position, and a missing field there is nil, not "0".
     assert value == "0"
+
+
+@pytest.mark.asyncio
+async def test_override_survives_a_hash_rebuild_by_reconcile(redis, monkeypatch):
+    """The flag must come back on the hash, not merely on the document.
+
+    Asserting the Mongo document still holds it would pass without this
+    change -- Mongo is not what gets wiped by a Redis restart. The hash is
+    what claim.lua reads, so the hash is what this asserts.
+    """
+    from app.queue import keys, queue
+
+    monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+    job = await queue.enqueue(
+        "align_reads", owner="p1", resource_override=True
+    )
+    assert job is not None
+    job_id = str(job.id)
+
+    # Simulate the Redis-side loss a restart produces: the queue entry and
+    # the hash both go, while Mongo keeps the job.
+    await redis.delete(keys.job_key(job_id))
+    await redis.zrem(keys.READY, job_id)
+
+    await queue.reconcile()
+
+    value = await redis.hget(keys.job_key(job_id), "override")
+    assert value == "1"
