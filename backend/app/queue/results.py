@@ -6,6 +6,7 @@ connection pools with different transaction semantics -- they return plain
 dicts, and the writes happen here on the loop.
 """
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -493,6 +494,30 @@ async def _apply_sra_download(result: dict, *, owner: str) -> None:
     accession = result.get("accession")
     job_id = result.get("job_id")
     platform = result.get("platform") or "UNKNOWN"
+
+    # The job-level dedup_key in sra_service.launch_download only collapses a
+    # second request while the first job is still in flight -- once that job
+    # has finished, there is no in-flight job left to collide with, and a
+    # second request for the same accession reaches this applier and would
+    # otherwise create a second, visible DataObject for content already
+    # present (bug #81). ERROR/MISSING records are not "already have it": the
+    # NCBI dialog deliberately lets a user re-request a run whose file was
+    # deleted or came in corrupted, and that recovery path must still ingest.
+    if accession and await DataObject.find_one(
+        DataObject.project_id == project_id,
+        {"metadata.sra_run": accession},
+        {"status": {"$nin": [ObjectStatus.ERROR, ObjectStatus.MISSING]}},
+    ):
+        log.info(
+            "sra_download_already_present",
+            accession=accession,
+            project_id=str(project_id),
+        )
+        for entry in staged:
+            path = Path(entry["path"])
+            if await asyncio.to_thread(path.exists):
+                await asyncio.to_thread(path.unlink)
+        return
 
     # Provenance, distinct from the sample metadata below: this records where
     # the bytes came from, which is not a searchable property of the biology.
