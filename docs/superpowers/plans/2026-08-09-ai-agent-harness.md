@@ -8,7 +8,8 @@ steps, run pipelines. Implements
 [#30](https://github.com/syntheticgio/bioflow/issues/30).
 
 **Architecture:** Backend spawns Pi as a subprocess (`pi --mode rpc`) per
-project. Pi connects to BioFlow's in-process MCP server via an MCP extension
+project. Pi connects to BioFlow's in-process MCP server via the
+pi-mcp-adapter extension
 and dynamically-generated config file. The backend proxies JSONL messages
 between the frontend (via SSE) and Pi (via stdin/stdout). No new MCP tools
 needed — the existing 18 tools are sufficient. Extensions, skills, and
@@ -44,11 +45,14 @@ a worktree. Use:
 Record the baseline count before touching anything. If the baseline is red,
 stop and report rather than starting against it.
 
-### Manual verification needs Pi and MCP extension installed
+### Manual verification needs Pi and pi-mcp-adapter installed
 
-Pi and its MCP extension must be installed in the `api` container or accessible
-on the host. The `api` container's Dockerfile will be updated to install both
-globally via npm, plus any desired skills.
+Pi and the pi-mcp-adapter extension must be installed in the `api` container
+or accessible on the host. The `api` container's Dockerfile will be updated
+to install Node 22 (Pi requires Node >= 22.19; `python:3.12-slim` has no Node
+and bookworm's apt nodejs is 18.x), Pi globally via npm, and the adapter via
+`pi install npm:pi-mcp-adapter` — which must run inside the container where
+Pi is installed.
 
 ### After merge
 
@@ -69,8 +73,8 @@ docker compose up -d --build api
 - Modify: `backend/Dockerfile` (or `docker-compose.override.yml`)
 - Create: `pi-skills/` directory with placeholder skills
 
-Adds config settings, installs Pi + MCP extension in the api container, and
-sets up skills/extensions directories.
+Adds config settings, installs Node 22, Pi + pi-mcp-adapter in the api
+container, and sets up skills/extensions directories.
 
 - [ ] **Step 1: Add config settings**
 
@@ -83,18 +87,32 @@ AGENT_RESPONSE_TIMEOUT: int = 300  # Seconds before killing unresponsive agent
 AGENT_IDLE_TIMEOUT: int = 1800  # Kill agent after 30 min of inactivity
 ```
 
-- [ ] **Step 2: Install Pi and MCP extension in the api container**
+- [ ] **Step 2: Install Node 22, Pi, and pi-mcp-adapter in the api container**
 
-In `backend/Dockerfile`, add:
+Pi requires Node >= 22.19. The `python:3.12-slim` base image has no Node at
+all, and Debian bookworm's apt `nodejs` is 18.x — too old. Install Node 22
+first (NodeSource), then Pi globally via npm, then the pi-mcp-adapter
+extension via Pi's own package manager (`pi install` — this is what registers
+the `--mcp-config` flag; it must run inside the container where Pi is
+installed):
 
 ```dockerfile
+# In backend/Dockerfile
+
+# Node 22 for the Pi coding agent (python:3.12-slim has no Node; bookworm's
+# apt nodejs is 18.x < pi's >=22.19 requirement)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Pi coding agent globally
 RUN npm install -g @earendil-works/pi-coding-agent
 
-# Install MCP extension (required for MCP server connectivity)
-RUN mkdir -p /root/.pi/agent/extensions \
-  && npm install -g @earendil-works/pi-mcp-extension \
-  && ln -s /usr/local/lib/node_modules/@earendil-works/pi-mcp-extension /root/.pi/agent/extensions/mcp
+# Install pi-mcp-adapter (required for MCP server connectivity).
+# pi install registers the extension in ~/.pi/agent/settings.json —
+# no interactive prompts, safe to run at build time.
+RUN pi install npm:pi-mcp-adapter \
+    && pi --version
 
 # Copy skills (teaches Pi about bioinformatics workflows)
 COPY ./pi-skills/ /root/.pi/agent/skills/
@@ -109,7 +127,6 @@ services:
       PI_PATH: /usr/local/bin/pi
     volumes:
       - /usr/local/bin/pi:/usr/local/bin/pi:ro
-      - /usr/local/lib/node_modules/@earendil-works/pi-mcp-extension:/root/.pi/agent/extensions/mcp:ro
       - ./pi-skills:/root/.pi/agent/skills:ro
 ```
 
