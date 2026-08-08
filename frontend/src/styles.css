@@ -966,6 +966,16 @@ a.btn {
   background: color-mix(in srgb, var(--error) 12%, transparent);
 }
 
+.btn.subtle {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+
+.btn.subtle:hover {
+  background: var(--bg-hover);
+}
+
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -5679,3 +5689,77 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 .workflow-job-error { color: var(--error); }
+
+/* The node detail view. Animates out of the canvas so it reads as opening
+   *this* node rather than navigating somewhere else. */
+.node-detail {
+  padding: 20px 28px;
+  overflow-y: auto;
+  animation: node-detail-in 140ms ease-out;
+}
+
+@keyframes node-detail-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.node-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.node-detail-ports {
+  list-style: none;
+  padding: 0;
+}
+
+.node-detail-ports li {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.param-field {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.param-help {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+
+.node-detail label.checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+.node-detail label.checkbox input {
+  margin-top: 2px;
+  width: auto;
+}
+
+.node-detail label.checkbox em {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: normal;
+}

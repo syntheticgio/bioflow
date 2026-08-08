@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiRequestError, api } from "../api/client";
 import type {
   GraphValidationError,
@@ -39,6 +39,7 @@ import {
   nodePortPosition,
   portsFor,
 } from "../lib/workflowGraph";
+import { NodeDetailPanel } from "./workflow/NodeDetailPanel";
 
 interface PendingWire {
   node_id: string;
@@ -109,6 +110,7 @@ export function WorkflowCanvas() {
   const [deriving, setDeriving] = useState(false);
   const [pickedRuns, setPickedRuns] = useState<string[]>([]);
   const [skipped, setSkipped] = useState<SkippedRun[]>([]);
+  const [detailNodeId, setDetailNodeId] = useState<string | null>(null);
   const dragRef = useRef<{ node_id: string; dx: number; dy: number } | null>(null);
 
   const palette = useQuery({
@@ -126,6 +128,34 @@ export function WorkflowCanvas() {
     for (const entry of palette.data ?? []) out[entry.node_type] = entry;
     return out;
   }, [palette.data]);
+
+  const detailNode = useMemo(
+    () => nodes.find((n) => n.node_id === detailNodeId) ?? null,
+    [nodes, detailNodeId],
+  );
+
+  function updateNode(nodeId: string, patch: Partial<WorkflowNode>) {
+    setNodes((current) =>
+      current.map((n) => (n.node_id === nodeId ? { ...n, ...patch } : n)),
+    );
+  }
+
+  function setParam(nodeId: string, key: string, value: unknown) {
+    setNodes((current) =>
+      current.map((n) =>
+        n.node_id === nodeId ? { ...n, params: { ...n.params, [key]: value } } : n,
+      ),
+    );
+  }
+
+  useEffect(() => {
+    if (!detailNodeId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDetailNodeId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailNodeId]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -618,6 +648,21 @@ export function WorkflowCanvas() {
         </div>
       )}
 
+      {detailNode ? (
+        <NodeDetailPanel
+          node={detailNode}
+          nodes={nodes}
+          edges={edges}
+          catalog={catalog}
+          onClose={() => setDetailNodeId(null)}
+          onChangeTool={changeTool}
+          onChangeParam={setParam}
+          onChangeLabel={(id, label) => updateNode(id, { label })}
+          onToggleContinue={(id, value) =>
+            updateNode(id, { continue_on_failure: value })
+          }
+        />
+      ) : (
       <div className="workflow-body">
         <aside className="workflow-palette">
           {selectedInput && (
@@ -778,6 +823,10 @@ export function WorkflowCanvas() {
                     };
                     setSelected(node.node_id);
                   }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setDetailNodeId(node.node_id);
+                  }}
                 >
                   {problems && <title>{problems.join("\n")}</title>}
                 </rect>
@@ -886,6 +935,7 @@ export function WorkflowCanvas() {
           })}
         </svg>
       </div>
+      )}
     </div>
   );
 }
