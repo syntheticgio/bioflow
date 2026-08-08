@@ -12,6 +12,7 @@ from app.api.v1 import (
     profiles,
     project_qa,
     projects,
+    replan,
     runs,
     schedules,
     search,
@@ -36,6 +37,7 @@ api_router.include_router(objects.router)
 api_router.include_router(uploads.router)
 api_router.include_router(jobs.router)
 api_router.include_router(pipelines.router)
+api_router.include_router(replan.router)
 api_router.include_router(runs.router)
 api_router.include_router(sra.router)
 api_router.include_router(ncbi.router)
