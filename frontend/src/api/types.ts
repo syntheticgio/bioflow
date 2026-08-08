@@ -1736,6 +1736,34 @@ export interface Feedback extends FeedbackSubmission {
   created_at: string;
 }
 
+export type LocalDatabaseCategory =
+  | "reference_assembly"
+  | "annotation"
+  | "variant_clinical"
+  | "taxonomy_metadata"
+  | "pipeline_tool_data"
+  | "other";
+
+export const LOCAL_DATABASE_CATEGORY_LABELS: Record<LocalDatabaseCategory, string> = {
+  reference_assembly: "Reference / Assembly",
+  annotation: "Annotation",
+  variant_clinical: "Variant / Clinical",
+  taxonomy_metadata: "Taxonomy / Metadata",
+  pipeline_tool_data: "Pipeline / Tool Data",
+  other: "Other",
+};
+
+export interface LocalDatabaseSubmission {
+  name: string;
+  url: string;
+  category: LocalDatabaseCategory;
+}
+
+export interface LocalDatabaseEntry extends LocalDatabaseSubmission {
+  id: string;
+  created_at: string;
+}
+
 /** A known provider, offered in the add-provider form. Picking one pre-fills
  *  the base URL; it stays editable afterwards, which is how a mainland
  *  DashScope account or a non-default local port gets configured. */
