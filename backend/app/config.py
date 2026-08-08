@@ -251,7 +251,7 @@ class Settings(BaseSettings):
     # --- AI agent (in-app Pi harness) ---
     # Path to the pi CLI binary. The api image installs it (and its
     # pi-mcp-adapter extension) at build time -- see backend/Dockerfile.
-    pi_path: str = "/usr/local/bin/pi"
+    pi_path: str = "/usr/bin/pi"
     # Master switch. Off hides the agent UI entirely, whatever else is set.
     pi_disabled: bool = False
     # A prompt that gets no response within this window is treated as a dead

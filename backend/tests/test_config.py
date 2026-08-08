@@ -68,14 +68,14 @@ class TestDeepVariantImage:
 class TestAgentSettings:
     """Defaults for the in-app Pi agent harness (epic #30).
 
-    The api image installs pi at /usr/local/bin/pi at build time, so the
+    The api image installs pi at /usr/bin/pi at build time, so the
     default path is a container fact, not a guess. The settings here are
     read by AgentService (Task 2) and the MCP config builder (Task 3).
     """
 
     def test_defaults(self):
         s = Settings()
-        assert s.pi_path == "/usr/local/bin/pi"
+        assert s.pi_path == "/usr/bin/pi"
         assert s.pi_disabled is False
         assert s.agent_response_timeout == 300
         assert s.agent_idle_timeout == 1800
