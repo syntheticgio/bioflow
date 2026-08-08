@@ -2870,3 +2870,44 @@ Two things to settle early, because they shape everything after:
 
 This is the largest item in this file and probably wants decomposing into its
 own spec before any plan.
+
+## In-app AI agent — FIXED
+
+Shipped 2026-08-08 as epic #30 (issues #85-#90) against
+`docs/superpowers/specs/2026-08-09-ai-agent-harness-design.md` and
+`docs/superpowers/plans/2026-08-09-ai-agent-harness.md`. The first slice adds a
+project-scoped agent drawer with a Pi subprocess, MCP integration, SSE
+streaming, and error handling.
+
+**What shipped:**
+- `AgentProcess` (backend) spawns `pi --mode rpc --no-session --mcp-config` per
+  (profile, project); temp config points at `http://localhost:8000/api/v1/mcp?profile=<id>`
+- Event translation from pi's JSONL protocol to SSE events for the drawer:
+  agent_start, message_delta (text/thinking), tool_call/tool_result (unwrapping
+  pi-mcp-adapter's `mcp` proxy tool name), done, error
+- `streamingBehavior: "steer"` on every prompt; prompts are fire-and-forget with
+  the watchdog armed by the reader on acceptance
+- API router at `/projects/{project_id}/agent` with POST /ask, GET /events (SSE),
+  DELETE /agent, POST /agent/restart
+- Lifespan sweeps idle agents every 60s and kills all on shutdown
+- Frontend hook `useAgentSSE` and AgentPanel UI components (header, message
+  bubbles with streaming cursor and tool call indicators, input area)
+- Footer integration with 🤖 Agent button alongside the existing 💬 Ask button
+
+**Design decisions that departed from the plan:**
+- The plan's ack-future in `send_prompt` deadlocked by construction (the ack
+  arrives on stdout only after the function returns). Removed: prompts are
+  fire-and-forget, rejection becomes an error event, watchdog armed by the reader.
+- The plan's `_no_agent_stream()` was replaced by a re-attaching loop: the
+  stream is opened before any process exists, polls for one, forwards events,
+  and re-attaches when the process stops or dies.
+- `get_profile_id` validates through `resolve_owner` but returns the raw
+  client-supplied id (the MCP config embeds it in `?profile=`, not the owner
+  string).
+- Two test-infra traps found and documented: httpx 0.28's ASGITransport buffers
+  the full response body (infinite SSE never arrives through it), and the repo's
+  sse-starlette fork runs a process-global exit watcher that kills a second
+  sequential server's streams.
+
+**Verification:** 28 new tests (18 service, 10 API), 4072 passed full suite,
+ruff clean. Manual testing against a real stack confirmed the full lifecycle.
