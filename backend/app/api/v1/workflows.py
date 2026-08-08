@@ -14,11 +14,14 @@ test exists to prevent.
 Design note: docs/superpowers/specs/2026-08-07-workflow-dag-design.md
 """
 
+from datetime import datetime
+
 from beanie import PydanticObjectId
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import OwnerDep
+from app.models.job import Job
 from app.models.workflow import (
     WorkflowDefinition,
     WorkflowEdge,
@@ -90,6 +93,57 @@ class DerivedOut(BaseModel):
     # here rather than dropped, or the user gets a canvas quietly missing a
     # step they selected.
     skipped: list[SkippedRunOut]
+
+
+class WorkflowRunOut(BaseModel):
+    """One row of the activity listing.
+
+    `status` is derived on read, never stored -- a second stored copy would
+    drift the first time a write was lost. The counts ride along so a collapsed
+    row can say "1 of 3" without a request per run.
+    """
+
+    id: str
+    definition_id: str
+    definition_version: int
+    project_id: str
+    label: str
+    status: str
+    node_total: int
+    node_done: int
+    node_failed: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class NodeJobOut(BaseModel):
+    job_id: str
+    type: str | None
+    state: str | None
+    progress: dict | None
+    error: dict | None
+
+
+class WorkflowNodeOut(BaseModel):
+    node_id: str
+    kind: str
+    node_type: str | None
+    label: str
+    state: str
+    attempt: int
+    # Present only for the 9 node types that create a PipelineRun. The other 13
+    # are tracked by their jobs alone -- see the deviation note on #78.
+    run_id: str | None
+    jobs: list[NodeJobOut]
+    outputs: list[str]
+
+
+class WorkflowRunDetailOut(BaseModel):
+    id: str
+    definition_id: str
+    label: str
+    status: str
+    nodes: list[WorkflowNodeOut]
 
 
 class LaunchIn(BaseModel):
@@ -174,6 +228,126 @@ async def derive_from_runs(body: DeriveIn, owner: OwnerDep) -> DerivedOut:
             for s in graph.skipped
         ],
     )
+
+
+@router.get("/runs")
+async def list_workflow_runs(
+    owner: OwnerDep, limit: int = 50
+) -> list[WorkflowRunOut]:
+    """Recent workflow runs. Declared before `/{definition_id}` so the path
+    parameter cannot swallow "runs"."""
+    summaries = await workflow_orchestrator.list_runs(owner=owner, limit=limit)
+    return [
+        WorkflowRunOut(
+            id=str(s.run.id),
+            definition_id=str(s.run.definition_id),
+            definition_version=s.run.definition_version,
+            project_id=str(s.run.project_id),
+            label=s.run.label,
+            status=s.status.value,
+            node_total=s.node_total,
+            node_done=s.node_done,
+            node_failed=s.node_failed,
+            created_at=s.run.created_at,
+            updated_at=s.run.updated_at,
+        )
+        for s in summaries
+    ]
+
+
+@router.get("/runs/{workflow_run_id}")
+async def get_workflow_run(
+    workflow_run_id: PydanticObjectId, owner: OwnerDep
+) -> WorkflowRunDetailOut:
+    """One run, expanded to its nodes and each node's jobs.
+
+    The jobs are looked up here rather than left to the client: a node's state
+    comes from them, and a per-node request would put the cost of the expanded
+    view on the number of nodes.
+    """
+    run, status_value, nodes = await workflow_orchestrator.run_detail(
+        workflow_run_id, owner=owner
+    )
+
+    job_ids = [jid for node in nodes for jid in node.job_ids]
+    jobs = (
+        await Job.find({"_id": {"$in": job_ids}}).to_list() if job_ids else []
+    )
+    by_id = {job.id: job for job in jobs}
+
+    return WorkflowRunDetailOut(
+        id=str(run.id),
+        definition_id=str(run.definition_id),
+        label=run.label,
+        status=status_value.value,
+        nodes=[
+            WorkflowNodeOut(
+                node_id=node.node_id,
+                kind=node.kind,
+                node_type=node.node_type,
+                label=node.label,
+                state=node.state.value,
+                attempt=node.attempt,
+                run_id=str(node.run_id) if node.run_id else None,
+                jobs=[
+                    NodeJobOut(
+                        job_id=str(jid),
+                        # A job pruned by the 30-day TTL leaves its id on the
+                        # node run. Reported as an id with nulls rather than
+                        # omitted, so the count still matches what ran.
+                        type=by_id[jid].type if jid in by_id else None,
+                        state=by_id[jid].state.value if jid in by_id else None,
+                        progress=(
+                            by_id[jid].progress.model_dump(mode="json")
+                            if jid in by_id
+                            else None
+                        ),
+                        error=(
+                            by_id[jid].error.model_dump(mode="json")
+                            if jid in by_id and by_id[jid].error
+                            else None
+                        ),
+                    )
+                    for jid in node.job_ids
+                ],
+                outputs=[str(o) for o in node.outputs],
+            )
+            for node in nodes
+        ],
+    )
+
+
+@router.post(
+    "/runs/{workflow_run_id}/nodes/{node_id}/retry",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def retry_workflow_node(
+    workflow_run_id: PydanticObjectId, node_id: str, owner: OwnerDep
+) -> dict:
+    """Retry one failed node in place (§1.4): a new attempt and new work, with
+    succeeded siblings left alone."""
+    await workflow_orchestrator.retry_node(workflow_run_id, node_id, owner=owner)
+    return {"retried": node_id}
+
+
+@router.post(
+    "/runs/{workflow_run_id}/retry-failed", status_code=status.HTTP_202_ACCEPTED
+)
+async def retry_failed(
+    workflow_run_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    count = await workflow_orchestrator.retry_failed_nodes(
+        workflow_run_id, owner=owner
+    )
+    return {"retried": count}
+
+
+@router.post("/runs/{workflow_run_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_workflow_run(
+    workflow_run_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    await workflow_orchestrator.cancel_workflow(workflow_run_id, owner=owner)
+    return {"cancelled": str(workflow_run_id)}
 
 
 @router.get("/{definition_id}")

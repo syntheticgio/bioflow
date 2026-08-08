@@ -23,9 +23,12 @@ from app.models.workflow import (
 # Terminal and unsuccessful. A node in one of these will never produce the
 # output its dependents are waiting for, which is what makes them doom-bearing
 # -- unless the node opted into `continue_on_failure`.
-_UNSUCCESSFUL = frozenset(
+UNSUCCESSFUL = frozenset(
     {NodeRunState.FAILED, NodeRunState.CANCELLED, NodeRunState.SKIPPED}
 )
+# Kept as a private alias so this module's own body reads unchanged; the public
+# name is what other modules import.
+_UNSUCCESSFUL = UNSUCCESSFUL
 
 
 def _parents(definition: WorkflowDefinition) -> dict[str, list[str]]:

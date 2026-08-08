@@ -20,6 +20,8 @@ view keeps seeing ordinary runs. See the deviation note on #18/#78.
 Design note: docs/superpowers/specs/2026-08-07-workflow-dag-design.md
 """
 
+from dataclasses import dataclass
+
 import structlog
 from beanie import PydanticObjectId
 
@@ -35,16 +37,21 @@ from app.models.workflow import (
 )
 from app.pipelines.node_types import NODE_TYPES
 from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
-from app.services.workflow_planner import doomed_nodes, runnable_nodes
+from app.services.workflow_planner import UNSUCCESSFUL, doomed_nodes, runnable_nodes
 
 log = structlog.get_logger(__name__)
 
 __all__ = [
+    "NodeDetail",
     "OutputCandidate",
+    "RunSummary",
     "cancel_workflow",
     "launch_workflow",
     "on_node_finished",
+    "list_runs",
     "reconcile_workflows",
+    "retry_failed_nodes",
+    "run_detail",
     "retry_node",
     "status_of",
 ]
@@ -97,9 +104,18 @@ def _latest(rows: list[WorkflowNodeRun]) -> dict[str, WorkflowNodeRun]:
     return latest
 
 
-async def _load(workflow_run_id: PydanticObjectId):
+async def _load(workflow_run_id: PydanticObjectId, *, owner: str | None = None):
+    """The run and its definition.
+
+    `owner`, when given, scopes the lookup. Optional rather than required
+    because the internal callers -- the completion hook and the reconciler --
+    act on whatever run a finished job belongs to and have no user in hand;
+    every caller that *does* have one must pass it. Without that, any profile
+    holding a run id could retry or cancel another profile's workflow and spend
+    their compute, which is what `test_another_owner_cannot_retry` caught.
+    """
     run = await WorkflowRun.get(workflow_run_id)
-    if run is None:
+    if run is None or (owner is not None and run.owner != owner):
         raise NotFoundError(f"No workflow run {workflow_run_id}.")
     definition = await WorkflowDefinition.get(run.definition_id)
     if definition is None:
@@ -431,7 +447,7 @@ async def retry_node(
     them SKIPPED is the failure mode that makes retry useless -- the node
     succeeds and the graph still never advances.
     """
-    run, definition = await _load(workflow_run_id)
+    run, definition = await _load(workflow_run_id, owner=owner)
     rows = await _rows(run.id)
     latest = _latest(rows)
     row = latest.get(node_id)
@@ -464,7 +480,7 @@ async def cancel_workflow(workflow_run_id: PydanticObjectId, *, owner: str) -> N
     """
     from app.queue import queue
 
-    run, _ = await _load(workflow_run_id)
+    run, _ = await _load(workflow_run_id, owner=owner)
     latest = _latest(await _rows(run.id))
 
     for row in latest.values():
@@ -497,6 +513,160 @@ async def status_of(workflow_run_id: PydanticObjectId) -> WorkflowStatus:
     return derive_status(
         [row.state for node_id, row in latest.items() if node_id in action_ids]
     )
+
+
+@dataclass(frozen=True)
+class RunSummary:
+    """One row of the activity listing.
+
+    Carries the counts as well as the status so a collapsed row can say "1 of
+    3" without a second request per run.
+    """
+
+    run: WorkflowRun
+    status: WorkflowStatus
+    node_total: int
+    node_done: int
+    node_failed: int
+
+
+async def list_runs(*, owner: str, limit: int = 50) -> list[RunSummary]:
+    """Recent workflow runs with their derived status, in three queries.
+
+    Deliberately not a loop over `status_of`: that is one `_load` plus one
+    `_rows` per run, so the activity page would slow in proportion to history
+    -- the exact shape `run_service.status_for_many` exists to avoid on the
+    `PipelineRun` side. Runs, their definitions, and every node row are each
+    fetched once and joined in memory.
+    """
+    runs = (
+        await WorkflowRun.find(WorkflowRun.owner == owner)
+        .sort(-WorkflowRun.created_at)
+        .limit(limit)
+        .to_list()
+    )
+    if not runs:
+        return []
+
+    definitions = await WorkflowDefinition.find(
+        {"_id": {"$in": [r.definition_id for r in runs]}}
+    ).to_list()
+    by_definition = {d.id: d for d in definitions}
+
+    rows = await WorkflowNodeRun.find(
+        {"workflow_run_id": {"$in": [r.id for r in runs]}}
+    ).to_list()
+    by_run: dict[PydanticObjectId, list[WorkflowNodeRun]] = {}
+    for row in rows:
+        by_run.setdefault(row.workflow_run_id, []).append(row)
+
+    summaries: list[RunSummary] = []
+    for run in runs:
+        definition = by_definition.get(run.definition_id)
+        # A definition deleted out from under its run: report the run rather
+        # than hiding it, since the run is the record of what happened.
+        action_ids = (
+            {
+                n.node_id
+                for n in definition.nodes
+                if n.kind is WorkflowNodeKind.ACTION
+            }
+            if definition
+            else set()
+        )
+        latest = _latest(by_run.get(run.id, []))
+        states = [
+            row.state for node_id, row in latest.items() if node_id in action_ids
+        ]
+        summaries.append(
+            RunSummary(
+                run=run,
+                status=derive_status(states),
+                node_total=len(states),
+                node_done=sum(1 for s in states if s is NodeRunState.SUCCEEDED),
+                node_failed=sum(1 for s in states if s in UNSUCCESSFUL),
+            )
+        )
+    return summaries
+
+
+@dataclass(frozen=True)
+class NodeDetail:
+    node_id: str
+    kind: str
+    node_type: str | None
+    label: str
+    state: NodeRunState
+    attempt: int
+    run_id: PydanticObjectId | None
+    job_ids: list[PydanticObjectId]
+    outputs: list[PydanticObjectId]
+
+
+async def run_detail(
+    workflow_run_id: PydanticObjectId, *, owner: str
+) -> tuple[WorkflowRun, WorkflowStatus, list[NodeDetail]]:
+    """One run, expanded to its nodes.
+
+    Nodes are returned in the definition's own order rather than the node runs'
+    insertion order, so the expanded view reads the way the canvas is laid out.
+    """
+    run = await WorkflowRun.get(workflow_run_id)
+    if run is None or run.owner != owner:
+        raise NotFoundError(f"No workflow run {workflow_run_id}.")
+    definition = await WorkflowDefinition.get(run.definition_id)
+    if definition is None:
+        raise NotFoundError(f"No definition {run.definition_id}.")
+
+    latest = _latest(await _rows(run.id))
+    details: list[NodeDetail] = []
+    for node in definition.nodes:
+        row = latest.get(node.node_id)
+        details.append(
+            NodeDetail(
+                node_id=node.node_id,
+                kind=node.kind.value,
+                node_type=node.node_type,
+                label=node.label or node.node_type or node.node_id,
+                state=row.state if row else NodeRunState.PENDING,
+                attempt=row.attempt if row else 1,
+                run_id=row.run_id if row else None,
+                job_ids=list(row.job_ids) if row else [],
+                outputs=list(row.outputs) if row else [],
+            )
+        )
+
+    action_ids = {
+        n.node_id for n in definition.nodes if n.kind is WorkflowNodeKind.ACTION
+    }
+    status = derive_status(
+        [d.state for d in details if d.node_id in action_ids]
+    )
+    return run, status, details
+
+
+async def retry_failed_nodes(
+    workflow_run_id: PydanticObjectId, *, owner: str
+) -> int:
+    """Retry every failed node in one run. Returns how many were retried.
+
+    §1.4: this is the per-node operation applied to a set, not a second
+    mechanism -- so it goes through `retry_node` rather than reimplementing the
+    attempt bookkeeping.
+    """
+    run = await WorkflowRun.get(workflow_run_id)
+    if run is None or run.owner != owner:
+        raise NotFoundError(f"No workflow run {workflow_run_id}.")
+
+    latest = _latest(await _rows(run.id))
+    failed = [
+        node_id
+        for node_id, row in latest.items()
+        if row.state is NodeRunState.FAILED
+    ]
+    for node_id in failed:
+        await retry_node(run.id, node_id, owner=owner)
+    return len(failed)
 
 
 async def reconcile_workflows() -> int:
