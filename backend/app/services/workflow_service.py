@@ -219,7 +219,26 @@ class InvalidGraph(errors.AppError):
 
     def __init__(self, validation_errors: list[ValidationError]):
         self.errors = validation_errors
-        super().__init__(f"{len(validation_errors)} validation error(s)")
+        # Also in `details`, because that is the only part `AppError.to_dict`
+        # serializes -- a bare attribute reaches the exception handler and is
+        # dropped, leaving the client with "3 validation error(s)" and no way
+        # to learn which three. That defeats the entire reason
+        # `validate_definition` returns a list instead of raising on the first
+        # problem: the canvas marks every bad wire at once.
+        super().__init__(
+            f"{len(validation_errors)} validation error(s)",
+            details={
+                "errors": [
+                    {
+                        "code": e.code,
+                        "message": e.message,
+                        "node_id": e.node_id,
+                        "port": e.port,
+                    }
+                    for e in validation_errors
+                ]
+            },
+        )
 
 
 async def create_definition(
@@ -240,6 +259,28 @@ async def create_definition(
     return definition
 
 
+async def list_definitions(*, owner: str) -> list[WorkflowDefinition]:
+    """Every definition this profile owns, most recently edited first."""
+    return (
+        await WorkflowDefinition.find(WorkflowDefinition.owner == owner)
+        .sort(-WorkflowDefinition.updated_at)
+        .to_list()
+    )
+
+
+async def get_definition(definition_id, *, owner: str) -> WorkflowDefinition:
+    """One definition, scoped to its owner.
+
+    Another owner's definition raises `NotFoundError` rather than a permission
+    error, matching `get_project`/`get_object` -- the whole codebase denies the
+    same way, and "forbidden" would confirm the row exists.
+    """
+    definition = await WorkflowDefinition.get(definition_id)
+    if definition is None or definition.owner != owner:
+        raise NotFoundError(f"No definition {definition_id}.")
+    return definition
+
+
 async def update_definition(
     definition_id,
     *,
@@ -247,15 +288,21 @@ async def update_definition(
     description: str,
     nodes: list[WorkflowNode],
     edges: list[WorkflowEdge],
+    owner: str | None = None,
 ) -> WorkflowDefinition:
     """Replace a definition's graph, bumping its version.
 
     The version bump is unconditional rather than change-detecting: a
     WorkflowRun pins the version it ran, and a cheap extra version is far
     better than two different graphs sharing one.
+
+    `owner`, when given, scopes the lookup: without it any caller holding an id
+    could rewrite any profile's saved graph. Optional rather than required only
+    because this shipped before there was an owner to thread through; every
+    caller that has one should pass it.
     """
     definition = await WorkflowDefinition.get(definition_id)
-    if definition is None:
+    if definition is None or (owner is not None and definition.owner != owner):
         raise NotFoundError(f"No definition {definition_id}.")
 
     candidate = WorkflowDefinition(

@@ -99,6 +99,42 @@ class TestBindDownstreamInputs:
 
         assert bound == {("align", "reads"): second.object_id}
 
+    def test_a_mate_pair_fills_the_primary_and_mate_ports(self):
+        """A paired trim produces two FASTQs from one declared output port, and
+        the consumer has a `mate` port for exactly that. Treating them as two
+        rivals for `reads` is what stalled a real trim -> align workflow: both
+        matched, neither could be chosen, and nothing launched.
+
+        The first candidate leads (`_outputs_of` orders R1 first), so this
+        needs no filename parsing of its own.
+        """
+        graph = _graph(
+            [_action("trim", "trim"), _action("align", "align")],
+            [("trim", "trimmed", "align", "reads")],
+        )
+        r1 = _candidate(FormatKind.FASTQ, ObjectRole.TRIMMED_READS, name="s_R1.fq")
+        r2 = _candidate(FormatKind.FASTQ, ObjectRole.TRIMMED_READS, name="s_R2.fq")
+
+        bound = bind_downstream_inputs(graph, "trim", [r1, r2], paired=True)
+
+        assert bound[("align", "reads")] == r1.object_id
+        assert bound[("align", "mate")] == r2.object_id
+
+    def test_a_pair_whose_consumer_has_no_mate_port_binds_only_the_primary(self):
+        """QC takes one file and has no `mate` port -- a paired library is two
+        files and gets two QC runs, which its docstring says outright. R1 must
+        still bind rather than the whole node stalling."""
+        graph = _graph(
+            [_action("trim", "trim"), _action("qc", "qc")],
+            [("trim", "trimmed", "qc", "reads")],
+        )
+        r1 = _candidate(FormatKind.FASTQ, ObjectRole.TRIMMED_READS, name="s_R1.fq")
+        r2 = _candidate(FormatKind.FASTQ, ObjectRole.TRIMMED_READS, name="s_R2.fq")
+
+        bound = bind_downstream_inputs(graph, "trim", [r1, r2], paired=True)
+
+        assert bound == {("qc", "reads"): r1.object_id}
+
     def test_ambiguous_candidates_with_no_declared_mapping_bind_nothing(self):
         """Two equally type-compatible candidates and nothing saying which is
         which. Picking either is the arbitrary choice this module exists to
