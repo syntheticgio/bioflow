@@ -349,9 +349,7 @@ async def estimate(
         segments = _fit_segmented(records, _duration_samples_from)
         if threads in segments:
             model, answered_by = segments[threads], threads
-            scoring_samples = _duration_samples_from(
-                [r for r in records if r.threads == threads]
-            )
+            scoring_samples = _segment_samples(records, threads, _duration_samples_from)
         elif None in segments:
             model, answered_by = segments[None], None
             scoring_samples = samples
@@ -448,6 +446,20 @@ def _fit_segmented(
     return out
 
 
+def _segment_samples(
+    records: list[JobRunTiming], threads: int, sample_fn
+) -> list[tuple[int, int]]:
+    """The `(bytes, y)` samples for one thread count's own records --
+    what a segment's `r_squared`/`range` must be scored against, never the
+    pooled set. Split out so `estimate()`, `estimate_memory()`, and `stats()`
+    can't independently drift on this filter the way they did before the
+    r_squared scoring bug (see the design doc's "Threshold" section and the
+    fix in this feature's git history) -- one function, one place to get it
+    right.
+    """
+    return sample_fn([r for r in records if r.threads == threads])
+
+
 async def estimate_memory(
     job_type: str, input_bytes: int, *, threads: int | None = None
 ) -> dict | None:
@@ -477,9 +489,7 @@ async def estimate_memory(
         segments = _fit_segmented(records, _memory_samples_from)
         if threads in segments:
             model, answered_by = segments[threads], threads
-            scoring_samples = _memory_samples_from(
-                [r for r in records if r.threads == threads]
-            )
+            scoring_samples = _segment_samples(records, threads, _memory_samples_from)
         elif None in segments:
             model, answered_by = segments[None], None
             scoring_samples = samples
@@ -529,9 +539,7 @@ async def stats() -> list[dict]:
                     "intercept_ms": round(duration_segments[threads]["intercept"]),
                     "r_squared": round(
                         _r_squared(
-                            _duration_samples_from(
-                                [r for r in records if r.threads == threads]
-                            ),
+                            _segment_samples(records, threads, _duration_samples_from),
                             duration_segments[threads],
                         ),
                         3,

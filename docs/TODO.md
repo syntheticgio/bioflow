@@ -388,6 +388,13 @@ until enough varied-thread runs accumulate. See
 for the full design and why those two criteria were deliberately deferred
 rather than faked against fixtures.
 
+Separately, `memory_estimate.resolve()`'s three pre-flight `LoadGovernor`
+memory-reservation callers in `backend/app/services/pipeline_service.py`
+(around lines 1293, 1472, 3290) were not updated to pass `threads=` in this
+pass -- each likely has a thread count in a nearby local variable, but wiring
+them needs its own look and testing, so they stay byte-only until a follow-up
+does that.
+
 ---
 
 Raised: 2026-08-03, deferred while building computation records
