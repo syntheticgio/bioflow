@@ -23,6 +23,7 @@ from app.models.job import (
     JobState,
     JobTiming,
 )
+from app.models.local_database import LocalDatabase, LocalDatabaseCategory
 from app.models.object import (
     Compression,
     DataObject,
@@ -81,6 +82,7 @@ ALL_MODELS = [
     Profile,
     StructureLookup,
     Feedback,
+    LocalDatabase,
     Share,
     ProjectConversation,
     ResourceLimits,
@@ -118,6 +120,8 @@ __all__ = [
     "JobRunTiming",
     "JobState",
     "JobTiming",
+    "LocalDatabase",
+    "LocalDatabaseCategory",
     "OPTIONAL_ROLES",
     "ObjectError",
     "ObjectRole",
