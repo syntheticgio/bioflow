@@ -27,11 +27,34 @@ async def _outputs_of(job_id: PydanticObjectId) -> list:
     of the 22 node types create no `PipelineRun` to hold one -- this is what
     makes their outputs findable at all. For the 9 that do create a run, the
     two agree.
+
+    Two filters, both added after checking this against the real database
+    rather than fixtures -- of 70 jobs with objects attributed to them, 31
+    produce more than one:
+
+    **Sidecars are excluded.** Several real jobs produce 6, 9, or 16 objects
+    that are *entirely* sidecars (`.fai`, `.mmi`, aligner index files). They
+    are biologically inert, were never anyone's output, and including them
+    makes every such node ambiguous to the binder -- which refuses to guess,
+    so the graph would simply stall.
+
+    **Mates are ordered by `read_number`.** A real paired trim produces two
+    objects that are both FASTQ/TRIMMED_READS and so identical to the type
+    system. R1 must come first: an aligner handed the mates backwards produces
+    a silently wrong answer rather than an error.
     """
     from app.models.object import DataObject
     from app.services.workflow_binding import OutputCandidate
 
-    objects = await DataObject.find(DataObject.produced_by_job == job_id).to_list()
+    objects = await DataObject.find(
+        DataObject.produced_by_job == job_id,
+        {"sidecar_of": None},
+    ).to_list()
+
+    # None sorts with the singles rather than raising; a single-end file has no
+    # read number and its position among unrelated outputs does not matter.
+    objects.sort(key=lambda o: (o.read_number is None, o.read_number or 0))
+
     return [
         OutputCandidate(
             object_id=obj.id, format=obj.format.kind, role=obj.role, name=obj.name

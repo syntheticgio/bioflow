@@ -216,6 +216,78 @@ class TestCollectingOutputs:
         fresh = await WorkflowNodeRun.get(row.id)
         assert fresh.outputs == [produced.id]
 
+    async def test_sidecars_are_not_collected_as_outputs(self):
+        """Found against the real database, not by review: of 70 jobs with
+        objects attributed to them, 31 produce more than one -- and several
+        produce 6, 9, or 16, *all* of which are sidecars (.fai, .mmi, aligner
+        index files). Returning those as binding candidates makes every
+        multi-output node ambiguous and stalls the graph, for objects that are
+        biologically inert and were never anyone's output."""
+        job = Job(type="run_align", owner=OWNER, state=JobState.SUCCEEDED)
+        await job.insert()
+        real = DataObject(
+            name="aligned.bam",
+            project_id=PydanticObjectId(),
+            owner=OWNER,
+            format=FormatInfo(kind=FormatKind.BAM),
+            role=ObjectRole.ALIGNMENT,
+            produced_by_job=job.id,
+        )
+        await real.insert()
+        sidecar = DataObject(
+            name="aligned.bam.bai",
+            project_id=PydanticObjectId(),
+            owner=OWNER,
+            format=FormatInfo(kind=FormatKind.UNKNOWN),
+            produced_by_job=job.id,
+            sidecar_of=real.id,
+        )
+        await sidecar.insert()
+        run, row = await _node_run(NodeRunState.RUNNING, job)
+
+        await workflow_hook.on_job_finished(job.id, succeeded=True)
+
+        fresh = await WorkflowNodeRun.get(row.id)
+        assert fresh.outputs == [real.id]
+
+    async def test_paired_outputs_are_ordered_by_read_number(self):
+        """The other real-data finding: a real trim job produces
+        `_1.trimmed.fastq` and `_2.trimmed.fastq`, both FASTQ/TRIMMED_READS and
+        so indistinguishable by type. `read_number` is what tells them apart,
+        and R1 must come first -- an aligner handed the mates backwards is a
+        silent wrong answer, not an error."""
+        job = Job(type="run_trim", owner=OWNER, state=JobState.SUCCEEDED)
+        await job.insert()
+        project = PydanticObjectId()
+        r2 = DataObject(
+            name="s_2.trimmed.fastq",
+            project_id=project,
+            owner=OWNER,
+            format=FormatInfo(kind=FormatKind.FASTQ),
+            role=ObjectRole.TRIMMED_READS,
+            produced_by_job=job.id,
+            read_number=2,
+        )
+        await r2.insert()
+        r1 = DataObject(
+            name="s_1.trimmed.fastq",
+            project_id=project,
+            owner=OWNER,
+            format=FormatInfo(kind=FormatKind.FASTQ),
+            role=ObjectRole.TRIMMED_READS,
+            produced_by_job=job.id,
+            read_number=1,
+            mate_object_id=r2.id,
+        )
+        await r1.insert()
+        await r2.set({DataObject.mate_object_id: r1.id})
+        run, row = await _node_run(NodeRunState.RUNNING, job)
+
+        await workflow_hook.on_job_finished(job.id, succeeded=True)
+
+        fresh = await WorkflowNodeRun.get(row.id)
+        assert fresh.outputs == [r1.id, r2.id]
+
     async def test_another_jobs_objects_are_not_collected(self):
         job = Job(type="run_trim", owner=OWNER, state=JobState.SUCCEEDED)
         await job.insert()
