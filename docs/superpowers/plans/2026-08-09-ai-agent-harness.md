@@ -793,11 +793,33 @@ The following features were identified during implementation but are not part of
 the first slice. They are tracked as separate issues and can be picked up
 independently.
 
-### Conversation persistence [#97](https://github.com/syntheticgio/bioflow/issues/97)
+### Conversation persistence [#97](https://github.com/syntheticgio/bioflow/issues/97) — FIXED
 
 The agent drawer currently has no persistence — closing it loses the
 conversation. Save and restore conversations per (profile, project) so the user
 can close and reopen the drawer without losing context.
+
+**Shipped (2026-08-09):** The agent drawer now persists conversations to the
+existing `ProjectConversation` collection (reused from the Q&A feature, keyed
+by `(owner, project_id)`). `ConversationTurn` gained an optional `tool_calls`
+field (`ToolCallTurn` model) recording each MCP tool call's name, args, result,
+and success — the Q&A path leaves it `None`. The `/ask` endpoint saves the
+user's message via a fire-and-forget background task; the SSE `/events` stream
+accumulates text deltas and tool-call/tool-result pairs between `agent_start`
+and `done`, then saves the complete assistant turn. `GET /conversation` loads
+turns on drawer mount, `DELETE /conversation` clears them, and
+`POST /conversation/turns` appends individual turns. The frontend `AgentPanel`
+loads the saved transcript on mount via `useQuery`, maps tool calls back into
+message bubbles, and adds a clear button to the header. Compaction is left as a
+future follow-up — the agent's context window is managed by Pi's own session,
+not by what we store, so compaction is less critical here than for the Q&A
+chat.
+
+Files: `backend/app/models/conversation.py`, `backend/app/api/v1/agent.py`,
+`frontend/src/components/AgentPanel.tsx`, `frontend/src/api/types.ts`,
+`frontend/src/api/client.ts`. Tests: 11 new backend tests in
+`tests/api/test_agent.py` (including SSE-driven assistant-turn persistence)
+and 4 new model tests in `tests/models/test_conversation.py`.
 
 ### Custom system prompts [#98](https://github.com/syntheticgio/bioflow/issues/98)
 
