@@ -15,6 +15,7 @@ from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import memory_estimate
 from app.services.memory_estimate import EstimateSource
+from app.services.timing_service import MIN_SAMPLES
 
 
 @pytest.fixture(autouse=True)
@@ -180,6 +181,29 @@ class TestGuards:
         assert result.source is EstimateSource.UNKNOWN
         assert result.mb is None
         assert result.fell_back_from_measured is True
+
+
+class TestThreadSegmentation:
+    async def test_threads_argument_selects_a_segment(self):
+        """resolve() with a threads argument must reach the same segment
+        estimate() would pick for that thread count -- proves the plumbing,
+        not the fitting logic (already covered in test_record_outcomes.py)."""
+        for i in range(1, MIN_SAMPLES + 1):
+            await JobRunTiming(
+                job_type="align_reads",
+                input_bytes=1000 * i,
+                duration_ms=1,
+                outcome=RunOutcome.SUCCEEDED,
+                threads=4,
+                resources=RunResources(peak_rss_bytes=10_000_000 * i),
+            ).insert()
+        result = await memory_estimate.resolve(
+            job_type="align_reads",
+            input_bytes=5000,
+            heuristic_mb=None,
+            threads=4,
+        )
+        assert result.source is EstimateSource.MEASURED
 
 
 class TestAssemblyShape:

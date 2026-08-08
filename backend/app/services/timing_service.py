@@ -325,14 +325,38 @@ def _observed_range(samples: list[tuple[int, int]], input_bytes: int) -> dict:
     }
 
 
-async def estimate(job_type: str, input_bytes: int) -> dict | None:
+async def estimate(
+    job_type: str, input_bytes: int, *, threads: int | None = None
+) -> dict | None:
     """Predicted duration in ms for a run of this type and size.
 
     None means "not enough history" -- callers should show no estimate rather
     than guessing.
+
+    `threads=None` (the default) is byte-only, identical to this function's
+    behavior before segmentation existed. `threads=<int>` prefers a
+    same-thread-count segment's fit when one has enough samples, falling back
+    to the same pooled bytes-only fit `threads=None` would have used.
     """
-    samples = await _samples(job_type)
-    model = _fit(samples)
+    records = await _modelled(job_type)
+    samples = _duration_samples_from(records)
+
+    if threads is None:
+        model = _fit(samples)
+        answered_by = None
+        scoring_samples = samples
+    else:
+        segments = _fit_segmented(records, _duration_samples_from)
+        if threads in segments:
+            model, answered_by = segments[threads], threads
+            scoring_samples = _segment_samples(records, threads, _duration_samples_from)
+        elif None in segments:
+            model, answered_by = segments[None], None
+            scoring_samples = samples
+        else:
+            model, answered_by = None, None
+            scoring_samples = samples
+
     if model is None:
         return {
             "known": False,
@@ -345,13 +369,14 @@ async def estimate(job_type: str, input_bytes: int) -> dict | None:
         "known": True,
         "estimate_ms": int(max(100, predicted)),
         "samples": model["n"],
-        "r_squared": round(_r_squared(samples, model), 3),
+        "r_squared": round(_r_squared(scoring_samples, model), 3),
         "throughput_mb_s": (
             round(1000 / (model["slope"] * 1024 * 1024), 1)
             if model["slope"] > 0
             else None
         ),
-        "range": _observed_range(samples, input_bytes),
+        "range": _observed_range(scoring_samples, input_bytes),
+        "segment": {"threads": answered_by, "samples": model["n"]},
     }
 
 
@@ -381,7 +406,63 @@ def _fit_memory(samples: list[tuple[int, int]]) -> dict | None:
     return _fit(samples)
 
 
-async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
+def _fit_segmented(
+    records: list[JobRunTiming],
+    sample_fn,
+) -> dict[int | None, dict]:
+    """One fit per thread count with `>= MIN_SAMPLES` samples, plus a
+    bytes-only fallback fit over every record regardless of thread count,
+    keyed `None`.
+
+    `sample_fn` is `_duration_samples_from` or `_memory_samples_from` --
+    whichever `(input_bytes, y)` extraction the caller wants segmented, so
+    duration and memory share this grouping logic rather than each
+    reimplementing it. Records with `threads is None` never form or join a
+    per-thread group (an unknown thread count can't be assigned one) but do
+    count toward the `None` fallback, matching today's un-segmented
+    behavior exactly when nothing has a thread count yet.
+
+    Reuses `MIN_SAMPLES`, the same threshold `_fit` already enforces --
+    see the design doc's "Threshold" section for why a separate,
+    segment-specific constant was not introduced.
+    """
+    by_threads: dict[int, list[JobRunTiming]] = {}
+    for record in records:
+        if record.threads is not None:
+            by_threads.setdefault(record.threads, []).append(record)
+
+    out: dict[int | None, dict] = {}
+    for threads, group in by_threads.items():
+        samples = sample_fn(group)
+        if len(samples) >= MIN_SAMPLES:
+            model = _fit(samples)
+            if model is not None:
+                out[threads] = model
+
+    fallback = _fit(sample_fn(records))
+    if fallback is not None:
+        out[None] = fallback
+
+    return out
+
+
+def _segment_samples(
+    records: list[JobRunTiming], threads: int, sample_fn
+) -> list[tuple[int, int]]:
+    """The `(bytes, y)` samples for one thread count's own records --
+    what a segment's `r_squared`/`range` must be scored against, never the
+    pooled set. Split out so `estimate()`, `estimate_memory()`, and `stats()`
+    can't independently drift on this filter the way they did before the
+    r_squared scoring bug (see the design doc's "Threshold" section and the
+    fix in this feature's git history) -- one function, one place to get it
+    right.
+    """
+    return sample_fn([r for r in records if r.threads == threads])
+
+
+async def estimate_memory(
+    job_type: str, input_bytes: int, *, threads: int | None = None
+) -> dict | None:
     """Predicted peak RSS in bytes for a run of this type and size.
 
     **Modelled outcomes only** -- reads via `_modelled()`, the same
@@ -393,10 +474,29 @@ async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
     Returns `known: False` rather than a guess when there is not enough
     history. Only runs above the sampling floor carry a measured peak, so this
     can stay silent long after the duration model has become confident.
+
+    `threads` behaves exactly as it does in `estimate()` -- see that
+    docstring.
     """
     records = await _modelled(job_type)
     samples = _memory_samples_from(records)
-    model = _fit_memory(samples)
+
+    if threads is None:
+        model = _fit_memory(samples)
+        answered_by = None
+        scoring_samples = samples
+    else:
+        segments = _fit_segmented(records, _memory_samples_from)
+        if threads in segments:
+            model, answered_by = segments[threads], threads
+            scoring_samples = _segment_samples(records, threads, _memory_samples_from)
+        elif None in segments:
+            model, answered_by = segments[None], None
+            scoring_samples = samples
+        else:
+            model, answered_by = None, None
+            scoring_samples = samples
+
     if model is None:
         return {
             "known": False,
@@ -409,8 +509,9 @@ async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
         "known": True,
         "estimate_bytes": int(max(0, predicted)),
         "samples": model["n"],
-        "r_squared": round(_r_squared(samples, model), 3),
-        "range": _observed_range(samples, input_bytes),
+        "r_squared": round(_r_squared(scoring_samples, model), 3),
+        "range": _observed_range(scoring_samples, input_bytes),
+        "segment": {"threads": answered_by, "samples": model["n"]},
     }
 
 
@@ -424,6 +525,31 @@ async def stats() -> list[dict]:
         model = _fit(samples)
         memory_samples = _memory_samples_from(records)
         memory_model = _fit_memory(memory_samples)
+
+        thread_counts = sorted(
+            {r.threads for r in records if r.threads is not None}
+        )
+        duration_segments = _fit_segmented(records, _duration_samples_from)
+        segments = [
+            {
+                "threads": threads,
+                "samples": duration_segments[threads]["n"],
+                "model": {
+                    "slope_ms_per_byte": duration_segments[threads]["slope"],
+                    "intercept_ms": round(duration_segments[threads]["intercept"]),
+                    "r_squared": round(
+                        _r_squared(
+                            _segment_samples(records, threads, _duration_samples_from),
+                            duration_segments[threads],
+                        ),
+                        3,
+                    ),
+                },
+            }
+            for threads in thread_counts
+            if threads in duration_segments
+        ]
+
         out.append(
             {
                 "job_type": t,
@@ -445,6 +571,12 @@ async def stats() -> list[dict]:
                     "intercept_bytes": round(memory_model["intercept"]),
                     "r_squared": round(_r_squared(memory_samples, memory_model), 3),
                 },
+                # Per-thread-count duration fits that qualified (>=
+                # MIN_SAMPLES same-thread rows), for the diagnostics view to
+                # show what's actually segmenting versus falling back. Empty
+                # until real runs at varying thread counts accumulate -- see
+                # docs/superpowers/specs/2026-08-08-thread-count-segmentation-design.md.
+                "segments": segments,
             }
         )
     return out

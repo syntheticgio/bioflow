@@ -17,7 +17,12 @@ from app.config import settings
 from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import timing_service
-from app.services.timing_service import MIN_SAMPLES, _fit_memory, _memory_samples_from
+from app.services.timing_service import (
+    MIN_SAMPLES,
+    _fit_memory,
+    _fit_segmented,
+    _memory_samples_from,
+)
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`, so bare `async def` tests are collected.
@@ -160,3 +165,45 @@ class TestEstimateMemory:
 
         assert after["estimate_bytes"] == clean["estimate_bytes"]
         assert after["samples"] == clean["samples"] == 8
+
+
+def _mem_timing(*, threads, input_bytes, peak_rss_bytes):
+    return JobRunTiming(
+        job_type="align_reads",
+        input_bytes=input_bytes,
+        duration_ms=1,
+        threads=threads,
+        resources=RunResources(peak_rss_bytes=peak_rss_bytes),
+    )
+
+
+class TestSegmentedMemoryFit:
+    def test_segments_with_enough_samples_get_their_own_fit(self, beanie_models):
+        records = [
+            _mem_timing(threads=4, input_bytes=1000 * i, peak_rss_bytes=1_000_000 * i)
+            for i in range(1, MIN_SAMPLES + 1)
+        ] + [
+            _mem_timing(threads=8, input_bytes=1000 * i, peak_rss_bytes=3_000_000 * i)
+            for i in range(1, MIN_SAMPLES + 1)
+        ]
+        segments = _fit_segmented(records, _memory_samples_from)
+        assert segments[4]["slope"] == pytest.approx(1000.0, rel=1e-6)
+        assert segments[8]["slope"] == pytest.approx(3000.0, rel=1e-6)
+
+    def test_records_without_a_measured_peak_do_not_count_as_samples(self, beanie_models):
+        """RunResources().peak_rss_bytes defaults to None -- a run under the
+        sampling floor must not be treated as a zero-memory sample."""
+        records = [
+            _mem_timing(threads=4, input_bytes=1000 * i, peak_rss_bytes=1_000_000 * i)
+            for i in range(1, MIN_SAMPLES)
+        ] + [
+            JobRunTiming(
+                job_type="align_reads",
+                input_bytes=1000,
+                duration_ms=1,
+                threads=4,
+            )
+            for _ in range(5)
+        ]
+        segments = _fit_segmented(records, _memory_samples_from)
+        assert 4 not in segments

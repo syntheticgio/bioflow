@@ -334,3 +334,65 @@ attribute directly, never exercising real pydantic-settings env parsing.
 **A narrower version of the concurrency bug remains, found during final
 review and filed as
 [#74](https://github.com/syntheticgio/bioflow/issues/74).** `claim.lua`
+
+
+---
+
+# Deferred findings
+
+See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
+lands. Short version: mark it `— FIXED` with a note, keep the body, and never
+trust a plan's checkboxes as evidence it shipped.
+
+## Neither model segments by thread count — PARTIALLY FIXED
+
+**Partially addressed 2026-08-08:** the segmentation machinery landed --
+`_fit_segmented` in `backend/app/services/timing_service.py` groups
+`JobRunTiming` records by `threads` and fits each group with
+`>= MIN_SAMPLES` (5) same-thread-count rows, falling back to the existing
+pooled bytes-only fit otherwise. `estimate()`, `estimate_memory()`, and
+`memory_estimate.resolve()` all take an optional `threads` argument now, and
+the three real call sites that pass a job's thread count through
+(`worker.py:_eta_model_ms`, and two calls inside `jobs.py:get_job`) do so via
+`job.payload.get("threads")`. `stats()`'s `/timing-model` output gained a
+`segments` list per job type.
+
+**Still open:** at the time this landed, the real `job_timings` collection
+held only 9 rows with a thread count at all (`align_reads @ 4` x5,
+`quantify @ 4` x4) -- one thread value per job type, nothing to segment
+against. The two real-row acceptance criteria on
+[#8](https://github.com/syntheticgio/bioflow/issues/8) --
+"thread-segmented duration and memory fits use real computation rows" and
+"real-row verification... cover segmentation and fallback" -- stay open
+until enough varied-thread runs accumulate. See
+`docs/superpowers/specs/2026-08-08-thread-count-segmentation-design.md`
+for the full design and why those two criteria were deliberately deferred
+rather than faked against fixtures. Additionally, `memory_estimate.resolve()`
+has three further callers inside `backend/app/services/pipeline_service.py`
+(the pre-flight `LoadGovernor` memory-reservation checks, around lines 1293,
+1472, 3290) that were not wired to pass `threads=` in this pass and remain
+byte-only pending a follow-up.
+
+---
+
+Raised: 2026-08-03, deferred while building computation records
+(`docs/superpowers/specs/2026-08-03-computation-records-design.md`,
+`docs/superpowers/plans/2026-08-03-computation-records.md`).
+
+`JobRunTiming.threads` is captured -- the executor reads it from
+`job.payload`, where the align/assembly/expression/assembly_qc handlers
+already put it -- but both `timing_service._fit` (duration) and its memory
+counterpart still regress against `input_bytes` alone. The design called for
+segmenting the duration fit by thread count with a bytes-only fallback.
+
+Deferred because no row carried a thread count until the recording shipped in
+this same work, so the segmentation could only have been tested against
+synthetic data and would have fallen back to today's behavior on every real
+row anyway -- there was nothing to segment yet.
+
+Revisit once several job types have accumulated runs at differing thread
+counts. Check against real rows, not fixtures -- per CLAUDE.md, hand-built
+objects that already look the way the code expects are how the suggestion
+rules passed green while being wrong.
+
+Touches: `backend/app/services/timing_service.py`.

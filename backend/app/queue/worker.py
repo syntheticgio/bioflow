@@ -434,7 +434,9 @@ class Worker:
         if not size:
             return None
 
-        estimate = await timing_service.estimate(job.type, size)
+        estimate = await timing_service.estimate(
+            job.type, size, threads=job.payload.get("threads")
+        )
         if estimate is None or not estimate.get("known"):
             return None
         return estimate["estimate_ms"]
