@@ -325,14 +325,34 @@ def _observed_range(samples: list[tuple[int, int]], input_bytes: int) -> dict:
     }
 
 
-async def estimate(job_type: str, input_bytes: int) -> dict | None:
+async def estimate(
+    job_type: str, input_bytes: int, *, threads: int | None = None
+) -> dict | None:
     """Predicted duration in ms for a run of this type and size.
 
     None means "not enough history" -- callers should show no estimate rather
     than guessing.
+
+    `threads=None` (the default) is byte-only, identical to this function's
+    behavior before segmentation existed. `threads=<int>` prefers a
+    same-thread-count segment's fit when one has enough samples, falling back
+    to the same pooled bytes-only fit `threads=None` would have used.
     """
-    samples = await _samples(job_type)
-    model = _fit(samples)
+    records = await _modelled(job_type)
+    samples = _duration_samples_from(records)
+
+    if threads is None:
+        model = _fit(samples)
+        answered_by = None
+    else:
+        segments = _fit_segmented(records, _duration_samples_from)
+        if threads in segments:
+            model, answered_by = segments[threads], threads
+        elif None in segments:
+            model, answered_by = segments[None], None
+        else:
+            model, answered_by = None, None
+
     if model is None:
         return {
             "known": False,
@@ -352,6 +372,7 @@ async def estimate(job_type: str, input_bytes: int) -> dict | None:
             else None
         ),
         "range": _observed_range(samples, input_bytes),
+        "segment": {"threads": answered_by, "samples": model["n"]},
     }
 
 
@@ -421,7 +442,9 @@ def _fit_segmented(
     return out
 
 
-async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
+async def estimate_memory(
+    job_type: str, input_bytes: int, *, threads: int | None = None
+) -> dict | None:
     """Predicted peak RSS in bytes for a run of this type and size.
 
     **Modelled outcomes only** -- reads via `_modelled()`, the same
@@ -433,10 +456,25 @@ async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
     Returns `known: False` rather than a guess when there is not enough
     history. Only runs above the sampling floor carry a measured peak, so this
     can stay silent long after the duration model has become confident.
+
+    `threads` behaves exactly as it does in `estimate()` -- see that
+    docstring.
     """
     records = await _modelled(job_type)
     samples = _memory_samples_from(records)
-    model = _fit_memory(samples)
+
+    if threads is None:
+        model = _fit_memory(samples)
+        answered_by = None
+    else:
+        segments = _fit_segmented(records, _memory_samples_from)
+        if threads in segments:
+            model, answered_by = segments[threads], threads
+        elif None in segments:
+            model, answered_by = segments[None], None
+        else:
+            model, answered_by = None, None
+
     if model is None:
         return {
             "known": False,
@@ -451,6 +489,7 @@ async def estimate_memory(job_type: str, input_bytes: int) -> dict | None:
         "samples": model["n"],
         "r_squared": round(_r_squared(samples, model), 3),
         "range": _observed_range(samples, input_bytes),
+        "segment": {"threads": answered_by, "samples": model["n"]},
     }
 
 
