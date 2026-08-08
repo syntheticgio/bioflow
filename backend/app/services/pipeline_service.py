@@ -1492,6 +1492,9 @@ async def launch_alignment(
 
             proposal = replan_service.replan(
                 job_type=JOB_TYPE_ALIGN_READS,
+                # as_dict() doesn't carry reference_bases/building_index --
+                # the proposer reads them directly, and AlignParams has no
+                # reason to know about them.
                 params={
                     **align_params.as_dict(),
                     "reference_bases": reference.size or 0,
@@ -3303,6 +3306,9 @@ async def launch_assembly(
 
             proposal = replan_service.replan(
                 job_type=JOB_TYPE_ASSEMBLE,
+                # as_dict() carries genome_size, but the proposer reads
+                # genome_bases -- merged in under the name it expects rather
+                # than renaming the field on AssemblyParams for one caller.
                 params={
                     **parsed.as_dict(),
                     "genome_bases": parsed.genome_size,

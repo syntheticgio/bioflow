@@ -148,6 +148,122 @@ class TestAlignmentRefusal:
         assert enqueued["resource_override"] is True
 
 
+def _assembly_reads_fixture():
+    """A HiFi FASTQ shaped like `launch_assembly` expects, following
+    test_assembly_launch.py's TestLaunchReachesTheQueue._reads_object.
+    """
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name="SRR1.fastq",
+        format=SimpleNamespace(kind=FormatKind.FASTQ),
+        role=None,
+        metadata={"organism": "Saccharomyces cerevisiae"},
+        facts={"qc_read_chemistry": "hifi"},
+        status=ObjectStatus.READY,
+        project_id=PydanticObjectId(),
+        owner="local",
+        blob_sha256="a" * 64,
+        size=1_000_000,
+    )
+
+
+class TestAssemblyRefusal:
+    """Mirrors TestAlignmentRefusal, adapted to launch_assembly's seams:
+    object_service.get_object, resource_estimator.classify, and
+    memory_estimate.resolve are the same three; launch_assembly has no
+    reference to fetch and no index status to check.
+    """
+
+    async def test_refusal_details_name_the_estimate_source(self):
+        reads = _assembly_reads_fixture()
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.pipelines.resource_estimator.classify",
+                lambda **kwargs: resource_estimator.Band.BLOCK,
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(999_999)),
+            ),
+        ):
+            with pytest.raises(ValidationError) as exc:
+                await pipeline_service.launch_assembly(
+                    object_id=reads.id,
+                    owner="local",
+                    params={
+                        "assembler": "flye",
+                        "mode": "pacbio-hifi",
+                        "threads": 8,
+                        "iterations": 1,
+                        "genome_size": 12_000_000,
+                        "genome_size_source": "user",
+                    },
+                )
+
+        details = exc.value.details
+        assert details["estimate_source"] in {"measured", "heuristic"}
+        assert isinstance(details["detail"], str) and details["detail"]
+        assert details["estimate_mb"] > details["budget_mb"]
+        assert "replan" in details
+        assert details["replan"]["kind"] in {"proposal", "infeasible", "no_knobs"}
+
+    async def test_override_skips_the_refusal(self):
+        reads = _assembly_reads_fixture()
+
+        enqueued = {}
+
+        async def _enqueue(job_type, **kwargs):
+            enqueued["type"] = job_type
+            enqueued.update(kwargs)
+            return SimpleNamespace(id=PydanticObjectId())
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.pipelines.resource_estimator.classify",
+                lambda **kwargs: resource_estimator.Band.BLOCK,
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(999_999)),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            job = await pipeline_service.launch_assembly(
+                object_id=reads.id,
+                owner="local",
+                params={
+                    "assembler": "flye",
+                    "mode": "pacbio-hifi",
+                    "threads": 8,
+                    "iterations": 1,
+                    "genome_size": 12_000_000,
+                    "genome_size_source": "user",
+                },
+                resource_override=True,
+            )
+
+        assert job is not None
+        assert enqueued["resource_override"] is True
+
+
 def test_a_child_job_never_reaches_the_block_check():
     """Acceptance criterion: jobs with a parent_job_id never render a card.
 
