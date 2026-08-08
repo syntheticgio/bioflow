@@ -61,8 +61,14 @@ def bind_downstream_inputs(
     *,
     outputs_by_port: dict[str, PydanticObjectId] | None = None,
     paired: bool = False,
-) -> dict[tuple[str, str], PydanticObjectId]:
+) -> dict[tuple[str, str], PydanticObjectId | list[PydanticObjectId]]:
     """Map (downstream node, input port) -> object id, for one finished node.
+
+    A *multi* port maps to a list instead of a bare id -- every
+    type-compatible candidate, in the order the source produced them. The
+    union return type rather than always-a-list is deliberate: every existing
+    consumer reads scalars, and making them all unwrap a one-element list to
+    gain nothing would be a large diff with no behaviour in it.
 
     `outputs_by_port` names which produced object corresponds to which declared
     output port. It is what makes resolution by *name*: with it, a node
@@ -126,6 +132,16 @@ def bind_downstream_inputs(
                 bound[(edge.to_node, "mate")] = candidates[1].object_id
         elif len(candidates) == 1:
             chosen = candidates[0]
+        elif port.multiple:
+            # Several candidates, no declared mapping, and nothing to
+            # disambiguate -- but a multi port has no ambiguity to resolve in
+            # the first place: "several candidates" is the answer, not a
+            # problem the generic rule below needs to refuse. Every
+            # type-compatible candidate binds, as a list, in production order.
+            matching = [c for c in candidates if port.type.accepts(c.format, c.role)]
+            if matching:
+                bound[(edge.to_node, edge.to_port)] = [c.object_id for c in matching]
+            continue
         else:
             # Several candidates and no declared mapping: fall back to type,
             # but only when it is unambiguous. Two matches mean the node type

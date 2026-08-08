@@ -135,11 +135,34 @@ class TestBindDownstreamInputs:
 
         assert bound == {("qc", "reads"): r1.object_id}
 
-    def test_ambiguous_candidates_with_no_declared_mapping_bind_nothing(self):
+    def test_ambiguous_candidates_with_no_declared_mapping_bind_nothing_on_a_scalar_port(
+        self,
+    ):
         """Two equally type-compatible candidates and nothing saying which is
         which. Picking either is the arbitrary choice this module exists to
         avoid -- better to leave the dependent waiting somewhere visible than
-        to feed an aligner the wrong mate."""
+        to feed a scalar port the wrong mate.
+
+        `bam_stats`'s `alignment` port is scalar (unlike `align`'s `reads`,
+        which became `multiple` for #94 and is covered by
+        `test_ambiguous_candidates_bind_every_match_on_a_multi_port` below),
+        so this keeps exercising the refuse-to-guess rule this test used to
+        check against `align` before that port's type changed.
+        """
+        graph = _graph(
+            [_action("align", "align"), _action("stats", "bam_stats")],
+            [("align", "alignment", "stats", "alignment")],
+        )
+        first = _candidate(FormatKind.BAM, ObjectRole.ALIGNMENT, name="a.bam")
+        second = _candidate(FormatKind.BAM, ObjectRole.ALIGNMENT, name="b.bam")
+
+        assert bind_downstream_inputs(graph, "align", [first, second]) == {}
+
+    def test_ambiguous_candidates_bind_every_match_on_a_multi_port(self):
+        """The same shape as the scalar case above, but the target port is
+        `multiple` -- `align`'s `reads`, since #94. There, "several
+        candidates and no declared mapping" is not ambiguity to refuse; a
+        multi port's whole point is to take everything type-compatible."""
         graph = _graph(
             [_action("trim", "trim"), _action("align", "align")],
             [("trim", "trimmed", "align", "reads")],
@@ -147,7 +170,9 @@ class TestBindDownstreamInputs:
         first = _candidate(FormatKind.FASTQ, ObjectRole.TRIMMED_READS, name="a_R1.fq")
         second = _candidate(FormatKind.FASTQ, ObjectRole.TRIMMED_READS, name="a_R2.fq")
 
-        assert bind_downstream_inputs(graph, "trim", [first, second]) == {}
+        bound = bind_downstream_inputs(graph, "trim", [first, second])
+
+        assert bound == {("align", "reads"): [first.object_id, second.object_id]}
 
     def test_feeds_several_downstream_nodes_from_one_output(self):
         """A fan-out: one trimmed FASTQ feeding both an aligner and a QC node.

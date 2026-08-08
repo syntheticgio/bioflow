@@ -29,6 +29,7 @@ from app.errors import ConflictError, NotFoundError
 from app.models.workflow import (
     NodeRunState,
     WorkflowDefinition,
+    WorkflowNode,
     WorkflowNodeKind,
     WorkflowNodeRun,
     WorkflowRun,
@@ -123,6 +124,23 @@ async def _load(workflow_run_id: PydanticObjectId, *, owner: str | None = None):
     return run, definition
 
 
+def _is_multi_port(node: WorkflowNode, port_name: str) -> bool:
+    """Whether `port_name` on `node`'s input side is declared `multiple`.
+
+    False for anything without a resolvable spec (no node_type, unknown
+    node_type, or unknown port name) -- those are graphs `_bound_inputs`
+    cannot make sense of regardless, and the scalar-overwrite behaviour is the
+    existing, safe fallback for them.
+    """
+    if node.node_type is None:
+        return False
+    spec = NODE_TYPES.get(node.node_type)
+    if spec is None:
+        return False
+    port = next((p for p in spec.inputs if p.name == port_name), None)
+    return port is not None and port.multiple
+
+
 def _bound_inputs(
     definition: WorkflowDefinition,
     node_id: str,
@@ -133,20 +151,58 @@ def _bound_inputs(
 
     An edge from an INPUT node reads the run's binding; an edge from an ACTION
     node reads what that node produced, which `on_node_finished` recorded.
+
+    A *multi* port can be fed by more than one edge -- legal since the
+    validator's `duplicate_wire` check started skipping multi ports. Values
+    for such a port are collected into a list rather than assigned directly,
+    because a plain `inputs[edge.to_port] = value` assignment would let a
+    second edge silently overwrite the first.
+
+    The list is only surfaced when a multi port actually receives more than
+    one contribution. A multi port fed by exactly one edge -- by far the
+    common case, since most align nodes have one upstream reads source --
+    keeps producing the bare scalar every launcher and every pre-existing
+    test already expects; wrapping it in a one-element list would be a
+    behaviour change with no wire to justify it. A contribution that is
+    itself already a list (an ACTION source whose own output port is multi,
+    per `bind_downstream_inputs`'s ambiguous-candidates branch) is flattened
+    in rather than nested, so it counts as however many object ids it holds.
     """
     by_id = {n.node_id: n for n in definition.nodes}
+    target = by_id.get(node_id)
     inputs: dict = {}
+    multi_values: dict[str, list] = {}
     for edge in definition.edges:
         if edge.to_node != node_id:
             continue
         source = by_id.get(edge.from_node)
         if source is None:
             continue
+
+        value = None
+        has_value = False
         if source.kind is WorkflowNodeKind.INPUT:
             if source.node_id in bindings:
-                inputs[edge.to_port] = bindings[source.node_id]
+                value = bindings[source.node_id]
+                has_value = True
         elif (edge.to_node, edge.to_port) in resolved:
-            inputs[edge.to_port] = resolved[(edge.to_node, edge.to_port)]
+            value = resolved[(edge.to_node, edge.to_port)]
+            has_value = True
+
+        if not has_value:
+            continue
+
+        if target is not None and _is_multi_port(target, edge.to_port):
+            collected = multi_values.setdefault(edge.to_port, [])
+            if isinstance(value, list):
+                collected.extend(value)
+            else:
+                collected.append(value)
+        else:
+            inputs[edge.to_port] = value
+
+    for port_name, values in multi_values.items():
+        inputs[port_name] = values[0] if len(values) == 1 else values
     return inputs
 
 

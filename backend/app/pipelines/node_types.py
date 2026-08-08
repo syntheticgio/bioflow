@@ -102,12 +102,21 @@ async def _launch_trim(*, inputs: dict, params: dict, owner: str):
 
 
 async def _launch_align(*, inputs: dict, params: dict, owner: str):
+    # `reads` is a multi port, so it arrives as a list. The launcher itself
+    # takes one object_id: extra read files are passed through params for the
+    # runner to concatenate, which is what "they all go in together" means --
+    # one alignment over every chunk, not one run per file.
+    reads = inputs["reads"]
+    if isinstance(reads, list):
+        primary, extra = reads[0], reads[1:]
+    else:
+        primary, extra = reads, []
     return await pipeline_service.launch_alignment(
-        object_id=inputs["reads"],
+        object_id=primary,
         reference_id=inputs["reference"],
         owner=owner,
         mate_object_id=inputs.get("mate"),
-        params=params,
+        params={**params, "extra_reads": [str(o) for o in extra]} if extra else params,
     )
 
 
