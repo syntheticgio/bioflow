@@ -690,7 +690,7 @@ export function WorkflowCanvas() {
               node.kind === "input"
                 ? [{ name: "object", type: node.accepts!, required: true }]
                 : (meta?.outputs ?? []);
-            const height = node.kind === "input" ? 54 : nodeHeight(meta);
+            const height = node.kind === "input" ? 54 : nodeHeight(node, catalog);
             const problems = errorsByNode.get(node.node_id);
             return (
               <g key={node.node_id}>

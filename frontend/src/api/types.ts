@@ -1857,16 +1857,43 @@ export interface PortMeta {
   name: string;
   type: PortType;
   required: boolean;
+  /** Whether this port takes several wires, collected into a list for the
+   *  launcher. Only the one-wire-per-port rule relaxes -- type checking still
+   *  applies to each wire. */
+  multiple?: boolean;
+}
+
+export interface ToolOption {
+  value: string;
+  label: string;
+}
+
+export interface ToolChoice {
+  /** Where the chosen tool lives in `node.params`. */
+  param_key: string;
+  options: ToolOption[];
+  default: string;
+}
+
+export interface PortSet {
+  inputs: PortMeta[];
+  outputs: PortMeta[];
 }
 
 /** One entry of the canvas palette, served by `/workflows/node-types`.
  *  Generated from the backend registry rather than hand-listed here, so a tool
- *  added there appears in the canvas without a frontend change. */
+ *  added there reaches the canvas without a second edit. */
 export interface NodeTypeMeta {
   node_type: string;
   label: string;
+  /** The default port set -- what a freshly-dropped node has. */
   inputs: PortMeta[];
   outputs: PortMeta[];
+  /** Null for node types that run exactly one tool. */
+  tool_choice?: ToolChoice | null;
+  /** Every option's ports, keyed by tool value. Lets the canvas re-shape a
+   *  node on a dropdown change with no round trip. */
+  ports_by_tool?: Record<string, PortSet>;
 }
 
 export interface NodePosition {
@@ -1887,6 +1914,9 @@ export interface WorkflowNode {
    *  only a name tells them apart. */
   label?: string | null;
   accepts?: PortType | null;
+  /** INPUT only. A slot that binds several files, whose single outgoing wire
+   *  carries the set. May only feed a multi port. */
+  multiple?: boolean;
 }
 
 export interface WorkflowEdge {
