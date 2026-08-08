@@ -112,10 +112,19 @@ export function AgentPanel({
 
   const ask = useMutation({
     mutationFn: (q: string) => api.askAgent(projectId, q),
-    onSuccess: () => {
-      // Optimistic: add the user message immediately
-      const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: "" };
-      setMessages((prev) => [...prev, userMsg]);
+    onSuccess: (_data, q) => {
+      // Optimistic: the user's message, plus an empty assistant bubble for
+      // the stream to fill. The delta/tool handlers all target the last
+      // message when it is isStreaming, so without this placeholder every
+      // token is silently dropped.
+      const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: q };
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "",
+        isStreaming: true,
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setIsStreaming(true);
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
