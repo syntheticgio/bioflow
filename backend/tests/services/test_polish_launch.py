@@ -18,8 +18,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from beanie import PydanticObjectId
 
-from app.errors import ValidationError
+from app.errors import ConflictError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
+from app.models.run import RunInput, RunInputRole, RunKind
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
 
@@ -92,6 +93,17 @@ async def _run(*, draft, project_objects, reads_object_id=None, mate_object_id=N
         enqueued.update(kwargs)
         return SimpleNamespace(id="job1")
 
+    created: dict = {}
+
+    # Real RunInputs, so a launcher omitting the model's required `name`
+    # raises here rather than in the running app -- see test_assembly_launch.py.
+    async def _create_run(**kwargs):
+        for item in kwargs["inputs"]:
+            assert isinstance(item, RunInput)
+            assert item.name
+        created.update(kwargs)
+        return SimpleNamespace(id="run1", owner="local")
+
     with (
         patch("app.pipelines.tools.polypolish", return_value=_PP),
         patch("app.pipelines.tools.bwa_mem2", return_value=_BWA),
@@ -99,6 +111,8 @@ async def _run(*, draft, project_objects, reads_object_id=None, mate_object_id=N
         patch("app.services.object_service.list_objects", AsyncMock(side_effect=_list_objects)),
         patch("app.services.pipeline_service._resolve_readable",
               AsyncMock(return_value=("a" * 64, None))),
+        patch("app.services.run_service.create_run", _create_run),
+        patch("app.services.run_service.link_job", AsyncMock()),
         patch("app.queue.queue.enqueue", _enqueue),
     ):
         job = await pipeline_service.launch_polish(
@@ -107,7 +121,7 @@ async def _run(*, draft, project_objects, reads_object_id=None, mate_object_id=N
             mate_object_id=mate_object_id,
             owner="local",
         )
-    return job, enqueued
+    return job, enqueued, created
 
 
 class TestResolvingReadsFromTheProject:
@@ -118,7 +132,7 @@ class TestResolvingReadsFromTheProject:
         r2 = _illumina("r_2.fastq", project_id=pid, mate=r1.id)
         r1.mate_object_id = r2.id
 
-        job, enqueued = await _run(draft=draft, project_objects=[r1, r2])
+        job, enqueued, created = await _run(draft=draft, project_objects=[r1, r2])
 
         assert job.id == "job1"
         assert enqueued["type"] == "polish_assembly"
@@ -157,7 +171,7 @@ class TestResolvingReadsFromTheProject:
         r1.mate_object_id = r2.id
         ont = _nanopore("ont.fastq", project_id=pid)
 
-        job, enqueued = await _run(draft=draft, project_objects=[r1, r2, ont])
+        job, enqueued, created = await _run(draft=draft, project_objects=[r1, r2, ont])
         assert job.id == "job1"
 
 
@@ -168,7 +182,7 @@ class TestExplicitReads:
         chosen = _illumina("chosen.fastq", project_id=pid)
         other = _illumina("other.fastq", project_id=pid)
 
-        job, enqueued = await _run(
+        job, enqueued, created = await _run(
             draft=draft, project_objects=[chosen, other], reads_object_id=chosen.id
         )
         assert enqueued["payload"]["reads_object_id"] == str(chosen.id)
@@ -205,7 +219,7 @@ class TestDepthAndCareful:
         draft = _draft(total_bases=5_000_000)
         r1 = _illumina("r.fastq", project_id=draft.project_id, total_bases=150_000_000)
 
-        _, enqueued = await _run(draft=draft, project_objects=[r1])
+        _, enqueued, created = await _run(draft=draft, project_objects=[r1])
         assert enqueued["payload"]["depth"] == pytest.approx(30.0)
 
     async def test_paired_read_bases_are_summed(self):
@@ -215,7 +229,7 @@ class TestDepthAndCareful:
         r2 = _illumina("r_2.fastq", project_id=pid, total_bases=50_000_000, mate=r1.id)
         r1.mate_object_id = r2.id
 
-        _, enqueued = await _run(draft=draft, project_objects=[r1, r2])
+        _, enqueued, created = await _run(draft=draft, project_objects=[r1, r2])
         assert enqueued["payload"]["depth"] == pytest.approx(20.0)
 
     async def test_depth_is_none_when_qc_has_not_run(self):
@@ -225,12 +239,85 @@ class TestDepthAndCareful:
         r1 = _illumina("r.fastq", project_id=draft.project_id, total_bases=None)
         r1.facts = {}
 
-        _, enqueued = await _run(draft=draft, project_objects=[r1])
+        _, enqueued, created = await _run(draft=draft, project_objects=[r1])
         assert enqueued["payload"]["depth"] is None
 
     async def test_depth_is_none_without_an_assembly_length(self):
         draft = _draft(total_bases=None)
         r1 = _illumina("r.fastq", project_id=draft.project_id)
 
-        _, enqueued = await _run(draft=draft, project_objects=[r1])
+        _, enqueued, created = await _run(draft=draft, project_objects=[r1])
         assert enqueued["payload"]["depth"] is None
+
+
+class TestTheRunRecord:
+    """GitHub #91: this launcher created no PipelineRun at all, which left a
+    finished polish unrecoverable by derive-from-runs."""
+
+    async def test_a_reference_assembly_run_is_created(self):
+        draft = _draft()
+        pid = draft.project_id
+        r1 = _illumina("r_1.fastq", project_id=pid)
+        r2 = _illumina("r_2.fastq", project_id=pid, mate=r1.id)
+        r1.mate_object_id = r2.id
+
+        _, _, created = await _run(draft=draft, project_objects=[r1, r2])
+
+        assert created["kind"] is RunKind.REFERENCE_ASSEMBLY
+        # The tool is what tells the three REFERENCE_ASSEMBLY node types apart
+        # when a run is derived back into a node -- see
+        # workflow_derive._node_type_for.
+        assert created["tool"] == "polypolish"
+        assert created["project_id"] == draft.project_id
+        roles = {i.role: i.object_id for i in created["inputs"]}
+        assert roles[RunInputRole.DRAFT_ASSEMBLY] == draft.id
+        # The pair goes in under distinct roles, so a derived node wires both
+        # read ports rather than one object twice.
+        assert {roles[RunInputRole.READS], roles[RunInputRole.MATE]} == {r1.id, r2.id}
+
+    async def test_single_end_reads_record_no_mate(self):
+        draft = _draft()
+        r1 = _illumina("r.fastq", project_id=draft.project_id)
+
+        _, _, created = await _run(draft=draft, project_objects=[r1])
+
+        roles = [i.role for i in created["inputs"]]
+        assert RunInputRole.MATE not in roles
+
+    async def test_a_deduplicated_launch_discards_its_run(self):
+        """A run left behind by a launch that enqueued nothing would sit in the
+        activity view implying work is happening."""
+        draft = _draft()
+        r1 = _illumina("r.fastq", project_id=draft.project_id)
+        objects = {o.id: o for o in (draft, r1)}
+        discard = AsyncMock()
+
+        with (
+            patch("app.pipelines.tools.polypolish", return_value=_PP),
+            patch("app.pipelines.tools.bwa_mem2", return_value=_BWA),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=lambda object_id, *, owner: objects[object_id]),
+            ),
+            patch(
+                "app.services.object_service.list_objects",
+                AsyncMock(return_value=[r1]),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.discard_run", discard),
+            # None is what enqueue returns when the dedup key already exists.
+            patch("app.queue.queue.enqueue", AsyncMock(return_value=None)),
+        ):
+            with pytest.raises(ConflictError):
+                await pipeline_service.launch_polish(
+                    draft_object_id=draft.id, owner="local"
+                )
+
+        discard.assert_awaited_once()

@@ -18,8 +18,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from beanie import PydanticObjectId
 
-from app.errors import ValidationError
+from app.errors import ConflictError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
+from app.models.run import RunInput, RunInputRole, RunKind
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
 
@@ -66,12 +67,27 @@ async def _run(*, draft, project_objects, reference_object_id=None, divergence=N
         enqueued.update(kwargs)
         return SimpleNamespace(id="job1")
 
+    created: dict = {}
+
+    # Constructing the real RunInput is the assertion, the same way
+    # test_assembly_launch.py does it: it is a pydantic model with a required
+    # `name`, so a launcher that omits one raises here rather than in the
+    # running app.
+    async def _create_run(**kwargs):
+        for item in kwargs["inputs"]:
+            assert isinstance(item, RunInput)
+            assert item.name
+        created.update(kwargs)
+        return SimpleNamespace(id="run1", owner="local")
+
     with (
         patch("app.pipelines.tools.ragtag", return_value=_RT),
         patch("app.services.object_service.get_object", AsyncMock(side_effect=_get_object)),
         patch("app.services.object_service.list_objects", AsyncMock(side_effect=_list_objects)),
         patch("app.services.pipeline_service._resolve_readable",
               AsyncMock(return_value=("a" * 64, None))),
+        patch("app.services.run_service.create_run", _create_run),
+        patch("app.services.run_service.link_job", AsyncMock()),
         patch("app.queue.queue.enqueue", _enqueue),
     ):
         job = await pipeline_service.launch_scaffold(
@@ -80,7 +96,7 @@ async def _run(*, draft, project_objects, reference_object_id=None, divergence=N
             divergence=divergence,
             owner="local",
         )
-    return job, enqueued
+    return job, enqueued, created
 
 
 class TestResolvingReferenceFromTheProject:
@@ -88,7 +104,7 @@ class TestResolvingReferenceFromTheProject:
         draft = _draft()
         ref = _reference("ref.fasta", project_id=draft.project_id)
 
-        job, enqueued = await _run(draft=draft, project_objects=[ref])
+        job, enqueued, created = await _run(draft=draft, project_objects=[ref])
 
         assert job.id == "job1"
         assert enqueued["type"] == "scaffold_assembly"
@@ -121,7 +137,7 @@ class TestExplicitReference:
         chosen = _reference("chosen.fasta", project_id=pid)
         other = _reference("other.fasta", project_id=pid)
 
-        job, enqueued = await _run(
+        job, enqueued, created = await _run(
             draft=draft, project_objects=[chosen, other], reference_object_id=chosen.id
         )
         assert enqueued["payload"]["reference_object_id"] == str(chosen.id)
@@ -169,12 +185,70 @@ class TestDraftValidation:
             await _run(draft=draft, project_objects=[ref])
 
 
+class TestTheRunRecord:
+    """GitHub #91: this launcher created no PipelineRun at all, which left a
+    finished scaffold unrecoverable by derive-from-runs."""
+
+    async def test_a_reference_assembly_run_is_created(self):
+        draft = _draft()
+        ref = _reference("ref.fasta", project_id=draft.project_id)
+
+        _, _, created = await _run(draft=draft, project_objects=[ref])
+
+        assert created["kind"] is RunKind.REFERENCE_ASSEMBLY
+        # The tool is what tells the three REFERENCE_ASSEMBLY node types apart
+        # when a run is derived back into a node -- see
+        # workflow_derive._node_type_for.
+        assert created["tool"] == "ragtag"
+        assert created["project_id"] == draft.project_id
+        roles = {i.role: i.object_id for i in created["inputs"]}
+        assert roles[RunInputRole.DRAFT_ASSEMBLY] == draft.id
+        assert roles[RunInputRole.REFERENCE] == ref.id
+
+    async def test_a_deduplicated_launch_discards_its_run(self):
+        """A run left behind by a launch that enqueued nothing would sit in the
+        activity view implying work is happening."""
+        draft = _draft()
+        ref = _reference("ref.fasta", project_id=draft.project_id)
+        objects = {o.id: o for o in (draft, ref)}
+        discard = AsyncMock()
+
+        with (
+            patch("app.pipelines.tools.ragtag", return_value=_RT),
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=lambda object_id, *, owner: objects[object_id]),
+            ),
+            patch(
+                "app.services.object_service.list_objects",
+                AsyncMock(return_value=[ref]),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.discard_run", discard),
+            # None is what enqueue returns when the dedup key already exists.
+            patch("app.queue.queue.enqueue", AsyncMock(return_value=None)),
+        ):
+            with pytest.raises(ConflictError):
+                await pipeline_service.launch_scaffold(
+                    draft_object_id=draft.id, owner="local"
+                )
+
+        discard.assert_awaited_once()
+
+
 class TestDivergence:
     async def test_a_chosen_divergence_is_threaded_through(self):
         draft = _draft()
         ref = _reference("ref.fasta", project_id=draft.project_id)
 
-        _, enqueued = await _run(
+        _, enqueued, created = await _run(
             draft=draft, project_objects=[ref], divergence="distant"
         )
         assert enqueued["payload"]["divergence"] == "distant"
