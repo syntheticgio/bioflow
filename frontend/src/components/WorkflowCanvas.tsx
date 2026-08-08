@@ -33,9 +33,11 @@ import {
   bindableObjects,
   canConnect,
   edgeKey,
+  edgesInvalidatedBy,
   nextFreeSlot,
   nodeHeight,
   nodePortPosition,
+  portsFor,
 } from "../lib/workflowGraph";
 
 interface PendingWire {
@@ -162,13 +164,19 @@ export function WorkflowCanvas() {
   }, []);
 
   function addActionNode(meta: NodeTypeMeta) {
+    // Seeded with the default tool rather than left unset: a node with no
+    // tool has no ports, and a node you cannot wire until you have visited a
+    // dropdown reads as broken.
+    const params = meta.tool_choice
+      ? { [meta.tool_choice.param_key]: meta.tool_choice.default }
+      : {};
     setNodes((current) => [
       ...current,
       {
         node_id: freshNodeId(meta.node_type),
         kind: "action",
         node_type: meta.node_type,
-        params: {},
+        params,
         continue_on_failure: false,
         position: nextFreeSlot(current),
       },
@@ -198,6 +206,11 @@ export function WorkflowCanvas() {
     [nodes, selected],
   );
 
+  const selectedAction = useMemo(
+    () => nodes.find((n) => n.node_id === selected && n.kind === "action") ?? null,
+    [nodes, selected],
+  );
+
   function updateInput(nodeId: string, patch: Partial<WorkflowNode>) {
     setNodes((current) =>
       current.map((n) => (n.node_id === nodeId ? { ...n, ...patch } : n)),
@@ -207,6 +220,36 @@ export function WorkflowCanvas() {
     // rejects, reporting an error about a wire the user did not touch.
     if (patch.accepts) {
       setEdges((current) => current.filter((e) => e.from_node !== nodeId));
+    }
+  }
+
+  /** Change a node's tool, dropping the wires that stop making sense.
+   *
+   * The removal is reported rather than silent: a wire disappearing with no
+   * explanation is what gets filed as a bug.
+   */
+  function changeTool(nodeId: string, tool: string) {
+    const node = nodes.find((n) => n.node_id === nodeId);
+    const meta = node?.node_type ? catalog[node.node_type] : undefined;
+    const choice = meta?.tool_choice;
+    if (!node || !choice) return;
+
+    const dropped = edgesInvalidatedBy(nodes, edges, catalog, nodeId, tool);
+    setNodes((current) =>
+      current.map((n) =>
+        n.node_id === nodeId
+          ? { ...n, params: { ...n.params, [choice.param_key]: tool } }
+          : n,
+      ),
+    );
+    if (dropped.length > 0) {
+      const keys = new Set(dropped.map(edgeKey));
+      setEdges((current) => current.filter((e) => !keys.has(edgeKey(e))));
+      setNotice(
+        `Switched to ${tool}; removed ${dropped.length} wire(s) it has no port for: ${dropped
+          .map((e) => `${e.to_node}.${e.to_port}`)
+          .join(", ")}.`,
+      );
     }
   }
 
@@ -609,6 +652,30 @@ export function WorkflowCanvas() {
               </label>
             </div>
           )}
+          {selectedAction && (() => {
+            const meta = selectedAction.node_type ? catalog[selectedAction.node_type] : undefined;
+            const choice = meta?.tool_choice;
+            if (!choice) return null;
+            const current = selectedAction.params?.[choice.param_key];
+            return (
+              <div className="workflow-inspector">
+                <h4>{meta?.label}</h4>
+                <label>
+                  <span>Tool</span>
+                  <select
+                    value={typeof current === "string" ? current : choice.default}
+                    onChange={(e) => changeTool(selectedAction.node_id, e.target.value)}
+                  >
+                    {choice.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            );
+          })()}
           <h4>Tools</h4>
           {palette.isLoading && <p className="muted">Loading…</p>}
           {(palette.data ?? []).map((meta) => (
@@ -643,10 +710,8 @@ export function WorkflowCanvas() {
             const from = nodes.find((n) => n.node_id === edge.from_node);
             const to = nodes.find((n) => n.node_id === edge.to_node);
             if (!from || !to) return null;
-            const fromMeta = from.node_type ? catalog[from.node_type] : undefined;
-            const toMeta = to.node_type ? catalog[to.node_type] : undefined;
-            const fromPorts = from.kind === "input" ? ["object"] : (fromMeta?.outputs ?? []).map((p) => p.name);
-            const toPorts = (toMeta?.inputs ?? []).map((p) => p.name);
+            const fromPorts = portsFor(from, catalog).outputs.map((p) => p.name);
+            const toPorts = portsFor(to, catalog).inputs.map((p) => p.name);
             const a = nodePortPosition(
               from.position ?? { x: 0, y: 0 },
               Math.max(fromPorts.indexOf(edge.from_port), 0),
@@ -685,11 +750,7 @@ export function WorkflowCanvas() {
           {nodes.map((node) => {
             const meta = node.node_type ? catalog[node.node_type] : undefined;
             const position = node.position ?? { x: 0, y: 0 };
-            const inputs = node.kind === "input" ? [] : (meta?.inputs ?? []);
-            const outputs =
-              node.kind === "input"
-                ? [{ name: "object", type: node.accepts!, required: true }]
-                : (meta?.outputs ?? []);
+            const { inputs, outputs } = portsFor(node, catalog);
             const height = node.kind === "input" ? 54 : nodeHeight(node, catalog);
             const problems = errorsByNode.get(node.node_id);
             return (
@@ -723,6 +784,20 @@ export function WorkflowCanvas() {
                 <text className="workflow-node-label" x={position.x + 10} y={position.y + 20}>
                   {node.kind === "input" ? (node.label ?? "input") : (meta?.label ?? node.node_type)}
                 </text>
+                {(() => {
+                  const choice = meta?.tool_choice;
+                  if (!choice) return null;
+                  const tool = node.params?.[choice.param_key];
+                  return (
+                    <text
+                      className="workflow-node-tool"
+                      x={position.x + 10}
+                      y={position.y + 34}
+                    >
+                      {typeof tool === "string" ? tool : choice.default}
+                    </text>
+                  );
+                })()}
                 {selected === node.node_id && (
                   <text
                     className="workflow-node-delete"
