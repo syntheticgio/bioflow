@@ -65,6 +65,7 @@ async def enqueue(
     max_attempts: int | None = None,
     delay_seconds: float = 0,
     depends_on: list[PydanticObjectId] | None = None,
+    tolerate_failure_of: list[PydanticObjectId] | None = None,
     parent_job_id: PydanticObjectId | None = None,
     resource_override: bool = False,
 ) -> Job | None:
@@ -113,6 +114,7 @@ async def enqueue(
     resources = resources or JobResources()
     available_at = now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else None
     depends_on = list(depends_on or [])
+    tolerate_failure_of = list(tolerate_failure_of or [])
 
     # Left None when the caller passed None: the unique index's $type clause
     # exempts missing keys, and turning "no deduplication" into the bare owner
@@ -132,6 +134,7 @@ async def enqueue(
         max_attempts=max_attempts or settings.job_max_attempts,
         available_at=available_at,
         depends_on=depends_on,
+        tolerate_failure_of=tolerate_failure_of,
         parent_job_id=parent_job_id,
         resource_override=resource_override,
         timing=JobTiming(enqueued_at=now),
@@ -151,8 +154,8 @@ async def enqueue(
         # afterwards means the job is already visible to any concurrent
         # completion, so at worst both paths try to release it -- which the
         # conditional state update in `_release_dependents` makes safe.
-        outstanding = await _unfinished_dependencies(depends_on)
-        failed = await _failed_dependencies(depends_on)
+        outstanding = await _unfinished_dependencies(depends_on, tolerate_failure_of)
+        failed = await _failed_dependencies(depends_on, tolerate_failure_of)
         if failed:
             await _fail_blocked_job(job, failed)
             return job
@@ -217,13 +220,30 @@ async def _dependency_jobs(depends_on: list[PydanticObjectId]) -> list[Job]:
 
 async def _unfinished_dependencies(
     depends_on: list[PydanticObjectId],
+    tolerate_failure_of: list[PydanticObjectId] | None = None,
 ) -> list[PydanticObjectId]:
-    unfinished, _ = classify_dependencies(await _dependency_jobs(depends_on))
+    unfinished, _ = classify_dependencies(
+        await _dependency_jobs(depends_on),
+        tolerate_failure_of=set(tolerate_failure_of or ()),
+    )
     return [j.id for j in unfinished]
 
 
-async def _failed_dependencies(depends_on: list[PydanticObjectId]) -> list[Job]:
-    _, failed = classify_dependencies(await _dependency_jobs(depends_on))
+async def _failed_dependencies(
+    depends_on: list[PydanticObjectId],
+    tolerate_failure_of: list[PydanticObjectId] | None = None,
+) -> list[Job]:
+    """Dependencies that ended badly *and* were not tolerated.
+
+    Both callers pass the dependent's own `tolerate_failure_of`, which is why
+    this takes it rather than reading it off a job: `enqueue` asks about a job
+    it has only just inserted, and `_release_dependents` asks on behalf of each
+    of several dependents in turn, each with its own tolerated set.
+    """
+    _, failed = classify_dependencies(
+        await _dependency_jobs(depends_on),
+        tolerate_failure_of=set(tolerate_failure_of or ()),
+    )
     return failed
 
 
@@ -302,12 +322,17 @@ async def _release_dependents(job_id: str, *, succeeded: bool) -> None:
 
     for dep in dependents:
         if not succeeded:
-            failed = await _failed_dependencies(dep.depends_on)
+            failed = await _failed_dependencies(dep.depends_on, dep.tolerate_failure_of)
             if failed:
                 await _fail_blocked_job(dep, failed)
-            continue
+                continue
+            # Every failure this dependent saw was tolerated, so it is not
+            # doomed -- but it may still be waiting on a sibling. Fall through
+            # to the same readiness check the success path uses rather than
+            # leaving it BLOCKED forever: this failure was its last chance at a
+            # release, since nothing else is coming to wake it.
 
-        if await _unfinished_dependencies(dep.depends_on):
+        if await _unfinished_dependencies(dep.depends_on, dep.tolerate_failure_of):
             continue  # still waiting on a sibling dependency
 
         # Conditional on the job still being BLOCKED, so two dependencies
