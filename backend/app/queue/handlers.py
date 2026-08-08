@@ -854,14 +854,44 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
             except Exception:
                 continue
             mtime = datetime.fromtimestamp(entry.stat().st_mtime, UTC)
+            age_hours = (datetime.now(UTC) - mtime).total_seconds() / 3600
             if mtime > cutoff:
+                log.info(
+                    "report_dir_reap_candidate",
+                    object_id=str(object_id),
+                    root=str(root),
+                    age_hours=round(age_hours, 3),
+                    action="skip_too_young",
+                )
                 continue
-            if await DataObject.get(object_id) is not None:
+            db_hit = await DataObject.get(object_id) is not None
+            if db_hit:
+                log.info(
+                    "report_dir_reap_candidate",
+                    object_id=str(object_id),
+                    root=str(root),
+                    age_hours=round(age_hours, 3),
+                    db_lookup_result="found",
+                    action="skip_live_object",
+                )
                 continue
+            log.info(
+                "report_dir_reap_candidate",
+                object_id=str(object_id),
+                root=str(root),
+                age_hours=round(age_hours, 3),
+                db_lookup_result="not_found",
+                action="reap",
+            )
             size = await asyncio.to_thread(
                 lambda e=entry: sum(f.stat().st_size for f in e.rglob("*") if f.is_file())
             )
-            await asyncio.to_thread(object_service.remove_report_dirs, object_id)
+            await asyncio.to_thread(
+                object_service.remove_report_dirs,
+                object_id,
+                caller="reap_report_dirs",
+                reason="orphaned_no_db_record",
+            )
             if not entry.exists():
                 removed += 1
                 reclaimed += size

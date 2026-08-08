@@ -41,6 +41,29 @@ class TestReportDirCleanup:
         for d in made:
             assert not d.exists(), f"leaked {d}"
 
+    async def test_logs_caller_and_reason_for_an_inline_delete(self, monkeypatch):
+        """Issue #10: a removal with no caller/reason on the log line is
+        unattributable after the fact. delete_object must stamp both."""
+        from tests.services.helpers import make_object
+
+        infos: list[tuple] = []
+        monkeypatch.setattr(
+            object_service.log, "info", lambda event, **kw: infos.append((event, kw))
+        )
+
+        root = await project_service.create_project(name="reports-attribution", owner=TEST_OWNER)
+        obj = await make_object(root, "sample.vcf.gz")
+        d = settings.vcf_stats_dir / str(obj.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "artifact.txt").write_text("generated")
+
+        await object_service.delete_object(obj.id, owner=TEST_OWNER)
+
+        removed = [kw for event, kw in infos if event == "report_dir_removed"]
+        assert removed, "expected a report_dir_removed log line"
+        assert removed[0]["caller"] == "delete_object"
+        assert removed[0]["reason"] == "object_deleted"
+
     async def test_leaves_other_objects_reports_alone(self):
         """The removal is keyed by object id, so a sibling's identically-shaped
         directory next to it must survive."""
@@ -177,3 +200,62 @@ class TestReapReportDirs:
 
         assert stray.exists()
         stray.rmdir()
+
+    async def test_logs_a_candidate_line_and_attribution_for_every_decision(self, monkeypatch):
+        """Issue #10: the reaper previously logged only an aggregate count, so
+        a wrongly-reaped directory left no trace of which object was checked,
+        what the DB lookup returned, or why it was judged eligible. Every
+        candidate -- reaped, spared as young, or spared as live -- must now
+        produce a `report_dir_reap_candidate` line, and an actual removal must
+        be attributed to the reaper by name."""
+        from bson import ObjectId
+
+        from app.queue import handlers as handlers_module
+        from app.queue.handlers import reap_report_dirs
+        from tests.services.helpers import make_object
+
+        infos: list[tuple] = []
+        monkeypatch.setattr(
+            handlers_module.log, "info", lambda event, **kw: infos.append((event, kw))
+        )
+        monkeypatch.setattr(
+            object_service.log, "info", lambda event, **kw: infos.append((event, kw))
+        )
+
+        root = await project_service.create_project(name="reap-attribution", owner=TEST_OWNER)
+        live_obj = await make_object(root, "live.vcf.gz")
+
+        gone = ObjectId()
+        reaped_dir = settings.vcf_stats_dir / str(gone)
+        reaped_dir.mkdir(parents=True, exist_ok=True)
+        self.age(reaped_dir)
+
+        live_dir = settings.vcf_stats_dir / str(live_obj.id)
+        live_dir.mkdir(parents=True, exist_ok=True)
+        self.age(live_dir)
+
+        young = ObjectId()
+        young_dir = settings.qc_reports_dir / str(young)
+        young_dir.mkdir(parents=True, exist_ok=True)
+
+        await reap_report_dirs(self.ctx())
+
+        candidates = {
+            kw["object_id"]: kw for event, kw in infos if event == "report_dir_reap_candidate"
+        }
+        assert candidates[str(gone)]["action"] == "reap"
+        assert candidates[str(gone)]["db_lookup_result"] == "not_found"
+        assert candidates[str(live_obj.id)]["action"] == "skip_live_object"
+        assert candidates[str(live_obj.id)]["db_lookup_result"] == "found"
+        assert candidates[str(young)]["action"] == "skip_too_young"
+
+        removed = [
+            kw
+            for event, kw in infos
+            if event == "report_dir_removed" and kw["object_id"] == str(gone)
+        ]
+        assert removed, "expected a report_dir_removed line for the reaped directory"
+        assert removed[0]["caller"] == "reap_report_dirs"
+        assert removed[0]["reason"] == "orphaned_no_db_record"
+
+        young_dir.rmdir()

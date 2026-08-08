@@ -829,11 +829,13 @@ async def delete_object(object_id: PydanticObjectId, *, owner: str) -> None:
             role=sidecar.sidecar_role.value if sidecar.sidecar_role else None,
         )
 
-    await asyncio.to_thread(remove_report_dirs, object_id)
+    await asyncio.to_thread(
+        remove_report_dirs, object_id, caller="delete_object", reason="object_deleted"
+    )
     await blob_service.detach_blob_from_object(object_id)
 
 
-def remove_report_dirs(object_id: PydanticObjectId) -> None:
+def remove_report_dirs(object_id: PydanticObjectId, *, caller: str, reason: str) -> None:
     """Remove the per-object Results directories written outside objects/.
 
     Best-effort by design. The overwhelmingly common case is that none of these
@@ -842,6 +844,11 @@ def remove_report_dirs(object_id: PydanticObjectId) -> None:
     a log line and nothing more: the object is going away regardless, and
     refusing to delete it would trade a recoverable disk leak for a file the
     user cannot get rid of.
+
+    `caller` and `reason` are required, not defaulted, so every deletion's log
+    line says who triggered it and why -- the two facts issue #10 found
+    missing when a report directory disappeared with no way to tell whether
+    `delete_object` or the reaper was responsible.
     """
     for parent in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
         path = parent / str(object_id)
@@ -851,7 +858,12 @@ def remove_report_dirs(object_id: PydanticObjectId) -> None:
         try:
             path.resolve().relative_to(parent.resolve())
         except ValueError:
-            log.error("refusing_report_cleanup_outside_parent", path=str(path))
+            log.error(
+                "refusing_report_cleanup_outside_parent",
+                path=str(path),
+                caller=caller,
+                reason=reason,
+            )
             continue
         if not path.exists():
             continue
@@ -863,9 +875,17 @@ def remove_report_dirs(object_id: PydanticObjectId) -> None:
                 object_id=str(object_id),
                 path=str(path),
                 error=str(exc),
+                caller=caller,
+                reason=reason,
             )
         else:
-            log.info("report_dir_removed", object_id=str(object_id), path=str(path))
+            log.info(
+                "report_dir_removed",
+                object_id=str(object_id),
+                path=str(path),
+                caller=caller,
+                reason=reason,
+            )
 
 
 def copy_report_dirs(src_object_id: PydanticObjectId, dst_object_id: PydanticObjectId) -> None:
