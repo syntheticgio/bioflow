@@ -182,6 +182,8 @@ def derive_status(states: list[NodeRunState]) -> WorkflowStatus:
         return WorkflowStatus.SUCCEEDED
     if any(s is NodeRunState.SUCCEEDED for s in states):
         return WorkflowStatus.PARTIAL
+    if all(s in _UNSUCCESSFUL_NODE_STATES for s in states):
+        return WorkflowStatus.FAILED
     return WorkflowStatus.FAILED
 
 
