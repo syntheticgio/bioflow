@@ -99,3 +99,47 @@ class TestClassifyDependencies:
         )
         assert len(failed) == 1
         assert len(unfinished) == 1
+
+
+class TestTolerantDependencies:
+    """`continue_on_failure` nodes: a dependency whose failure must not
+    cascade.
+
+    The workflow case this exists for is a QC node feeding a downstream step.
+    QC failing means we lack a report, not that the assembly behind it is
+    unusable -- the same judgement `OPTIONAL_ROLES` already encodes for runs.
+    """
+
+    def test_a_tolerated_failure_does_not_fail_the_dependent(self):
+        dep = make_job(JobState.FAILED)
+        unfinished, failed = classify_dependencies(
+            [dep], tolerate_failure_of={dep.id}
+        )
+        assert unfinished == []
+        assert failed == []
+
+    def test_an_untolerated_failure_still_fails_the_dependent(self):
+        """Tolerance is per-id, not a global switch."""
+        tolerated = make_job(JobState.FAILED)
+        fatal = make_job(JobState.FAILED)
+        unfinished, failed = classify_dependencies(
+            [tolerated, fatal], tolerate_failure_of={tolerated.id}
+        )
+        assert [j.id for j in failed] == [fatal.id]
+
+    def test_a_tolerated_dependency_still_blocks_while_active(self):
+        """Tolerating failure is not the same as not waiting. A running QC
+        node still has to finish before its dependent starts, or the dependent
+        races the file QC is reading."""
+        dep = make_job(JobState.RUNNING)
+        unfinished, failed = classify_dependencies(
+            [dep], tolerate_failure_of={dep.id}
+        )
+        assert len(unfinished) == 1
+        assert failed == []
+
+    def test_default_is_unchanged(self):
+        """Omitting the argument must behave exactly as before -- every
+        existing caller relies on it."""
+        unfinished, failed = classify_dependencies([make_job(JobState.FAILED)])
+        assert len(failed) == 1
