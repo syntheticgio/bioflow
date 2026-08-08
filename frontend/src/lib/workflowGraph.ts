@@ -13,6 +13,7 @@
  */
 
 import type {
+  DataObject,
   NodePosition,
   NodeTypeMeta,
   PortType,
@@ -170,6 +171,33 @@ export function nodePortPosition(
   const span = (total - 1) * PORT_SPACING;
   const first = position.y + NODE_HEADER + PORT_SPACING - span / 2;
   return { x, y: first + index * PORT_SPACING };
+}
+
+/** The files that may be bound to one input slot.
+ *
+ * Filtering rather than listing everything is the point: the aligner's
+ * reference port accepts a FASTA *with the reference role*, and offering
+ * `protein.faa` alongside the genome is how a user picks the wrong one -- the
+ * exact confusion `ObjectRole` exists to prevent, and a mistake that only
+ * surfaces deep inside a tool run.
+ *
+ * Sidecars and not-yet-ready files are hidden for related reasons: a `.fai` is
+ * biologically inert and never something anyone binds, and a still-uploading
+ * file would launch a pipeline against a partial one.
+ */
+export function bindableObjects(
+  objects: DataObject[],
+  accepts: PortType | null | undefined,
+): DataObject[] {
+  if (!accepts) return [];
+  return objects.filter((object) => {
+    if (object.sidecar_of) return false;
+    if (object.status !== "ready") return false;
+    return portAccepts(accepts, {
+      format: object.format?.kind ?? "unknown",
+      role: object.role ?? null,
+    });
+  });
 }
 
 /** Somewhere to drop a new node that is not on top of an existing one.

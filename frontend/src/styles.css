@@ -5368,3 +5368,101 @@ table.software-matrix thead th.software-matrix-corner {
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
+
+/* The run dialog: pick a project, bind each input slot to a real file. */
+
+.workflow-launch {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.workflow-launch-panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  min-width: 460px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.workflow-launch-panel h3 {
+  margin: 0 0 14px;
+}
+
+.workflow-launch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.workflow-launch-row > span {
+  width: 170px;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+}
+
+/* The accepted type, shown beside each slot: it is the reason a file the user
+   expected is missing from the list, and without it an empty dropdown reads as
+   a bug rather than as a filter doing its job. */
+.workflow-launch-row em {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.workflow-launch-row select {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 8px;
+}
+
+.workflow-launch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Inspector for the selected input slot: its name, and the type it accepts.
+   Without the type control every slot is FASTQ forever and a workflow that
+   takes a reference genome cannot be built at all. */
+
+.workflow-inspector {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.workflow-inspector label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.workflow-inspector span {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.workflow-inspector input,
+.workflow-inspector select {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 12px;
+  width: 100%;
+}

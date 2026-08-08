@@ -29,6 +29,7 @@ import type {
 import {
   NODE_WIDTH,
   PORT_RADIUS,
+  bindableObjects,
   canConnect,
   edgeKey,
   nextFreeSlot,
@@ -41,6 +42,43 @@ interface PendingWire {
   port: string;
   x: number;
   y: number;
+}
+
+/** The types an input slot can declare.
+ *
+ * A short list rather than every FormatKind/ObjectRole pair: the combinations
+ * that are not here are ones no node type accepts, and offering them would let
+ * a user build a slot nothing can consume. `role: null` means "any role for
+ * this format", which is what a port like QC's genuinely wants.
+ */
+const ACCEPT_CHOICES: {
+  key: string;
+  label: string;
+  format: string;
+  role: string | null;
+}[] = [
+  { key: "fastq", label: "Reads (FASTQ)", format: "fastq", role: null },
+  {
+    key: "fastq:trimmed_reads",
+    label: "Trimmed reads (FASTQ)",
+    format: "fastq",
+    role: "trimmed_reads",
+  },
+  {
+    key: "fasta:reference",
+    label: "Reference genome (FASTA)",
+    format: "fasta",
+    role: "reference",
+  },
+  { key: "bam:alignment", label: "Alignment (BAM)", format: "bam", role: "alignment" },
+  { key: "vcf:variants", label: "Variants (VCF)", format: "vcf", role: "variants" },
+  { key: "gff:annotation", label: "Annotation (GFF)", format: "gff", role: "annotation" },
+];
+
+function acceptsKey(node: WorkflowNode): string {
+  const format = node.accepts?.format ?? "fastq";
+  const role = node.accepts?.role;
+  return role ? `${format}:${role}` : format;
 }
 
 let nodeCounter = 0;
@@ -62,6 +100,9 @@ export function WorkflowCanvas() {
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<GraphValidationError[]>([]);
+  const [launching, setLaunching] = useState(false);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [bindings, setBindings] = useState<Record<string, string>>({});
   const dragRef = useRef<{ node_id: string; dx: number; dy: number } | null>(null);
 
   const palette = useQuery({
@@ -148,6 +189,23 @@ export function WorkflowCanvas() {
     ]);
   }
 
+  const selectedInput = useMemo(
+    () => nodes.find((n) => n.node_id === selected && n.kind === "input") ?? null,
+    [nodes, selected],
+  );
+
+  function updateInput(nodeId: string, patch: Partial<WorkflowNode>) {
+    setNodes((current) =>
+      current.map((n) => (n.node_id === nodeId ? { ...n, ...patch } : n)),
+    );
+    // A slot whose type changed can no longer accept whatever was wired out of
+    // it, so those edges go. Leaving them would save a graph the server
+    // rejects, reporting an error about a wire the user did not touch.
+    if (patch.accepts) {
+      setEdges((current) => current.filter((e) => e.from_node !== nodeId));
+    }
+  }
+
   function removeNode(nodeId: string) {
     setNodes((current) => current.filter((n) => n.node_id !== nodeId));
     setEdges((current) =>
@@ -221,6 +279,43 @@ export function WorkflowCanvas() {
     });
   }
 
+  const inputNodes = useMemo(
+    () => nodes.filter((n) => n.kind === "input"),
+    [nodes],
+  );
+
+  const projects = useQuery({
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects(),
+    enabled: launching,
+  });
+
+  const projectObjects = useQuery({
+    queryKey: ["objects", projectId],
+    queryFn: () => api.listObjects(projectId!),
+    enabled: launching && Boolean(projectId),
+  });
+
+  const launch = useMutation({
+    mutationFn: () =>
+      api.launchWorkflow(definitionId!, {
+        project_id: projectId!,
+        label: name,
+        bindings,
+      }),
+    onSuccess: (run) => {
+      setLaunching(false);
+      setNotice(`Launched "${run.label}" — ${run.status}.`);
+    },
+    onError: (error: unknown) =>
+      setNotice(error instanceof Error ? error.message : "Launch failed."),
+  });
+
+  // Every input slot must have a file before the run can start: the launcher
+  // validates its inputs, so an unbound slot fails inside a tool rather than
+  // here, where the user can still fix it.
+  const unbound = inputNodes.filter((n) => !bindings[n.node_id]);
+
   function newDefinition() {
     setDefinitionId(null);
     setName("New workflow");
@@ -248,6 +343,23 @@ export function WorkflowCanvas() {
           disabled={save.isPending || nodes.length === 0}
         >
           {save.isPending ? "Saving…" : definitionId ? "Save version" : "Save"}
+        </button>
+        <button
+          className="btn"
+          onClick={() => {
+            setLaunching(true);
+            setNotice(null);
+          }}
+          // Launching needs a saved definition: the API takes a definition id,
+          // and an unsaved graph has none.
+          disabled={!definitionId || inputNodes.length === 0}
+          title={
+            definitionId
+              ? "Bind files and run this workflow"
+              : "Save the workflow before running it"
+          }
+        >
+          Run…
         </button>
         <button className="btn" onClick={newDefinition}>
           New
@@ -279,8 +391,128 @@ export function WorkflowCanvas() {
         </ul>
       )}
 
+      {launching && (
+        <div className="workflow-launch" role="dialog" aria-label="Run workflow">
+          <div className="workflow-launch-panel">
+            <h3>Run “{name}”</h3>
+
+            <label className="workflow-launch-row">
+              <span>Project</span>
+              <select
+                value={projectId ?? ""}
+                onChange={(e) => {
+                  setProjectId(e.target.value || null);
+                  // Bindings name objects in the old project, so they cannot
+                  // survive a project change -- keeping them would submit ids
+                  // the new project does not contain.
+                  setBindings({});
+                }}
+              >
+                <option value="">Choose a project…</option>
+                {(projects.data ?? []).map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {inputNodes.map((node) => {
+              const candidates = bindableObjects(
+                projectObjects.data ?? [],
+                node.accepts,
+              );
+              return (
+                <label className="workflow-launch-row" key={node.node_id}>
+                  <span>
+                    {node.label ?? node.node_id}
+                    <em>
+                      {node.accepts?.format}
+                      {node.accepts?.role ? `/${node.accepts.role}` : ""}
+                    </em>
+                  </span>
+                  <select
+                    value={bindings[node.node_id] ?? ""}
+                    disabled={!projectId}
+                    onChange={(e) =>
+                      setBindings((current) => ({
+                        ...current,
+                        [node.node_id]: e.target.value,
+                      }))
+                    }
+                  >
+                    <option value="">
+                      {!projectId
+                        ? "Choose a project first"
+                        : candidates.length === 0
+                          ? "No matching files in this project"
+                          : "Choose a file…"}
+                    </option>
+                    {candidates.map((object) => (
+                      <option key={object.id} value={object.id}>
+                        {object.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              );
+            })}
+
+            <div className="workflow-launch-actions">
+              <button className="btn" onClick={() => setLaunching(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                disabled={!projectId || unbound.length > 0 || launch.isPending}
+                onClick={() => launch.mutate()}
+                title={
+                  unbound.length > 0
+                    ? `Still to bind: ${unbound.map((n) => n.label ?? n.node_id).join(", ")}`
+                    : "Start the run"
+                }
+              >
+                {launch.isPending ? "Starting…" : "Run"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="workflow-body">
         <aside className="workflow-palette">
+          {selectedInput && (
+            <div className="workflow-inspector">
+              <h4>Input slot</h4>
+              <label>
+                <span>Name</span>
+                <input
+                  value={selectedInput.label ?? ""}
+                  onChange={(e) => updateInput(selectedInput.node_id, { label: e.target.value })}
+                />
+              </label>
+              <label>
+                <span>Accepts</span>
+                <select
+                  value={acceptsKey(selectedInput)}
+                  onChange={(e) => {
+                    const choice = ACCEPT_CHOICES.find((c) => c.key === e.target.value);
+                    if (choice) {
+                      updateInput(selectedInput.node_id, {
+                        accepts: { format: choice.format, role: choice.role },
+                      });
+                    }
+                  }}
+                >
+                  {ACCEPT_CHOICES.map((choice) => (
+                    <option key={choice.key} value={choice.key}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
           <h4>Tools</h4>
           {palette.isLoading && <p className="muted">Loading…</p>}
           {(palette.data ?? []).map((meta) => (

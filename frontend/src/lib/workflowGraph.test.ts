@@ -3,11 +3,17 @@ import {
   NODE_WIDTH,
   canConnect,
   edgeKey,
+  bindableObjects,
   nextFreeSlot,
   nodePortPosition,
   wouldCycle,
 } from "./workflowGraph";
-import type { NodeTypeMeta, WorkflowEdge, WorkflowNode } from "../api/types";
+import type {
+  DataObject,
+  NodeTypeMeta,
+  WorkflowEdge,
+  WorkflowNode,
+} from "../api/types";
 
 // The two node types these tests wire together, shaped exactly as
 // /workflows/node-types serves them. Hand-writing them here rather than
@@ -293,5 +299,64 @@ describe("nextFreeSlot", () => {
       }
       nodes.push({ ...action(`n${i}`, "trim"), position: spot });
     }
+  });
+});
+
+describe("bindableObjects", () => {
+  function obj(
+    id: string,
+    format: string,
+    role: string | null = null,
+    extra: Partial<DataObject> = {},
+  ): DataObject {
+    return {
+      id,
+      name: `${id}.file`,
+      format: { kind: format } as DataObject["format"],
+      role: role as DataObject["role"],
+      status: "ready",
+      sidecar_of: null,
+      ...extra,
+    } as DataObject;
+  }
+
+  const port = { format: "fastq", role: null };
+
+  it("keeps a file whose format the port accepts", () => {
+    const kept = bindableObjects([obj("a", "fastq")], port);
+    expect(kept.map((o) => o.id)).toEqual(["a"]);
+  });
+
+  it("drops a file of the wrong format", () => {
+    expect(bindableObjects([obj("a", "bam", "alignment")], port)).toEqual([]);
+  });
+
+  it("enforces the role a port requires", () => {
+    // The protein.faa trap again, this time in the binding dialog: offering it
+    // for a reference port is how a user picks it by mistake.
+    const candidates = [obj("prot", "fasta", "protein"), obj("ref", "fasta", "reference")];
+    const kept = bindableObjects(candidates, { format: "fasta", role: "reference" });
+    expect(kept.map((o) => o.id)).toEqual(["ref"]);
+  });
+
+  it("hides sidecars", () => {
+    // A .fai or .mmi is biologically inert and never something a user binds.
+    const candidates = [obj("real", "fastq"), obj("side", "fastq", null, { sidecar_of: "real" })];
+    expect(bindableObjects(candidates, port).map((o) => o.id)).toEqual(["real"]);
+  });
+
+  it("hides files that are not ready", () => {
+    // Binding a still-uploading file would launch a pipeline against a partial
+    // one, which fails deep inside a tool rather than at the point of choice.
+    const candidates = [
+      obj("done", "fastq"),
+      obj("busy", "fastq", null, { status: "uploading" as DataObject["status"] }),
+    ];
+    expect(bindableObjects(candidates, port).map((o) => o.id)).toEqual(["done"]);
+  });
+
+  it("offers everything of the format when the port names no role", () => {
+    const candidates = [obj("plain", "fastq"), obj("trimmed", "fastq", "trimmed_reads")];
+    expect(bindableObjects(candidates, port)).toHaveLength(2);
   });
 });
