@@ -363,6 +363,32 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## Alignment memory estimate does not size extra reads
+
+Raised: 2026-08-08, deferred during code review of extra-reads-for-alignment
+(GitHub issue #94, Task 3).
+
+`launch_alignment` (`backend/app/services/pipeline_service.py`) calls
+`memory_estimate.resolve(... input_bytes=obj.size or None, ...)` with only the
+primary read object's size. When `params["extra_reads"]` is non-empty, the
+runner (`align_handlers.align_reads`) concatenates every extra read's bytes
+into the primary before the aligner runs, so the real input the aligner and
+`samtools sort` see can be several times `obj.size` -- but the resource
+estimate that gates the job and sizes its `mem_mb` never learns about the
+extras.
+
+This is exactly the kind of gap CLAUDE.md's "Querying computation records"
+section warns is easy to introduce silently: nothing raises, no test fails,
+the job simply gets a memory budget sized for a fraction of its real input.
+A large enough set of extra reads could OOM a job that the estimator believed
+was comfortably under budget.
+
+Fix by summing `obj.size` across the primary and every object in
+`extra_reads` before calling `memory_estimate.resolve`, in `launch_alignment`.
+
+Touches: `backend/app/services/pipeline_service.py` (`launch_alignment`),
+`backend/app/pipelines/resource_estimator.py`.
+
 ## Neither model segments by thread count
 
 Raised: 2026-08-03, deferred while building computation records

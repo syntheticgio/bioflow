@@ -1454,7 +1454,16 @@ async def launch_alignment(
     # is -- same project, same alignability check -- since the runner will
     # concatenate their bytes into what the aligner treats as one file.
     extra_reads: list[DataObject] = []
+    seen_extra_ids: set[str] = set()
     for extra_id in extra_read_ids:
+        if extra_id == str(object_id):
+            raise ValidationError("A file cannot be listed as its own extra read")
+        if mate_object_id is not None and extra_id == str(mate_object_id):
+            raise ValidationError("A file cannot be both the mate and an extra read")
+        if extra_id in seen_extra_ids:
+            raise ValidationError(f"Duplicate extra read id: {extra_id}")
+        seen_extra_ids.add(extra_id)
+
         extra_obj = await object_service.get_object(
             PydanticObjectId(extra_id), owner=owner
         )

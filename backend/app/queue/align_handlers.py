@@ -67,21 +67,22 @@ def _index_tool(aligner: Aligner, aligner_tool: tools.Tool) -> tools.Tool:
     return aligner_tool
 
 
-def _resolve_blob(payload: dict, key: str) -> Path:
-    """Locate an input by digest or explicit path.
+def _resolve_digest_or_path(
+    digest: str | None, path_str: str | None, *, missing_message: str
+) -> Path:
+    """Locate a file by content digest or explicit path, and confirm it exists.
 
-    Registered-in-place files have no managed blob to address by hash, so the
-    external path is the only way to reach them.
+    Shared by `_resolve_blob` (payload keys named `{key}_sha256`/`{key}_path`)
+    and the `extra_reads` loop (entries keyed `sha256`/`path`) so the two
+    naming conventions can each supply their own already-known keys without
+    duplicating the resolve-then-verify logic itself.
     """
-    digest = payload.get(f"{key}_sha256")
-    path_str = payload.get(f"{key}_path")
-
     if path_str:
         path = Path(path_str)
     elif digest:
         path = blob_path(digest)
     else:
-        raise PermanentError(f"Job requires '{key}_sha256' or '{key}_path'")
+        raise PermanentError(missing_message)
 
     if not path.exists():
         # Permanent rather than retryable: a blob missing now will still be
@@ -89,6 +90,19 @@ def _resolve_blob(payload: dict, key: str) -> Path:
         # storage problems.
         raise PermanentError(f"Input not found: {path}")
     return path
+
+
+def _resolve_blob(payload: dict, key: str) -> Path:
+    """Locate an input by digest or explicit path.
+
+    Registered-in-place files have no managed blob to address by hash, so the
+    external path is the only way to reach them.
+    """
+    return _resolve_digest_or_path(
+        payload.get(f"{key}_sha256"),
+        payload.get(f"{key}_path"),
+        missing_message=f"Job requires '{key}_sha256' or '{key}_path'",
+    )
 
 
 def _materialize(
@@ -469,21 +483,14 @@ def align_reads(ctx: JobContext) -> dict:
         # ever sees them. See _concatenate_reads for why concatenation is the
         # only approach that works across all six aligners this handler
         # drives.
-        extra_paths = []
-        for entry in extra_reads_payload:
-            path_str = entry.get("path")
-            digest = entry.get("sha256")
-            if path_str:
-                extra_path = Path(path_str)
-            elif digest:
-                extra_path = blob_path(digest)
-            else:
-                raise PermanentError(
-                    "extra_reads entry requires 'sha256' or 'path'"
-                )
-            if not extra_path.exists():
-                raise PermanentError(f"Input not found: {extra_path}")
-            extra_paths.append(extra_path)
+        extra_paths = [
+            _resolve_digest_or_path(
+                entry.get("sha256"),
+                entry.get("path"),
+                missing_message="extra_reads entry requires 'sha256' or 'path'",
+            )
+            for entry in extra_reads_payload
+        ]
 
         r1_name = ctx.payload.get("r1_name") or "reads.fastq"
         combined = work / f"combined_{Path(r1_name).name}"

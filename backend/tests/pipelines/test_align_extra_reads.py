@@ -13,8 +13,10 @@ import gzip
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from beanie import PydanticObjectId
 
+from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus
 from app.queue.align_handlers import _concatenate_reads
 from app.services import memory_estimate, pipeline_service
@@ -196,6 +198,115 @@ class TestLaunchAlignmentCarriesExtraReads:
             )
 
         assert "extra_reads" not in enqueued["payload"]
+
+    async def test_extra_read_id_equal_to_primary_is_rejected(self):
+        """Passing the primary object's own id as an extra read would
+        silently duplicate every one of its reads in the concatenated
+        output -- the same failure the mate check already guards against
+        for mate_object_id == object_id."""
+        project_id = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "sample_R1.fastq", project_id=project_id)
+        reference = SimpleNamespace(
+            id=PydanticObjectId(),
+            name="ref.fasta",
+            format=SimpleNamespace(kind=FormatKind.FASTA),
+            role=None,
+            facts={},
+            status=ObjectStatus.READY,
+            project_id=project_id,
+            owner="local",
+            size=3_000_000_000,
+        )
+
+        async def _get_object(object_id, owner):
+            for obj in (primary, reference):
+                if obj.id == object_id:
+                    return obj
+            raise AssertionError(f"unexpected object id {object_id}")
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            with pytest.raises(ValidationError):
+                await pipeline_service.launch_alignment(
+                    object_id=primary.id,
+                    reference_id=reference.id,
+                    owner="local",
+                    paired=False,
+                    params={"extra_reads": [str(primary.id)]},
+                )
+
+    async def test_extra_read_id_equal_to_mate_is_rejected(self):
+        project_id = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "sample_R1.fastq", project_id=project_id)
+        mate = _fastq_object(PydanticObjectId(), "sample_R2.fastq", project_id=project_id)
+        reference = SimpleNamespace(
+            id=PydanticObjectId(),
+            name="ref.fasta",
+            format=SimpleNamespace(kind=FormatKind.FASTA),
+            role=None,
+            facts={},
+            status=ObjectStatus.READY,
+            project_id=project_id,
+            owner="local",
+            size=3_000_000_000,
+        )
+
+        async def _get_object(object_id, owner):
+            for obj in (primary, mate, reference):
+                if obj.id == object_id:
+                    return obj
+            raise AssertionError(f"unexpected object id {object_id}")
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            with pytest.raises(ValidationError):
+                await pipeline_service.launch_alignment(
+                    object_id=primary.id,
+                    reference_id=reference.id,
+                    owner="local",
+                    mate_object_id=mate.id,
+                    paired=True,
+                    params={"extra_reads": [str(mate.id)]},
+                )
+
+    async def test_duplicate_extra_read_ids_are_rejected(self):
+        project_id = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "sample_R1.fastq", project_id=project_id)
+        extra = _fastq_object(PydanticObjectId(), "sample_chunk2.fastq", project_id=project_id)
+        reference = SimpleNamespace(
+            id=PydanticObjectId(),
+            name="ref.fasta",
+            format=SimpleNamespace(kind=FormatKind.FASTA),
+            role=None,
+            facts={},
+            status=ObjectStatus.READY,
+            project_id=project_id,
+            owner="local",
+            size=3_000_000_000,
+        )
+
+        async def _get_object(object_id, owner):
+            for obj in (primary, extra, reference):
+                if obj.id == object_id:
+                    return obj
+            raise AssertionError(f"unexpected object id {object_id}")
+
+        with patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=_get_object),
+        ):
+            with pytest.raises(ValidationError):
+                await pipeline_service.launch_alignment(
+                    object_id=primary.id,
+                    reference_id=reference.id,
+                    owner="local",
+                    paired=False,
+                    params={"extra_reads": [str(extra.id), str(extra.id)]},
+                )
 
 
 class TestConcatenateReads:
