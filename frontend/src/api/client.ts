@@ -85,6 +85,8 @@ import type {
   VariantStructure,
   DerivedGraph,
   NodeTypeMeta,
+  WorkflowRunDetail,
+  WorkflowRunRow,
   VersionInfo,
   WorkflowDefinition,
   WorkflowDefinitionInput,
@@ -1080,6 +1082,27 @@ export const api = {
     request<DerivedGraph>("/workflows/derive", {
       method: "POST",
       body: JSON.stringify({ run_ids: runIds }),
+    }),
+
+  listWorkflowRuns: () => request<WorkflowRunRow[]>("/workflows/runs"),
+
+  getWorkflowRun: (id: string) =>
+    request<WorkflowRunDetail>(`/workflows/runs/${id}`),
+
+  retryWorkflowNode: (runId: string, nodeId: string) =>
+    request<{ retried: string }>(
+      `/workflows/runs/${runId}/nodes/${encodeURIComponent(nodeId)}/retry`,
+      { method: "POST" },
+    ),
+
+  retryFailedWorkflowNodes: (runId: string) =>
+    request<{ retried: number }>(`/workflows/runs/${runId}/retry-failed`, {
+      method: "POST",
+    }),
+
+  cancelWorkflowRun: (runId: string) =>
+    request<{ cancelled: string }>(`/workflows/runs/${runId}/cancel`, {
+      method: "POST",
     }),
 
   launchWorkflow: (

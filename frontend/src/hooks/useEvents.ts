@@ -55,6 +55,14 @@ export function useEvents() {
           // Singular too: IngestProgress and the activity view watch one job
           // at a time, and without this a running job's detail never refreshes.
           qc.invalidateQueries({ queryKey: ["job"] });
+          // A workflow node's state is derived from its jobs, so a job
+          // reaching a terminal state is exactly when the aggregate changes.
+          // The event cannot say *which* workflow -- `run_ids` carries
+          // PipelineRun ids and 13 of 22 node types create no run -- so this
+          // invalidates rather than targets. Cheap: the queries only refetch
+          // if something is mounted and watching. See #80.
+          qc.invalidateQueries({ queryKey: ["workflow-runs"] });
+          qc.invalidateQueries({ queryKey: ["workflow-run"] });
         }
         if (key === "objects") {
           qc.invalidateQueries({ queryKey: ["objects"] });
