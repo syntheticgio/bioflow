@@ -617,6 +617,16 @@ async def complete(
     # After the terminal write lands, so a dependent that dispatches
     # immediately cannot observe its dependency as still running.
     await _release_dependents(job_id, succeeded=state is JobState.SUCCEEDED)
+
+    # Advance any workflow waiting on this job. A no-op (one indexed query) for
+    # the overwhelming majority of jobs, which belong to no workflow, and it
+    # never raises -- workflow bookkeeping must not turn a successful job into
+    # a failed one.
+    from app.services import workflow_hook
+
+    await workflow_hook.on_job_finished(
+        PydanticObjectId(job_id), succeeded=state is JobState.SUCCEEDED
+    )
     return True
 
 
