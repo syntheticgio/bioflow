@@ -33,6 +33,12 @@ class Project(TimestampedDocument):
     counters: ProjectCounters = Field(default_factory=ProjectCounters)
     archived: bool = False
 
+    # Extra per-project instructions appended to the agent's default
+    # grounding prompt (see api/v1/agent.py:_system_prompt). Empty means
+    # "default only". Length-capped in ProjectUpdate because the value is
+    # passed to pi as an argv element.
+    agent_system_prompt: str = ""
+
     class Settings:
         name = "projects"
         indexes = [

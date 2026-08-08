@@ -30,6 +30,7 @@ class ProjectUpdate(BaseModel):
     metadata: dict | None = None
     tags: list[str] | None = None
     archived: bool | None = None
+    agent_system_prompt: str | None = Field(default=None, max_length=4000)
 
 
 class ProjectOut(BaseModel):
@@ -37,6 +38,7 @@ class ProjectOut(BaseModel):
     name: str
     slug: str
     description: str
+    agent_system_prompt: str
     parent_id: str | None
     metadata: dict
     tags: list[str]
@@ -53,6 +55,7 @@ class ProjectOut(BaseModel):
             name=p.name,
             slug=p.slug,
             description=p.description,
+            agent_system_prompt=p.agent_system_prompt,
             parent_id=str(p.parent_id) if p.parent_id else None,
             metadata=p.metadata,
             tags=p.tags,
