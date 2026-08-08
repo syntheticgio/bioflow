@@ -163,6 +163,17 @@ async def stop_agent(project_id: PydanticObjectId, profile_id: ProfileIdDep) -> 
 
 
 @router.post("/restart", response_model=AgentAskResponse)
-async def restart_agent(project_id: PydanticObjectId, profile_id: ProfileIdDep) -> AgentAskResponse:
-    await agent_service.restart_agent(profile_id, str(project_id))
+async def restart_agent(
+    project_id: PydanticObjectId, owner: OwnerDep, profile_id: ProfileIdDep
+) -> AgentAskResponse:
+    """Stop and respawn, keeping the project's composed prompt.
+
+    The ownership-scoped lookup is here for the prompt, not just the 404: a
+    respawn that forwarded nothing would drop the project grounding, which is
+    what this endpoint used to do.
+    """
+    project = await project_service.get_project(project_id, owner=owner)
+    await agent_service.restart_agent(
+        profile_id, str(project_id), system_prompt=_system_prompt(project)
+    )
     return AgentAskResponse(status="restarting")

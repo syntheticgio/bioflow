@@ -330,6 +330,37 @@ class TestLifecycle:
         _, spawned = spawn
         assert len(spawned) == 2
 
+    async def test_restart_respawns_with_the_project_prompt(
+        self, client, two_profiles, spawn
+    ):
+        """Regression guard: restart used to respawn with no prompt at all."""
+        owner = two_profiles["a"].owner_id()
+        project = await _project(owner)
+        await project_service.update_project(
+            project.id, {"agent_system_prompt": "Be terse."}, owner=owner
+        )
+        headers = two_profiles["a_headers"]
+        url = f"/api/v1/projects/{project.id}/agent"
+        await client.post(url + "/ask", json={"message": "hi"}, headers=headers)
+
+        response = await client.post(url + "/restart", headers=headers)
+        assert response.status_code == 200
+
+        cmds, _ = spawn
+        assert len(cmds) == 2
+        prompt_arg = cmds[1][cmds[1].index("--system-prompt") + 1]
+        assert "bioinformatics coding agent" in prompt_arg
+        assert "Be terse." in prompt_arg
+
+    async def test_restart_unknown_project_404s(self, client, two_profiles):
+        project = await _project(two_profiles["b"].owner_id())
+        headers = two_profiles["a_headers"]
+        url = f"/api/v1/projects/{project.id}/agent/restart"
+
+        response = await client.post(url, headers=headers)
+
+        assert response.status_code == 404
+
 
 @pytest.mark.filterwarnings(
     "ignore:.*is marked with '@pytest.mark.asyncio'.*:pytest.PytestWarning"
