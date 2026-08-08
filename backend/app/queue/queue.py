@@ -176,7 +176,11 @@ async def enqueue(
     return job
 
 
-def classify_dependencies(jobs: list[Job]) -> tuple[list[Job], list[Job]]:
+def classify_dependencies(
+    jobs: list[Job],
+    *,
+    tolerate_failure_of: set[PydanticObjectId] | None = None,
+) -> tuple[list[Job], list[Job]]:
     """Split dependency jobs into (unfinished, failed).
 
     Pure, so the release decision can be tested without a database -- the
@@ -187,10 +191,22 @@ def classify_dependencies(jobs: list[Job]) -> tuple[list[Job], list[Job]]:
     record was pruned by the 30-day TTL, or never existed. Treating a missing
     job as blocking would strand otherwise-ready work forever, and treating it
     as failed would kill work whose input very likely did get produced.
+
+    `tolerate_failure_of` names dependencies whose failure must not cascade --
+    workflow nodes marked `continue_on_failure`. It is a set of ids rather than
+    a boolean because tolerance is per-edge: a node may depend on both an
+    optional QC step and a mandatory alignment, and only the first is
+    survivable. Note that a tolerated dependency still *blocks* while active;
+    tolerating a failure is not the same as not waiting for the work.
     """
+    tolerated = tolerate_failure_of or set()
     unfinished = [j for j in jobs if j.state in ACTIVE_STATES]
     failed = [
-        j for j in jobs if j.state in TERMINAL_STATES and j.state is not JobState.SUCCEEDED
+        j
+        for j in jobs
+        if j.state in TERMINAL_STATES
+        and j.state is not JobState.SUCCEEDED
+        and j.id not in tolerated
     ]
     return unfinished, failed
 

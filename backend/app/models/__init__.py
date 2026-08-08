@@ -57,6 +57,12 @@ from app.models.schedule import Schedule
 from app.models.structure import StructureLookup
 from app.models.timing import JobRunTiming
 from app.models.upload_session import UploadSession, UploadState
+from app.models.workflow import (
+    WorkflowBinding,
+    WorkflowDefinition,
+    WorkflowNodeRun,
+    WorkflowRun,
+)
 
 ALL_MODELS = [
     AiProvider,
@@ -78,6 +84,9 @@ ALL_MODELS = [
     Share,
     ProjectConversation,
     ResourceLimits,
+    WorkflowDefinition,
+    WorkflowRun,
+    WorkflowNodeRun,
 ]
 
 __all__ = [
@@ -140,6 +149,10 @@ __all__ = [
     "TaskSlot",
     "UploadSession",
     "UploadState",
+    "WorkflowBinding",
+    "WorkflowDefinition",
+    "WorkflowNodeRun",
+    "WorkflowRun",
     "normalize_failure",
     "normalize_organism",
 ]
