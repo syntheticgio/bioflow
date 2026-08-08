@@ -21,13 +21,15 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import OwnerDep
+from app.errors import NotFoundError
 from app.models.job import Job
 from app.models.workflow import (
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowNodeKind,
 )
-from app.pipelines.node_types import NODE_TYPES
+from app.pipelines.node_types import NODE_TYPES, ports_for
 from app.services import workflow_derive, workflow_orchestrator, workflow_service
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
@@ -64,6 +66,25 @@ class PortOut(BaseModel):
     name: str
     type: dict
     required: bool
+    # Whether this port takes several wires. The canvas needs it to know when
+    # to allow a second connection rather than refusing it.
+    multiple: bool = False
+
+
+class ToolOptionOut(BaseModel):
+    value: str
+    label: str
+
+
+class ToolChoiceOut(BaseModel):
+    param_key: str
+    options: list[ToolOptionOut]
+    default: str
+
+
+class PortSetOut(BaseModel):
+    inputs: list[PortOut]
+    outputs: list[PortOut]
 
 
 class NodeTypeOut(BaseModel):
@@ -71,6 +92,14 @@ class NodeTypeOut(BaseModel):
     label: str
     inputs: list[PortOut]
     outputs: list[PortOut]
+    # None for the node types that run exactly one tool -- most of them.
+    tool_choice: ToolChoiceOut | None = None
+    # Every option's port set, keyed by tool value. Empty when there is no
+    # choice. Served eagerly so the canvas re-shapes a node on a dropdown
+    # change without a round trip; the payload is small (six aligners, four
+    # ports each) and a fetch-per-change would show ports lagging the
+    # selection.
+    ports_by_tool: dict[str, PortSetOut] = Field(default_factory=dict)
 
 
 class DeriveIn(BaseModel):
@@ -175,19 +204,79 @@ async def list_node_types(owner: OwnerDep) -> list[NodeTypeOut]:
                 name=p.name,
                 type=p.type.model_dump(mode="json"),
                 required=p.required,
+                multiple=p.multiple,
             )
             for p in specs
         ]
 
-    return [
-        NodeTypeOut(
-            node_type=node_type,
-            label=spec.label,
-            inputs=ports(spec.inputs),
-            outputs=ports(spec.outputs),
+    result = []
+    for node_type, spec in sorted(NODE_TYPES.items()):
+        # The default port set: what a freshly-dropped node has, before any
+        # tool is chosen. Built the same way `ports_for` resolves an unset
+        # tool -- a probe node with empty params -- so this never drifts from
+        # what the canvas actually sees for a new node.
+        default_probe = WorkflowNode(
+            node_id="probe", kind=WorkflowNodeKind.ACTION, node_type=node_type
         )
-        for node_type, spec in sorted(NODE_TYPES.items())
-    ]
+        default_inputs, default_outputs = ports_for(default_probe)
+
+        choice = spec.tool_choice
+        ports_by_tool: dict[str, PortSetOut] = {}
+        tool_choice_out: ToolChoiceOut | None = None
+        if choice is not None:
+            tool_choice_out = ToolChoiceOut(
+                param_key=choice.param_key,
+                options=[
+                    ToolOptionOut(value=o.value, label=o.label)
+                    for o in choice.options
+                ],
+                default=choice.default,
+            )
+            for option in choice.options:
+                probe = WorkflowNode(
+                    node_id="probe",
+                    kind=WorkflowNodeKind.ACTION,
+                    node_type=node_type,
+                    params={choice.param_key: option.value},
+                )
+                tool_inputs, tool_outputs = ports_for(probe)
+                ports_by_tool[option.value] = PortSetOut(
+                    inputs=ports(tool_inputs), outputs=ports(tool_outputs)
+                )
+
+        result.append(
+            NodeTypeOut(
+                node_type=node_type,
+                label=spec.label,
+                inputs=ports(default_inputs),
+                outputs=ports(default_outputs),
+                tool_choice=tool_choice_out,
+                ports_by_tool=ports_by_tool,
+            )
+        )
+    return result
+
+
+@router.get("/tool-schema/{node_type}/{tool}")
+async def tool_schema(node_type: str, tool: str, owner: OwnerDep) -> dict:
+    """The parameter form for one tool of one node type.
+
+    Served rather than duplicated in the frontend for the reason
+    `aligner_registry`'s docstring gives: a second copy of the field list is
+    the copy nobody updates.
+    """
+    spec = NODE_TYPES.get(node_type)
+    if spec is None or spec.tool_choice is None:
+        raise NotFoundError(f"No tool-parameterized node type {node_type!r}.")
+    if node_type == "align":
+        from app.pipelines.aligner_registry import schema_for
+        from app.pipelines.aligners import Aligner
+
+        try:
+            return schema_for(Aligner(tool))
+        except ValueError as exc:
+            raise NotFoundError(f"No aligner {tool!r}.") from exc
+    raise NotFoundError(f"No schema for {node_type!r}.")
 
 
 @router.get("")
