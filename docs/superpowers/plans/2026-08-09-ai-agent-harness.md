@@ -509,7 +509,7 @@ of a second sequential server in the same process.
 
 A React hook that manages the SSE connection to the agent events endpoint.
 
-- [ ] **Step 1: Implement `useAgentSSE`**
+- [x] **Step 1: Implement `useAgentSSE`**
 
 ```typescript
 interface AgentSSEOptions {
@@ -537,7 +537,13 @@ Key behaviors:
 - Returns `connected` state and `connect`/`disconnect` controls
 - Cleans up on unmount
 
-- [ ] **Step 2: Add API methods to client.ts**
+**Implemented (52b22ca):** the hook at `frontend/src/hooks/useAgentSSE.ts` opens
+an EventSource to the agent events endpoint with profile query param, parses
+all five event types (agent_status/message_delta/tool_call/tool_result/done/error),
+and auto-reconnects with exponential backoff. The interface matches the plan's
+sketch.
+
+- [x] **Step 2: Add API methods to client.ts**
 
 ```typescript
 askAgent: (projectId: string, message: string) =>
@@ -557,6 +563,21 @@ stopAgent: (projectId: string) =>
 
 ---
 
+
+**Implemented (52b22ca):** the hook at `frontend/src/hooks/useAgentSSE.ts` opens
+an EventSource to the agent events endpoint with profile query param, parses
+all five event types (agent_status/message_delta/tool_call/tool_result/done/error),
+and auto-reconnects with exponential backoff. The interface matches the plan's
+sketch. API methods added to `frontend/src/api/client.ts`.
+
+**Delta from plan:** the plan's `onMessageDelta` callback received a plain
+`text: string` — the implementation sends `(kind, contentIndex, delta)` so the
+UI can distinguish text from thinking deltas and update the correct content
+index. The plan's `onToolCall` received `(tool: string, args: unknown)` — the
+implementation sends `(id, name, args)` so tool results can be matched back to
+their calls. The plan's `onConnectionChange` callback is used to set the
+connected state and show the status dot/error badge.
+
 ## Task 5: Frontend — AgentPanel components
 
 **Files:**
@@ -565,7 +586,7 @@ stopAgent: (projectId: string) =>
 - Create: `frontend/src/components/AgentPanelInput.tsx`
 - Create: `frontend/src/styles/agent.css`
 
-- [ ] **Step 1: Implement `AgentPanel`**
+- [x] **Step 1: Implement `AgentPanel`**
 
 The main drawer component, modeled on `ProjectQaDrawer`:
 
@@ -590,7 +611,7 @@ States:
 - **Error**: Error banner with retry button
 - **Disconnected**: "Agent disconnected" with restart button
 
-- [ ] **Step 2: Implement `AgentMessageBubble`**
+- [x] **Step 2: Implement `AgentMessageBubble`**
 
 ```typescript
 interface MessageBubbleProps {
@@ -607,7 +628,7 @@ Renders:
 - Tool calls: compact inline indicators like "🔍 Searching objects..."
 - Streaming state: cursor animation while text is still arriving
 
-- [ ] **Step 3: Implement `AgentPanelInput`**
+- [x] **Step 3: Implement `AgentPanelInput`**
 
 ```typescript
 interface AgentPanelInputProps {
@@ -620,7 +641,7 @@ interface AgentPanelInputProps {
 A textarea input with send button. Disabled while streaming. Shows connection
 status indicator. Supports Enter to send, Shift+Enter for newline.
 
-- [ ] **Step 4: Add styles**
+- [x] **Step 4: Add styles**
 
 Create `agent.css` with styles for:
 - Drawer container (slide-up panel, backdrop)
@@ -633,6 +654,25 @@ Create `agent.css` with styles for:
 
 ---
 
+
+**Implemented (52b22ca):** three components at
+`frontend/src/components/AgentPanel.tsx`,
+`frontend/src/components/AgentMessageBubble.tsx`, and
+`frontend/src/components/AgentPanelInput.tsx`; styles at
+`frontend/src/styles/agent.css`. Footer integration adds the 🤖 Agent button
+and panel alongside the existing 💬 Ask button; `styles.css` imports the new
+stylesheet.
+
+**Delta from plan:** the plan's AgentPanel states include a "Ready" state (empty
+conversation, input enabled) — the implementation merges this into the base
+state (no messages + not streaming = empty prompt). The plan's tool call
+indicators show "🔍 Searching objects..." — the implementation shows
+pending/done/error states with the actual tool name and arguments. The plan's
+error banner has a retry button — the implementation uses the restart button
+in the header for recovery. The plan's disconnected state shows "Agent
+disconnected" with restart button — the implementation sets this as an error
+message in the error badge and uses the restart button for recovery.
+
 ## Task 6: Integrate into the app
 
 **Files:**
@@ -640,7 +680,7 @@ Create `agent.css` with styles for:
 - Modify: `frontend/src/styles.css` — import agent.css
 - Modify: `frontend/src/api/client.ts` — add agent methods
 
-- [ ] **Step 1: Add agent drawer to project detail view**
+- [x] **Step 1: Add agent drawer to project detail view**
 
 In the project detail component, add an "Agent" button (e.g., in the footer or
 toolbar) that opens the AgentPanel.
@@ -657,7 +697,7 @@ const [agentOpen, setAgentOpen] = useState(false);
 )}
 ```
 
-- [ ] **Step 2: Add footer entry point**
+- [x] **Step 2: Add footer entry point**
 
 Alongside the Q&A chat entry, add an agent entry:
 
@@ -667,7 +707,7 @@ Alongside the Q&A chat entry, add an agent entry:
 </button>
 ```
 
-- [ ] **Step 3: Import agent.css**
+- [x] **Step 3: Import agent.css**
 
 ```css
 /* In styles.css */
