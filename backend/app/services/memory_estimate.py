@@ -95,6 +95,7 @@ async def resolve(
     job_type: str,
     input_bytes: int | None,
     heuristic_mb: int | None,
+    threads: int | None = None,
 ) -> MemoryEstimate:
     """Pick the most trustworthy available estimate and say which it is.
 
@@ -104,10 +105,17 @@ async def resolve(
     to 256: treating that as an answer would let an assembly with no genome
     size resolve to "256 MB, source: declared" and sail through a BLOCK check
     that should have stayed silent -- strictly worse than no estimate.
+
+    `threads` passes straight through to `timing_service.estimate_memory` --
+    see that function's docstring for segment-selection behavior. `None`
+    (the default) preserves this function's byte-only behavior from before
+    segmentation existed.
     """
     measured = None
     if input_bytes is not None:
-        measured = await timing_service.estimate_memory(job_type, input_bytes)
+        measured = await timing_service.estimate_memory(
+            job_type, input_bytes, threads=threads
+        )
 
     if measured is not None and measured.get("known"):
         if _is_trustworthy(measured):
