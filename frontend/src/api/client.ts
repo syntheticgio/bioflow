@@ -54,6 +54,7 @@ import type {
   QuantifyRequest,
   ReferenceOption,
   RegisterAccepted,
+  ReplanResult,
   ResourceLimits,
   ResourceLimitsIn,
   RunDetail,
@@ -802,6 +803,14 @@ export const api = {
     request<JobSummary>("/pipelines/align", {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+
+  /** Propose a fitting configuration for a refused job, or say why there is
+   * none. Feeds the resource-refusal card's Auto-adjust button. */
+  replan: (jobType: string, params: Record<string, unknown>) =>
+    request<ReplanResult>("/pipelines/replan", {
+      method: "POST",
+      body: JSON.stringify({ job_type: jobType, params }),
     }),
 
   /** Variant calling defaults for one BAM, including the inferred caller. */

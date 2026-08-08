@@ -838,6 +838,45 @@ export interface AlignEnvelope {
   models: Record<string, MemoryModel>;
 }
 
+/** One knob the re-planner moved. Mirrors replan_service.Change. */
+export interface ReplanChange {
+  name: string;
+  before: number;
+  after: number;
+}
+
+/**
+ * Mirrors replan_service.ReplanResult.
+ *
+ * A tagged union rather than a nullable proposal: "nothing fits" and "there is
+ * nothing here to tune" call for different prose and different next steps, and
+ * collapsing both into null loses exactly the distinction the user needs.
+ */
+export type ReplanResult =
+  | {
+      kind: "proposal";
+      params: Record<string, unknown>;
+      estimate_mb: number;
+      changes: ReplanChange[];
+      note: string;
+    }
+  | { kind: "infeasible"; reason: string }
+  | { kind: "no_knobs" };
+
+/**
+ * The `details` payload of a 422 resource refusal.
+ *
+ * Assembly renders the card straight from this; alignment builds the same
+ * shape client-side from its envelope, so both dialogs feed one component.
+ */
+export interface ResourceRefusalDetails {
+  estimate_mb: number;
+  budget_mb: number;
+  estimate_source: "measured" | "heuristic" | "declared" | "unknown";
+  detail: string;
+  replan: ReplanResult;
+}
+
 /** Mirrors align_runner.ReadGroup: the @RG fields a variant caller requires. */
 export interface ReadGroup {
   sample: string;
