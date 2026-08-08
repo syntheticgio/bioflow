@@ -29,6 +29,33 @@ async def test_returns_a_proposal_for_a_tunable_over_budget_alignment(client):
 
 
 @pytest.mark.asyncio
+async def test_align_params_missing_reference_bases_is_no_knobs_not_500(client):
+    """A caller that sends only AlignParams -- no reference_bases/building_index
+    -- is a real shape, not a hypothetical: AlignDialog's replan query did
+    exactly this before it was fixed to enrich the params (see the comment
+    on its queryFn), and hit this endpoint's proposer with a bare
+    dict.__getitem__ that raised KeyError as an unhandled 500. `replan()`
+    now catches that and degrades to `no_knobs` rather than crashing, so a
+    future caller with the same gap gets a clean tagged result instead of a
+    stack trace in the browser network tab.
+    """
+    resp = await client.post(
+        "/api/v1/pipelines/replan",
+        json={
+            "job_type": "align_reads",
+            "params": {
+                "aligner": "minimap2",
+                "threads": 64,
+                "sort_memory_mb": 4096,
+                # Deliberately no reference_bases / building_index.
+            },
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"kind": "no_knobs"}
+
+
+@pytest.mark.asyncio
 async def test_unregistered_job_type_reports_no_knobs(client):
     resp = await client.post(
         "/api/v1/pipelines/replan",

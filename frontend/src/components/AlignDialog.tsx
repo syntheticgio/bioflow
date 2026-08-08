@@ -149,8 +149,22 @@ export function AlignDialog({
   // Fetched when the card is about to show, so the button's presence is
   // decided before the user sees it rather than on click.
   const { data: replan } = useQuery<ReplanResult>({
-    queryKey: ["pipelines", "replan", "align_reads", params],
-    queryFn: () => api.replan("align_reads", params as unknown as Record<string, unknown>),
+    queryKey: ["pipelines", "replan", "align_reads", params, envelope?.reference_bases, needsIndex],
+    // replan_service's align proposer reads reference_bases/building_index
+    // directly; they're properties of the reference, not of AlignParams, so
+    // they're not in `params` itself and must be added here. Mirrors the same
+    // gap already handled server-side in pipeline_service.py's own internal
+    // replan() call (see the comment there).
+    queryFn: () =>
+      api.replan("align_reads", {
+        ...params,
+        reference_bases: envelope?.reference_bases ?? 0,
+        building_index: needsIndex,
+      } as unknown as Record<string, unknown>),
+    // `band` only ever leaves "ok" once `envelope` has loaded (it's derived
+    // from `estimate`, which is null until `envelope` is truthy -- see
+    // above), so by the time this query is enabled `envelope` is guaranteed
+    // non-null and `reference_bases` is real data, not the `?? 0` fallback.
     enabled: band === "block",
   });
 

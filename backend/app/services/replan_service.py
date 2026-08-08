@@ -118,7 +118,22 @@ def replan(
     if proposer is None:
         return NoKnobs()
 
-    result = proposer(params=params, budget_mb=budget_mb, cpu_budget=cpu_budget)
+    try:
+        result = proposer(params=params, budget_mb=budget_mb, cpu_budget=cpu_budget)
+    except (KeyError, TypeError):
+        # A proposer reading a param this caller never sent (e.g. align's
+        # reference_bases/building_index, which live outside AlignParams --
+        # see the comment on the frontend call site) is the same "bug in the
+        # per-type function" the module docstring already treats as a log,
+        # not a 500. Degrading to NoKnobs keeps a malformed/incomplete params
+        # dict from turning the refusal card itself into a crash.
+        logger.exception(
+            "replan: %s proposer raised on params=%r; treating as no knobs",
+            job_type,
+            params,
+        )
+        return NoKnobs()
+
     if not isinstance(result, Proposal):
         return result
 
