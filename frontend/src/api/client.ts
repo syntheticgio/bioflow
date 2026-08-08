@@ -32,6 +32,8 @@ import type {
   JobSummary,
   LineageDownloadRequest,
   LineageStatus,
+  LocalDatabaseEntry,
+  LocalDatabaseSubmission,
   MateSuggestion,
   MetadataSchema,
   NcbiResolveResponse,
@@ -420,6 +422,14 @@ export const api = {
     request<Feedback>("/feedback", { method: "POST", body: JSON.stringify(body) }),
 
   listFeedback: () => request<Feedback[]>("/feedback"),
+
+  submitLocalDatabase: (body: LocalDatabaseSubmission) =>
+    request<LocalDatabaseEntry>("/local-databases", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  listLocalDatabases: () => request<LocalDatabaseEntry[]>("/local-databases"),
 
   listSchedules: () => request<ScheduleInfo[]>("/schedules"),
 

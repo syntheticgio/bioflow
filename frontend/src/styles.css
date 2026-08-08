@@ -2704,6 +2704,18 @@ a.btn {
   text-decoration: underline;
 }
 
+.db-local-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.db-local-section {
+  margin-bottom: 2rem;
+}
+
 /* --- tools (search / access filter / surprise) --- */
 .db-tools {
   display: flex;
