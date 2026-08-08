@@ -1418,6 +1418,7 @@ async def launch_alignment(
     read_group: dict | None = None,
     params: dict | None = None,
     paired: bool = True,
+    resource_override: bool = False,
 ):
     """Queue an alignment, building the reference index first if it is missing.
 
@@ -1483,7 +1484,22 @@ async def launch_alignment(
             threads=align_params.threads,
             cpu_budget=governor.cpu_budget(),
         )
-        if band is resource_estimator.Band.BLOCK:
+        # `resource_override` is the user's "Launch anyway" from the refusal
+        # card. It skips the refusal here and rides on the job document to
+        # claim.lua, which admits the job only when it is the sole occupant.
+        if band is resource_estimator.Band.BLOCK and not resource_override:
+            from app.services import replan_service
+
+            proposal = replan_service.replan(
+                job_type=JOB_TYPE_ALIGN_READS,
+                params={
+                    **align_params.as_dict(),
+                    "reference_bases": reference.size or 0,
+                    "building_index": building,
+                },
+                budget_mb=mem_budget_mb,
+                cpu_budget=governor.cpu_budget() or 1,
+            )
             raise ValidationError(
                 resource_estimator.explain(
                     aligner=aligner,
@@ -1498,6 +1514,10 @@ async def launch_alignment(
                     "estimate_mb": estimate,
                     "budget_mb": mem_budget_mb,
                     "estimate_source": resolved.source.value,
+                    # The card names the source in prose; `detail` is the
+                    # phrase resolve() already wrote for exactly that.
+                    "detail": resolved.detail,
+                    "replan": replan_service.as_payload(proposal),
                 },
             )
 
@@ -1662,6 +1682,7 @@ async def launch_alignment(
         project_id=obj.project_id,
         object_id=obj.id,
         depends_on=depends_on,
+        resource_override=resource_override,
     )
     if job is None:
         # The run describes work that will not happen, so it must not linger in
@@ -3214,6 +3235,7 @@ async def launch_assembly(
     object_id: PydanticObjectId,
     owner: str,
     params: dict | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a de novo assembly of one long-read FASTQ."""
     from app.queue import queue
@@ -3276,7 +3298,18 @@ async def launch_assembly(
             threads=parsed.threads,
             cpu_budget=None,
         )
-        if band is resource_estimator.Band.BLOCK:
+        if band is resource_estimator.Band.BLOCK and not resource_override:
+            from app.services import replan_service
+
+            proposal = replan_service.replan(
+                job_type=JOB_TYPE_ASSEMBLE,
+                params={
+                    **parsed.as_dict(),
+                    "genome_bases": parsed.genome_size,
+                },
+                budget_mb=mem_budget_mb,
+                cpu_budget=LoadGovernor().cpu_budget() or 1,
+            )
             raise ValidationError(
                 f"This assembly needs about {estimate:,} MB "
                 f"({resolved.detail}), more than the "
@@ -3286,6 +3319,11 @@ async def launch_assembly(
                     "estimate_mb": estimate,
                     "budget_mb": mem_budget_mb,
                     "estimate_source": resolved.source.value,
+                    "detail": resolved.detail,
+                    # Inlined rather than fetched by a follow-up request: this
+                    # path is reactive, so the card renders from this response
+                    # and a second round trip would show it half-populated.
+                    "replan": replan_service.as_payload(proposal),
                 },
             )
 
@@ -3340,6 +3378,7 @@ async def launch_assembly(
         dedup_key=f"assemble:{reads.id}:{_params_fingerprint(parsed.as_dict())}",
         project_id=reads.project_id,
         object_id=reads.id,
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)

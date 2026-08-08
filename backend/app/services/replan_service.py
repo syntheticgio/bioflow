@@ -153,6 +153,33 @@ def replan(
     return result
 
 
+def as_payload(result: ReplanResult) -> dict:
+    """Serialize a result for the refusal card.
+
+    A tagged union rather than a nullable proposal: the card must be able to
+    tell "nothing fits" from "there is nothing here to tune", which call for
+    different next steps and different prose.
+
+    Lives here rather than at either call site because both the enqueue-time
+    refusal (inlined into the 422 for assembly) and the replan endpoint (for
+    alignment) need exactly this shape.
+    """
+    if isinstance(result, Proposal):
+        return {
+            "kind": "proposal",
+            "params": result.params,
+            "estimate_mb": result.estimate_mb,
+            "changes": [
+                {"name": c.name, "before": c.before, "after": c.after}
+                for c in result.changes
+            ],
+            "note": result.note,
+        }
+    if isinstance(result, Infeasible):
+        return {"kind": "infeasible", "reason": result.reason}
+    return {"kind": "no_knobs"}
+
+
 def _clamp_threads(*, threads: int, cpu_budget: float) -> tuple[int, str]:
     """Stage one: reduce a thread count the machine cannot deliver.
 

@@ -873,6 +873,9 @@ class AlignRequest(BaseModel):
     paired: bool = True
     read_group: dict = Field(default_factory=dict)
     params: dict = Field(default_factory=dict)
+    # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
+    # persists on the job, where claim.lua admits it only as sole occupant.
+    resource_override: bool = False
 
 
 class BuildIndexRequest(BaseModel):
@@ -958,13 +961,19 @@ class AssembleRequest(BaseModel):
     # Omitted by the Actions card, which launches with whatever the server
     # decides; supplied by the dialog when the user has changed something.
     params: dict | None = None
+    # "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
+    # persists on the job, where claim.lua admits it only as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/assemble", response_model=JobOut, status_code=status.HTTP_201_CREATED)
 async def launch_assemble(body: AssembleRequest, owner: OwnerDep) -> JobOut:
     """Queue a de novo assembly of one long-read FASTQ."""
     job = await pipeline_service.launch_assembly(
-        object_id=body.object_id, owner=owner, params=body.params
+        object_id=body.object_id,
+        owner=owner,
+        params=body.params,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
@@ -1354,6 +1363,7 @@ async def launch_alignment(body: AlignRequest, owner: OwnerDep) -> JobOut:
         read_group=body.read_group,
         params=body.params,
         paired=body.paired,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
