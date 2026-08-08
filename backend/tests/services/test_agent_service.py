@@ -13,8 +13,27 @@ from pathlib import Path
 
 import pytest
 
+from app.config import settings
 from app.errors import AgentUnavailableError
 from app.services.agent_service import AgentEvent, AgentProcess, AgentService
+
+
+@pytest.fixture(autouse=True)
+def _isolate_bioinfo_home(monkeypatch, tmp_path):
+    """Keep every test in this module off the real /data volume.
+
+    `AgentService.__init__` falls back to `settings.agent_sessions_dir`
+    (`bioinfo_home / "agent-sessions"`) whenever `make_service()` is called
+    without an explicit `sessions_dir=`, and `AgentProcess.start()`
+    unconditionally `mkdir`s that path on spawn. Repointing `bioinfo_home`
+    at this test's own `tmp_path` -- the same idiom used elsewhere in the
+    suite (see `tests/queue/test_assembly_qc_handlers.py`) -- means the
+    ~15+ call sites that never set `sessions_dir` still get an isolated
+    directory, with no change to `make_service()` or those call sites.
+    Tests in `TestSessionFlags` that already pass `sessions_dir=tmp_path`
+    explicitly are unaffected: that kwarg always wins over the fallback.
+    """
+    monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
 
 
 class FakeWriter:
