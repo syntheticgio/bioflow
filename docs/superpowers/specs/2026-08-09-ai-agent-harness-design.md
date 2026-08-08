@@ -64,12 +64,14 @@ backend spawns it, sends `prompt` commands, and reads events from its stdout.
 This is the designed integration surface — see
 [Pi's RPC documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/rpc.md).
 
-Pi connects to BioFlow's MCP server via an MCP extension that reads an MCP
-config file at startup. The extension registers the `--mcp-config` CLI flag
-and handles connecting to the servers listed in the config file. This means
-Pi can also connect to external MCP servers alongside BioFlow's — just add
-them to the config file. No new MCP tools are needed; the existing 18 tools
-are sufficient.
+Pi connects to BioFlow's MCP server via the [pi-mcp-adapter](https://pi.dev/packages/pi-mcp-adapter)
+extension (v2.21.1, MIT, [nicobailon/pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter)),
+installed with `pi install npm:pi-mcp-adapter` inside the container where Pi
+lives. The adapter registers the `--mcp-config` CLI flag and handles
+connecting to the servers listed in the config file. This means Pi can also
+connect to external MCP servers alongside BioFlow's — just add them to the
+config file. No new MCP tools are needed; the existing 18 tools are
+sufficient.
 
 ### Why a subprocess and not the SDK
 
@@ -88,14 +90,18 @@ but:
 ### Extensions, skills, and MCP servers
 
 Pi loads extensions from `~/.pi/agent/extensions/` (or via `--extension`),
-skills from `~/.pi/agent/skills/` (or via `--skill`), and MCP servers via an
-MCP extension that reads a JSON config file (`--mcp-config`). These are all
-installed or mounted into the Docker container so they are available to every
-Pi process.
+skills from `~/.pi/agent/skills/` (or via `--skill`), and MCP servers via the
+pi-mcp-adapter extension, which reads a JSON config file (`--mcp-config`).
+These are all installed or mounted into the Docker container so they are
+available to every Pi process.
 
-**Pre-installed extensions:** The MCP extension (`mcp-extension`) is required
-for Pi to connect to any MCP server. Additional extensions can be installed
-for custom tools, event interception, or UI components.
+**Pre-installed extensions:** The pi-mcp-adapter extension (installed via
+`pi install npm:pi-mcp-adapter`) is required for Pi to connect to any MCP
+server. It exposes MCP servers through a single proxy tool
+(`mcp({ tool: ... })`, ~200 tokens) rather than loading every server's tools
+into context — the agent discovers tools on demand and servers connect lazily
+on first use. Additional extensions can be installed for custom tools, event
+interception, or UI components.
 
 **Pre-installed skills:** Skills teach Pi about specific workflows (e.g.,
 "how to run a QC pipeline", "how to interpret FASTQ quality reports"). These
@@ -244,9 +250,9 @@ killed and restarted. The SSE stream delivers an `error` event.
 
 ### MCP connection from Pi to BioFlow
 
-Pi connects to BioFlow's MCP server via an MCP extension that reads a config
-file. The backend generates this config file dynamically per project and
-passes it to the Pi process via `--mcp-config`:
+Pi connects to BioFlow's MCP server via the pi-mcp-adapter extension, which
+reads a config file. The backend generates this config file dynamically per
+project and passes it to the Pi process via `--mcp-config`:
 
 ```
 pi --mode rpc --no-session --mcp-config /tmp/bioflow-mcp-config.json
@@ -269,11 +275,14 @@ its own key and URL. The profile id is the one the user selected in the UI —
 the backend resolves it from the request context (X-BioFlow-Profile header)
 and embeds it in the URL.
 
-**Why a config file instead of a flag?** Pi uses the MCP extension pattern,
-which reads a config file rather than accepting a single URL on the command
-line. This is more flexible: it supports multiple servers, each with their own
-options (timeouts, headers, auth). The trade-off is that the backend must
-write a temp file and clean it up.
+**Why a config file instead of a flag?** pi-mcp-adapter reads the standard
+MCP config format (`{ "mcpServers": { ... } }`) and registers the
+`--mcp-config` flag to point at a specific file. The config file supports
+stdio servers (`command`/`args`), HTTP/StreamableHTTP servers (`url`), Unix
+sockets (`socket`), and per-server options like `lifecycle` (lazy/eager/
+keep-alive), `idleTimeout`, `headers`, and `env`. BioFlow's MCP server is
+HTTP, so the `url` key is used. The trade-off is that the backend must write
+a temp file and clean it up.
 
 ### RPC protocol flow
 
@@ -492,17 +501,24 @@ AGENT_IDLE_TIMEOUT: int = 1800  # Kill agent after 30 min of inactivity
 ```
 
 On Docker, Pi would need to be installed in the `api` container or accessible
-via a bind mount. The `api` container installs Pi via npm and also installs
-the MCP extension and any desired skills/extensions:
+via a bind mount. The `api` container installs Pi via npm and then installs
+the pi-mcp-adapter extension via Pi's own package manager (`pi install`):
 
 ```dockerfile
-# In backend/Dockerfile, or docker-compose.override.yml
+# In backend/Dockerfile
+# Pi requires Node >= 22.19 — python:3.12-slim has no Node at all, and
+# bookworm's apt nodejs is 18.x, too old. Install Node 22 first.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Pi coding agent globally
 RUN npm install -g @earendil-works/pi-coding-agent
 
-# Install MCP extension (required for MCP server connectivity)
-RUN mkdir -p /root/.pi/agent/extensions \
-  && npm install -g @earendil-works/pi-mcp-extension \
-  && ln -s /usr/local/lib/node_modules/@earendil-works/pi-mcp-extension /root/.pi/agent/extensions/mcp
+# Install pi-mcp-adapter (required for MCP server connectivity).
+# This runs inside the container where Pi is installed — `pi install`
+# registers the extension in ~/.pi/agent/settings.json.
+RUN pi install npm:pi-mcp-adapter
 
 # Install skills (optional, teaches Pi about bioinformatics workflows)
 COPY ./pi-skills/ /root/.pi/agent/skills/
@@ -516,7 +532,6 @@ services:
   api:
     volumes:
       - /usr/local/bin/pi:/usr/local/bin/pi:ro
-      - /usr/local/lib/node_modules/@earendil-works/pi-mcp-extension:/root/.pi/agent/extensions/mcp:ro
       - ./pi-skills:/root/.pi/agent/skills:ro
 ```
 
@@ -526,7 +541,7 @@ What ships in the initial implementation:
 
 - [x] Project-scoped agent drawer UI
 - [x] Backend spawns Pi as a subprocess per project
-- [x] Pi connects to BioFlow's MCP server via MCP extension and config file
+- [x] Pi connects to BioFlow's MCP server via pi-mcp-adapter and config file
 - [x] User sends message, agent responds with streaming text
 - [x] Tool calls are visible as compact inline indicators
 - [x] Single conversation per project (no persistence across sessions)
@@ -534,7 +549,7 @@ What ships in the initial implementation:
 - [x] Error handling: process crash, timeout, connection loss
 - [x] SSE-based streaming response delivery
 - [x] Pi installed in the Docker api container
-- [x] MCP extension installed in the Docker api container
+- [x] pi-mcp-adapter installed in the Docker api container (via `pi install`)
 - [x] Placeholder skills directory for bioinformatics workflows
 - [x] Dynamic MCP config generation per project session
 
@@ -583,7 +598,7 @@ Manual testing at localhost:5173 (no headless component tests in this repo):
 | Pi is not installed or outdated | `PI_DISABLED` flag hides the UI; clear error message guides installation |
 | Pi process consumes too much memory | Per-project processes capped; idle timeout kills after 30 min of inactivity |
 | MCP connection fails | Retry logic on spawn; clear error in SSE stream |
-| MCP extension not installed | Check for extension file before spawning; clear error message |
+| MCP adapter not installed | Check for the adapter during startup; clear error message |
 | Pi's Node.js version incompatible | Document required Node version; pin Pi version in Dockerfile |
 | Multiple projects each run a Pi process | Each process is ~100-200 MB; for a single-user tool this is acceptable |
 | SSE connection drops mid-response | Frontend reconnects and sends a follow-up to get the current state |
