@@ -265,7 +265,7 @@ override, env-JSON parsing).
 Implements `AgentService` that manages Pi process lifecycle, sends prompts,
 reads events, and translates them into a format the API can stream.
 
-- [ ] **Step 1: Define `AgentEvent` types**
+- [x] **Step 1: Define `AgentEvent` types**
 
 ```python
 from dataclasses import dataclass, field
@@ -286,7 +286,7 @@ class AgentEvent:
     data: dict = field(default_factory=dict)
 ```
 
-- [ ] **Step 2: Implement `AgentProcess` class**
+- [x] **Step 2: Implement `AgentProcess` class**
 
 A single-project agent process wrapper:
 
@@ -327,7 +327,7 @@ Key behaviors:
   - `agent_end` → `done` SSE event
 - `stop()` terminates the process and cleans up
 
-- [ ] **Step 3: Implement `AgentService` class**
+- [x] **Step 3: Implement `AgentService` class**
 
 Manages multiple `AgentProcess` instances, one per project:
 
@@ -347,10 +347,31 @@ class AgentService:
     async def cleanup_idle(self) -> None: ...
 ```
 
-- [ ] **Step 4: Write tests**
+- [x] **Step 4: Write tests**
 
 Test process spawning (mock subprocess), message sending, event parsing, error
 handling, and idle cleanup.
+
+**Implemented (53490d1, issue #86):** processes are keyed by
+`(profile_id, project_id)`, not just project — the MCP connection is
+profile-scoped, so two profiles must not share a process; `AgentProcess`
+spawns `pi --mode rpc --no-session --mcp-config <tempfile>`, translates
+stdout JSONL to SSE events (unwrapping pi-mcp-adapter's `mcp` proxy tool
+name), and is supervised by a per-run response watchdog, an unexpected-exit
+watcher, and idle reaping.
+
+**Delta from plan:** the plan had `send_prompt` await a command-ack future.
+That deadlocks by construction — the ack arrives on stdout only after
+`send_prompt` returns — so the machinery was removed: prompts are
+fire-and-forget with `streamingBehavior: "steer"`, a `success: false`
+response becomes an SSE error event, and the response watchdog is armed by
+the stdout reader on acceptance instead of in `send_prompt`. The MCP config
+builder and `build_mcp_config` live in the service (moved to Task 3's
+router wiring, which now only passes the resolved profile id).
+
+Tests use a `FakeProcess` patching `create_subprocess_exec` and feed the
+documented RPC shapes from pi's docs/rpc.md; 18 tests, full suite 4049
+passed, ruff clean.
 
 ---
 
