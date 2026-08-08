@@ -344,14 +344,20 @@ async def estimate(
     if threads is None:
         model = _fit(samples)
         answered_by = None
+        scoring_samples = samples
     else:
         segments = _fit_segmented(records, _duration_samples_from)
         if threads in segments:
             model, answered_by = segments[threads], threads
+            scoring_samples = _duration_samples_from(
+                [r for r in records if r.threads == threads]
+            )
         elif None in segments:
             model, answered_by = segments[None], None
+            scoring_samples = samples
         else:
             model, answered_by = None, None
+            scoring_samples = samples
 
     if model is None:
         return {
@@ -365,13 +371,13 @@ async def estimate(
         "known": True,
         "estimate_ms": int(max(100, predicted)),
         "samples": model["n"],
-        "r_squared": round(_r_squared(samples, model), 3),
+        "r_squared": round(_r_squared(scoring_samples, model), 3),
         "throughput_mb_s": (
             round(1000 / (model["slope"] * 1024 * 1024), 1)
             if model["slope"] > 0
             else None
         ),
-        "range": _observed_range(samples, input_bytes),
+        "range": _observed_range(scoring_samples, input_bytes),
         "segment": {"threads": answered_by, "samples": model["n"]},
     }
 
@@ -466,14 +472,20 @@ async def estimate_memory(
     if threads is None:
         model = _fit_memory(samples)
         answered_by = None
+        scoring_samples = samples
     else:
         segments = _fit_segmented(records, _memory_samples_from)
         if threads in segments:
             model, answered_by = segments[threads], threads
+            scoring_samples = _memory_samples_from(
+                [r for r in records if r.threads == threads]
+            )
         elif None in segments:
             model, answered_by = segments[None], None
+            scoring_samples = samples
         else:
             model, answered_by = None, None
+            scoring_samples = samples
 
     if model is None:
         return {
@@ -487,8 +499,8 @@ async def estimate_memory(
         "known": True,
         "estimate_bytes": int(max(0, predicted)),
         "samples": model["n"],
-        "r_squared": round(_r_squared(samples, model), 3),
-        "range": _observed_range(samples, input_bytes),
+        "r_squared": round(_r_squared(scoring_samples, model), 3),
+        "range": _observed_range(scoring_samples, input_bytes),
         "segment": {"threads": answered_by, "samples": model["n"]},
     }
 

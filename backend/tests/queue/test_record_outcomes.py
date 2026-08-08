@@ -175,6 +175,30 @@ class TestThreadSegmentation:
         result = await timing_service.estimate("align_reads", 5000, threads=8)
         assert result["segment"]["threads"] == 8
 
+    async def test_segment_r_squared_is_scored_against_its_own_samples(self):
+        """A segment's confidence score must reflect how well ITS OWN samples
+        fit its own model, not how the pooled all-threads samples fit it --
+        mixing two different slopes into one pooled comparison would produce
+        a misleadingly low r_squared for a segment that is actually a
+        perfect fit."""
+        for i in range(1, MIN_SAMPLES + 1):
+            await _record(
+                RunOutcome.SUCCEEDED,
+                duration_ms=1 * i,
+                input_bytes=1000 * i,
+                threads=4,
+            )
+        for i in range(1, MIN_SAMPLES + 1):
+            await _record(
+                RunOutcome.SUCCEEDED,
+                duration_ms=3 * i,
+                input_bytes=1000 * i,
+                threads=8,
+            )
+        result = await timing_service.estimate("align_reads", 5000, threads=8)
+        assert result["segment"]["threads"] == 8
+        assert result["r_squared"] > 0.99
+
     async def test_sparse_thread_count_falls_back(self):
         """Fewer than MIN_SAMPLES rows at the requested thread count: the
         answer comes from the None fallback, not a half-formed segment."""
@@ -219,8 +243,21 @@ class TestThreadSegmentation:
                 threads=4,
                 resources={"peak_rss_bytes": 1_000_000 * i},
             ).insert()
+        # A different-slope threads=8 pool alongside it -- proves r_squared
+        # is scored against the threads=4 segment's own samples, not the
+        # pooled (two-slope) set, the same bug shape as the duration side.
+        for i in range(1, MIN_SAMPLES + 1):
+            await JobRunTiming(
+                job_type="align_reads",
+                input_bytes=1000 * i,
+                duration_ms=1,
+                outcome=RunOutcome.SUCCEEDED,
+                threads=8,
+                resources={"peak_rss_bytes": 3_000_000 * i},
+            ).insert()
         result = await timing_service.estimate_memory(
             "align_reads", 5000, threads=4
         )
         assert result["known"] is True
         assert result["segment"]["threads"] == 4
+        assert result["r_squared"] > 0.99
