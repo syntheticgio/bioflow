@@ -5563,26 +5563,6 @@ table.software-matrix thead th.software-matrix-corner {
   width: 100%;
 }
 
-.workflow-inspector label.checkbox {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.workflow-inspector label.checkbox input {
-  margin-top: 2px;
-  width: auto;
-}
-
-.workflow-inspector label.checkbox em {
-  display: block;
-  font-size: 11px;
-  color: var(--text-faint);
-  font-style: normal;
-  opacity: 0.85;
-}
-
 /* Runs offered for derive-from-runs, and the skipped report. The skipped list
    is styled as a warning rather than an error: nothing failed, but a run the
    user selected is not on the canvas and they need to know which. */
@@ -5772,8 +5752,14 @@ table.software-matrix thead th.software-matrix-corner {
   opacity: 0.75;
 }
 
-.node-detail label.checkbox {
+/* Checkbox rows in the workflow panels (inspector and node detail). Kept
+   unscoped so both get the same layout from one place: `.checkbox` is used
+   only by these two, and the row direction has to be explicit because
+   `.workflow-inspector label` stacks its labels in a column -- the same
+   conflict `.trim-fields .trim-check` resolves for the dialogs. */
+label.checkbox {
   display: flex;
+  flex-direction: row;
   align-items: flex-start;
   gap: 8px;
   font-size: 13px;
@@ -5781,14 +5767,15 @@ table.software-matrix thead th.software-matrix-corner {
   cursor: pointer;
 }
 
-.node-detail label.checkbox input {
+label.checkbox input {
   margin-top: 2px;
   width: auto;
 }
 
-.node-detail label.checkbox em {
+label.checkbox em {
   display: block;
   font-size: 11px;
   color: var(--text-faint);
   font-style: normal;
+  opacity: 0.85;
 }
