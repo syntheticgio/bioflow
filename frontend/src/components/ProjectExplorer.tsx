@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
@@ -274,10 +274,17 @@ function ProjectView({ projectId }: { projectId: string }) {
   });
 
   // Recorded on view, not on any mutation -- a rename or tag edit elsewhere
-  // must not count as the user having "opened" this project just now.
+  // must not count as the user having "opened" this project just now. Guard
+  // on projectId (not just `project`) so a same-project refetch triggered by
+  // an adjacent panel's mutation doesn't re-bump the timestamp -- only an
+  // actual navigation to a different project should.
+  const recordedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (project) recordProjectVisit(project.id, project.name);
-  }, [project]);
+    if (project && recordedFor.current !== projectId) {
+      recordProjectVisit(project.id, project.name);
+      recordedFor.current = projectId;
+    }
+  }, [project, projectId]);
 
   const { data: objects, isLoading } = useQuery({
     queryKey: ["objects", projectId],
