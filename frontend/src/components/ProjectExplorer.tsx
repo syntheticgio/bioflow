@@ -575,8 +575,6 @@ function FileRow({
           {object.format.kind !== "unknown" && (
             <span>{formatKindLabel(object.format.kind)}</span>
           )}
-          {/* After size and format, matching the detail panel's ordering. */}
-          {quality && <span title={quality.tooltip}>{quality.word}</span>}
           {object.status !== "ready" && <span>{object.status}</span>}
         </div>
       </div>
