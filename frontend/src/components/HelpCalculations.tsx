@@ -67,6 +67,13 @@ export function HelpCalculations() {
             below Q20 while the overall mean is Q30 or better. A healthy
             average can hide a bad read tail, which trimming fixes.
           </li>
+          <li>
+            <strong>A collapsed cycle</strong> — more than 5% of reads have an
+            uncalled base at one specific position. This usually means a single
+            sequencing cycle failed. When it applies it replaces the ambiguous-base
+            penalty above rather than adding to it: both describe the same defect,
+            and one problem should only cost one grade.
+          </li>
         </ul>
 
         <h3>The duplication caveat</h3>
@@ -88,10 +95,32 @@ export function HelpCalculations() {
 
         <h3>What GC content does not do</h3>
         <p>
-          GC content is reported but never changes the grade. Expected GC is a
-          property of the organism — roughly 41% for human, under 20% for{" "}
-          <em>Plasmodium</em> — so without knowing the source, an unusual GC is
-          not evidence of a problem.
+          GC content never changes the grade. Expected GC is a property of the
+          organism — roughly 41% for human, under 20% for <em>Plasmodium</em> —
+          so without knowing the source, an unusual GC is not evidence of a
+          problem.
+        </p>
+        <p>
+          The GC distribution chart will still show you what to expect when
+          something can say what that is. It looks for an answer in two places,
+          in order: a <strong>reference genome in the same project</strong>,
+          whose GC is measured from the file itself, and then a small table of{" "}
+          <strong>published figures for well-known genomes</strong>, used when
+          the file's Organism metadata names one. The chart always says which of
+          the two it used, and which file or assembly the number came from.
+        </p>
+        <p>
+          When neither applies, no expected line is drawn. You can tick{" "}
+          <strong>overlay normal distribution</strong> to see a bell curve fitted
+          to the file's own data — useful for judging whether the distribution is
+          one clean peak or two overlapping ones, but it is a description of this
+          file, not an expectation of it. A second peak usually means
+          contamination; a very broad one can mean amplification bias.
+        </p>
+        <p>
+          The GC distribution is measured from a sample of up to 200,000 reads,
+          while the N content chart is fastp's count across the whole file. Both
+          say which under the chart.
         </p>
 
         <h3>When no grade is shown</h3>
