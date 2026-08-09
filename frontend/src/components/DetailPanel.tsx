@@ -25,6 +25,7 @@ import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
 import { BaseCompositionChart, QualityChart } from "./SequenceCharts";
+import { AdapterContentChart, DuplicationLevelsChart } from "./ContaminationCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { OrganismBlurb } from "./OrganismBlurb";
@@ -1003,7 +1004,11 @@ function QcTab({
       {/* Charts lead: the shape of the data answers "is this any good?" faster
           than any table of it can, and the numbers below are what you check
           once the shape has raised a question. */}
-      {(composition || curve || showChromStrip) && (
+      {(composition ||
+        curve ||
+        showChromStrip ||
+        obj.facts.qc_adapter_content != null ||
+        obj.facts.qc_duplication_levels != null) && (
         <div className="qc-charts">
           {composition && (
             <div className="qc-chart">
@@ -1020,6 +1025,29 @@ function QcTab({
             <div className="qc-chart">
               <div className="section-title">Quality per position</div>
               <QualityChart curve={curve as never} />
+            </div>
+          )}
+          {/* Contamination and library complexity, from the whole-file QC
+              scan. Both self-suppress on files QC'd before that scan existed,
+              so the grid keeps its old two-up shape for them. */}
+          {obj.facts.qc_adapter_content != null && (
+            <div className="qc-chart">
+              <div className="section-title">Adapter content</div>
+              <AdapterContentChart
+                positions={(obj.facts.qc_adapter_content as never as { positions: number[] }).positions}
+                series={(obj.facts.qc_adapter_content as never as { series: { name: string; values: number[] }[] }).series}
+              />
+            </div>
+          )}
+          {obj.facts.qc_duplication_levels != null && (
+            <div className="qc-chart">
+              <div className="section-title">Sequence duplication levels</div>
+              <DuplicationLevelsChart
+                labels={(obj.facts.qc_duplication_levels as never as { labels: string[] }).labels}
+                percentages={(obj.facts.qc_duplication_levels as never as { percentages: number[] }).percentages}
+                percentUnique={obj.facts.qc_percent_unique as number | undefined}
+                scannedReads={obj.facts.qc_duplication_scanned_reads as number | undefined}
+              />
             </div>
           )}
           {/* Second column on a reference, where the quality curve would be

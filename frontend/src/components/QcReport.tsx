@@ -94,12 +94,27 @@ function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) 
         <dt>GC</dt>
         <dd>{pct(measured.gc_content)}</dd>
 
-        {qc.qc_duplication_rate != null && (
+        {/* The whole-file scan's number wins over fastp's when it exists:
+            fastp reports duplication from its own sampled estimate, while
+            `qc_percent_unique` comes from a full pass with FastQC's
+            frozen-dictionary correction applied. fastp's value stays in the
+            facts for provenance -- it is a real measurement -- but showing
+            both would put two methods' answers side by side, disagreeing, on
+            the same screen. */}
+        {(qc.qc_percent_unique != null || qc.qc_duplication_rate != null) && (
           <>
             <dt>Duplication</dt>
             {/* Inverted: a high duplication rate is the bad direction, where a
                 high Q30 is the good one. */}
-            <dd>{quality(qc.qc_duplication_rate, 0.3, { goodWhenLow: true })}</dd>
+            <dd>
+              {quality(
+                qc.qc_percent_unique != null
+                  ? 1 - qc.qc_percent_unique / 100
+                  : qc.qc_duplication_rate,
+                0.3,
+                { goodWhenLow: true },
+              )}
+            </dd>
           </>
         )}
 
