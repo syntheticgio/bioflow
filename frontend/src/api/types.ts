@@ -1181,6 +1181,11 @@ export interface InsertSizeHistogramBucket {
   count: number;
 }
 
+export interface ReadLengthHistogramBucket {
+  length_bin: number;
+  count: number;
+}
+
 /** Facts produced by the run_bam_stats job. Read from ObjectDetail.facts
  * under the bam_stats_ prefix -- see BamResults.tsx. */
 export interface BamStatsFacts {
