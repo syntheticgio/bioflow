@@ -397,9 +397,7 @@ textarea:focus {
 }
 
 .row-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 
 .row-sub {
@@ -461,16 +459,6 @@ textarea:focus {
   background: var(--bg-hover);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
-}
-
-/* Inside a pair the badge leads the row instead of trailing the metadata, so
-   it needs to hold a column and not be squeezed by a long filename. */
-.row-in-pair > .read-badge {
-  flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 1px;
-  min-width: 22px;
-  text-align: center;
 }
 
 .row-action {

@@ -553,10 +553,6 @@ function FileRow({
       className={`row ${selected ? "selected" : ""}${inPair ? " row-in-pair" : ""}`}
       onClick={onSelect}
     >
-      {/* The read number leads the name inside a pair: it is what
-          distinguishes the two rows, and the eye needs it before the
-          filename, not after the metadata. */}
-      {inPair && badge != null && <span className="read-badge">R{badge}</span>}
       {/* The grade rides the icon's corner; the word stays in the metadata
           line below, so the tier never depends on reading the mark alone. */}
       <span className="row-icon">
@@ -571,6 +567,10 @@ function FileRow({
       <div className="row-main">
         <div className="row-name">{object.name}</div>
         <div className="row-sub">
+          {/* Read number leads the metadata line, whether paired or not, so
+              the filename above keeps its full width instead of being
+              squeezed to make room for the badge. */}
+          {badge != null && <span className="read-badge">R{badge}</span>}
           <span>{formatBytes(object.size)}</span>
           {object.format.kind !== "unknown" && (
             <span>{formatKindLabel(object.format.kind)}</span>
@@ -578,10 +578,6 @@ function FileRow({
           {/* After size and format, matching the detail panel's ordering. */}
           {quality && <span title={quality.tooltip}>{quality.word}</span>}
           {object.status !== "ready" && <span>{object.status}</span>}
-          {/* Unpaired files can still carry a read number -- a mate that was
-              deleted, or lives elsewhere. It stays in the metadata line
-              there, since there is no sibling row to tell apart. */}
-          {!inPair && badge != null && <span className="read-badge">R{badge}</span>}
         </div>
       </div>
       {/* An <a> rather than a button so the browser streams the file to disk
