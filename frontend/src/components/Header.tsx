@@ -7,6 +7,7 @@ import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
 import { LoadIndicator } from "./LoadIndicator";
 import { Menu } from "./Menu";
+import { RecentProjects } from "./RecentProjects";
 
 /** Same query the header badge and /shares itself both read, so opening the
  *  page costs no second request and the badge clears from the same
@@ -180,6 +181,7 @@ export function Header() {
             <span>{formatBytes(data.storage.library_bytes)} stored</span>
           </div>
         )}
+        <RecentProjects />
         <LoadIndicator />
       </div>
     </header>
