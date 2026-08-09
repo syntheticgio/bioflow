@@ -1001,21 +1001,22 @@ function QcTab({
   // while the QC tab is active) and the file actually has tiles. The matrix
   // is far larger than the object document it's described by, so it must
   // not ride along with the rest of the detail panel's own load.
-  const tileSource = obj.facts.qc_tile_source as string | undefined;
-  const [tiles, setTiles] = useState<TileMatrix | null>(null);
+  const tileSource =
+    typeof obj.facts.qc_tile_source === "string" ? obj.facts.qc_tile_source : undefined;
+  const [tileMatrix, setTileMatrix] = useState<TileMatrix | null>(null);
 
   useEffect(() => {
     if (tileSource !== "present") {
-      setTiles(null);
+      setTileMatrix(null);
       return;
     }
     let cancelled = false;
     api
       .qcTileMatrix(obj.id)
-      .then((m) => !cancelled && setTiles(m))
+      .then((m) => !cancelled && setTileMatrix(m))
       // A missing or unreadable matrix renders nothing, the same as a file
       // that never had tiles. It is an extra, not a promise.
-      .catch(() => !cancelled && setTiles(null));
+      .catch(() => !cancelled && setTileMatrix(null));
     return () => {
       cancelled = true;
     };
@@ -1063,7 +1064,7 @@ function QcTab({
         showChromStrip ||
         obj.facts.qc_adapter_content != null ||
         obj.facts.qc_duplication_levels != null ||
-        tiles) && (
+        tileMatrix) && (
         <div className="qc-charts">
           {composition && (
             <div className="qc-chart">
@@ -1136,10 +1137,10 @@ function QcTab({
               for reads. Renders nothing when the file has no sequence facts,
               so a GFF sidecar keeps the single-column layout. */}
           {showChromStrip && <ChromosomeStrip facts={obj.facts} />}
-          {tiles && (
+          {tileMatrix && (
             <div className="qc-chart">
               <div className="section-title">Quality per tile</div>
-              <TileQualityChart data={tiles} />
+              <TileQualityChart data={tileMatrix} />
             </div>
           )}
         </div>
