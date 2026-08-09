@@ -229,3 +229,62 @@ class DuplicationTracker:
             "percent_unique": round(100.0 * dedup_total / raw_total, 2),
             "total_reads": self.total_count,
         }
+
+
+# Same cap and reasoning as `sequence_stats.MAX_POSITIONS`: the useful detail
+# is at the start of the read, and an uncapped array would allocate megabytes
+# per file on long-read input.
+MAX_POSITIONS = 1_000
+
+
+class AdapterTracker:
+    """Per-position cumulative adapter matches, one counter row per probe."""
+
+    def __init__(
+        self,
+        probes: list[tuple[str, str]],
+        *,
+        max_positions: int = MAX_POSITIONS,
+    ) -> None:
+        self.probes = probes
+        self.max_positions = max_positions
+        self.counts: dict[str, list[int]] = {
+            name: [0] * max_positions for name, _ in probes
+        }
+        self.reads = 0
+        self.longest_read = 0
+
+    def add(self, seq: str) -> None:
+        self.reads += 1
+        self.longest_read = max(
+            self.longest_read, min(len(seq), self.max_positions)
+        )
+
+        for name, probe in self.probes:
+            index = seq.find(probe)
+            if index < 0 or index >= self.max_positions:
+                continue
+            # Cumulative: a read that has entered adapter stays in adapter for
+            # the rest of its length.
+            row = self.counts[name]
+            for pos in range(index, self.max_positions):
+                row[pos] += 1
+
+    def result(self) -> dict:
+        if not self.reads or not self.longest_read:
+            return {}
+
+        width = self.longest_read
+        return {
+            "positions": list(range(1, width + 1)),
+            "series": [
+                {
+                    "name": name,
+                    "values": [
+                        round(100.0 * c / self.reads, 4)
+                        for c in self.counts[name][:width]
+                    ],
+                }
+                for name, _ in self.probes
+            ],
+        }

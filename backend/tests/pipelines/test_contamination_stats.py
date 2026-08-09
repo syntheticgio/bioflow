@@ -196,3 +196,66 @@ def test_duplication_result_on_a_fully_duplicated_library():
 
 def test_duplication_result_is_empty_for_no_reads():
     assert cs.DuplicationTracker().result() == {}
+
+
+def test_adapter_tracker_marks_every_position_from_the_match_onward():
+    """The cumulative rule: once a read has run into adapter it stays in
+    adapter, which is what makes the plotted curve monotonic."""
+    probes = [("Test", "ACGTACGTACGT")]
+    tracker = cs.AdapterTracker(probes, max_positions=20)
+    tracker.add("TTTTT" + "ACGTACGTACGT")
+
+    counts = tracker.counts["Test"]
+    assert counts[:5] == [0, 0, 0, 0, 0]
+    assert all(c == 1 for c in counts[5:17])
+
+
+def test_adapter_tracker_counts_only_the_earliest_match():
+    """A probe occurring twice must not double-count the read."""
+    probes = [("Test", "AAAAAAAAAAAA")]
+    tracker = cs.AdapterTracker(probes, max_positions=40)
+    tracker.add("A" * 12 + "CGT" + "A" * 12)
+
+    assert tracker.counts["Test"][0] == 1
+    assert max(tracker.counts["Test"]) == 1
+
+
+def test_adapter_tracker_result_is_percentage_of_reads():
+    probes = [("Test", "ACGTACGTACGT")]
+    tracker = cs.AdapterTracker(probes, max_positions=20)
+    tracker.add("ACGTACGTACGT")
+    tracker.add("TTTTTTTTTTTT")
+    tracker.add("TTTTTTTTTTTT")
+    tracker.add("TTTTTTTTTTTT")
+
+    result = tracker.result()
+    series = result["series"][0]
+
+    assert series["name"] == "Test"
+    assert series["values"][0] == pytest.approx(25.0)
+
+
+def test_adapter_tracker_keeps_all_zero_series():
+    """Dropping empty series is the frontend's job -- the facts record what
+    was probed for, so 'we looked and found none' stays distinguishable from
+    'we never looked'."""
+    probes = [("Test", "ACGTACGTACGT")]
+    tracker = cs.AdapterTracker(probes, max_positions=10)
+    tracker.add("TTTTTTTTTT")
+
+    result = tracker.result()
+
+    assert result["series"][0]["name"] == "Test"
+    assert all(v == 0.0 for v in result["series"][0]["values"])
+
+
+def test_adapter_tracker_result_is_empty_for_no_reads():
+    assert cs.AdapterTracker([("Test", "ACGTACGTACGT")]).result() == {}
+
+
+def test_adapter_tracker_truncates_positions_to_the_cap():
+    probes = [("Test", "ACGTACGTACGT")]
+    tracker = cs.AdapterTracker(probes, max_positions=5)
+    tracker.add("T" * 200)
+
+    assert len(tracker.result()["positions"]) == 5
