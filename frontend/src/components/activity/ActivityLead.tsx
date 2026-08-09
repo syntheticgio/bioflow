@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
-import type { JobState, RunDetail, RunMemberJob, RunSummary } from "../../api/types";
+import type {
+  JobState,
+  RunDetail,
+  RunMemberJob,
+  RunSummary,
+  WorkflowRunRow,
+} from "../../api/types";
 import { formatClock } from "../../lib/format";
 import { notify } from "../../stores/messageStore";
 import { ROLE_LABELS, STATUS_LABELS, runFacts } from "../../lib/runFormat";
 import { LedgerRow } from "./RunLedger";
 import { SectionHead } from "./SectionHead";
+import { WorkflowLedgerRow } from "./WorkflowRuns";
 
 /** States a job will not leave on its own. A pruned job (null) counts as done:
  *  the run record outlives its jobs, and a finished run whose jobs have aged
@@ -25,13 +32,20 @@ const isSettled = (j: RunMemberJob) => j.state === null || SETTLED.has(j.state);
  */
 export function ActivityLead({
   runs,
+  workflows = [],
   details,
   onSelect,
 }: {
   runs: RunSummary[];
+  /** Active workflow runs, set as ledger lines under the lead story (#93).
+   *  They are not candidates for the headline: a workflow's own progress lives
+   *  in its node list, and the lead story is built around a run's jobs. */
+  workflows?: WorkflowRunRow[];
   details: Map<string, RunDetail>;
   onSelect: (objectId: string, projectId: string) => void;
 }) {
+  // One open at a time across both kinds -- the ids share a namespace here
+  // only in the sense that a workflow id and a run id never collide.
   const [open, setOpen] = useState<string | null>(null);
 
   const [lead, ...rest] = runs;
@@ -40,10 +54,11 @@ export function ActivityLead({
     0,
   );
 
+  const total = runs.length + workflows.length;
   const note =
-    runs.length === 0
+    total === 0
       ? undefined
-      : `${runs.length} ${runs.length === 1 ? "run" : "runs"} · ${jobCount} ${
+      : `${total} ${total === 1 ? "run" : "runs"} · ${jobCount} ${
           jobCount === 1 ? "job" : "jobs"
         }`;
 
@@ -51,14 +66,16 @@ export function ActivityLead({
     <section className="activity-lead">
       <SectionHead title="In progress" note={note} />
 
-      {!lead ? (
+      {!lead && workflows.length === 0 ? (
         <div className="activity-empty">Nothing running.</div>
       ) : (
-        <LeadStory
-          run={lead}
-          detail={details.get(lead.id)}
-          onSelect={onSelect}
-        />
+        lead && (
+          <LeadStory
+            run={lead}
+            detail={details.get(lead.id)}
+            onSelect={onSelect}
+          />
+        )
       )}
 
       {rest.map((run, i) => (
@@ -70,6 +87,18 @@ export function ActivityLead({
           open={open === run.id}
           onToggle={() => setOpen((o) => (o === run.id ? null : run.id))}
           onSelect={onSelect}
+        />
+      ))}
+
+      {/* Numbered continuing from the plain runs, so a mixed column reads as
+          one list. The lead story occupies 01 when there is one. */}
+      {workflows.map((run, i) => (
+        <WorkflowLedgerRow
+          key={run.id}
+          run={run}
+          index={runs.length + i + 1}
+          open={open === run.id}
+          onToggle={() => setOpen((o) => (o === run.id ? null : run.id))}
         />
       ))}
     </section>

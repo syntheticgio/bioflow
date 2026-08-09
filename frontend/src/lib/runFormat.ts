@@ -1,4 +1,10 @@
-import type { JobSummary, RunStatus, RunSummary, SystemLoad } from "../api/types";
+import type {
+  JobSummary,
+  RunStatus,
+  RunSummary,
+  SystemLoad,
+  WorkflowRunRow,
+} from "../api/types";
 
 /**
  * The shared vocabulary for describing a run to a person.
@@ -135,4 +141,32 @@ export function jobLabel(job: JobSummary): string {
     return typeof mate === "string" && mate ? `${name} + ${mate}` : name;
   }
   return job.type;
+}
+
+/** A ledger line, from either kind of run. */
+export type LedgerLine =
+  | { kind: "run"; at: string; run: RunSummary }
+  | { kind: "workflow"; at: string; run: WorkflowRunRow };
+
+/**
+ * Runs and workflow runs as one list, most recent first.
+ *
+ * Merged rather than concatenated (#93): the ledger reads as "what finished,
+ * most recent first", and a block of workflows pinned to the end would break
+ * that whatever their timestamps say. `updated_at` is an ISO-8601 UTC string
+ * from the API, so a lexicographic compare is a chronological one and avoids
+ * parsing a Date per row per render.
+ */
+export function mergeLedgerLines(
+  runs: RunSummary[],
+  workflows: WorkflowRunRow[],
+): LedgerLine[] {
+  return [
+    ...runs.map((run) => ({ kind: "run" as const, at: run.updated_at, run })),
+    ...workflows.map((run) => ({
+      kind: "workflow" as const,
+      at: run.updated_at,
+      run,
+    })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
 }

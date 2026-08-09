@@ -1,9 +1,10 @@
 import { useState } from "react";
-import type { RunMemberJob, RunSummary } from "../../api/types";
+import type { RunMemberJob, RunSummary, WorkflowRunRow } from "../../api/types";
 import { formatClock } from "../../lib/format";
-import { STATUS_LABELS, runFacts } from "../../lib/runFormat";
+import { STATUS_LABELS, mergeLedgerLines, runFacts } from "../../lib/runFormat";
 import { SectionHead } from "./SectionHead";
 import { RunFailureBlock } from "./RunFailureBlock";
+import { WorkflowLedgerRow } from "./WorkflowRuns";
 
 /**
  * Finished runs as a numbered ledger: one line each, parameters on demand.
@@ -15,10 +16,13 @@ import { RunFailureBlock } from "./RunFailureBlock";
  */
 export function RunLedger({
   runs,
+  workflows = [],
   jobsByRun,
   onSelect,
 }: {
   runs: RunSummary[];
+  /** Finished workflow runs, interleaved with the plain ones (#93). */
+  workflows?: WorkflowRunRow[];
   /** Member jobs per run id, from the details already fetched by the page.
    *  The count comes from this too -- the array is what a failed row needs to
    *  say anything about why it failed. */
@@ -29,25 +33,41 @@ export function RunLedger({
   // rest off the fold for no gain.
   const [open, setOpen] = useState<string | null>(null);
 
+  const lines = mergeLedgerLines(runs, workflows);
+
   return (
     <section className="activity-ledger">
-      <SectionHead title="Recent runs" note={`last ${runs.length}`} />
+      <SectionHead title="Recent runs" note={`last ${lines.length}`} />
 
-      {runs.length === 0 ? (
+      {lines.length === 0 ? (
         <div className="activity-empty">No finished runs.</div>
       ) : (
         <>
-          {runs.map((run, i) => (
-            <LedgerRow
-              key={run.id}
-              run={run}
-              index={i + 1}
-              jobs={jobsByRun.get(run.id)}
-              open={open === run.id}
-              onToggle={() => setOpen((o) => (o === run.id ? null : run.id))}
-              onSelect={onSelect}
-            />
-          ))}
+          {lines.map((line, i) =>
+            line.kind === "workflow" ? (
+              <WorkflowLedgerRow
+                key={line.run.id}
+                run={line.run}
+                index={i + 1}
+                open={open === line.run.id}
+                onToggle={() =>
+                  setOpen((o) => (o === line.run.id ? null : line.run.id))
+                }
+              />
+            ) : (
+              <LedgerRow
+                key={line.run.id}
+                run={line.run}
+                index={i + 1}
+                jobs={jobsByRun.get(line.run.id)}
+                open={open === line.run.id}
+                onToggle={() =>
+                  setOpen((o) => (o === line.run.id ? null : line.run.id))
+                }
+                onSelect={onSelect}
+              />
+            ),
+          )}
           <div className="activity-hint">Click a line to open its parameters.</div>
         </>
       )}

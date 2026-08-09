@@ -10,7 +10,7 @@ import { ActivityDesk } from "./activity/ActivityDesk";
 import { ActivityLead } from "./activity/ActivityLead";
 import { FailureExplanationExpander } from "./activity/FailureExplanationExpander";
 import { RunLedger } from "./activity/RunLedger";
-import { WorkflowRuns } from "./activity/WorkflowRuns";
+import { useWorkflowRuns } from "./activity/WorkflowRuns";
 import { RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
 
 /** How many finished runs the ledger column carries. */
@@ -72,6 +72,10 @@ export function ActivityView() {
 
   const details = new Map<string, RunDetail>();
   for (const detail of runDetails) if (detail) details.set(detail.id, detail);
+
+  // Workflows are runs too, and go in the same two columns (#93) rather than
+  // in a section of their own above them.
+  const workflows = useWorkflowRuns();
 
   const { data: load } = useQuery({
     queryKey: ["system", "load"],
@@ -141,24 +145,21 @@ export function ActivityView() {
         {load && <GovernorNote load={load} waiting={waiting.length} />}
       </div>
 
-      {/* Workflows first, above the run columns. A workflow is the largest
-          unit of intent here -- one user action that becomes several runs --
-          so burying it under the columns put the headline below the fold on a
-          4000px page. Renders nothing at all when no workflow has ever run,
-          which is most installs. */}
-      <WorkflowRuns />
-
-      {/* Then runs: one column per action the user took, rather than the seven
-          jobs an alignment decomposes into. */}
+      {/* Runs: one column per action the user took, rather than the seven jobs
+          an alignment decomposes into. Workflows are among them -- a workflow
+          is one user action that becomes several runs, so it belongs in the
+          same columns rather than in a third place with its own look. */}
       <div className="activity-grid">
         <ActivityLead
           runs={activeRuns}
+          workflows={workflows.active}
           details={details}
           onSelect={selectObject}
         />
 
         <RunLedger
           runs={finishedRuns.slice(0, LEDGER_LIMIT)}
+          workflows={workflows.finished.slice(0, LEDGER_LIMIT)}
           jobsByRun={
             new Map(
               finishedRuns.map((r) => [r.id, details.get(r.id)?.jobs ?? []]),
