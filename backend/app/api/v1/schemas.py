@@ -248,16 +248,21 @@ class ObjectComputationsOut(BaseModel):
 
 # --- Provenance narratives ---
 class ProvenanceStepOut(BaseModel):
-    """One step, flattened for the panel.
+    """One numbered row of "How this file was made".
 
-    Deliberately not the whole `Step`: `job_type` is here because the UI
-    shows it when parameters are missing, but `Gap` objects are not -- the
-    markdown already places each gap in the position its fact would have
-    occupied, and a second parallel representation would drift.
+    These fields are what the History tab renders from. `markdown` on the
+    response is no longer the display path -- it backs the Copy report button
+    only -- so gaps and parameters appear here as structured data rather than
+    being read back out of rendered prose.
+
+    `names` covers every object the row is about: more than one when a single
+    job produced several (the two mates of a pair), and `object_id` is the
+    first of them, which is what the row links to.
     """
 
     object_id: str
     name: str
+    names: list[str]
     kind: str
     verb: str | None
     tool: str | None
@@ -265,13 +270,33 @@ class ProvenanceStepOut(BaseModel):
     job_type: str | None
     ran_at: datetime | None
     outcome: str | None
+    params: dict = Field(default_factory=dict)
+    # Rendered inline markers ("version not recorded"), in the position the
+    # fact would have occupied.
+    gaps: list[str] = Field(default_factory=list)
+    # For a material, the name of the object that consumed it. Materials are
+    # ordered into the lineage by their own timestamp, so one downloaded
+    # before the reads sorts above them; this is what tells the reader it is
+    # an input to a later step rather than an ancestor of everything below.
+    used_by: str | None = None
+
+
+class ProvenanceGapOut(BaseModel):
+    """One entry in the "Not recorded" rail."""
+
+    label: str
+    object_id: str | None = None
 
 
 class ProvenanceNarrativeOut(BaseModel):
     markdown: str
     gap_count: int
+    # The full lineage, oldest first, materials included and ordered among the
+    # spine rather than listed separately.
+    lineage: list[ProvenanceStepOut]
     steps: list[ProvenanceStepOut]
     materials: list[ProvenanceStepOut]
+    gaps: list[ProvenanceGapOut]
     has_branches: bool
 
 
