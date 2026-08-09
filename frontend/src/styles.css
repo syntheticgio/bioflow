@@ -404,8 +404,13 @@ textarea:focus {
   font-size: 11px;
   color: var(--text-faint);
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin-top: 1px;
+}
+
+.row-sub > span {
+  white-space: nowrap;
 }
 
 /* ---------- Paired-end reads ---------- */
