@@ -4831,9 +4831,16 @@ table.software-matrix thead th.software-matrix-corner {
 /* --- Settings page (AI providers) --- */
 
 .settings-page {
+  width: 100%;
   max-width: 860px;
   margin: 0 auto;
   padding: 24px 20px 40px;
+}
+
+/* Settings > Tools needs more horizontal room than the other settings pages
+   so its cards can lay out in 2-3 columns instead of one long list. */
+.settings-page-wide {
+  max-width: 1400px;
 }
 
 .settings-body {
@@ -5048,21 +5055,38 @@ table.software-matrix thead th.software-matrix-corner {
   border-bottom-color: var(--accent);
 }
 
-/* Settings > Tools table. A variant of .settings-table rather than a second
-   class on its cells: the AI routing table's first column is a narrow label,
-   this one's is a name plus a one-liner and needs room to wrap instead of
-   being clipped to content width. */
-.settings-tools-table th {
-  text-align: left;
-  font-weight: 400;
-  padding: 10px 12px 10px 0;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
+/* Settings > Tools grid. Was a <table>, but table rows can't reflow into
+   columns -- each tool is now a self-contained card so the grid can pack
+   2-3 per row on wide viewports and fall back to 1 on narrow ones. */
+.settings-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--border);
 }
 
-.settings-tools-table tr:last-child th,
-.settings-tools-table tr:last-child td {
-  border-bottom: none;
+.settings-tools-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.settings-tools-card-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-tools-card-state {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  padding-top: 1px;
 }
 
 .settings-tools-name {
@@ -5081,7 +5105,6 @@ table.software-matrix thead th.software-matrix-corner {
 .settings-tools-state {
   color: var(--text-dim);
   font-size: 12px;
-  white-space: nowrap;
 }
 
 .settings-tools-state-failed {
@@ -5089,9 +5112,9 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 .settings-tools-action {
+  flex-shrink: 0;
   text-align: right;
   white-space: nowrap;
-  vertical-align: top;
 }
 
 .settings-security-note {
