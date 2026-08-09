@@ -1601,15 +1601,16 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   external_link: "b",
   warning: "b",
   succeeded: "b",
-  // VII. Job status & agent chrome -- strokes over enclosures for the same
-  // reason as Section V: these sit beside running text at icon size, not in
-  // a card, so a mark reads cleaner than a frame.
+  // VII. Job status & agent chrome -- strokes over enclosures for queued,
+  // running, projects, files and live, for the same reason as Section V:
+  // these sit beside running text at icon size, not in a card, so a mark
+  // reads cleaner than a frame. ask and agent keep the house default (`a`)
+  // -- their enclosures are the recognisable shape (speech bubble, robot
+  // head), unlike the rest of this section.
   queued: "b",
   running: "b",
   projects: "b",
   files: "b",
-  ask: "b",
-  agent: "b",
   live: "b",
 };
 
