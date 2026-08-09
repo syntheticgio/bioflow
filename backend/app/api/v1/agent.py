@@ -135,11 +135,14 @@ async def _append_turn(
 def _system_prompt(project) -> str:
     """Project context for the agent, set at spawn time only.
 
-    Minimal on purpose: this is the project awareness the drawer needs (the
-    agent should say "your reads", not "the reads"), not a user-editable
-    custom prompt, which is out of scope for the first slice.
+    The default block is infrastructure grounding -- which project this is and
+    that MCP tools exist -- so it is always present and always owned by this
+    code. A project's `agent_system_prompt` is appended to it rather than
+    replacing it: a user asking for a different tone must not be able to
+    silently discard tool awareness, and a stored copy of the grounding text
+    would freeze at whatever it said the day it was edited.
     """
-    return (
+    base = (
         "You are a bioinformatics coding agent inside BioFlow, a local "
         f"bioinformatics data manager. You are working on the project "
         f"{project.name!r} (id {project.id}). You have MCP tools to read this "
@@ -147,6 +150,10 @@ def _system_prompt(project) -> str:
         "jobs. Prefer running a tool over describing what you would do, and "
         "keep answers concrete and short."
     )
+    custom = (project.agent_system_prompt or "").strip()
+    if not custom:
+        return base
+    return f"{base}\n\nAdditional instructions from the user:\n{custom}"
 
 @router.post("/ask", response_model=AgentAskResponse)
 async def ask_agent(
@@ -393,6 +400,17 @@ async def stop_agent(project_id: PydanticObjectId, profile_id: ProfileIdDep) -> 
     await agent_service.stop_agent(profile_id, str(project_id))
 
 @router.post("/restart", response_model=AgentAskResponse)
-async def restart_agent(project_id: PydanticObjectId, profile_id: ProfileIdDep) -> AgentAskResponse:
-    await agent_service.restart_agent(profile_id, str(project_id))
+async def restart_agent(
+    project_id: PydanticObjectId, owner: OwnerDep, profile_id: ProfileIdDep
+) -> AgentAskResponse:
+    """Stop and respawn, keeping the project's composed prompt.
+
+    The ownership-scoped lookup is here for the prompt, not just the 404: a
+    respawn that forwarded nothing would drop the project grounding, which is
+    what this endpoint used to do.
+    """
+    project = await project_service.get_project(project_id, owner=owner)
+    await agent_service.restart_agent(
+        profile_id, str(project_id), system_prompt=_system_prompt(project)
+    )
     return AgentAskResponse(status="restarting")

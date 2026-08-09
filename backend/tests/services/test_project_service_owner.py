@@ -138,3 +138,51 @@ class TestProjectServiceOwnerScoping:
 
         unchanged = await project_service.get_project(project.id, owner="owner-a")
         assert unchanged.name == "update-scope"
+
+
+class TestAgentSystemPrompt:
+    async def test_defaults_to_empty_string(self):
+        project = await project_service.create_project(
+            name="prompt-default", owner="prompt-default-owner"
+        )
+        assert project.agent_system_prompt == ""
+
+    async def test_update_sets_the_prompt(self):
+        owner = "prompt-set-owner"
+        project = await project_service.create_project(name="prompt-set", owner=owner)
+
+        updated = await project_service.update_project(
+            project.id, {"agent_system_prompt": "Always cite the tool."}, owner=owner
+        )
+
+        assert updated.agent_system_prompt == "Always cite the tool."
+
+    async def test_empty_string_clears_the_prompt(self):
+        """Reset-to-default sends "", which the None-skipping loop must honour."""
+        owner = "prompt-clear-owner"
+        project = await project_service.create_project(name="prompt-clear", owner=owner)
+        await project_service.update_project(
+            project.id, {"agent_system_prompt": "temporary"}, owner=owner
+        )
+
+        cleared = await project_service.update_project(
+            project.id, {"agent_system_prompt": ""}, owner=owner
+        )
+
+        assert cleared.agent_system_prompt == ""
+
+    async def test_none_leaves_the_prompt_alone(self):
+        """A PATCH that omits the field must not wipe it."""
+        owner = "prompt-untouched-owner"
+        project = await project_service.create_project(
+            name="prompt-untouched", owner=owner
+        )
+        await project_service.update_project(
+            project.id, {"agent_system_prompt": "keep me"}, owner=owner
+        )
+
+        same = await project_service.update_project(
+            project.id, {"name": "prompt-renamed"}, owner=owner
+        )
+
+        assert same.agent_system_prompt == "keep me"

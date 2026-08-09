@@ -117,7 +117,7 @@ async def update_project(
             raise ValidationError("Project name cannot be empty")
         project.name = new_name
         project.slug = slugify(new_name)
-    for field in ("description", "tags", "archived"):
+    for field in ("description", "tags", "archived", "agent_system_prompt"):
         if updates.get(field) is not None:
             setattr(project, field, updates[field])
     if updates.get("metadata") is not None:

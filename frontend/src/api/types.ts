@@ -3,6 +3,7 @@ export interface Project {
   name: string;
   slug: string;
   description: string;
+  agent_system_prompt: string;
   parent_id: string | null;
   metadata: Record<string, unknown>;
   tags: string[];

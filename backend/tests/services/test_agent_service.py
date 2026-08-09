@@ -364,3 +364,61 @@ class TestLifecycle:
         assert service.get("p", "j1") is None
         assert service.get("p", "j2") is None
         assert a.process is None and b.process is None
+
+    async def test_same_prompt_reuses_the_process(self, spawn):
+        service = make_service()
+        first = await service.get_or_create("p", "j", system_prompt="A")
+        second = await service.get_or_create("p", "j", system_prompt="A")
+        assert second is first
+        calls, _ = spawn()
+        assert len(calls) == 1
+        await second.stop()
+
+    async def test_changed_prompt_respawns(self, spawn):
+        """The direction that fails if the comparison is dropped."""
+        service = make_service()
+        first = await service.get_or_create("p", "j", system_prompt="A")
+        second = await service.get_or_create("p", "j", system_prompt="B")
+        assert second is not first
+        calls, _ = spawn()
+        assert len(calls) == 2
+        assert "B" in calls[1]
+        assert first.process is None
+        await second.stop()
+
+    async def test_changed_prompt_does_not_kill_a_busy_process(self, spawn):
+        service = make_service()
+        first = await service.get_or_create("p", "j", system_prompt="A")
+        first._busy = True
+
+        second = await service.get_or_create("p", "j", system_prompt="B")
+
+        assert second is first
+        calls, _ = spawn()
+        assert len(calls) == 1
+        first._busy = False
+        await first.stop()
+
+    async def test_prompt_going_empty_respawns(self, spawn):
+        """Reset-to-default must reach the running agent too."""
+        service = make_service()
+        first = await service.get_or_create("p", "j", system_prompt="A")
+        second = await service.get_or_create("p", "j", system_prompt=None)
+        assert second is not first
+        calls, _ = spawn()
+        assert len(calls) == 2
+        assert "--system-prompt" not in calls[1]
+        await second.stop()
+
+    async def test_restart_forwards_the_system_prompt(self, spawn):
+        """Regression guard: restart used to respawn with no prompt at all."""
+        service = make_service()
+        first = await service.get_or_create("p", "j", system_prompt="grounding")
+        await service.restart_agent("p", "j", system_prompt="grounding")
+        calls, _ = spawn()
+        assert len(calls) == 2
+        assert "--system-prompt" in calls[1]
+        assert "grounding" in calls[1]
+        second = service.get("p", "j")
+        assert second is not None and second is not first
+        await second.stop()

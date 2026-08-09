@@ -278,3 +278,58 @@
   33% { content: ".."; }
   66% { content: "..."; }
 }
+
+/* Agent prompt editor */
+.agent-prompt-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.agent-prompt-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.agent-prompt-help {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-prompt-textarea {
+  flex: 1;
+  min-height: 12rem;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  color: var(--text);
+  outline: none;
+}
+
+.agent-prompt-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.agent-prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-prompt-count {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.agent-prompt-error {
+  font-size: 12px;
+  color: #dc2626;
+}
