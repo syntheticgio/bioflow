@@ -2,8 +2,8 @@
   role="img" aria-label="Reads (b)"
   fill="none" stroke="currentColor" stroke-width="16"
   stroke-linecap="round" stroke-linejoin="round">
-  <g transform="translate(4.92 -14.31) scale(0.9615)" stroke-width="16.64">
-  <path d="M24 96h208"></path>
-  <path d="M24 200c40 0 68-12 96-32 28-20 60-24 112-16" stroke="var(--bio-accent,#0088b0)"></path>
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M40 64h176" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M40 128h112"></path><path d="M40 192h56"></path>
   </g>
 </svg>

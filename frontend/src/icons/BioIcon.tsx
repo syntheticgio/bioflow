@@ -60,11 +60,15 @@ export const BIO_ICONS: Record<string, Glyph> = {
         </g>
       </>
     ),
+    /* Same three-bar geometry as enrichment.b: a tapering list reads as "many
+       records, most discarded", which fits a pile of reads at least as well
+       as it fits a filtered gene set. Replaces the S-curve that was here --
+       nothing else referenced that artwork directly. */
     b: (
       <>
-        <g transform="translate(4.92 -14.31) scale(0.9615)" strokeWidth={16.64}>
-        <path d="M24 96h208"></path>
-        <path d="M24 200c40 0 68-12 96-32 28-20 60-24 112-16" stroke="var(--bio-accent,#0088b0)"></path>
+        <g transform="translate(-17.45 -17.45) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M40 64h176" stroke="var(--bio-accent,#0088b0)"></path>
+        <path d="M40 128h112"></path><path d="M40 192h56"></path>
         </g>
       </>
     ),
@@ -1377,8 +1381,11 @@ export type BioIconName = keyof typeof BIO_ICONS;
  *
  *   sequence (c)       -- the frame in `a` reads as a document, not a sequence,
  *                         and would echo `counts_matrix` two rows down.
- *   variants, run,     -- strokes carry these better: each is a thing that
- *   index, sample (b)     happens along a line rather than sits inside a box.
+ *   reads, variants,   -- strokes carry these better: each is a thing that
+ *   run, index,           happens along a line rather than sits inside a box.
+ *   sample (b)            reads.b was swapped 2026-08-09 for the tapering
+ *                         three-bar mark shared with enrichment.b -- reads
+ *                         better as "many records" than the original S-curve.
  *   metadata_tags (c)  -- the mark is the tag; enclosing it doubles the shape.
  *
  * Section V interface chrome is `b` throughout, so the drawn verbs sit at the
@@ -1389,6 +1396,9 @@ export type BioIconName = keyof typeof BIO_ICONS;
  */
 export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   sequence: "c",
+  // Tapering three-bar mark, shared with enrichment.b -- reads better as
+  // "many records" than the bar-chart geometry in reads.a.
+  reads: "b",
   variants: "b",
   run: "b",
   index: "b",
