@@ -180,7 +180,11 @@ export function AgentPanel({
           <button
             type="button"
             className="icon-btn"
-            onClick={() => newSession.mutate()}
+            onClick={() => {
+              if (confirm("Start a new session? This clears the agent's conversation history and can't be undone.")) {
+                newSession.mutate();
+              }
+            }}
             title="New session (clears the agent's memory)"
             style={{ marginLeft: "auto" }}
             disabled={isStreaming}
