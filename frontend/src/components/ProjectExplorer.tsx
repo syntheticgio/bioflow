@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes, formatKindLabel } from "../lib/format";
 import { readQuality } from "../lib/readQuality";
+import { recordProjectVisit } from "../lib/recentProjects";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { NewProjectModal } from "./NewProjectModal";
@@ -271,6 +272,12 @@ function ProjectView({ projectId }: { projectId: string }) {
     queryKey: ["project", projectId],
     queryFn: () => api.getProject(projectId),
   });
+
+  // Recorded on view, not on any mutation -- a rename or tag edit elsewhere
+  // must not count as the user having "opened" this project just now.
+  useEffect(() => {
+    if (project) recordProjectVisit(project.id, project.name);
+  }, [project]);
 
   const { data: objects, isLoading } = useQuery({
     queryKey: ["objects", projectId],
