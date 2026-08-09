@@ -1,3 +1,5 @@
+@import "./styles/agent.css";
+
 :root {
   --bg: #0f1216;
   --bg-panel: #161a20;
@@ -5671,6 +5673,3 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 .workflow-job-error { color: var(--error); }
-
-/* Agent panel styles */
-@import "./styles/agent.css";
