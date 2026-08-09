@@ -54,13 +54,23 @@ This mattered less when nobody read the commits; now someone does.
 
 ### Writing the PR
 
-The PR description is the unit the user actually reviews, and -- see
-[Changelogs](#changelogs-are-generated-from-commits-and-prs) -- it is a
-candidate input to the release notes. Two things it must carry:
+**The PR title is what lands in the release notes verbatim** -- see
+[Release notes](#release-notes-come-from-pr-titles). Write it to the same
+standard as a commit subject, and for a single-commit branch just reuse that
+subject. Everything under
+[Writing the subject line](#writing-the-subject-line) applies to it,
+Conventional Commits prefix included.
+
+The description is the unit the user actually reviews. Two things it must
+carry:
 
 - **The "why", not just the "what".** The diff already says what changed.
 - **`Closes #NN`** when the work resolves a tracked issue, so the issue closes
   on merge rather than being closed by hand later.
+
+**Label the PR** with its `type:` and `area:` labels. `.github/release.yml`
+categorizes the notes by label, not by the title's `feat:`/`fix:` prefix, so
+an unlabelled PR lands under "Other changes".
 
 `--fill` takes the description from your commit bodies, which in this repo are
 already written at the right level of detail. That is usually the right call;
@@ -106,6 +116,62 @@ are filtered *out* of user-facing notes. Two consequences:
 
 Use `tweak` and `style` sparingly; both appear in the history and neither is
 a standard Conventional Commits type.
+
+### Writing the subject line
+
+**Write the subject for someone reading a release changelog, not for someone
+reading the diff.** It is the one line that survives into the notes, and by
+then the code is not in front of the reader. This is the single highest-value
+thing to get right in a commit.
+
+The mechanics, all of which this repo's history already follows -- match it
+rather than introducing a second style:
+
+- **Imperative mood**, as if completing "this commit will ...": `add`, `drop`,
+  `hide`, `record`, `reject`. Not `added`, `adds`, or `adding`.
+- **Lowercase after the colon** (11 of the last 400 commits capitalize; don't
+  add to them) and **no trailing period** (zero do).
+- **Aim for ~65 characters, hard-stop around 72.** That is this repo's median.
+  Longer is allowed when the extra words carry real information -- several of
+  the best subjects below run past it -- but a long subject is usually a sign
+  that detail belongs in the body.
+- **Use a scope when one is obvious**, and reuse an existing one:
+  `frontend`, `ui`, `api`, `queue`, `pipelines`, `models`, `services`,
+  `agent`, `provenance`, `timing`, `icons`, `ops`, `launcher`. About a quarter
+  of commits have no scope, which is fine when the change is genuinely
+  cross-cutting. Don't invent a near-synonym for a scope already in use.
+
+**Say what changed for the user, not what you edited.** The diff already
+records which functions moved. The subject is the only place the *behavior*
+gets stated:
+
+```
+fix(frontend): record a project visit once per navigation, not per refetch
+fix(queue): advance workflow nodes on every terminal path, not just complete()
+feat(activity): say what each run is doing, not just what it acted on
+fix(frontend): hide RECENT block entirely when zero chips fit
+feat(ui): quality badge as a serif figure instead of a color dot
+```
+
+Those are real subjects from this repo, and they share a shape worth copying:
+**they name the new behavior and, where it clarifies, contrast it with the old
+one** ("..., not per refetch"). A reader who never sees the diff still learns
+what changed. That contrast is also what makes a changelog entry useful rather
+than merely present.
+
+What to avoid, and why each one fails:
+
+| Avoid | Why |
+|---|---|
+| `fix: bug fix` / `fix(ui): fix issue` | Says nothing the type didn't already say. |
+| `feat: update ProjectExplorer.tsx` | Names a file, not a change. The diff has the filename. |
+| `fix: address PR feedback` | Meaningless outside the PR; unreadable in a changelog six months on. |
+| `chore: various improvements` | Bundles unrelated work *and* hides it from the notes. |
+| `feat: WIP` | A commit that admits it isn't a unit of work. |
+
+If you cannot write a clear subject, that is usually the commit telling you it
+does two things and should be two commits -- see the note above about keeping
+commits separable.
 
 ## Release methodology
 
