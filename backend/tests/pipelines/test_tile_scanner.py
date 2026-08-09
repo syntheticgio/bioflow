@@ -138,11 +138,14 @@ def test_scan_samples_a_small_file_completely(tmp_path):
 
 def test_scan_thins_a_file_larger_than_the_target(tmp_path):
     path = _write_fastq(tmp_path / "r1.fastq", [_illumina(1101)] * 100)
-    # Estimating from a 100-record file against a 10-read target: the rate
-    # must thin, and the decoded count must respect it.
+    # 100 identical records estimate to ~100 records; against a target of 10
+    # that is a 1-in-10 rate, landing at 10 sampled reads. A loose ">1"/"<100"
+    # assertion here would pass even if the rate math drifted by an order of
+    # magnitude, which is exactly the kind of regression this function exists
+    # to avoid on real multi-gigabyte files.
     result = tile_scanner.scan(path, target_sampled_reads=10)
-    assert result.sample_rate > 1
-    assert result.sampled_reads < 100
+    assert result.sample_rate == 10
+    assert result.sampled_reads == 10
 
 
 def test_scan_records_per_tile_coordinate_extents(tmp_path):
@@ -166,6 +169,19 @@ def test_scan_truncates_beyond_the_tile_cap(tmp_path, monkeypatch):
 
     assert result.truncated is True
     assert len(result.matrix) == 3
+
+
+def test_scan_bounds_extents_by_the_same_tile_cap(tmp_path, monkeypatch):
+    # extents must stop growing at MAX_TILES too, not just the quality
+    # matrix -- otherwise a malformed file with many fabricated tile values
+    # defeats half the guardrail's purpose while `matrix` looks capped.
+    monkeypatch.setattr(tile_scanner, "MAX_TILES", 3)
+    records = [_illumina(1100 + i) for i in range(10)]
+    path = _write_fastq(tmp_path / "r1.fastq", records)
+
+    result = tile_scanner.scan(path)
+
+    assert len(result.extents) == 3
 
 
 def test_scan_truncates_beyond_the_position_cap(tmp_path, monkeypatch):

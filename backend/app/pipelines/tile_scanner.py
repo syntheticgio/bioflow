@@ -221,7 +221,15 @@ def scan(
                 continue
 
             saw_tile = True
-            _record_extent(extents, pos)
+
+            # Bound extents by the same MAX_TILES cap as the quality matrix --
+            # tracking a fabricated tile's coordinates unconditionally would
+            # let a malformed file grow this dict without bound even while
+            # sums/counts correctly stopped, defeating half the guardrail.
+            if pos.tile in extents or len(extents) < MAX_TILES:
+                _record_extent(extents, pos)
+            else:
+                truncated = True
 
             if records % rate != 0 and rate > 1:
                 continue
@@ -237,11 +245,12 @@ def scan(
             if _accumulate(sums[pos.tile], counts[pos.tile], qual.rstrip("\n")):
                 truncated = True
 
+    # Every index in counts[tile] is created and incremented together with
+    # the matching sums[tile] entry in _accumulate, so c is never 0 here --
+    # no fallback needed, and one would risk masking a real Q0 read as the
+    # same 0.0 a missing sample would produce.
     matrix = {
-        tile: [
-            s / c if c else 0.0
-            for s, c in zip(sums[tile], counts[tile])
-        ]
+        tile: [s / c for s, c in zip(sums[tile], counts[tile])]
         for tile in sums
     }
 
