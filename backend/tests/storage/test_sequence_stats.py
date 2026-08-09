@@ -100,6 +100,56 @@ class TestQualityCurve:
         assert curve[3]["count"] == 1
 
 
+class TestGcHistogram:
+    def test_bins_every_read_at_its_own_gc(self, tmp_path):
+        """The default fixture read is 30% GC (C=3, G=2, of 10 bases), so 100
+        identical reads must land in one bin of 100 -- not spread."""
+        r = ss.fastq_stats(write_fastq(tmp_path / "t.fastq", 100), Compression.NONE)
+        assert r["gc_per_read_histogram"] == [{"gc_percent": 50, "count": 100}]
+
+    def test_two_populations_produce_two_bins(self, tmp_path):
+        """The contamination signal the chart exists to show: a mixed library
+        is two peaks, and an aggregate mean would hide it between them."""
+        p = tmp_path / "t.fastq"
+        with open(p, "w") as f:
+            for i in range(30):
+                f.write(f"@a{i}\nAAAAAAAAAA\n+\nIIIIIIIIII\n")   # 0% GC
+            for i in range(70):
+                f.write(f"@b{i}\nGGGGGGGGGG\n+\nIIIIIIIIII\n")   # 100% GC
+        hist = ss.fastq_stats(p, Compression.NONE)["gc_per_read_histogram"]
+        assert hist == [
+            {"gc_percent": 0, "count": 30},
+            {"gc_percent": 100, "count": 70},
+        ]
+
+    def test_bins_are_sorted_and_sparse(self, tmp_path):
+        """Sorted so the chart can draw it as a line without re-sorting;
+        sparse so an empty bin costs nothing in the document."""
+        p = tmp_path / "t.fastq"
+        with open(p, "w") as f:
+            f.write("@a\nGGGGGGGGGG\n+\nIIIIIIIIII\n")           # 100%
+            f.write("@b\nAAAAAAAAAA\n+\nIIIIIIIIII\n")           # 0%
+            f.write("@c\nACGTACGTAC\n+\nIIIIIIIIII\n")           # 50%
+        hist = ss.fastq_stats(p, Compression.NONE)["gc_per_read_histogram"]
+        assert [b["gc_percent"] for b in hist] == [0, 50, 100]
+
+    def test_mean_is_unchanged_by_the_histogram(self, tmp_path):
+        """Regression guard: `gc_per_read_mean` is an existing fact other
+        surfaces read, and swapping the accumulator must not move it."""
+        r = ss.fastq_stats(write_fastq(tmp_path / "t.fastq", 100), Compression.NONE)
+        assert r["gc_per_read_mean"] == 50.0
+
+    def test_reads_with_no_acgt_are_not_binned(self, tmp_path):
+        """An all-N read has no GC to speak of. Counting it as 0% GC would
+        invent a peak at zero out of unsequenced bases."""
+        p = tmp_path / "t.fastq"
+        with open(p, "w") as f:
+            f.write("@a\nNNNNNNNNNN\n+\nIIIIIIIIII\n")
+            f.write("@b\nACGTACGTAC\n+\nIIIIIIIIII\n")
+        hist = ss.fastq_stats(p, Compression.NONE)["gc_per_read_histogram"]
+        assert hist == [{"gc_percent": 50, "count": 1}]
+
+
 class TestCompression:
     def test_gzip_gives_identical_results(self, tmp_path):
         plain = write_fastq(tmp_path / "t.fastq", 100)

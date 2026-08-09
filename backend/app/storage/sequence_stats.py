@@ -85,7 +85,12 @@ def fastq_stats(
     reads = 0
     total_gc = 0
     total_acgt = 0
-    per_read_gc: list[float] = []
+    # Binned at integer GC% rather than kept as a list of floats. The
+    # distribution is what the chart draws and the mean is derived from the
+    # same counts, so the per-read values themselves are never needed -- and a
+    # 200k-read sample previously held a 200k-element float list purely to
+    # average it.
+    gc_histogram: Counter[int] = Counter()
     min_score = 256
     max_score = -1
 
@@ -108,8 +113,11 @@ def fastq_stats(
                 acgt = gc + seq.count("A") + seq.count("T")
                 total_gc += gc
                 total_acgt += acgt
+                # Reads with no A/C/G/T at all (all-N) are skipped: they have
+                # no GC ratio, and binning them at 0% would invent a peak out
+                # of unsequenced bases.
                 if acgt:
-                    per_read_gc.append(100.0 * gc / acgt)
+                    gc_histogram[round(100.0 * gc / acgt)] += 1
 
                 for i, ch in enumerate(qual[:MAX_POSITIONS]):
                     score = ord(ch)
@@ -148,8 +156,15 @@ def fastq_stats(
         facts["base_composition"] = composition
     if total_acgt:
         facts["gc_content_percent"] = round(100.0 * total_gc / total_acgt, 2)
-    if per_read_gc:
-        facts["gc_per_read_mean"] = round(sum(per_read_gc) / len(per_read_gc), 2)
+    if gc_histogram:
+        binned = sorted(gc_histogram.items())
+        facts["gc_per_read_histogram"] = [
+            {"gc_percent": pct, "count": n} for pct, n in binned
+        ]
+        total = sum(gc_histogram.values())
+        facts["gc_per_read_mean"] = round(
+            sum(pct * n for pct, n in binned) / total, 2
+        )
 
     quality = _quality_curve(qual_sum, qual_n, offset)
     if quality:
