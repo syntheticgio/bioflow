@@ -20,6 +20,11 @@ interface QualityPoint {
   count: number;
 }
 
+export interface LengthBucket {
+  length_bin: number;
+  count: number;
+}
+
 // Colours follow the convention used by IGV and most genome browsers, so the
 // chart reads correctly to anyone who has looked at sequence data before.
 // Held as CSS variables with the IGV value as the fallback: a theme can
@@ -295,6 +300,107 @@ export function QualityChart({ curve }: { curve: QualityPoint[] }) {
         {hover
           ? `position ${hover.position}: Q${hover.mean.toFixed(1)} (${hover.count.toLocaleString()} reads)`
           : "mean Phred quality per position · hover for detail"}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Linear x-axis for short reads (one sharp peak, matches the classic FastQC
+ * shape); log-scale for long reads, where PacBio/ONT lengths span several
+ * orders of magnitude and a linear axis would compress everything but the
+ * tail into a few pixels. The underlying data is identical either way --
+ * only axis scale changes, chosen by the caller via `logScale`.
+ */
+export function LengthDistributionChart({
+  buckets,
+  logScale,
+  sampledReads,
+}: {
+  buckets: LengthBucket[];
+  logScale: boolean;
+  sampledReads?: number;
+}) {
+  const [hover, setHover] = useState<LengthBucket | null>(null);
+  if (!buckets?.length) return null;
+
+  const w = 460;
+  const h = 210;
+  const pad = { top: 10, right: 14, bottom: 26, left: 34 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const minLen = buckets[0].length_bin;
+  const maxLen = buckets[buckets.length - 1].length_bin;
+  const maxCount = Math.max(...buckets.map((b) => b.count));
+
+  // Log scale needs a positive domain; a 0bp bucket (empty read) is mapped to
+  // the first bin width instead of dropped, so it still renders rather than
+  // producing -Infinity.
+  const toDomain = (len: number) => (logScale ? Math.log10(Math.max(len, 1)) : len);
+  const domainMin = toDomain(minLen);
+  const domainMax = Math.max(toDomain(maxLen), domainMin + 1);
+
+  const x = (len: number) =>
+    pad.left + ((toDomain(len) - domainMin) / (domainMax - domainMin)) * plotW;
+  const y = (count: number) => pad.top + plotH - (count / maxCount) * plotH;
+
+  const barW = Math.max(1, plotW / buckets.length - 1);
+
+  const ticks = logScale
+    ? [100, 1_000, 10_000, 100_000].filter((t) => t >= minLen && t <= maxLen)
+    : [minLen, Math.round((minLen + maxLen) / 2), maxLen];
+
+  return (
+    <div>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ maxWidth: w, display: "block" }}
+        onMouseLeave={() => setHover(null)}
+      >
+        <line
+          x1={pad.left}
+          x2={w - pad.right}
+          y1={pad.top + plotH}
+          y2={pad.top + plotH}
+          stroke="var(--border)"
+          strokeWidth="1"
+        />
+
+        {buckets.map((b) => (
+          <rect
+            key={b.length_bin}
+            x={x(b.length_bin) - barW / 2}
+            y={y(b.count)}
+            width={barW}
+            height={pad.top + plotH - y(b.count)}
+            fill="var(--accent)"
+            opacity={hover?.length_bin === b.length_bin ? 0.9 : 0.5}
+            onMouseEnter={() => setHover(b)}
+          />
+        ))}
+
+        {ticks.map((t) => (
+          <text
+            key={t}
+            x={x(t)}
+            y={h - 6}
+            textAnchor="middle"
+            fontSize="9"
+            fill="var(--text-faint)"
+          >
+            {logScale && t >= 1000 ? `${t / 1000}kb` : `${t}bp`}
+          </text>
+        ))}
+      </svg>
+
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>
+        {hover
+          ? `${hover.length_bin}–${hover.length_bin + 10}bp: ${hover.count.toLocaleString()} reads`
+          : sampledReads
+            ? `sampled ${sampledReads.toLocaleString()} reads · hover for detail`
+            : "hover for detail"}
       </div>
     </div>
   );
