@@ -32,7 +32,22 @@ jobs:
         with:
           path-to-signatures: .github/cla-signatures.json
           path-to-document: https://github.com/${{ github.repository }}/blob/main/CONTRIBUTING.md
-          # branch: cla-signatures
-          allowlist: syntheticgio
+          # Must stay set. The action's default is `master`, which this repo
+          # does not have -- its default branch is `main` -- so leaving this
+          # commented out fails every PR with "Branch master not found. Make
+          # sure the branch where signatures are stored is NOT protected."
+          # The misleading half of that message is the protection hint: the
+          # branch is unprotected, it simply does not exist under that name.
+          branch: cla-signatures
+          # Signatures live on their own branch rather than on `main` so the
+          # bot's commits don't land in the release notes or the changelog.
+          #
+          # `claude` is here because agent commits in this repo carry a
+          # `Co-Authored-By: Claude ...` trailer, which makes the bot a
+          # committer the action then demands a signature from -- and a bot
+          # account can never post the sign-off comment, so the check can
+          # never pass. Allowlisting bots is the documented remedy for
+          # exactly this.
+          allowlist: syntheticgio,claude,bot*
           # remote-organization-name: ${{ github.repository_owner }}
           # remote-repository-name: ${{ github.event.repository.name }}
