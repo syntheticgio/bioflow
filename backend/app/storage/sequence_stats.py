@@ -36,6 +36,12 @@ CANCEL_CHECK_READS = 20_000
 INSERT_SIZE_BIN_WIDTH = 10
 INSERT_SIZE_MAX = 2000
 
+# Read length is binned at the same 10 bp resolution as insert size, but with
+# no ceiling: insert size has a real biological cap from library prep, while
+# PacBio HiFi reads routinely exceed 20 kb and a cap would flatten the exact
+# shape long-read users need to see.
+READ_LENGTH_BIN_WIDTH = 10
+
 # STAR does not use the phred-like scale the other four aligners here do. It
 # writes 255 for a uniquely mapped read, and 3, 1 or 0 for a read placed at 2,
 # 3-4 or 5+ loci -- ordinal codes for locus count, not qualities. Averaging
@@ -88,6 +94,7 @@ def fastq_stats(
     per_read_gc: list[float] = []
     min_score = 256
     max_score = -1
+    length_histogram: Counter[int] = Counter()
 
     try:
         with opener(path, "rt", errors="replace") as fh:
@@ -103,6 +110,9 @@ def fastq_stats(
 
                 reads += 1
                 counts.update(seq)
+
+                bucket = (len(seq) // READ_LENGTH_BIN_WIDTH) * READ_LENGTH_BIN_WIDTH
+                length_histogram[bucket] += 1
 
                 gc = seq.count("G") + seq.count("C")
                 acgt = gc + seq.count("A") + seq.count("T")
@@ -157,6 +167,12 @@ def fastq_stats(
         scores = [q["mean"] for q in quality]
         facts["mean_quality"] = round(sum(scores) / len(scores), 2)
         facts["min_position_quality"] = round(min(scores), 2)
+
+    if length_histogram:
+        facts["read_length_histogram"] = [
+            {"length_bin": length_bin, "count": n}
+            for length_bin, n in sorted(length_histogram.items())
+        ]
 
     return facts
 

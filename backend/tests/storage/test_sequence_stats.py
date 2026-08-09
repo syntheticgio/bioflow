@@ -490,6 +490,31 @@ class TestInsertSizeHistogram:
         assert "insert_size_histogram" not in facts
 
 
+class TestReadLengthHistogram:
+    def test_bucketed_by_10bp_width(self, tmp_path):
+        """Two reads of length 10 land in the same 10bp bucket as each other,
+        a length-25 read lands in a different bucket."""
+        path = tmp_path / "lengths.fastq"
+        with open(path, "w") as f:
+            f.write("@r1\n" + "A" * 10 + "\n+\n" + "I" * 10 + "\n")
+            f.write("@r2\n" + "A" * 10 + "\n+\n" + "I" * 10 + "\n")
+            f.write("@r3\n" + "A" * 25 + "\n+\n" + "I" * 25 + "\n")
+        facts = ss.fastq_stats(path, Compression.NONE)
+        histogram = {h["length_bin"]: h["count"] for h in facts["read_length_histogram"]}
+        assert histogram[10] == 2
+        assert histogram[20] == 1
+
+    def test_uncapped_for_long_reads(self, tmp_path):
+        """Unlike insert_size_histogram's 2kb cap, length has no ceiling --
+        PacBio HiFi reads routinely exceed 20kb and must not be clamped."""
+        path = tmp_path / "long.fastq"
+        with open(path, "w") as f:
+            f.write("@r1\n" + "A" * 25_000 + "\n+\n" + "I" * 25_000 + "\n")
+        facts = ss.fastq_stats(path, Compression.NONE)
+        histogram = {h["length_bin"]: h["count"] for h in facts["read_length_histogram"]}
+        assert histogram[25_000] == 1
+
+
 class TestFastaSampling:
     """GC sampling must describe the file, not just its first chromosome."""
 
