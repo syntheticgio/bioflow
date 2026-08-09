@@ -1252,6 +1252,20 @@
   color: var(--color-accent-2);
 }
 
+/* What the run is doing, between the status kicker and the operands. Sized
+   between the two deliberately: it is the sentence a reader wants first, but
+   the headline stays the headline -- naming the files is what tells two
+   alignments apart. */
+.theme-broadsheet .lead-action {
+  font-family: var(--font-heading);
+  font-size: 15px;
+  font-weight: 500;
+  font-style: italic;
+  line-height: 1.2;
+  margin-top: 4px;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
 .theme-broadsheet .lead-headline {
   font-family: var(--font-heading);
   font-size: 31px;

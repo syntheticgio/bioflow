@@ -16,7 +16,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.config import settings
 from app.models import ALL_MODELS, JobState
-from app.models.job import Job
+from app.models.job import Job, JobError
 from app.models.object import DataObject, FormatInfo, FormatKind, ObjectRole
 from app.models.workflow import (
     NodeRunState,
@@ -155,9 +155,22 @@ class TestFindingTheNode:
 
 
 class TestWiredIntoTheQueue:
-    """The hook existing is not the hook being called. `queue.complete()` is
-    the one place a job reaches a terminal state, and without this test the
-    orchestrator could be perfectly correct and still never run."""
+    """The hook existing is not the hook being called.
+
+    `queue.complete()` is the *usual* place a job reaches a terminal state, but
+    it is not the only one, and the three others were the bug these tests were
+    written for: a job can also be failed because a dependency failed
+    (`_fail_blocked_job`), cancelled while queued or blocked (`request_cancel`),
+    or declared dead after repeated lease expiry (`reap_expired_leases`). Each
+    writes a terminal state and releases its dependents; none of them called the
+    workflow hook.
+
+    The visible consequence was a workflow stuck on "running" forever. A real
+    `build_index` was OOM-killed, its dependent `align_reads` was correctly
+    failed with `dependency_failed` -- and the node run stayed RUNNING, so
+    `derive_status` reported the whole workflow as still in flight with nothing
+    left to advance it. Nothing reclaims it: the node holds no lease to expire.
+    """
 
     async def test_completing_a_job_advances_its_workflow_node(
         self, redis, monkeypatch
@@ -192,6 +205,96 @@ class TestWiredIntoTheQueue:
 
         fresh = await WorkflowNodeRun.get(row.id)
         assert fresh.state is NodeRunState.SUCCEEDED
+
+    async def test_a_dependency_failure_advances_the_dependents_node(
+        self, redis, monkeypatch
+    ):
+        """The reported bug, reproduced end to end through the real queue.
+
+        `align_reads` never runs and so never reaches `complete()` -- it is
+        failed in place by `_fail_blocked_job` because the index build it
+        depended on failed. Its node must still resolve.
+        """
+        from app.queue import queue
+
+        monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+        index = Job(type="build_index", owner=OWNER, state=JobState.FAILED)
+        index.error = JobError(
+            code="permanent", message="bwa-mem2 exited -9", retryable=False
+        )
+        await index.insert()
+
+        align = Job(
+            type="align_reads",
+            owner=OWNER,
+            state=JobState.BLOCKED,
+            depends_on=[index.id],
+        )
+        await align.insert()
+        run, row = await _node_run(NodeRunState.RUNNING, align)
+
+        await queue._release_dependents(str(index.id), succeeded=False)
+
+        blocked = await Job.get(align.id)
+        assert blocked.state is JobState.FAILED
+        assert blocked.error.code == "dependency_failed"
+
+        fresh = await WorkflowNodeRun.get(row.id)
+        assert fresh.state is NodeRunState.FAILED
+
+    async def test_cancelling_a_queued_job_advances_its_workflow_node(
+        self, redis, monkeypatch
+    ):
+        """A cancelled job is terminal and nothing else is coming to advance
+        its node. Cancelling one node of a workflow must not strand the run."""
+        from app.queue import queue
+
+        monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+        job = Job(type="run_trim", owner=OWNER, state=JobState.QUEUED)
+        await job.insert()
+        run, row = await _node_run(NodeRunState.RUNNING, job)
+
+        assert await queue.request_cancel(str(job.id)) == "cancelled"
+
+        fresh = await WorkflowNodeRun.get(row.id)
+        assert fresh.state is NodeRunState.FAILED
+
+    async def test_a_job_dead_from_lease_expiry_advances_its_workflow_node(
+        self, redis, monkeypatch
+    ):
+        """The third path that bypasses `complete()`: a worker that died
+        without reporting, whose job exhausts its attempts in the reaper."""
+        from datetime import UTC, datetime, timedelta
+
+        from app.models.job import JobLease
+        from app.queue import keys, queue
+
+        monkeypatch.setattr(queue, "get_redis", lambda: redis)
+
+        now = datetime.now(UTC)
+        stale = now - timedelta(minutes=5)
+        job = Job(type="run_trim", owner=OWNER, state=JobState.RUNNING, max_attempts=1)
+        job.lease = JobLease(
+            worker_id="w1", epoch=1, expires_at=stale, heartbeat_at=stale
+        )
+        await job.insert()
+        run, row = await _node_run(NodeRunState.RUNNING, job)
+
+        # The reaper reads expired leases from the running set, scored by
+        # lease expiry in ms. `attempts` already at max_attempts is what makes
+        # it dead rather than requeued.
+        await job.set({Job.attempts: 1})
+        await redis.zadd(keys.RUNNING, {str(job.id): int(stale.timestamp() * 1000)})
+
+        await queue.reap_expired()
+
+        dead = await Job.get(job.id)
+        assert dead.state is JobState.DEAD
+
+        fresh = await WorkflowNodeRun.get(row.id)
+        assert fresh.state is NodeRunState.FAILED
 
 
 class TestCollectingOutputs:

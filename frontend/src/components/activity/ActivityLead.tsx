@@ -10,7 +10,7 @@ import type {
 } from "../../api/types";
 import { formatClock } from "../../lib/format";
 import { notify } from "../../stores/messageStore";
-import { ROLE_LABELS, STATUS_LABELS, runFacts } from "../../lib/runFormat";
+import { ROLE_LABELS, STATUS_LABELS, kindAction, runFacts } from "../../lib/runFormat";
 import { LedgerRow } from "./RunLedger";
 import { SectionHead } from "./SectionHead";
 import { WorkflowLedgerRow } from "./WorkflowRuns";
@@ -141,12 +141,19 @@ function LeadStory({
   const steps = jobs.filter((j) => j.role !== "ingest");
   const ingests = jobs.filter((j) => j.role === "ingest");
   const facts = runFacts(run);
+  const action = kindAction(run.kind);
 
   return (
     <>
       <div className="lead-kicker">
         {STATUS_LABELS[run.status]} · started {formatClock(run.created_at)}
       </div>
+
+      {/* What is being done, above what it is being done to. The stored label
+          names the operands ("reads → reference") and never the verb, so
+          without this the biggest text on the page does not say which action
+          is running. */}
+      {action && <div className="lead-action">{action}</div>}
 
       <h2 className="lead-headline">{run.label}</h2>
 

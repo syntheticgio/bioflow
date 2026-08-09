@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { RunMemberJob, RunSummary, WorkflowRunRow } from "../../api/types";
 import { formatClock } from "../../lib/format";
-import { STATUS_LABELS, mergeLedgerLines, runFacts } from "../../lib/runFormat";
+import { STATUS_LABELS, kindAction, mergeLedgerLines, runFacts } from "../../lib/runFormat";
 import { SectionHead } from "./SectionHead";
 import { RunFailureBlock } from "./RunFailureBlock";
 import { WorkflowLedgerRow } from "./WorkflowRuns";
@@ -99,7 +99,12 @@ export function LedgerRow({
 }) {
   const facts = runFacts(run);
   const jobCount = jobs?.length;
+  // The action joins the existing meta line rather than taking a row of its
+  // own: a ledger row is one line by design, and ten of them each gaining a
+  // second line would push the finished runs off the column. The lead story
+  // has the room to set it above the headline; this does not.
   const meta = [
+    kindAction(run.kind),
     STATUS_LABELS[run.status],
     jobCount != null ? `${jobCount} ${jobCount === 1 ? "job" : "jobs"}` : null,
     formatClock(run.updated_at),

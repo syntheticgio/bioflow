@@ -1,5 +1,6 @@
 import type {
   JobSummary,
+  RunKind,
   RunStatus,
   RunSummary,
   SystemLoad,
@@ -24,6 +25,54 @@ export const ROLE_LABELS: Record<string, string> = {
   ingest: "Read headers",
 };
 
+/**
+ * What each kind of run *does*, as a phrase to head its card.
+ *
+ * The stored `label` names the operands and not the verb: an alignment reads
+ * "DRR1066343 (paired) → GCF_000146045.2_R64_genomic.fna", which says what
+ * went in and what it was aligned against but never says "aligned". Downloads
+ * and trims happen to lead with a verb already ("Download SRR37688468 from
+ * SRA", "Trim sample (paired)"), so the activity page read as though only some
+ * runs knew what they were.
+ *
+ * Fixed here rather than in the stored label on purpose. `PipelineRun.label`
+ * is denormalized so a run stays readable after its inputs are deleted -- it
+ * is a record of what was asked for, and rewriting old ones to a new phrasing
+ * would be editing history to match today's UI. Deriving the verb from `kind`
+ * costs nothing, needs no migration, and fixes every run already in the
+ * database.
+ *
+ * `Record<RunKind, string>` rather than a partial map: a kind with no entry
+ * would render a card with no action line and nothing would fail, which is the
+ * silent-skip shape CLAUDE.md warns about for enum-keyed registries. This is
+ * the derivable case -- every member needs a phrase and no member has data
+ * behind it -- so the type makes a missing one a compile error, and
+ * `runFormat.test.ts` covers it at runtime for the same reason.
+ */
+export const KIND_ACTIONS: Record<RunKind, string> = {
+  alignment: "Aligning reads to a reference",
+  trim: "Trimming adapters and low-quality bases",
+  sra_download: "Downloading sequencing runs from SRA",
+  variant_calling: "Calling variants against a reference",
+  assembly_download: "Downloading a published assembly",
+  uniprot_download: "Downloading protein sequences from UniProt",
+  quantify: "Counting reads per gene",
+  differential_expression: "Testing for differential expression",
+  assembly: "Assembling reads into contigs",
+  reference_assembly: "Improving an assembly against a reference",
+};
+
+/** The action phrase for a run, or undefined for a kind we do not know.
+ *
+ *  Undefined rather than a guess: the API could serve a `kind` this build has
+ *  never heard of (an older frontend against a newer backend), and inventing
+ *  "Running alignment" from the raw string would put a machine token where a
+ *  sentence goes. The card drops the line instead.
+ */
+export function kindAction(kind: RunKind): string | undefined {
+  return KIND_ACTIONS[kind];
+}
+
 export const STATUS_LABELS: Record<RunStatus, string> = {
   waiting: "waiting",
   running: "running",
@@ -35,7 +84,11 @@ export const STATUS_LABELS: Record<RunStatus, string> = {
 /** The parameters worth showing in a summary, labelled for a person. */
 export function describeParams(params: Record<string, unknown>): Record<string, string> {
   const out: Record<string, string> = {};
-  if (params.aligner) out.Aligner = String(params.aligner);
+  // "Tool", matching what `runFacts` calls `run.tool` below. These never
+  // appear on one card -- alignment names its tool in params, trim in the
+  // run's own `tool` field -- so calling one "Aligner" and the other "Engine"
+  // gave the same fact two names depending on which card you were reading.
+  if (params.aligner) out.Tool = String(params.aligner);
   if (params.preset) out["Read type"] = String(params.preset);
   if (params.threads) out.Threads = String(params.threads);
   if (params.mark_duplicates) out.Duplicates = "marked";
@@ -90,7 +143,7 @@ export function runFacts(run: RunSummary): RunFact[] {
     });
   }
 
-  if (run.tool) facts.push({ k: "Engine", v: run.tool });
+  if (run.tool) facts.push({ k: "Tool", v: run.tool });
 
   return facts;
 }
