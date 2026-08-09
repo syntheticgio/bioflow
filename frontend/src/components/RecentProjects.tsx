@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { getRecentProjects } from "../lib/recentProjects";
-import { useElementWidth } from "../lib/useElementWidth";
 
 // Fixed per-chip budget rather than measuring text: exact glyph-width
 // measurement is unwarranted complexity for a cosmetic shortcut list, and a
@@ -11,9 +10,7 @@ const CHIP_WIDTH_PX = 160;
 const LABEL_WIDTH_PX = 60; // "RECENT" + its divider, roughly
 const MAX_CHIPS = 3;
 
-export function RecentProjects() {
-  const [containerRef, availableWidth] = useElementWidth<HTMLDivElement>();
-
+export function RecentProjects({ availableWidth }: { availableWidth: number }) {
   const { data: projects } = useQuery({
     queryKey: ["projects", null],
     queryFn: () => api.listProjects(),
@@ -26,8 +23,10 @@ export function RecentProjects() {
   const visible = recent.filter((p) => knownIds.has(p.id));
   if (visible.length === 0) return null;
 
-  // Available width is measured on a full-width probe (see Header.tsx),
-  // so budget is: total minus the "RECENT" label, divided into chip slots.
+  // Available width is measured on .header-right in Header.tsx (the stable
+  // parent, not this component's own div, whose size depends on the chip
+  // count we're computing), so budget is: total minus the "RECENT" label,
+  // divided into chip slots.
   const chipBudget = Math.max(0, availableWidth - LABEL_WIDTH_PX);
   const chipCount = Math.min(
     MAX_CHIPS,
@@ -36,7 +35,7 @@ export function RecentProjects() {
   );
 
   return (
-    <div className="recent-projects" ref={containerRef}>
+    <div className="recent-projects">
       {chipCount > 0 && (
         <>
           <span className="recent-projects-label">RECENT</span>
