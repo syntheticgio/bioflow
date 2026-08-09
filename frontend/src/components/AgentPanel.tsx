@@ -58,10 +58,10 @@ export function AgentPanel({
   // empty local transcript" check would otherwise also fire right after we
   // ourselves just cleared messages (New session), immediately relabeling a
   // brand-new, empty conversation as "resumed". suppressResumedRef is set
-  // whenever we locally reset the conversation and cleared once messages
-  // are confirmed empty, so only a connection that finds messages already
-  // empty for a reason OTHER than our own reset -- i.e. a fresh page
-  // load/drawer reopen -- counts as a resume.
+  // by newSession's onSuccess and cleared a few seconds later (see below),
+  // long enough to absorb that reconnect burst, so only a connection that
+  // finds messages already empty for a reason OTHER than our own reset --
+  // i.e. a fresh page load/drawer reopen -- counts as a resume.
   const suppressResumedRef = useRef(false);
 
   const { connected } = useAgentSSE({
