@@ -39,6 +39,14 @@ const BASE_COLORS: Record<string, string> = {
   Other: "var(--base-other, #a371f7)",
 };
 
+/**
+ * The single-cycle N percentage the grade treats as a failed cycle. Duplicated
+ * from readQuality.ts's N_SPIKE_LIMIT deliberately -- the chart must draw the
+ * same line the grade uses, and importing scoring logic into a chart module to
+ * share one number would couple them the wrong way round.
+ */
+const N_SPIKE_REFERENCE = 5.0;
+
 export function BaseCompositionChart({
   composition,
   sampledReads,
@@ -429,6 +437,329 @@ export function LengthDistributionChart({
           : sampledReads
             ? `sampled ${sampledReads.toLocaleString()} reads · hover for detail`
             : "hover for detail"}
+      </div>
+    </div>
+  );
+}
+
+interface GcBin {
+  gc_percent: number;
+  count: number;
+}
+
+interface ExpectedGcCurve {
+  percent: number;
+  attribution: string;
+}
+
+/**
+ * Per-sequence GC distribution: how many reads sit at each GC percentage.
+ *
+ * Distinct from the base-composition pie, which is one whole-file number. A
+ * library that is half one organism and half another has an unremarkable
+ * aggregate GC and two peaks here -- which is the contamination signal this
+ * chart exists to show.
+ *
+ * The reference curve is drawn only when something can actually say what to
+ * expect (a reference genome in the project, or a published figure for a named
+ * organism), and it is always labelled with which. When nothing can, the
+ * checkbox offers a normal fitted to the observed data instead -- labelled as
+ * a fit, because that is all it is. FastQC's equivalent curve is fitted the
+ * same way and is routinely misread as an expectation, which is what makes
+ * that module famously noisy.
+ */
+export function GcDistributionChart({
+  histogram,
+  meanGc,
+  expected,
+  sampledReads,
+}: {
+  histogram: GcBin[];
+  meanGc?: number;
+  expected?: ExpectedGcCurve | null;
+  sampledReads?: number;
+}) {
+  const [showFit, setShowFit] = useState(false);
+  const [hover, setHover] = useState<GcBin | null>(null);
+  if (!histogram?.length) return null;
+
+  const w = 460;
+  const h = 210;
+  const pad = { top: 10, right: 16, bottom: 26, left: 38 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const maxCount = Math.max(...histogram.map((b) => b.count));
+  if (!maxCount) return null;
+
+  // Fixed 0-100 x-axis rather than fitting to the observed range: GC is a
+  // percentage of a fixed scale, and rescaling would make a tight, healthy
+  // distribution and a broad, suspicious one look identical.
+  const x = (gc: number) => pad.left + (gc / 100) * plotW;
+  const y = (count: number) => pad.top + plotH - (count / maxCount) * plotH;
+
+  const line = histogram
+    .map((b, i) => `${i ? "L" : "M"} ${x(b.gc_percent)} ${y(b.count)}`)
+    .join(" ");
+
+  // A normal fitted to the observed mean and standard deviation, computed
+  // from the bins themselves. Scaled to the tallest observed bin so the two
+  // curves are comparable in shape, which is the only thing being compared.
+  const total = histogram.reduce((s, b) => s + b.count, 0);
+  const mean =
+    meanGc ?? histogram.reduce((s, b) => s + b.gc_percent * b.count, 0) / total;
+  const variance =
+    histogram.reduce((s, b) => s + b.count * (b.gc_percent - mean) ** 2, 0) /
+    total;
+  const sd = Math.sqrt(variance) || 1;
+  const fitPath = Array.from({ length: 101 }, (_, gc) => {
+    const density = Math.exp(-((gc - mean) ** 2) / (2 * sd * sd));
+    return `${gc ? "L" : "M"} ${x(gc)} ${y(density * maxCount)}`;
+  }).join(" ");
+
+  return (
+    <div>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ maxWidth: w, display: "block" }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {[0, 25, 50, 75, 100].map((gc) => (
+          <g key={gc}>
+            <line
+              x1={x(gc)}
+              x2={x(gc)}
+              y1={pad.top}
+              y2={pad.top + plotH}
+              stroke="var(--border)"
+              strokeWidth="1"
+            />
+            <text
+              x={x(gc)}
+              y={h - 14}
+              textAnchor="middle"
+              fontSize="9"
+              fill="var(--text-faint)"
+            >
+              {gc}
+            </text>
+          </g>
+        ))}
+
+        <path d={line} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+
+        {/* The expected-GC line, when something can say what to expect. */}
+        {expected && (
+          <>
+            <line
+              x1={x(expected.percent)}
+              x2={x(expected.percent)}
+              y1={pad.top}
+              y2={pad.top + plotH}
+              stroke="var(--success)"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+            />
+            <text
+              x={x(expected.percent) + 4}
+              y={pad.top + 10}
+              fontSize="9"
+              fill="var(--success)"
+            >
+              expected
+            </text>
+          </>
+        )}
+
+        {showFit && !expected && (
+          <path
+            d={fitPath}
+            fill="none"
+            stroke="var(--text-faint)"
+            strokeWidth="1.4"
+            strokeDasharray="4 3"
+          />
+        )}
+
+        {hover && (
+          <line
+            x1={x(hover.gc_percent)}
+            x2={x(hover.gc_percent)}
+            y1={pad.top}
+            y2={pad.top + plotH}
+            stroke="var(--text-faint)"
+            strokeDasharray="3 3"
+          />
+        )}
+
+        <rect
+          x={pad.left}
+          y={pad.top}
+          width={plotW}
+          height={plotH}
+          fill="transparent"
+          onMouseMove={(e) => {
+            const box = (e.target as SVGRectElement).getBoundingClientRect();
+            const gc = ((e.clientX - box.left) / box.width) * 100;
+            let nearest = histogram[0];
+            for (const b of histogram) {
+              if (Math.abs(b.gc_percent - gc) < Math.abs(nearest.gc_percent - gc)) {
+                nearest = b;
+              }
+            }
+            setHover(nearest);
+          }}
+        />
+
+        <text x={w / 2} y={h - 2} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
+          mean GC content per read (%)
+        </text>
+      </svg>
+
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>
+        {hover
+          ? `${hover.gc_percent}% GC: ${hover.count.toLocaleString()} reads`
+          : expected
+            ? expected.attribution
+            : "reads by GC content · hover for detail"}
+        {sampledReads != null && ` · sampled ${sampledReads.toLocaleString()} reads`}
+      </div>
+
+      {/* Offered only when nothing authoritative can be drawn. With a real
+          expected value on the chart, a second dashed curve fitted to the data
+          itself would compete with it and say less. */}
+      {!expected && (
+        <label
+          style={{
+            fontSize: 11,
+            color: "var(--text-faint)",
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            marginTop: 4,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showFit}
+            onChange={(e) => setShowFit(e.target.checked)}
+          />
+          overlay normal distribution (fitted to this file, not an expectation)
+        </label>
+      )}
+    </div>
+  );
+}
+
+interface NPoint {
+  position: number;
+  percent: number;
+}
+
+/**
+ * Percent uncalled (N) bases at each cycle.
+ *
+ * The aggregate N percentage in `base_composition` averages a failed cycle
+ * against every healthy one, which is exactly the shape that hides the
+ * failure: one cycle at 40% N across a 150-cycle read is 0.27% overall. This
+ * is the view where that spike is visible.
+ *
+ * Only rendered when fastp found any N at all -- an all-zero curve is omitted
+ * on the backend rather than drawn as a flat line at zero.
+ */
+export function NContentChart({ curve }: { curve: NPoint[] }) {
+  const [hover, setHover] = useState<NPoint | null>(null);
+  if (!curve?.length) return null;
+
+  const w = 460;
+  const h = 210;
+  const pad = { top: 10, right: 16, bottom: 26, left: 38 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const maxPos = curve[curve.length - 1].position;
+  const observedMax = Math.max(...curve.map((p) => p.percent));
+  // Floor the axis at the grading threshold so a clean file's noise is not
+  // magnified into a mountain range by autoscaling, while a genuine spike
+  // still has room to show its true height.
+  const yMax = Math.max(observedMax * 1.15, N_SPIKE_REFERENCE * 1.5);
+
+  const x = (p: number) => pad.left + ((p - 1) / Math.max(maxPos - 1, 1)) * plotW;
+  const y = (v: number) => pad.top + plotH - (Math.min(v, yMax) / yMax) * plotH;
+
+  const line = curve
+    .map((p, i) => `${i ? "L" : "M"} ${x(p.position)} ${y(p.percent)}`)
+    .join(" ");
+
+  return (
+    <div>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ maxWidth: w, display: "block" }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {/* The same 5% threshold the grade uses, drawn so the chart and the
+            grade cannot appear to disagree about what counts as a spike. */}
+        <line
+          x1={pad.left}
+          x2={w - pad.right}
+          y1={y(N_SPIKE_REFERENCE)}
+          y2={y(N_SPIKE_REFERENCE)}
+          stroke="var(--warn)"
+          strokeWidth="1"
+          strokeDasharray="4 3"
+        />
+        <text
+          x={pad.left - 5}
+          y={y(N_SPIKE_REFERENCE) + 3}
+          textAnchor="end"
+          fontSize="9"
+          fill="var(--warn)"
+        >
+          {N_SPIKE_REFERENCE}%
+        </text>
+
+        <path d={line} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+
+        {hover && (
+          <>
+            <line
+              x1={x(hover.position)}
+              x2={x(hover.position)}
+              y1={pad.top}
+              y2={pad.top + plotH}
+              stroke="var(--text-faint)"
+              strokeDasharray="3 3"
+            />
+            <circle cx={x(hover.position)} cy={y(hover.percent)} r="3.5" fill="var(--accent)" />
+          </>
+        )}
+
+        <rect
+          x={pad.left}
+          y={pad.top}
+          width={plotW}
+          height={plotH}
+          fill="transparent"
+          onMouseMove={(e) => {
+            const box = (e.target as SVGRectElement).getBoundingClientRect();
+            const frac = (e.clientX - box.left) / box.width;
+            const idx = Math.round(frac * (curve.length - 1));
+            setHover(curve[Math.max(0, Math.min(curve.length - 1, idx))]);
+          }}
+        />
+
+        <text x={w / 2} y={h - 6} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
+          position in read (bp)
+        </text>
+      </svg>
+
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>
+        {hover
+          ? `position ${hover.position}: ${hover.percent.toFixed(2)}% N`
+          : "uncalled (N) bases per position · hover for detail"}
       </div>
     </div>
   );

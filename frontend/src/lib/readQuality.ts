@@ -59,6 +59,14 @@ const N_LIMIT = 1.0; // percent
 const TAIL_COLLAPSE_Q = 20;
 const HEALTHY_MEAN_Q = 30;
 
+/**
+ * Percent N at a single cycle above which that cycle counts as failed.
+ * Well clear of the sub-1% noise floor of clean Illumina data; a genuine
+ * cycle failure spikes far higher. Kept in step with the reference line
+ * NContentChart draws, so the chart and the grade cannot disagree.
+ */
+const N_SPIKE_LIMIT = 5.0;
+
 function tierFrom(
   value: number,
   table: [number, 1 | 2 | 3 | 4 | 5][],
@@ -83,6 +91,23 @@ function nPercent(facts: Record<string, unknown>): number | null {
     }
   }
   return null;
+}
+
+/** The worst cycle in fastp's per-position N curve, if there is one. */
+function worstNCycle(
+  facts: Record<string, unknown>,
+): { position: number; percent: number } | null {
+  const curve = facts.qc_n_per_position;
+  if (!Array.isArray(curve)) return null;
+  let worst: { position: number; percent: number } | null = null;
+  for (const entry of curve) {
+    if (!entry || typeof entry !== "object") continue;
+    const percent = num((entry as { percent?: unknown }).percent);
+    const position = num((entry as { position?: unknown }).position);
+    if (percent === null || position === null) continue;
+    if (!worst || percent > worst.percent) worst = { position, percent };
+  }
+  return worst;
 }
 
 /**
@@ -131,10 +156,25 @@ export function readQuality(obj: DataObject): ReadQuality | null {
   }
 
   // Ambiguous bases. Assay-independent: no library design wants N.
-  const n = nPercent(facts);
-  if (n !== null && n > N_LIMIT) {
+  //
+  // Two rules for one defect, so only one may fire. A collapsed cycle usually
+  // drags the whole-file average over the aggregate threshold as well, and
+  // demoting twice for one problem overstates it. The spike is the more
+  // specific diagnosis -- it names the cycle, which is what makes it
+  // actionable -- so it wins and the aggregate rule stands down.
+  const spike = worstNCycle(facts);
+  if (spike && spike.percent > N_SPIKE_LIMIT) {
     tier = Math.max(1, tier - 1) as 1 | 2 | 3 | 4 | 5;
-    caveats.push(`${+n.toFixed(2)}% ambiguous (N) bases.`);
+    caveats.push(
+      `Cycle ${spike.position} is ${spike.percent.toFixed(0)}% N; ` +
+        "a specific cycle failed.",
+    );
+  } else {
+    const n = nPercent(facts);
+    if (n !== null && n > N_LIMIT) {
+      tier = Math.max(1, tier - 1) as 1 | 2 | 3 | 4 | 5;
+      caveats.push(`${+n.toFixed(2)}% ambiguous (N) bases.`);
+    }
   }
 
   // A healthy average can hide cycles that collapsed at the read's end,

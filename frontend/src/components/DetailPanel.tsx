@@ -24,7 +24,13 @@ import { ChromosomeStrip } from "./ChromosomeStrip";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
-import { BaseCompositionChart, LengthDistributionChart, QualityChart } from "./SequenceCharts";
+import {
+  BaseCompositionChart,
+  GcDistributionChart,
+  LengthDistributionChart,
+  NContentChart,
+  QualityChart,
+} from "./SequenceCharts";
 import { AdapterContentChart, DuplicationLevelsChart } from "./ContaminationCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
@@ -963,6 +969,16 @@ function QcTab({
     !isReference && Array.isArray(obj.facts.quality_per_position)
       ? obj.facts.quality_per_position
       : null;
+  // Both are reads-only: a reference has no per-read GC distribution worth
+  // drawing, and no per-cycle N.
+  const gcHistogram =
+    !isReference && Array.isArray(obj.facts.gc_per_read_histogram)
+      ? obj.facts.gc_per_read_histogram
+      : null;
+  const nCurve =
+    !isReference && Array.isArray(obj.facts.qc_n_per_position)
+      ? obj.facts.qc_n_per_position
+      : null;
   // ChromosomeStrip renders nothing for `kind: "nothing"` (no sequence facts
   // at all, e.g. a GFF sidecar). Without this check, a reference with no
   // composition/curve either would still open an empty .qc-charts grid --
@@ -1016,6 +1032,8 @@ function QcTab({
       {(composition ||
         curve ||
         lengthHistogram ||
+        gcHistogram ||
+        nCurve ||
         showChromStrip ||
         obj.facts.qc_adapter_content != null ||
         obj.facts.qc_duplication_levels != null) && (
@@ -1045,6 +1063,23 @@ function QcTab({
                 logScale={isLongReadPlatform}
                 sampledReads={obj.facts.stats_sampled_reads as number | undefined}
               />
+            </div>
+          )}
+          {gcHistogram && (
+            <div className="qc-chart">
+              <div className="section-title">GC distribution</div>
+              <GcDistributionChart
+                histogram={gcHistogram as never}
+                meanGc={obj.facts.gc_per_read_mean as number | undefined}
+                expected={obj.expected_gc}
+                sampledReads={obj.facts.stats_sampled_reads as number | undefined}
+              />
+            </div>
+          )}
+          {nCurve && (
+            <div className="qc-chart">
+              <div className="section-title">N content per position</div>
+              <NContentChart curve={nCurve as never} />
             </div>
           )}
           {/* Contamination and library complexity, from the whole-file QC

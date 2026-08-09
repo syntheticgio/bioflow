@@ -1,5 +1,6 @@
 """Object endpoints."""
 
+from dataclasses import asdict
 from pathlib import Path
 
 from beanie import PydanticObjectId
@@ -10,6 +11,7 @@ from app.api.deps import LinkableOwnerDep, OwnerDep
 from app.api.v1.schemas import (
     BlobOut,
     ComputationRecord,
+    ExpectedGc,
     ObjectComputationsOut,
     ObjectDetail,
     ObjectOut,
@@ -26,6 +28,7 @@ from app.models import BlobStorage, JobClass, JobRunTiming
 from app.models.ai import TaskSlot
 from app.services import (
     ai,
+    expected_gc,
     object_service,
     pipeline_service,
     provenance_lineage,
@@ -44,10 +47,18 @@ log = get_logger(__name__)
 @router.get("/{object_id}", response_model=ObjectDetail)
 async def get_object(object_id: PydanticObjectId, owner: OwnerDep) -> ObjectDetail:
     obj, blob = await object_service.object_with_blob(object_id, owner=owner)
+    references = await expected_gc.references_for_project(
+        project_id=obj.project_id, owner=owner
+    )
+    resolved = expected_gc.resolve(
+        references=references,
+        organism=obj.metadata.get("organism") if obj.metadata else None,
+    )
     return ObjectDetail(
         **ObjectOut.of(obj).model_dump(),
         blob=BlobOut.of(blob) if blob else None,
         summary_fingerprint=pipeline_service.summary_fingerprint(obj),
+        expected_gc=ExpectedGc(**asdict(resolved)) if resolved else None,
     )
 
 
