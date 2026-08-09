@@ -24,7 +24,7 @@ import { ChromosomeStrip } from "./ChromosomeStrip";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
-import { BaseCompositionChart, QualityChart } from "./SequenceCharts";
+import { BaseCompositionChart, QualityChart, LengthDistributionChart } from "./SequenceCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { OrganismBlurb } from "./OrganismBlurb";
@@ -968,6 +968,15 @@ function QcTab({
   // a visible gap with nothing in it.
   const showChromStrip =
     isReference && classifyChromosomes(obj.facts).kind !== "nothing";
+  const lengthHistogram = Array.isArray(obj.facts.read_length_histogram)
+    ? obj.facts.read_length_histogram
+    : null;
+  // Log axis for the platforms whose read lengths span orders of magnitude;
+  // everything else (including "QC never run yet", the common raw-upload
+  // case) defaults to linear, matching the reference FastQC single-peak
+  // shape. Mirrors LONG_READ_PLATFORMS in backend/app/pipelines/qc_stats.py.
+  const isLongReadPlatform =
+    obj.facts.qc_platform === "OXFORD_NANOPORE" || obj.facts.qc_platform === "PACBIO_SMRT";
 
   // Which tool produced these numbers. Sits under the tab as one line rather
   // than being repeated as a note on every group below it.
@@ -1003,7 +1012,7 @@ function QcTab({
       {/* Charts lead: the shape of the data answers "is this any good?" faster
           than any table of it can, and the numbers below are what you check
           once the shape has raised a question. */}
-      {(composition || curve || showChromStrip) && (
+      {(composition || curve || lengthHistogram || showChromStrip) && (
         <div className="qc-charts">
           {composition && (
             <div className="qc-chart">
@@ -1020,6 +1029,16 @@ function QcTab({
             <div className="qc-chart">
               <div className="section-title">Quality per position</div>
               <QualityChart curve={curve as never} />
+            </div>
+          )}
+          {lengthHistogram && (
+            <div className="qc-chart">
+              <div className="section-title">Read length distribution</div>
+              <LengthDistributionChart
+                buckets={lengthHistogram as never}
+                logScale={isLongReadPlatform}
+                sampledReads={obj.facts.stats_sampled_reads as number | undefined}
+              />
             </div>
           )}
           {/* Second column on a reference, where the quality curve would be
