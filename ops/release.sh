@@ -45,6 +45,44 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# --- git-cliff bootstrap ---------------------------------------------------
+# git-cliff regenerates CHANGELOG.md from Conventional Commits (#106). The
+# version and tarball checksums are pinned here so the changelog is
+# reproducible, and the binary is cached under the user cache dir so a release
+# does not depend on a brew/cargo toolchain and does not re-download on every
+# cut. Bootstrap is only reachable from the `app` line below.
+GIT_CLIFF_VERSION="2.13.1"
+GIT_CLIFF_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/bioflow-tools/git-cliff-${GIT_CLIFF_VERSION}"
+GIT_CLIFF_BIN="$GIT_CLIFF_DIR/git-cliff"
+
+# SHA-512 of the release tarball per architecture. A download that fails the
+# checksum aborts the release rather than producing a changelog nobody can
+# reproduce.
+GIT_CLIFF_SHA512_aarch64="b4f1957f73b0b87ca2113dc58cdf2828f7452f3e405444978089a9f6fdb3dc654e1f478eaf402831ec9350692b4e24e1d8e92e41485f3423664c8e6f8fb59f16"
+GIT_CLIFF_SHA512_x86_64="1192fc8f7ef532c0ec245c5012c19594e3d8d08fe4c592f748e80a260088e1c8ee3d4ec21130fe3e2be0efb08434d283ec0e2eb972cdd1f7b6a5ada35b107337"
+
+bootstrap_git_cliff() {
+  [ -x "$GIT_CLIFF_BIN" ] && return 0
+  local target sha
+  case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64)  target="aarch64-apple-darwin"; sha="$GIT_CLIFF_SHA512_aarch64" ;;
+    Darwin/x86_64) target="x86_64-apple-darwin";  sha="$GIT_CLIFF_SHA512_x86_64" ;;
+    *) die "git-cliff bootstrap only supports macOS (got $(uname -s)/$(uname -m))" ;;
+  esac
+  mkdir -p "$GIT_CLIFF_DIR"
+  local tarball="$GIT_CLIFF_DIR/git-cliff.tar.gz"
+  curl -fL -o "$tarball" \
+    "https://github.com/orhun/git-cliff/releases/download/v${GIT_CLIFF_VERSION}/git-cliff-${GIT_CLIFF_VERSION}-${target}.tar.gz" \
+    || die "could not download git-cliff ${GIT_CLIFF_VERSION}"
+  local actual
+  actual="$(shasum -a 512 "$tarball" | awk '{print $1}')"
+  [ "$actual" = "$sha" ] \
+    || die "git-cliff download failed its checksum (got ${actual}, want ${sha})"
+  tar -xzf "$tarball" -C "$GIT_CLIFF_DIR" --strip-components=1
+  rm -f "$tarball"
+  [ -x "$GIT_CLIFF_BIN" ] || die "git-cliff tarball did not contain the binary"
+}
+
 # --- preflight -------------------------------------------------------------
 # Every check refuses rather than warns, and names the precondition it tripped.
 
@@ -93,6 +131,19 @@ while IFS= read -r line; do
   [ -n "$line" ] && WRITTEN+=("$line")
 done <<< "$BUMP_OUTPUT"
 [ "${#WRITTEN[@]}" -gt 0 ] || die "bump wrote no files"
+
+# Regenerate CHANGELOG.md so the release commit carries the section for this
+# tag. The changelog tracks the app line only (#106); the launcher line keeps
+# its GitHub release notes. `--unreleased --tag` renders the commits since the
+# last tag under the new version before the tag exists; `--prepend` inserts
+# that section and leaves the older sections untouched.
+if [ "$LINE" = "app" ]; then
+  bootstrap_git_cliff
+  "$GIT_CLIFF_BIN" --unreleased --tag "$TAG" --prepend CHANGELOG.md
+  grep -Fq "## [$VERSION]" CHANGELOG.md \
+    || die "changelog generation produced no section for $TAG -- refusing to release without it"
+  WRITTEN+=("CHANGELOG.md")
+fi
 
 git add -- "${WRITTEN[@]}"
 git commit -m "release: $TAG"
