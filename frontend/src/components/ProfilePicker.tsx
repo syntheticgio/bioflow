@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiRequestError } from "../api/client";
-import { BioIcon } from "../icons/BioIcon";
 import type { Profile } from "../stores/profileStore";
 import { useProfileStore } from "../stores/profileStore";
 import { AddProfileModal } from "./AddProfileModal";
@@ -148,9 +147,6 @@ export function ProfilePicker() {
                   onClick={() => click(p)}
                   disabled={busy}
                 >
-                  <span className="picker-emoji">
-                    <BioIcon name="user" size={34} />
-                  </span>
                   <span className="picker-name">{p.username}</span>
                   {p.has_password && <span className="picker-lock">🔒</span>}
                 </button>
