@@ -104,6 +104,12 @@ class ProvenanceChain:
     order: tuple[PydanticObjectId, ...]
     gaps: tuple[Gap, ...]
     branches: tuple[tuple[PydanticObjectId, ...], ...] = ()
+    # Set when the object originally requested was a sidecar: a `.bai` or
+    # `.fai` has no lineage of its own worth showing (see the parent-edge
+    # skip below), so the walk transparently substitutes its parent and
+    # records the substitution here, keyed by the sidecar's own id and name.
+    # None for an ordinary walk.
+    redirected_from: tuple[PydanticObjectId, str] | None = None
 
     @property
     def gap_count(self) -> int:
@@ -370,8 +376,24 @@ async def walk(
     `object_service.get_object` authorizes before anything else is read --
     ancestors are fetched by id without their own owner check, so the target
     check is what stands between a request and another profile's lineage.
+
+    A sidecar makes a poor walk target: it is "biologically inert
+    scaffolding" (see the parent-edge skip below) with no narrative step of
+    its own, so a walk rooted directly on one produces a lineage whose last
+    row is a meaningless "processed with an unrecorded tool" step. Rather
+    than let that render, the walk is redirected to the sidecar's parent --
+    the object a methods reader actually wants when they open a `.bai` or
+    `.fai` -- and `redirected_from` records that the substitution happened,
+    for a caller that wants to say so.
     """
     target_obj = await object_service.get_object(object_id, owner=owner)
+
+    redirected_from: tuple[PydanticObjectId, str] | None = None
+    if target_obj.sidecar_of is not None:
+        redirected_from = (target_obj.id, target_obj.name)
+        target_obj = await object_service.get_object(
+            target_obj.sidecar_of, owner=owner
+        )
 
     gaps: list[Gap] = []
     branches: list[tuple[PydanticObjectId, ...]] = []
@@ -485,6 +507,7 @@ async def walk(
         order=tuple(reversed(order)),
         gaps=tuple(gaps),
         branches=tuple(branches),
+        redirected_from=redirected_from,
     )
 
 

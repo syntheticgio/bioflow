@@ -219,6 +219,10 @@ export type ProvenanceNarrative = {
   materials: ProvenanceStep[];
   gaps: ProvenanceGap[];
   has_branches: boolean;
+  /** Set when the object opened is a sidecar (e.g. a `.bai`/`.fai`) and the
+   * lineage shown is its parent's instead -- names the sidecar so the tab
+   * can say so. */
+  redirected_from_name: string | null;
 };
 
 export type ProvenanceProse = {

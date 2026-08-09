@@ -128,7 +128,11 @@ export function ProvenanceNarrative({
             {copied === "report" ? "Copied" : "Copy report"}
           </button>
         </div>
-        <div className="section-note">Lineage, oldest first.</div>
+        <div className="section-note">
+          {data.redirected_from_name
+            ? `${data.redirected_from_name} is an index file with no history of its own -- showing the lineage of the file it indexes.`
+            : "Lineage, oldest first."}
+        </div>
 
         {data.lineage.length === 0 ? (
           <div className="section-note">No lineage has been recorded.</div>
