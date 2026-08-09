@@ -6016,3 +6016,40 @@ label.checkbox em {
   background: var(--bg-elevated);
   word-break: break-word;
 }
+
+/* --- Per-tile quality heatmap --- */
+
+.tile-scale-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tile-scale-toggle button {
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.tile-scale-toggle button.active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.tile-readout {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  min-height: 16px;
+}
+
+.tile-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
+  max-width: 460px;
+}
