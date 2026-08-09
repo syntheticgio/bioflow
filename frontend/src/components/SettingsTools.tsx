@@ -3,10 +3,99 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
-import type { JobSummary, PipelineTool } from "../api/types";
+import type { JobSummary, PipelineTool, PipelineType } from "../api/types";
 import { SettingsNav } from "./SettingsNav";
 
 const ACTIVE_JOB_STATES = new Set(["pending", "queued", "delayed", "running"]);
+
+/**
+ * The section a tool is filed under, in the order the page renders them.
+ *
+ * A presentation rollup over the backend's `pipelines`, not a second source of
+ * truth: `PipelineType` is finer-grained than a settings page wants (ASSEMBLE,
+ * ASSEMBLY_QC, and REFERENCE_ASSEMBLY are three families in the tool pickers,
+ * where they only need to read as "Assembly" here), so this collapses them
+ * rather than restating which tools exist. Adding a tool to `TOOL_META` files
+ * it here automatically.
+ */
+const GROUPS = [
+  "Reads & QC",
+  "Alignment",
+  "Variants",
+  "Assembly",
+  "Expression",
+  "Archive",
+  "Utilities",
+] as const;
+
+type Group = (typeof GROUPS)[number];
+
+/**
+ * First match wins, so the order here is what decides a tool with more than
+ * one `PipelineType`.
+ *
+ * `utility` is deliberately first. The two tools that carry it also carry
+ * something else -- samtools is UTILITY+QC, bcftools is VARIANT+UTILITY --
+ * and in both cases the general-purpose toolkit is the better answer to
+ * "where would someone look for this": samtools is a BAM/CRAM/SAM toolkit
+ * whose flagstat output happens to be alignment QC, not a QC tool. `trim`
+ * before `qc` puts fastp (TRIM+QC) under Reads & QC, which is the same
+ * heading either way.
+ */
+const GROUP_BY_PIPELINE: readonly (readonly [PipelineType, Group])[] = [
+  ["utility", "Utilities"],
+  ["trim", "Reads & QC"],
+  ["qc", "Reads & QC"],
+  ["align", "Alignment"],
+  ["variant", "Variants"],
+  ["assemble", "Assembly"],
+  ["assembly_qc", "Assembly"],
+  ["reference_assembly", "Assembly"],
+  ["expression", "Expression"],
+  ["download", "Archive"],
+];
+
+/**
+ * Tools whose section the rollup above gets wrong, and the reason each one is
+ * here rather than fixed upstream.
+ *
+ * ivar is REFERENCE_ASSEMBLY because its consensus step builds a sequence
+ * against a reference, which is the right family for the assembly tool
+ * picker. On this page it reads as a variants tool -- it trims amplicon
+ * primers and calls a viral consensus, and someone scanning for it is
+ * thinking about variant calling, not about RagTag and Polypolish.
+ *
+ * bcftools is VARIANT+UTILITY, and `utility` winning the rollup is right for
+ * samtools but wrong here -- bcftools is the pileup caller, and burying it
+ * under Utilities puts it a heading away from clair3 and DeepVariant, which
+ * are what someone comparing variant callers is scanning for. Its VCF-toolkit
+ * half is real but secondary.
+ *
+ * An explicit list rather than reaching for a second backend field: two
+ * entries do not justify one, and being wrong here costs a tool being one
+ * heading away from where it was expected, not a tool disappearing.
+ */
+const GROUP_OVERRIDES: Readonly<Record<string, Group>> = {
+  bcftools: "Variants",
+  ivar: "Variants",
+};
+
+/**
+ * Tools with no `pipelines` at all (bgzip today) land here rather than being
+ * dropped. Silently skipping a tool the rollup has no rule for is the failure
+ * this page can least afford: it exists to answer "why is this greyed out",
+ * and a tool missing from it looks like a tool that does not exist.
+ */
+const FALLBACK_GROUP: Group = "Utilities";
+
+function groupFor(tool: PipelineTool): Group {
+  const override = GROUP_OVERRIDES[tool.name];
+  if (override) return override;
+  for (const [pipeline, group] of GROUP_BY_PIPELINE) {
+    if (tool.pipelines.includes(pipeline)) return group;
+  }
+  return FALLBACK_GROUP;
+}
 
 /**
  * Every tool BioFlow can run, with an action for the ones that need one.
@@ -79,18 +168,31 @@ export function SettingsTools() {
 
   const sorted = [...tools.data.tools].sort((a, b) => a.name.localeCompare(b.name));
 
+  // Only sections that actually have tools get a heading -- an empty
+  // "Expression" rule is a heading over nothing.
+  const sections = GROUPS.map((group) => ({
+    group,
+    tools: sorted.filter((tool) => groupFor(tool) === group),
+  })).filter((section) => section.tools.length > 0);
+
   return (
     <div className="settings-page settings-page-wide">
       <SettingsNav />
       <h1>Settings · Tools</h1>
       <p className="settings-hint">
-        Tools bundled in the image need no action. On-demand tools are pulled
-        as a separate container image the first time you install them.
+        Grouped by the step they belong to, so this page reads the same way the
+        pipeline cards do. Versions are what you cite; the one on-demand tool
+        carries its action.
       </p>
 
-      <div className="settings-tools-grid">
-        {sorted.map((tool) => (
-          <ToolRow key={tool.name} tool={tool} job={jobByTool.get(tool.name)} />
+      <div className="settings-tools-groups">
+        {sections.map((section) => (
+          <section className="settings-tools-group" key={section.group}>
+            <h2 className="settings-tools-group-heading">{section.group}</h2>
+            {section.tools.map((tool) => (
+              <ToolRow key={tool.name} tool={tool} job={jobByTool.get(tool.name)} />
+            ))}
+          </section>
         ))}
       </div>
     </div>
@@ -135,15 +237,15 @@ function ToolRow({ tool, job }: { tool: PipelineTool; job: JobSummary | undefine
   };
 
   return (
-    <div className="settings-tools-card">
-      <div className="settings-tools-card-info">
-        <span className="settings-tools-name">{tool.name}</span>
-        <span className="settings-tools-one-liner">{tool.one_liner}</span>
-      </div>
-      <div className="settings-tools-card-state">
+    <div className="settings-tools-row">
+      <span className="settings-tools-name">{tool.name}</span>
+      <span className="settings-tools-one-liner" title={tool.one_liner}>
+        {tool.one_liner}
+      </span>
+      <span className="settings-tools-card-state">
         <ToolState tool={tool} job={job} />
-      </div>
-      <div className="settings-tools-action">
+      </span>
+      <span className="settings-tools-action">
         <ToolAction
           tool={tool}
           job={job}
@@ -153,17 +255,52 @@ function ToolRow({ tool, job }: { tool: PipelineTool; job: JobSummary | undefine
           onRetry={(id) => retry.mutate(id)}
           busy={install.isPending || uninstall.isPending}
         />
-      </div>
+      </span>
     </div>
   );
 }
 
 /**
- * The status column. `job` takes precedence over `tool.install_state` when
- * both exist -- a job in flight is more current than the probe result it
- * will eventually invalidate, and showing "not installed" while a pull is
- * already 80% done would read as the button not having worked.
+ * The status column -- the version, in the ordinary case.
+ *
+ * It used to read "Included — 4.7" for a bundled tool and "Installed — 4.7"
+ * for an on-demand one. Both words were carrying the delivery distinction in
+ * prose, and neither earned its place once every row on the page is a tool
+ * that is present: "Included" was true of all but one row, which makes it
+ * noise rather than information. What is actually per-tool is the version
+ * (the thing you cite in a methods section) and, for the on-demand handful,
+ * the action beside it. Absence still gets words, because "Not installed" and
+ * "Unavailable" are the states where a bare blank would be ambiguous.
+ *
+ * `job` takes precedence over `tool.install_state` when both exist -- a job in
+ * flight is more current than the probe result it will eventually invalidate,
+ * and showing "not installed" while a pull is already 80% done would read as
+ * the button not having worked.
  */
+/**
+ * What to render in the version column, given that `version` is not always one.
+ *
+ * `_clean_version` in the backend falls back to the probe's entire first line
+ * when it finds no digit-dot-digit anywhere in the output. merqury.sh prints a
+ * usage banner carrying no version at all, so its "version" is the 90-character
+ * line `Usage: merqury.sh [-c] <read-db.meryl> ...`. The old layout hid this in
+ * a wide right-hand column; a narrow version column does not, and one tool's
+ * banner was wrapping into a stack of single words that broke its whole row.
+ *
+ * Blanking it is right for *this page* regardless of the backend: a version
+ * column should show a version or nothing, and a value with no digit in it is
+ * not one. Guarding on shape rather than on the name "merqury" so the next
+ * tool with an unparseable banner is handled too.
+ *
+ * The backend bug is real and outlives this -- merqury's own probe comment says
+ * the version should come from the install directory, which it never does, so
+ * `/help/software` still shows the banner. That is a separate fix.
+ */
+function displayVersion(version: string | null): string {
+  if (!version) return "";
+  return /\d+\.\d/.test(version) ? version : "";
+}
+
 function ToolState({ tool, job }: { tool: PipelineTool; job: JobSummary | undefined }) {
   if (job && ACTIVE_JOB_STATES.has(job.state)) {
     const pct = job.progress.pct;
@@ -183,12 +320,8 @@ function ToolState({ tool, job }: { tool: PipelineTool; job: JobSummary | undefi
     );
   }
 
-  if (tool.delivery === "bundled") {
-    return <span className="settings-tools-state">Included{tool.version ? ` — ${tool.version}` : ""}</span>;
-  }
-
-  if (tool.install_state === "installed") {
-    return <span className="settings-tools-state">Installed{tool.version ? ` — ${tool.version}` : ""}</span>;
+  if (tool.delivery === "bundled" || tool.install_state === "installed") {
+    return <span className="settings-tools-state">{displayVersion(tool.version)}</span>;
   }
 
   if (tool.install_state === "unknown") {
@@ -242,9 +375,12 @@ function ToolAction({
 
   if (tool.delivery === "bundled") return null;
 
+  // Both actions are text rather than filled buttons: on a page that is
+  // mostly rows with no action at all, a button on the one or two rows that
+  // have one pulls the eye away from the list it is meant to annotate.
   if (tool.install_state === "installed") {
     return (
-      <button className="settings-danger" onClick={onUninstall} disabled={busy}>
+      <button className="settings-tools-uninstall" onClick={onUninstall} disabled={busy}>
         Uninstall
       </button>
     );
@@ -254,7 +390,7 @@ function ToolAction({
   // Install is more useful than nothing, and the handler's own probe will
   // report the real reason if it still fails.
   return (
-    <button onClick={onInstall} disabled={busy}>
+    <button className="settings-tools-install" onClick={onInstall} disabled={busy}>
       Install
     </button>
   );
