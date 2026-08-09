@@ -70,6 +70,7 @@ import type {
   SraAccepted,
   SraDownloadRequest,
   SraResolveResponse,
+  TileMatrix,
   TimingEstimate,
   TrimDefaults,
   TrimRequest,
@@ -681,6 +682,14 @@ export const api = {
    */
   qcReportUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/qc/report/${objectId}/${reportPath}?${profileQuery()}`,
+
+  /**
+   * The per-tile quality matrix. A `fetch`, not a link -- unlike
+   * `qcReportUrl` above, which is a plain `<a href>` and therefore needs the
+   * profile as a query param. This one rides the normal profile header.
+   */
+  qcTileMatrix: (objectId: string) =>
+    request<TileMatrix>(`/pipelines/qc/tiles/${objectId}`),
 
   // --- NCBI SRA ---
 

@@ -1298,6 +1298,23 @@ export interface QcFacts {
   /** Paths relative to the report route, absent when the tool did not run. */
   qc_fastp_report?: string;
   qc_fastqc_report?: string;
+  /** Whether the reads' headers carried flow-cell tile coordinates.
+   *  "absent" covers SRA-stripped downloads and long reads -- an ordinary
+   *  outcome, not a failure. The chart renders nothing unless "present". */
+  qc_tile_source?: "present" | "absent";
+  qc_tile_count?: number;
+  qc_tile_sampled_reads?: number;
+  qc_tile_sample_rate?: number;
+  qc_tile_truncated?: boolean;
+  /** Filename of the sidecar holding the matrix, which is too large to live
+   *  in this document -- fetched separately via `api.qcTileMatrix`. */
+  qc_tile_matrix?: string;
+  qc_tile_worst?: {
+    tile: number;
+    mean_quality: number;
+    /** How far below the run's overall mean this tile sits. */
+    deficit: number;
+  };
   qc_status?: string;
 
   // NanoPlot facts, written by the long-read QC path (Nanopore/PacBio)
@@ -1315,6 +1332,19 @@ export interface QcFacts {
   /** Inferred by qc_stats.infer_chemistry; see ReadChemistry on the backend. */
   qc_read_chemistry?: string;
   qc_read_chemistry_reason?: string;
+}
+
+/** The per-tile quality matrix, served from its own route because it is far
+ *  too large for the object document. Rows are tiles in ascending (physical)
+ *  order; columns are read positions. A null cell is a position no read on
+ *  that tile reached -- distinct from a genuine quality of zero. */
+export interface TileMatrix {
+  tiles: number[];
+  positions: number;
+  matrix: (number | null)[][];
+  sampled_reads: number;
+  sample_rate: number;
+  truncated: boolean;
 }
 
 /**
