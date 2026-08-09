@@ -323,6 +323,17 @@ class TestLifecycle:
         _, spawned = spawn
         assert len(spawned) == 2
 
+    async def test_new_session_stops_the_agent(self, client, two_profiles, spawn):
+        project = await _project(two_profiles["a"].owner_id())
+        headers = two_profiles["a_headers"]
+        url = f"/api/v1/projects/{project.id}/agent"
+        await client.post(url + "/ask", json={"message": "hi"}, headers=headers)
+        assert agent_service.get(str(two_profiles["a"].id), str(project.id)) is not None
+
+        response = await client.post(url + "/new-session", headers=headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "cleared"
+        assert agent_service.get(str(two_profiles["a"].id), str(project.id)) is None
 
     async def test_restart_respawns_with_the_project_prompt(
         self, client, two_profiles, spawn

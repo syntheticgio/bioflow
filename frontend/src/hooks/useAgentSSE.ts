@@ -10,6 +10,15 @@ export interface AgentSSEOptions {
   onDone: () => void;
   onError: (message: string) => void;
   onConnectionChange: (connected: boolean) => void;
+  /**
+   * Fired only from the backend's `agent_status` event -- the actual signal
+   * for whether a pi agent process exists, as opposed to onConnectionChange
+   * which also fires from the SSE connection merely opening (onopen), before
+   * any real status is known. Use this, not onConnectionChange, for anything
+   * that needs to know whether the agent process itself is running (e.g.
+   * deciding whether a conversation is being "resumed").
+   */
+  onAgentStatus?: (running: boolean) => void;
 }
 
 export function useAgentSSE({
@@ -20,6 +29,7 @@ export function useAgentSSE({
   onDone,
   onError,
   onConnectionChange,
+  onAgentStatus,
 }: AgentSSEOptions) {
   const profileId = useProfileStore((s) => s.current?.id);
   const [connected, setConnected] = useState(false);
@@ -76,6 +86,7 @@ export function useAgentSSE({
         const data = JSON.parse(msgEvent.data);
         setConnected(data.running);
         onConnectionChange(data.running);
+        onAgentStatus?.(data.running);
       } catch {
         // Ignore malformed data
       }
@@ -126,7 +137,17 @@ export function useAgentSSE({
     });
 
     sourceRef.current = source;
-  }, [profileId, projectId, onMessageDelta, onToolCall, onToolResult, onDone, onError, onConnectionChange]);
+  }, [
+    profileId,
+    projectId,
+    onMessageDelta,
+    onToolCall,
+    onToolResult,
+    onDone,
+    onError,
+    onConnectionChange,
+    onAgentStatus,
+  ]);
 
   useEffect(() => {
     // Auto-connect when the component mounts and profileId is available

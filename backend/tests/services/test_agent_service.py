@@ -13,8 +13,27 @@ from pathlib import Path
 
 import pytest
 
+from app.config import settings
 from app.errors import AgentUnavailableError
 from app.services.agent_service import AgentEvent, AgentProcess, AgentService
+
+
+@pytest.fixture(autouse=True)
+def _isolate_bioinfo_home(monkeypatch, tmp_path):
+    """Keep every test in this module off the real /data volume.
+
+    `AgentService.__init__` falls back to `settings.agent_sessions_dir`
+    (`bioinfo_home / "agent-sessions"`) whenever `make_service()` is called
+    without an explicit `sessions_dir=`, and `AgentProcess.start()`
+    unconditionally `mkdir`s that path on spawn. Repointing `bioinfo_home`
+    at this test's own `tmp_path` -- the same idiom used elsewhere in the
+    suite (see `tests/queue/test_assembly_qc_handlers.py`) -- means the
+    ~15+ call sites that never set `sessions_dir` still get an isolated
+    directory, with no change to `make_service()` or those call sites.
+    Tests in `TestSessionFlags` that already pass `sessions_dir=tmp_path`
+    explicitly are unaffected: that kwarg always wins over the fallback.
+    """
+    monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
 
 
 class FakeWriter:
@@ -153,20 +172,14 @@ class TestSpawn:
         await service.get_or_create("prof-1", "proj-1")
         calls, fake = spawn()
         assert len(calls) == 1
-        expected_head = [
-            "/usr/local/bin/pi",
-            "--mode",
-            "rpc",
-            "--no-session",
-            "--mcp-config",
-        ]
-        assert calls[0][:5] == expected_head
+        assert calls[0][:3] == ["/usr/local/bin/pi", "--mode", "rpc"]
+        assert "--mcp-config" in calls[0]
         # The temp config file exists and carries the profile URL.
-        config = read_config(calls[0][5])
+        config = read_config(calls[0][calls[0].index("--mcp-config") + 1])
         assert config["mcpServers"]["bioflow"]["url"].endswith("?profile=prof-1")
         assert fake is not None
         await service.stop_agent("prof-1", "proj-1")
-        assert not config_file_exists(calls[0][5])
+        assert not config_file_exists(calls[0][calls[0].index("--mcp-config") + 1])
 
     async def test_system_prompt_is_passed_as_a_flag(self, spawn):
         service = make_service()
@@ -200,6 +213,42 @@ class TestSpawn:
         calls, _ = spawn()
         assert a is not b
         assert len(calls) == 2
+
+
+class TestSessionFlags:
+    async def test_spawn_uses_session_id_and_dir_not_no_session(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-1", "proj-1")
+        calls, _ = spawn()
+        cmd = calls[0]
+        assert "--no-session" not in cmd
+        assert "--session-dir" in cmd
+        assert cmd[cmd.index("--session-dir") + 1] == str(tmp_path)
+        assert "--session-id" in cmd
+        assert cmd[cmd.index("--session-id") + 1] == "bioflow-prof-1-proj-1"
+        await service.stop_agent("prof-1", "proj-1")
+
+    async def test_session_id_is_stable_across_respawns(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-1", "proj-1")
+        await service.stop_agent("prof-1", "proj-1")
+        await service.get_or_create("prof-1", "proj-1")
+        calls, _ = spawn()
+        first = calls[0][calls[0].index("--session-id") + 1]
+        second = calls[1][calls[1].index("--session-id") + 1]
+        assert first == second
+        await service.stop_agent("prof-1", "proj-1")
+
+    async def test_session_id_differs_by_profile_and_by_project(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-A", "proj-1")
+        await service.get_or_create("prof-B", "proj-1")
+        await service.get_or_create("prof-A", "proj-2")
+        calls, _ = spawn()
+        ids = [c[c.index("--session-id") + 1] for c in calls]
+        assert len(set(ids)) == 3, f"session ids must be distinct, got {ids}"
+        for prof, proj in (("prof-A", "proj-1"), ("prof-B", "proj-1"), ("prof-A", "proj-2")):
+            await service.stop_agent(prof, proj)
 
 
 class TestPrompt:
@@ -306,6 +355,45 @@ class TestEventTranslation:
         assert events[0].data["name"] == "bash"
         assert events[0].data["args"] == {"command": "ls"}
         await proc.stop()
+
+
+class TestTurnEndErrors:
+    async def test_turn_end_error_message_becomes_an_error_event(self, spawn):
+        service = make_service()
+        proc = await service.get_or_create("p", "j")
+        _, fake = spawn()
+        # Real capture from a pi 0.84.1 run against a bad API key.
+        fake.stdout.feed(
+            {
+                "type": "turn_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "api": "openai-responses",
+                    "provider": "openai",
+                    "model": "gemma-4-E2B-it-Q6_K",
+                    "stopReason": "error",
+                    "errorMessage": 'OpenAI API error (401): {"message":"Incorrect API key provided: dummy."}',
+                },
+            }
+        )
+        events = await collect(proc, 1)
+        assert events[0].type == "error"
+        assert "401" in events[0].data["message"]
+        await service.stop_agent("p", "j")
+
+    async def test_turn_end_without_an_error_emits_nothing(self, spawn):
+        """A normal turn must stay silent -- agent_settled already ends it."""
+        service = make_service()
+        proc = await service.get_or_create("p", "j")
+        _, fake = spawn()
+        fake.stdout.feed(
+            {"type": "turn_end", "message": {"role": "assistant", "content": [], "stopReason": "end_turn"}}
+        )
+        fake.stdout.feed({"type": "agent_settled"})
+        events = await collect(proc, 1)
+        assert events[0].type == "done", f"expected only done, got {events[0].type}"
+        await service.stop_agent("p", "j")
 
 
 class TestLifecycle:
@@ -422,3 +510,32 @@ class TestLifecycle:
         second = service.get("p", "j")
         assert second is not None and second is not first
         await second.stop()
+
+
+class TestSessionsDir:
+    def test_sessions_dir_derives_from_bioinfo_home(self):
+        from app.config import settings
+
+        assert settings.agent_sessions_dir == settings.bioinfo_home / "agent-sessions"
+
+
+class TestNewSession:
+    async def test_new_session_stops_process_and_deletes_session_files(self, spawn, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.get_or_create("prof-1", "proj-1")
+        # pi's actual naming: {timestamp}_{session-id}.jsonl -- confirmed
+        # against a real pi 0.84.1 run (see Task 0).
+        sid = "bioflow-prof-1-proj-1"
+        (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").write_text("{}\n")
+        (tmp_path / f"2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").write_text("{}\n")
+
+        await service.new_session("prof-1", "proj-1")
+
+        assert service.get("prof-1", "proj-1") is None
+        assert not (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").exists()
+        # Another pair's session must survive.
+        assert (tmp_path / "2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").exists()
+
+    async def test_new_session_is_safe_when_nothing_exists(self, tmp_path):
+        service = make_service(sessions_dir=tmp_path)
+        await service.new_session("nobody", "nothing")  # must not raise

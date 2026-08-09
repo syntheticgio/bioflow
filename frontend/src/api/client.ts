@@ -1148,4 +1148,9 @@ export const api = {
 
   clearAgentConversation: (projectId: string) =>
     request<void>(`/projects/${projectId}/agent/conversation`, { method: "DELETE" }),
+
+  newAgentSession: (projectId: string) =>
+    request<{ status: string }>(`/projects/${projectId}/agent/new-session`, {
+      method: "POST",
+    }),
 };

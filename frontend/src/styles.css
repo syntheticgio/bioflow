@@ -1,3 +1,5 @@
+@import "./styles/agent.css";
+
 :root {
   --bg: #0f1216;
   --bg-panel: #161a20;
@@ -5758,9 +5760,6 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 .workflow-job-error { color: var(--error); }
-
-/* Agent panel styles */
-@import "./styles/agent.css";
 
 /* The node detail view. Animates out of the canvas so it reads as opening
    *this* node rather than navigating somewhere else. */
