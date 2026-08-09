@@ -25,6 +25,7 @@ fields exist to prevent.
 from dataclasses import dataclass
 
 from app.models import normalize_organism
+from app.services import pipeline_service
 
 
 @dataclass(frozen=True)
@@ -142,3 +143,55 @@ def from_organism(organism: str | None) -> ExpectedGc | None:
             f"({entry.source_name})"
         ),
     )
+
+
+def from_references(objects) -> ExpectedGc | None:
+    """Tier 1: GC measured from a reference genome in the same project.
+
+    Better than the table when it applies -- it is the user's actual assembly
+    rather than a published figure for some assembly of the species.
+
+    Two exclusions, both learned the same way (see CLAUDE.md on the Actions
+    tab's suggestion rules, which shipped green tests while getting both
+    wrong against a real project):
+
+    * A protein or transcript FASTA is the same FormatKind as a genome and has
+      a GC content that means something entirely different. `role` is what
+      separates them; `COMPLETENESS_EXCLUDED_ROLES` is the same set the
+      completeness card already excludes for the same reason.
+    * Two references that disagree are not resolvable by picking one, so this
+      answers with nothing. Two copies of one assembly agree on their value
+      and are therefore one answer, not two.
+    """
+    usable = [
+        obj
+        for obj in objects
+        if obj.role is not None
+        and obj.role not in pipeline_service.COMPLETENESS_EXCLUDED_ROLES
+        and isinstance(obj.facts.get("gc_content_percent"), (int, float))
+    ]
+    if not usable:
+        return None
+
+    values = {obj.facts["gc_content_percent"] for obj in usable}
+    if len(values) > 1:
+        return None
+
+    chosen = usable[0]
+    percent = float(chosen.facts["gc_content_percent"])
+    return ExpectedGc(
+        percent=percent,
+        source="reference",
+        attribution=f"expected {percent}%, measured from {chosen.name}",
+    )
+
+
+def resolve(*, references, organism: str | None) -> ExpectedGc | None:
+    """The full cascade, in trust order. None means the chart draws no curve.
+
+    `references` should already be narrowed to the project's reference-role
+    objects by the caller; `from_references` re-checks the role rather than
+    trusting that, because the check is one line and the failure it prevents
+    is a confidently wrong curve.
+    """
+    return from_references(references) or from_organism(organism)

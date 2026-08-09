@@ -69,3 +69,91 @@ class TestFromOrganism:
         specifically (see the comment on that entry), so an organism string
         with no strain must not silently pick up K-12's figure."""
         assert expected_gc.from_organism("Escherichia coli") is None
+
+
+class FakeObject:
+    """A stand-in for DataObject carrying only what the resolver reads."""
+
+    def __init__(self, name, gc=None, role=None):
+        from app.models import ObjectRole
+
+        self.name = name
+        self.facts = {} if gc is None else {"gc_content_percent": gc}
+        self.role = ObjectRole(role) if role else None
+
+
+class TestFromReferences:
+    def test_measures_from_a_single_reference(self):
+        refs = [FakeObject("GRCh38.fa", gc=40.9, role="reference")]
+        got = expected_gc.from_references(refs)
+        assert got is not None
+        assert got.percent == 40.9
+        assert got.source == "reference"
+
+    def test_attribution_names_the_file_it_measured(self):
+        """'expected 40.9%' with no provenance is a number the user cannot
+        check. The filename is what makes it checkable."""
+        refs = [FakeObject("GRCh38.fa", gc=40.9, role="reference")]
+        assert "GRCh38.fa" in expected_gc.from_references(refs).attribution
+
+    def test_ignores_a_protein_fasta(self):
+        """The `protein.faa` mistake. A project that downloaded an NCBI
+        assembly holds protein and CDS FASTA alongside the genome; their GC is
+        not the genome's, and a curve drawn from one is confidently wrong."""
+        refs = [
+            FakeObject("protein.faa", gc=52.1, role="protein"),
+            FakeObject("GRCh38.fa", gc=40.9, role="reference"),
+        ]
+        assert expected_gc.from_references(refs).percent == 40.9
+
+    def test_a_project_of_only_protein_fasta_resolves_to_nothing(self):
+        refs = [FakeObject("protein.faa", gc=52.1, role="protein")]
+        assert expected_gc.from_references(refs) is None
+
+    def test_ignores_a_transcript_fasta(self):
+        refs = [FakeObject("cds_from_genomic.fna", gc=54.0, role="transcript")]
+        assert expected_gc.from_references(refs) is None
+
+    def test_a_reference_with_no_measured_gc_is_skipped(self):
+        """Still ingesting, or a format fasta_stats found nothing in."""
+        refs = [FakeObject("pending.fa", gc=None, role="reference")]
+        assert expected_gc.from_references(refs) is None
+
+    def test_two_copies_of_the_same_assembly_are_not_a_disagreement(self):
+        """The 'same assembly stored twice' case: identical values are one
+        answer, not two competing ones."""
+        refs = [
+            FakeObject("GRCh38.fa", gc=40.9, role="reference"),
+            FakeObject("GRCh38_copy.fa", gc=40.9, role="reference"),
+        ]
+        assert expected_gc.from_references(refs).percent == 40.9
+
+    def test_two_disagreeing_references_resolve_to_nothing(self):
+        """Two genuinely different genomes in one project. There is no basis
+        for picking one, and picking wrong draws an authoritative-looking
+        curve for the wrong organism."""
+        refs = [
+            FakeObject("human.fa", gc=40.9, role="reference"),
+            FakeObject("ecoli.fa", gc=50.8, role="reference"),
+        ]
+        assert expected_gc.from_references(refs) is None
+
+    def test_no_objects_at_all(self):
+        assert expected_gc.from_references([]) is None
+
+
+class TestResolveOrder:
+    def test_a_measured_reference_beats_the_table(self):
+        """Tier 1 outranks tier 2: the user's own file is a measurement, the
+        table is a published figure for a different assembly of the species."""
+        refs = [FakeObject("my_ecoli.fa", gc=50.1, role="reference")]
+        got = expected_gc.resolve(references=refs, organism="Escherichia coli")
+        assert got.source == "reference"
+        assert got.percent == 50.1
+
+    def test_falls_through_to_the_table(self):
+        got = expected_gc.resolve(references=[], organism="Escherichia coli K-12")
+        assert got.source == "table"
+
+    def test_falls_through_to_nothing(self):
+        assert expected_gc.resolve(references=[], organism=None) is None
