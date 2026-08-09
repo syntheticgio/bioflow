@@ -4,45 +4,170 @@ Single-user, local-only tool for non-critical, non-essential work. Optimize for
 "the person using it can see their change" over correctness-at-scale practices
 that make sense for a team or a hosted service.
 
-**`main` is this project's dev branch, not its production branch.** A separate
-downstream process does the final testing before anything reaches prod, so
-landing on `main` is not shipping to users -- it is the equivalent of pushing
-to a shared dev trunk.
+**`main` is this project's dev trunk, not its production branch.** Shipping to
+users happens at a tag, from a release branch, several stages downstream of
+`main` (see [Release methodology](#release-methodology) below). Landing on
+`main` is not shipping.
 
-## Commit and merge once the tests are green, without asking
+**But `main` is now reached through a pull request, not a direct merge.** This
+changed on 2026-08-09. The rest of the pipeline -- alpha, beta, production --
+is described under [Release methodology](#release-methodology); this section
+is only about how a piece of work gets from a worktree onto `main`.
 
-The consequence of the above: **do not hesitate over committing, merging to
-`main`, or pushing.** Once the suite is green, commit. If the work is done and
-`main` is clean, merge and push. Stopping to ask permission for each of those
-is friction with nothing on the other side of it -- there is no review gate to
-respect and no user-facing release to gate, and the downstream process is what
-actually protects prod.
+## Finish work on a branch, push it, and open a PR
 
-What still earns a pause:
+**Do not merge your own work to `main`.** The end state of a task is *an open
+PR*, not a merged one. The user reviews and merges. This is the one part of
+the old workflow that inverted: committing and pushing are still yours to do
+without asking, and merging is now the user's.
+
+Once the suite is green:
+
+```bash
+git push -u origin HEAD
+```
+
+```bash
+gh pr create --base main --fill
+```
+
+Then report the PR URL and stop. Do not `gh pr merge`, and do not push to
+`main` directly.
+
+What still earns a pause before you push:
 
 - **A red or unrun suite.** "Green" is the precondition, and it means read the
   count, not the exit code of whatever was last in the pipeline.
-- **`main` not being clean.** Merge into a dirty or diverged `main` and the
-  conflict becomes someone else's. Multiple agents merging to `main`
-  concurrently is a known rough edge being worked on separately; if `main` has
-  moved under you, re-run the suite after merging rather than assuming your
-  green still holds.
 - **Anything genuinely destructive** -- history rewrites, force pushes,
   deleting branches that hold unmerged work. Committing is cheap and
   reversible; those are not.
 
+`main` being dirty or diverged is no longer your problem to solve by hand: a
+PR that cannot merge cleanly says so in the GitHub UI, which is a better place
+to discover it than mid-merge on the user's checkout. If GitHub reports a
+conflict, rebase your branch on `origin/main` and push again -- that is
+ordinary work on your own branch, not a history rewrite of a shared one.
+
 Keep commits separable: a mechanical rename and a behaviour change in one
 commit is a commit nobody can review or revert, whatever the test count says.
+This mattered less when nobody read the commits; now someone does.
 
-## Push to origin when a merge to main is the end of the task
+### Writing the PR
 
-`origin` (`github.com:syntheticgio/bioflow`) is the remote this project
-actually uses. When a task's work lands on `main` and the task is otherwise
-done -- not a mid-task checkpoint, not a merge with more steps still to come --
-push `main` to `origin` as part of finishing, rather than leaving it local
-only. A merge that stays unpushed is a merge someone still has to remember to
-push later, and there is no other workflow here (no PR review gate, no CI)
-that does it instead.
+The PR description is the unit the user actually reviews, and -- see
+[Changelogs](#changelogs-are-generated-from-commits-and-prs) -- it is a
+candidate input to the release notes. Two things it must carry:
+
+- **The "why", not just the "what".** The diff already says what changed.
+- **`Closes #NN`** when the work resolves a tracked issue, so the issue closes
+  on merge rather than being closed by hand later.
+
+`--fill` takes the description from your commit bodies, which in this repo are
+already written at the right level of detail. That is usually the right call;
+write the body explicitly when the branch's commits individually undersell
+what the branch does as a whole.
+
+## Branch naming
+
+Branches are named for what they do, prefixed by type:
+
+```
+feat/recent-projects-header
+fix/99-sidecar-lineage-walk
+docs/release-methodology
+```
+
+The type prefix matches the Conventional Commits type the branch's commits
+use (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`). Include the issue
+number when there is one. Agent-generated `claude/*` branch names still work
+and nothing rejects them, but they say nothing about the change, and they now
+show up in a PR list that someone reads.
+
+## Commit messages are Conventional Commits
+
+This is not new -- roughly 98% of the last 300 commits already follow it --
+but it is now load-bearing rather than merely tidy, because the changelog is
+generated from it:
+
+```
+<type>(<scope>): <subject>
+```
+
+`feat` and `fix` are the types that reach users and therefore the changelog.
+`docs`, `test`, `refactor`, `chore`, `style` are real and correct types that
+are filtered *out* of user-facing notes. Two consequences:
+
+- **A user-visible change committed as `chore` disappears from the release
+  notes.** Nothing errors; the entry is simply absent.
+- **A breaking change needs `!`** -- `feat(api)!: ...` -- or a
+  `BREAKING CHANGE:` trailer in the body. That marker is what a major-version
+  bump and a "breaking" changelog section are keyed off, and it cannot be
+  recovered later from the diff.
+
+Use `tweak` and `style` sparingly; both appear in the history and neither is
+a standard Conventional Commits type.
+
+## Release methodology
+
+BioFlow releases through four stages. The diagrams in `assets/` are the
+reference: `BioFlowReleasePath.svg` (the stages), `BioFlowReleaseLifecycle.svg`
+(the branching topology), `BioFlowReleaseSemantics.svg` (what each number
+means).
+
+| Stage | Branch | Tag | What happens |
+|---|---|---|---|
+| Dev | `main` | none | Feature and fix PRs merge here |
+| Alpha | `alpha/X.Y.Z` | `vX.Y.Z-alpha` | Cut when a release is wanted; rigorous testing |
+| Beta | `beta/X.Y.Z` | `vX.Y.Z-beta` | Cut when alpha stabilizes; broader testing |
+| Production | `release/X.Y.Z` | `vX.Y.Z` | Cut when ready to ship; images and launchers built |
+
+The rule that matters for an agent, because it is the one that is easy to get
+backwards:
+
+- **Fixes found in alpha go in by PR *into the alpha branch*, then merge back
+  to `main`.** Not the other way around. Same for beta.
+- **Beta takes bug fixes only, no features.** A feature discovered to be
+  missing during beta waits for the next version; adding it silently
+  invalidates the testing beta exists to do.
+- **Nothing is cherry-picked forward from `main` into an existing alpha or
+  beta.** Alpha is cut *from* `main` once; after that the flow is alpha → main.
+
+Cutting any of these is the user's call, not something to do because a task
+finished. See [VERSION.md](VERSION.md) for the mechanics.
+
+Which number to bump, from `BioFlowReleaseSemantics.svg`:
+
+- **Major** (`X.0.0`) -- platform-level additions; allowed to break existing
+  features, server configuration, the API, or MCP tools.
+- **Minor** (`1.X.0`) -- new features, backwards compatible. Judgement call on
+  scope.
+- **Patch** (`1.0.X`) -- bug fixes, typos, unexpected behaviour. 100%
+  compatible, no new features.
+
+Note that `ops/release.sh` currently **rejects** `-alpha` and `-beta`
+suffixes (`VERSION.md` says pre-release versions are not supported). That
+predates this methodology and is a real gap: the script cannot yet cut the
+alpha and beta tags the pipeline calls for. Do not work around it by tagging
+by hand -- `publish-images.yml`'s version-guard exists to catch exactly that,
+and a hand-rolled tag publishes images labelled with a version the tree does
+not have.
+
+## Changelogs are generated from commits and PRs
+
+Currently the release notes carry no change information at all. The
+`release` job in `.github/workflows/publish-images.yml` passes both
+`--generate-notes` and `--notes-file` to `gh release create`, and
+`--notes-file` overrides `--generate-notes` rather than appending to it -- so
+every published release body is the static image-pull blurb plus the
+auto-appended compare link, and nothing else. `v0.2.6` is the worked example.
+
+This is the open design question tracked in
+[#99](https://github.com/syntheticgio/bioflow/issues/99). Until it is
+resolved, the thing an agent controls is the *input*: a well-typed
+Conventional Commit subject and a PR description that explains the why are
+what any of the candidate approaches will read. A `chore:`-typed feature or a
+`--fill`ed PR whose commits never said why is data that no generator can
+recover.
 
 ## Update issue when a task is completed or there is significant progress
 You should update the issue that we are tracking a task with in Github with any
@@ -300,12 +425,16 @@ Delete an entry outright only when it was wrong to begin with -- not merely
 done. A `— FIXED` entry is a record; a deleted one is a question someone will
 ask again.
 
-**"Merged to `main` and tested to the best of your ability" is the bar for
+**"PR merged to `main` and tested to the best of your ability" is the bar for
 `— FIXED` -- don't hold an entry open waiting for the user's own later
 testing to bless it.** `main` is a dev trunk here, not a release
 ([above](#working-on-this-repo)); nothing in this repo ships to users at
-merge time, so there is no "final testing" step downstream of you that a
-TODO entry should wait on. If testing after merge turns up a real problem,
+merge time -- alpha, beta, and production are all downstream of it -- so there
+is no "final testing" step that a TODO entry should wait on. Note the bar is
+the *merge*, not the PR: since you no longer merge your own work, an entry
+whose PR is open but unmerged is not yet `— FIXED`. If the PR is open and the
+task is otherwise done, say so and leave the entry open. If testing after
+merge turns up a real problem,
 that is a new entry, not a reason the old one should have stayed open --
 the original diagnosis was still correct and the fix still shipped.
 
