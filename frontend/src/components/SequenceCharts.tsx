@@ -350,8 +350,10 @@ export function LengthDistributionChart({
   // at the high end (a 10bp-wide bucket near 100bp covers several px; the
   // same 10bp bucket near 50,000bp covers a fraction of a px). Buckets are
   // sorted and contiguous, so a bucket's width in pixels is just the gap to
-  // the next bucket's x-position; the last bucket reuses the previous gap
-  // (bins are fixed-width, so consecutive gaps are equal on a log axis too).
+  // the next bucket's x-position; the last bucket reuses the previous gap as
+  // a close approximation (bins are fixed-width, so on a log axis adjacent
+  // gaps shrink gradually rather than jumping, making the reused gap a good
+  // stand-in even though it isn't exactly equal).
   // A single-bucket chart falls back to a fixed minimum.
   const barWidths = buckets.map((b, i) => {
     if (i < buckets.length - 1) {
