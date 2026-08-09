@@ -298,6 +298,11 @@ class ProvenanceNarrativeOut(BaseModel):
     materials: list[ProvenanceStepOut]
     gaps: list[ProvenanceGapOut]
     has_branches: bool
+    # Set when the object requested is a sidecar (a `.bai`, `.fai`, aligner
+    # index file): the lineage shown is its parent's, not its own, because a
+    # sidecar has no narrative step worth reporting. Names the sidecar so the
+    # UI can say "showing history for <parent>, the file <this> indexes."
+    redirected_from_name: str | None = None
 
 
 class ProvenanceProseOut(BaseModel):

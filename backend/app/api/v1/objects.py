@@ -161,6 +161,9 @@ async def provenance_narrative(
             for g in chain.gaps
         ],
         has_branches=bool(chain.branches),
+        redirected_from_name=(
+            chain.redirected_from[1] if chain.redirected_from else None
+        ),
     )
 
 
