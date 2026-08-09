@@ -260,18 +260,30 @@ turn, confirm the agent still knows it.
 
 ## Risks
 
-**The load-bearing assumption is that pi reloads a session on respawn.**
-`--session-id` is accepted and pi confirms create-if-missing semantics —
-observed: `Warning: No project session found with id 'bioflow-testproj';
-creating a new session with that id.` But no session file was ever written
-during testing, because every run failed at the provider before a turn
-completed. The reload path was never exercised.
+**RESOLVED 2026-08-08, implementation Task 0.** The load-bearing assumption
+that pi reloads a session on respawn is confirmed true. At design time,
+`--session-id` was shown to be accepted with correct create-if-missing
+semantics, but no session file was ever written because every test run
+failed at the provider before a turn completed — the reload path itself was
+unverified.
 
-If pi does not reload as advertised, this approach collapses and the
-fallback is Mongo-side persistence — #97's original shape, with the schema
-and compaction questions that come with it. **Verify this first, before any
-other implementation work.** It is cheap to check and it determines whether
-the rest of the plan is worth writing.
+During implementation, a real local model was wired in via a pi
+custom-provider extension (`pi.registerProvider("openai", {baseUrl:
+"http://host.docker.internal:11234/v1", ...})` — `OPENAI_BASE_URL` does not
+work; pi resolves providers through its own registry, not env vars). With
+that, one pi process completed a turn ("Reply with exactly: HELLO-LOCAL"),
+producing a real session file
+(`2026-08-08T23-18-19-668Z_gate-test.jsonl`). A second, fully independent pi
+process, given only the same `--session-dir`/`--session-id`, was asked what
+the first process had been told to reply with — it answered "HELLO-LOCAL",
+recalling the prior process's turn, with no "creating a new session"
+warning (confirming it resumed the existing file rather than starting
+fresh). The design's core mechanism is proven, not assumed.
+
+This also corrected a filename assumption: pi's real session files are
+named `{ISO-8601-timestamp}_{session-id}.jsonl`, not `{session-id}.jsonl`.
+The `new_session()` cleanup implementation (Task 4) uses a suffix glob
+(`*_{sid}.jsonl`) to match.
 
 **Session file format is pi's, and pi is pinned.** The Dockerfile pins the
 pi version because its protocol shapes are the contract this module
