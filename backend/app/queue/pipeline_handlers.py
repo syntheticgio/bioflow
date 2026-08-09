@@ -519,7 +519,7 @@ def _run_short_read_qc(
     # Adapter content and duplication levels, from a whole-file pass. Wrapped
     # exactly like FastQC above: this is the optional half of the run, and a
     # scan that fails must not cost the user the fastp facts that succeeded.
-    ctx.progress(phase="contamination", pct=0.9, message="scanning for adapters")
+    ctx.progress(phase="contamination", pct=0.97, message="scanning for adapters")
     try:
         detected = facts.get("qc_adapters") or {}
         facts.update(
