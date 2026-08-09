@@ -21,6 +21,7 @@ from app.pipelines import (
     cutadapt_runner,
     fastp_runner,
     qc_stats,
+    tile_scanner,
     tools,
     trimmomatic_runner,
 )
@@ -538,6 +539,11 @@ def _run_short_read_qc(
     except Exception as e:  # noqa: BLE001
         log.warning("qc_contamination_failed", job_id=ctx.job_id, error=str(e))
 
+    ctx.progress(
+        phase="tiles", pct=fastp_runner.MAX_MEASURED_PCT, message="scanning flow-cell tiles"
+    )
+    facts.update(_tile_facts(reads_in, report_dir))
+
     # Present on every QC'd file, not only long ones, so a consumer never has
     # to treat its absence as "short read" by default.
     facts["qc_read_chemistry"] = ReadChemistry.SHORT.value
@@ -718,6 +724,25 @@ def _run_fastqc(
         log.warning("qc_fastqc_no_report", job_id=ctx.job_id)
         return None
     return f"fastqc/{html.name}"
+
+
+def _tile_facts(reads_in: Path, report_dir: Path) -> dict:
+    """Summarise quality by flow-cell tile, or return nothing.
+
+    Swallows every failure to a warning, for the same reason `_run_fastqc`
+    does: this is an extra on top of the fastp facts, and a file with an
+    unexpected header format must not cost the user the numbers that did
+    parse. Files without tiles in their headers -- SRA-stripped downloads,
+    long reads -- are an ordinary outcome here, not a failure; the scanner
+    reports them as `absent` after a short probe rather than reading the
+    whole file.
+    """
+    try:
+        result = tile_scanner.scan(reads_in)
+        return tile_scanner.write_matrix(result, report_dir)
+    except (OSError, ValueError) as e:
+        log.warning("qc_tile_scan_failed", error=str(e))
+        return {}
 
 
 def _resolve_input(payload: dict, side: str) -> Path:

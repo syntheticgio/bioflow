@@ -1,5 +1,6 @@
 """Pipeline endpoints: launching runs and reporting tool availability."""
 
+import json
 from pathlib import Path, PurePosixPath
 
 from beanie import PydanticObjectId
@@ -21,6 +22,7 @@ from app.pipelines import (
     counts_runner,
     de_runner,
     lineage_inference,
+    tile_scanner,
     tools,
     variant_db,
 )
@@ -613,6 +615,39 @@ async def get_qc_report(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get("/qc/tiles/{object_id}")
+async def get_qc_tile_matrix(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
+    """Serve the per-tile quality matrix for an object.
+
+    Deliberately not routed through `get_qc_report`, despite serving from the
+    same directory. That route wraps its response in `sandbox` +
+    `default-src 'none'` because FastQC's HTML embeds sequence bytes taken
+    verbatim from the reads -- and that same header set would block the
+    `fetch` this endpoint exists to answer. Here the payload is JSON the
+    application parses rather than a document the browser renders, so the CSP
+    is unnecessary and actively harmful.
+
+    `OwnerDep`, not `LinkableOwnerDep`: this is fetched by the app's own code
+    with the profile header attached, never opened as a bare link.
+
+    The object read is discarded -- it is there to make the 404 happen.
+    Report directories are named by object id and nothing else, so without it
+    any caller holding an id could read any profile's matrix.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    root = (settings.qc_reports_dir / str(object_id)).resolve()
+    target = (root / tile_scanner.TILE_MATRIX_FILENAME).resolve()
+
+    # The filename is a module constant rather than user input, so traversal
+    # is not reachable through it -- but the resolve-and-recheck costs a stat
+    # and does not depend on that staying true.
+    if not target.is_relative_to(root) or not target.is_file():
+        raise NotFoundError(f"No tile matrix for object {object_id}")
+
+    return json.loads(target.read_text())
 
 
 class BamStatsRequest(BaseModel):

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { classifyChromosomes } from "../lib/chromosomes";
@@ -8,6 +8,7 @@ import type {
   AlignerName,
   DataObject,
   ObjectDetail as ObjectDetailData,
+  TileMatrix,
   VariantCallerName,
 } from "../api/types";
 import {
@@ -32,6 +33,7 @@ import {
   QualityChart,
 } from "./SequenceCharts";
 import { AdapterContentChart, DuplicationLevelsChart } from "./ContaminationCharts";
+import { TileQualityChart } from "./TileQualityChart";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { OrganismBlurb } from "./OrganismBlurb";
@@ -995,6 +997,31 @@ function QcTab({
   const isLongReadPlatform =
     obj.facts.qc_platform === "OXFORD_NANOPORE" || obj.facts.qc_platform === "PACBIO_SMRT";
 
+  // Fetched only when this tab is mounted (QcTab only exists in the tree
+  // while the QC tab is active) and the file actually has tiles. The matrix
+  // is far larger than the object document it's described by, so it must
+  // not ride along with the rest of the detail panel's own load.
+  const tileSource =
+    typeof obj.facts.qc_tile_source === "string" ? obj.facts.qc_tile_source : undefined;
+  const [tileMatrix, setTileMatrix] = useState<TileMatrix | null>(null);
+
+  useEffect(() => {
+    if (tileSource !== "present") {
+      setTileMatrix(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .qcTileMatrix(obj.id)
+      .then((m) => !cancelled && setTileMatrix(m))
+      // A missing or unreadable matrix renders nothing, the same as a file
+      // that never had tiles. It is an extra, not a promise.
+      .catch(() => !cancelled && setTileMatrix(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [obj.id, tileSource]);
+
   // Which tool produced these numbers. Sits under the tab as one line rather
   // than being repeated as a note on every group below it.
   const provenance = [
@@ -1036,7 +1063,8 @@ function QcTab({
         nCurve ||
         showChromStrip ||
         obj.facts.qc_adapter_content != null ||
-        obj.facts.qc_duplication_levels != null) && (
+        obj.facts.qc_duplication_levels != null ||
+        tileMatrix) && (
         <div className="qc-charts">
           {composition && (
             <div className="qc-chart">
@@ -1109,6 +1137,12 @@ function QcTab({
               for reads. Renders nothing when the file has no sequence facts,
               so a GFF sidecar keeps the single-column layout. */}
           {showChromStrip && <ChromosomeStrip facts={obj.facts} />}
+          {tileMatrix && (
+            <div className="qc-chart">
+              <div className="section-title">Quality per tile</div>
+              <TileQualityChart data={tileMatrix} />
+            </div>
+          )}
         </div>
       )}
 
