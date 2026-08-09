@@ -135,3 +135,90 @@ describe("readQuality", () => {
     expect(readQuality(pending as unknown as DataObject)).toBeNull();
   });
 });
+
+describe("N content", () => {
+  /** Clean everywhere except one collapsed cycle. */
+  const spike = [
+    { position: 1, percent: 0.01 },
+    { position: 2, percent: 0.01 },
+    { position: 3, percent: 38.0 },
+    { position: 4, percent: 0.01 },
+  ];
+
+  it("demotes for a single collapsed cycle", () => {
+    const q = readQuality(
+      fastq({ ...EXAMPLE_FACTS, qc_duplication_rate: 0.1, qc_n_per_position: spike }),
+    );
+    expect(q!.tier).toBe(4);
+    expect(q!.caveats.join(" ")).toContain("Cycle 3");
+  });
+
+  it("names the worst cycle, not the first one over the line", () => {
+    const q = readQuality(
+      fastq({
+        ...EXAMPLE_FACTS,
+        qc_duplication_rate: 0.1,
+        qc_n_per_position: [
+          { position: 1, percent: 8.0 },
+          { position: 2, percent: 41.0 },
+        ],
+      }),
+    );
+    expect(q!.caveats.join(" ")).toContain("Cycle 2");
+  });
+
+  it("does not demote for ordinary sub-threshold N", () => {
+    const q = readQuality(
+      fastq({
+        ...EXAMPLE_FACTS,
+        qc_duplication_rate: 0.1,
+        qc_n_per_position: [
+          { position: 1, percent: 0.4 },
+          { position: 2, percent: 0.9 },
+        ],
+      }),
+    );
+    expect(q!.tier).toBe(5);
+    expect(q!.caveats).toEqual([]);
+  });
+
+  it("supersedes the aggregate rule rather than stacking with it", () => {
+    /** A spike big enough to also push the whole-file N over 1%. Both rules
+     *  describe one defect, so the grade must drop once, not twice. */
+    const q = readQuality(
+      fastq({
+        ...EXAMPLE_FACTS,
+        qc_duplication_rate: 0.1,
+        base_composition: [
+          { base: "A", count: 100, percent: 30.0 },
+          { base: "C", count: 100, percent: 20.0 },
+          { base: "G", count: 100, percent: 20.0 },
+          { base: "T", count: 100, percent: 25.0 },
+          { base: "N", count: 100, percent: 5.0 },
+        ],
+        qc_n_per_position: spike,
+      }),
+    );
+    expect(q!.tier).toBe(4);
+    expect(q!.caveats).toHaveLength(1);
+    expect(q!.caveats[0]).toContain("Cycle 3");
+  });
+
+  it("still applies the aggregate rule when there is no per-cycle curve", () => {
+    /** fastp has not run, or the curve was all zeros and omitted. The
+     *  aggregate rule is the only evidence available and must still fire. */
+    const q = readQuality(
+      fastq({
+        ...EXAMPLE_FACTS,
+        qc_duplication_rate: 0.1,
+        base_composition: [
+          { base: "A", count: 100, percent: 45.0 },
+          { base: "T", count: 100, percent: 45.0 },
+          { base: "N", count: 100, percent: 10.0 },
+        ],
+      }),
+    );
+    expect(q!.tier).toBe(4);
+    expect(q!.caveats.join(" ")).toContain("10% ambiguous");
+  });
+});
