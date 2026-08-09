@@ -125,6 +125,16 @@ export interface Blob {
   last_verified_at: string | null;
 }
 
+/** What GC to expect for a file's reads, and what said so. Null when nothing
+ *  in the project or the genome table can say. */
+export interface ExpectedGc {
+  percent: number;
+  /** "reference" (measured from a project file) or "table" (published). */
+  source: string;
+  /** Shown beside the curve; always names its source. */
+  attribution: string;
+}
+
 export interface ObjectDetail extends DataObject {
   blob: Blob | null;
   /**
@@ -133,6 +143,10 @@ export interface ObjectDetail extends DataObject {
    * compute one -- in which case staleness is simply not claimed.
    */
   summary_fingerprint?: string | null;
+  /** What GC to expect, when anything can say. Null (not undefined) when the
+   *  backend resolver found nothing -- matches the Python API's optional
+   *  Pydantic field, which serializes an unset value as JSON null. */
+  expected_gc: ExpectedGc | null;
 }
 
 /** One completed run, as shown in an object's History tab. Every resource
