@@ -6,7 +6,9 @@ database seam exists; these cover the table and the resolution order.
 
 import pytest
 
+from app.models import ObjectRole
 from app.services import expected_gc
+from tests.services.helpers import make_object, make_project
 
 
 class TestGenomeTable:
@@ -157,10 +159,6 @@ class TestResolveOrder:
 
     def test_falls_through_to_nothing(self):
         assert expected_gc.resolve(references=[], organism=None) is None
-
-
-from app.models import ObjectRole
-from tests.services.helpers import make_object, make_project
 
 
 async def seed_reference(project, name, gc, role=ObjectRole.REFERENCE):

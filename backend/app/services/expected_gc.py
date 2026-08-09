@@ -24,6 +24,8 @@ fields exist to prevent.
 
 from dataclasses import dataclass
 
+from beanie import PydanticObjectId
+
 from app.models import DataObject, ObjectRole, normalize_organism
 from app.services import pipeline_service
 
@@ -197,7 +199,9 @@ def resolve(*, references, organism: str | None) -> ExpectedGc | None:
     return from_references(references) or from_organism(organism)
 
 
-async def references_for_project(*, project_id, owner) -> list:
+async def references_for_project(
+    *, project_id: PydanticObjectId, owner: str
+) -> list[DataObject]:
     """Reference-role objects in one project, for `resolve` to measure.
 
     Scoped by owner as well as project: this runs on a detail endpoint whose
