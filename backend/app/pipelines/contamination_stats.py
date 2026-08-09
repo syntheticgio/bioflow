@@ -251,23 +251,32 @@ class AdapterTracker:
         self.counts: dict[str, list[int]] = {
             name: [0] * max_positions for name, _ in probes
         }
+        # Per-position denominator: how many reads were long enough to reach
+        # each position. Mirrors `sequence_stats.py`'s `qual_n` -- dividing by
+        # a constant read count would treat positions a short read never
+        # reached as if it had been clean at them, understating contamination
+        # at high positions whenever read lengths vary.
+        self.reads_at_position: list[int] = [0] * max_positions
         self.reads = 0
         self.longest_read = 0
 
     def add(self, seq: str) -> None:
         self.reads += 1
-        self.longest_read = max(
-            self.longest_read, min(len(seq), self.max_positions)
-        )
+        length = min(len(seq), self.max_positions)
+        self.longest_read = max(self.longest_read, length)
+
+        for pos in range(length):
+            self.reads_at_position[pos] += 1
 
         for name, probe in self.probes:
             index = seq.find(probe)
-            if index < 0 or index >= self.max_positions:
+            if index < 0 or index >= length:
                 continue
             # Cumulative: a read that has entered adapter stays in adapter for
-            # the rest of its length.
+            # the rest of its length -- but only up to where the read itself
+            # ends, not past it.
             row = self.counts[name]
-            for pos in range(index, self.max_positions):
+            for pos in range(index, length):
                 row[pos] += 1
 
     def result(self) -> dict:
@@ -275,14 +284,17 @@ class AdapterTracker:
             return {}
 
         width = self.longest_read
+        denominators = self.reads_at_position[:width]
         return {
             "positions": list(range(1, width + 1)),
             "series": [
                 {
                     "name": name,
                     "values": [
-                        round(100.0 * c / self.reads, 4)
-                        for c in self.counts[name][:width]
+                        round(100.0 * c / denom, 4) if denom else 0.0
+                        for c, denom in zip(
+                            self.counts[name][:width], denominators
+                        )
                     ],
                 }
                 for name, _ in self.probes

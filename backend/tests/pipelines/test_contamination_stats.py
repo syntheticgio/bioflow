@@ -208,6 +208,9 @@ def test_adapter_tracker_marks_every_position_from_the_match_onward():
     counts = tracker.counts["Test"]
     assert counts[:5] == [0, 0, 0, 0, 0]
     assert all(c == 1 for c in counts[5:17])
+    # The read is 17bp long; positions past its own length must not be
+    # marked, even though max_positions=20 leaves room for them.
+    assert all(c == 0 for c in counts[17:20])
 
 
 def test_adapter_tracker_counts_only_the_earliest_match():
@@ -259,3 +262,15 @@ def test_adapter_tracker_truncates_positions_to_the_cap():
     tracker.add("T" * 200)
 
     assert len(tracker.result()["positions"]) == 5
+
+
+def test_adapter_tracker_does_not_fill_past_a_short_reads_own_length():
+    probes = [("Test", "ACGTACGTACGT")]
+    tracker = cs.AdapterTracker(probes, max_positions=50)
+    tracker.add("ACGTACGTACGT")          # 12bp, matches at 0
+    tracker.add("T" * 40)                 # 40bp, sets longest_read = 40
+
+    result = tracker.result()
+    values = result["series"][0]["values"]
+    # the 12bp read cannot have "entered adapter" at position 39
+    assert values[39] == pytest.approx(0.0)
