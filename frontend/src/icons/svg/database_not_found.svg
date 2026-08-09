@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Database not found"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 9.25) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 60a96 28 0 0 1 192 0"></path>
+  <path d="M32 128a96 28 0 0 1 192 0"></path>
+  <path d="M32 196a96 28 0 0 1 192 0" stroke-dasharray="18 15" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

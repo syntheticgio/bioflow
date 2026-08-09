@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Files (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <path d="M56 32h96l48 48v144H56Z" fill="currentColor" stroke="none"></path>
+  <path d="M152 32v48h48" stroke="var(--bio-knockout,#f3f2f2)"></path>
+  </g>
+</svg>

@@ -175,8 +175,12 @@ export function Header() {
             className="header-stats"
             title={`${data.counts.objects} files at ${data.storage.path}`}
           >
-            <span>{data.counts.objects} files</span>
-            <span>{data.counts.projects} projects</span>
+            <span>
+              {data.counts.objects} <BioIcon name="files" size={14} title="files" />
+            </span>
+            <span>
+              {data.counts.projects} <BioIcon name="projects" size={14} title="projects" />
+            </span>
             <span>{formatBytes(data.storage.library_bytes)} stored</span>
           </div>
         )}

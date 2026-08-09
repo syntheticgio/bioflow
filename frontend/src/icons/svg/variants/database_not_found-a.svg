@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Database not found (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M56 68a72 28 0 0 1 144 0a72 28 0 0 1-144 0" stroke-dasharray="20 16"></path>
+  <path d="M56 68v120a72 28 0 0 0 144 0V68" stroke-dasharray="20 16"></path>
+  </g>
+</svg>

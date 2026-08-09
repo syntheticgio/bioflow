@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Queued (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g fill="currentColor" stroke="none">
+  <circle cx="46" cy="128" r="18"></circle><circle cx="128" cy="128" r="18"></circle>
+  <circle cx="210" cy="128" r="18" fill="var(--bio-accent,#0088b0)"></circle>
+  </g>
+</svg>
