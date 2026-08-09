@@ -80,7 +80,7 @@ export function SettingsTools() {
   const sorted = [...tools.data.tools].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="settings-page">
+    <div className="settings-page settings-page-wide">
       <SettingsNav />
       <h1>Settings · Tools</h1>
       <p className="settings-hint">
@@ -88,13 +88,11 @@ export function SettingsTools() {
         as a separate container image the first time you install them.
       </p>
 
-      <table className="settings-table settings-tools-table">
-        <tbody>
-          {sorted.map((tool) => (
-            <ToolRow key={tool.name} tool={tool} job={jobByTool.get(tool.name)} />
-          ))}
-        </tbody>
-      </table>
+      <div className="settings-tools-grid">
+        {sorted.map((tool) => (
+          <ToolRow key={tool.name} tool={tool} job={jobByTool.get(tool.name)} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -137,15 +135,15 @@ function ToolRow({ tool, job }: { tool: PipelineTool; job: JobSummary | undefine
   };
 
   return (
-    <tr>
-      <th scope="row">
+    <div className="settings-tools-card">
+      <div className="settings-tools-card-info">
         <span className="settings-tools-name">{tool.name}</span>
         <span className="settings-tools-one-liner">{tool.one_liner}</span>
-      </th>
-      <td>
+      </div>
+      <div className="settings-tools-card-state">
         <ToolState tool={tool} job={job} />
-      </td>
-      <td className="settings-tools-action">
+      </div>
+      <div className="settings-tools-action">
         <ToolAction
           tool={tool}
           job={job}
@@ -155,8 +153,8 @@ function ToolRow({ tool, job }: { tool: PipelineTool; job: JobSummary | undefine
           onRetry={(id) => retry.mutate(id)}
           busy={install.isPending || uninstall.isPending}
         />
-      </td>
-    </tr>
+      </div>
+    </div>
   );
 }
 
