@@ -811,8 +811,14 @@ function ObjectDetail({ id }: { id: string }) {
 
         {tab === "history" && (
           <TabPanel id="history" idPrefix="obj">
-            <ComputationHistory objectId={obj.id} />
-            <ProvenanceNarrative key={obj.id} objectId={obj.id} />
+            {/* The runs table lives inside the narrative's left column: it
+                owns its own query, but the layout places it under the
+                lineage rather than beside it. */}
+            <ProvenanceNarrative
+              key={obj.id}
+              objectId={obj.id}
+              runs={<ComputationHistory objectId={obj.id} />}
+            />
           </TabPanel>
         )}
 
