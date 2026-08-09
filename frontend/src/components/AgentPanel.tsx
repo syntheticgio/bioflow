@@ -31,11 +31,38 @@ export function AgentPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resumed, setResumed] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   // Track the current streaming message content
   const streamingContentRef = useRef<string>("");
   const currentToolCallsRef = useRef<ToolCallInfo[]>([]);
+
+  // useAgentSSE wires this component's callbacks into whichever EventSource
+  // is live at the time; because onConnectionChange is a fresh closure each
+  // render, a callback firing asynchronously (agent_status arrives after a
+  // network round trip) can run against a closure captured at an earlier
+  // render than the one active when it fires. messagesRef always reflects
+  // the current messages, so onConnectionChange below reads live state
+  // instead of whatever `messages` looked like when its closure was made.
+  const messagesRef = useRef<Message[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // useAgentSSE reconnects its EventSource far more often than a real
+  // network drop would suggest -- effectively on every render, since its
+  // `connect` callback is rebuilt from fresh inline handlers each time (see
+  // useAgentSSE.ts). Every reconnect re-emits agent_status as its first
+  // event, so onConnectionChange's "did we land on a running agent with an
+  // empty local transcript" check would otherwise also fire right after we
+  // ourselves just cleared messages (New session), immediately relabeling a
+  // brand-new, empty conversation as "resumed". suppressResumedRef is set
+  // whenever we locally reset the conversation and cleared once messages
+  // are confirmed empty, so only a connection that finds messages already
+  // empty for a reason OTHER than our own reset -- i.e. a fresh page
+  // load/drawer reopen -- counts as a resume.
+  const suppressResumedRef = useRef(false);
 
   const { connected } = useAgentSSE({
     projectId,
@@ -106,6 +133,18 @@ export function AgentPanel({
         setError("Disconnected from agent. Click restart to reconnect.");
       } else {
         setError(null);
+        // Connected to an agent that was already running: it has a
+        // conversation we are not showing (scrollback is not restored --
+        // see issue #97), so say so rather than implying a blank agent.
+        // Read messagesRef rather than `messages` -- this callback can run
+        // against a closure from an earlier render than the current one.
+        // Skip it if we ourselves just cleared the conversation: the SSE
+        // hook reconnects aggressively (see comment on suppressResumedRef
+        // above), and the reconnect that follows New session/restart would
+        // otherwise see the empty transcript and relabel it as "resumed".
+        if (messagesRef.current.length === 0 && !suppressResumedRef.current) {
+          setResumed(true);
+        }
       }
     },
   });
@@ -126,6 +165,7 @@ export function AgentPanel({
       };
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setIsStreaming(true);
+      setResumed(false);
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
     },
@@ -148,8 +188,20 @@ export function AgentPanel({
       setMessages([]);
       setError(null);
       setIsStreaming(false);
+      setResumed(false);
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
+      // Deleting the session means any agent_status the SSE hook's next
+      // (near-immediate) reconnect reports is describing the fresh, empty
+      // session we just created, not an old one -- suppress relabeling it
+      // "resumed" for a few seconds while that reconnect settles. Unlike
+      // restart(), which keeps history server-side and should still say
+      // "resumed" once it reconnects, this is the one action that makes an
+      // empty transcript truly mean an empty conversation.
+      suppressResumedRef.current = true;
+      window.setTimeout(() => {
+        suppressResumedRef.current = false;
+      }, 3000);
     },
   });
 
@@ -207,8 +259,19 @@ export function AgentPanel({
         <div className="agent-drawer-body" ref={bodyRef}>
           {messages.length === 0 && !isStreaming ? (
             <div className="queue-empty">
-              Ask the AI agent about your project data. It can run QC, trim, align, and
-              assemble pipelines, inspect jobs, and answer questions about your files.
+              {resumed ? (
+                <>
+                  Resuming an earlier conversation — the agent still remembers it,
+                  but the messages above are not shown. Ask a follow-up, or start
+                  over with New session.
+                </>
+              ) : (
+                <>
+                  Ask the AI agent about your project data. It can run QC, trim, align,
+                  and assemble pipelines, inspect jobs, and answer questions about your
+                  files.
+                </>
+              )}
             </div>
           ) : (
             messages.map((msg) => (
