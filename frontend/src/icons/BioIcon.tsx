@@ -1557,6 +1557,142 @@ export const BIO_ICONS: Record<string, Glyph> = {
       </>
     ),
   },
+  connection_closed: {
+    label: "Connection closed",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <rect x="24" y="88" width="208" height="80" rx="40"></rect>
+        <circle cx="76" cy="128" r="18"></circle>
+        <path d="M52 172 204 84" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-17.45 -17.45) scale(1.1364)" strokeWidth={14.08}>
+        <circle cx="128" cy="128" r="22"></circle>
+        <path d="M76 92a56 56 0 0 0 0 72"></path><path d="M180 92a56 56 0 0 1 0 72"></path>
+        <path d="M40 216 216 40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <circle cx="128" cy="128" r="100"></circle>
+      </>
+    ),
+  },
+  database_not_found: {
+    label: "Database not found",
+    a: (
+      <>
+        <g transform="translate(-17.45 -17.45) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M56 68a72 28 0 0 1 144 0a72 28 0 0 1-144 0" strokeDasharray="20 16"></path>
+        <path d="M56 68v120a72 28 0 0 0 144 0V68" strokeDasharray="20 16"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-5.33 9.25) scale(1.0417)" strokeWidth={15.36}>
+        <path d="M32 60a96 28 0 0 1 192 0"></path>
+        <path d="M32 128a96 28 0 0 1 192 0"></path>
+        <path d="M32 196a96 28 0 0 1 192 0" strokeDasharray="18 15" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(-17.45 -26.5) scale(1.1364)" strokeWidth={14.08}>
+        <ellipse cx="128" cy="88" rx="88" ry="32" fill="currentColor" stroke="none"></ellipse>
+        <ellipse cx="128" cy="184" rx="88" ry="32" strokeDasharray="20 16"></ellipse>
+        </g>
+      </>
+    ),
+  },
+  reads_raw: {
+    label: "Reads (raw)",
+    a: (
+      <>
+        <g transform="translate(0.73 -56.09) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M24 108h176"></path><path d="M32 216v-40"></path><path d="M72 216v-56"></path><path d="M112 216v-48"></path><path d="M152 216v-64"></path><path d="M192 216v-32"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-17.45 -17.45) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M40 64h176"></path><path d="M40 128h112"></path><path d="M40 192h56"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 128h80"></path><path d="M152 128h80"></path>
+        </g>
+      </>
+    ),
+  },
+  reads_trimmed: {
+    label: "Reads (trimmed)",
+    a: (
+      <>
+        <g transform="translate(0.73 -56.09) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M24 108h176"></path><path d="M32 216v-56"></path><path d="M72 216v-56"></path><path d="M112 216v-56"></path><path d="M152 216v-56"></path><path d="M192 216v-56"></path>
+        <path d="M24 160h176" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(5.27 -17.45) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M40 64h136"></path><path d="M40 128h136"></path><path d="M40 192h136"></path>
+        <path d="M176 40v176" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 128h64"></path><path d="M140 128h64"></path>
+        <path d="M24 108v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 108v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+  },
+  user: {
+    label: "User",
+    a: (
+      <>
+        <g transform="translate(-11.13 -11.13) scale(1.0870)" strokeWidth={14.72}>
+        <circle cx="128" cy="128" r="92" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></circle>
+        <path d="M92 62c0 42 72 24 72 66s-72 24-72 66"></path>
+        <path d="M164 62c0 42-72 24-72 66s72 24 72 66"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-5.33 -5.33) scale(1.0417)" strokeWidth={15.36}>
+        <path d="M96 32c0 48 64 48 64 96s-64 48-64 96"></path>
+        <path d="M160 32c0 48-64 48-64 96s64 48 64 96"></path>
+        <path d="M104 76h48" stroke="var(--bio-accent,#0088b0)"></path><path d="M104 180h48" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(19.81 11.64) scale(0.9091)" strokeWidth={17.6}>
+        <path d="M96 36c0 46 64 46 64 92s-64 46-64 92"></path>
+        <g fill="var(--bio-accent,#0088b0)" stroke="none">
+        <circle cx="96" cy="36" r="18"></circle><circle cx="96" cy="220" r="18"></circle>
+        </g>
+        </g>
+      </>
+    ),
+  },
 };
 
 export type BioIconName = keyof typeof BIO_ICONS;
@@ -1612,6 +1748,18 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   projects: "b",
   files: "b",
   live: "b",
+  // Connection/storage status chrome, same reasoning as warning/succeeded
+  // above: these read as a badge next to text, not a card.
+  connection_closed: "b",
+  database_not_found: "b",
+  // Reads (raw) and Reads (trimmed) use the mark variant (`c`) per design
+  // review: the file-list row already carries the Raw/Trimmed toggle state
+  // in its label, so the icon only needs the fewest strokes that still read
+  // as "a pile of reads", not a full enclosure.
+  reads_raw: "c",
+  reads_trimmed: "c",
+  // user keeps the house default (`a`) -- explicitly chosen in review as the
+  // replacement for the 🧬 emoji beside the profile name.
 };
 
 /** The house default for every concept not named above. */
@@ -1725,6 +1873,7 @@ export function FileIcon({
   className = "",
   variant,
   size = 32,
+  readsStage,
 }: {
   formatKind: string;
   role?: string | null;
@@ -1732,10 +1881,22 @@ export function FileIcon({
   /** Omit to get the reviewed choice for the resolved concept. */
   variant?: BioIconVariant;
   size?: number;
+  /** When the resolved concept is "reads", swap in the raw/trimmed mark
+   *  instead -- lets the stage rail's Raw/Trimmed toggle carry into the row
+   *  icon, not just the label. Ignored for every other concept, since only
+   *  FASTQ has a raw/trimmed distinction to draw. */
+  readsStage?: "raw" | "trimmed";
 }) {
+  const concept = conceptFor(formatKind, role);
+  const name =
+    concept === "reads" && readsStage
+      ? readsStage === "trimmed"
+        ? "reads_trimmed"
+        : "reads_raw"
+      : concept;
   return (
     <BioIcon
-      name={conceptFor(formatKind, role)}
+      name={name}
       variant={variant}
       size={size}
       className={className}

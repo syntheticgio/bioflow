@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import mastheadImg from "../assets/broadhead-masthead.png";
+import { BioIcon } from "../icons/BioIcon";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
@@ -148,7 +149,7 @@ export function Header() {
           <Menu
             label={
               <>
-                {profile.display.emoji} {profile.username}
+                <BioIcon name="user" size={14} /> {profile.username}
                 {inboxCount > 0 && (
                   <span className="menu-badge" title={`${inboxCount} pending share offer(s)`}>
                     {inboxCount}

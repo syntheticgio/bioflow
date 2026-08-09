@@ -528,6 +528,7 @@ function FileRow({
   selected,
   inPair,
   readBadge,
+  readsStage,
   onSelect,
   onDelete,
 }: {
@@ -537,6 +538,10 @@ function FileRow({
   /** Read number badge to show, if any. Defaults to the object's own
    *  read_number so the plain list keeps its existing behaviour. */
   readBadge?: number | null;
+  /** Which version of a stage rail's FASTQ is on screen, so the row icon
+   *  matches the Raw/Trimmed toggle rather than always drawing the generic
+   *  reads mark. Omitted outside the stage rail. */
+  readsStage?: "raw" | "trimmed";
   onSelect: () => void;
   onDelete: () => void;
 }) {
@@ -555,7 +560,12 @@ function FileRow({
       {/* The grade rides the icon's corner; the word stays in the metadata
           line below, so the tier never depends on reading the mark alone. */}
       <span className="row-icon">
-        <FileIcon formatKind={object.format.kind} role={object.role} size={30} />
+        <FileIcon
+          formatKind={object.format.kind}
+          role={object.role}
+          size={30}
+          readsStage={readsStage}
+        />
         {quality && <QualityBadge quality={quality} />}
       </span>
       <div className="row-main">
@@ -686,6 +696,7 @@ function StageRailCard({
           selected={sel === `object:${o.id}`}
           inPair={entry.paired}
           readBadge={entry.raw[i].read_number}
+          readsStage={stage}
           onSelect={() => onSelect(`object:${o.id}`)}
           onDelete={() => onDelete(o.id, o.name)}
         />
