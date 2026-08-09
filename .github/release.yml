@@ -9,8 +9,8 @@
 #
 # The practical consequence, and the reason this comment exists: labelling a
 # merged PR is what puts it in the right section. The title still carries the
-# `feat:`/`fix:` prefix for the humans reading it and for any future
-# commit-driven generator (#106), but it does no work here.
+# `feat:`/`fix:` prefix for the humans reading it and for the commit-driven
+# `CHANGELOG.md` generator in ops/release.sh (#106), but it does no work here.
 # Every label name here is quoted. Unquoted, a name containing a colon --
 # which every label in this repo has -- is parsed by YAML as a nested mapping
 # (`status: unnecessary` becomes {status: unnecessary}, not the string
