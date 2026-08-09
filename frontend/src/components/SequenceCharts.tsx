@@ -367,9 +367,17 @@ export function LengthDistributionChart({
   const binWidth =
     buckets.length > 1 ? buckets[1].length_bin - buckets[0].length_bin : undefined;
 
+  // Order-of-magnitude ticks can all fall outside a narrow sample (e.g. every
+  // read under 100bp) -- fall back to the data's own range so the axis is
+  // never left unlabelled.
+  const logTicks = [100, 1_000, 10_000, 100_000].filter((t) => t >= minLen && t <= maxLen);
   const ticks = logScale
-    ? [100, 1_000, 10_000, 100_000].filter((t) => t >= minLen && t <= maxLen)
-    : [minLen, Math.round((minLen + maxLen) / 2), maxLen];
+    ? logTicks.length
+      ? logTicks
+      : Array.from(new Set([minLen, maxLen]))
+    : // A single-length sample would otherwise repeat minLen three times,
+      // which both looks redundant and gives React duplicate keys below.
+      Array.from(new Set([minLen, Math.round((minLen + maxLen) / 2), maxLen]));
 
   return (
     <div>
