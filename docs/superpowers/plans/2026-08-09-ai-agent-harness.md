@@ -821,14 +821,45 @@ Files: `backend/app/models/conversation.py`, `backend/app/api/v1/agent.py`,
 `tests/api/test_agent.py` (including SSE-driven assistant-turn persistence)
 and 4 new model tests in `tests/models/test_conversation.py`.
 
-### Custom system prompts [#98](https://github.com/syntheticgio/bioflow/issues/98)
+### Custom system prompts [#98](https://github.com/syntheticgio/bioflow/issues/98) — FIXED
 
 The agent uses a hardcoded system prompt with just the project name. Allow users
 to customize the system prompt per project, with options to replace or augment
 the default project-awareness prompt.
 
-### Multi-turn refinement [#99](https://github.com/syntheticgio/bioflow/issues/99)
+**Shipped (2026-08-09):** `Project.agent_system_prompt` (a free-text column, set
+via `PATCH /projects/{id}/update`) is appended to a fixed infrastructure
+grounding block (`You are a bioinformatics coding agent inside BioFlow…`) at
+spawn time, so it augments rather than replaces tool awareness. The drawer shows
+an ⚙️ button that opens an inline editor; saving POSTs the field and then
+restarts the agent via `POST /agent/restart` so the new prompt takes effect (the
+prompt is baked into the pi process at spawn time, so there is no live-reload
+path for it).
+
+Files: `backend/app/models/project.py` (`agent_system_prompt` column), `backend/api/
+v1/projects.py` (PATCH handler), `frontend/src/components/AgentPanel.tsx` (prompt
+editor), `frontend/src/api/types.ts` (`*Project.agent_system_prompt`).
+
+### Multi-turn refinement [#99](https://github.com/syntheticgio/bioflow/issues/99) — FIXED
 
 The agent handles each prompt as a single-turn interaction. Add the ability for
 the agent to maintain context across multiple turns in a session, enabling
 follow-up questions and refinements without starting fresh each time.
+
+**Shipped (2026-08-09):** pi's native `--session-file` flag provides multi-turn
+continuity: the `AgentService` now passes a session file path keyed by
+`(profile, project_id)` when spawning pi, so pi itself reads and appends the
+conversation history between asks. The SSE stream preserves its re-attaching
+behavior across pi process restarts, so a stopped or crashed agent reconnects
+seamlessly when the user sends a follow-up. A `POST /projects/{id}/agent/new-
+session` endpoint stops the process and deletes the session file, giving users
+an explicit "New session" button (with confirmation dialog) when they want a
+black slate. The frontend `AgentPanel` shows a "Resuming an earlier conversation"
+message when the stream reports an already-running agent, and the `newSession`
+mutation clears both the pi session file and the `ProjectConversation` transcript
+(issue #97's MongoDB storage) so a new session truly starts fresh on both sides.
+
+Files: `backend/app/services/agent_service.py` (`new_session`,
+`session_id_for`, session-file path in spawn config), `backend/app/api/v1/agent.py`
+(`post /new-session`), `frontend/src/components/AgentPanel.tsx` (`newSession`
+mutation, resume detection via `onAgentStatus`).
