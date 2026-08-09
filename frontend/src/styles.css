@@ -5087,56 +5087,107 @@ table.software-matrix thead th.software-matrix-corner {
   border-bottom-color: var(--accent);
 }
 
-/* Settings > Tools grid. Was a <table>, but table rows can't reflow into
-   columns -- each tool is now a self-contained card so the grid can pack
-   2-3 per row on wide viewports and fall back to 1 on narrow ones. */
-.settings-tools-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 0;
-  border-top: 1px solid var(--border);
+/* Settings > Tools, grouped by pipeline step.
+ *
+ * Two layers of layout, and they solve different problems. The outer masonry
+ * column flow packs the seven groups into two columns on a wide viewport --
+ * `columns` rather than a grid because the groups are wildly uneven (Assembly
+ * has seven tools, Expression two) and a grid would leave a tall column of
+ * whitespace beside the short ones. Inside a group, each row is its own
+ * subgrid-free `grid` so the version and action columns line up per group;
+ * they deliberately do not line up *across* groups, since the two columns are
+ * independent lists that happen to sit side by side.
+ *
+ * Was a card grid before this, and before that a <table>. The card grid put a
+ * border box around every tool, which reads as 30-odd separate objects; the
+ * groups are what the page is actually organised by, so they get the visual
+ * weight (a heading and a rule) and the rows inside them get none. */
+.settings-tools-groups {
+  columns: 2;
+  column-gap: 48px;
+  margin-top: 20px;
 }
 
-.settings-tools-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 12px;
+@media (max-width: 900px) {
+  .settings-tools-groups {
+    columns: 1;
+  }
+}
+
+.settings-tools-group {
+  /* Keeps a group's heading welded to its rows -- a heading stranded at the
+     foot of the left column is worse than an uneven column break. */
+  break-inside: avoid;
+  margin-bottom: 28px;
+  /* The group, not the row, owns the column tracks: `auto` on a per-row grid
+     sizes each row independently, so every tool's one-liner started at a
+     different x and the group read as ragged. Declaring the grid here and
+     letting rows contribute their cells via `display: contents` makes the
+     name column as wide as the longest name *in this group*, which is what
+     puts the one-liners on a common left edge. */
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+/* Spans every column so the heading sits above the tracks rather than in the
+   first one. */
+.settings-tools-group-heading {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 4px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+}
+
+/* Contributes its four cells to the group's grid rather than forming a grid of
+   its own -- see .settings-tools-group. The cost of `contents` is that the row
+   element itself can carry no padding or background; the per-cell padding
+   below is what replaces it. */
+.settings-tools-row {
+  display: contents;
   font-size: 13px;
 }
 
-.settings-tools-card-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.settings-tools-card-state {
-  flex: 1;
-  min-width: 0;
-  text-align: right;
-  padding-top: 1px;
+.settings-tools-row > * {
+  padding: 5px 0;
 }
 
 .settings-tools-name {
-  display: block;
   color: var(--text);
-  font-weight: 500;
+  font-weight: 600;
 }
 
+/* One line, clipped rather than wrapped. A wrapped one-liner makes its row
+   two lines tall and pushes the name out of vertical alignment with its own
+   version, which reads as a broken row rather than as a long description --
+   and the group's widest version (deepvariant's
+   `deepvariant-arm64:v1.9.0-arm64.6`) narrows this track for every sibling,
+   so the wrapping lands on rows that have nothing long about them. The full
+   text stays reachable on hover, and /help/software carries it untruncated. */
 .settings-tools-one-liner {
-  display: block;
-  color: var(--text-faint);
-  font-size: 11px;
-  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tools-card-state {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .settings-tools-state {
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-tools-state-failed {
@@ -5144,9 +5195,33 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 .settings-tools-action {
-  flex-shrink: 0;
   text-align: right;
   white-space: nowrap;
+}
+
+/* Both actions are plain text in an accent colour, not filled buttons -- see
+   ToolAction in SettingsTools.tsx for why. */
+.settings-tools-install,
+.settings-tools-uninstall {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-tools-install {
+  color: var(--accent);
+}
+
+.settings-tools-uninstall {
+  color: var(--error);
+}
+
+.settings-tools-install:disabled,
+.settings-tools-uninstall:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .settings-security-note {
