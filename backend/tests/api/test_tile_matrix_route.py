@@ -22,6 +22,8 @@ OBJECT_ID = "507f1f77bcf86cd799439011"
 OTHER_ID = "507f191e810c19729de860ea"
 UNKNOWN_ID = "5f1f1f1f1f1f1f1f1f1f1f1f"
 
+MATRIX_PAYLOAD = {"tiles": [1101, 1102], "positions": 2, "matrix": [[40.0, 39.0], [30.0, 29.0]]}
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -29,9 +31,7 @@ def client(tmp_path, monkeypatch):
 
     reports = tmp_path / "qc_reports"
     (reports / OBJECT_ID).mkdir(parents=True)
-    (reports / OBJECT_ID / "tile_quality.json").write_text(
-        json.dumps({"tiles": [1101, 1102], "positions": 2, "matrix": [[40.0, 39.0], [30.0, 29.0]]})
-    )
+    (reports / OBJECT_ID / "tile_quality.json").write_text(json.dumps(MATRIX_PAYLOAD))
 
     stub_get_object(monkeypatch, pipelines_api, known={OBJECT_ID, OTHER_ID})
 
@@ -43,9 +43,12 @@ def client(tmp_path, monkeypatch):
 
 
 def test_returns_the_matrix(client):
+    # Full round-trip against the fixture's exact payload, not just one key --
+    # a regression that dropped or mangled `matrix`/`positions` would pass a
+    # narrower "tiles looks right" assertion.
     res = client.get(f"/pipelines/qc/tiles/{OBJECT_ID}")
     assert res.status_code == 200
-    assert res.json()["tiles"] == [1101, 1102]
+    assert res.json() == MATRIX_PAYLOAD
 
 
 def test_missing_matrix_is_a_404(client, tmp_path):
