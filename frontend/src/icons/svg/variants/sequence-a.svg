@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Sequence (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 40h192v176H32Z"></path>
+  <path d="M60 88h136" stroke-dasharray="18 14" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M60 128h136" stroke-dasharray="18 14"></path>
+  <path d="M60 168h96" stroke-dasharray="18 14"></path>
+  </g>
+</svg>

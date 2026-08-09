@@ -147,7 +147,6 @@ export function ProfilePicker() {
                   onClick={() => click(p)}
                   disabled={busy}
                 >
-                  <span className="picker-emoji">{p.display.emoji}</span>
                   <span className="picker-name">{p.username}</span>
                   {p.has_password && <span className="picker-lock">🔒</span>}
                 </button>

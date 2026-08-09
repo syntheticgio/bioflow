@@ -41,7 +41,6 @@ function InboxRow({ share }: { share: Share }) {
   return (
     <div className="share-row">
       <div className="share-row-main">
-        <span title={share.from_profile.username}>{share.from_profile.emoji}</span>
         <strong>{share.from_profile.username}</strong>
         <span>wants to share</span>
         <strong>{share.name}</strong>
@@ -96,7 +95,6 @@ function OutboxRow({ share }: { share: Share }) {
   return (
     <div className="share-row">
       <div className="share-row-main">
-        <span title={share.to_profile.username}>{share.to_profile.emoji}</span>
         <strong>{share.to_profile.username}</strong>
         <strong>{share.name}</strong>
         <span className={`share-state share-state-${share.state}`}>{share.state}</span>

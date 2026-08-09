@@ -200,6 +200,38 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* Recent-projects shortcuts: same quiet weight as header-stats and
+   load-indicator, with a leading rule to set the block apart, matching how
+   the three status-strip groups read as one line but distinct clusters. */
+.recent-projects {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
+.recent-projects-label {
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+
+.recent-projects-chip {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.recent-projects-chip:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 /* ---------- Main split ---------- */
 .main {
   display: grid;
@@ -356,12 +388,26 @@ textarea:focus {
 }
 
 .row-icon {
-  /* Positioning context so the quality badge dot can sit on its corner. */
+  /* Positioning context so the quality badge can sit on its corner. */
   position: relative;
   flex-shrink: 0;
-  width: 40px;
-  text-align: center;
+  /* Shrink-wraps the glyph so the badge's corner offsets land on the ink
+     rather than on the dead space a fixed 40px column left around it. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-dim);
+}
+
+/* The glyph reads as one weight with the row's text rather than competing
+   with it; selection and hover promote it along with the name. */
+.row-icon svg {
+  color: var(--text-dim);
+}
+
+.row.selected .row-icon svg,
+.row:hover .row-icon svg {
+  color: var(--text);
 }
 
 .row-main {
@@ -370,17 +416,20 @@ textarea:focus {
 }
 
 .row-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 
 .row-sub {
   font-size: 11px;
   color: var(--text-faint);
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin-top: 1px;
+}
+
+.row-sub > span {
+  white-space: nowrap;
 }
 
 /* ---------- Paired-end reads ---------- */
@@ -434,16 +483,6 @@ textarea:focus {
   background: var(--bg-hover);
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
-}
-
-/* Inside a pair the badge leads the row instead of trailing the metadata, so
-   it needs to hold a column and not be squeezed by a long filename. */
-.row-in-pair > .read-badge {
-  flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 1px;
-  min-width: 22px;
-  text-align: center;
 }
 
 .row-action {
@@ -1457,10 +1496,23 @@ a.btn {
 /* A button, not a link: it toggles the queue panel rather than navigating.
    Font and colour are set explicitly because a button inherits neither. */
 .footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-dim);
   text-decoration: none;
   padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "N ⌷ · M 🗎": counts followed by their icon rather than a word, so the
+   glyph reads as a unit symbol. Not a button -- there is nothing to toggle
+   here, unlike the queue/ask/agent links beside it. */
+.footer-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2519,45 +2571,60 @@ a.btn {
 
 /* Read quality badge -------------------------------------------------- */
 
+/* The tier as a set numeral rather than a colored dot.
+   The traffic-light ramp was the one place the app reached for colors the
+   design system does not own, and it carried the grade in hue alone -- so it
+   said nothing in greyscale and little at 9px. The figure states the tier
+   outright; color is now emphasis, not the message. */
 .q-badge {
   position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  /* Against the row background, so the dot reads as separate from the glyph
-     rather than merging with it on hover. */
-  box-shadow: 0 0 0 1.5px var(--bg-panel);
+  /* Clear of the glyph's own box rather than overlapping its corner: with the
+     denominator back, "3/5" set at a legible size is close to as wide as a
+     30px icon, and a badge that size covering the corner buried the artwork
+     under it (measured at 18px on a 24px icon). Floating just outside the
+     bottom-right, as in the design review's standalone mark, keeps both
+     readable. */
+  right: -6px;
+  bottom: -7px;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-family: var(--font-heading, Georgia, serif);
+  font-variant-numeric: lining-nums tabular-nums;
+  line-height: 1;
+  /* The row's own background, so the mark reads as sitting on the row rather
+     than punching a hole in it -- there is no glyph ink behind it to hide. */
+  background: var(--bg-panel);
 }
 
 .row.selected .q-badge,
 .row:hover .q-badge {
-  box-shadow: 0 0 0 1.5px var(--bg-hover);
+  background: var(--bg-hover);
 }
 
-/* Green -> amber -> red. Existing theme vars, so light mode tracks. */
-.q-badge-5 {
-  background: var(--success);
+.q-badge-tier {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
 }
 
-/* Tier 4 is still good; dimmed rather than a different hue. */
-.q-badge-4 {
-  background: var(--success);
-  opacity: 0.65;
+/* 5/4/3 are still usable data; 2/1 are a real problem. Binary rather than a
+   five-step ramp, matching readQuality's own tier words -- "Fair" (3) is the
+   last tier this app calls usable, so it gets the "fine" color. */
+.q-badge-low .q-badge-tier {
+  color: var(--error);
 }
 
-.q-badge-3 {
-  background: var(--warn);
+/* Carried smaller and dimmer: the denominator is a unit, not the reading. */
+.q-badge-of {
+  font-size: 9px;
+  color: var(--text-dim);
 }
 
-/* Deepened rather than a new hue: still "caution", further along. */
-.q-badge-2 {
-  background: color-mix(in srgb, var(--warn) 75%, var(--error));
-}
-
-.q-badge-1 {
-  background: var(--error);
+.q-badge-low .q-badge-of {
+  color: color-mix(in srgb, var(--error) 55%, var(--text-dim));
 }
 
 /* Outstanding-work badge ------------------------------------------------ */
@@ -5055,56 +5122,107 @@ table.software-matrix thead th.software-matrix-corner {
   border-bottom-color: var(--accent);
 }
 
-/* Settings > Tools grid. Was a <table>, but table rows can't reflow into
-   columns -- each tool is now a self-contained card so the grid can pack
-   2-3 per row on wide viewports and fall back to 1 on narrow ones. */
-.settings-tools-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 0;
-  border-top: 1px solid var(--border);
+/* Settings > Tools, grouped by pipeline step.
+ *
+ * Two layers of layout, and they solve different problems. The outer masonry
+ * column flow packs the seven groups into two columns on a wide viewport --
+ * `columns` rather than a grid because the groups are wildly uneven (Assembly
+ * has seven tools, Expression two) and a grid would leave a tall column of
+ * whitespace beside the short ones. Inside a group, each row is its own
+ * subgrid-free `grid` so the version and action columns line up per group;
+ * they deliberately do not line up *across* groups, since the two columns are
+ * independent lists that happen to sit side by side.
+ *
+ * Was a card grid before this, and before that a <table>. The card grid put a
+ * border box around every tool, which reads as 30-odd separate objects; the
+ * groups are what the page is actually organised by, so they get the visual
+ * weight (a heading and a rule) and the rows inside them get none. */
+.settings-tools-groups {
+  columns: 2;
+  column-gap: 48px;
+  margin-top: 20px;
 }
 
-.settings-tools-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 12px;
+@media (max-width: 900px) {
+  .settings-tools-groups {
+    columns: 1;
+  }
+}
+
+.settings-tools-group {
+  /* Keeps a group's heading welded to its rows -- a heading stranded at the
+     foot of the left column is worse than an uneven column break. */
+  break-inside: avoid;
+  margin-bottom: 28px;
+  /* The group, not the row, owns the column tracks: `auto` on a per-row grid
+     sizes each row independently, so every tool's one-liner started at a
+     different x and the group read as ragged. Declaring the grid here and
+     letting rows contribute their cells via `display: contents` makes the
+     name column as wide as the longest name *in this group*, which is what
+     puts the one-liners on a common left edge. */
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: baseline;
+  gap: 0 10px;
+}
+
+/* Spans every column so the heading sits above the tracks rather than in the
+   first one. */
+.settings-tools-group-heading {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 4px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+}
+
+/* Contributes its four cells to the group's grid rather than forming a grid of
+   its own -- see .settings-tools-group. The cost of `contents` is that the row
+   element itself can carry no padding or background; the per-cell padding
+   below is what replaces it. */
+.settings-tools-row {
+  display: contents;
   font-size: 13px;
 }
 
-.settings-tools-card-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.settings-tools-card-state {
-  flex: 1;
-  min-width: 0;
-  text-align: right;
-  padding-top: 1px;
+.settings-tools-row > * {
+  padding: 5px 0;
 }
 
 .settings-tools-name {
-  display: block;
   color: var(--text);
-  font-weight: 500;
+  font-weight: 600;
 }
 
+/* One line, clipped rather than wrapped. A wrapped one-liner makes its row
+   two lines tall and pushes the name out of vertical alignment with its own
+   version, which reads as a broken row rather than as a long description --
+   and the group's widest version (deepvariant's
+   `deepvariant-arm64:v1.9.0-arm64.6`) narrows this track for every sibling,
+   so the wrapping lands on rows that have nothing long about them. The full
+   text stays reachable on hover, and /help/software carries it untruncated. */
 .settings-tools-one-liner {
-  display: block;
-  color: var(--text-faint);
-  font-size: 11px;
-  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-tools-card-state {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .settings-tools-state {
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-tools-state-failed {
@@ -5112,9 +5230,33 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 .settings-tools-action {
-  flex-shrink: 0;
   text-align: right;
   white-space: nowrap;
+}
+
+/* Both actions are plain text in an accent colour, not filled buttons -- see
+   ToolAction in SettingsTools.tsx for why. */
+.settings-tools-install,
+.settings-tools-uninstall {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.settings-tools-install {
+  color: var(--accent);
+}
+
+.settings-tools-uninstall {
+  color: var(--error);
+}
+
+.settings-tools-install:disabled,
+.settings-tools-uninstall:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .settings-security-note {

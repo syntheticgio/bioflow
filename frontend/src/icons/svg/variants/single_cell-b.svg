@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Single cell (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-27.81 -32.47) scale(1.1628)" stroke-width="13.76">
+  <g fill="currentColor" stroke="none">
+  <circle cx="72" cy="80" r="16"></circle><circle cx="112" cy="112" r="16"></circle><circle cx="64" cy="132" r="16"></circle>
+  <circle cx="180" cy="164" r="16"></circle><circle cx="204" cy="120" r="16"></circle><circle cx="148" cy="196" r="16"></circle>
+  </g>
+  </g>
+</svg>

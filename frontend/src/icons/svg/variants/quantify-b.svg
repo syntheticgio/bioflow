@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Quantify (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -22) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 192h192" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M64 192v-48"></path><path d="M128 192v-96"></path><path d="M192 192v-64"></path>
+  </g>
+</svg>

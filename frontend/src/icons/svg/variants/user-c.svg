@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="User (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(19.81 11.64) scale(0.9091)" stroke-width="17.6">
+  <path d="M96 36c0 46 64 46 64 92s-64 46-64 92"></path>
+  <g fill="var(--bio-accent,#0088b0)" stroke="none">
+  <circle cx="96" cy="36" r="18"></circle><circle cx="96" cy="220" r="18"></circle>
+  </g>
+  </g>
+</svg>

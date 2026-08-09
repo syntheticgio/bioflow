@@ -157,8 +157,3 @@ export function readQuality(obj: DataObject): ReadQuality | null {
 
   return { tier, word, basis, caveats, tooltip: lines.join("\n") };
 }
-
-/** Tier -> CSS class for the badge. Colors live in styles.css. */
-export function qualityClass(tier: 1 | 2 | 3 | 4 | 5): string {
-  return `q-badge q-badge-${tier}`;
-}

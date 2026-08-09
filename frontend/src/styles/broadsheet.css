@@ -337,6 +337,42 @@
   color: var(--ink-55);
 }
 
+/* Recent-projects joins the status strip's uppercase/middot convention;
+   the leading vertical bar is the same divider device used elsewhere in
+   the design between the stats block and this one. */
+.theme-broadsheet .recent-projects {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--ink-55);
+}
+
+.theme-broadsheet .recent-projects-chip {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+  font-style: italic;
+}
+
+.theme-broadsheet .recent-projects-chip:hover {
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .recent-projects > span + a::before,
+.theme-broadsheet .recent-projects > a + a::before {
+  content: "·";
+  margin-right: var(--space-2);
+  color: var(--ink-55);
+}
+
 /* The status dot is the one child that is a mark, not a word -- it takes no
    separator and sits tight against the state it belongs to. */
 .theme-broadsheet .load-indicator > .dot + span::before {
@@ -538,11 +574,31 @@
   color: var(--ink-62);
 }
 
-/* Still used by the project rows' folder glyph; file rows no longer carry an
-   icon at all. */
+/* Project rows and file rows both carry a drawn glyph again (BioIcon).
+   No width: the base rule shrink-wraps the icon so the quality badge's
+   corner offsets land on the ink rather than on empty column. */
 .theme-broadsheet .row-icon {
-  width: 28px;
   color: var(--ink-62);
+}
+
+.theme-broadsheet .row-icon svg {
+  color: var(--ink-62);
+}
+
+/* --bg-hover is a translucent mix here, so the badge cannot simply inherit
+   it -- against the paper texture a translucent backing reads as washed out.
+   These flatten the same mix against the page so the badge stays opaque. */
+.theme-broadsheet .row:hover .q-badge {
+  background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
+}
+
+.theme-broadsheet .row.selected .q-badge {
+  background: var(--bg-elevated, var(--color-bg));
+}
+
+.theme-broadsheet .row.selected .row-icon svg,
+.theme-broadsheet .row:hover .row-icon svg {
+  color: var(--color-text);
 }
 
 /* The explorer reuses .detail-title for the project name in its header. The
@@ -577,7 +633,7 @@
 
 /* The read number is the pair's own mark, so it takes the accent that the
    label does -- the two read as one piece of structure. */
-.theme-broadsheet .row-in-pair > .read-badge {
+.theme-broadsheet .row-in-pair .read-badge {
   background: none;
   padding: 0;
   font-family: var(--font-heading);
@@ -755,6 +811,11 @@
 
 .theme-broadsheet .detail {
   padding: 0;
+  /* Named so descendants can size against this pane rather than the viewport.
+     The two differ here: the pane is behind a draggable splitter, so a media
+     query would keep a two-column layout while the pane itself was dragged
+     too narrow to hold one. The History tab's rail is the current caller. */
+  container: detail-pane / inline-size;
 }
 
 /* The subject of the page gets the display treatment -- the mockup's
@@ -1790,4 +1851,153 @@
 .theme-broadsheet .md-code {
   background: var(--color-neutral-200);
   border-radius: var(--radius-sm);
+}
+
+/* ── History tab ────────────────────────────────────────────────────────── */
+
+/* The lineage and runs table on the left, the methods paragraph and the
+   "Not recorded" rail on the right.
+
+   The rail is a fixed 380px so the lineage keeps the rest -- `auto-fit` with
+   a minmax floor (what .detail-columns uses) would split the width evenly
+   instead, giving a 380px rail 525px and squeezing the lineage rows that
+   actually need the room.
+
+   A fixed track cannot collapse on its own, so the single-column fallback
+   comes from a container query rather than a media query: this pane sits
+   behind a draggable splitter, so its width and the viewport's are different
+   numbers, and only the pane's own width says whether two columns fit.
+   `.detail` below declares the containment this queries. */
+.theme-broadsheet .history-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  gap: var(--space-8);
+  align-items: start;
+}
+
+@container detail-pane (max-width: 780px) {
+  .theme-broadsheet .history-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.theme-broadsheet .history-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.theme-broadsheet .history-head .section-title {
+  margin-bottom: 0;
+}
+
+/* Numbered lineage rows: the index in its own column so the names align
+   whatever the step count reaches. */
+.theme-broadsheet .lineage-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--space-4);
+}
+
+.theme-broadsheet .lineage-index {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--ink-55);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-divider);
+}
+
+.theme-broadsheet .lineage-body {
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--color-divider);
+  min-width: 0;
+}
+
+.theme-broadsheet .lineage-name {
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.theme-broadsheet .lineage-desc {
+  font-size: 14px;
+  color: var(--ink-70);
+  margin-top: 2px;
+}
+
+/* A missing fact is stated where the fact would have been, in the one ink
+   this theme reserves for "look here". */
+.theme-broadsheet .lineage-gap {
+  color: var(--color-accent-2-700);
+}
+
+.theme-broadsheet .lineage-used-by {
+  color: var(--ink-55);
+}
+
+.theme-broadsheet .lineage-params {
+  font-size: 12.5px;
+  color: var(--ink-62);
+  margin-top: 4px;
+  line-height: 1.5;
+  max-width: 64ch;
+  overflow-wrap: anywhere;
+}
+
+/* The timestamp is one fact and reads as one line. Left to wrap it breaks
+   into four ("Aug 7," / "2026," / "02:43:31" / "PM"), which turns every row
+   into a four-line block and buries the four numbers the table exists to
+   show. Nothing else in the row is long enough to need the width back. */
+.theme-broadsheet .runs-table td:first-child,
+.theme-broadsheet .runs-table th:first-child {
+  white-space: nowrap;
+}
+
+.theme-broadsheet .runs-footer {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+}
+
+.theme-broadsheet .runs-footer .section-note {
+  margin-bottom: 0;
+}
+
+/* The paragraph slot before it has been generated: an invitation with the
+   reason it may read poorly, rather than an empty box. */
+.theme-broadsheet .prose-invite {
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-sm);
+  padding: var(--space-5);
+}
+
+.theme-broadsheet .prose-invite-body {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-70);
+  font-style: italic;
+  text-wrap: pretty;
+  margin-bottom: var(--space-4);
+}
+
+/* The rail's rule is the one place the accent-2 ink appears as a bar: it is
+   what makes "Not recorded" read as a list of things to fix rather than
+   another metadata block. */
+.theme-broadsheet .gap-rail {
+  border-top: 2px solid var(--color-accent-2-700);
+  padding-top: var(--space-3);
+}
+
+.theme-broadsheet .gap-rail > div {
+  font-size: 14px;
+  line-height: 1.5;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.theme-broadsheet .gap-rail > div:last-child {
+  border-bottom: 0;
 }

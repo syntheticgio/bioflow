@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Activity"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-18.15 -12.66) scale(1.0989)" stroke-width="14.56">
+  <path d="M96 72h128"></path><path d="M96 128h96"></path><path d="M96 184h64"></path>
+  <circle cx="56" cy="72" r="14" fill="var(--bio-accent,#0088b0)" stroke="none"></circle>
+  <circle cx="56" cy="128" r="14" fill="currentColor" fill-opacity="0.35" stroke="none"></circle>
+  <circle cx="56" cy="184" r="14" fill="currentColor" fill-opacity="0.35" stroke="none"></circle>
+  </g>
+</svg>

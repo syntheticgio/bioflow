@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Connection closed (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 4.92) scale(0.9615)" stroke-width="16.64">
+  <rect x="24" y="88" width="208" height="80" rx="40"></rect>
+  <circle cx="76" cy="128" r="18"></circle>
+  <path d="M52 172 204 84" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

@@ -39,8 +39,9 @@ export function ContigTable({
       >
         <span>Per-contig coverage</span>
         <a
+          className="btn-text"
           href={api.bamStatsDownloadUrl(objectId, reportPath)}
-          style={{ marginLeft: "auto", fontSize: 11 }}
+          style={{ marginLeft: "auto" }}
         >
           Download TSV
         </a>

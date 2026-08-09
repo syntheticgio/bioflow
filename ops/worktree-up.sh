@@ -29,8 +29,10 @@
 #         ./ops/worktree-up.sh --reseed    # re-copy the main stack's database
 #         ./ops/worktree-up.sh --down      # stop it and delete its volumes
 #
-# Ports default to 5273 (web) and 8100 (api); override with WT_WEB_PORT and
-# WT_API_PORT if you want two worktree stacks at once.
+# Ports are chosen per worktree: derived from the branch name so a given
+# worktree keeps the same URL run to run, then probed upward for a free pair so
+# concurrent stacks never collide. The script prints the ones it picked. Set
+# WT_WEB_PORT/WT_API_PORT to pin specific ones.
 set -euo pipefail
 
 MAIN_PROJECT="biopipe"
@@ -90,8 +92,80 @@ export COMPOSE_PROJECT_NAME="$PROJECT"
 # main checkout's .env pins BIOFLOW_TAG.
 export BIOFLOW_TAG="wt-${SLUG}"
 
-export WT_WEB_PORT="${WT_WEB_PORT:-5273}"
-export WT_API_PORT="${WT_API_PORT:-8100}"
+# Pick a port pair this worktree can have to itself.
+#
+# These used to be fixed at 5273/8100, which meant the *second* concurrent
+# worktree stack died on "Bind for 0.0.0.0:8100 failed: port is already
+# allocated" unless the user set WT_WEB_PORT/WT_API_PORT by hand. Several
+# agents work in this repo at once -- eight worktrees existed when this was
+# written -- so that was a routine failure, and the manual workaround left
+# stacks on hand-bumped ports nobody could predict.
+#
+# Derived from the branch slug rather than simply scanning from a base, so a
+# given worktree keeps the same URL across restarts: the port you bookmarked
+# yesterday is still that worktree's port today. A hash alone is not enough
+# though -- over the eight real worktrees at the time, two collided (birthday
+# paradox in a 100-wide range is likelier than it sounds) -- so the hash only
+# chooses where to *start* looking, and we probe upward from there for a pair
+# that is actually free.
+#
+# An explicit WT_WEB_PORT/WT_API_PORT in the environment still wins, and is
+# taken as-is: an override is a deliberate request for a specific port, so
+# silently moving it would defeat the point.
+port_in_use() {
+  # A container publishing it, or anything else on the host holding it.
+  # Both matter: the competing listener is usually another worktree stack, but
+  # it can equally be an unrelated dev server.
+  #
+  # This stack's *own* containers are excluded. Re-running the script against a
+  # already-running worktree is the normal way to rebuild it, and without this
+  # the script would see its own published port, judge it taken, and hand the
+  # stack a different URL on every restart -- the opposite of the stability the
+  # slug hash exists to provide.
+  if docker ps --format '{{.Names}} {{.Ports}}' \
+    | grep -v "^${PROJECT}-" \
+    | grep -qE "[: ]$1->"; then
+    return 0
+  fi
+  if command -v lsof >/dev/null 2>&1 \
+    && lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; then
+    # lsof sees the docker-proxy holding this stack's own port too, so fall
+    # through to a docker-side check rather than treating it as taken.
+    if ! docker ps --format '{{.Names}} {{.Ports}}' \
+      | grep "^${PROJECT}-" | grep -qE "[: ]$1->"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+if [ -z "${WT_WEB_PORT:-}" ] || [ -z "${WT_API_PORT:-}" ]; then
+  # Offset in [0,99] from the slug, so each worktree starts at its own place.
+  OFFSET="$(printf '%s' "$SLUG" | shasum -a 256 | tr -dc '0-9' | tail -c 4)"
+  OFFSET=$((10#${OFFSET:-0} % 100))
+
+  for _ in $(seq 0 99); do
+    CAND_WEB=$((5200 + OFFSET))
+    CAND_API=$((8100 + OFFSET))
+    # Both must be free, and both move together, so web and api stay a
+    # predictable 2900 apart rather than drifting into an unmemorable pair.
+    if ! port_in_use "$CAND_WEB" && ! port_in_use "$CAND_API"; then
+      break
+    fi
+    OFFSET=$(((OFFSET + 1) % 100))
+    CAND_WEB="" ; CAND_API=""
+  done
+
+  if [ -z "${CAND_WEB:-}" ]; then
+    echo "Could not find a free port pair in 5200-5299 / 8100-8199." >&2
+    echo "Tear down a worktree stack, or set WT_WEB_PORT and WT_API_PORT." >&2
+    exit 1
+  fi
+
+  WT_WEB_PORT="$CAND_WEB"
+  WT_API_PORT="$CAND_API"
+fi
+export WT_WEB_PORT WT_API_PORT
 
 compose() {
   docker compose \

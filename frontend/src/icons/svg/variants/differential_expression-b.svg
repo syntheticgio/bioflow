@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Differential expression (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <path d="M128 32v192" stroke-dasharray="14 16" stroke="var(--bio-accent,#0088b0)"></path>
+  <g fill="currentColor" stroke="none">
+  <circle cx="64" cy="72" r="14"></circle><circle cx="44" cy="132" r="12"></circle><circle cx="84" cy="176" r="12"></circle>
+  <circle cx="192" cy="64" r="14"></circle><circle cx="212" cy="124" r="12"></circle><circle cx="172" cy="172" r="12"></circle>
+  </g>
+  </g>
+</svg>

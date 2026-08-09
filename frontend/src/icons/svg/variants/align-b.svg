@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Align (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 0.92) scale(1.0417)" stroke-width="15.36">
+  <path d="M56 48 104 152"></path><path d="M200 48 152 152"></path>
+  <path d="M24 200h208" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

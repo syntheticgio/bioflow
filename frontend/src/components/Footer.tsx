@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
+import { BioIcon } from "../icons/BioIcon";
 import { useMessageStore } from "../stores/messageStore";
 import { AgentPanel } from "./AgentPanel";
 import { ProjectQaDrawer } from "./ProjectQaDrawer";
@@ -54,8 +55,10 @@ export function Footer({
       )}
 
       {data && (
-        <span title={data.storage.detail}>
-          {data.counts.projects} projects · {data.counts.objects} files
+        <span className="footer-stats" title={data.storage.detail}>
+          {data.counts.projects} <BioIcon name="projects" size={14} />
+          <span aria-hidden="true"> · </span>
+          {data.counts.objects} <BioIcon name="files" size={14} />
         </span>
       )}
 
@@ -66,7 +69,7 @@ export function Footer({
           title="Ask a question about this project"
           onClick={() => setQaOpen((o) => !o)}
         >
-          💬 Ask
+          <BioIcon name="ask" size={14} /> Ask
         </button>
       )}
 
@@ -77,7 +80,7 @@ export function Footer({
           title="Open AI agent"
           onClick={() => setAgentOpen((o) => !o)}
         >
-          🤖 Agent
+          <BioIcon name="agent" size={14} /> Agent
         </button>
       )}
 

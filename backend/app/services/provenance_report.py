@@ -36,6 +36,72 @@ _CHAIN_LEVEL_KINDS = frozenset(
     {GapKind.SHARE_BOUNDARY, GapKind.DANGLING_PARENT, GapKind.DEPTH_EXCEEDED}
 )
 
+# What the History tab's "Not recorded" rail calls each gap. The rail lists
+# gaps away from the step they belong to, so these read as standalone noun
+# phrases ("Download tool and version") where `_GAP_TEXT` reads as an inline
+# marker ("**version not recorded**") -- the same fact, but a sentence
+# fragment cannot be lifted out of its sentence.
+#
+# Keyed by `(job_type, kind)`, and deliberately partial on the job_type axis:
+# job types are an open vocabulary (`_STEP_VERBS` in the walker says why), so
+# an unmapped one falls back to `_GAP_LABELS_BY_KIND`, which covers every
+# `GapKind` and is what `test_provenance_report.py` asserts exhaustively. A
+# missing entry here costs a generic phrase, never a missing rail row.
+_GAP_LABELS: dict[tuple[str, GapKind], str] = {
+    ("download_sra_run", GapKind.VERSION_UNRECORDED): "Download tool and version",
+    ("download_sra_run", GapKind.PARAMS_UNRECORDED): "Download parameters",
+    ("download_assembly", GapKind.VERSION_UNRECORDED): "Download tool and version",
+    ("download_assembly", GapKind.PARAMS_UNRECORDED): "Download parameters",
+    ("download_uniprot", GapKind.VERSION_UNRECORDED): "Download tool and version",
+    ("download_uniprot", GapKind.PARAMS_UNRECORDED): "Download parameters",
+    ("trim_reads", GapKind.VERSION_UNRECORDED): "Trimming tool version",
+    ("trim_reads", GapKind.PARAMS_UNRECORDED): "Trimming parameters",
+    ("align_reads", GapKind.VERSION_UNRECORDED): "Aligner version",
+    ("align_reads", GapKind.PARAMS_UNRECORDED): "Alignment parameters",
+    ("assemble_reads", GapKind.VERSION_UNRECORDED): "Assembler version",
+    ("assemble_reads", GapKind.PARAMS_UNRECORDED): "Assembly parameters",
+    ("call_variants", GapKind.VERSION_UNRECORDED): "Variant caller version",
+    ("call_variants", GapKind.PARAMS_UNRECORDED): "Variant calling parameters",
+    ("quantify", GapKind.VERSION_UNRECORDED): "Quantification tool version",
+    ("quantify", GapKind.PARAMS_UNRECORDED): "Quantification parameters",
+}
+
+_GAP_LABELS_BY_KIND: dict[GapKind, str] = {
+    GapKind.VERSION_UNRECORDED: "Tool version",
+    GapKind.PARAMS_UNRECORDED: "Parameters",
+    GapKind.SHARE_BOUNDARY: "Lineage before this profile",
+    GapKind.DANGLING_PARENT: "A parent object that no longer exists",
+    GapKind.DEPTH_EXCEEDED: "Ancestry beyond the depth limit",
+}
+
+
+def is_step_level(gap: Gap) -> bool:
+    """Whether a gap belongs inline on a step row.
+
+    The inverse of `_CHAIN_LEVEL_KINDS`: a share boundary or a dangling parent
+    describes the traversal, not a fact the step failed to record, so it has no
+    position within a step row and appears only in the rail.
+    """
+    return gap.kind not in _CHAIN_LEVEL_KINDS
+
+
+def inline_gap_text(gap: Gap) -> str:
+    """One gap as the History tab's inline marker, without markdown emphasis.
+
+    `_GAP_TEXT` wraps each phrase in `**` for the markdown report; the tab
+    styles the marker itself, so the asterisks would render literally.
+    """
+    return _GAP_TEXT[gap.kind].strip("*")
+
+
+def gap_label(gap: Gap, job_type: str | None) -> str:
+    """The rail's name for one gap."""
+    if job_type is not None:
+        specific = _GAP_LABELS.get((job_type, gap.kind))
+        if specific is not None:
+            return specific
+    return _GAP_LABELS_BY_KIND[gap.kind]
+
 
 def _gaps_for(chain: ProvenanceChain, node_id) -> list[Gap]:
     return [g for g in chain.gaps if g.object_id == node_id]

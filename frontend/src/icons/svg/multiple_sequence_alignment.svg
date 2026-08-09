@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Multiple sequence alignment"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <path d="M136 32v192h32V32Z" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)" stroke="none"></path>
+  <path d="M32 56h72"></path><path d="M136 56h88"></path>
+  <path d="M32 104h104"></path><path d="M168 104h56"></path>
+  <path d="M32 152h72"></path><path d="M136 152h56"></path>
+  <path d="M32 200h104"></path><path d="M168 200h56"></path>
+  </g>
+</svg>

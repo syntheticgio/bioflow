@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Contact map (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -17.83) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 56h192v168H32Z"></path><path d="M96 56v168"></path><path d="M160 56v168"></path><path d="M32 112h192"></path><path d="M32 168h192"></path><path d="M32 56h64v56H32Z" fill="currentColor" fill-opacity="0.45" stroke="none"></path><path d="M96 112h64v56H96Z" fill="currentColor" fill-opacity="0.45" stroke="none"></path><path d="M160 168h64v56h-64Z" fill="currentColor" fill-opacity="0.45" stroke="none"></path>
+  </g>
+</svg>
