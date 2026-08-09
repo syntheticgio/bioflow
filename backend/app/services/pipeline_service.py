@@ -1132,10 +1132,7 @@ async def align_envelope(
 
     governor = LoadGovernor()
 
-    # Reference size in bases, approximated by file size. A FASTA carries
-    # about one byte per base plus headers and newlines, so this overestimates
-    # by a few percent -- the right direction for a memory warning.
-    reference_bases = reference.size or 0
+    reference_bases = reference_bases_for(reference)
 
     status = await reference_index_status(reference)
 
@@ -1222,6 +1219,36 @@ async def launch_build_index(
             details={"reference_id": str(reference.id), "aligner": aligner.value},
         )
     return job
+
+
+def reference_bases_for(reference) -> int:
+    """How many bases of sequence a reference holds, for memory sizing.
+
+    Prefers the parser's measured `total_bases` and falls back to the file
+    size. That fallback was the sole input until #100, justified by a FASTA
+    carrying about one byte per base -- true uncompressed, and wrong by ~6x for
+    the gzipped references NCBI downloads produce by default. The #96 reference
+    is 143.6 MB on disk against 448.6 Mbp of sequence, so every estimate for it
+    was made against a sixth of the real genome, and an index build that could
+    not fit was admitted as though it could.
+
+    Note this is deliberately the opposite choice from `_infer_genome_size`,
+    which refuses `total_bases` on purpose. That helper guesses an assembly's
+    size from whatever candidate object it can find, where a `protein.faa`
+    roled `reference` would answer with a protein length. Here the object is
+    not a candidate: it is the exact file about to be indexed, so its own
+    measured base count is precisely the number wanted.
+
+    When nothing measured the sequence, a compressed file still must not be
+    sized at its compressed length -- that understates in the one direction
+    that causes an OOM kill. `max()` keeps the fallback at worst as wrong as it
+    always was, never newly worse.
+    """
+    size = reference.size or 0
+    measured = (reference.facts or {}).get("total_bases") or 0
+    if measured > 0:
+        return max(int(measured), size)
+    return size
 
 
 # The floor under a declared memory reservation. The estimator's coefficients
@@ -1360,7 +1387,7 @@ async def _enqueue_build_index(
     # not in this job.
     mem_mb = await declared_align_mem_mb(
         aligner=aligner,
-        reference_bases=reference.size or 0,
+        reference_bases=reference_bases_for(reference),
         threads=INDEX_BUILD_THREADS,
         sort_memory_mb=0,
         building_index=True,
@@ -1491,7 +1518,7 @@ async def launch_alignment(
 
     heuristic_mb = resource_estimator.estimate_mb(
         aligner=aligner,
-        reference_bases=reference.size or 0,
+        reference_bases=reference_bases_for(reference),
         threads=align_params.threads,
         sort_memory_mb=align_params.sort_memory_mb,
         building_index=building,
@@ -1524,7 +1551,7 @@ async def launch_alignment(
                 # reason to know about them.
                 params={
                     **align_params.as_dict(),
-                    "reference_bases": reference.size or 0,
+                    "reference_bases": reference_bases_for(reference),
                     "building_index": building,
                 },
                 budget_mb=mem_budget_mb,
@@ -1533,7 +1560,7 @@ async def launch_alignment(
             raise ValidationError(
                 resource_estimator.explain(
                     aligner=aligner,
-                    reference_bases=reference.size or 0,
+                    reference_bases=reference_bases_for(reference),
                     threads=align_params.threads,
                     sort_memory_mb=align_params.sort_memory_mb,
                     building_index=building,
@@ -1691,7 +1718,7 @@ async def launch_alignment(
 
     align_mem_mb = await declared_align_mem_mb(
         aligner=aligner,
-        reference_bases=reference.size or 0,
+        reference_bases=reference_bases_for(reference),
         threads=align_params.threads,
         sort_memory_mb=align_params.sort_memory_mb,
         building_index=False,
