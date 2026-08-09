@@ -39,28 +39,38 @@ class ReadPosition:
 def parse_header(header: str) -> ReadPosition | None:
     """Extract tile and x/y from an Illumina header, or None if it is not one.
 
+    Checks every space-delimited token, not just the first. Raw instrument
+    output puts the machine header first (`@M01939:146:...:1101:...`), but
+    the SRA Toolkit rewrites the accession to the front and appends the
+    original machine header as a later token instead of stripping it
+    outright -- `@DRR1066343.1 E00477:474:H2LYCCCX2:2:1101:6268:1309
+    length=150` is a real example from this app's own test data. Scanning
+    every token finds the tile in both layouts without knowing which one a
+    given file uses; a Nanopore or PacBio header simply has no token that
+    colon-splits into a valid shape, so it still parses to None.
+
     Returns None rather than raising: a file whose headers do not carry tiles
     is an ordinary, expected input, not an error.
     """
     if not header:
         return None
 
-    # The read/filter/control/index fields after the space are not needed.
-    name = header.split(" ", 1)[0].lstrip("@")
-    fields = name.split(":")
-    if len(fields) < _MIN_FIELDS:
-        return None
+    for token in header.lstrip("@").split(" "):
+        fields = token.split(":")
+        if len(fields) < _MIN_FIELDS:
+            continue
+        try:
+            return ReadPosition(
+                tile=int(fields[_TILE_FIELD]),
+                x=int(fields[_X_FIELD]),
+                y=int(fields[_Y_FIELD]),
+            )
+        except ValueError:
+            # A colon-bearing token that is not Illumina's -- shape matched,
+            # the contents did not. Keep checking the remaining tokens.
+            continue
 
-    try:
-        return ReadPosition(
-            tile=int(fields[_TILE_FIELD]),
-            x=int(fields[_X_FIELD]),
-            y=int(fields[_Y_FIELD]),
-        )
-    except ValueError:
-        # A colon-bearing header that is not Illumina's -- shape matched, the
-        # contents did not.
-        return None
+    return None
 
 
 # How many records to inspect before deciding a file has no tiles at all.

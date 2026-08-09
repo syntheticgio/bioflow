@@ -27,8 +27,30 @@ def test_sra_stripped_header_yields_none():
     assert tile_scanner.parse_header("@SRR123456.1 1 length=100") is None
 
 
+def test_sra_wrapped_illumina_header_parses_from_the_second_token():
+    # A real header from this app's own /data: the SRA Toolkit rewrites the
+    # accession to the front but appends the original machine header as a
+    # later token rather than stripping it outright. Discovered verifying
+    # this feature against real files -- every SRA-sourced short-read FASTQ
+    # available in this environment is shaped this way, not the raw
+    # "@M01939:..." shape the rest of these tests use.
+    header = "@DRR1066343.1 E00477:474:H2LYCCCX2:2:1101:6268:1309 length=150"
+    assert tile_scanner.parse_header(header) == tile_scanner.ReadPosition(
+        tile=1101, x=6268, y=1309
+    )
+
+
 def test_nanopore_uuid_header_yields_none():
     header = "@a1b2c3d4-e5f6-7890-abcd-ef1234567890 runid=xyz ch=42"
+    assert tile_scanner.parse_header(header) is None
+
+
+def test_sra_wrapped_nanopore_header_yields_none():
+    # The same SRA accession-first rewrite applied to a Nanopore UUID -- also
+    # a real header from this app's /data. No token here colon-splits into a
+    # valid Illumina shape, so this must still parse to None even though the
+    # scan now checks every token instead of just the first.
+    header = "@ERR16145614.1 000b8484-b0df-4fe9-8c31-6c164440e761 length=175"
     assert tile_scanner.parse_header(header) is None
 
 
