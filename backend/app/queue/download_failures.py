@@ -10,7 +10,7 @@ the handler's attempt budget.
 from pathlib import Path
 
 from app.errors import PermanentError, RetryableError
-from app.queue.pipeline_handlers import _log_tail
+from app.queue.pipeline_handlers import _killed_by_signal, _log_tail
 
 # Errors that mean "ask again later" rather than "this will never work". NCBI
 # is rate-limited and intermittently unavailable, and burning the attempt
@@ -47,7 +47,7 @@ def classify_failure(
     if "disk" in lowered and ("full" in lowered or "space" in lowered):
         return PermanentError(detail, details={"accession": accession})
 
-    if code == 137:
+    if _killed_by_signal(code):
         return RetryableError(f"{detail} (killed, most likely out of memory)")
 
     if any(pattern in lowered for pattern in RETRYABLE_PATTERNS):

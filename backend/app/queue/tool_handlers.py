@@ -23,6 +23,7 @@ from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import tool_cache, tools
 from app.queue.executor import run_subprocess
+from app.queue.pipeline_handlers import _killed_by_signal
 from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
@@ -256,9 +257,9 @@ def _pull_failure(code: int, log_path: Path, image: str) -> Exception:
     detail = f"pulling {image} exited {code}"
     if tail:
         detail = f"{detail}: {tail}"
-    # 137 is SIGKILL. A pull killed mid-transfer is exactly the transient case
-    # this handler's higher max_attempts exists for.
-    if code == 137:
+    # A pull killed mid-transfer is exactly the transient case this handler's
+    # higher max_attempts exists for.
+    if _killed_by_signal(code):
         return RetryableError(f"{detail} (killed)")
     return RetryableError(detail)
 
