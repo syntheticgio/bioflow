@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Live (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 4.92) scale(0.9615)" stroke-width="16.64">
+  <rect x="24" y="88" width="208" height="80" rx="40" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></rect>
+  <circle cx="76" cy="128" r="18" fill="var(--bio-accent,#0088b0)" stroke="none"></circle>
+  </g>
+</svg>

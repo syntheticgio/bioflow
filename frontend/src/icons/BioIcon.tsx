@@ -1738,15 +1738,19 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   warning: "b",
   succeeded: "b",
   // VII. Job status & agent chrome -- strokes over enclosures for queued,
-  // running, projects, files and live, for the same reason as Section V:
-  // these sit beside running text at icon size, not in a card, so a mark
-  // reads cleaner than a frame. ask and agent keep the house default (`a`)
-  // -- their enclosures are the recognisable shape (speech bubble, robot
-  // head), unlike the rest of this section.
+  // running and live, for the same reason as Section V: these sit beside
+  // running text at icon size, not in a card, so a mark reads cleaner than a
+  // frame. ask and agent keep the house default (`a`) -- their enclosures
+  // are the recognisable shape (speech bubble, robot head), unlike the rest
+  // of this section.
+  //
+  // projects and files were `b` here too until the header stats strip
+  // ("150 files · 7 projects") started using them 2026-08-09: the folder
+  // and dog-eared-document enclosures are what those words mean as objects
+  // in this app, and that reads clearer at a glance than the stroke marks
+  // did in the same spot. Reverted to the house default (`a`).
   queued: "b",
   running: "b",
-  projects: "b",
-  files: "b",
   live: "b",
   // Connection/storage status chrome, same reasoning as warning/succeeded
   // above: these read as a badge next to text, not a card.

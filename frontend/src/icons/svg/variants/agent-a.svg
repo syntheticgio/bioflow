@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Agent (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-6.73 9.06) scale(1.0526)" stroke-width="15.2">
+  <path d="M128 72V38"></path>
+  <rect x="40" y="72" width="176" height="136" rx="28" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></rect>
+  <g fill="currentColor" stroke="none">
+  <circle cx="128" cy="28" r="12"></circle><circle cx="92" cy="140" r="16"></circle><circle cx="164" cy="140" r="16"></circle>
+  </g>
+  </g>
+</svg>
