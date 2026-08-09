@@ -1264,6 +1264,23 @@ export interface QcFacts {
     read1_sequence: string | null;
     read2_sequence: string | null;
   };
+  /**
+   * Per-position cumulative adapter percentages, one series per probe.
+   * Written by the whole-file contamination scan; absent on files QC'd
+   * before it existed, which is why every consumer treats it as optional.
+   */
+  qc_adapter_content?: {
+    positions: number[];
+    series: { name: string; values: number[] }[];
+  };
+  /** FastQC's 16-slot duplication histogram, as percentages of the library. */
+  qc_duplication_levels?: {
+    labels: string[];
+    percentages: number[];
+  };
+  /** Whole-file, correction-adjusted. Preferred over `qc_duplication_rate`. */
+  qc_percent_unique?: number;
+  qc_duplication_scanned_reads?: number;
   /** Paths relative to the report route, absent when the tool did not run. */
   qc_fastp_report?: string;
   qc_fastqc_report?: string;
