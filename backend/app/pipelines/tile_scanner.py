@@ -13,6 +13,7 @@ heatmap of nothing.
 """
 
 import gzip
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -309,3 +310,80 @@ def _worst_tile(matrix: dict[int, list[float]]) -> int | None:
     if not matrix:
         return None
     return min(matrix, key=lambda t: sum(matrix[t]) / len(matrix[t]) if matrix[t] else 0.0)
+
+
+# Filename of the sidecar, relative to the object's QC report directory --
+# the same convention `qc_fastp_report` uses.
+TILE_MATRIX_FILENAME = "tile_quality.json"
+
+
+def write_matrix(result: ScanResult, report_dir: Path) -> dict:
+    """Write the matrix as a sidecar and return the facts describing it.
+
+    The matrix is deliberately *not* in the returned facts. A NovaSeq run is
+    ~1408 tiles by 150 positions -- over 200,000 floats -- and object
+    documents are read by the detail panel, summary prompts, and provenance,
+    none of which want to carry it. `fastp_runner.parse_report` declined to
+    inline "several hundred floats" for the same reason.
+    """
+    facts: dict = {
+        "qc_tile_source": result.source,
+        "qc_tile_count": result.tile_count,
+        "qc_tile_sampled_reads": result.sampled_reads,
+        "qc_tile_sample_rate": result.sample_rate,
+        "qc_tile_truncated": result.truncated,
+    }
+
+    if result.source != "present" or not result.matrix:
+        return facts
+
+    # Ascending tile number: Illumina encodes surface, swath, and position in
+    # it, so ascending order is what makes a smudge across adjacent tiles read
+    # as one shape rather than scattered rows.
+    tiles = sorted(result.matrix)
+    positions = max(len(result.matrix[t]) for t in tiles)
+
+    # Padded with null, not 0.0. Zero is a real Phred score and would draw as
+    # a defect at every position a shorter read did not reach.
+    matrix = [
+        result.matrix[t] + [None] * (positions - len(result.matrix[t]))
+        for t in tiles
+    ]
+
+    payload = {
+        "tiles": tiles,
+        "positions": positions,
+        "matrix": matrix,
+        "extents": {
+            str(t): {
+                "x_min": e.x_min,
+                "x_max": e.x_max,
+                "y_min": e.y_min,
+                "y_max": e.y_max,
+                "reads": e.reads,
+            }
+            for t, e in sorted(result.extents.items())
+        },
+        "sampled_reads": result.sampled_reads,
+        "sample_rate": result.sample_rate,
+        "truncated": result.truncated,
+    }
+
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / TILE_MATRIX_FILENAME).write_text(json.dumps(payload))
+
+    facts["qc_tile_matrix"] = TILE_MATRIX_FILENAME
+    if result.worst_tile is not None:
+        row = result.matrix[result.worst_tile]
+        worst_mean = sum(row) / len(row) if row else 0.0
+        all_means = [
+            sum(r) / len(r) for r in result.matrix.values() if r
+        ]
+        overall = sum(all_means) / len(all_means) if all_means else 0.0
+        facts["qc_tile_worst"] = {
+            "tile": result.worst_tile,
+            "mean_quality": round(worst_mean, 2),
+            "deficit": round(overall - worst_mean, 2),
+        }
+
+    return facts

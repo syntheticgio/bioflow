@@ -223,3 +223,84 @@ def test_scan_ignores_quality_longer_than_the_matrix_row(tmp_path):
     )
     result = tile_scanner.scan(path)
     assert len(result.matrix[1101]) == 6
+
+
+import json
+
+
+def test_write_matrix_produces_a_sidecar_and_scalar_facts(tmp_path):
+    path = _write_fastq(
+        tmp_path / "r1.fastq",
+        [_illumina(1101, qual="IIII"), _illumina(1102, qual="5555")],
+    )
+    result = tile_scanner.scan(path)
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+
+    facts = tile_scanner.write_matrix(result, report_dir)
+
+    assert facts["qc_tile_source"] == "present"
+    assert facts["qc_tile_count"] == 2
+    assert facts["qc_tile_matrix"] == tile_scanner.TILE_MATRIX_FILENAME
+    assert facts["qc_tile_worst"]["tile"] == 1102
+    # The sidecar holds the matrix; the facts must not.
+    assert "matrix" not in facts
+
+    written = json.loads((report_dir / tile_scanner.TILE_MATRIX_FILENAME).read_text())
+    assert written["tiles"] == [1101, 1102]
+    assert written["matrix"][0] == [40.0, 40.0, 40.0, 40.0]
+    assert written["positions"] == 4
+
+
+def test_write_matrix_writes_no_sidecar_when_tiles_are_absent(tmp_path):
+    records = [(f"@SRR123456.{i}", "ACGT", "IIII") for i in range(1200)]
+    path = _write_fastq(tmp_path / "r1.fastq", records)
+    result = tile_scanner.scan(path)
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+
+    facts = tile_scanner.write_matrix(result, report_dir)
+
+    assert facts["qc_tile_source"] == "absent"
+    assert "qc_tile_matrix" not in facts
+    assert not (report_dir / tile_scanner.TILE_MATRIX_FILENAME).exists()
+
+
+def test_write_matrix_sorts_tiles_into_physical_order(tmp_path):
+    # Encounter order is 1103 then 1101; stored order must be ascending, since
+    # the chart's rows are meant to mirror the physical layout.
+    path = _write_fastq(
+        tmp_path / "r1.fastq", [_illumina(1103), _illumina(1101)]
+    )
+    result = tile_scanner.scan(path)
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+
+    tile_scanner.write_matrix(result, report_dir)
+
+    written = json.loads((report_dir / tile_scanner.TILE_MATRIX_FILENAME).read_text())
+    assert written["tiles"] == [1101, 1103]
+
+
+def test_write_matrix_pads_ragged_rows(tmp_path):
+    # Two tiles whose reads differ in length must still form a rectangle, or
+    # the frontend cannot index the matrix by position.
+    path = _write_fastq(
+        tmp_path / "r1.fastq",
+        [
+            ("@M01939:146:FC:1:1101:1:2 1:N:0:1", "ACGT", "IIII"),
+            ("@M01939:146:FC:1:1102:1:3 1:N:0:1", "ACGTAA", "IIIIII"),
+        ],
+    )
+    result = tile_scanner.scan(path)
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+
+    tile_scanner.write_matrix(result, report_dir)
+
+    written = json.loads((report_dir / tile_scanner.TILE_MATRIX_FILENAME).read_text())
+    assert written["positions"] == 6
+    assert all(len(row) == 6 for row in written["matrix"])
+    # The short row's missing positions are null, not zero -- zero is a real
+    # Phred score and would draw as a defect.
+    assert written["matrix"][0][4] is None
