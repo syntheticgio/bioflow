@@ -1744,11 +1744,12 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   // are the recognisable shape (speech bubble, robot head), unlike the rest
   // of this section.
   //
-  // projects and files were `b` here too until the header stats strip
-  // ("150 files · 7 projects") started using them 2026-08-09: the folder
+  // projects and files were `b` here too until the footer stats strip
+  // ("7 projects · 150 files") started using them 2026-08-09: the folder
   // and dog-eared-document enclosures are what those words mean as objects
   // in this app, and that reads clearer at a glance than the stroke marks
-  // did in the same spot. Reverted to the house default (`a`).
+  // did in the same spot -- the same call already made for ask/agent above.
+  // Reverted to the house default (`a`).
   queued: "b",
   running: "b",
   live: "b",

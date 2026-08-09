@@ -55,8 +55,10 @@ export function Footer({
       )}
 
       {data && (
-        <span title={data.storage.detail}>
-          {data.counts.projects} projects · {data.counts.objects} files
+        <span className="footer-stats" title={data.storage.detail}>
+          {data.counts.projects} <BioIcon name="projects" size={14} />
+          <span aria-hidden="true"> · </span>
+          {data.counts.objects} <BioIcon name="files" size={14} />
         </span>
       )}
 
