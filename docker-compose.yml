@@ -36,12 +36,22 @@ services:
       - ${HOME}/.bioflow/mongo:/data/db
       - ./ops/mongo-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      # Self-initiating: the entrypoint script only runs on a fresh data dir,
-      # so this also handles an existing volume that was never initiated.
-      test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }"]
-      interval: 10s
+      # Healthy means "a client can write", not merely "a replica set exists".
+      # rs.status().ok is 1 the instant the set is configured, while the node
+      # is still STARTUP2 and rejecting writes -- so the old probe could report
+      # healthy a beat before api and worker could actually use it.
+      # hello().isWritablePrimary is the state that matters.
+      #
+      # The initiate is a fallback for an existing data directory that was
+      # never initiated; ops/mongo-init/rs-init.js handles the fresh case and,
+      # since that script was fixed, normally gets there first. It stays
+      # because it is the only thing that recovers a half-initialised volume,
+      # and it is written to match rs-init.js exactly -- a loopback member,
+      # for the reasons documented at length in that file.
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try { db.hello().isWritablePrimary || rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'127.0.0.1:27017'}]}).ok }"]
+      interval: 2s
       timeout: 5s
-      retries: 12
+      retries: 30
       start_period: 20s
     restart: unless-stopped
 
