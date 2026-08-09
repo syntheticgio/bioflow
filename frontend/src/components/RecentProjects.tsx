@@ -15,7 +15,7 @@ export function RecentProjects() {
   const [containerRef, availableWidth] = useElementWidth<HTMLDivElement>();
 
   const { data: projects } = useQuery({
-    queryKey: ["projects"],
+    queryKey: ["projects", null],
     queryFn: () => api.listProjects(),
   });
 
