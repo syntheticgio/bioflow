@@ -133,18 +133,29 @@ export function AgentPanel({
         setError("Disconnected from agent. Click restart to reconnect.");
       } else {
         setError(null);
-        // Connected to an agent that was already running: it has a
-        // conversation we are not showing (scrollback is not restored --
-        // see issue #97), so say so rather than implying a blank agent.
-        // Read messagesRef rather than `messages` -- this callback can run
-        // against a closure from an earlier render than the current one.
-        // Skip it if we ourselves just cleared the conversation: the SSE
-        // hook reconnects aggressively (see comment on suppressResumedRef
-        // above), and the reconnect that follows New session/restart would
-        // otherwise see the empty transcript and relabel it as "resumed".
-        if (messagesRef.current.length === 0 && !suppressResumedRef.current) {
-          setResumed(true);
-        }
+      }
+    },
+    // Fired only from the backend's agent_status event, never from the SSE
+    // connection merely opening -- onopen fires unconditionally and says
+    // nothing about whether a pi process actually exists, so using
+    // onConnectionChange here would show "resumed" on a brand-new
+    // conversation (onopen's premature true beats agent_status's correct
+    // running:false to this callback). See the review that found this: a
+    // first-ever conversation has no process to resume, but onopen still
+    // fires before the real status arrives.
+    onAgentStatus: (running) => {
+      if (!running) return;
+      // Connected to an agent that was already running: it has a
+      // conversation we are not showing (scrollback is not restored --
+      // see issue #97), so say so rather than implying a blank agent.
+      // Read messagesRef rather than `messages` -- this callback can run
+      // against a closure from an earlier render than the current one.
+      // Skip it if we ourselves just cleared the conversation: the SSE
+      // hook reconnects aggressively (see comment on suppressResumedRef
+      // above), and the reconnect that follows New session/restart would
+      // otherwise see the empty transcript and relabel it as "resumed".
+      if (messagesRef.current.length === 0 && !suppressResumedRef.current) {
+        setResumed(true);
       }
     },
   });
