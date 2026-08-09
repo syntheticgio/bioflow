@@ -15,7 +15,7 @@ from app.models.workflow import (
     WorkflowNode,
     WorkflowNodeKind,
 )
-from app.pipelines.node_types import NODE_TYPES, NodeTypeSpec, PortSpec
+from app.pipelines.node_types import NODE_TYPES, NodeTypeSpec, PortSpec, ports_for
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,11 @@ def _spec_for(node: WorkflowNode) -> NodeTypeSpec | None:
     return NODE_TYPES.get(node.node_type)
 
 
-def _input_port(spec: NodeTypeSpec, name: str) -> PortSpec | None:
-    return next((p for p in spec.inputs if p.name == name), None)
+def _input_port(node: WorkflowNode, name: str) -> PortSpec | None:
+    """Looked up per *node*, not per spec: a tool-parameterized node's ports
+    depend on the tool it chose."""
+    inputs, _ = ports_for(node)
+    return next((p for p in inputs if p.name == name), None)
 
 
 def _output_type(node: WorkflowNode, port_name: str):
@@ -47,7 +50,8 @@ def _output_type(node: WorkflowNode, port_name: str):
     spec = _spec_for(node)
     if spec is None:
         return None
-    port = next((p for p in spec.outputs if p.name == port_name), None)
+    _, outputs = ports_for(node)
+    port = next((p for p in outputs if p.name == port_name), None)
     return port.type if port else None
 
 
@@ -93,7 +97,7 @@ def validate_definition(definition: WorkflowDefinition) -> list[ValidationError]
         if spec is None:
             continue  # already reported as unknown_node_type
 
-        port = _input_port(spec, edge.to_port)
+        port = _input_port(target, edge.to_port)
         if port is None:
             errors.append(
                 ValidationError(
@@ -106,7 +110,11 @@ def validate_definition(definition: WorkflowDefinition) -> list[ValidationError]
             continue
 
         key = (edge.to_node, edge.to_port)
-        if key in wired:
+        # A multi port collects several wires; every other port takes one.
+        # Checked here rather than by skipping the bookkeeping entirely,
+        # because `wired` is also what the required-input check below reads --
+        # a multi port with one wire must still count as satisfied.
+        if key in wired and not port.multiple:
             errors.append(
                 ValidationError(
                     "duplicate_wire",
@@ -146,7 +154,8 @@ def validate_definition(definition: WorkflowDefinition) -> list[ValidationError]
         spec = _spec_for(node)
         if spec is None:
             continue
-        for port in spec.inputs:
+        inputs, _ = ports_for(node)
+        for port in inputs:
             if port.required and (node.node_id, port.name) not in wired:
                 errors.append(
                     ValidationError(

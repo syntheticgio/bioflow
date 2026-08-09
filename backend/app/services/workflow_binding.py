@@ -18,7 +18,7 @@ from beanie import PydanticObjectId
 
 from app.models.object import FormatKind, ObjectRole
 from app.models.workflow import WorkflowDefinition, WorkflowNode, WorkflowNodeKind
-from app.pipelines.node_types import NODE_TYPES
+from app.pipelines.node_types import NODE_TYPES, ports_for
 
 
 @dataclass(frozen=True)
@@ -50,7 +50,8 @@ def _output_port_type(node: WorkflowNode, port_name: str):
     spec = NODE_TYPES.get(node.node_type)
     if spec is None:
         return None
-    port = next((p for p in spec.outputs if p.name == port_name), None)
+    _, outputs = ports_for(node)
+    port = next((p for p in outputs if p.name == port_name), None)
     return port.type if port else None
 
 
@@ -61,8 +62,14 @@ def bind_downstream_inputs(
     *,
     outputs_by_port: dict[str, PydanticObjectId] | None = None,
     paired: bool = False,
-) -> dict[tuple[str, str], PydanticObjectId]:
+) -> dict[tuple[str, str], PydanticObjectId | list[PydanticObjectId]]:
     """Map (downstream node, input port) -> object id, for one finished node.
+
+    A *multi* port maps to a list instead of a bare id -- every
+    type-compatible candidate, in the order the source produced them. The
+    union return type rather than always-a-list is deliberate: every existing
+    consumer reads scalars, and making them all unwrap a one-element list to
+    gain nothing would be a large diff with no behaviour in it.
 
     `outputs_by_port` names which produced object corresponds to which declared
     output port. It is what makes resolution by *name*: with it, a node
@@ -94,7 +101,8 @@ def bind_downstream_inputs(
         target_spec = NODE_TYPES.get(target.node_type)
         if target_spec is None:
             continue
-        port = next((p for p in target_spec.inputs if p.name == edge.to_port), None)
+        target_inputs, _ = ports_for(target)
+        port = next((p for p in target_inputs if p.name == edge.to_port), None)
         if port is None:
             continue
 
@@ -118,7 +126,7 @@ def bind_downstream_inputs(
             # library simply gets two QC runs.
             chosen = candidates[0]
             mate_port = next(
-                (p for p in target_spec.inputs if p.name == "mate"), None
+                (p for p in target_inputs if p.name == "mate"), None
             )
             if mate_port is not None and mate_port.type.accepts(
                 candidates[1].format, candidates[1].role
@@ -126,6 +134,16 @@ def bind_downstream_inputs(
                 bound[(edge.to_node, "mate")] = candidates[1].object_id
         elif len(candidates) == 1:
             chosen = candidates[0]
+        elif port.multiple:
+            # Several candidates, no declared mapping, and nothing to
+            # disambiguate -- but a multi port has no ambiguity to resolve in
+            # the first place: "several candidates" is the answer, not a
+            # problem the generic rule below needs to refuse. Every
+            # type-compatible candidate binds, as a list, in production order.
+            matching = [c for c in candidates if port.type.accepts(c.format, c.role)]
+            if matching:
+                bound[(edge.to_node, edge.to_port)] = [c.object_id for c in matching]
+            continue
         else:
             # Several candidates and no declared mapping: fall back to type,
             # but only when it is unambiguous. Two matches mean the node type

@@ -222,6 +222,84 @@ class TestPalette:
         assert reference["type"]["role"] == "reference"
         assert reference["required"] is True
 
+    async def test_align_serves_its_tool_choice(self, client, two_profiles):
+        """The canvas needs the aligner options and default to render a
+        dropdown, not just the resolved default port set."""
+        resp = await client.get(
+            "/api/v1/workflows/node-types", headers=two_profiles["a_headers"]
+        )
+        align = next(n for n in resp.json() if n["node_type"] == "align")
+
+        choice = align["tool_choice"]
+        assert choice["param_key"] == "aligner"
+        assert choice["default"] == "minimap2"
+        values = [o["value"] for o in choice["options"]]
+        assert "star" in values and "minimap2" in values
+
+    async def test_align_serves_per_tool_ports(self, client, two_profiles):
+        """Every option's port set is served eagerly so switching a node's
+        tool on the canvas re-shapes it without a round trip."""
+        resp = await client.get(
+            "/api/v1/workflows/node-types", headers=two_profiles["a_headers"]
+        )
+        align = next(n for n in resp.json() if n["node_type"] == "align")
+
+        star = align["ports_by_tool"]["star"]
+        assert any(p["name"] == "annotation" for p in star["inputs"])
+
+        minimap2 = align["ports_by_tool"]["minimap2"]
+        assert all(p["name"] != "annotation" for p in minimap2["inputs"])
+
+    async def test_ports_carry_multiple(self, client, two_profiles):
+        resp = await client.get(
+            "/api/v1/workflows/node-types", headers=two_profiles["a_headers"]
+        )
+        align = next(n for n in resp.json() if n["node_type"] == "align")
+        reads = next(p for p in align["inputs"] if p["name"] == "reads")
+        assert reads["multiple"] is True
+
+    async def test_a_node_type_without_a_tool_choice_serves_null(
+        self, client, two_profiles
+    ):
+        resp = await client.get(
+            "/api/v1/workflows/node-types", headers=two_profiles["a_headers"]
+        )
+        qc = next(n for n in resp.json() if n["node_type"] == "qc")
+        assert qc["tool_choice"] is None
+        assert qc["ports_by_tool"] == {}
+
+
+class TestToolSchema:
+    """The parameter form for one tool of one node type, served rather than
+    duplicated in the frontend -- see aligner_registry's own docstring for why
+    a second copy of the field list is the copy nobody updates."""
+
+    async def test_tool_schema_for_a_known_aligner(self, client, two_profiles):
+        resp = await client.get(
+            "/api/v1/workflows/tool-schema/align/minimap2",
+            headers=two_profiles["a_headers"],
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["aligner"] == "minimap2"
+        assert isinstance(body["fields"], list)
+
+    async def test_tool_schema_for_an_unknown_tool_404s(self, client, two_profiles):
+        resp = await client.get(
+            "/api/v1/workflows/tool-schema/align/no-such-aligner",
+            headers=two_profiles["a_headers"],
+        )
+        assert resp.status_code == 404
+
+    async def test_tool_schema_for_a_node_type_with_no_tool_choice_404s(
+        self, client, two_profiles
+    ):
+        resp = await client.get(
+            "/api/v1/workflows/tool-schema/qc/anything",
+            headers=two_profiles["a_headers"],
+        )
+        assert resp.status_code == 404
+
 
 class TestLaunch:
     async def test_launching_an_unknown_definition_is_404(self, client, two_profiles):

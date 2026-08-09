@@ -421,24 +421,108 @@ byte-only pending a follow-up.
 
 ---
 
-Raised: 2026-08-03, deferred while building computation records
-(`docs/superpowers/specs/2026-08-03-computation-records-design.md`,
-`docs/superpowers/plans/2026-08-03-computation-records.md`).
+## Two orchestrator sites resolve ports from the static spec, not `ports_for(node)`
 
-`JobRunTiming.threads` is captured -- the executor reads it from
-`job.payload`, where the align/assembly/expression/assembly_qc handlers
-already put it -- but both `timing_service._fit` (duration) and its memory
-counterpart still regress against `input_bytes` alone. The design called for
-segmenting the duration fit by thread count with a bytes-only fallback.
+Raised: 2026-08-08, deferred during code review of Task 4's tool-choice ports
+work (GitHub issue #94, Task 4).
 
-Deferred because no row carried a thread count until the recording shipped in
-this same work, so the segmentation could only have been tested against
-synthetic data and would have fallen back to today's behavior on every real
-row anyway -- there was nothing to segment yet.
+Task 4 introduced `ports_for(node)`
+(`backend/app/pipelines/node_types.py`) as the correct way to resolve a
+node's *actual* input/output ports once its chosen tool is taken into
+account -- e.g. a STAR-configured `align` node gains an optional
+`annotation` GTF input that `NODE_TYPES[node.node_type].inputs`, the static
+per-node-type spec, does not know about. Two sites in
+`backend/app/services/workflow_orchestrator.py` still read the static
+`spec.inputs` directly instead:
 
-Revisit once several job types have accumulated runs at differing thread
-counts. Check against real rows, not fixtures -- per CLAUDE.md, hand-built
-objects that already look the way the code expects are how the suggestion
-rules passed green while being wrong.
+- `_is_multi_port` (line 140) looks up a port by name in `spec.inputs` to
+  decide whether an edge should be collected into a list. It is reached from
+  `_bound_inputs`, which resolves every input a node launches with.
+- `_advance` (line 259) computes `missing = [p.name for p in spec.inputs if
+  p.required and p.name not in inputs]` to decide whether a node has enough
+  bound inputs to launch.
 
-Touches: `backend/app/services/timing_service.py`.
+This is safe today because the only tool-added port that exists yet --
+STAR's `annotation` GTF input, added by
+`tool_choice._resolve_align_ports` -- is `required=False` and not
+`multiple=True`. Neither dormant site can currently produce a wrong answer:
+`_is_multi_port` only misclassifies ports that are `multiple=True` in the
+per-tool set but absent (or non-multiple) in the static set, and `_advance`'s
+missing-input check only misfires on a `required=True` per-tool port the
+static set doesn't have.
+
+The moment a future tool choice adds a `required=True` or `multiple=True`
+port for one tool value, both sites will misbehave silently: `_advance`
+could decide a node's inputs are complete when the tool-specific spec still
+needs one more, launching it with an incomplete `inputs` dict; or
+`_is_multi_port` could fail to collect a multi-port's second edge into a
+list, silently dropping a contribution. Either failure surfaces deep inside
+the launcher as a confusing error attributed to the wrong node, per the
+comment already on `_advance`'s missing-input branch -- not as a validation
+message pointing at the actual gap.
+
+Fix by changing both sites to call `ports_for(node)` and use its returned
+input tuple in place of `spec.inputs`, the same migration Task 4 already
+made at the sites that resolve ports for validation and the API.
+
+Touches: `backend/app/services/workflow_orchestrator.py`
+(`_is_multi_port`, line 140; `_advance`, line 259),
+`backend/app/pipelines/node_types.py` (`ports_for`).
+
+## Alignment memory estimate does not size extra reads
+
+Raised: 2026-08-08, deferred during code review of extra-reads-for-alignment
+(GitHub issue #94, Task 3).
+
+`launch_alignment` (`backend/app/services/pipeline_service.py`) calls
+`memory_estimate.resolve(... input_bytes=obj.size or None, ...)` with only the
+primary read object's size. When `params["extra_reads"]` is non-empty, the
+runner (`align_handlers.align_reads`) concatenates every extra read's bytes
+into the primary before the aligner runs, so the real input the aligner and
+`samtools sort` see can be several times `obj.size` -- but the resource
+estimate that gates the job and sizes its `mem_mb` never learns about the
+extras.
+
+This is exactly the kind of gap CLAUDE.md's "Querying computation records"
+section warns is easy to introduce silently: nothing raises, no test fails,
+the job simply gets a memory budget sized for a fraction of its real input.
+A large enough set of extra reads could OOM a job that the estimator believed
+was comfortably under budget.
+
+Fix by summing `obj.size` across the primary and every object in
+`extra_reads` before calling `memory_estimate.resolve`, in `launch_alignment`.
+
+Touches: `backend/app/services/pipeline_service.py` (`launch_alignment`),
+`backend/app/pipelines/resource_estimator.py`.
+
+## STAR's `annotation` input port cannot be wired through the UI
+
+Raised: 2026-08-08, deferred during code review of Task 7's tool-selector
+work (GitHub issue #94, Task 7).
+
+Task 4 gave a STAR-configured `align` node an `annotation` input port typed
+`PortType(format=FormatKind.GTF)` (`app/pipelines/tool_choice.py`,
+`_resolve_align_ports`), and Task 7 makes that port render correctly on the
+canvas -- the node grows a fourth port slot and the dot draws in the right
+place. But `ACCEPT_CHOICES` in
+`frontend/src/components/WorkflowCanvas.tsx` -- the list of file types an
+input-slot node can be configured to *produce*, so it has something to wire
+into a downstream port -- has a `gff:annotation` entry (format `"gff"`) and
+no entry for format `"gtf"`. `FormatKind.GTF` is a distinct enum value from
+`FormatKind.GFF` on the backend (`app/models/object.py`), and `portAccepts`
+(`frontend/src/lib/workflowGraph.ts`) matches on format exactly, so a
+`gff`-typed input slot can never satisfy a `gtf`-typed port.
+
+The result is a control that is visible and functionally correct but
+permanently unusable: nothing in today's UI can produce an output typed
+`gtf`, so no edge can ever be drawn into STAR's `annotation` port. A user
+sees the port, sees no way to feed it, and has no reason to suspect the gap
+is one missing dropdown entry rather than a real modeling constraint.
+
+Fix by adding a `gtf:annotation`-shaped entry to `ACCEPT_CHOICES` --
+one line, no other change needed, since `portAccepts` already does the right
+thing once a slot can claim the format. Left for Task 9 (binding files at
+the input node) or a standalone follow-up rather than Task 7, since Task 7's
+scope was rendering the port, not making every input-slot format reachable.
+
+Touches: `frontend/src/components/WorkflowCanvas.tsx` (`ACCEPT_CHOICES`).

@@ -67,21 +67,22 @@ def _index_tool(aligner: Aligner, aligner_tool: tools.Tool) -> tools.Tool:
     return aligner_tool
 
 
-def _resolve_blob(payload: dict, key: str) -> Path:
-    """Locate an input by digest or explicit path.
+def _resolve_digest_or_path(
+    digest: str | None, path_str: str | None, *, missing_message: str
+) -> Path:
+    """Locate a file by content digest or explicit path, and confirm it exists.
 
-    Registered-in-place files have no managed blob to address by hash, so the
-    external path is the only way to reach them.
+    Shared by `_resolve_blob` (payload keys named `{key}_sha256`/`{key}_path`)
+    and the `extra_reads` loop (entries keyed `sha256`/`path`) so the two
+    naming conventions can each supply their own already-known keys without
+    duplicating the resolve-then-verify logic itself.
     """
-    digest = payload.get(f"{key}_sha256")
-    path_str = payload.get(f"{key}_path")
-
     if path_str:
         path = Path(path_str)
     elif digest:
         path = blob_path(digest)
     else:
-        raise PermanentError(f"Job requires '{key}_sha256' or '{key}_path'")
+        raise PermanentError(missing_message)
 
     if not path.exists():
         # Permanent rather than retryable: a blob missing now will still be
@@ -89,6 +90,19 @@ def _resolve_blob(payload: dict, key: str) -> Path:
         # storage problems.
         raise PermanentError(f"Input not found: {path}")
     return path
+
+
+def _resolve_blob(payload: dict, key: str) -> Path:
+    """Locate an input by digest or explicit path.
+
+    Registered-in-place files have no managed blob to address by hash, so the
+    external path is the only way to reach them.
+    """
+    return _resolve_digest_or_path(
+        payload.get(f"{key}_sha256"),
+        payload.get(f"{key}_path"),
+        missing_message=f"Job requires '{key}_sha256' or '{key}_path'",
+    )
 
 
 def _materialize(
@@ -462,6 +476,26 @@ def align_reads(ctx: JobContext) -> dict:
     if r2 is not None:
         r2 = _named_read_link(work, r2, ctx.payload.get("r2_name"))
 
+    extra_reads_payload = ctx.payload.get("extra_reads") or []
+    if extra_reads_payload:
+        # Several read files bound to the same multi port -- chunked/split
+        # reads, not a mate -- get concatenated into r1 before the aligner
+        # ever sees them. See _concatenate_reads for why concatenation is the
+        # only approach that works across all six aligners this handler
+        # drives.
+        extra_paths = [
+            _resolve_digest_or_path(
+                entry.get("sha256"),
+                entry.get("path"),
+                missing_message="extra_reads entry requires 'sha256' or 'path'",
+            )
+            for entry in extra_reads_payload
+        ]
+
+        r1_name = ctx.payload.get("r1_name") or "reads.fastq"
+        combined = work / f"combined_{Path(r1_name).name}"
+        r1 = _concatenate_reads(r1, extra_paths, combined)
+
     out_dir = work / "out"
     out_dir.mkdir(exist_ok=True)
     bam_name = ctx.payload.get("output_name") or "aligned.bam"
@@ -580,6 +614,39 @@ def _append_star_summary(scratch: Path, log_path: Path) -> None:
             handle.write(text)
     except OSError as e:
         log.warning("star_summary_not_logged", error=str(e))
+
+
+def _concatenate_reads(primary: Path, extras: list[Path], destination: Path) -> Path:
+    """Combine several FASTQ files into the one file the aligner sees.
+
+    None of the six aligners `align_runner` drives take several read files
+    positionally, and only three of them (bowtie2, HISAT2, STAR) support a
+    comma-separated list at all -- each with its own flag, and bwa-mem2,
+    minimap2, and winnowmap have no multi-file convention whatsoever.
+    Concatenating here, once, is the one approach that works uniformly across
+    every aligner rather than special-casing half of them.
+
+    Compression follows the primary: `_is_gzip` sniffs magic bytes rather than
+    trusting a name, since a resolved blob has no extension until
+    `_named_read_link` gives it one, and every read is decompressed on read
+    and (if the primary was gzipped) recompressed on write so the aligner
+    downstream sees one consistently-encoded file. FASTQ concatenates cleanly
+    this way: each record is self-contained, so files placed end to end are a
+    valid FASTQ of every read from every input, primary first.
+    """
+    primary_gzipped = _is_gzip(primary)
+    sources = [primary, *extras]
+
+    opener = gzip.open if primary_gzipped else open
+    with opener(destination, "wb") as dst:
+        for src in sources:
+            if _is_gzip(src):
+                with gzip.open(src, "rb") as fh:
+                    shutil.copyfileobj(fh, dst)
+            else:
+                with open(src, "rb") as fh:
+                    shutil.copyfileobj(fh, dst)
+    return destination
 
 
 def _named_read_link(work: Path, target: Path, name: str | None) -> Path:

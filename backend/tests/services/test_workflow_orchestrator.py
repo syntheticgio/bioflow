@@ -199,6 +199,81 @@ class TestLaunch:
         )
         assert row.job_ids
 
+    async def test_a_scalar_binding_produces_exactly_one_row(self, launches):
+        """The common case: one INPUT node, one bound file. Confirms the
+        multi-slot fan-out below has not changed the everyday shape."""
+        run, _ = await _linear_run(launches)
+        rows = [b for b in run.bindings if b.node_id == "reads"]
+        assert len(rows) == 1
+
+    async def test_a_list_binding_produces_one_row_per_object(self, launches):
+        """A multi INPUT node (several files under one node_id, per
+        `PortSpec.multiple`) fans out into N `WorkflowBinding` rows sharing
+        that node_id -- the shape `_bound_inputs` already collects back into a
+        list via its `isinstance(value, list)` branch."""
+        definition = await _definition(
+            [_input("reads"), _input("reference"), _action("align", "align")],
+            [
+                ("reads", "object", "align", "reads"),
+                ("reference", "object", "align", "reference"),
+            ],
+        )
+        id1, id2 = PydanticObjectId(), PydanticObjectId()
+        run = await orch.launch_workflow(
+            definition_id=definition.id,
+            project_id=PydanticObjectId(),
+            bindings={
+                "reads": [id1, id2],
+                "reference": PydanticObjectId(),
+            },
+            owner=OWNER,
+            label="multi",
+        )
+
+        reads_rows = [b for b in run.bindings if b.node_id == "reads"]
+        assert len(reads_rows) == 2
+        assert {b.object_id for b in reads_rows} == {id1, id2}
+        assert all(b.node_id == "reads" for b in reads_rows)
+
+    async def test_a_list_binding_resolves_to_both_ids_on_the_launched_node(
+        self, launches
+    ):
+        """The row-count tests above stop at `WorkflowBinding` rows coming out
+        of `launch_workflow`. This drives the rest of the path: `_advance`
+        reads those rows back via `_bound_inputs` and must hand the launched
+        node both ids under the one `reads` key, not just write two rows and
+        drop one.
+
+        Distinct from `test_orchestrator_launches_a_multi_port_with_every_bound_id`
+        in test_workflow_multi_port.py, which covers two separately-bound
+        scalar INPUT nodes each wired into `align.reads`. Here there is a
+        single INPUT node, bound to a real Python list of two ids in one
+        `bindings` entry -- the other shape `_bound_inputs`'s
+        `isinstance(value, list)` branch has to handle.
+        """
+        definition = await _definition(
+            [_input("reads"), _input("reference"), _action("align", "align")],
+            [
+                ("reads", "object", "align", "reads"),
+                ("reference", "object", "align", "reference"),
+            ],
+        )
+        id1, id2 = PydanticObjectId(), PydanticObjectId()
+        await orch.launch_workflow(
+            definition_id=definition.id,
+            project_id=PydanticObjectId(),
+            bindings={
+                "reads": [id1, id2],
+                "reference": PydanticObjectId(),
+            },
+            owner=OWNER,
+            label="multi",
+        )
+
+        [(node_type, inputs)] = launches
+        assert node_type == "align"
+        assert set(inputs["reads"]) == {id1, id2}
+
 
 class TestProgressiveLaunch:
     async def test_a_succeeding_node_launches_its_successor(self, launches):

@@ -16,6 +16,7 @@ import type {
   DataObject,
   NodePosition,
   NodeTypeMeta,
+  PortMeta,
   PortType,
   WorkflowEdge,
   WorkflowNode,
@@ -43,27 +44,57 @@ export function portAccepts(port: PortType, produced: PortType): boolean {
   return port.role === produced.role;
 }
 
+/** The ports one node actually has, given the tool it has chosen.
+ *
+ * The mirror of the backend's `node_types.ports_for`. Every read of a node's
+ * ports goes through here rather than through `catalog[node_type].inputs`:
+ * for a tool-parameterized node those static lists are only the *default*
+ * shape, and reading them directly draws a STAR node without its annotation
+ * port.
+ *
+ * An unset or unrecognized tool falls back to the default, so a
+ * freshly-dropped node is wirable and a definition saved before an aligner
+ * was removed still opens.
+ */
+export function portsFor(
+  node: WorkflowNode,
+  catalog: Record<string, NodeTypeMeta>,
+): { inputs: PortMeta[]; outputs: PortMeta[] } {
+  if (node.kind === "input") {
+    return {
+      inputs: [],
+      outputs: node.accepts
+        ? [{ name: "object", type: node.accepts, required: true, multiple: node.multiple }]
+        : [],
+    };
+  }
+  const meta = node.node_type ? catalog[node.node_type] : undefined;
+  if (!meta) return { inputs: [], outputs: [] };
+  const choice = meta.tool_choice;
+  if (!choice) return { inputs: meta.inputs, outputs: meta.outputs };
+  const chosen = node.params?.[choice.param_key];
+  const tool = typeof chosen === "string" ? chosen : choice.default;
+  const set = meta.ports_by_tool?.[tool] ?? meta.ports_by_tool?.[choice.default];
+  return set ? { inputs: set.inputs, outputs: set.outputs } : { inputs: meta.inputs, outputs: meta.outputs };
+}
+
 function outputType(
   node: WorkflowNode,
   portName: string,
   catalog: Record<string, NodeTypeMeta>,
 ): PortType | null {
-  if (node.kind === "input") {
-    // An INPUT has exactly one output, `object`, carrying whatever it accepts.
-    return portName === "object" ? (node.accepts ?? null) : null;
-  }
-  const meta = node.node_type ? catalog[node.node_type] : undefined;
-  return meta?.outputs.find((p) => p.name === portName)?.type ?? null;
+  const { outputs } = portsFor(node, catalog);
+  return outputs.find((p) => p.name === portName)?.type ?? null;
 }
 
 function inputPort(
   node: WorkflowNode,
   portName: string,
   catalog: Record<string, NodeTypeMeta>,
-): PortType | null {
+): PortMeta | null {
   if (node.kind === "input") return null; // nothing flows into a slot
-  const meta = node.node_type ? catalog[node.node_type] : undefined;
-  return meta?.inputs.find((p) => p.name === portName)?.type ?? null;
+  const { inputs } = portsFor(node, catalog);
+  return inputs.find((p) => p.name === portName) ?? null;
 }
 
 /** Whether adding `from -> to` closes a loop, by asking if `from` is already
@@ -130,17 +161,28 @@ export function canConnect(
     return { ok: false, reason: `No input port ${candidate.to_port}.` };
   }
 
-  // One wire per input port. Fan-*out* is fine and common -- a trimmed FASTQ
-  // feeding both an aligner and a QC node -- but two objects arriving at one
-  // port has no meaning.
+  // One wire per input port -- unless the port collects several. Fan-*out* is
+  // always fine (a trimmed FASTQ feeding both an aligner and a QC node); what
+  // this governs is fan-*in*, which only a multi port has a meaning for.
   const occupied = edges.some(
     (e) => e.to_node === candidate.to_node && e.to_port === candidate.to_port,
   );
-  if (occupied) {
+  if (occupied && !accepted.multiple) {
     return { ok: false, reason: `${candidate.to_port} already has an input.` };
   }
 
-  if (!portAccepts(accepted, produced)) {
+  // A slot holding several files may only feed a port that takes several.
+  // Refused here rather than at launch, where the user has long forgotten
+  // what they wired -- and silently sending one of N files is worse than
+  // either.
+  if (source.kind === "input" && source.multiple && !accepted.multiple) {
+    return {
+      ok: false,
+      reason: `${candidate.to_port} takes one file, and ${source.label ?? source.node_id} holds several.`,
+    };
+  }
+
+  if (!portAccepts(accepted.type, produced)) {
     const role = produced.role ?? "any";
     return {
       ok: false,
@@ -153,6 +195,54 @@ export function canConnect(
   }
 
   return { ok: true };
+}
+
+/** Which wires stop making sense if `nodeId` switches to `tool`.
+ *
+ * Returned rather than applied, so the caller can both remove them and *say*
+ * which it removed. A wire vanishing with no explanation is the version of
+ * this that gets reported as a bug.
+ *
+ * The generalization of the rule `updateInput` already applies to input slots:
+ * a slot whose type changed can no longer feed what it fed. Same reasoning,
+ * now that an action node's ports can change too.
+ */
+export function edgesInvalidatedBy(
+  nodes: WorkflowNode[],
+  edges: WorkflowEdge[],
+  catalog: Record<string, NodeTypeMeta>,
+  nodeId: string,
+  tool: string,
+): WorkflowEdge[] {
+  const node = nodes.find((n) => n.node_id === nodeId);
+  if (!node) return [];
+  const meta = node.node_type ? catalog[node.node_type] : undefined;
+  const choice = meta?.tool_choice;
+  if (!choice) return [];
+
+  const after = portsFor(
+    { ...node, params: { ...node.params, [choice.param_key]: tool } },
+    catalog,
+  );
+  const byId = new Map(nodes.map((n) => [n.node_id, n]));
+
+  return edges.filter((edge) => {
+    if (edge.to_node === nodeId) {
+      const port = after.inputs.find((p) => p.name === edge.to_port);
+      if (!port) return true;
+      const source = byId.get(edge.from_node);
+      const produced = source ? outputType(source, edge.from_port, catalog) : null;
+      return !produced || !portAccepts(port.type, produced);
+    }
+    if (edge.from_node === nodeId) {
+      const port = after.outputs.find((p) => p.name === edge.from_port);
+      if (!port) return true;
+      const target = byId.get(edge.to_node);
+      const accepted = target ? inputPort(target, edge.to_port, catalog) : null;
+      return !accepted || !portAccepts(accepted.type, port.type);
+    }
+    return false;
+  });
 }
 
 /** Where one port's dot sits, in canvas coordinates.
@@ -229,8 +319,17 @@ export function nextFreeSlot(nodes: { position?: NodePosition }[]): NodePosition
   return { x: 40, y: 50 };
 }
 
-/** The height a node needs to hold its ports without them overflowing. */
-export function nodeHeight(meta: NodeTypeMeta | undefined): number {
-  const ports = Math.max(meta?.inputs.length ?? 1, meta?.outputs.length ?? 1, 1);
+/** The height a node needs to hold its ports without them overflowing.
+ *
+ * Takes the node, not its type: a STAR node has one more port than a
+ * minimap2 node of the same type, and sizing from the type alone draws the
+ * annotation port outside the box.
+ */
+export function nodeHeight(
+  node: WorkflowNode,
+  catalog: Record<string, NodeTypeMeta>,
+): number {
+  const { inputs, outputs } = portsFor(node, catalog);
+  const ports = Math.max(inputs.length, outputs.length, 1);
   return NODE_HEADER + PORT_SPACING * (ports + 1);
 }

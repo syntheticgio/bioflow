@@ -3,9 +3,11 @@ import {
   NODE_WIDTH,
   canConnect,
   edgeKey,
+  edgesInvalidatedBy,
   bindableObjects,
   nextFreeSlot,
   nodePortPosition,
+  portsFor,
   wouldCycle,
 } from "./workflowGraph";
 import type {
@@ -40,7 +42,7 @@ const ALIGN: NodeTypeMeta = {
   node_type: "align",
   label: "Align to reference",
   inputs: [
-    { name: "reads", type: { format: "fastq", role: null }, required: true },
+    { name: "reads", type: { format: "fastq", role: null }, required: true, multiple: true },
     { name: "mate", type: { format: "fastq", role: null }, required: false },
     {
       name: "reference",
@@ -55,6 +57,33 @@ const ALIGN: NodeTypeMeta = {
       required: true,
     },
   ],
+  tool_choice: {
+    param_key: "aligner",
+    options: [
+      { value: "minimap2", label: "minimap2" },
+      { value: "star", label: "STAR" },
+    ],
+    default: "minimap2",
+  },
+  ports_by_tool: {
+    minimap2: {
+      inputs: [
+        { name: "reads", type: { format: "fastq", role: null }, required: true, multiple: true },
+        { name: "mate", type: { format: "fastq", role: null }, required: false },
+        { name: "reference", type: { format: "fasta", role: "reference" }, required: true },
+      ],
+      outputs: [{ name: "alignment", type: { format: "bam", role: "alignment" }, required: true }],
+    },
+    star: {
+      inputs: [
+        { name: "reads", type: { format: "fastq", role: null }, required: true, multiple: true },
+        { name: "mate", type: { format: "fastq", role: null }, required: false },
+        { name: "reference", type: { format: "fasta", role: "reference" }, required: true },
+        { name: "annotation", type: { format: "gtf", role: null }, required: false },
+      ],
+      outputs: [{ name: "alignment", type: { format: "bam", role: "alignment" }, required: true }],
+    },
+  },
 };
 
 const CATALOG: Record<string, NodeTypeMeta> = { trim: TRIM, align: ALIGN };
@@ -142,12 +171,14 @@ describe("canConnect", () => {
   });
 
   it("rejects a second wire into an occupied port", () => {
-    const nodes = [action("t", "trim"), action("t2", "trim"), action("a", "align")];
-    const existing = [edge("t", "trimmed", "a", "reads")];
+    // "reads" on trim is a scalar port (align's is multi -- see the
+    // "canConnect with multi ports" tests below for that case).
+    const nodes = [input("r1", "fastq"), input("r2", "fastq"), action("t", "trim")];
+    const existing = [edge("r1", "object", "t", "reads")];
     const result = canConnect(nodes, existing, CATALOG, {
-      from_node: "t2",
-      from_port: "trimmed",
-      to_node: "a",
+      from_node: "r2",
+      from_port: "object",
+      to_node: "t",
       to_port: "reads",
     });
     expect(result.ok).toBe(false);
@@ -358,5 +389,102 @@ describe("bindableObjects", () => {
   it("offers everything of the format when the port names no role", () => {
     const candidates = [obj("plain", "fastq"), obj("trimmed", "fastq", "trimmed_reads")];
     expect(bindableObjects(candidates, port)).toHaveLength(2);
+  });
+});
+
+describe("portsFor", () => {
+  it("returns the default set for a node with no tool chosen", () => {
+    const node = action("align_1", "align");
+    const { inputs } = portsFor(node, CATALOG);
+    expect(inputs.map((p) => p.name)).toContain("reads");
+  });
+
+  it("returns the tool's set when one is chosen", () => {
+    const node = { ...action("align_1", "align"), params: { aligner: "star" } };
+    const { inputs } = portsFor(node, CATALOG);
+    expect(inputs.map((p) => p.name)).toContain("annotation");
+  });
+
+  it("falls back to the default for an unknown tool", () => {
+    const node = { ...action("align_1", "align"), params: { aligner: "nope" } };
+    const { inputs } = portsFor(node, CATALOG);
+    expect(inputs.map((p) => p.name)).toContain("reads");
+    expect(inputs.map((p) => p.name)).not.toContain("annotation");
+  });
+
+  it("returns the static set for a node type with no tool choice", () => {
+    const node = action("t", "trim");
+    const { inputs } = portsFor(node, CATALOG);
+    expect(inputs.map((p) => p.name)).toEqual(["reads", "mate"]);
+  });
+});
+
+describe("canConnect with multi ports", () => {
+  it("accepts a second wire into a multi port", () => {
+    const nodes = [input("r1", "fastq"), input("r2", "fastq"), action("align_1", "align")];
+    const edges = [edge("r1", "object", "align_1", "reads")];
+    const verdict = canConnect(nodes, edges, CATALOG, edge("r2", "object", "align_1", "reads"));
+    expect(verdict.ok).toBe(true);
+  });
+
+  it("still refuses a second wire into a scalar port", () => {
+    const nodes = [
+      input("ref_a", "fasta", "reference"),
+      input("ref_b", "fasta", "reference"),
+      action("align_1", "align"),
+    ];
+    const edges = [edge("ref_a", "object", "align_1", "reference")];
+    const verdict = canConnect(nodes, edges, CATALOG, edge("ref_b", "object", "align_1", "reference"));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toMatch(/already has an input/);
+  });
+
+  it("type-checks every wire of a multi port", () => {
+    const nodes = [input("r1", "fastq"), input("bam", "bam", "alignment"), action("align_1", "align")];
+    const edges = [edge("r1", "object", "align_1", "reads")];
+    const verdict = canConnect(nodes, edges, CATALOG, edge("bam", "object", "align_1", "reads"));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toMatch(/does not accept/);
+  });
+
+  it("refuses a multi slot feeding a scalar port", () => {
+    const slot = { ...input("many", "fastq"), multiple: true };
+    const nodes = [slot, action("t", "trim")];
+    const verdict = canConnect(nodes, [], CATALOG, edge("many", "object", "t", "reads"));
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toMatch(/one file/);
+  });
+
+  it("allows a multi slot feeding a multi port", () => {
+    const slot = { ...input("many", "fastq"), multiple: true };
+    const nodes = [slot, action("align_1", "align")];
+    const verdict = canConnect(nodes, [], CATALOG, edge("many", "object", "align_1", "reads"));
+    expect(verdict.ok).toBe(true);
+  });
+});
+
+describe("edgesInvalidatedBy", () => {
+  it("drops a wire into a port the new tool does not have", () => {
+    const node = { ...action("align_1", "align"), params: { aligner: "star" } };
+    const nodes = [input("gtf", "gtf"), node];
+    const edges = [edge("gtf", "object", "align_1", "annotation")];
+    const dropped = edgesInvalidatedBy(nodes, edges, CATALOG, "align_1", "minimap2");
+    expect(dropped.map((e) => e.to_port)).toEqual(["annotation"]);
+  });
+
+  it("keeps wires into ports both tools share", () => {
+    const node = { ...action("align_1", "align"), params: { aligner: "star" } };
+    const nodes = [input("r1", "fastq"), node];
+    const edges = [edge("r1", "object", "align_1", "reads")];
+    const dropped = edgesInvalidatedBy(nodes, edges, CATALOG, "align_1", "minimap2");
+    expect(dropped).toEqual([]);
+  });
+
+  it("leaves other nodes' wires alone", () => {
+    const align = { ...action("align_1", "align"), params: { aligner: "star" } };
+    const nodes = [input("r1", "fastq"), align, action("t", "trim")];
+    const edges = [edge("r1", "object", "t", "reads")];
+    const dropped = edgesInvalidatedBy(nodes, edges, CATALOG, "align_1", "minimap2");
+    expect(dropped).toEqual([]);
   });
 });

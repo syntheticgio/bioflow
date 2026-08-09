@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from app.models.object import FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.models.workflow import PortType
+from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ToolChoice
 from app.services import (
     ncbi_assembly_service,
     pipeline_service,
@@ -54,6 +55,17 @@ class PortSpec:
     name: str
     type: PortType
     required: bool = True
+    # Whether this port accepts several incoming wires, collected into a list
+    # for the launcher. Only the one-wire-per-port rule relaxes -- type
+    # checking still applies to each wire independently, which is what keeps a
+    # multi port from becoming an untyped one.
+    #
+    # `continuity_qc`'s hifi_bam/nano_bam and `differential_expression`'s
+    # counts are the other two ports whose launchers genuinely take lists
+    # today (both currently smuggle the set through `params`). They are left
+    # scalar here deliberately: each needs its own decision about how the
+    # per-sample design travels, and neither is what #94 asks for.
+    multiple: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +91,12 @@ class NodeTypeSpec:
     # a second spec claiming a kind without a tool would make
     # workflow_derive._node_type_for silently pick whichever came first.
     run_tool: str | None = None
+    # Set when this node type is parameterized by a tool -- which aligner,
+    # which caller. The chosen tool lives in `node.params[param_key]`, and the
+    # port set follows from it, so ports are resolved per *node* via
+    # `ports_for` rather than read off `spec.inputs` directly. Every read of
+    # `.inputs`/`.outputs` outside this module should go through `ports_for`.
+    tool_choice: "ToolChoice | None" = None
 
 
 async def _launch_trim(*, inputs: dict, params: dict, owner: str):
@@ -91,12 +109,21 @@ async def _launch_trim(*, inputs: dict, params: dict, owner: str):
 
 
 async def _launch_align(*, inputs: dict, params: dict, owner: str):
+    # `reads` is a multi port, so it arrives as a list. The launcher itself
+    # takes one object_id: extra read files are passed through params for the
+    # runner to concatenate, which is what "they all go in together" means --
+    # one alignment over every chunk, not one run per file.
+    reads = inputs["reads"]
+    if isinstance(reads, list):
+        primary, extra = reads[0], reads[1:]
+    else:
+        primary, extra = reads, []
     return await pipeline_service.launch_alignment(
-        object_id=inputs["reads"],
+        object_id=primary,
         reference_id=inputs["reference"],
         owner=owner,
         mate_object_id=inputs.get("mate"),
-        params=params,
+        params={**params, "extra_reads": [str(o) for o in extra]} if extra else params,
     )
 
 
@@ -310,8 +337,12 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         launch_name="pipeline_service.launch_alignment",
         launch=_launch_align,
         run_kind=RunKind.ALIGNMENT,
+        tool_choice=ALIGN_TOOL_CHOICE,
         inputs=(
-            PortSpec("reads", PortType(format=FormatKind.FASTQ)),
+            # Several read files go in together -- chunked/split reads, not
+            # mates. `mate` beside it stays scalar: R2 is one file with a
+            # specific meaning, and collapsing the two concepts would lose it.
+            PortSpec("reads", PortType(format=FormatKind.FASTQ), multiple=True),
             PortSpec("mate", PortType(format=FormatKind.FASTQ), required=False),
             # The role is required here, and it is the whole point: a protein
             # FASTA and a genome are both FormatKind.FASTA.
@@ -752,6 +783,31 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         "pipeline_service.launch_variant_summary",
     }
 )
+
+
+def ports_for(node) -> tuple[tuple[PortSpec, ...], tuple[PortSpec, ...]]:
+    """The (inputs, outputs) for one node, given the tool it has chosen.
+
+    Every caller that used to read `spec.inputs`/`spec.outputs` should come
+    here instead: a tool-parameterized node's real port set is not on its spec.
+    Node types without a `tool_choice` -- most of them -- get their static
+    tuples back unchanged, so this is a safe blanket replacement.
+
+    An unset or unrecognized tool falls back to the default rather than
+    raising. A node dropped from the palette has no tool until the resolver
+    supplies one, and a definition saved before an aligner was removed must
+    still open -- in both cases ports that exist beat an exception.
+    """
+    spec = NODE_TYPES.get(node.node_type) if node.node_type else None
+    if spec is None:
+        return (), ()
+    choice = spec.tool_choice
+    if choice is None:
+        return spec.inputs, spec.outputs
+    tool = node.params.get(choice.param_key) or choice.default
+    if tool not in {o.value for o in choice.options}:
+        tool = choice.default
+    return choice.resolve(spec.inputs, spec.outputs, tool)
 
 
 def launch_function_names() -> set[str]:

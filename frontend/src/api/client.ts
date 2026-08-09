@@ -1110,7 +1110,11 @@ export const api = {
 
   launchWorkflow: (
     id: string,
-    body: { project_id: string; label: string; bindings: Record<string, string> },
+    body: {
+      project_id: string;
+      label: string;
+      bindings: Record<string, string | string[]>;
+    },
   ) =>
     request<WorkflowRunSummary>(`/workflows/${id}/runs`, {
       method: "POST",

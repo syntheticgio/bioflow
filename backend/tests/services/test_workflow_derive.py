@@ -40,6 +40,7 @@ async def _run(
     outputs: list[PydanticObjectId] = (),
     label: str = "run",
     tool: str | None = None,
+    params: dict | None = None,
 ) -> PipelineRun:
     run = PipelineRun(
         kind=kind,
@@ -48,6 +49,7 @@ async def _run(
         owner=OWNER,
         tool=tool,
         status=RunStatus.SUCCEEDED,
+        params=params or {},
         inputs=[
             RunInput(object_id=oid, name=name, role=role)
             for oid, name, role in inputs
@@ -310,6 +312,76 @@ class TestLayout:
         assert len([n for n in result.nodes if n.kind.value == "action"]) == 2
 
 
+class TestToolConfiguredPorts:
+    """A node's real port set depends on its chosen tool (#94 Task 4,
+    `pipelines/tool_choice.py`), and deriving from history has to resolve
+    ports the same way `workflow_service`/`workflow_binding` do -- through
+    `ports_for`, not the node type's static spec.
+
+    STAR is the concrete case: a STAR-configured `align` node gains an
+    optional `annotation` GTF input port that a minimap2 `align` node
+    doesn't have. Before this fix, `_port_for_role` matched a role against
+    `NODE_TYPES["align"].inputs` directly -- the base, minimap2-shaped port
+    set -- so a real STAR alignment run's `annotation`-role RunInput matched
+    no port and its edge was silently dropped, even though the run's own
+    `params["aligner"]` said STAR all along.
+    """
+
+    async def test_a_star_runs_annotation_input_is_wired_to_the_annotation_port(self):
+        reads = PydanticObjectId()
+        reference = PydanticObjectId()
+        annotation = PydanticObjectId()
+        run = await _run(
+            RunKind.ALIGNMENT,
+            tool="star",
+            params={"aligner": "star"},
+            inputs=[
+                (reads, "s.fastq", "reads"),
+                (reference, "ref.fna", "reference"),
+                (annotation, "genes.gtf", "annotation"),
+            ],
+        )
+
+        result = await derive_definition([run.id], owner=OWNER)
+
+        assert result.skipped == []
+        action = next(n for n in result.nodes if n.kind.value == "action")
+        assert action.node_type == "align"
+        ports = {e.to_port for e in result.edges if e.to_node == action.node_id}
+        # Before the fix, "annotation" was silently absent here: the role
+        # matched no port on the base (non-STAR) spec and its edge was
+        # dropped with no error to anyone.
+        assert "annotation" in ports
+
+        annotation_edge = next(e for e in result.edges if e.to_port == "annotation")
+        annotation_node = next(
+            n for n in result.nodes if n.node_id == annotation_edge.from_node
+        )
+        assert annotation_node.label == "genes.gtf"
+
+    async def test_a_non_star_aligner_has_no_annotation_port_to_wire(self):
+        """The base (minimap2-shaped) port set has no `annotation` input, so a
+        RunInput carrying that role on a non-STAR run still yields no edge --
+        this is not a bug, it's the node genuinely not having that port."""
+        reads = PydanticObjectId()
+        annotation = PydanticObjectId()
+        run = await _run(
+            RunKind.ALIGNMENT,
+            tool="minimap2",
+            params={"aligner": "minimap2"},
+            inputs=[
+                (reads, "s.fastq", "reads"),
+                (annotation, "genes.gtf", "annotation"),
+            ],
+        )
+
+        result = await derive_definition([run.id], owner=OWNER)
+
+        action = next(n for n in result.nodes if n.kind.value == "action")
+        ports = {e.to_port for e in result.edges if e.to_node == action.node_id}
+        assert "annotation" not in ports
+
+
 class TestRolePortNaming:
     """`_port_for_role` matches a RunInputRole's value against port names.
 
@@ -328,7 +400,7 @@ class TestRolePortNaming:
             role.value
             for role in RunInputRole
             if not any(
-                _port_for_role(node_type, role.value) for node_type in NODE_TYPES
+                _port_for_role(node_type, {}, role.value) for node_type in NODE_TYPES
             )
         ]
         assert unreachable == [], (

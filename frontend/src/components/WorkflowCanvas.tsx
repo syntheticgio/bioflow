@@ -18,7 +18,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiRequestError, api } from "../api/client";
 import type {
   GraphValidationError,
@@ -33,10 +33,13 @@ import {
   bindableObjects,
   canConnect,
   edgeKey,
+  edgesInvalidatedBy,
   nextFreeSlot,
   nodeHeight,
   nodePortPosition,
+  portsFor,
 } from "../lib/workflowGraph";
+import { NodeDetailPanel } from "./workflow/NodeDetailPanel";
 
 interface PendingWire {
   node_id: string;
@@ -103,10 +106,14 @@ export function WorkflowCanvas() {
   const [serverErrors, setServerErrors] = useState<GraphValidationError[]>([]);
   const [launching, setLaunching] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
-  const [bindings, setBindings] = useState<Record<string, string>>({});
+  // One object id per slot, or several for a slot marked `multiple`. The
+  // union rather than always-an-array keeps the scalar path -- every
+  // existing read and the launch payload -- unchanged for the common case.
+  const [bindings, setBindings] = useState<Record<string, string | string[]>>({});
   const [deriving, setDeriving] = useState(false);
   const [pickedRuns, setPickedRuns] = useState<string[]>([]);
   const [skipped, setSkipped] = useState<SkippedRun[]>([]);
+  const [detailNodeId, setDetailNodeId] = useState<string | null>(null);
   const dragRef = useRef<{ node_id: string; dx: number; dy: number } | null>(null);
 
   const palette = useQuery({
@@ -124,6 +131,34 @@ export function WorkflowCanvas() {
     for (const entry of palette.data ?? []) out[entry.node_type] = entry;
     return out;
   }, [palette.data]);
+
+  const detailNode = useMemo(
+    () => nodes.find((n) => n.node_id === detailNodeId) ?? null,
+    [nodes, detailNodeId],
+  );
+
+  function updateNode(nodeId: string, patch: Partial<WorkflowNode>) {
+    setNodes((current) =>
+      current.map((n) => (n.node_id === nodeId ? { ...n, ...patch } : n)),
+    );
+  }
+
+  function setParam(nodeId: string, key: string, value: unknown) {
+    setNodes((current) =>
+      current.map((n) =>
+        n.node_id === nodeId ? { ...n, params: { ...n.params, [key]: value } } : n,
+      ),
+    );
+  }
+
+  useEffect(() => {
+    if (!detailNodeId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDetailNodeId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detailNodeId]);
 
   const save = useMutation({
     mutationFn: () => {
@@ -162,13 +197,19 @@ export function WorkflowCanvas() {
   }, []);
 
   function addActionNode(meta: NodeTypeMeta) {
+    // Seeded with the default tool rather than left unset: a node with no
+    // tool has no ports, and a node you cannot wire until you have visited a
+    // dropdown reads as broken.
+    const params = meta.tool_choice
+      ? { [meta.tool_choice.param_key]: meta.tool_choice.default }
+      : {};
     setNodes((current) => [
       ...current,
       {
         node_id: freshNodeId(meta.node_type),
         kind: "action",
         node_type: meta.node_type,
-        params: {},
+        params,
         continue_on_failure: false,
         position: nextFreeSlot(current),
       },
@@ -198,6 +239,11 @@ export function WorkflowCanvas() {
     [nodes, selected],
   );
 
+  const selectedAction = useMemo(
+    () => nodes.find((n) => n.node_id === selected && n.kind === "action") ?? null,
+    [nodes, selected],
+  );
+
   function updateInput(nodeId: string, patch: Partial<WorkflowNode>) {
     setNodes((current) =>
       current.map((n) => (n.node_id === nodeId ? { ...n, ...patch } : n)),
@@ -207,6 +253,36 @@ export function WorkflowCanvas() {
     // rejects, reporting an error about a wire the user did not touch.
     if (patch.accepts) {
       setEdges((current) => current.filter((e) => e.from_node !== nodeId));
+    }
+  }
+
+  /** Change a node's tool, dropping the wires that stop making sense.
+   *
+   * The removal is reported rather than silent: a wire disappearing with no
+   * explanation is what gets filed as a bug.
+   */
+  function changeTool(nodeId: string, tool: string) {
+    const node = nodes.find((n) => n.node_id === nodeId);
+    const meta = node?.node_type ? catalog[node.node_type] : undefined;
+    const choice = meta?.tool_choice;
+    if (!node || !choice) return;
+
+    const dropped = edgesInvalidatedBy(nodes, edges, catalog, nodeId, tool);
+    setNodes((current) =>
+      current.map((n) =>
+        n.node_id === nodeId
+          ? { ...n, params: { ...n.params, [choice.param_key]: tool } }
+          : n,
+      ),
+    );
+    if (dropped.length > 0) {
+      const keys = new Set(dropped.map(edgeKey));
+      setEdges((current) => current.filter((e) => !keys.has(edgeKey(e))));
+      setNotice(
+        `Switched to ${tool}; removed ${dropped.length} wire(s) it has no port for: ${dropped
+          .map((e) => `${e.to_node}.${e.to_port}`)
+          .join(", ")}.`,
+      );
     }
   }
 
@@ -291,13 +367,12 @@ export function WorkflowCanvas() {
   const projects = useQuery({
     queryKey: ["projects"],
     queryFn: () => api.listProjects(),
-    enabled: launching,
   });
 
   const projectObjects = useQuery({
     queryKey: ["objects", projectId],
     queryFn: () => api.listObjects(projectId!),
-    enabled: launching && Boolean(projectId),
+    enabled: Boolean(projectId),
   });
 
   const runs = useQuery({
@@ -345,7 +420,10 @@ export function WorkflowCanvas() {
   // Every input slot must have a file before the run can start: the launcher
   // validates its inputs, so an unbound slot fails inside a tool rather than
   // here, where the user can still fix it.
-  const unbound = inputNodes.filter((n) => !bindings[n.node_id]);
+  const unbound = inputNodes.filter((n) => {
+    const bound = bindings[n.node_id];
+    return !bound || (Array.isArray(bound) && bound.length === 0);
+  });
 
   function newDefinition() {
     setDefinitionId(null);
@@ -366,6 +444,25 @@ export function WorkflowCanvas() {
           onChange={(e) => setName(e.target.value)}
           aria-label="Workflow name"
         />
+        <select
+          className="workflow-project"
+          value={projectId ?? ""}
+          onChange={(e) => {
+            setProjectId(e.target.value || null);
+            // Bindings name objects in the old project, so they cannot
+            // survive a project change -- keeping them would submit ids the
+            // new project does not contain.
+            setBindings({});
+          }}
+          aria-label="Project"
+        >
+          <option value="">Choose a project…</option>
+          {(projects.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
         <button className="btn" onClick={addInputNode}>
           Add input
         </button>
@@ -474,29 +571,35 @@ export function WorkflowCanvas() {
                       {node.accepts?.role ? `/${node.accepts.role}` : ""}
                     </em>
                   </span>
-                  <select
-                    value={bindings[node.node_id] ?? ""}
-                    disabled={!projectId}
-                    onChange={(e) =>
-                      setBindings((current) => ({
-                        ...current,
-                        [node.node_id]: e.target.value,
-                      }))
-                    }
-                  >
-                    <option value="">
-                      {!projectId
-                        ? "Choose a project first"
-                        : candidates.length === 0
-                          ? "No matching files in this project"
-                          : "Choose a file…"}
-                    </option>
-                    {candidates.map((object) => (
-                      <option key={object.id} value={object.id}>
-                        {object.name}
+                  {node.multiple ? (
+                    <span className="muted">
+                      {((bindings[node.node_id] as string[]) ?? []).length} file(s) selected on the canvas
+                    </span>
+                  ) : (
+                    <select
+                      value={(bindings[node.node_id] as string) ?? ""}
+                      disabled={!projectId}
+                      onChange={(e) =>
+                        setBindings((current) => ({
+                          ...current,
+                          [node.node_id]: e.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">
+                        {!projectId
+                          ? "Choose a project first"
+                          : candidates.length === 0
+                            ? "No matching files in this project"
+                            : "Choose a file…"}
                       </option>
-                    ))}
-                  </select>
+                      {candidates.map((object) => (
+                        <option key={object.id} value={object.id}>
+                          {object.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </label>
               );
             })}
@@ -575,6 +678,21 @@ export function WorkflowCanvas() {
         </div>
       )}
 
+      {detailNode ? (
+        <NodeDetailPanel
+          node={detailNode}
+          nodes={nodes}
+          edges={edges}
+          catalog={catalog}
+          onClose={() => setDetailNodeId(null)}
+          onChangeTool={changeTool}
+          onChangeParam={setParam}
+          onChangeLabel={(id, label) => updateNode(id, { label })}
+          onToggleContinue={(id, value) =>
+            updateNode(id, { continue_on_failure: value })
+          }
+        />
+      ) : (
       <div className="workflow-body">
         <aside className="workflow-palette">
           {selectedInput && (
@@ -607,8 +725,58 @@ export function WorkflowCanvas() {
                   ))}
                 </select>
               </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={Boolean(selectedInput.multiple)}
+                  onChange={(e) => {
+                    updateInput(selectedInput.node_id, { multiple: e.target.checked });
+                    // The slot's shape changed, so what it can feed changed
+                    // with it -- a set cannot flow into a scalar port. Same
+                    // reasoning as the `accepts` branch of updateInput.
+                    setEdges((current) =>
+                      current.filter((e2) => e2.from_node !== selectedInput.node_id),
+                    );
+                    setBindings((current) => ({
+                      ...current,
+                      [selectedInput.node_id]: e.target.checked ? [] : "",
+                    }));
+                  }}
+                />
+                <span>
+                  Several files
+                  <em>
+                    Read files split into chunks that all go into one run. Not
+                    mates -- R2 belongs on its own slot.
+                  </em>
+                </span>
+              </label>
             </div>
           )}
+          {selectedAction && (() => {
+            const meta = selectedAction.node_type ? catalog[selectedAction.node_type] : undefined;
+            const choice = meta?.tool_choice;
+            if (!choice) return null;
+            const current = selectedAction.params?.[choice.param_key];
+            return (
+              <div className="workflow-inspector">
+                <h4>{meta?.label}</h4>
+                <label>
+                  <span>Tool</span>
+                  <select
+                    value={typeof current === "string" ? current : choice.default}
+                    onChange={(e) => changeTool(selectedAction.node_id, e.target.value)}
+                  >
+                    {choice.options.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            );
+          })()}
           <h4>Tools</h4>
           {palette.isLoading && <p className="muted">Loading…</p>}
           {(palette.data ?? []).map((meta) => (
@@ -643,10 +811,8 @@ export function WorkflowCanvas() {
             const from = nodes.find((n) => n.node_id === edge.from_node);
             const to = nodes.find((n) => n.node_id === edge.to_node);
             if (!from || !to) return null;
-            const fromMeta = from.node_type ? catalog[from.node_type] : undefined;
-            const toMeta = to.node_type ? catalog[to.node_type] : undefined;
-            const fromPorts = from.kind === "input" ? ["object"] : (fromMeta?.outputs ?? []).map((p) => p.name);
-            const toPorts = (toMeta?.inputs ?? []).map((p) => p.name);
+            const fromPorts = portsFor(from, catalog).outputs.map((p) => p.name);
+            const toPorts = portsFor(to, catalog).inputs.map((p) => p.name);
             const a = nodePortPosition(
               from.position ?? { x: 0, y: 0 },
               Math.max(fromPorts.indexOf(edge.from_port), 0),
@@ -685,12 +851,14 @@ export function WorkflowCanvas() {
           {nodes.map((node) => {
             const meta = node.node_type ? catalog[node.node_type] : undefined;
             const position = node.position ?? { x: 0, y: 0 };
-            const inputs = node.kind === "input" ? [] : (meta?.inputs ?? []);
-            const outputs =
+            const { inputs, outputs } = portsFor(node, catalog);
+            const height =
               node.kind === "input"
-                ? [{ name: "object", type: node.accepts!, required: true }]
-                : (meta?.outputs ?? []);
-            const height = node.kind === "input" ? 54 : nodeHeight(meta);
+                ? 54 +
+                  (node.multiple
+                    ? 20 + ((bindings[node.node_id] as string[]) ?? []).length * 18
+                    : 0)
+                : nodeHeight(node, catalog);
             const problems = errorsByNode.get(node.node_id);
             return (
               <g key={node.node_id}>
@@ -717,12 +885,47 @@ export function WorkflowCanvas() {
                     };
                     setSelected(node.node_id);
                   }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setDetailNodeId(node.node_id);
+                  }}
                 >
                   {problems && <title>{problems.join("\n")}</title>}
                 </rect>
                 <text className="workflow-node-label" x={position.x + 10} y={position.y + 20}>
                   {node.kind === "input" ? (node.label ?? "input") : (meta?.label ?? node.node_type)}
                 </text>
+                {(() => {
+                  const choice = meta?.tool_choice;
+                  if (!choice) return null;
+                  const tool = node.params?.[choice.param_key];
+                  // Sits under the main label at y+34 when there's room, but
+                  // must never reach the first port dot -- a node with few
+                  // ports (align's 3-port tools) puts that dot at y+30, and
+                  // STAR's 4-port set puts it at y+19, both well above the
+                  // y+34 default. Anchor to the real first-port offset
+                  // (computed the same way `nodePortPosition` does, from the
+                  // node's actual total port count -- the same count
+                  // `nodeHeight` uses) rather than a constant, so this holds
+                  // for any port count a tool-choice node can have, not just
+                  // today's. Clearing PORT_RADIUS plus a few px keeps the
+                  // text's glyph box off the dot even accounting for font
+                  // ascent; align/STAR's only realistic counts (3 and 4) land
+                  // at toolY 22 and 11 respectively -- tighter under the
+                  // label than the 14px default gap, but not overlapping it.
+                  const totalPorts = Math.max(inputs.length, outputs.length, 1);
+                  const firstPortY = nodePortPosition(position, 0, totalPorts, "input").y;
+                  const toolY = Math.min(position.y + 34, firstPortY - PORT_RADIUS - 3);
+                  return (
+                    <text
+                      className="workflow-node-tool"
+                      x={position.x + 10}
+                      y={toolY}
+                    >
+                      {typeof tool === "string" ? tool : choice.default}
+                    </text>
+                  );
+                })()}
                 {selected === node.node_id && (
                   <text
                     className="workflow-node-delete"
@@ -735,6 +938,93 @@ export function WorkflowCanvas() {
                   >
                     ×
                   </text>
+                )}
+
+                {node.kind === "input" && (
+                  <foreignObject
+                    x={position.x + 8}
+                    y={position.y + 26}
+                    width={NODE_WIDTH - 16}
+                    height={24}
+                  >
+                    <select
+                      className="node-binding"
+                      value={
+                        Array.isArray(bindings[node.node_id])
+                          ? ""
+                          : ((bindings[node.node_id] as string) ?? "")
+                      }
+                      disabled={!projectId}
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (!value) return;
+                        setBindings((current) => ({
+                          ...current,
+                          [node.node_id]: node.multiple
+                            ? [
+                                ...(((current[node.node_id] as string[]) ?? []).filter(
+                                  (id) => id !== value,
+                                )),
+                                value,
+                              ]
+                            : value,
+                        }));
+                      }}
+                    >
+                      <option value="">
+                        {!projectId
+                          ? "Choose a project first"
+                          : node.multiple
+                            ? "Add a file…"
+                            : "Choose a file…"}
+                      </option>
+                      {bindableObjects(projectObjects.data ?? [], node.accepts).map(
+                        (object) => (
+                          <option key={object.id} value={object.id}>
+                            {object.name}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </foreignObject>
+                )}
+
+                {node.kind === "input" && node.multiple && (
+                  <foreignObject
+                    x={position.x + 8}
+                    y={position.y + 52}
+                    width={NODE_WIDTH - 16}
+                    height={Math.max(
+                      ((bindings[node.node_id] as string[]) ?? []).length * 18,
+                      1,
+                    )}
+                  >
+                    <ul className="node-binding-list">
+                      {((bindings[node.node_id] as string[]) ?? []).map((id) => (
+                        <li key={id}>
+                          <span>
+                            {(projectObjects.data ?? []).find((o) => o.id === id)?.name ??
+                              id}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setBindings((current) => ({
+                                ...current,
+                                [node.node_id]: (
+                                  (current[node.node_id] as string[]) ?? []
+                                ).filter((x) => x !== id),
+                              }));
+                            }}
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </foreignObject>
                 )}
 
                 {inputs.map((port, i) => {
@@ -794,6 +1084,7 @@ export function WorkflowCanvas() {
           })}
         </svg>
       </div>
+      )}
     </div>
   );
 }
