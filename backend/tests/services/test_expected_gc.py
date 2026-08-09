@@ -59,7 +59,13 @@ class TestFromOrganism:
         `source_name` lives on the table entry, not on the resolved
         ExpectedGc -- the resolved object carries only the finished
         attribution string, so this reads the table for the expected text."""
-        got = expected_gc.from_organism("Escherichia coli")
+        got = expected_gc.from_organism("Escherichia coli K-12")
         assert got is not None
-        assert "Escherichia coli" in got.attribution
-        assert expected_gc.GENOME_GC["escherichia coli"].source_name in got.attribution
+        assert "Escherichia coli K-12" in got.attribution
+        assert expected_gc.GENOME_GC["escherichia coli k-12"].source_name in got.attribution
+
+    def test_bare_species_does_not_match_a_strain_specific_entry(self):
+        """GC genuinely varies by E. coli strain; the table is keyed to K-12
+        specifically (see the comment on that entry), so an organism string
+        with no strain must not silently pick up K-12's figure."""
+        assert expected_gc.from_organism("Escherichia coli") is None

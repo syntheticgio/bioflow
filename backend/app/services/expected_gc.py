@@ -82,7 +82,13 @@ GENOME_GC: dict[str, GenomeGc] = {
         source_name="GRCm39",
         citation="NCBI RefSeq GCF_000001635.27 (GRCm39) assembly statistics",
     ),
-    "escherichia coli": GenomeGc(
+    # Keyed to the strain, not the bare species. `normalize_organism`'s own
+    # docstring gives the same reason: "Escherichia coli K-12 is not
+    # Escherichia coli O157:H7" -- GC genuinely varies by E. coli strain, and
+    # this table would otherwise attribute one strain's figure to any project
+    # whose organism metadata just says "Escherichia coli". A bare-species
+    # entry would be a plausible-looking but unearned hit.
+    "escherichia coli k-12": GenomeGc(
         percent=50.8,
         source_name="K-12 MG1655 (ASM584v2)",
         citation="NCBI RefSeq GCF_000005845.2 (ASM584v2) assembly statistics",
