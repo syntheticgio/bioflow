@@ -202,6 +202,20 @@ async def timing_model() -> dict:
     }
 
 
+@router.get("/metrics")
+async def metrics() -> dict:
+    """Aggregated computation cost, for the Reference → Metrics page."""
+    from app.queue.executor import RESOURCE_FLOOR_MS
+    from app.services import timing_service
+
+    return {
+        "min_samples": timing_service.MIN_SAMPLES,
+        # Imported rather than repeated: a client showing "no memory estimate
+        # for jobs under a minute" and an executor using a different floor
+        # would disagree silently.
+        "resource_floor_ms": RESOURCE_FLOOR_MS,
+        **await timing_service.metrics(),
+    }
 @router.get("/types")
 async def list_job_types() -> dict:
     return {

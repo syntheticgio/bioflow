@@ -175,6 +175,53 @@ export interface ObjectComputations {
   has_more: boolean;
 }
 
+/**
+ * A summary pair (median/p90) over some measurement, for the Reference →
+ * Metrics page. Both are null when there are no measurements: a run under
+ * the 60s sampling floor has no peak to summarize, and a job type no one
+ * has run yet has no durations at all. Render null as an em-dash, never as
+ * 0.
+ */
+export interface MetricSummary {
+  median: number | null;
+  p90: number | null;
+}
+
+/** One job type's row on the Reference → Metrics page. */
+export interface JobTypeMetrics {
+  job_type: string;
+  /** Every recorded run, grouped by outcome — failures included. */
+  outcomes: {
+    succeeded: number;
+    failed: number;
+    dead: number;
+    cancelled: number;
+  };
+  duration_ms: MetricSummary;
+  input_bytes: MetricSummary;
+  peak_rss_bytes: MetricSummary;
+  /** Opportunistic: null until pipelines record a read count. */
+  read_count: MetricSummary;
+  /** Which binaries these runs used, most-used first. */
+  tools: { name: string | null; version: string | null; runs: number }[];
+}
+
+/**
+ * Aggregated computation cost, from GET /metrics.
+ *
+ * Durations, sizes, memory and read counts summarize the most recent
+ * successful runs (the same window the predictive models fit); `totals` and
+ * per-type `outcomes` count every recorded run, failures included. The two
+ * deliberately describe different windows — a metrics page that hid
+ * failures would be a status page for a rosier app.
+ */
+export interface MetricsStats {
+  min_samples: number;
+  resource_floor_ms: number;
+  totals: Record<string, number>;
+  types: JobTypeMetrics[];
+}
+
 export type ProvenanceStep = {
   object_id: string;
   name: string;

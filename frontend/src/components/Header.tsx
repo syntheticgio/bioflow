@@ -35,6 +35,7 @@ const REFERENCE_ITEMS: { to: string; label: string; section: string }[] = [
   { to: "/help/workflow-diagrams", label: "Workflow Diagrams", section: "Reference" },
   { to: "/help/genome-analysis-review", label: "Genome Analysis Review", section: "Reference" },
   { to: "/help/databases", label: "Databases", section: "Reference" },
+  { to: "/metrics", label: "Metrics", section: "Reference" },
 ];
 
 /** Help menu contents, grouped so the dropdown stays scannable as it grows.

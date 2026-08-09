@@ -17,6 +17,8 @@ Two properties matter more than accuracy:
 
 from datetime import UTC, datetime
 
+import math
+
 from app.logging import get_logger
 from app.models.timing import (
     MODELLED_OUTCOMES,
@@ -580,3 +582,136 @@ async def stats() -> list[dict]:
             }
         )
     return out
+
+
+def _percentile(values: list[int], pct: float) -> int | None:
+    """Nearest-rank percentile of a list of measurements.
+
+    `None` when there are none: the metrics view follows the same convention
+    as the models -- an unmeasured run is not a run that measured zero, and a
+    column with no data shows nothing rather than 0.
+    """
+    if not values:
+        return None
+    ordered = sorted(values)
+    # Nearest-rank: the rank is ceil(pct/100 * N), so the median of an
+    # even-sized sample is the lower middle. Determinism over convention.
+    rank = math.ceil((pct / 100) * len(ordered))
+    idx = max(0, min(len(ordered) - 1, rank - 1))
+    return ordered[idx]
+
+
+def _summary(values: list[int]) -> dict:
+    """median/p90 over a list of measurements; both null when empty."""
+    return {
+        "median": _percentile(values, 50),
+        "p90": _percentile(values, 90),
+    }
+
+
+def _numeric_features(records: list[JobRunTiming], key: str) -> list[int]:
+    """Positive numeric values of one opportunistic feature across records.
+
+    Feature values are untyped at the schema level (a pipeline records what
+    it can), so each is checked rather than trusted.
+    """
+    out = []
+    for record in records:
+        value = record.features.get(key)
+        if isinstance(value, int) and value > 0:
+            out.append(value)
+    return out
+
+
+def _tool_counts(records: list[JobRunTiming]) -> list[dict]:
+    """Which binaries these runs used, most-used first."""
+    counts: dict[tuple[str | None, str | None], int] = {}
+    for record in records:
+        key = (record.tool, record.tool_version)
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        {"name": name, "version": version, "runs": n}
+        for (name, version), n in sorted(counts.items(), key=lambda kv: -kv[1])
+    ]
+
+
+async def _outcome_counts() -> dict[str, dict[str, int]]:
+    """Every recorded run, grouped by job type then outcome.
+
+    Deliberately *not* read through `_modelled`: counts are diagnostics and
+    never model input, and a page that shows how often runs fail needs the
+    failures. This mirrors `records_for_object`'s "failures on purpose"
+    stance -- the asymmetry is the point. No fit ever sees these.
+    """
+    # The document’s own bound collection, not get_db(): get_db() reads the
+    # app-level client, which tests deliberately never initialize (they bind
+    # their own client to a private database instead), while this collection
+    # is exactly the store `_modelled` queries -- so an outcome count and a
+    # duration summary can never disagree about which database they read.
+    # Beanie’s aggregate() is avoided on purpose: this Motor version’s latent
+    # cursors are not awaitable, and AggregationQuery.to_list() awaits one.
+    # The async-for form works on both. See queue/stats.py.
+    # `$ifNull` is not defensive padding: the real collection holds rows
+    # recorded before the outcome field existed (2026-08-03), which carry no
+    # `outcome` at all. Per the computation-records design, those were
+    # recorded on the success path and nowhere else, so they count as
+    # succeeded -- not as a fourth, mysterious outcome bucket.
+    pipeline = [
+        {
+            "$group": {
+                "_id": {
+                    "job_type": "$job_type",
+                    "outcome": {"$ifNull": ["$outcome", "succeeded"]},
+                },
+                "n": {"$sum": 1},
+            }
+        }
+    ]
+    out: dict[str, dict[str, int]] = {}
+    async for row in JobRunTiming.get_pymongo_collection().aggregate(pipeline):
+        key = row["_id"]
+        out.setdefault(key["job_type"], {})[key["outcome"]] = row["n"]
+    return out
+
+
+async def metrics() -> dict:
+    """Aggregated computation cost, for the Reference → Metrics page.
+
+    Diagnostics, not model input. Every "how long / how much memory / how
+    big" number here is a plain percentile over successful runs, read through
+    the same `_modelled` accessor the predictive models use, so a failure can
+    never leak into a summary that reads like a model's answer. Outcome counts
+    are the one deliberately separate piece: they cover *every* recorded run
+    (failures included -- the most informative record a user can read), via
+    `_outcome_counts`, and the two sources are never mixed.
+
+    `_modelled` caps at MAX_SAMPLES recent runs per type, so the percentiles
+    describe the recent window while `outcomes` describes the whole history.
+    """
+    counts = await _outcome_counts()
+    totals: dict[str, int] = {}
+    for by_outcome in counts.values():
+        for outcome, n in by_outcome.items():
+            totals[outcome] = totals.get(outcome, 0) + n
+
+    types = await JobRunTiming.distinct("job_type")
+    out = []
+    for job_type in sorted(types):
+        records = await _modelled(job_type)
+        durations = [r.duration_ms for r in records if r.duration_ms > 0]
+        inputs = [r.input_bytes for r in records if r.input_bytes > 0]
+        memory = [
+            r.resources.peak_rss_bytes for r in records if r.resources.peak_rss_bytes
+        ]
+        out.append(
+            {
+                "job_type": job_type,
+                "outcomes": counts.get(job_type, {}),
+                "duration_ms": _summary(durations),
+                "input_bytes": _summary(inputs),
+                "peak_rss_bytes": _summary(memory),
+                "read_count": _summary(_numeric_features(records, "read_count")),
+                "tools": _tool_counts(records),
+            }
+        )
+    return {"totals": totals, "types": out}

@@ -87,6 +87,7 @@ import type {
   VariantsPage,
   VariantStructure,
   DerivedGraph,
+  MetricsStats,
   NodeTypeMeta,
   WorkflowRunDetail,
   WorkflowRunRow,
@@ -509,6 +510,9 @@ export const api = {
   retryJob: (id: string) => request<JobSummary>(`/jobs/${id}/retry`, { method: "POST" }),
 
   jobTypes: () => request<Record<string, unknown>>("/jobs/types"),
+
+  /** Aggregated computation cost, for the Reference → Metrics page. */
+  metrics: () => request<MetricsStats>("/jobs/metrics"),
 
   // --- Pipelines ---
 

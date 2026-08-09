@@ -16,6 +16,7 @@ import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
 import { HelpAbout } from "./components/HelpAbout";
 import { HelpCalculations } from "./components/HelpCalculations";
+import { Metrics } from "./components/Metrics";
 import { HelpDatabases } from "./components/HelpDatabases";
 import { HelpFeedback } from "./components/HelpFeedback";
 import { HelpGenomeAnalysisReview } from "./components/HelpGenomeAnalysisReview";
@@ -118,6 +119,7 @@ function Shell() {
           <Route path="/settings/resources" element={<SettingsResources />} />
           <Route path="/settings/mcp" element={<SettingsMcp />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
+          <Route path="/metrics" element={<Metrics />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
           <Route path="/help/databases" element={<HelpDatabases />} />
