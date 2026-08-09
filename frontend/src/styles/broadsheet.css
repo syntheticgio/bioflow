@@ -281,13 +281,18 @@
   gap: var(--space-4);
 }
 
-/* Text buttons on paper: no chip, no fill, colour is the only state. */
+/* Text buttons on paper: no chip, no fill, colour is the only state.
+   The generic `.theme-broadsheet button` rule below sets a bold heading
+   font for real buttons (.btn); these menu triggers are plain nav-level
+   text, so they need to opt back out to match the sibling <a> links. */
 .theme-broadsheet .header-menu button,
 .theme-broadsheet .header-menu a {
   padding: 0;
   border-radius: 0;
   background: none;
   font-size: 15px;
+  font-family: var(--font-body);
+  font-weight: 400;
   color: var(--color-text);
 }
 
