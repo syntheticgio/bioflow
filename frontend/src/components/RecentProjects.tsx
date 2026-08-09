@@ -34,23 +34,21 @@ export function RecentProjects({ availableWidth }: { availableWidth: number }) {
     Math.floor(chipBudget / CHIP_WIDTH_PX),
   );
 
+  if (chipCount === 0) return null;
+
   return (
     <div className="recent-projects">
-      {chipCount > 0 && (
-        <>
-          <span className="recent-projects-label">RECENT</span>
-          {visible.slice(0, chipCount).map((p) => (
-            <Link
-              key={p.id}
-              to={`/p/${p.id}`}
-              className="recent-projects-chip"
-              title={p.name}
-            >
-              {p.name}
-            </Link>
-          ))}
-        </>
-      )}
+      <span className="recent-projects-label">RECENT</span>
+      {visible.slice(0, chipCount).map((p) => (
+        <Link
+          key={p.id}
+          to={`/p/${p.id}`}
+          className="recent-projects-chip"
+          title={p.name}
+        >
+          {p.name}
+        </Link>
+      ))}
     </div>
   );
 }
