@@ -390,6 +390,34 @@ See CLAUDE.md, "Closing out a TODO entry", for what to do when one of these
 lands. Short version: mark it `— FIXED` with a note, keep the body, and never
 trust a plan's checkboxes as evidence it shipped.
 
+## `SequenceCharts.tsx`'s four charts duplicate the same axis/hover scaffolding
+
+Raised: 2026-08-09, deferred during code review of Task 8 of the
+sequence-composition-and-bias-QC plan
+(`docs/superpowers/plans/2026-08-09-sequence-composition-bias-qc.md`).
+
+`BaseCompositionChart`, `QualityChart`, `GcDistributionChart`, and
+`NContentChart` (all in `frontend/src/components/SequenceCharts.tsx`, now
+~630 lines) each hand-roll the same shape: a `pad`/`plotW`/`plotH` layout
+object, an `x`/`y` scale closure, a transparent hit-`<rect>` for hover, and a
+crosshair-plus-readout interaction. The review that added the fourth chart
+(`NContentChart`, Task 8) flagged this as the point a prior review had
+already named as the natural trigger for extracting shared scaffolding --
+Task 7's review, adding the third chart, said so explicitly and deferred it
+to "whenever a fourth chart lands." It landed, and the extraction still
+didn't happen, because Task 8's scope was the new chart's behavior, not a
+refactor of its siblings.
+
+Nothing is broken. Each chart is independently correct, readable, and
+consistent with the file's established hand-rolled-SVG convention (no
+charting library, per the file's own top-of-file rationale). This is a
+maintainability note, not a defect: a fifth chart would be the next natural
+trigger, and by then the shared shape (padding object, x/y scale builders,
+hover-rect wiring, crosshair rendering) is worth factoring into a small
+internal helper or hook that the existing four charts adopt at the same time.
+
+Touches: `frontend/src/components/SequenceCharts.tsx`.
+
 ## Neither model segments by thread count — PARTIALLY FIXED
 
 **Partially addressed 2026-08-08:** the segmentation machinery landed --
