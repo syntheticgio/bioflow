@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { BioIcon } from "../icons/BioIcon";
 import { formatBytes, formatDate } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
@@ -42,9 +41,6 @@ function InboxRow({ share }: { share: Share }) {
   return (
     <div className="share-row">
       <div className="share-row-main">
-        <span title={share.from_profile.username}>
-          <BioIcon name="user" size={16} />
-        </span>
         <strong>{share.from_profile.username}</strong>
         <span>wants to share</span>
         <strong>{share.name}</strong>
@@ -99,9 +95,6 @@ function OutboxRow({ share }: { share: Share }) {
   return (
     <div className="share-row">
       <div className="share-row-main">
-        <span title={share.to_profile.username}>
-          <BioIcon name="user" size={16} />
-        </span>
         <strong>{share.to_profile.username}</strong>
         <strong>{share.name}</strong>
         <span className={`share-state share-state-${share.state}`}>{share.state}</span>
