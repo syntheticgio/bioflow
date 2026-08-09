@@ -3,10 +3,12 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import mastheadImg from "../assets/broadhead-masthead.png";
 import { formatBytes } from "../lib/format";
+import { useElementWidth } from "../lib/useElementWidth";
 import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
 import { LoadIndicator } from "./LoadIndicator";
 import { Menu } from "./Menu";
+import { RecentProjects } from "./RecentProjects";
 
 /** Same query the header badge and /shares itself both read, so opening the
  *  page costs no second request and the badge clears from the same
@@ -59,6 +61,8 @@ export function Header() {
   });
 
   const navigate = useNavigate();
+
+  const [headerRightRef, headerRightWidth] = useElementWidth<HTMLDivElement>();
 
   const profile = useProfileStore((s) => s.current);
   const logout = useProfileStore((s) => s.logout);
@@ -165,7 +169,7 @@ export function Header() {
         )}
       </nav>
 
-      <div className="header-right">
+      <div className="header-right" ref={headerRightRef}>
         {/* What the library holds, then what it is doing. Library size rather
             than free space: under Docker Desktop the container cannot see the
             external drive's real capacity, and a confidently wrong "192 GB
@@ -180,6 +184,7 @@ export function Header() {
             <span>{formatBytes(data.storage.library_bytes)} stored</span>
           </div>
         )}
+        <RecentProjects availableWidth={headerRightWidth} />
         <LoadIndicator />
       </div>
     </header>

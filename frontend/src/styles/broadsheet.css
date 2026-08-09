@@ -337,6 +337,42 @@
   color: var(--ink-55);
 }
 
+/* Recent-projects joins the status strip's uppercase/middot convention;
+   the leading vertical bar is the same divider device used elsewhere in
+   the design between the stats block and this one. */
+.theme-broadsheet .recent-projects {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--ink-55);
+}
+
+.theme-broadsheet .recent-projects-chip {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+  font-style: italic;
+}
+
+.theme-broadsheet .recent-projects-chip:hover {
+  color: var(--color-accent-700);
+}
+
+.theme-broadsheet .recent-projects > span + a::before,
+.theme-broadsheet .recent-projects > a + a::before {
+  content: "·";
+  margin-right: var(--space-2);
+  color: var(--ink-55);
+}
+
 /* The status dot is the one child that is a mark, not a word -- it takes no
    separator and sits tight against the state it belongs to. */
 .theme-broadsheet .load-indicator > .dot + span::before {
