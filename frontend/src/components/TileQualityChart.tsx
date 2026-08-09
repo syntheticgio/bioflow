@@ -229,8 +229,14 @@ function TileCanvas({ data, colorFor, onHover }: CellRenderer) {
     const p = Math.floor(((e.clientX - rect.left) / rect.width) * cols);
     const drawnRow = Math.floor(((e.clientY - rect.top) / rect.height) * drawnRows);
     // Read from the unbinned data so the tooltip names a tile that exists,
-    // even when its row is several tiles wide.
-    const t = Math.min(drawnRow * tilesPerRow, rows - 1);
+    // even when its row is several tiles wide. Picks the LAST tile in the
+    // bin, not the first: the paint loop below writes tiles in ascending
+    // order with later ones overpainting earlier ones at the same pixel row,
+    // so the last tile is whichever one is actually visible. Picking the
+    // first tile here would report a different tile -- and a different Q
+    // value -- than what's on screen. If the paint loop's write order ever
+    // changes, this must change with it.
+    const t = Math.min(drawnRow * tilesPerRow + tilesPerRow - 1, rows - 1);
     const q = data.matrix[t]?.[p];
     if (q == null) {
       onHover(null);
