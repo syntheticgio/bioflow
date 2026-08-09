@@ -53,44 +53,55 @@ export function ProvenanceNarrative({ objectId }: { objectId: string }) {
         </span>
       </div>
 
-      <Markdown source={data.markdown} />
+      {/* The structured report and its prose rendering are the same facts
+          twice -- the theme sets them side by side where there is width for
+          it, and they stack on their own when there is not. */}
+      <div className="detail-columns">
+        <div>
+          <Markdown source={data.markdown} />
 
-      <div className="detail-actions">
-        <button
-          type="button"
-          className="btn-text"
-          onClick={() => copy(data.markdown, "report")}
-        >
-          {copied === "report" ? "Copied" : "Copy report"}
-        </button>
-        <button
-          type="button"
-          className="btn-text"
-          onClick={() => prose.mutate()}
-          disabled={prose.isPending}
-        >
-          {prose.isPending ? "Generating…" : "Generate prose"}
-        </button>
-      </div>
-
-      {proseText && (
-        <>
-          <p className="ai-summary-body">{proseText}</p>
           <div className="detail-actions">
             <button
               type="button"
               className="btn-text"
-              onClick={() => copy(proseText, "prose")}
+              onClick={() => copy(data.markdown, "report")}
             >
-              {copied === "prose" ? "Copied" : "Copy paragraph"}
+              {copied === "report" ? "Copied" : "Copy report"}
+            </button>
+            <button
+              type="button"
+              className="btn-text"
+              onClick={() => prose.mutate()}
+              disabled={prose.isPending}
+            >
+              {prose.isPending ? "Generating…" : "Generate prose"}
             </button>
           </div>
-        </>
-      )}
+        </div>
 
-      {prose.data?.unavailable_reason && (
-        <div className="section-note">{prose.data.unavailable_reason}</div>
-      )}
+        {(proseText || prose.data?.unavailable_reason) && (
+          <div>
+            {proseText && (
+              <>
+                <p className="ai-summary-body">{proseText}</p>
+                <div className="detail-actions">
+                  <button
+                    type="button"
+                    className="btn-text"
+                    onClick={() => copy(proseText, "prose")}
+                  >
+                    {copied === "prose" ? "Copied" : "Copy paragraph"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {prose.data?.unavailable_reason && (
+              <div className="section-note">{prose.data.unavailable_reason}</div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
