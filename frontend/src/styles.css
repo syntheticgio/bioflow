@@ -200,19 +200,6 @@ textarea:focus {
   font-variant-numeric: tabular-nums;
 }
 
-/* The count and its unit glyph sit in one span (files/projects), so this
-   centers the icon on the digits' baseline the way "150 files" centered the
-   word before it. */
-.header-stats span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.header-stats svg {
-  flex-shrink: 0;
-}
-
 /* ---------- Main split ---------- */
 .main {
   display: grid;
@@ -1491,6 +1478,16 @@ a.btn {
   color: var(--text-dim);
   text-decoration: none;
   padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "N ⌷ · M 🗎": counts followed by their icon rather than a word, so the
+   glyph reads as a unit symbol. Not a button -- there is nothing to toggle
+   here, unlike the queue/ask/agent links beside it. */
+.footer-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-variant-numeric: tabular-nums;
 }
 
