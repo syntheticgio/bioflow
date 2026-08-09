@@ -130,8 +130,9 @@ export function VariantTable({
         <span>Variants</span>
         {reportPath && (
           <a
+            className="btn-text"
             href={api.vcfStatsDownloadUrl(objectId, reportPath)}
-            style={{ marginLeft: "auto", fontSize: 11 }}
+            style={{ marginLeft: "auto" }}
           >
             Download TSV
           </a>
