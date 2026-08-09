@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Reference genome (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 4.92) scale(0.9615)" stroke-width="16.64">
+  <rect x="88" y="24" width="80" height="88" rx="16"></rect>
+  <rect x="88" y="144" width="80" height="88" rx="16"></rect>
+  <path d="M88 64h80" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M88 188h80" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

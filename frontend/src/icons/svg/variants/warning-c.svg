@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Warning (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-24.38 -19.62) scale(1.1905)" stroke-width="13.44">
+  <path d="M128 40v112" stroke="#aa0b56"></path>
+  <circle cx="128" cy="196" r="12" fill="#aa0b56" stroke="none"></circle>
+  </g>
+</svg>

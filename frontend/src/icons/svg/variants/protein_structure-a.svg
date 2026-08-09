@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Protein structure (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M40 40h176v176H40Z"></path>
+  <path d="M76 180c48 0 24-56 52-56s4 56 52 56" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

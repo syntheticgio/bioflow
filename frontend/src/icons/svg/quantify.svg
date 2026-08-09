@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Quantify"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -1.17) scale(1.0417)" stroke-width="15.36">
+  <path d="M40 64h56"></path><path d="M112 64h40"></path><path d="M168 64h48"></path>
+  <path d="M32 168h192"></path>
+  <path d="M56 152h40v32H56Z" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></path>
+  <path d="M144 152h56v32h-56Z" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></path>
+  </g>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Open (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-11.13 -11.13) scale(1.0870)" stroke-width="14.72">
+  <circle cx="128" cy="128" r="92" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></circle>
+  <path d="M112 88l44 40-44 40"></path>
+  </g>
+</svg>

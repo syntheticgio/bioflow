@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="QC report (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M40 184a88 88 0 1 1 176 0"></path>
+  <path d="M128 184l44-52" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M64 120l-16-16"></path><path d="M128 96V72"></path><path d="M192 120l16-16"></path>
+  </g>
+</svg>

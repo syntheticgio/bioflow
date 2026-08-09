@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Methylation (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-10.3 -8.17) scale(1.0638)" stroke-width="15.04">
+  <circle cx="80" cy="128" r="44" fill="currentColor" stroke="none"></circle>
+  <circle cx="180" cy="128" r="44"></circle>
+  </g>
+</svg>

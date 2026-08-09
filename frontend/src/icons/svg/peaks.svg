@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Peaks"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 -6.62) scale(0.9615)" stroke-width="16.64">
+  <path d="M24 168c28 0 32-96 56-96s28 96 56 96 32-72 56-72 20 72 40 72"></path>
+  <path d="M56 208h48" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M164 208h40" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

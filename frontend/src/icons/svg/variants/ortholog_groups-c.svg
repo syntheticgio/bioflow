@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Ortholog groups (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M96 128h64" stroke="var(--bio-accent,#0088b0)"></path>
+  <g fill="currentColor" stroke="none">
+  <circle cx="68" cy="128" r="28"></circle><circle cx="188" cy="128" r="28"></circle>
+  </g>
+  </g>
+</svg>

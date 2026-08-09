@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Trim"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 128h124"></path><path d="M172 128h52" stroke-dasharray="14 16"></path>
+  <path d="M148 96l32 64"></path><path d="M180 96l-32 64"></path>
+  </g>
+</svg>

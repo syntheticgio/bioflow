@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Structural variant (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 1.08) scale(0.9615)" stroke-width="16.64">
+  <path d="M24 168h72"></path><path d="M160 168h72"></path>
+  <path d="M96 168h64" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M96 96h64" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M120 76l-24 20 24 20" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M136 148l24 20-24 20" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

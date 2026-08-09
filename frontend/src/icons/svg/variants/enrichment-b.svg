@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Enrichment (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M40 64h176" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M40 128h112"></path><path d="M40 192h56"></path>
+  </g>
+</svg>

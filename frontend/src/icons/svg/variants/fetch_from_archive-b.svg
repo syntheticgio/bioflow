@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Fetch from archive (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-32 -32) scale(1.2500)" stroke-width="12.8">
+  <path d="M48 48h160"></path><path d="M48 88h160"></path><path d="M48 128h160"></path>
+  <path d="M128 152v56" stroke="var(--bio-accent,#0088b0)"></path><path d="M104 184l24 24 24-24" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Multiple sequence alignment (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 72h192" stroke-dasharray="28 16"></path>
+  <path d="M32 128h192" stroke-dasharray="20 14"></path>
+  <path d="M32 184h192" stroke-dasharray="34 12"></path>
+  <path d="M148 44v168" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>
