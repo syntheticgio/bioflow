@@ -115,3 +115,39 @@ def get_corrected_count(
         return float(number_of_observations)
 
     return number_of_observations / p_seeing
+
+
+DUPLICATION_SLOTS = 16
+
+DUPLICATION_LABELS: tuple[str, ...] = (
+    "1", "2", "3", "4", "5", "6", "7", "8", "9",
+    ">10", ">50", ">100", ">500", ">1k", ">5k", ">10k",
+)
+
+
+def slot_for_level(duplication_level: int) -> int:
+    """Which histogram slot a duplication level falls in.
+
+    Binning is on `duplication_level - 1`, matching FastQC. That is why ">50"
+    starts at level 51 rather than 50 -- a detail worth preserving, since the
+    whole point of porting the algorithm is that the bins line up with the
+    FastQC reports people compare against.
+    """
+    temp = duplication_level - 1
+
+    # The negative guard is FastQC's, for duplication levels past 2^31.
+    if temp > 9999 or temp < 0:
+        return 15
+    if temp > 4999:
+        return 14
+    if temp > 999:
+        return 13
+    if temp > 499:
+        return 12
+    if temp > 99:
+        return 11
+    if temp > 49:
+        return 10
+    if temp > 9:
+        return 9
+    return temp

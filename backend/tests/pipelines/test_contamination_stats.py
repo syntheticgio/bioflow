@@ -1,3 +1,5 @@
+import pytest
+
 from app.pipelines import contamination_stats as cs
 
 
@@ -64,3 +66,34 @@ def test_corrected_count_is_near_observed_for_high_duplication():
     before the freeze, so its count needs little correction."""
     corrected = cs.get_corrected_count(1_000, 1_000_000, 50_000, 10)
     assert 10 <= corrected < 11
+
+
+@pytest.mark.parametrize(
+    "level,expected_slot",
+    [
+        (1, 0),      # seen once -> first slot
+        (9, 8),      # last exact slot
+        (10, 9),     # ">10" begins
+        (50, 9),     # tempDupSlot 49, still ">10"
+        (51, 10),    # tempDupSlot 50 -> ">50"
+        (100, 10),
+        (101, 11),   # ">100"
+        (500, 11),
+        (501, 12),   # ">500"
+        (1000, 12),
+        (1001, 13),  # ">1k"
+        (5000, 13),
+        (5001, 14),  # ">5k"
+        (10000, 14),
+        (10001, 15), # ">10k"
+        (99999, 15),
+    ],
+)
+def test_slot_boundaries(level, expected_slot):
+    """Boundaries are off-by-one traps: FastQC bins on `level - 1`, so the
+    ">50" slot actually starts at level 51."""
+    assert cs.slot_for_level(level) == expected_slot
+
+
+def test_slot_labels_match_slot_count():
+    assert len(cs.DUPLICATION_LABELS) == cs.DUPLICATION_SLOTS
