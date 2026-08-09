@@ -34,6 +34,14 @@ const BASE_COLORS: Record<string, string> = {
   Other: "var(--base-other, #a371f7)",
 };
 
+/**
+ * The single-cycle N percentage the grade treats as a failed cycle. Duplicated
+ * from readQuality.ts's N_SPIKE_LIMIT deliberately -- the chart must draw the
+ * same line the grade uses, and importing scoring logic into a chart module to
+ * share one number would couple them the wrong way round.
+ */
+const N_SPIKE_REFERENCE = 5.0;
+
 export function BaseCompositionChart({
   composition,
   sampledReads,
@@ -506,6 +514,119 @@ export function GcDistributionChart({
           overlay normal distribution (fitted to this file, not an expectation)
         </label>
       )}
+    </div>
+  );
+}
+
+interface NPoint {
+  position: number;
+  percent: number;
+}
+
+/**
+ * Percent uncalled (N) bases at each cycle.
+ *
+ * The aggregate N percentage in `base_composition` averages a failed cycle
+ * against every healthy one, which is exactly the shape that hides the
+ * failure: one cycle at 40% N across a 150-cycle read is 0.27% overall. This
+ * is the view where that spike is visible.
+ *
+ * Only rendered when fastp found any N at all -- an all-zero curve is omitted
+ * on the backend rather than drawn as a flat line at zero.
+ */
+export function NContentChart({ curve }: { curve: NPoint[] }) {
+  const [hover, setHover] = useState<NPoint | null>(null);
+  if (!curve?.length) return null;
+
+  const w = 460;
+  const h = 210;
+  const pad = { top: 10, right: 16, bottom: 26, left: 38 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+
+  const maxPos = curve[curve.length - 1].position;
+  const observedMax = Math.max(...curve.map((p) => p.percent));
+  // Floor the axis at the grading threshold so a clean file's noise is not
+  // magnified into a mountain range by autoscaling, while a genuine spike
+  // still has room to show its true height.
+  const yMax = Math.max(observedMax * 1.15, N_SPIKE_REFERENCE * 1.5);
+
+  const x = (p: number) => pad.left + ((p - 1) / Math.max(maxPos - 1, 1)) * plotW;
+  const y = (v: number) => pad.top + plotH - (Math.min(v, yMax) / yMax) * plotH;
+
+  const line = curve
+    .map((p, i) => `${i ? "L" : "M"} ${x(p.position)} ${y(p.percent)}`)
+    .join(" ");
+
+  return (
+    <div>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ maxWidth: w, display: "block" }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {/* The same 5% threshold the grade uses, drawn so the chart and the
+            grade cannot appear to disagree about what counts as a spike. */}
+        <line
+          x1={pad.left}
+          x2={w - pad.right}
+          y1={y(N_SPIKE_REFERENCE)}
+          y2={y(N_SPIKE_REFERENCE)}
+          stroke="var(--warn)"
+          strokeWidth="1"
+          strokeDasharray="4 3"
+        />
+        <text
+          x={pad.left - 5}
+          y={y(N_SPIKE_REFERENCE) + 3}
+          textAnchor="end"
+          fontSize="9"
+          fill="var(--warn)"
+        >
+          {N_SPIKE_REFERENCE}%
+        </text>
+
+        <path d={line} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+
+        {hover && (
+          <>
+            <line
+              x1={x(hover.position)}
+              x2={x(hover.position)}
+              y1={pad.top}
+              y2={pad.top + plotH}
+              stroke="var(--text-faint)"
+              strokeDasharray="3 3"
+            />
+            <circle cx={x(hover.position)} cy={y(hover.percent)} r="3.5" fill="var(--accent)" />
+          </>
+        )}
+
+        <rect
+          x={pad.left}
+          y={pad.top}
+          width={plotW}
+          height={plotH}
+          fill="transparent"
+          onMouseMove={(e) => {
+            const box = (e.target as SVGRectElement).getBoundingClientRect();
+            const frac = (e.clientX - box.left) / box.width;
+            const idx = Math.round(frac * (curve.length - 1));
+            setHover(curve[Math.max(0, Math.min(curve.length - 1, idx))]);
+          }}
+        />
+
+        <text x={w / 2} y={h - 6} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
+          position in read (bp)
+        </text>
+      </svg>
+
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>
+        {hover
+          ? `position ${hover.position}: ${hover.percent.toFixed(2)}% N`
+          : "uncalled (N) bases per position · hover for detail"}
+      </div>
     </div>
   );
 }
