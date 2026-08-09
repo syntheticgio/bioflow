@@ -12,7 +12,10 @@ tile number is worse than no tile number, because it produces a plausible
 heatmap of nothing.
 """
 
+import gzip
 from dataclasses import dataclass
+from pathlib import Path
+from typing import IO
 
 # Field indices within the colon-delimited header. The instrument, run, and
 # flowcell fields ahead of these are not used, but their presence is what
@@ -57,3 +60,243 @@ def parse_header(header: str) -> ReadPosition | None:
         # A colon-bearing header that is not Illumina's -- shape matched, the
         # contents did not.
         return None
+
+
+# How many records to inspect before deciding a file has no tiles at all.
+# Large enough to survive a few junk headers at the top of an otherwise
+# ordinary file; small enough that bailing costs a fraction of a second
+# rather than a full read of a 30GB SRA download.
+PROBE_RECORDS = 1000
+
+# Decode quality for roughly this many reads. The rate adapts to the file's
+# size so a small file is sampled completely and a large one is thinned. A
+# tile/position cell on a MiSeq run still receives hundreds of reads here.
+TARGET_SAMPLED_READS = 2_000_000
+
+# Guardrails. A NovaSeq S4 has ~1408 tiles and reads run to ~300bp, so both
+# caps sit well above any real file; they exist so a malformed one cannot
+# grow the accumulator without bound.
+MAX_TILES = 2000
+MAX_POSITIONS = 1000
+
+# Sanger/Illumina 1.8+ quality encoding.
+_PHRED_OFFSET = 33
+
+
+@dataclass
+class TileExtent:
+    """The bounding box of clusters seen on one tile, and how many there were.
+
+    Stored instead of every read's coordinates: the full set is millions of
+    points nothing renders, while the box is nearly free and is what a
+    within-tile spatial view would need.
+    """
+
+    x_min: int
+    x_max: int
+    y_min: int
+    y_max: int
+    reads: int
+
+
+@dataclass
+class ScanResult:
+    """What one pass over a FASTQ learned about its flow cell."""
+
+    source: str  # "present" | "absent"
+    matrix: dict[int, list[float]]
+    extents: dict[int, TileExtent]
+    tile_count: int
+    sampled_reads: int
+    sample_rate: int
+    records_inspected: int
+    truncated: bool
+    worst_tile: int | None
+
+
+def _open_fastq(path: Path) -> IO[str]:
+    """Open plain or gzipped FASTQ as text, by magic number rather than name.
+
+    Sniffing the bytes rather than trusting the extension: ingest bgzips
+    files, and a `.fastq` that is actually compressed would otherwise be read
+    as line noise and parse to zero tiles.
+    """
+    with open(path, "rb") as probe:
+        magic = probe.read(2)
+    if magic == b"\x1f\x8b":
+        return gzip.open(path, "rt", errors="replace")
+    return open(path, "rt", errors="replace")
+
+
+def _estimate_sample_rate(path: Path, target: int) -> int:
+    """Pick a 1-in-N sampling rate from the file's size.
+
+    Estimates the record count by measuring the first 1000 records' mean
+    on-disk length. Approximate on purpose -- the rate only has to land in
+    the right order of magnitude, since the cell counts it produces are in
+    the hundreds either way.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return 1
+
+    sampled_bytes = 0
+    sampled_records = 0
+    try:
+        with _open_fastq(path) as fh:
+            for i, line in enumerate(fh):
+                sampled_bytes += len(line)
+                if i % 4 == 3:
+                    sampled_records += 1
+                    if sampled_records >= 1000:
+                        break
+    except OSError:
+        return 1
+
+    if sampled_records == 0 or sampled_bytes == 0:
+        return 1
+
+    bytes_per_record = sampled_bytes / sampled_records
+    # A gzipped file holds more records per on-disk byte than this estimate
+    # from decompressed lines suggests; undershooting the rate samples more
+    # than asked, which is the safe direction.
+    estimated_records = size / bytes_per_record
+    if estimated_records <= target:
+        return 1
+    return max(1, int(estimated_records // target))
+
+
+def scan(
+    path: Path, target_sampled_reads: int = TARGET_SAMPLED_READS
+) -> ScanResult:
+    """Walk a FASTQ, summarising mean quality by tile and read position.
+
+    Headers are parsed for every record -- a string split, cheap enough to do
+    exhaustively -- while quality is decoded only for a subsample, because
+    decoding is what actually costs.
+    """
+    rate = _estimate_sample_rate(path, target_sampled_reads)
+
+    sums: dict[int, list[float]] = {}
+    counts: dict[int, list[int]] = {}
+    extents: dict[int, TileExtent] = {}
+    records = 0
+    sampled = 0
+    truncated = False
+    saw_tile = False
+
+    with _open_fastq(path) as fh:
+        while True:
+            header = fh.readline()
+            if not header:
+                break
+            seq = fh.readline()
+            plus = fh.readline()
+            qual = fh.readline()
+            if not qual:
+                # Truncated final record -- a file still being written.
+                break
+            del seq, plus
+
+            records += 1
+            pos = parse_header(header.rstrip("\n"))
+
+            if pos is None:
+                if not saw_tile and records >= PROBE_RECORDS:
+                    # Nothing in the probe window carried a tile. This is an
+                    # SRA-stripped or long-read file; stop rather than read
+                    # the whole thing to learn the same thing again.
+                    return ScanResult(
+                        source="absent",
+                        matrix={},
+                        extents={},
+                        tile_count=0,
+                        sampled_reads=0,
+                        sample_rate=rate,
+                        records_inspected=records,
+                        truncated=False,
+                        worst_tile=None,
+                    )
+                continue
+
+            saw_tile = True
+            _record_extent(extents, pos)
+
+            if records % rate != 0 and rate > 1:
+                continue
+
+            if pos.tile not in sums:
+                if len(sums) >= MAX_TILES:
+                    truncated = True
+                    continue
+                sums[pos.tile] = []
+                counts[pos.tile] = []
+
+            sampled += 1
+            if _accumulate(sums[pos.tile], counts[pos.tile], qual.rstrip("\n")):
+                truncated = True
+
+    matrix = {
+        tile: [
+            s / c if c else 0.0
+            for s, c in zip(sums[tile], counts[tile])
+        ]
+        for tile in sums
+    }
+
+    return ScanResult(
+        source="present" if saw_tile else "absent",
+        matrix=matrix,
+        extents=extents,
+        tile_count=len(matrix),
+        sampled_reads=sampled,
+        sample_rate=rate,
+        records_inspected=records,
+        truncated=truncated,
+        worst_tile=_worst_tile(matrix),
+    )
+
+
+def _record_extent(extents: dict[int, TileExtent], pos: ReadPosition) -> None:
+    """Widen a tile's bounding box to include one more cluster."""
+    current = extents.get(pos.tile)
+    if current is None:
+        extents[pos.tile] = TileExtent(
+            x_min=pos.x, x_max=pos.x, y_min=pos.y, y_max=pos.y, reads=1
+        )
+        return
+    extents[pos.tile] = TileExtent(
+        x_min=min(current.x_min, pos.x),
+        x_max=max(current.x_max, pos.x),
+        y_min=min(current.y_min, pos.y),
+        y_max=max(current.y_max, pos.y),
+        reads=current.reads + 1,
+    )
+
+
+def _accumulate(sums: list[float], counts: list[int], qual: str) -> bool:
+    """Add one read's per-base quality to a tile's running totals.
+
+    Rows grow to the longest read seen, so a file of mixed lengths is not
+    silently truncated to its first read's length. Returns whether the
+    position cap was hit.
+    """
+    hit_cap = False
+    for i, ch in enumerate(qual):
+        if i >= MAX_POSITIONS:
+            hit_cap = True
+            break
+        if i >= len(sums):
+            sums.append(0.0)
+            counts.append(0)
+        sums[i] += ord(ch) - _PHRED_OFFSET
+        counts[i] += 1
+    return hit_cap
+
+
+def _worst_tile(matrix: dict[int, list[float]]) -> int | None:
+    """The tile with the lowest mean quality across all its positions."""
+    if not matrix:
+        return None
+    return min(matrix, key=lambda t: sum(matrix[t]) / len(matrix[t]) if matrix[t] else 0.0)
