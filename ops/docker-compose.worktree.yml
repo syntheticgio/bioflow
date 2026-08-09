@@ -5,14 +5,23 @@
 # files rather than replacing it, so without the tag a worktree stack would
 # publish 5173 and 8000 in addition to its own ports -- colliding with the
 # main stack, which is the one thing this file exists to avoid.
+# The BIND_ADDRESS prefix matches docker-compose.yml, which publishes the main
+# stack on ${BIND_ADDRESS:-127.0.0.1} so a dev instance is not exposed to the
+# network. Overriding `ports` here dropped that prefix, which quietly published
+# every worktree stack on 0.0.0.0 -- a wider exposure than the stack it is a
+# copy of, and not something a worktree should decide on its own.
+#
+# The port values themselves are chosen by ops/worktree-up.sh, which derives
+# them from the branch slug and probes for a free pair; the defaults here are
+# only a fallback for a direct `docker compose -f ...` invocation.
 services:
   api:
     ports: !override
-      - "${WT_API_PORT:-8100}:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${WT_API_PORT:-8100}:8000"
 
   web:
     ports: !override
-      - "${WT_WEB_PORT:-5273}:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:${WT_WEB_PORT:-5273}:80"
 
   # docker-compose.yml bind-mounts mongo/redis to a single fixed host path
   # (~/.bioflow) for the one real installation. That path has no per-project
