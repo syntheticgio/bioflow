@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
+import { Markdown } from "./Markdown";
 
 /**
  * The methods report for one file.
@@ -52,9 +53,7 @@ export function ProvenanceNarrative({ objectId }: { objectId: string }) {
         </span>
       </div>
 
-      <pre className="mono" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-        {data.markdown}
-      </pre>
+      <Markdown source={data.markdown} />
 
       <div className="detail-actions">
         <button
