@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import mastheadImg from "../assets/broadhead-masthead.png";
+import { BioIcon } from "../icons/BioIcon";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import { useProfileStore } from "../stores/profileStore";
