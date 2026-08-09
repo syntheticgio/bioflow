@@ -373,3 +373,20 @@ def scan_contamination(
         facts["qc_duplication_levels"] = dup_result
 
     return facts
+
+
+def compression_of(path: Path) -> Compression:
+    """Sniff a file's compression from its magic bytes.
+
+    The QC payload carries no compression field, and the path handed to this
+    module is a symlink created to give fastp a readable filename. Reading the
+    first bytes is both more direct and more reliable than re-deriving it from
+    that name.
+    """
+    from app.storage.detect import detect_compression
+
+    try:
+        with open(path, "rb") as fh:
+            return detect_compression(fh.read(64))
+    except OSError:
+        return Compression.NONE

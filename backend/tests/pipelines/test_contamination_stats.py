@@ -358,3 +358,24 @@ def test_scan_honours_cancellation(tmp_path):
         cs.scan_contamination(
             path, Compression.NONE, cancel_event=cancel, cancel_check_reads=1
         )
+
+
+def test_compression_of_sniffs_gzip(tmp_path):
+    """BGZF is gzip with an extra subfield, and `detect_compression`
+    distinguishes them -- both must open with the gzip reader, so the scan
+    treats them the same and this test accepts either."""
+    path = tmp_path / "reads.fastq.gz"
+    path.write_bytes(gzip.compress(b"@r\nACGT\n+\nIIII\n"))
+
+    assert cs.compression_of(path) in (Compression.GZIP, Compression.BGZF)
+
+
+def test_compression_of_sniffs_plain_text(tmp_path):
+    path = tmp_path / "reads.fastq"
+    path.write_text("@r\nACGT\n+\nIIII\n")
+
+    assert cs.compression_of(path) == Compression.NONE
+
+
+def test_compression_of_defaults_to_none_when_unreadable(tmp_path):
+    assert cs.compression_of(tmp_path / "missing.fastq") == Compression.NONE

@@ -13,10 +13,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
-from app.errors import PermanentError, RetryableError
+from app.errors import JobCancelled, PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import cutadapt_runner, fastp_runner, qc_stats, tools, trimmomatic_runner
+from app.pipelines import (
+    contamination_stats,
+    cutadapt_runner,
+    fastp_runner,
+    qc_stats,
+    tools,
+    trimmomatic_runner,
+)
 from app.pipelines.align_runner import ReadChemistry
 from app.queue.executor import run_subprocess
 from app.queue.registry import HandlerMode, JobContext, handler
@@ -508,6 +515,28 @@ def _run_short_read_qc(
     fastqc_name = _run_fastqc(ctx, reads_in, report_dir, log_path)
     if fastqc_name:
         facts["qc_fastqc_report"] = fastqc_name
+
+    # Adapter content and duplication levels, from a whole-file pass. Wrapped
+    # exactly like FastQC above: this is the optional half of the run, and a
+    # scan that fails must not cost the user the fastp facts that succeeded.
+    ctx.progress(phase="contamination", pct=0.9, message="scanning for adapters")
+    try:
+        detected = facts.get("qc_adapters") or {}
+        facts.update(
+            contamination_stats.scan_contamination(
+                reads_in,
+                contamination_stats.compression_of(reads_in),
+                detected_adapters=[
+                    detected.get("read1_sequence"),
+                    detected.get("read2_sequence"),
+                ],
+                cancel_event=ctx.cancel_event,
+            )
+        )
+    except JobCancelled:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.warning("qc_contamination_failed", job_id=ctx.job_id, error=str(e))
 
     # Present on every QC'd file, not only long ones, so a consumer never has
     # to treat its absence as "short read" by default.
