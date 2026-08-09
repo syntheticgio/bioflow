@@ -8,7 +8,13 @@ from datetime import datetime
 
 from beanie import PydanticObjectId
 
-from app.services.provenance_report import _GAP_TEXT, render_markdown
+from app.services.provenance_report import (
+    _GAP_TEXT,
+    gap_label,
+    inline_gap_text,
+    is_step_level,
+    render_markdown,
+)
 from app.services.provenance_walker import (
     Gap,
     GapKind,
@@ -146,3 +152,43 @@ def test_root_is_labelled_input_not_a_gap():
     md = render_markdown(_chain(_root()))
     assert "Input" in md
     assert "not recorded" not in md
+
+
+# --- The "Not recorded" rail ---
+
+
+def test_every_gap_kind_has_a_rail_label():
+    """The rail lists gaps away from the step they belong to, so every kind
+    needs a standalone phrase. `_GAP_LABELS` is keyed by `(job_type, kind)`
+    and deliberately partial on the job_type axis -- job types are an open
+    vocabulary -- so this asserts the fallback covers the closed axis. An
+    uncovered kind would be a rail row that raises rather than one that reads
+    generically."""
+    for kind in GapKind:
+        assert gap_label(Gap(kind=kind), None)
+
+
+def test_a_known_job_type_gets_its_specific_phrase():
+    gap = Gap(kind=GapKind.PARAMS_UNRECORDED, object_id=READS)
+    assert gap_label(gap, "download_sra_run") == "Download parameters"
+
+
+def test_an_unmapped_job_type_falls_back_rather_than_raising():
+    """A job type nothing has written a phrase for costs a generic label, not
+    a missing row -- the same fail-open direction `_STEP_VERBS` takes."""
+    gap = Gap(kind=GapKind.PARAMS_UNRECORDED, object_id=READS)
+    assert gap_label(gap, "some_future_job") == "Parameters"
+
+
+def test_inline_marker_drops_the_markdown_emphasis():
+    """The tab styles the marker itself; asterisks would render literally."""
+    text = inline_gap_text(Gap(kind=GapKind.VERSION_UNRECORDED))
+    assert "*" not in text
+    assert "version not recorded" in text
+
+
+def test_chain_level_gaps_are_not_step_level():
+    """A share boundary describes the traversal, not a fact a step failed to
+    record, so it has no position inside a step row."""
+    assert not is_step_level(Gap(kind=GapKind.SHARE_BOUNDARY))
+    assert is_step_level(Gap(kind=GapKind.PARAMS_UNRECORDED))

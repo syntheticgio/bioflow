@@ -175,9 +175,19 @@ export interface ObjectComputations {
   has_more: boolean;
 }
 
+/**
+ * One numbered row of "How this file was made".
+ *
+ * `name` is already formatted for display and covers every object the row is
+ * about -- "mate_1.fastq and mate_2.fastq" when one job produced both -- with
+ * `names` holding them separately for anything that needs the parts. Rows are
+ * merged server-side on the producing job, so two files on one row is a claim
+ * the record supports, not a guess.
+ */
 export type ProvenanceStep = {
   object_id: string;
   name: string;
+  names: string[];
   kind: "spine" | "supporting";
   verb: string | null;
   tool: string | null;
@@ -185,13 +195,29 @@ export type ProvenanceStep = {
   job_type: string | null;
   ran_at: string | null;
   outcome: string | null;
+  params: Record<string, unknown>;
+  gaps: string[];
+  used_by: string | null;
 };
 
+export type ProvenanceGap = {
+  label: string;
+  object_id: string | null;
+};
+
+/**
+ * `markdown` backs the Copy report button only -- the tab renders from
+ * `lineage`, which is the same facts as structured rows. `steps` and
+ * `materials` are `lineage` partitioned by kind, kept for callers that want
+ * one or the other.
+ */
 export type ProvenanceNarrative = {
   markdown: string;
   gap_count: number;
+  lineage: ProvenanceStep[];
   steps: ProvenanceStep[];
   materials: ProvenanceStep[];
+  gaps: ProvenanceGap[];
   has_branches: boolean;
 };
 

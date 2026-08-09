@@ -15,6 +15,7 @@ from app.api.v1.schemas import (
     ObjectOut,
     ObjectUpdate,
     PairRequest,
+    ProvenanceGapOut,
     ProvenanceNarrativeOut,
     ProvenanceProseOut,
     ProvenanceStepOut,
@@ -27,6 +28,7 @@ from app.services import (
     ai,
     object_service,
     pipeline_service,
+    provenance_lineage,
     provenance_prompt,
     provenance_report,
     provenance_walker,
@@ -109,11 +111,14 @@ async def provenance_narrative(
     """
     chain = await provenance_walker.walk(object_id, owner=owner)
 
-    def _out(node) -> ProvenanceStepOut:
-        step = node.produced_by
+    def _out(entry) -> ProvenanceStepOut:
+        node = entry.node
+        step = entry.step
+        used_by = chain.nodes.get(node.used_by) if node.used_by else None
         return ProvenanceStepOut(
             object_id=str(node.object_id),
-            name=node.name,
+            name=provenance_lineage.format_names(entry.names),
+            names=list(entry.names),
             kind=node.kind,
             verb=step.verb if step else None,
             tool=step.tool if step else None,
@@ -121,14 +126,40 @@ async def provenance_narrative(
             job_type=step.job_type if step else None,
             ran_at=step.ran_at if step else None,
             outcome=step.outcome if step else None,
+            params=dict(step.params) if step else {},
+            gaps=[
+                provenance_report.inline_gap_text(g)
+                for g in entry.gaps
+                if provenance_report.is_step_level(g)
+            ],
+            used_by=used_by.name if used_by is not None else None,
         )
 
-    nodes = [chain.nodes[oid] for oid in chain.order]
+    lineage = [_out(e) for e in provenance_lineage.lineage_for(chain)]
+
+    # The rail names every gap once, including the chain-level ones a step row
+    # has nowhere to show. `job_type` comes from the node the gap is attached
+    # to, so a download's missing parameters read as "Download parameters"
+    # rather than the generic phrase.
+    job_types = {
+        node.object_id: node.produced_by.job_type
+        for node in chain.nodes.values()
+        if node.produced_by is not None
+    }
+
     return ProvenanceNarrativeOut(
         markdown=provenance_report.render_markdown(chain),
         gap_count=chain.gap_count,
-        steps=[_out(n) for n in nodes if n.kind == "spine"],
-        materials=[_out(n) for n in nodes if n.kind == "supporting"],
+        lineage=lineage,
+        steps=[s for s in lineage if s.kind == "spine"],
+        materials=[s for s in lineage if s.kind == "supporting"],
+        gaps=[
+            ProvenanceGapOut(
+                label=provenance_report.gap_label(g, job_types.get(g.object_id)),
+                object_id=str(g.object_id) if g.object_id else None,
+            )
+            for g in chain.gaps
+        ],
         has_branches=bool(chain.branches),
     )
 

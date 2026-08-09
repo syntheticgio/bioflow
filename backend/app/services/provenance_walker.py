@@ -60,10 +60,18 @@ class Gap:
 
 @dataclass(frozen=True)
 class Step:
-    """One job that produced an object."""
+    """One job that produced an object.
+
+    `job_id` is what lets two objects be recognized as one step: the two mates
+    of a pair are separate objects produced by a single `download_sra_run`
+    run, and the job they share is the only evidence of that which does not
+    involve guessing. Renderers merge on it; see
+    `provenance_lineage.merge_steps`.
+    """
 
     job_type: str
     verb: str
+    job_id: PydanticObjectId | None = None
     tool: str | None = None
     tool_version: str | None = None
     params: dict = field(default_factory=dict)
@@ -80,6 +88,13 @@ class Node:
     kind: Literal["spine", "supporting"]
     produced_by: Step | None
     parents: tuple[PydanticObjectId, ...] = ()
+    # For a material, the object that consumed it. The lineage list orders
+    # materials chronologically alongside the spine, so a reference downloaded
+    # months before the reads sorts above them -- this is what lets the row say
+    # "used as reference by <consumer>" instead of appearing to be an ancestor
+    # of everything below it. None for spine nodes and for a material whose
+    # consumer left the traversal (dangling or sidecar-skipped).
+    used_by: PydanticObjectId | None = None
 
 
 @dataclass(frozen=True)
@@ -374,6 +389,11 @@ async def walk(
     kinds: dict[PydanticObjectId, Literal["spine", "supporting"]] = {
         target_obj.id: "spine"
     }
+    # material id -> the object that used it. First writer wins: a reference
+    # reachable from both the alignment and the variant call is named by
+    # whichever consumer the BFS reached first, which is the one nearest the
+    # target and so the one a reader is most likely to be looking at.
+    consumers: dict[PydanticObjectId, PydanticObjectId] = {}
 
     while queue:
         obj, depth = queue.popleft()
@@ -421,6 +441,13 @@ async def walk(
                 kinds[parent_id] = kind
             if kind == "spine":
                 spine_parents.append(parent_id)
+            # Recorded for every parent edge, not only the ones supporting at
+            # this moment: `kinds` can demote a node to supporting on a later
+            # edge than the one that first reached it, and gating this write on
+            # the edge-time kind would leave exactly those nodes -- the
+            # reconvergent references -- with no consumer to name.
+            if parent_id not in consumers:
+                consumers[parent_id] = obj.id
 
             if parent_id not in seen:
                 seen.add(parent_id)
@@ -440,6 +467,13 @@ async def walk(
             kind=kinds.get(oid, "spine"),
             produced_by=step,
             parents=parents,
+            # Only meaningful for a material; a spine node's consumer is just
+            # the next step down the lineage, which the ordering already shows.
+            used_by=(
+                consumers.get(oid)
+                if kinds.get(oid, "spine") == "supporting"
+                else None
+            ),
         )
         for oid, (name, role, step, parents) in raw.items()
     }
@@ -494,6 +528,7 @@ async def _step_for(obj: DataObject) -> tuple[Step | None, list[Gap]]:
     step = Step(
         job_type=job_type,
         verb=_STEP_VERBS.get(job_type, GENERIC_VERB),
+        job_id=obj.produced_by_job,
         tool=tool,
         tool_version=version,
         params=params,
