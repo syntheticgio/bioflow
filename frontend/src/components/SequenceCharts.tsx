@@ -345,7 +345,25 @@ export function LengthDistributionChart({
     pad.left + ((toDomain(len) - domainMin) / (domainMax - domainMin)) * plotW;
   const y = (count: number) => pad.top + plotH - (count / maxCount) * plotH;
 
-  const barW = Math.max(1, plotW / buckets.length - 1);
+  // Bar width must track each bucket's own pixel footprint, not a single
+  // global average: on the log axis, adjacent-bucket spacing compresses hard
+  // at the high end (a 10bp-wide bucket near 100bp covers several px; the
+  // same 10bp bucket near 50,000bp covers a fraction of a px). Buckets are
+  // sorted and contiguous, so a bucket's width in pixels is just the gap to
+  // the next bucket's x-position; the last bucket reuses the previous gap
+  // (bins are fixed-width, so consecutive gaps are equal on a log axis too).
+  // A single-bucket chart falls back to a fixed minimum.
+  const barWidths = buckets.map((b, i) => {
+    if (i < buckets.length - 1) {
+      return Math.max(1, x(buckets[i + 1].length_bin) - x(b.length_bin));
+    }
+    if (i > 0) {
+      return Math.max(1, x(b.length_bin) - x(buckets[i - 1].length_bin));
+    }
+    return Math.max(1, plotW);
+  });
+  const binWidth =
+    buckets.length > 1 ? buckets[1].length_bin - buckets[0].length_bin : undefined;
 
   const ticks = logScale
     ? [100, 1_000, 10_000, 100_000].filter((t) => t >= minLen && t <= maxLen)
@@ -368,12 +386,12 @@ export function LengthDistributionChart({
           strokeWidth="1"
         />
 
-        {buckets.map((b) => (
+        {buckets.map((b, i) => (
           <rect
             key={b.length_bin}
-            x={x(b.length_bin) - barW / 2}
+            x={x(b.length_bin) - barWidths[i] / 2}
             y={y(b.count)}
-            width={barW}
+            width={barWidths[i]}
             height={pad.top + plotH - y(b.count)}
             fill="var(--accent)"
             opacity={hover?.length_bin === b.length_bin ? 0.9 : 0.5}
@@ -397,7 +415,7 @@ export function LengthDistributionChart({
 
       <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 2 }}>
         {hover
-          ? `${hover.length_bin}–${hover.length_bin + 10}bp: ${hover.count.toLocaleString()} reads`
+          ? `${hover.length_bin}–${hover.length_bin + (binWidth ?? 10)}bp: ${hover.count.toLocaleString()} reads`
           : sampledReads
             ? `sampled ${sampledReads.toLocaleString()} reads · hover for detail`
             : "hover for detail"}
