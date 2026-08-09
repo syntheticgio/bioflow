@@ -68,11 +68,14 @@ export function HelpCalculations() {
             average can hide a bad read tail, which trimming fixes.
           </li>
           <li>
-            <strong>A collapsed cycle</strong> — more than 5% of reads have an
-            uncalled base at one specific position. This usually means a single
-            sequencing cycle failed. When it applies it replaces the ambiguous-base
-            penalty above rather than adding to it: both describe the same defect,
-            and one problem should only cost one grade.
+            <strong>A dead cycle</strong> — more than 5% of reads have an
+            uncalled base at one specific position. This is a different signal
+            from the "collapsed cycles" rule above (that one is about quality,
+            this one is about uncalled bases) and usually means a single
+            sequencing cycle failed outright. When it applies it replaces the
+            ambiguous-base penalty above rather than adding to it: both
+            describe the same defect, and one problem should only cost one
+            grade.
           </li>
         </ul>
 
@@ -118,9 +121,11 @@ export function HelpCalculations() {
           contamination; a very broad one can mean amplification bias.
         </p>
         <p>
-          The GC distribution is measured from a sample of up to 200,000 reads,
-          while the N content chart is fastp's count across the whole file. Both
-          say which under the chart.
+          The GC distribution is measured from a sample of up to 200,000
+          reads, and says so under the chart. The N content chart is fastp's
+          count across the whole file rather than a sample, though the chart
+          itself does not repeat that -- only the GC chart captions its
+          sample size.
         </p>
 
         <h3>When no grade is shown</h3>
