@@ -153,10 +153,18 @@ export function fileStats(obj: DataObject): Stat[] {
     if (gcPercent != null) {
       stats.push({ label: "GC content", value: `${gcPercent.toFixed(2)}%` });
     }
-    if (qc.qc_duplication_rate != null) {
+    // The whole-file scan's number wins over fastp's sampled one when it
+    // exists, same preference QcReport gives it -- otherwise this headline
+    // and the Quality-control table a few rows below it show two different
+    // duplication rates for the same file.
+    if (qc.qc_percent_unique != null || qc.qc_duplication_rate != null) {
+      const rate =
+        qc.qc_percent_unique != null
+          ? 1 - qc.qc_percent_unique / 100
+          : qc.qc_duplication_rate!;
       stats.push({
         label: "Duplication",
-        value: `${(qc.qc_duplication_rate * 100).toFixed(1)}%`,
+        value: `${(rate * 100).toFixed(1)}%`,
       });
     }
   } else {
