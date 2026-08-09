@@ -5782,3 +5782,75 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--text-faint);
   font-style: normal;
 }
+
+/* ---------- Rendered markdown ---------- */
+
+/* The provenance report is generated as markdown by the backend and rendered
+   by components/Markdown.tsx. These rules exist so it reads as a document --
+   it is the artifact a user cites -- rather than as the monospaced blob it
+   was before. Scoped under .md so nothing here reaches the rest of the app,
+   and sized off the same vars as .ai-summary-body so the two prose blocks in
+   this panel match. */
+.md {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  max-width: 68ch;
+}
+
+.md > *:first-child {
+  margin-top: 0;
+}
+
+.md > *:last-child {
+  margin-bottom: 0;
+}
+
+/* The report's own `## Provenance` heading sits directly under the panel's
+   "Provenance" section title, so it is deliberately quiet -- present for
+   anyone reading the copied text, not competing with the title above it. */
+.md-h1 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 0 0 6px;
+}
+
+.md-h2 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 14px 0 6px;
+}
+
+.md-p {
+  margin: 0 0 8px;
+}
+
+.md-list {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.md-list li {
+  margin-bottom: 4px;
+}
+
+/* Parameter lines and other continuations: a step down in weight, because
+   they qualify the step above rather than being steps themselves. */
+.md-list .md-list {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.md-code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  word-break: break-word;
+}

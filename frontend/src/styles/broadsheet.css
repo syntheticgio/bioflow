@@ -1743,3 +1743,32 @@
   font-size: 14px;
   color: var(--ink-78);
 }
+
+/* ── Rendered markdown ──────────────────────────────────────────────────── */
+
+/* The base .md rules already land on this theme -- it remaps --text and
+   --text-dim at the root -- so only the face and the inline code chip need
+   saying. The report is prose here, in the body serif, like every other
+   block of sentences on the page. */
+.theme-broadsheet .md {
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.theme-broadsheet .md-h1,
+.theme-broadsheet .md-h2 {
+  font-family: var(--font-heading);
+  color: var(--ink-62);
+}
+
+.theme-broadsheet .md-list .md-list {
+  font-size: 14px;
+}
+
+/* Filenames stay monospaced, but the filled chip reads as a UI badge against
+   newsprint -- a tint of the page instead. */
+.theme-broadsheet .md-code {
+  background: var(--color-neutral-200);
+  border-radius: var(--radius-sm);
+}
