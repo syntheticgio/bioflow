@@ -597,7 +597,7 @@
 
 /* The read number is the pair's own mark, so it takes the accent that the
    label does -- the two read as one piece of structure. */
-.theme-broadsheet .row-in-pair > .read-badge {
+.theme-broadsheet .row-in-pair .read-badge {
   background: none;
   padding: 0;
   font-family: var(--font-heading);
