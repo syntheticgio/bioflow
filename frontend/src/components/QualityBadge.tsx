@@ -10,13 +10,22 @@ import type { ReadQuality } from "../lib/readQuality";
  * 9px size the dot was fighting at.
  *
  * The serif is the chrome: the figure is set in the theme's own face rather
- * than drawn, which is why this is not a BioIcon glyph. `/5` is carried at a
- * smaller optical size so the tier reads first.
+ * than drawn, which is why this is not a BioIcon glyph.
  *
- * The word still sits beside it in the row and the full tooltip -- including
- * the numeric score and any caveats -- still hangs off the badge itself.
+ * `showDenominator` carries the `/5`. It is off in a file row, where the badge
+ * rides a 30px glyph and the denominator made the mark nearly as wide as the
+ * icon it sits on -- measured at 18px against a 24px icon, covering most of the
+ * artwork. Nothing is lost there: the word sits in the row's metadata line, the
+ * aria-label says "n of 5", and the tooltip carries the score in full. Turn it
+ * on where the badge stands alone with no such context.
  */
-export function QualityBadge({ quality }: { quality: ReadQuality }) {
+export function QualityBadge({
+  quality,
+  showDenominator = false,
+}: {
+  quality: ReadQuality;
+  showDenominator?: boolean;
+}) {
   return (
     <span
       className="q-badge"
@@ -24,9 +33,11 @@ export function QualityBadge({ quality }: { quality: ReadQuality }) {
       aria-label={`Read quality: ${quality.word}, ${quality.tier} of 5`}
     >
       <span className="q-badge-tier">{quality.tier}</span>
-      <span className="q-badge-of" aria-hidden="true">
-        /5
-      </span>
+      {showDenominator && (
+        <span className="q-badge-of" aria-hidden="true">
+          /5
+        </span>
+      )}
     </span>
   );
 }

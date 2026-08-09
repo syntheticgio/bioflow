@@ -1474,6 +1474,17 @@ const FORMAT_CONCEPTS: Record<string, BioIconName> = {
   hic: "contact_map",
   tsv: "counts_matrix",
   csv: "counts_matrix",
+  // Sidecars are the file the tools need, not the data anyone reads: a .fai
+  // beside a reference is an index, and drawing it as "unrecognized" put a
+  // question-mark page next to a perfectly well-understood file. Checked
+  // against the real database, where .fai is the third-commonest kind with no
+  // concept of its own.
+  fai: "index",
+  bai: "index",
+  csi: "index",
+  tbi: "index",
+  // Assembly graph -- GFA is what an assembler emits before scaffolding.
+  gfa: "assemble",
 };
 
 /** Role overrides format, exactly as categorizeFile() in ProjectExplorer does:

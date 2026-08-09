@@ -356,12 +356,26 @@ textarea:focus {
 }
 
 .row-icon {
-  /* Positioning context so the quality badge dot can sit on its corner. */
+  /* Positioning context so the quality badge can sit on its corner. */
   position: relative;
   flex-shrink: 0;
-  width: 40px;
-  text-align: center;
+  /* Shrink-wraps the glyph so the badge's corner offsets land on the ink
+     rather than on the dead space a fixed 40px column left around it. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-dim);
+}
+
+/* The glyph reads as one weight with the row's text rather than competing
+   with it; selection and hover promote it along with the name. */
+.row-icon svg {
+  color: var(--text-dim);
+}
+
+.row.selected .row-icon svg,
+.row:hover .row-icon svg {
+  color: var(--text);
 }
 
 .row-main {
@@ -2526,20 +2540,26 @@ a.btn {
    outright; color is now emphasis, not the message. */
 .q-badge {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
+  /* Tucked past the glyph's corner: the artwork's own ink stops short of the
+     256-grid edge, so a badge flush to the box still reads as sitting on the
+     icon rather than beside it. */
+  right: -4px;
+  bottom: -4px;
   display: flex;
   align-items: baseline;
   gap: 0.5px;
-  padding: 0 2px;
+  padding: 0 1px;
+  min-width: 11px;
+  justify-content: center;
   border-radius: 3px;
   font-family: var(--font-heading, Georgia, serif);
   font-variant-numeric: lining-nums tabular-nums;
   line-height: 1;
-  /* Sits on the row rather than the glyph, so the numeral stays legible over
-     whatever ink the icon puts behind it. */
+  /* Punches a hole in the glyph behind it so the figure never sits on the
+     icon's own strokes. Matches the row rather than the panel, since the row
+     is what changes under hover and selection. */
   background: var(--bg-panel);
-  box-shadow: 0 0 0 1.5px var(--bg-panel);
+  box-shadow: 0 0 0 2px var(--bg-panel);
 }
 
 .row.selected .q-badge,

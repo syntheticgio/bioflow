@@ -6,6 +6,8 @@ import { formatBytes, formatKindLabel } from "../lib/format";
 import { readQuality } from "../lib/readQuality";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
+import { QualityBadge } from "./QualityBadge";
+import { BioIcon, FileIcon } from "../icons/BioIcon";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
@@ -131,7 +133,9 @@ function RootView() {
             onClick={() => select(`project:${p.id}`)}
             onDoubleClick={() => navigate(`/p/${p.id}`)}
           >
-            <span className="row-icon">📁</span>
+            <span className="row-icon">
+              <BioIcon name="project" size={24} />
+            </span>
             <div className="row-main">
               <div className="row-name">{p.name}</div>
               <div className="row-sub">
@@ -548,6 +552,12 @@ function FileRow({
           distinguishes the two rows, and the eye needs it before the
           filename, not after the metadata. */}
       {inPair && badge != null && <span className="read-badge">R{badge}</span>}
+      {/* The grade rides the icon's corner; the word stays in the metadata
+          line below, so the tier never depends on reading the mark alone. */}
+      <span className="row-icon">
+        <FileIcon formatKind={object.format.kind} role={object.role} size={30} />
+        {quality && <QualityBadge quality={quality} />}
+      </span>
       <div className="row-main">
         <div className="row-name">{object.name}</div>
         <div className="row-sub">
