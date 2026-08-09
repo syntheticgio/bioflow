@@ -102,7 +102,7 @@ class TestQualityCurve:
 
 class TestGcHistogram:
     def test_bins_every_read_at_its_own_gc(self, tmp_path):
-        """The default fixture read is 30% GC (C=3, G=2, of 10 bases), so 100
+        """The default fixture read is 50% GC (C=3, G=2, of 10 bases), so 100
         identical reads must land in one bin of 100 -- not spread."""
         r = ss.fastq_stats(write_fastq(tmp_path / "t.fastq", 100), Compression.NONE)
         assert r["gc_per_read_histogram"] == [{"gc_percent": 50, "count": 100}]
