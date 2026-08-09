@@ -151,3 +151,81 @@ def slot_for_level(duplication_level: int) -> int:
     if temp > 9:
         return 9
     return temp
+
+
+# FastQC's limits, kept identical so the numbers line up with its reports.
+# The dictionary caps at ~100k x 50 chars, so memory is bounded at roughly
+# 10-15 MB no matter how large the file is.
+OBSERVATION_CUTOFF = 100_000
+DUPLICATION_SEQUENCE_LENGTH = 50
+
+
+class DuplicationTracker:
+    """Counts distinct read prefixes, freezing the dictionary at the cutoff.
+
+    Freezing stops the dictionary growing; it does *not* stop the scan. Reads
+    past the freeze still increment sequences already known and still count
+    toward `total_count`, which is what makes the correction in `result()`
+    an extrapolation to the whole library rather than to a sample.
+    """
+
+    def __init__(self) -> None:
+        self.sequences: dict[str, int] = {}
+        self.total_count = 0
+        self.count_at_unique_limit = 0
+        self._frozen = False
+
+    def add(self, seq: str) -> None:
+        self.total_count += 1
+        key = seq[:DUPLICATION_SEQUENCE_LENGTH]
+
+        if key in self.sequences:
+            self.sequences[key] += 1
+            if not self._frozen:
+                self.count_at_unique_limit = self.total_count
+            return
+
+        if self._frozen:
+            return
+
+        self.sequences[key] = 1
+        self.count_at_unique_limit = self.total_count
+        if len(self.sequences) >= OBSERVATION_CUTOFF:
+            self._frozen = True
+
+    def result(self) -> dict:
+        """The corrected histogram, as percentages of the library."""
+        if not self.total_count:
+            return {}
+
+        # "How many distinct sequences were seen exactly N times."
+        collated: dict[int, int] = {}
+        for count in self.sequences.values():
+            collated[count] = collated.get(count, 0) + 1
+
+        percentages = [0.0] * DUPLICATION_SLOTS
+        dedup_total = 0.0
+        raw_total = 0.0
+
+        for level, observations in collated.items():
+            corrected = get_corrected_count(
+                self.count_at_unique_limit,
+                self.total_count,
+                level,
+                observations,
+            )
+            dedup_total += corrected
+            raw_total += corrected * level
+            percentages[slot_for_level(level)] += corrected * level
+
+        if raw_total == 0:
+            return {}
+
+        percentages = [round(100.0 * p / raw_total, 4) for p in percentages]
+
+        return {
+            "labels": list(DUPLICATION_LABELS),
+            "percentages": percentages,
+            "percent_unique": round(100.0 * dedup_total / raw_total, 2),
+            "total_reads": self.total_count,
+        }

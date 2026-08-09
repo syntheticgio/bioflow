@@ -97,3 +97,71 @@ def test_slot_boundaries(level, expected_slot):
 
 def test_slot_labels_match_slot_count():
     assert len(cs.DUPLICATION_LABELS) == cs.DUPLICATION_SLOTS
+
+
+def test_duplication_tracker_freezes_at_the_unique_limit(monkeypatch):
+    """Past the limit, new sequences are dropped but existing ones keep
+    counting -- that is what keeps total_count a true whole-file count."""
+    monkeypatch.setattr(cs, "OBSERVATION_CUTOFF", 3)
+    tracker = cs.DuplicationTracker()
+
+    for seq in ("AAA", "CCC", "GGG"):
+        tracker.add(seq)
+    tracker.add("TTT")   # dropped: dictionary is frozen
+    tracker.add("AAA")   # counted: already present
+
+    assert tracker.total_count == 5
+    assert tracker.sequences == {"AAA": 2, "CCC": 1, "GGG": 1}
+
+
+def test_duplication_tracker_truncates_to_fifty_bases():
+    """Reads differing only past 50bp are the same fragment for duplication
+    purposes -- this tolerates end-of-read quality decay."""
+    tracker = cs.DuplicationTracker()
+    tracker.add("A" * 50 + "CCCC")
+    tracker.add("A" * 50 + "GGGG")
+
+    assert tracker.sequences == {"A" * 50: 2}
+
+
+def test_duplication_tracker_records_count_at_unique_limit(monkeypatch):
+    monkeypatch.setattr(cs, "OBSERVATION_CUTOFF", 2)
+    tracker = cs.DuplicationTracker()
+
+    tracker.add("AAA")
+    tracker.add("CCC")   # freezes here, at 2 reads
+    tracker.add("GGG")
+    tracker.add("TTT")
+
+    assert tracker.count_at_unique_limit == 2
+    assert tracker.total_count == 4
+
+
+def test_duplication_result_on_a_fully_unique_library():
+    tracker = cs.DuplicationTracker()
+    for i in range(100):
+        tracker.add(f"SEQ{i:04d}")
+
+    result = tracker.result()
+
+    assert result["percent_unique"] == pytest.approx(100.0)
+    # Everything sits in the "seen once" slot.
+    assert result["percentages"][0] == pytest.approx(100.0)
+    assert sum(result["percentages"][1:]) == pytest.approx(0.0)
+
+
+def test_duplication_result_on_a_fully_duplicated_library():
+    """One fragment, 100 copies: 1% unique, and all of the library sits in
+    the >50 slot (level 100 -> tempDupSlot 99 -> slot 10)."""
+    tracker = cs.DuplicationTracker()
+    for _ in range(100):
+        tracker.add("AAAA")
+
+    result = tracker.result()
+
+    assert result["percent_unique"] == pytest.approx(1.0)
+    assert result["percentages"][10] == pytest.approx(100.0)
+
+
+def test_duplication_result_is_empty_for_no_reads():
+    assert cs.DuplicationTracker().result() == {}
