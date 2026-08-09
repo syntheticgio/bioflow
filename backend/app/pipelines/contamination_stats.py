@@ -300,3 +300,76 @@ class AdapterTracker:
                 for name, _ in self.probes
             ],
         }
+
+
+CANCEL_CHECK_READS = 20_000
+
+
+def scan_contamination(
+    path: Path,
+    compression: Compression,
+    *,
+    detected_adapters: list[str | None] | None = None,
+    cancel_event: threading.Event | None = None,
+    cancel_check_reads: int = CANCEL_CHECK_READS,
+) -> dict:
+    """Adapter content and duplication levels, from one whole-file pass.
+
+    Returns `qc_`-prefixed facts ready to merge into a QC result, or `{}` when
+    the file could not be read. Every failure short of cancellation is
+    swallowed to a warning: this is the optional half of a QC run, exactly
+    like FastQC, and a scan that cannot parse the file must not cost the user
+    the facts that fastp did produce.
+    """
+    opener = (
+        gzip.open
+        if compression in (Compression.GZIP, Compression.BGZF)
+        else open
+    )
+
+    probes = build_probes(list(detected_adapters or []))
+    adapters = AdapterTracker(probes)
+    duplication = DuplicationTracker()
+    reads = 0
+
+    try:
+        with opener(path, "rt", errors="replace") as fh:
+            while True:
+                header = fh.readline()
+                if not header:
+                    break
+                seq = fh.readline().rstrip("\n")
+                fh.readline()  # '+' separator
+                qual = fh.readline()
+                if not qual:
+                    break
+
+                reads += 1
+                adapters.add(seq)
+                duplication.add(seq)
+
+                if reads % cancel_check_reads == 0 and cancel_event is not None:
+                    if cancel_event.is_set():
+                        raise JobCancelled("Cancelled during contamination scan")
+    except JobCancelled:
+        raise
+    except (OSError, EOFError, UnicodeDecodeError) as e:
+        log.warning("contamination_scan_failed", path=str(path), error=str(e))
+        return {}
+
+    if not reads:
+        return {}
+
+    facts: dict = {"qc_duplication_scanned_reads": reads}
+
+    adapter_result = adapters.result()
+    if adapter_result:
+        facts["qc_adapter_content"] = adapter_result
+
+    dup_result = duplication.result()
+    if dup_result:
+        facts["qc_percent_unique"] = dup_result.pop("percent_unique")
+        dup_result.pop("total_reads", None)
+        facts["qc_duplication_levels"] = dup_result
+
+    return facts

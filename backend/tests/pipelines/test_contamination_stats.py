@@ -1,5 +1,10 @@
+import gzip
+import threading
+
 import pytest
 
+from app.errors import JobCancelled
+from app.models import Compression
 from app.pipelines import contamination_stats as cs
 
 
@@ -274,3 +279,82 @@ def test_adapter_tracker_does_not_fill_past_a_short_reads_own_length():
     values = result["series"][0]["values"]
     # the 12bp read cannot have "entered adapter" at position 39
     assert values[39] == pytest.approx(0.0)
+
+
+def _write_fastq(path, reads):
+    lines = []
+    for i, seq in enumerate(reads):
+        lines += [f"@read{i}", seq, "+", "I" * len(seq)]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def test_scan_reports_both_statistics(tmp_path):
+    path = tmp_path / "reads.fastq"
+    _write_fastq(path, ["ACGT" * 15] * 10)
+
+    facts = cs.scan_contamination(path, Compression.NONE)
+
+    assert facts["qc_duplication_scanned_reads"] == 10
+    assert facts["qc_percent_unique"] == pytest.approx(10.0)
+    assert facts["qc_duplication_levels"]["labels"][0] == "1"
+    assert facts["qc_adapter_content"]["series"]
+
+
+def test_scan_detects_adapter_read_through(tmp_path):
+    """A fragment shorter than the read: the tail is Nextera adapter."""
+    path = tmp_path / "reads.fastq"
+    _write_fastq(path, ["TTTTTTTT" + "CTGTCTCTTATA"] * 4)
+
+    facts = cs.scan_contamination(path, Compression.NONE)
+    series = {s["name"]: s["values"] for s in facts["qc_adapter_content"]["series"]}
+
+    assert series["Nextera Transposase"][8] == pytest.approx(100.0)
+    assert series["Nextera Transposase"][0] == pytest.approx(0.0)
+    assert all(v == 0.0 for v in series["Illumina Universal"])
+
+
+def test_scan_includes_detected_adapter_probe(tmp_path):
+    path = tmp_path / "reads.fastq"
+    _write_fastq(path, ["TTTTCCCCGGGGAAAA"] * 3)
+
+    facts = cs.scan_contamination(
+        path, Compression.NONE, detected_adapters=["TTTTCCCCGGGG"]
+    )
+    names = [s["name"] for s in facts["qc_adapter_content"]["series"]]
+
+    assert "Detected" in names
+
+
+def test_scan_reads_gzipped_input(tmp_path):
+    path = tmp_path / "reads.fastq.gz"
+    body = "\n".join(["@r", "ACGT" * 15, "+", "I" * 60]) + "\n"
+    path.write_bytes(gzip.compress(body.encode()))
+
+    facts = cs.scan_contamination(path, Compression.GZIP)
+
+    assert facts["qc_duplication_scanned_reads"] == 1
+
+
+def test_scan_returns_empty_for_an_empty_file(tmp_path):
+    path = tmp_path / "empty.fastq"
+    path.write_text("")
+
+    assert cs.scan_contamination(path, Compression.NONE) == {}
+
+
+def test_scan_returns_empty_rather_than_raising_on_unreadable_input(tmp_path):
+    """A scan failure must not fail the QC job -- same contract as FastQC's."""
+    assert cs.scan_contamination(tmp_path / "missing.fastq", Compression.NONE) == {}
+
+
+def test_scan_honours_cancellation(tmp_path):
+    path = tmp_path / "reads.fastq"
+    _write_fastq(path, ["ACGT" * 15] * 50)
+
+    cancel = threading.Event()
+    cancel.set()
+
+    with pytest.raises(JobCancelled):
+        cs.scan_contamination(
+            path, Compression.NONE, cancel_event=cancel, cancel_check_reads=1
+        )
