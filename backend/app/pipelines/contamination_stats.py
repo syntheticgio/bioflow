@@ -61,3 +61,52 @@ def build_probes(detected: list[str | None]) -> list[tuple[str, str]]:
         known.add(head)
 
     return probes
+
+
+def get_corrected_count(
+    count_at_limit: int,
+    total_count: int,
+    duplication_level: int,
+    number_of_observations: int,
+) -> float:
+    """Estimate how many sequences at this duplication level we never saw.
+
+    Ported from FastQC's `DuplicationLevel.getCorrectedCount`. The dictionary
+    stops accepting new sequences at 100k distinct entries, so a file larger
+    than that contributes sequences we never recorded. This computes the
+    probability of *not* having seen a sequence with this duplication level
+    within the first `count_at_limit` reads, inverts it, and scales the
+    observed count by the result.
+
+    Both early exits are from the original and are not merely optimisations:
+    they are the cases where the correction is provably 1.0.
+    """
+    # Nothing froze: every distinct sequence in the file is in the dictionary.
+    if count_at_limit == total_count:
+        return float(number_of_observations)
+
+    # Not enough reads left to hide another sequence at this level.
+    if total_count - number_of_observations < count_at_limit:
+        return float(number_of_observations)
+
+    # The probability below which correcting would not move the count by even
+    # 0.01 of an observation. Past this point the corrected value is so close
+    # to the observed one that continuing the loop buys nothing.
+    limit_of_caring = 1.0 - (
+        number_of_observations / (number_of_observations + 0.01)
+    )
+
+    p_not_seeing = 1.0
+    for i in range(count_at_limit):
+        p_not_seeing *= (
+            (total_count - i) - duplication_level
+        ) / (total_count - i)
+        if p_not_seeing < limit_of_caring:
+            p_not_seeing = 0.0
+            break
+
+    p_seeing = 1.0 - p_not_seeing
+    if p_seeing == 0.0:
+        return float(number_of_observations)
+
+    return number_of_observations / p_seeing

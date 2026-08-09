@@ -30,3 +30,37 @@ def test_build_probes_ignores_short_or_empty_detection():
     assert cs.build_probes([""]) == cs.build_probes([])
     assert cs.build_probes(["ACGT"]) == cs.build_probes([])
     assert cs.build_probes([None]) == cs.build_probes([])
+
+
+def test_corrected_count_returns_observations_when_nothing_was_missed():
+    """When the dictionary never froze (count_at_limit == total), every
+    sequence was seen, so there is nothing to correct."""
+    assert cs.get_corrected_count(1000, 1000, 1, 500) == 500
+
+
+def test_corrected_count_returns_observations_when_no_room_to_hide():
+    """If fewer sequences remain than the freeze point, another sequence at
+    this level could not have been missed."""
+    assert cs.get_corrected_count(900, 1000, 1, 500) == 500
+
+
+def test_corrected_count_scales_up_when_sequences_were_missed():
+    """A dictionary that froze early saw a small slice of the file, so the
+    observed count under-counts and the correction must exceed it."""
+    corrected = cs.get_corrected_count(1_000, 1_000_000, 1, 100)
+    assert corrected > 100
+
+
+def test_corrected_count_grows_as_freeze_point_shrinks():
+    """The earlier the freeze, the more was missed, so the larger the
+    correction -- this is the direction that makes the estimate meaningful."""
+    early = cs.get_corrected_count(1_000, 1_000_000, 1, 100)
+    late = cs.get_corrected_count(500_000, 1_000_000, 1, 100)
+    assert early > late
+
+
+def test_corrected_count_is_near_observed_for_high_duplication():
+    """A sequence appearing very often is almost certain to have been caught
+    before the freeze, so its count needs little correction."""
+    corrected = cs.get_corrected_count(1_000, 1_000_000, 50_000, 10)
+    assert 10 <= corrected < 11
