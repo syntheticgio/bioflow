@@ -96,6 +96,11 @@ def get_corrected_count(
         number_of_observations / (number_of_observations + 0.01)
     )
 
+    # count_at_limit is always a snapshot of total_count taken no later than
+    # the point total_count reaches its final value (DuplicationTracker),
+    # so it can never exceed it; guard 1 has already ruled out equality here.
+    # That keeps every (total_count - i) below strictly positive.
+    assert count_at_limit <= total_count
     p_not_seeing = 1.0
     for i in range(count_at_limit):
         p_not_seeing *= (
