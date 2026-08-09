@@ -194,6 +194,33 @@ def build_qc_command(
     return cmd
 
 
+def _n_content_curve(raw: dict) -> list[dict] | None:
+    """Percent N per cycle, from fastp's `content_curves`.
+
+    fastp writes fractions (0.4 for 40%); every other fact in this app is a
+    percentage, so the scaling happens here rather than in the chart.
+
+    Returns None when the curve is absent or entirely zero. All-zero is the
+    ordinary state of clean Illumina data, and a flat line at zero is a chart
+    that never says anything -- so it is reported as nothing to say, which is
+    how the rest of the QC facts signal the same thing.
+
+    Read1 only. A paired run's read2 curve is a second chart's worth of
+    question, and worth adding when someone has a file where the two differ.
+    """
+    curve = (
+        raw.get("read1_before_filtering", {})
+        .get("content_curves", {})
+        .get("N")
+    )
+    if not curve or not any(curve):
+        return None
+    return [
+        {"position": i + 1, "percent": round(value * 100, 4)}
+        for i, value in enumerate(curve)
+    ]
+
+
 def parse_qc_facts(path: Path) -> dict:
     """QC facts for an object, from fastp's report-only JSON.
 
@@ -218,6 +245,10 @@ def parse_qc_facts(path: Path) -> dict:
         "qc_duplication_rate": raw.get("duplication", {}).get("rate"),
         "qc_insert_size_peak": raw.get("insert_size", {}).get("peak"),
     }
+
+    n_curve = _n_content_curve(raw)
+    if n_curve:
+        facts["qc_n_per_position"] = n_curve
 
     adapters = raw.get("adapter_cutting", {})
     if adapters:

@@ -286,7 +286,21 @@ SAMPLE_REPORT = {
         "read1_adapter_sequence": "AGATCGGAAGAGC",
         "read2_adapter_sequence": "unspecified",
     },
-    "read1_before_filtering": {"quality_curves": {"mean": [30.0] * 100}},
+    "read1_before_filtering": {
+        "total_reads": 20000,
+        "total_cycles": 8,
+        "quality_curves": {"mean": [36.0] * 8},
+        "content_curves": {
+            "A": [0.25] * 8,
+            "T": [0.25] * 8,
+            "C": [0.25] * 8,
+            "G": [0.25] * 8,
+            # Fractions, exactly as fastp writes them. Cycle 5 (1-indexed) is
+            # a 40% N spike; every other cycle is clean.
+            "N": [0.0, 0.0, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0],
+            "GC": [0.5] * 8,
+        },
+    },
 }
 
 
@@ -540,3 +554,38 @@ class TestParseQcFacts:
         p = tmp_path / "qc.json"
         p.write_text("{ truncated")
         assert fastp_runner.parse_qc_facts(p) == {}
+
+    def test_reports_n_content_per_cycle(self, facts):
+        """fastp writes fractions; the app's facts are percentages
+        everywhere else (base_composition, gc_content_percent), so these are
+        scaled at parse time rather than in the chart."""
+        assert facts["qc_n_per_position"] == [
+            {"position": 1, "percent": 0.0},
+            {"position": 2, "percent": 0.0},
+            {"position": 3, "percent": 0.0},
+            {"position": 4, "percent": 0.0},
+            {"position": 5, "percent": 40.0},
+            {"position": 6, "percent": 0.0},
+            {"position": 7, "percent": 0.0},
+            {"position": 8, "percent": 0.0},
+        ]
+
+    def test_an_all_zero_n_curve_is_omitted(self, tmp_path):
+        """The common case for clean Illumina data. A flat line at zero is a
+        chart that never says anything, so absent means 'nothing to report'
+        the way every other block in QcReport self-suppresses."""
+        report = json.loads(json.dumps(SAMPLE_REPORT))
+        report["read1_before_filtering"]["content_curves"]["N"] = [0.0] * 8
+        p = tmp_path / "qc.json"
+        p.write_text(json.dumps(report))
+        assert "qc_n_per_position" not in fastp_runner.parse_qc_facts(p)
+
+    def test_a_missing_curves_block_is_not_fatal(self, tmp_path):
+        """An older fastp, or a report written before this block existed."""
+        report = json.loads(json.dumps(SAMPLE_REPORT))
+        del report["read1_before_filtering"]
+        p = tmp_path / "qc.json"
+        p.write_text(json.dumps(report))
+        facts = fastp_runner.parse_qc_facts(p)
+        assert "qc_n_per_position" not in facts
+        assert facts["qc_tool"] == "fastp"
