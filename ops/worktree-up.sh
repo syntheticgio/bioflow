@@ -146,8 +146,17 @@ collection_count() {
 }
 
 # Infrastructure first, so the database is seeded before api and worker can
-# write to it. --wait blocks on the healthchecks, and mongo's self-initiates
-# the replica set.
+# write to it. --wait blocks on the healthchecks; the replica set is initiated
+# by ops/mongo-init/rs-init.js during the entrypoint's init phase, before
+# mongod's real boot, so it is already PRIMARY by the time --wait looks.
+#
+# This used to fail roughly one run in three with "container ... is unhealthy"
+# (#101). rs-init.js was initiating with the member name `mongo:27017`, which
+# cannot work during initdb -- the entrypoint pins that temporary mongod to
+# `--bind_ip 127.0.0.1`, so it does not map the name to itself -- and the
+# error was swallowed. The set was then left for the healthcheck's fallback to
+# initiate a few seconds into the real boot, and --wait polls health during
+# exactly that window. See rs-init.js for the full mechanism.
 compose up -d --wait mongo redis
 
 if [ "$MODE" = "reseed" ]; then
