@@ -1183,15 +1183,15 @@ a.btn {
   font-size: 15px;
 }
 
-.modal label {
+.modal :where(label) {
   display: block;
   font-size: 12px;
   color: var(--text-dim);
   margin-bottom: 4px;
 }
 
-.modal input,
-.modal textarea {
+.modal :where(input),
+.modal :where(textarea) {
   width: 100%;
   margin-bottom: 12px;
 }
@@ -2286,6 +2286,11 @@ a.btn {
   align-items: flex-start;
   gap: 8px;
   font-size: 13px;
+}
+
+.assembly-component input {
+  width: auto;
+  margin-bottom: 0;
 }
 
 .assembly-component.disabled {
