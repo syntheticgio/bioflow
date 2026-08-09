@@ -753,6 +753,23 @@ def _prepare_workdir(ctx: JobContext, kind: str = "trim") -> Path:
     return work
 
 
+def _killed_by_signal(code: int) -> bool:
+    """Whether an exit code means "the kernel killed this", either convention.
+
+    `run_subprocess` hands back `subprocess.Popen.returncode`, and Python
+    reports a signal death as the negative signal number -- SIGKILL is -9, not
+    137. 137 is the shell's `128 + signal` form, which this process never
+    produces on its own but which a tool invoked through a shell wrapper still
+    can, so both are accepted.
+
+    Only SIGKILL (9) and SIGTERM (15) count. Widening this to "any negative
+    code" would claim SIGHUP as an OOM kill, and treating every code above 128
+    as a signal would misread 255, which plenty of tools use as a plain
+    "something went wrong".
+    """
+    return code in (-9, -15, 137, 143)
+
+
 def _failure(code: int, log_path: Path, tool: str = "fastp") -> Exception:
     """Classify a non-zero exit from an external tool.
 
@@ -764,8 +781,8 @@ def _failure(code: int, log_path: Path, tool: str = "fastp") -> Exception:
     if tail:
         detail = f"{detail}: {tail}"
 
-    if code == 137:
-        # 137 is SIGKILL, which on this stack means the OOM killer.
+    if _killed_by_signal(code):
+        # A kill on this stack means the OOM killer.
         #
         # Under a cgroup hard limit the ceiling does not move, so the job dies
         # identically on every attempt -- job_max_attempts turns one dead job
