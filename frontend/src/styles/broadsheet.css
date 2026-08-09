@@ -538,11 +538,33 @@
   color: var(--ink-62);
 }
 
-/* Still used by the project rows' folder glyph; file rows no longer carry an
-   icon at all. */
+/* Project rows and file rows both carry a drawn glyph again (BioIcon).
+   No width: the base rule shrink-wraps the icon so the quality badge's
+   corner offsets land on the ink rather than on empty column. */
 .theme-broadsheet .row-icon {
-  width: 28px;
   color: var(--ink-62);
+}
+
+.theme-broadsheet .row-icon svg {
+  color: var(--ink-62);
+}
+
+/* --bg-hover is a translucent mix here, so the badge cannot simply inherit it:
+   the icon's strokes would read straight through the figure. These flatten the
+   same mix against the page so the backing stays opaque. */
+.theme-broadsheet .row:hover .q-badge {
+  background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
+}
+
+.theme-broadsheet .row.selected .q-badge {
+  background: var(--bg-elevated, var(--color-bg));
+  box-shadow: 0 0 0 2px var(--bg-elevated, var(--color-bg));
+}
+
+.theme-broadsheet .row.selected .row-icon svg,
+.theme-broadsheet .row:hover .row-icon svg {
+  color: var(--color-text);
 }
 
 /* The explorer reuses .detail-title for the project name in its header. The
