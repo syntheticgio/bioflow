@@ -1591,6 +1591,16 @@ a.btn {
   grid-column: 1 / -1;
 }
 
+/* `.trim-fields label` stacks its children in a column, which is right for a
+   labelled input but puts a checkbox *above* its own text. Checkbox rows opt
+   back into the side-by-side row `.trim-check` asks for; the selector has to
+   name `.trim-fields` to outrank it. */
+.trim-fields .trim-check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 .trim-advanced-toggle {
   display: flex;
   align-items: center;
