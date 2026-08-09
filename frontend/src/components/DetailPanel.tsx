@@ -359,14 +359,12 @@ function tabsFor(obj: DataObject): TabDef[] {
     {
       id: "metadata",
       label: "Metadata",
+    },
+    {
+      id: "history",
+      label: "History",
       hint: typeof obj.facts.sra_accession === "string" ? "Provenance" : undefined,
     },
-    // No hint: the count lives in ComputationHistory's own query, which does
-    // not run until the tab is open. Fetching provenance for every object
-    // just to label a tab whose answer is almost always zero is the wrong
-    // trade -- unlike Quality/Metadata's hints, which reuse data DetailPanel
-    // already holds for the object it just fetched.
-    { id: "history", label: "History" },
     { id: "actions", label: "Actions" },
   );
   return tabs;
@@ -814,6 +812,7 @@ function ObjectDetail({ id }: { id: string }) {
         {tab === "history" && (
           <TabPanel id="history" idPrefix="obj">
             <ComputationHistory objectId={obj.id} />
+            <ProvenanceNarrative key={obj.id} objectId={obj.id} />
           </TabPanel>
         )}
 
@@ -848,9 +847,6 @@ function ObjectDetail({ id }: { id: string }) {
                   reingestPending={reingest.isPending}
                   reingestDisabled={!obj.blob_sha256}
                 />
-              }
-              provenanceNarrative={
-                <ProvenanceNarrative key={obj.id} objectId={obj.id} />
               }
               confirmingDelete={confirmingDelete}
               setConfirmingDelete={setConfirmingDelete}
@@ -1235,7 +1231,6 @@ function MetadataTab({
 function ActionsTab({
   obj,
   computations,
-  provenanceNarrative,
   confirmingDelete,
   setConfirmingDelete,
   remove,
@@ -1244,7 +1239,6 @@ function ActionsTab({
 }: {
   obj: ObjectDetailData;
   computations: React.ReactNode;
-  provenanceNarrative: React.ReactNode;
   confirmingDelete: boolean;
   setConfirmingDelete: (v: boolean) => void;
   remove: { mutate: () => void; isPending: boolean };
@@ -1254,7 +1248,6 @@ function ActionsTab({
   return (
     <>
       {computations}
-      {provenanceNarrative}
 
       <div className="section">
         <div className="section-title">Launch a pipeline on this file</div>

@@ -70,7 +70,7 @@ export function ProvenanceNarrative({ objectId }: { objectId: string }) {
             </button>
             <button
               type="button"
-              className="btn-text"
+              className="btn"
               onClick={() => prose.mutate()}
               disabled={prose.isPending}
             >
@@ -83,6 +83,7 @@ export function ProvenanceNarrative({ objectId }: { objectId: string }) {
           <div>
             {proseText && (
               <>
+                <div className="section-title">Narrative</div>
                 <p className="ai-summary-body">{proseText}</p>
                 <div className="detail-actions">
                   <button
