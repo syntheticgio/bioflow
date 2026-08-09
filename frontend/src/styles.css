@@ -2519,45 +2519,45 @@ a.btn {
 
 /* Read quality badge -------------------------------------------------- */
 
+/* The tier as a set numeral rather than a colored dot.
+   The traffic-light ramp was the one place the app reached for colors the
+   design system does not own, and it carried the grade in hue alone -- so it
+   said nothing in greyscale and little at 9px. The figure states the tier
+   outright; color is now emphasis, not the message. */
 .q-badge {
   position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  /* Against the row background, so the dot reads as separate from the glyph
-     rather than merging with it on hover. */
+  right: -3px;
+  bottom: -3px;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5px;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-family: var(--font-heading, Georgia, serif);
+  font-variant-numeric: lining-nums tabular-nums;
+  line-height: 1;
+  /* Sits on the row rather than the glyph, so the numeral stays legible over
+     whatever ink the icon puts behind it. */
+  background: var(--bg-panel);
   box-shadow: 0 0 0 1.5px var(--bg-panel);
 }
 
 .row.selected .q-badge,
 .row:hover .q-badge {
+  background: var(--bg-hover);
   box-shadow: 0 0 0 1.5px var(--bg-hover);
 }
 
-/* Green -> amber -> red. Existing theme vars, so light mode tracks. */
-.q-badge-5 {
-  background: var(--success);
+.q-badge-tier {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
 }
 
-/* Tier 4 is still good; dimmed rather than a different hue. */
-.q-badge-4 {
-  background: var(--success);
-  opacity: 0.65;
-}
-
-.q-badge-3 {
-  background: var(--warn);
-}
-
-/* Deepened rather than a new hue: still "caution", further along. */
-.q-badge-2 {
-  background: color-mix(in srgb, var(--warn) 75%, var(--error));
-}
-
-.q-badge-1 {
-  background: var(--error);
+/* Carried smaller and dimmer: the denominator is a unit, not the reading. */
+.q-badge-of {
+  font-size: 8px;
+  color: var(--text-dim);
 }
 
 /* Outstanding-work badge ------------------------------------------------ */
