@@ -137,6 +137,37 @@ def test_duplication_tracker_records_count_at_unique_limit(monkeypatch):
     assert tracker.total_count == 4
 
 
+def test_duplication_tracker_advances_unique_limit_on_repeat_while_open(monkeypatch):
+    """count_at_unique_limit must advance on a repeat too, as long as the
+    dictionary hasn't frozen yet -- this is what keeps it a true snapshot of
+    total_count rather than only tracking the newest-key case.
+
+    The second half re-adds a key *after* freezing and pins the opposite
+    direction: once frozen, a repeat must NOT advance the limit. Without
+    this half, deleting or inverting the `if not self._frozen:` guard in
+    the existing-key branch would still pass -- the first half alone can't
+    tell "always advance" apart from "advance only while open," since the
+    dictionary never freezes before its assertions run.
+    """
+    monkeypatch.setattr(cs, "OBSERVATION_CUTOFF", 3)
+    tracker = cs.DuplicationTracker()
+
+    tracker.add("AAA")
+    tracker.add("AAA")   # repeat, but dictionary still open (1 distinct key < cutoff of 3)
+    tracker.add("CCC")
+
+    assert tracker.count_at_unique_limit == 3
+    assert tracker.total_count == 3
+
+    tracker.add("GGG")   # 3rd distinct key -> freezes here, limit advances to 4
+    assert tracker.count_at_unique_limit == 4
+    assert tracker.total_count == 4
+
+    tracker.add("AAA")   # repeat while frozen: must NOT advance the limit
+    assert tracker.count_at_unique_limit == 4
+    assert tracker.total_count == 5
+
+
 def test_duplication_result_on_a_fully_unique_library():
     tracker = cs.DuplicationTracker()
     for i in range(100):
