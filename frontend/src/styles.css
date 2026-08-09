@@ -1471,6 +1471,9 @@ a.btn {
 /* A button, not a link: it toggles the queue panel rather than navigating.
    Font and colour are set explicitly because a button inherits neither. */
 .footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-dim);
   text-decoration: none;

@@ -1369,6 +1369,194 @@ export const BIO_ICONS: Record<string, Glyph> = {
       </>
     ),
   },
+  queued: {
+    label: "Queued",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M64 40H24v176h40"></path><path d="M192 40h40v176h-40"></path>
+        <path d="M72 88h112" stroke="var(--bio-accent,#0088b0)"></path><path d="M72 128h112"></path><path d="M72 168h112"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-11.13 -11.13) scale(1.0870)" strokeWidth={14.72}>
+        <circle cx="128" cy="128" r="92"></circle>
+        <path d="M128 72v56h52" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g fill="currentColor" stroke="none">
+        <circle cx="46" cy="128" r="18"></circle><circle cx="128" cy="128" r="18"></circle>
+        <circle cx="210" cy="128" r="18" fill="var(--bio-accent,#0088b0)"></circle>
+        </g>
+      </>
+    ),
+  },
+  running: {
+    label: "Running",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 72h100v112H24Z" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)" stroke="none"></path>
+        <path d="M24 72h208v112H24Z"></path>
+        <path d="M124 72v112" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-11.13 -11.13) scale(1.0870)" strokeWidth={14.72}>
+        <path d="M128 36a92 92 0 1 1-92 92"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(-27.32 -8.17) scale(1.0638)">
+        <path d="M76 34 216 128 76 222Z" fill="currentColor" stroke="none"></path>
+        </g>
+      </>
+    ),
+  },
+  projects: {
+    label: "Projects",
+    a: (
+      <>
+        <g transform="translate(-4 -8) scale(1)" strokeWidth={16}>
+        <path d="M72 60h48l18 22h72"></path>
+        <path d="M32 96h60l20 24h120v92H32Z" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-15.96 -12.66) scale(1.0989)" strokeWidth={14.56}>
+        <path d="M40 56v144"></path>
+        <path d="M72 72h150" stroke="var(--bio-accent,#0088b0)"></path><path d="M72 128h120"></path><path d="M72 184h150"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(-20.84 -27.82) scale(1.1628)" fill="currentColor" stroke="none">
+        <circle cx="64" cy="72" r="22"></circle><circle cx="192" cy="72" r="22"></circle>
+        <circle cx="128" cy="196" r="22" fill="var(--bio-accent,#0088b0)"></circle>
+        </g>
+      </>
+    ),
+  },
+  files: {
+    label: "Files",
+    a: (
+      <>
+        <g transform="translate(4 0) scale(1)" strokeWidth={16}>
+        <path d="M84 28h72l52 52v20"></path>
+        <path d="M40 60h84l56 56v112H40Z" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></path>
+        <path d="M124 60v56h56"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-17.45 -17.45) scale(1.1364)" strokeWidth={14.08}>
+        <path d="M88 40h104v104"></path>
+        <path d="M168 216H64V112" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(-5.33 -5.33) scale(1.0417)" strokeWidth={15.36}>
+        <path d="M56 32h96l48 48v144H56Z" fill="currentColor" stroke="none"></path>
+        <path d="M152 32v48h48" stroke="var(--bio-knockout,#f3f2f2)"></path>
+        </g>
+      </>
+    ),
+  },
+  ask: {
+    label: "Ask",
+    a: (
+      <>
+        <g transform="translate(-5.33 -9.5) scale(1.0417)" strokeWidth={15.36}>
+        <path d="M32 48h192v128H120l-48 40v-40H32Z" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(6.43 4.47) scale(0.9804)" strokeWidth={16.32}>
+        <circle cx="128" cy="116" r="92"></circle>
+        <path d="M63 181 28 228l58-18" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(-5.33 -1.17) scale(1.0417)">
+        <path d="M32 48h192v112h-64l-24 40-24-40H32Z" fill="currentColor" stroke="none"></path>
+        </g>
+      </>
+    ),
+  },
+  agent: {
+    label: "Agent",
+    a: (
+      <>
+        <g transform="translate(-6.73 9.06) scale(1.0526)" strokeWidth={15.2}>
+        <path d="M128 72V38"></path>
+        <rect x="40" y="72" width="176" height="136" rx="28" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></rect>
+        <g fill="currentColor" stroke="none">
+        <circle cx="128" cy="28" r="12"></circle><circle cx="92" cy="140" r="16"></circle><circle cx="164" cy="140" r="16"></circle>
+        </g>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(0 4) scale(1)" strokeWidth={16}>
+        <path d="M128 56V24"></path>
+        <circle cx="128" cy="140" r="84"></circle>
+        <path d="M100 132v20" stroke="var(--bio-accent,#0088b0)"></path><path d="M156 132v20" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)">
+        <path d="M128 24c10 56 46 92 104 104-58 12-94 48-104 104-10-56-46-92-104-104 58-12 94-48 104-104Z" fill="currentColor" stroke="none"></path>
+        </g>
+      </>
+    ),
+  },
+  live: {
+    label: "Live",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <rect x="24" y="88" width="208" height="80" rx="40" fill="var(--bio-accent,#0088b0)" fillOpacity="var(--bio-duo,0.15)"></rect>
+        <circle cx="76" cy="128" r="18" fill="var(--bio-accent,#0088b0)" stroke="none"></circle>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(-24.38 -24.38) scale(1.1905)" strokeWidth={13.44}>
+        <circle cx="128" cy="128" r="22" fill="currentColor" stroke="none"></circle>
+        <path d="M76 92a56 56 0 0 0 0 72"></path><path d="M180 92a56 56 0 0 1 0 72"></path>
+        <path d="M44 60a104 104 0 0 0 0 136" stroke="var(--bio-accent,#0088b0)"></path><path d="M212 60a104 104 0 0 1 0 136" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <circle cx="128" cy="128" r="100" fill="var(--bio-accent,#0088b0)" stroke="none"></circle>
+      </>
+    ),
+  },
 };
 
 export type BioIconName = keyof typeof BIO_ICONS;
@@ -1413,6 +1601,16 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   external_link: "b",
   warning: "b",
   succeeded: "b",
+  // VII. Job status & agent chrome -- strokes over enclosures for the same
+  // reason as Section V: these sit beside running text at icon size, not in
+  // a card, so a mark reads cleaner than a frame.
+  queued: "b",
+  running: "b",
+  projects: "b",
+  files: "b",
+  ask: "b",
+  agent: "b",
+  live: "b",
 };
 
 /** The house default for every concept not named above. */
