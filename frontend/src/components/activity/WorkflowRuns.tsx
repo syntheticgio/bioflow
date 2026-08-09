@@ -1,19 +1,28 @@
 /**
- * Workflow runs in the activity view.
+ * Workflow runs, set as ledger lines beside the ordinary runs.
  *
  * A workflow's nodes are ordinary `PipelineRun`s and jobs, deliberately (design
- * §1.5), which is exactly why this section has to exist: without it a workflow
- * is a flat pile of unrelated rows with nothing saying they belong together or
- * how far along the whole thing is.
+ * §1.5), which is why a workflow still needs a row of its own: without it a
+ * workflow is a flat pile of unrelated rows with nothing saying they belong
+ * together or how far along the whole thing is.
+ *
+ * It used to get a whole section above the run columns. It no longer does
+ * (#93): a workflow is a run the user started, so it belongs in the same two
+ * columns every other run does -- active ones under "In progress", finished
+ * ones in the ledger -- rather than in a third place with its own visual
+ * language. The collapsed line is therefore a `ledger-line`, the same markup
+ * `LedgerRow` uses, and only the expansion is workflow-specific: the node list
+ * is the part that has no equivalent among plain runs, and it is the part the
+ * issue asked to keep as it was.
  *
  * Status is derived server-side from node states and shares `RunStatus`'s
  * vocabulary, so the existing STATUS_LABELS apply unchanged.
  *
  * Live updates come from polling while a run is active -- the same 2s cadence
- * the runs and jobs queries above already use. `run_ids` on `job.progress`
- * cannot serve here: it carries `PipelineRun` ids, and 13 of the 22 node types
- * create no run at all, so a workflow whose QC node is working would report
- * nothing. See the deviation note on #80.
+ * the runs and jobs queries already use. `run_ids` on `job.progress` cannot
+ * serve here: it carries `PipelineRun` ids, and 13 of the 22 node types create
+ * no run at all, so a workflow whose QC node is working would report nothing.
+ * See the deviation note on #80.
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,49 +32,49 @@ import type { WorkflowNodeRow, WorkflowRunRow } from "../../api/types";
 import { formatClock } from "../../lib/format";
 import { STATUS_LABELS } from "../../lib/runFormat";
 import { notify } from "../../stores/messageStore";
-import { SectionHead } from "./SectionHead";
 
 const ACTIVE = new Set(["running", "waiting"]);
 
-export function WorkflowRuns() {
-  const [open, setOpen] = useState<string | null>(null);
+export const isActiveWorkflow = (run: WorkflowRunRow) => ACTIVE.has(run.status);
 
+/**
+ * Every workflow run, split the way the two columns want them.
+ *
+ * Lives here rather than in `ActivityView` so the polling rule stays next to
+ * the component that renders the result; the view just spreads the halves into
+ * the columns.
+ */
+export function useWorkflowRuns() {
   const { data: runs = [] } = useQuery({
     queryKey: ["workflow-runs"],
     queryFn: () => api.listWorkflowRuns(),
     // Poll only while something is in flight, matching the runs query.
     refetchInterval: (q) => {
       const list = q.state.data as WorkflowRunRow[] | undefined;
-      return list?.some((r) => ACTIVE.has(r.status)) ? 2000 : false;
+      return list?.some(isActiveWorkflow) ? 2000 : false;
     },
   });
 
-  // The section disappears entirely when no workflow has ever run, rather than
-  // showing an empty box: most installs will never use workflows, and an empty
-  // heading is a permanent question about a feature they are not using.
-  if (runs.length === 0) return null;
-
-  return (
-    <section className="activity-workflows">
-      <SectionHead title="Workflows" note={`${runs.length}`} />
-      {runs.map((run) => (
-        <WorkflowRow
-          key={run.id}
-          run={run}
-          open={open === run.id}
-          onToggle={() => setOpen((o) => (o === run.id ? null : run.id))}
-        />
-      ))}
-    </section>
-  );
+  return {
+    active: runs.filter(isActiveWorkflow),
+    finished: runs.filter((r) => !isActiveWorkflow(r)),
+  };
 }
 
-function WorkflowRow({
+/**
+ * One workflow run as a ledger line.
+ *
+ * `index` continues the numbering of the column it is placed in, so a mixed
+ * column reads as one list rather than two that each restart at 01.
+ */
+export function WorkflowLedgerRow({
   run,
+  index,
   open,
   onToggle,
 }: {
   run: WorkflowRunRow;
+  index: number;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -77,7 +86,7 @@ function WorkflowRow({
     // Fetched only when expanded: the collapsed row already carries its counts,
     // so the detail is the expensive half and nobody needs it unopened.
     enabled: open,
-    refetchInterval: open && ACTIVE.has(run.status) ? 2000 : false,
+    refetchInterval: open && isActiveWorkflow(run) ? 2000 : false,
   });
 
   const invalidate = () => {
@@ -115,16 +124,35 @@ function WorkflowRow({
     onError: (e: Error) => notify.error(e.message),
   });
 
+  // Same shape as a plain run's ledger meta -- status, size, time -- so the two
+  // kinds of line scan as one column. "Workflow" is what tells them apart, and
+  // it earns its place: the expansion behaves differently from a run's.
+  const meta = [
+    STATUS_LABELS[run.status],
+    "workflow",
+    `${run.node_done}/${run.node_total} nodes`,
+    formatClock(run.updated_at),
+  ].join(" · ");
+
   return (
-    <div className={`workflow-run${open ? " open" : ""}`}>
-      <button className="workflow-run-head" onClick={onToggle}>
-        <span className="workflow-run-chevron">{open ? "▾" : "▸"}</span>
-        <span className="workflow-run-label">{run.label}</span>
-        <span className={`workflow-run-status ${run.status}`}>
-          {STATUS_LABELS[run.status]}
-        </span>
-        <span className="workflow-run-count">
-          {run.node_done}/{run.node_total}
+    <div className={`ledger-row workflow ${run.status}`}>
+      <div
+        className="ledger-line"
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        <span className="ledger-num">{String(index).padStart(2, "0")}</span>
+        <span className="ledger-title">{run.label}</span>
+        <span className="ledger-meta">
+          {meta}
           {/* Failures are called out separately rather than folded into the
               fraction: a PARTIAL run has real outputs *and* a dead branch, and
               "2/3" alone hides which. */}
@@ -132,11 +160,10 @@ function WorkflowRow({
             <em className="workflow-run-failed"> · {run.node_failed} failed</em>
           )}
         </span>
-        <span className="workflow-run-time">{formatClock(run.created_at)}</span>
-      </button>
+      </div>
 
       {open && (
-        <div className="workflow-run-body">
+        <div className="ledger-detail workflow-run-body">
           <div className="workflow-run-actions">
             {run.node_failed > 0 && (
               <button
@@ -149,7 +176,7 @@ function WorkflowRow({
                   : `Retry all failed (${run.node_failed})`}
               </button>
             )}
-            {ACTIVE.has(run.status) && (
+            {isActiveWorkflow(run) && (
               <button
                 className="btn small"
                 onClick={() => cancel.mutate()}

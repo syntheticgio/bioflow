@@ -1482,6 +1482,14 @@
   overflow-wrap: anywhere;
 }
 
+/* A workflow line is a ledger line (#93), so it needs no styling of its own --
+   except its expansion, which carries the node list rather than a fact grid
+   and would otherwise sit at the theme's body size next to 13.5px facts. */
+.theme-broadsheet .ledger-detail.workflow-run-body {
+  font-size: 13px;
+  border-top-color: var(--color-divider);
+}
+
 /* ── Activity: desk rail ────────────────────────────────────────────────── */
 
 .theme-broadsheet .activity-desk {

@@ -5605,68 +5605,14 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 /* ------------------------------------------------------- workflow activity */
-/* A workflow run and its nodes. Absent entirely when no workflow has run --
-   most installs will never use them, and an empty heading is a permanent
-   question about a feature nobody is using. */
-
-.activity-workflows {
-  padding: 12px 14px 0;
-}
-
-.workflow-run {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 6px;
-  background: var(--bg-panel);
-}
-
-.workflow-run-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  background: none;
-  border: none;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  font-size: 13px;
-}
-
-.workflow-run-head:hover {
-  background: var(--bg-hover);
-}
+/* A workflow run and its nodes. The collapsed line is a `ledger-row`, shared
+   with the ordinary runs it sits beside (#93); only the expansion below is
+   workflow-specific, because the node list has no equivalent among plain
+   runs. */
 
 .workflow-run-chevron {
   color: var(--text-faint);
   font-size: 10px;
-}
-
-.workflow-run-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-run-status {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-}
-
-.workflow-run-status.running { color: var(--accent); }
-.workflow-run-status.succeeded { color: var(--success); }
-.workflow-run-status.failed { color: var(--error); }
-/* PARTIAL is a real ending, not a failure: real outputs plus a dead branch. */
-.workflow-run-status.partial { color: var(--warn); }
-
-.workflow-run-count {
-  color: var(--text-faint);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
 }
 
 .workflow-run-failed {
@@ -5674,14 +5620,11 @@ table.software-matrix thead th.software-matrix-corner {
   font-style: normal;
 }
 
-.workflow-run-time {
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
+/* Already inside a `ledger-detail`, which supplies the indent -- this adds
+   only the rule separating the nodes from the line they opened from. */
 .workflow-run-body {
   border-top: 1px solid var(--border);
-  padding: 8px 10px;
+  padding-top: 8px;
 }
 
 .workflow-run-actions {
