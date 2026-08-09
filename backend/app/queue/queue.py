@@ -247,6 +247,26 @@ async def _failed_dependencies(
     return failed
 
 
+async def _advance_workflow(job_id: str, *, succeeded: bool) -> None:
+    """Tell any workflow waiting on this job that it has finished.
+
+    `complete()` is the usual path to a terminal state and calls the hook
+    itself, but it is not the only one: a job can be failed because a
+    dependency failed, cancelled while still queued or blocked, or declared
+    dead after repeated lease expiry. Each of those writes a terminal state
+    without ever reaching `complete()`, and each used to leave the workflow
+    node it belonged to sitting on RUNNING forever -- nothing reclaims it,
+    because a node holds no lease to expire. A real OOM-killed `build_index`
+    stranded its whole workflow that way.
+
+    The hook itself never raises (it swallows and logs), so this is safe to
+    call from paths whose real job is something else.
+    """
+    from app.services import workflow_hook
+
+    await workflow_hook.on_job_finished(PydanticObjectId(job_id), succeeded=succeeded)
+
+
 async def _clear_cancel_flag(job_id: str) -> None:
     """Drop a job id from the cancel set once nothing can still read it.
 
@@ -302,6 +322,7 @@ async def _fail_blocked_job(job: Job, failed: list[Job]) -> None:
     )
     await publish_event("job.failed", {"job_id": str(job.id)}, owner=job.owner)
     await _clear_cancel_flag(str(job.id))
+    await _advance_workflow(str(job.id), succeeded=False)
 
     # Cascade: anything waiting on *this* job now cannot run either.
     await _release_dependents(str(job.id), succeeded=False)
@@ -622,11 +643,7 @@ async def complete(
     # the overwhelming majority of jobs, which belong to no workflow, and it
     # never raises -- workflow bookkeeping must not turn a successful job into
     # a failed one.
-    from app.services import workflow_hook
-
-    await workflow_hook.on_job_finished(
-        PydanticObjectId(job_id), succeeded=state is JobState.SUCCEEDED
-    )
+    await _advance_workflow(job_id, succeeded=state is JobState.SUCCEEDED)
     return True
 
 
@@ -698,6 +715,7 @@ async def request_cancel(job_id: str) -> str:
             }
         )
         await publish_event("job.cancelled", {"job_id": job_id}, owner=job.owner)
+        await _advance_workflow(job_id, succeeded=False)
         # Cancelling an index build must not leave the alignment behind it
         # queued forever waiting for a file nobody is going to write.
         await _release_dependents(job_id, succeeded=False)
@@ -782,7 +800,9 @@ async def reap_expired(max_batch: int = 100) -> list[tuple[str, int]]:
             await _clear_cancel_flag(job_id)
             log.error("job_dead_after_lease_expiry", job_id=job_id, attempts=attempts)
             # A job that died here never went through `complete`, so this is
-            # the only place its dependents learn they will never run.
+            # the only place its dependents -- and any workflow node it serves
+            # -- learn they will never run.
+            await _advance_workflow(job_id, succeeded=False)
             await _release_dependents(job_id, succeeded=False)
         else:
             await get_db().jobs.update_one(
