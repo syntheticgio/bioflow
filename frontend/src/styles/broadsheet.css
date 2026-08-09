@@ -549,17 +549,15 @@
   color: var(--ink-62);
 }
 
-/* --bg-hover is a translucent mix here, so the badge cannot simply inherit it:
-   the icon's strokes would read straight through the figure. These flatten the
-   same mix against the page so the backing stays opaque. */
+/* --bg-hover is a translucent mix here, so the badge cannot simply inherit
+   it -- against the paper texture a translucent backing reads as washed out.
+   These flatten the same mix against the page so the badge stays opaque. */
 .theme-broadsheet .row:hover .q-badge {
   background: color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-text) 5%, var(--color-bg));
 }
 
 .theme-broadsheet .row.selected .q-badge {
   background: var(--bg-elevated, var(--color-bg));
-  box-shadow: 0 0 0 2px var(--bg-elevated, var(--color-bg));
 }
 
 .theme-broadsheet .row.selected .row-icon svg,

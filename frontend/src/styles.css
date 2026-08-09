@@ -2540,44 +2540,53 @@ a.btn {
    outright; color is now emphasis, not the message. */
 .q-badge {
   position: absolute;
-  /* Tucked past the glyph's corner: the artwork's own ink stops short of the
-     256-grid edge, so a badge flush to the box still reads as sitting on the
-     icon rather than beside it. */
-  right: -4px;
-  bottom: -4px;
+  /* Clear of the glyph's own box rather than overlapping its corner: with the
+     denominator back, "3/5" set at a legible size is close to as wide as a
+     30px icon, and a badge that size covering the corner buried the artwork
+     under it (measured at 18px on a 24px icon). Floating just outside the
+     bottom-right, as in the design review's standalone mark, keeps both
+     readable. */
+  right: -6px;
+  bottom: -7px;
   display: flex;
   align-items: baseline;
   gap: 0.5px;
-  padding: 0 1px;
-  min-width: 11px;
-  justify-content: center;
+  padding: 1px 3px;
   border-radius: 3px;
   font-family: var(--font-heading, Georgia, serif);
   font-variant-numeric: lining-nums tabular-nums;
   line-height: 1;
-  /* Punches a hole in the glyph behind it so the figure never sits on the
-     icon's own strokes. Matches the row rather than the panel, since the row
-     is what changes under hover and selection. */
+  /* The row's own background, so the mark reads as sitting on the row rather
+     than punching a hole in it -- there is no glyph ink behind it to hide. */
   background: var(--bg-panel);
-  box-shadow: 0 0 0 2px var(--bg-panel);
 }
 
 .row.selected .q-badge,
 .row:hover .q-badge {
   background: var(--bg-hover);
-  box-shadow: 0 0 0 1.5px var(--bg-hover);
 }
 
 .q-badge-tier {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--accent);
 }
 
+/* 5/4/3 are still usable data; 2/1 are a real problem. Binary rather than a
+   five-step ramp, matching readQuality's own tier words -- "Fair" (3) is the
+   last tier this app calls usable, so it gets the "fine" color. */
+.q-badge-low .q-badge-tier {
+  color: var(--error);
+}
+
 /* Carried smaller and dimmer: the denominator is a unit, not the reading. */
 .q-badge-of {
-  font-size: 8px;
+  font-size: 9px;
   color: var(--text-dim);
+}
+
+.q-badge-low .q-badge-of {
+  color: color-mix(in srgb, var(--error) 55%, var(--text-dim));
 }
 
 /* Outstanding-work badge ------------------------------------------------ */
