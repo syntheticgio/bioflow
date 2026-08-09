@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Alignment (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 20.31) scale(0.9615)" stroke-width="16.64">
+  <path d="M24 112h208"></path>
+  <path d="M72 72v80" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M136 72v80" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M192 72v80" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

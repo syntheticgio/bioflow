@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Metadata &amp; tags"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -17.45) scale(1.1364)" stroke-width="14.08">
+  <path d="M32 96h72v64H32Z" fill="currentColor" stroke="none"></path>
+  <path d="M152 96h72v64h-72Z"></path>
+  </g>
+</svg>

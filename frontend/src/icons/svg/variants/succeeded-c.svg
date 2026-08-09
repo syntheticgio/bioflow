@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Succeeded (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -5.33) scale(1.0417)" stroke-width="15.36">
+  <rect x="32" y="32" width="192" height="192" rx="40" fill="currentColor" stroke="none"></rect>
+  <path d="M88 132l28 28 56-62" stroke="var(--bio-knockout,#f3f2f2)"></path>
+  </g>
+</svg>

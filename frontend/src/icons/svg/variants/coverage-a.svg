@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Coverage (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(4.92 -31.62) scale(0.9615)" stroke-width="16.64">
+  <path d="M24 216h208"></path><path d="M24 196c32 0 36-72 72-72s36 44 72 44 32-52 64-52v100H24Z" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></path>
+  </g>
+</svg>

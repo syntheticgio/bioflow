@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Single cell (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-9.59 -5.69) scale(1.0386)" stroke-width="15.4">
+  <path d="M40 76a52 52 0 0 1 84-32 52 52 0 0 1-16 84 52 52 0 0 1-68-52Z" stroke-dasharray="16 16" fill="var(--bio-accent,#0088b0)" fill-opacity="var(--bio-duo,0.15)"></path>
+  <g fill="currentColor" stroke="none">
+  <circle cx="60" cy="76" r="13"></circle><circle cx="92" cy="52" r="13"></circle><circle cx="96" cy="92" r="13"></circle>
+  <circle cx="184" cy="76" r="13"></circle><circle cx="212" cy="108" r="13"></circle><circle cx="176" cy="120" r="13"></circle>
+  <circle cx="104" cy="188" r="13"></circle><circle cx="140" cy="212" r="13"></circle><circle cx="144" cy="172" r="13"></circle>
+  </g>
+  </g>
+</svg>

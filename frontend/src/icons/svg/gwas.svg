@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="GWAS"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-5.33 -6.9) scale(1.0417)" stroke-width="15.36">
+  <path d="M32 216h192"></path>
+  <path d="M32 88h192" stroke-dasharray="12 14" stroke="var(--bio-accent,#0088b0)"></path>
+  <g fill="currentColor" stroke="none">
+  <circle cx="56" cy="188" r="11"></circle><circle cx="88" cy="164" r="11"></circle>
+  <circle cx="120" cy="180" r="11"></circle><circle cx="152" cy="56" r="13"></circle>
+  <circle cx="152" cy="112" r="11"></circle><circle cx="184" cy="172" r="11"></circle><circle cx="212" cy="188" r="11"></circle>
+  </g>
+  </g>
+</svg>

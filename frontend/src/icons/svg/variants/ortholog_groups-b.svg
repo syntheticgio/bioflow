@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Ortholog groups (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-49.78 -49.78) scale(1.3889)" stroke-width="11.52">
+  <path d="M56 56h48v48H56Z"></path><path d="M152 56h48v48h-48Z"></path>
+  <path d="M56 152h48v48H56Z"></path><path d="M152 152h48v48h-48Z"></path>
+  <path d="M104 80h48" stroke="var(--bio-accent,#0088b0)"></path>
+  <path d="M104 176h48" stroke="var(--bio-accent,#0088b0)"></path>
+  </g>
+</svg>

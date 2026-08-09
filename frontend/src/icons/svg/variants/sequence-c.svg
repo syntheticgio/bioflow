@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Sequence (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-19.62 -24.38) scale(1.1905)" stroke-width="13.44">
+  <path d="M40 88v80"></path><path d="M96 104v48"></path><path d="M152 80v96"></path><path d="M208 104v48"></path>
+  </g>
+</svg>

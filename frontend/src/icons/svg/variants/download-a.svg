@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Download (a)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -8.36) scale(1.1364)" stroke-width="14.08">
+  <path d="M128 32v112"></path><path d="M92 108l36 36 36-36"></path>
+  <path d="M40 168v40h176v-40"></path>
+  </g>
+</svg>

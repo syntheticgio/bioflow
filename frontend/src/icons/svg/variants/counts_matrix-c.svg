@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Counts matrix (c)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-6.41 -8.56) scale(1.0753)" stroke-width="14.88">
+  <g fill="currentColor" stroke="none">
+  <circle cx="56" cy="56" r="10"></circle><circle cx="128" cy="56" r="22"></circle><circle cx="200" cy="56" r="13"></circle>
+  <circle cx="56" cy="128" r="23"></circle><circle cx="128" cy="128" r="11"></circle><circle cx="200" cy="128" r="17"></circle>
+  <circle cx="56" cy="200" r="14"></circle><circle cx="128" cy="200" r="20"></circle><circle cx="200" cy="200" r="9"></circle>
+  </g>
+  </g>
+</svg>

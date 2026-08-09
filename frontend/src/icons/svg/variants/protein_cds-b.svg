@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"
+  role="img" aria-label="Protein &amp; CDS (b)"
+  fill="none" stroke="currentColor" stroke-width="16"
+  stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(-17.45 -3.82) scale(1.1364)" stroke-width="14.08">
+  <path d="M40 72q44-40 88 0t88 0"></path>
+  <path d="M40 160q44-40 88 0t88 0"></path>
+  </g>
+</svg>
