@@ -157,3 +157,65 @@ class TestResolveOrder:
 
     def test_falls_through_to_nothing(self):
         assert expected_gc.resolve(references=[], organism=None) is None
+
+
+from app.models import ObjectRole
+from tests.services.helpers import make_object, make_project
+
+
+async def seed_reference(project, name, gc, role=ObjectRole.REFERENCE):
+    """A stored object carrying a measured GC, as ingest would leave it."""
+    obj = await make_object(project, name)
+    obj.role = role
+    obj.facts = {"gc_content_percent": gc}
+    await obj.save()
+    return obj
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+class TestReferencesForProject:
+    """The database seam. Async because it queries; the resolver itself is
+    pure and stays synchronous, which is why every other test here is too."""
+
+    async def test_returns_the_projects_reference_objects(self, beanie_models):
+        project = await make_project("gc-refs")
+        await seed_reference(project, "GRCh38.fa", 40.9)
+        found = await expected_gc.references_for_project(
+            project_id=project.id, owner=project.owner
+        )
+        assert [o.name for o in found] == ["GRCh38.fa"]
+
+    async def test_excludes_objects_with_no_role(self, beanie_models):
+        """A FASTQ in the same project is not a reference genome."""
+        project = await make_project("gc-mixed")
+        await make_object(project, "reads_1.fastq")
+        await seed_reference(project, "GRCh38.fa", 40.9)
+        found = await expected_gc.references_for_project(
+            project_id=project.id, owner=project.owner
+        )
+        assert [o.name for o in found] == ["GRCh38.fa"]
+
+    async def test_does_not_cross_projects(self, beanie_models):
+        """Another project's reference says nothing about this file."""
+        mine = await make_project("gc-mine")
+        theirs = await make_project("gc-theirs")
+        await seed_reference(theirs, "ecoli.fa", 50.8)
+        found = await expected_gc.references_for_project(
+            project_id=mine.id, owner=mine.owner
+        )
+        assert found == []
+
+    async def test_resolves_end_to_end_from_stored_objects(self, beanie_models):
+        """The whole cascade against real documents rather than fakes -- the
+        seam where a query that returns the wrong shape would still satisfy
+        every unit test above it."""
+        project = await make_project("gc-e2e")
+        await seed_reference(project, "GRCh38.fa", 40.9)
+        refs = await expected_gc.references_for_project(
+            project_id=project.id, owner=project.owner
+        )
+        got = expected_gc.resolve(references=refs, organism=None)
+        assert got is not None
+        assert got.source == "reference"
+        assert "GRCh38.fa" in got.attribution

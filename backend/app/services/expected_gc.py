@@ -24,7 +24,7 @@ fields exist to prevent.
 
 from dataclasses import dataclass
 
-from app.models import normalize_organism
+from app.models import DataObject, ObjectRole, normalize_organism
 from app.services import pipeline_service
 
 
@@ -195,3 +195,17 @@ def resolve(*, references, organism: str | None) -> ExpectedGc | None:
     is a confidently wrong curve.
     """
     return from_references(references) or from_organism(organism)
+
+
+async def references_for_project(*, project_id, owner) -> list:
+    """Reference-role objects in one project, for `resolve` to measure.
+
+    Scoped by owner as well as project: this runs on a detail endpoint whose
+    authorization is the object fetch, and a query that ignored owner would
+    read another profile's files to answer a question about this one.
+    """
+    return await DataObject.find(
+        DataObject.owner == owner,
+        DataObject.project_id == project_id,
+        DataObject.role == ObjectRole.REFERENCE,
+    ).to_list()

@@ -170,6 +170,20 @@ class ObjectOut(BaseModel):
         )
 
 
+class ExpectedGc(BaseModel):
+    """What GC this file's reads should show, and what said so.
+
+    Optional everywhere: most files resolve to nothing, and the chart draws no
+    reference curve in that case rather than guessing.
+    """
+
+    percent: float
+    # "reference" (measured from a project file) or "table" (published value).
+    source: str
+    # Shown beside the curve. Always names its source, so a user can check it.
+    attribution: str
+
+
 class ObjectDetail(ObjectOut):
     blob: BlobOut | None = None
     # Digest of the object's current facts and metadata. Compared client-side
@@ -177,6 +191,9 @@ class ObjectDetail(ObjectOut):
     # describes the file from one written before the last QC or trim run.
     # Detail-only: the listing has no use for it and it costs a hash per row.
     summary_fingerprint: str | None = None
+    # What GC to expect, when anything can say. Detail-only, like
+    # summary_fingerprint: the listing has no use for it and it costs a query.
+    expected_gc: ExpectedGc | None = None
 
 
 # --- Computation provenance ---
