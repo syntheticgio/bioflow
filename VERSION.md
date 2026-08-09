@@ -7,7 +7,7 @@
 > refuses pre-release versions, so it cannot cut the `-alpha` and `-beta` tags
 > that flow calls for, and the `main`-only check below assumes releases come
 > straight off the trunk. Closing that gap is tracked in
-> [#99](https://github.com/syntheticgio/bioflow/issues/99).
+> [#107](https://github.com/syntheticgio/bioflow/issues/107).
 
 BioFlow has **two independent version lines.** They never need to agree, and
 bumping one does not imply bumping the other.
