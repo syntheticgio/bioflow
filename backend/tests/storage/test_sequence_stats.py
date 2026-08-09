@@ -514,6 +514,22 @@ class TestReadLengthHistogram:
         histogram = {h["length_bin"]: h["count"] for h in facts["read_length_histogram"]}
         assert histogram[25_000] == 1
 
+    def test_alignment_stats_also_bucketed(self, tmp_path):
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "lengths.bam",
+            [
+                {"name": "r1", "seq": "A" * 10},
+                {"name": "r2", "seq": "A" * 10},
+                {"name": "r3", "seq": "A" * 25},
+            ],
+        )
+        facts = ss.alignment_stats(p, FormatKind.BAM)
+        histogram = {h["length_bin"]: h["count"] for h in facts["read_length_histogram"]}
+        assert histogram[10] == 2
+        assert histogram[20] == 1
+
 
 class TestFastaSampling:
     """GC sampling must describe the file, not just its first chromosome."""

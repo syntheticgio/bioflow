@@ -385,6 +385,7 @@ def alignment_stats(
     mapq_n = 0
     mapq_histogram: Counter[int] = Counter()
     insert_size_histogram: Counter[int] = Counter()
+    length_histogram: Counter[int] = Counter()
     saw_paired = False
 
     try:
@@ -400,6 +401,8 @@ def alignment_stats(
                     continue
 
                 reads += 1
+                bucket = (len(seq) // READ_LENGTH_BIN_WIDTH) * READ_LENGTH_BIN_WIDTH
+                length_histogram[bucket] += 1
                 if not rec.is_unmapped:
                     mapped += 1
                     mapq_sum += rec.mapping_quality
@@ -495,6 +498,12 @@ def alignment_stats(
         facts["insert_size_histogram"] = [
             {"insert_size": size, "count": n}
             for size, n in sorted(insert_size_histogram.items())
+        ]
+
+    if length_histogram:
+        facts["read_length_histogram"] = [
+            {"length_bin": length_bin, "count": n}
+            for length_bin, n in sorted(length_histogram.items())
         ]
 
     return facts
