@@ -1,0 +1,40 @@
+# Groups the auto-generated release notes that publish-images.yml requests
+# from GitHub's generate-notes API.
+#
+# Categorization is by PR *label*, not by the Conventional Commits type in the
+# PR title -- GitHub's generator has no notion of `feat:` or `fix:`. An
+# unlabelled PR therefore falls through to the catch-all "Other changes"
+# section rather than being dropped, which is the safe direction: a change
+# nobody labelled still appears, it is just filed under a vaguer heading.
+#
+# The practical consequence, and the reason this comment exists: labelling a
+# merged PR is what puts it in the right section. The title still carries the
+# `feat:`/`fix:` prefix for the humans reading it and for any future
+# commit-driven generator (#106), but it does no work here.
+# Every label name here is quoted. Unquoted, a name containing a colon --
+# which every label in this repo has -- is parsed by YAML as a nested mapping
+# (`status: unnecessary` becomes {status: unnecessary}, not the string
+# "status: unnecessary"), and the entry silently never matches anything.
+changelog:
+  exclude:
+    labels:
+      - "status: unnecessary"
+      - "wontfix"
+  categories:
+    - title: Breaking changes
+      labels:
+        - "breaking"
+    - title: New features
+      labels:
+        - "type:feature"
+    - title: Bug fixes
+      labels:
+        - "type:bug"
+    - title: Maintenance
+      labels:
+        - "type:maintenance"
+    # Catch-all. Must stay last: the generator assigns each PR to the first
+    # matching category, and `*` matches everything.
+    - title: Other changes
+      labels:
+        - "*"

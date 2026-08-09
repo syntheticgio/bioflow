@@ -4,45 +4,245 @@ Single-user, local-only tool for non-critical, non-essential work. Optimize for
 "the person using it can see their change" over correctness-at-scale practices
 that make sense for a team or a hosted service.
 
-**`main` is this project's dev branch, not its production branch.** A separate
-downstream process does the final testing before anything reaches prod, so
-landing on `main` is not shipping to users -- it is the equivalent of pushing
-to a shared dev trunk.
+**`main` is this project's dev trunk, not its production branch.** Shipping to
+users happens at a tag, from a release branch, several stages downstream of
+`main` (see [Release methodology](#release-methodology) below). Landing on
+`main` is not shipping.
 
-## Commit and merge once the tests are green, without asking
+**But `main` is now reached through a pull request, not a direct merge.** This
+changed on 2026-08-09. The rest of the pipeline -- alpha, beta, production --
+is described under [Release methodology](#release-methodology); this section
+is only about how a piece of work gets from a worktree onto `main`.
 
-The consequence of the above: **do not hesitate over committing, merging to
-`main`, or pushing.** Once the suite is green, commit. If the work is done and
-`main` is clean, merge and push. Stopping to ask permission for each of those
-is friction with nothing on the other side of it -- there is no review gate to
-respect and no user-facing release to gate, and the downstream process is what
-actually protects prod.
+## Finish work on a branch, push it, and open a PR
 
-What still earns a pause:
+**Do not merge your own work to `main`.** The end state of a task is *an open
+PR*, not a merged one. The user reviews and merges. This is the one part of
+the old workflow that inverted: committing and pushing are still yours to do
+without asking, and merging is now the user's.
+
+Once the suite is green:
+
+```bash
+git push -u origin HEAD
+```
+
+```bash
+gh pr create --base main --fill
+```
+
+Then report the PR URL and stop. Do not `gh pr merge`, and do not push to
+`main` directly.
+
+What still earns a pause before you push:
 
 - **A red or unrun suite.** "Green" is the precondition, and it means read the
   count, not the exit code of whatever was last in the pipeline.
-- **`main` not being clean.** Merge into a dirty or diverged `main` and the
-  conflict becomes someone else's. Multiple agents merging to `main`
-  concurrently is a known rough edge being worked on separately; if `main` has
-  moved under you, re-run the suite after merging rather than assuming your
-  green still holds.
 - **Anything genuinely destructive** -- history rewrites, force pushes,
   deleting branches that hold unmerged work. Committing is cheap and
   reversible; those are not.
 
+`main` being dirty or diverged is no longer your problem to solve by hand: a
+PR that cannot merge cleanly says so in the GitHub UI, which is a better place
+to discover it than mid-merge on the user's checkout. If GitHub reports a
+conflict, rebase your branch on `origin/main` and push again -- that is
+ordinary work on your own branch, not a history rewrite of a shared one.
+
 Keep commits separable: a mechanical rename and a behaviour change in one
 commit is a commit nobody can review or revert, whatever the test count says.
+This mattered less when nobody read the commits; now someone does.
 
-## Push to origin when a merge to main is the end of the task
+### Writing the PR
 
-`origin` (`github.com:syntheticgio/bioflow`) is the remote this project
-actually uses. When a task's work lands on `main` and the task is otherwise
-done -- not a mid-task checkpoint, not a merge with more steps still to come --
-push `main` to `origin` as part of finishing, rather than leaving it local
-only. A merge that stays unpushed is a merge someone still has to remember to
-push later, and there is no other workflow here (no PR review gate, no CI)
-that does it instead.
+**The PR title is what lands in the release notes verbatim** -- see
+[Release notes](#release-notes-come-from-pr-titles). Write it to the same
+standard as a commit subject, and for a single-commit branch just reuse that
+subject. Everything under
+[Writing the subject line](#writing-the-subject-line) applies to it,
+Conventional Commits prefix included.
+
+The description is the unit the user actually reviews. Two things it must
+carry:
+
+- **The "why", not just the "what".** The diff already says what changed.
+- **`Closes #NN`** when the work resolves a tracked issue, so the issue closes
+  on merge rather than being closed by hand later.
+
+**Label the PR** with its `type:` and `area:` labels. `.github/release.yml`
+categorizes the notes by label, not by the title's `feat:`/`fix:` prefix, so
+an unlabelled PR lands under "Other changes".
+
+`--fill` takes the description from your commit bodies, which in this repo are
+already written at the right level of detail. That is usually the right call;
+write the body explicitly when the branch's commits individually undersell
+what the branch does as a whole.
+
+## Branch naming
+
+Branches are named for what they do, prefixed by type:
+
+```
+feat/recent-projects-header
+fix/99-sidecar-lineage-walk
+docs/release-methodology
+```
+
+The type prefix matches the Conventional Commits type the branch's commits
+use (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`). Include the issue
+number when there is one. Agent-generated branch names still work and nothing
+rejects them, but they say nothing about the change, and they now show up in a
+PR list that someone reads.
+
+## Commit messages are Conventional Commits
+
+This is not new -- roughly 98% of the last 300 commits already follow it --
+but it is now load-bearing rather than merely tidy, because the changelog is
+generated from it:
+
+```
+<type>(<scope>): <subject>
+```
+
+`feat` and `fix` are the types that reach users and therefore the changelog.
+`docs`, `test`, `refactor`, `chore`, `style` are real and correct types that
+are filtered *out* of user-facing notes. Two consequences:
+
+- **A user-visible change committed as `chore` disappears from the release
+  notes.** Nothing errors; the entry is simply absent.
+- **A breaking change needs `!`** -- `feat(api)!: ...` -- or a
+  `BREAKING CHANGE:` trailer in the body. That marker is what a major-version
+  bump and a "breaking" changelog section are keyed off, and it cannot be
+  recovered later from the diff.
+
+Use `tweak` and `style` sparingly; both appear in the history and neither is
+a standard Conventional Commits type.
+
+### Writing the subject line
+
+**Write the subject for someone reading a release changelog, not for someone
+reading the diff.** It is the one line that survives into the notes, and by
+then the code is not in front of the reader. This is the single highest-value
+thing to get right in a commit.
+
+The mechanics, all of which this repo's history already follows -- match it
+rather than introducing a second style:
+
+- **Imperative mood**, as if completing "this commit will ...": `add`, `drop`,
+  `hide`, `record`, `reject`. Not `added`, `adds`, or `adding`.
+- **Lowercase after the colon** (11 of the last 400 commits capitalize; don't
+  add to them) and **no trailing period** (zero do).
+- **Aim for ~65 characters, hard-stop around 72.** That is this repo's median.
+  Longer is allowed when the extra words carry real information -- several of
+  the best subjects below run past it -- but a long subject is usually a sign
+  that detail belongs in the body.
+- **Use a scope when one is obvious**, and reuse an existing one:
+  `frontend`, `ui`, `api`, `queue`, `pipelines`, `models`, `services`,
+  `agent`, `provenance`, `timing`, `icons`, `ops`, `launcher`. About a quarter
+  of commits have no scope, which is fine when the change is genuinely
+  cross-cutting. Don't invent a near-synonym for a scope already in use.
+
+**Say what changed for the user, not what you edited.** The diff already
+records which functions moved. The subject is the only place the *behavior*
+gets stated:
+
+```
+fix(frontend): record a project visit once per navigation, not per refetch
+fix(queue): advance workflow nodes on every terminal path, not just complete()
+feat(activity): say what each run is doing, not just what it acted on
+fix(frontend): hide RECENT block entirely when zero chips fit
+feat(ui): quality badge as a serif figure instead of a color dot
+```
+
+Those are real subjects from this repo, and they share a shape worth copying:
+**they name the new behavior and, where it clarifies, contrast it with the old
+one** ("..., not per refetch"). A reader who never sees the diff still learns
+what changed. That contrast is also what makes a changelog entry useful rather
+than merely present.
+
+What to avoid, and why each one fails:
+
+| Avoid | Why |
+|---|---|
+| `fix: bug fix` / `fix(ui): fix issue` | Says nothing the type didn't already say. |
+| `feat: update ProjectExplorer.tsx` | Names a file, not a change. The diff has the filename. |
+| `fix: address PR feedback` | Meaningless outside the PR; unreadable in a changelog six months on. |
+| `chore: various improvements` | Bundles unrelated work *and* hides it from the notes. |
+| `feat: WIP` | A commit that admits it isn't a unit of work. |
+
+If you cannot write a clear subject, that is usually the commit telling you it
+does two things and should be two commits -- see the note above about keeping
+commits separable.
+
+## Release methodology
+
+BioFlow releases through four stages. The diagrams in `assets/` are the
+reference: `BioFlowReleasePath.svg` (the stages), `BioFlowReleaseLifecycle.svg`
+(the branching topology), `BioFlowReleaseSemantics.svg` (what each number
+means).
+
+| Stage | Branch | Tag | What happens |
+|---|---|---|---|
+| Dev | `main` | none | Feature and fix PRs merge here |
+| Alpha | `alpha/X.Y.Z` | `vX.Y.Z-alpha` | Cut when a release is wanted; rigorous testing |
+| Beta | `beta/X.Y.Z` | `vX.Y.Z-beta` | Cut when alpha stabilizes; broader testing |
+| Production | `release/X.Y.Z` | `vX.Y.Z` | Cut when ready to ship; images and launchers built |
+
+The rule that matters for an agent, because it is the one that is easy to get
+backwards:
+
+- **Fixes found in alpha go in by PR *into the alpha branch*, then merge back
+  to `main`.** Not the other way around. Same for beta.
+- **Beta takes bug fixes only, no features.** A feature discovered to be
+  missing during beta waits for the next version; adding it silently
+  invalidates the testing beta exists to do.
+- **Nothing is cherry-picked forward from `main` into an existing alpha or
+  beta.** Alpha is cut *from* `main` once; after that the flow is alpha → main.
+
+Cutting any of these is the user's call, not something to do because a task
+finished. See [VERSION.md](VERSION.md) for the mechanics.
+
+Which number to bump, from `BioFlowReleaseSemantics.svg`:
+
+- **Major** (`X.0.0`) -- platform-level additions; allowed to break existing
+  features, server configuration, the API, or MCP tools.
+- **Minor** (`1.X.0`) -- new features, backwards compatible. Judgement call on
+  scope.
+- **Patch** (`1.0.X`) -- bug fixes, typos, unexpected behaviour. 100%
+  compatible, no new features.
+
+Note that `ops/release.sh` currently **rejects** `-alpha` and `-beta`
+suffixes (`VERSION.md` says pre-release versions are not supported). That
+predates this methodology and is a real gap: the script cannot yet cut the
+alpha and beta tags the pipeline calls for
+([#107](https://github.com/syntheticgio/bioflow/issues/107)). Do not work
+around it by tagging by hand -- `publish-images.yml`'s version-guard exists
+to catch exactly that, and a hand-rolled tag publishes images labelled with a
+version the tree does not have.
+
+## Release notes come from PR titles
+
+Release notes are generated by GitHub from the PRs merged since the previous
+tag, which is why the PR title matters as much as the commit subjects
+underneath it. Write it the way it should read in a changelog.
+
+Two known gaps, both filed:
+
+- **The notes are empty today**
+  ([#105](https://github.com/syntheticgio/bioflow/issues/105)). The `release`
+  job in `.github/workflows/publish-images.yml` passes both
+  `--generate-notes` and `--notes-file` to `gh release create`, and
+  `--notes-file` overrides `--generate-notes` rather than appending to it --
+  so every published body is the static image-pull blurb plus the
+  auto-appended compare link. `v0.2.6` is the worked example.
+- **Commit bodies are not read by any of this**
+  ([#106](https://github.com/syntheticgio/bioflow/issues/106)). Generating a
+  `CHANGELOG.md` from the Conventional Commit history, which would use them,
+  is future work.
+
+The thing an agent controls either way is the *input*: a well-typed commit
+subject and a PR title and description that explain the why. A `chore:`-typed
+feature or a `--fill`ed PR whose commits never said why is data that no
+generator can recover.
 
 ## Running the app: one instance, not dev/prod
 
@@ -259,12 +459,16 @@ Delete an entry outright only when it was wrong to begin with -- not merely
 done. A `— FIXED` entry is a record; a deleted one is a question someone will
 ask again.
 
-**"Merged to `main` and tested to the best of your ability" is the bar for
+**"PR merged to `main` and tested to the best of your ability" is the bar for
 `— FIXED` -- don't hold an entry open waiting for the user's own later
 testing to bless it.** `main` is a dev trunk here, not a release
 ([above](#working-on-this-repo)); nothing in this repo ships to users at
-merge time, so there is no "final testing" step downstream of you that a
-TODO entry should wait on. If testing after merge turns up a real problem,
+merge time -- alpha, beta, and production are all downstream of it -- so there
+is no "final testing" step that a TODO entry should wait on. Note the bar is
+the *merge*, not the PR: since you no longer merge your own work, an entry
+whose PR is open but unmerged is not yet `— FIXED`. If the PR is open and the
+task is otherwise done, say so and leave the entry open. If testing after
+merge turns up a real problem,
 that is a new entry, not a reason the old one should have stayed open --
 the original diagnosis was still correct and the fix still shipped.
 

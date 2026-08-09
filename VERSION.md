@@ -1,5 +1,14 @@
 # Versioning and releases
 
+> **This file documents the tooling as it exists today, which predates the
+> four-stage alpha/beta/production methodology adopted on 2026-08-09.** See
+> "Release methodology" in [CLAUDE.md](CLAUDE.md) for the intended flow and
+> the diagrams in `assets/`. The gap is real and not yet closed: `ops/release.sh`
+> refuses pre-release versions, so it cannot cut the `-alpha` and `-beta` tags
+> that flow calls for, and the `main`-only check below assumes releases come
+> straight off the trunk. Closing that gap is tracked in
+> [#107](https://github.com/syntheticgio/bioflow/issues/107).
+
 BioFlow has **two independent version lines.** They never need to agree, and
 bumping one does not imply bumping the other.
 

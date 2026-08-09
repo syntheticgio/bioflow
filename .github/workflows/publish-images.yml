@@ -309,10 +309,29 @@ jobs:
             echo '```'
           } > "$notes_file"
 
+          # Append GitHub's generated "What's Changed" list to the blurb above.
+          #
+          # This used to be `--generate-notes` alongside `--notes-file`, which
+          # published nothing: --notes-file *overrides* --generate-notes rather
+          # than appending to it, so every release through v0.2.6 carried the
+          # blurb and no change information at all. Asking the API for the body
+          # and concatenating it ourselves is the only way to get both (#105).
+          #
+          # Categorized by PR label via .github/release.yml. The list is built
+          # from merged PRs, so a change that reached the tag by a direct push
+          # to main is invisible here -- that is the tradeoff of the PR
+          # workflow adopted 2026-08-09, not a bug in this step.
+          notes_body="$(gh api \
+            --method POST \
+            "/repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            --jq .body)"
+
+          printf '\n%s\n' "$notes_body" >> "$notes_file"
+
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "BioFlow ${version}" \
-            --generate-notes \
             --notes-file "$notes_file" \
           || gh release edit "$TAG" \
             --repo "${{ github.repository }}" \
