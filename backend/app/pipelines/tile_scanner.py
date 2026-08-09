@@ -14,10 +14,6 @@ heatmap of nothing.
 
 from dataclasses import dataclass
 
-from app.logging import get_logger
-
-log = get_logger(__name__)
-
 # Field indices within the colon-delimited header. The instrument, run, and
 # flowcell fields ahead of these are not used, but their presence is what
 # makes index 4 the tile rather than something else -- hence the length check.
