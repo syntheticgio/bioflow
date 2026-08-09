@@ -401,8 +401,8 @@ def alignment_stats(
                     continue
 
                 reads += 1
-                bucket = (len(seq) // READ_LENGTH_BIN_WIDTH) * READ_LENGTH_BIN_WIDTH
-                length_histogram[bucket] += 1
+                length_bucket = (len(seq) // READ_LENGTH_BIN_WIDTH) * READ_LENGTH_BIN_WIDTH
+                length_histogram[length_bucket] += 1
                 if not rec.is_unmapped:
                     mapped += 1
                     mapq_sum += rec.mapping_quality
