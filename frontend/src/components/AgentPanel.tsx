@@ -142,6 +142,17 @@ export function AgentPanel({
     },
   });
 
+  const newSession = useMutation({
+    mutationFn: () => api.newAgentSession(projectId),
+    onSuccess: () => {
+      setMessages([]);
+      setError(null);
+      setIsStreaming(false);
+      streamingContentRef.current = "";
+      currentToolCallsRef.current = [];
+    },
+  });
+
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
   }, [messages, isStreaming]);
@@ -169,9 +180,18 @@ export function AgentPanel({
           <button
             type="button"
             className="icon-btn"
-            onClick={() => restart.mutate()}
-            title="Restart agent"
+            onClick={() => newSession.mutate()}
+            title="New session (clears the agent's memory)"
             style={{ marginLeft: "auto" }}
+            disabled={isStreaming}
+          >
+            🗑
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => restart.mutate()}
+            title="Restart agent (keeps the conversation)"
           >
             🔄
           </button>

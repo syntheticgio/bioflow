@@ -1128,4 +1128,9 @@ export const api = {
 
   stopAgent: (projectId: string) =>
     request<void>(`/projects/${projectId}/agent`, { method: "DELETE" }),
+
+  newAgentSession: (projectId: string) =>
+    request<{ status: string }>(`/projects/${projectId}/agent/new-session`, {
+      method: "POST",
+    }),
 };
