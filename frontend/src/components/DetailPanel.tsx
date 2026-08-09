@@ -24,7 +24,7 @@ import { ChromosomeStrip } from "./ChromosomeStrip";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
-import { BaseCompositionChart, QualityChart, LengthDistributionChart } from "./SequenceCharts";
+import { BaseCompositionChart, LengthDistributionChart, QualityChart } from "./SequenceCharts";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
 import { OrganismBlurb } from "./OrganismBlurb";
