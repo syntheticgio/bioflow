@@ -418,7 +418,16 @@ class TestDeclaredMemory:
 
     async def test_star_reserves_more_than_bwa_for_the_same_genome(self):
         """The comparison the flat number could not express. Both were 8192
-        before, so the governor could not tell them apart."""
+        before, so the governor could not tell them apart.
+
+        The margin was `bwa * 3` until #100 corrected bwa-mem2's resident-index
+        coefficient from 2.0 to the ~3.2 bytes/base its README documents, which
+        narrowed a ratio that was only ever incidental. What matters is that
+        STAR's uncompressed suffix array is visibly dearer than an FM-index --
+        ~35 GB against ~15 GB here -- not the particular multiple, so this
+        asserts a clear separation rather than a number recalibrated to
+        whatever the coefficients currently happen to produce.
+        """
         common = dict(
             reference_bases=self.HUMAN_BASES,
             threads=4,
@@ -431,7 +440,7 @@ class TestDeclaredMemory:
         bwa = await pipeline_service.declared_align_mem_mb(
             aligner=Aligner.BWA_MEM2, **common
         )
-        assert star > bwa * 3
+        assert star > bwa * 2
 
     async def test_a_small_genome_reserves_less_than_the_old_flat_8gb(self):
         """The other direction, which is what stops one yeast alignment from

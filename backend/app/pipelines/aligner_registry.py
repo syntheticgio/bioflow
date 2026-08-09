@@ -131,13 +131,22 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.bwa_mem2,
         index=aligners.layout_for(Aligner.BWA_MEM2),
         params_class=align_params.Bwa2Params,
-        # ~2 bytes/base: about 6 GB for a 3.1 Gb human genome, which matches
-        # the figure bwa-mem2's own README gives for its index.
+        # ~3.2 bytes/base: about 10 GB for a 3.1 Gb human genome, the figure
+        # bwa-mem2's README gives for its resident index since the October
+        # 2020 change to a single FM-index with a compressed suffix array.
+        # (The ~6 GB this comment claimed before was the pre-2020 number.)
+        #
+        # The build multiplier is by far the largest here, and is not a guess:
+        # the README states indexing "Requires 28N GB memory where N is the
+        # size of the reference sequence" -- roughly 28 bytes/base, which
+        # 3.2 * 8.75 reproduces. Modelled at 4 bytes/base effective before,
+        # this under-reserved by 7x, and the queue governor duly admitted an
+        # 897 Mbp build into 8 GB and had it OOM-killed (#96, #100).
         memory_model=MemoryModel(
-            index_bytes_per_ref_base=2.0,
+            index_bytes_per_ref_base=3.2,
             fixed_overhead_mb=512,
             bytes_per_thread_mb=256,
-            index_build_multiplier=2.0,
+            index_build_multiplier=8.75,
         ),
         fields=_SHARED_FIELDS,
     ),
