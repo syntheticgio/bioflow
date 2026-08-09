@@ -68,7 +68,7 @@ export function ShareFileModal({ objectId, objectName, isExternal, onClose }: Pr
             </option>
             {recipients.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.display.emoji} {p.username}
+                {p.username}
               </option>
             ))}
           </select>
