@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { MetadataField, MetadataSchema, ObjectRole } from "../api/types";
 import { accessionUrl } from "../lib/format";
+import { notify } from "../stores/messageStore";
 
 interface Props {
   value: Record<string, unknown>;
@@ -116,6 +117,8 @@ export function SchemaMetadataEditor({
         setField("molecule_type", result.molecule_type);
       }
       setInferBasis(result.basis);
+    } catch (e) {
+      notify.error(e instanceof Error ? e.message : "Could not sample the file");
     } finally {
       setInferring(false);
     }
