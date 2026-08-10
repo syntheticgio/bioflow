@@ -811,9 +811,8 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         "pipeline_service.launch_summary",
         "pipeline_service.launch_de_summary",
         "pipeline_service.launch_variant_summary",
-        # Read-only QC jobs that produce facts merged onto an existing
+        # Read-only QC job that produces facts merged onto an existing
         # assembly rather than a new object — no output port to wire.
-        "pipeline_service.launch_completeness",
         "pipeline_service.launch_gc_tracks",
         # On-demand analysis over an existing BAM against a caller-chosen
         # GTF, not a graph step: applicability is inferred per-object (see
