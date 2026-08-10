@@ -1123,7 +1123,8 @@ async def reference_index_status(reference: DataObject) -> dict:
 
 
 async def align_envelope(
-    *, object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: str
+    *, object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: str,
+    chunked: bool = False,
 ) -> dict:
     """Host budgets, input sizes, and the per-aligner memory coefficients.
 
@@ -1146,7 +1147,9 @@ async def align_envelope(
 
     status = await reference_index_status(reference)
 
-    return {
+    from app.pipelines import align_buckets, aligner_registry
+
+    result = {
         "cpu_budget": governor.cpu_budget(),
         "mem_budget_mb": int(governor.mem_budget_bytes() / (1024 * 1024)),
         "reference_bases": reference_bases,
@@ -1159,6 +1162,20 @@ async def align_envelope(
             for aligner in Aligner
         },
     }
+
+    if chunked:
+        # Read .fai to get sequence count
+        fai_path = Path(settings.bioinfo_home) / "objects" / str(reference.id) / f"{reference.name}.fai"
+        if fai_path.exists():
+            sequences = _parse_fai(fai_path)
+            result["chunking"] = {
+                "supported": len(sequences) > 1,
+                "total_sequences": len(sequences),
+            }
+        else:
+            result["chunking"] = {"supported": False}
+
+    return result
 
 
 async def sidecar_payload(reference: DataObject, aligner: Aligner) -> dict:
@@ -4919,3 +4936,16 @@ async def launch_continuity_qc(
         tool_version=tool.version,
     )
     return job
+
+
+def _parse_fai(fai_path: Path) -> list[tuple[str, int]]:
+    """Read a .fai file into (name, length) tuples."""
+    result = []
+    with open(fai_path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                result.append((parts[0], int(parts[1])))
+    return result
