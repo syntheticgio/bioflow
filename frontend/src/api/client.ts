@@ -314,6 +314,12 @@ export const api = {
       method: "POST",
     }),
 
+  inferMoleculeType: (id: string) =>
+    request<{ molecule_type: string | null; basis: string }>(
+      `/objects/${id}/infer-molecule-type`,
+      { method: "POST" },
+    ),
+
   /**
    * URL for downloading the object's raw stored bytes.
    *

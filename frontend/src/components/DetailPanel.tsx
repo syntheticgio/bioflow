@@ -1323,6 +1323,7 @@ function MetadataTab({
           key={obj.role ?? "none"}
           value={obj.metadata}
           formatKind={obj.format.kind}
+          objectId={obj.id}
           role={obj.role}
           onSave={onSave}
           saving={saving}
