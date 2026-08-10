@@ -876,6 +876,11 @@ export interface AlignParams {
   clip_penalty?: string;
   multimap_xa?: string;
   batch_size?: number;
+  /** Not an aligner option -- carried alongside the rest of `params` on
+   *  launch because AlignRequest.params is an open dict, not a typed
+   *  sub-model, so this is where the dialog's chunked-alignment toggle
+   *  actually travels to the backend. */
+  chunked?: boolean;
 }
 
 /** One input in the generated parameter form. Mirrors registry ParamField. */
@@ -993,6 +998,11 @@ export interface AlignEnvelope {
   input_bytes: number;
   index_status: Record<string, boolean>;
   models: Record<string, MemoryModel>;
+  /** Only present when the envelope was requested with `chunked=true`
+   *  (pipeline_service.align_envelope); `total_sequences` is present only
+   *  when `supported` is true, since it comes from reading the reference's
+   *  .fai and there is nothing to count when chunking can't apply. */
+  chunking?: { supported: boolean; total_sequences?: number };
 }
 
 /** One knob the re-planner moved. Mirrors replan_service.Change. */
