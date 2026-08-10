@@ -484,6 +484,24 @@ def _aligner_argv(
     if aligner is Aligner.BWA_MEM2:
         argv = [aligner_path, "mem", "-t", str(params.threads)]
         argv += ["-R", read_group.as_sam_header()]
+
+        # Biology-tuning flags from Bwa2Params
+        if params.min_score > 0:
+            argv += ["-T", str(params.min_score)]
+        if params.mark_split:
+            argv.append("-M")
+        argv += ["-c", str(params.max_seed_occ)]
+        argv += ["-r", str(params.reseed_factor)]
+        if params.all_alignments:
+            argv.append("-a")
+        argv += ["-m", str(params.max_mate_rescue)]
+        if params.soft_clip_supp:
+            argv.append("-Y")
+        argv += ["-L", params.clip_penalty]
+        argv += ["-h", params.multimap_xa]
+        if params.batch_size > 0:
+            argv += ["-K", str(params.batch_size)]
+
         argv += [str(reference), str(r1)]
         if r2 is not None:
             argv.append(str(r2))

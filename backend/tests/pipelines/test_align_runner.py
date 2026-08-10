@@ -185,7 +185,11 @@ class TestMarkdupCommand:
         assert subprocess.run(cmd, check=False).returncode == 0
 
     def test_bwa_mem2_uses_mem(self):
-        script = align_cmd(aligner=Aligner.BWA_MEM2, aligner_path="bwa-mem2")[-1]
+        script = align_cmd(
+            aligner=Aligner.BWA_MEM2,
+            aligner_path="bwa-mem2",
+            params=align_params.Bwa2Params(),
+        )[-1]
         assert "bwa-mem2 mem" in script
 
     def test_sort_memory_is_per_thread(self):

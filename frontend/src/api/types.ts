@@ -865,6 +865,17 @@ export interface AlignParams {
   out_filter_multimap_nmax?: number;
   align_intron_max?: number;
   out_sam_unmapped?: boolean;
+  // bwa-mem2 specific fields
+  min_score?: number;
+  mark_split?: boolean;
+  max_seed_occ?: number;
+  reseed_factor?: number;
+  all_alignments?: boolean;
+  max_mate_rescue?: number;
+  soft_clip_supp?: boolean;
+  clip_penalty?: string;
+  multimap_xa?: string;
+  batch_size?: number;
 }
 
 /** One input in the generated parameter form. Mirrors registry ParamField. */
@@ -949,9 +960,17 @@ export interface LineageStatus {
   present: boolean;
 }
 
+export interface AlignerPreset {
+  id: string;
+  label: string;
+  description: string;
+  values: Record<string, unknown>;
+}
+
 export interface AlignerSchema {
   aligner: AlignerName;
   fields: ParamFieldMeta[];
+  presets?: Record<string, AlignerPreset>;
 }
 
 /** Mirrors resource_estimator.MemoryModel. */
