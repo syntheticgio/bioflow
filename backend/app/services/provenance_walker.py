@@ -103,7 +103,7 @@ class ProvenanceChain:
     nodes: dict[PydanticObjectId, Node]
     order: tuple[PydanticObjectId, ...]
     gaps: tuple[Gap, ...]
-    branches: tuple[tuple[PydanticObjectId, ...], ...] = ()
+    branches: tuple[tuple[PydanticObjectId, ...], ...] = ()  # each: (dest_id, parent_id, ...)
     # Set when the object originally requested was a sidecar: a `.bai` or
     # `.fai` has no lineage of its own worth showing (see the parent-edge
     # skip below), so the walk transparently substitutes its parent and
@@ -476,7 +476,7 @@ async def walk(
                 queue.append((parent, depth + 1))
 
         if len(spine_parents) > 1:
-            branches.append(tuple(spine_parents))
+            branches.append((obj.id, *spine_parents))
 
         raw[obj.id] = (obj.name, obj.role, step, tuple(parent_ids))
         order.append(obj.id)
