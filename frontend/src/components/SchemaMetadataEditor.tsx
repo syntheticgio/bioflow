@@ -263,7 +263,15 @@ function FieldInput({
         {field.unit && (
           <span style={{ color: "var(--text-faint)" }}> ({field.unit})</span>
         )}
-        {field.help && <span style={{ color: "var(--text-faint)" }}> ⓘ</span>}
+        {field.help && (
+          <span
+            title={field.help}
+            style={{ color: "var(--text-faint)", cursor: "help" }}
+            aria-label={field.help}
+          >
+            {" "}ⓘ
+          </span>
+        )}
         {externalUrl && (
           <a
             href={externalUrl}
