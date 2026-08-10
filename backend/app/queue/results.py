@@ -1585,6 +1585,32 @@ async def _apply_run_bam_stats(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_run_transcript_qc(result: dict, *, owner: str) -> None:
+    """Record RNA-seq transcript QC on the BAM it described.
+
+    Read-only like BAM stats: no files to ingest, just facts merged onto the
+    object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("transcript_qc_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info("transcript_qc_applied", object_id=object_id)
+
+
 async def _apply_run_vcf_stats(result: dict, *, owner: str) -> None:
     """Record a Variant Results computation on the VCF it described.
 
@@ -2527,6 +2553,7 @@ _APPLIERS = {
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
     "run_bam_stats": _apply_run_bam_stats,
+    "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
