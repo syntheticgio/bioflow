@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { accessionUrl } from "../lib/format";
 import { BuscoChart } from "./BuscoChart";
+import { NxChart } from "./NxChart";
 
 interface Props {
   facts: Record<string, unknown>;
@@ -87,6 +88,13 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
   const l50 = facts.sequence_l50 as number | undefined;
   const auN = facts.sequence_auN as number | undefined;
   const gapCount = facts.sequence_gap_count as number | undefined;
+  const nxCurve = facts.sequence_nx_curve as [number, number][] | undefined;
+  // Expected genome size, present only on assemblies BioFlow produced from
+  // reads with a size supplied -- it arrives here because assembly
+  // provenance is merged into the facts document (queue/results.py:1354),
+  // not because the FASTA said anything about it. An uploaded or
+  // NCBI-downloaded assembly has none, and the chart drops to Nx alone.
+  const genomeSize = facts.assembly_genome_size as number | undefined;
   const hasContiguity = n50 !== undefined;
 
   // Completeness: compleasm, a separate job the user launches.
@@ -325,6 +333,10 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           </>
         )}
       </dl>
+      )}
+
+      {nxCurve !== undefined && totalBases !== undefined && (
+        <NxChart curve={nxCurve} totalBases={totalBases} genomeSize={genomeSize} />
       )}
 
       {/* This note's visibility rides on hasAnything, which for a truncated
