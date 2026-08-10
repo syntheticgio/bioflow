@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
 import { AiSummary } from "./AiSummary";
+import { FactsColumns } from "./FactsColumns";
 import { DistributionChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
@@ -159,7 +160,7 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
             )}
           </div>
 
-          <div className="facts-columns">
+          <FactsColumns>
             {f.vcf_stats_substitutions && f.vcf_stats_substitutions.length > 0 && (
               <div className="section">
                 <div className="section-title">Substitution types</div>
@@ -173,7 +174,7 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
                 <FiltersTable rows={f.vcf_stats_filters} />
               </div>
             )}
-          </div>
+          </FactsColumns>
 
           {f.vcf_stats_contigs && f.vcf_stats_contigs.length > 0 && (
             <div className="section">

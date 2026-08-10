@@ -22,6 +22,7 @@ import { notify } from "../stores/messageStore";
 import { AiSummary } from "./AiSummary";
 import { AssemblyFacts } from "./AssemblyFacts";
 import { ChromosomeStrip } from "./ChromosomeStrip";
+import { FactsColumns } from "./FactsColumns";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
@@ -1177,7 +1178,7 @@ function QcTab({
            groups, the QC report and the trim comparison are all cards of the
            same kind, and they pack by height together rather than the last
            two spanning the full width under the rest. */
-        <div className="facts-columns">
+        <FactsColumns>
           {/* Already grouped by subject -- File contents, Measured quality,
               Header and so on. */}
           {hasFacts && <FactsTable facts={obj.facts} columns />}
@@ -1191,7 +1192,7 @@ function QcTab({
               output: "what did trimming do to my reads" is a question about
               the input. */}
           <TrimReport facts={obj.facts} projectId={obj.project_id} />
-        </div>
+        </FactsColumns>
       )}
     </>
   );
@@ -1237,7 +1238,7 @@ function MetadataTab({
 
       {/* What is true of the file, in two columns. Read-only: these are facts
           about the bytes and the archive, not fields anyone edits here. */}
-      <div className="facts-columns">
+      <FactsColumns>
         <div className="section">
           <div className="section-title">Format</div>
           <dl className="kv">
@@ -1319,7 +1320,7 @@ function MetadataTab({
             metadata={obj.metadata}
           />
         )}
-      </div>
+      </FactsColumns>
 
       {/* The editable form, below everything that merely describes the file.
           Full width: its groups lay out in columns of their own, which a
