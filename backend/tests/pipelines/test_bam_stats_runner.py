@@ -7,6 +7,7 @@ worth testing in isolation, with no queue or filesystem involved.
 from pathlib import Path
 
 from app.pipelines.bam_stats_runner import (
+    DepthHistogram,
     allocate_bins,
     bin_depth,
     build_coverage_command,
@@ -17,6 +18,7 @@ from app.pipelines.bam_stats_runner import (
     contigs_tsv,
     cumulative_coverage,
     genome_summary,
+    histogram_bucket_width,
     parse_coverage,
     parse_idxstats,
 )
@@ -273,6 +275,52 @@ class TestCoerceTsvValue:
 
     def test_unknown_column_stays_a_string(self):
         assert coerce_tsv_value("mystery", "42") == "42"
+
+
+class TestDepthHistogram:
+    def test_bucket_width_spans_three_times_mean_depth(self):
+        """A 40x genome: 3 * 40 / 60 buckets == 2.0 per bucket."""
+        assert histogram_bucket_width(mean_depth=40.0) == 2.0
+
+    def test_bucket_width_floors_at_one(self):
+        """samtools depth reports integers, so buckets finer than 1x would be
+        a comb of structurally empty slots, not a distribution."""
+        assert histogram_bucket_width(mean_depth=5.0) == 1.0
+
+    def test_bucket_width_is_none_for_empty_or_zero_depth(self):
+        """No mean depth means no sensible axis -- emit nothing rather than
+        dividing by zero."""
+        assert histogram_bucket_width(mean_depth=0.0) is None
+
+    def test_counts_land_in_the_bucket_for_their_depth(self):
+        h = DepthHistogram(bucket_width=2.0, buckets=5)
+        for depth in (0.0, 1.0, 2.0, 3.0, 9.0):
+            h.add(depth)
+        facts = h.to_facts()
+        # bucket 0 spans [0,2) and caught depths 0 and 1
+        assert facts[0] == {"depth": 0.0, "count": 2}
+        # bucket 1 spans [2,4) and caught depths 2 and 3
+        assert facts[1] == {"depth": 2.0, "count": 2}
+        # bucket 4 spans [8,10) and caught depth 9
+        assert facts[4] == {"depth": 8.0, "count": 1}
+
+    def test_depths_beyond_the_span_land_in_the_overflow_bucket(self):
+        """The overflow bucket is what keeps a high-copy contaminant visible
+        instead of silently dropped."""
+        h = DepthHistogram(bucket_width=1.0, buckets=3)
+        h.add(0.5)
+        h.add(500.0)
+        facts = h.to_facts()
+        assert len(facts) == 4  # buckets + 1 overflow
+        assert facts[-1] == {"depth": 3.0, "count": 1}
+
+    def test_emits_every_bucket_including_empty_ones(self):
+        """A gap in the middle of the distribution is signal. Omitting empty
+        buckets would make the chart's x-axis lie about spacing."""
+        h = DepthHistogram(bucket_width=1.0, buckets=4)
+        h.add(0.0)
+        h.add(3.0)
+        assert [f["count"] for f in h.to_facts()] == [1, 0, 0, 1, 0]
 
 
 class TestAllocateBins:
