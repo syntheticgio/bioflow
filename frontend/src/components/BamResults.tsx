@@ -49,6 +49,18 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
     <>
       <AlignmentReport facts={obj.facts} />
 
+      {rnaApplies && (
+        // Independent of bam_stats: transcript QC needs a GTF, not a
+        // coverage computation, so it must not wait behind "Compute
+        // results" -- a user with a bare, unindexed RNA-seq BAM should
+        // still be able to reach this.
+        <TranscriptQc
+          obj={obj}
+          geneBody={rnaApplicability.geneBody}
+          featureDistribution={rnaApplicability.featureDistribution}
+        />
+      )}
+
       {!hasResults && (
         <div className="section">
           <div className="section-title">Coverage &amp; per-contig detail</div>
@@ -168,14 +180,6 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               </div>
             )}
           </div>
-
-          {rnaApplies && (
-            <TranscriptQc
-              obj={obj}
-              geneBody={rnaApplicability.geneBody}
-              featureDistribution={rnaApplicability.featureDistribution}
-            />
-          )}
 
           <div className="section">
             <div className="section-title">Provenance</div>
