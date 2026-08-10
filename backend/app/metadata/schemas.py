@@ -130,6 +130,27 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
              options=("female", "male", "unknown"), group="Sample"),
     FieldDef("collection_date", "Collection date", type=FieldType.DATE, group="Sample"),
     FieldDef(
+        "molecule_type",
+        "Molecule type",
+        type=FieldType.ENUM,
+        options=("DNA", "RNA", "Other"),
+        group="Experiment",
+        suggested=True,
+        help="What the library was made from. Derived from the SRA record's "
+             "library source, or inferred from the FASTQ's own bases via the "
+             "Infer button when no SRA record is available.",
+    ),
+    FieldDef(
+        "library_source",
+        "Library source",
+        type=FieldType.ENUM,
+        options=("Genomic", "Transcriptomic", "Metagenomic",
+                 "Metatranscriptomic", "Synthetic", "Viral RNA", "Other"),
+        group="Experiment",
+        open_vocabulary=True,
+        help="SRA's own library source classification, where available.",
+    ),
+    FieldDef(
         "assay",
         "Assay",
         type=FieldType.ENUM,
