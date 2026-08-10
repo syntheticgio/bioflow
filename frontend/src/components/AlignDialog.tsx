@@ -64,6 +64,7 @@ export function AlignDialog({
   const [overrides, setOverrides] = useState<Partial<AlignParams>>({});
   const [rgOverrides, setRgOverrides] = useState<Partial<ReadGroup>>({});
   const [advanced, setAdvanced] = useState(false);
+  const [chunked, setChunked] = useState(false);
   // Dismissed by "Edit parameters": the band is still "block", but the user
   // has asked to go back to the fields rather than be shown the card again.
   // Reset whenever the band leaves "block" so a fresh refusal re-renders it.
@@ -198,7 +199,7 @@ export function AlignDialog({
         // carry no `aligner` key at all and the server would silently fall
         // back to its own default. Send the full merged `params` so the
         // aligner actually chosen in the tool selector is the one that runs.
-        params,
+        params: { ...params, chunked },
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -219,7 +220,7 @@ export function AlignDialog({
         mate_object_id: usePair ? mate!.object_id : null,
         paired: usePair,
         read_group: readGroup,
-        params,
+        params: { ...params, chunked },
         resource_override: true,
       }),
     onSuccess: () => {
@@ -375,6 +376,22 @@ export function AlignDialog({
               }
             />
           </div>
+        )}
+
+        {envelope?.chunking?.supported && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 13 }}>
+            <input
+              type="checkbox"
+              checked={chunked}
+              onChange={(e) => setChunked(e.target.checked)}
+            />
+            Chunked alignment — split reference and align in parallel
+            {chunked && envelope.chunking && (
+              <span style={{ fontSize: 11, color: "var(--text-faint)" }}>
+                ({envelope.chunking.total_sequences} sequences)
+              </span>
+            )}
+          </label>
         )}
 
         <button
