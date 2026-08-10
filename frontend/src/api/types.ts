@@ -1985,6 +1985,10 @@ export interface AiRouting {
   catalog: AiSlot[];
 }
 
+export interface GeneralSettings {
+  feedback_enabled: boolean;
+}
+
 export interface ResourceLimits {
   max_mem_mb: number | null;
   max_cpu: number | null;

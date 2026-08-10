@@ -61,6 +61,16 @@ export function Header() {
     refetchInterval: 15000,
   });
 
+  // Feedback is off by default, so it's excluded until this resolves true --
+  // matches the route guard in App.tsx, which reads the same query key.
+  const generalSettings = useQuery({
+    queryKey: ["settings", "general"],
+    queryFn: api.generalSettings,
+  });
+  const helpItems = HELP_ITEMS.filter(
+    (item) => item.to !== "/help/feedback" || generalSettings.data?.feedback_enabled
+  );
+
   const navigate = useNavigate();
 
   const [headerRightRef, headerRightWidth] = useElementWidth<HTMLDivElement>();
@@ -120,7 +130,7 @@ export function Header() {
         />
         <Menu
           label="Help"
-          items={HELP_ITEMS.map((item) => ({
+          items={helpItems.map((item) => ({
             label: item.label,
             section: item.section,
             onSelect: () => navigate(item.to),

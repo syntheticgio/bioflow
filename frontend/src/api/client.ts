@@ -31,6 +31,7 @@ import type {
   Facets,
   Feedback,
   FeedbackSubmission,
+  GeneralSettings,
   JobLog,
   JobSummary,
   LineageDownloadRequest,
@@ -625,6 +626,14 @@ export const api = {
 
   setAiRouting: (body: { default: string | null; slots: Record<string, string> }) =>
     request<AiRouting>("/settings/ai/routing", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  generalSettings: () => request<GeneralSettings>("/settings/general"),
+
+  setGeneralSettings: (body: GeneralSettings) =>
+    request<GeneralSettings>("/settings/general", {
       method: "PUT",
       body: JSON.stringify(body),
     }),
