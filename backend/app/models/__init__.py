@@ -5,6 +5,7 @@ its indexes.
 """
 
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
+from app.models.app_settings import AppSettings
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.conversation import (
     ConversationTurn,
@@ -72,6 +73,7 @@ from app.models.workflow import (
 ALL_MODELS = [
     AiProvider,
     AiRouting,
+    AppSettings,
     Project,
     Blob,
     DataObject,
@@ -100,6 +102,7 @@ __all__ = [
     "ALL_MODELS",
     "AiProvider",
     "AiRouting",
+    "AppSettings",
     "AttemptProgress",
     "TERMINAL_STATES",
     "Blob",
