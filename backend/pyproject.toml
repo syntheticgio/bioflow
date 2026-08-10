@@ -1,6 +1,6 @@
 [project]
 name = "biopipe-backend"
-version = "0.2.6"
+version = "0.3.0-alpha"
 description = "Local bioinformatics data manager - API and worker"
 requires-python = ">=3.12"
 dependencies = [

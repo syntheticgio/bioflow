@@ -5,6 +5,1072 @@ All notable changes to BioFlow, generated from Conventional Commits by
 the first paragraph of the body where one exists; only `feat` and `fix`
 reach the notes. See AGENTS.md "Release notes" for the contract.
 
+## [0.3.0-alpha] - 2026-08-10
+
+
+
+
+### 🚀 Features
+
+- *(agent)* add drive-pipelines, interpret-alignment, variant-analysis, database-access skills; sharpen debug-failed-job; bump pi-subagents pin (#83)
+
+- *(agent)* wire datasets and fetch MCP servers into agent spawns via AGENT_EXTRA_MCP_SERVERS (#83)
+
+- *(agent)* install pi-subagents, pi-hermes-memory, and the datasets+fetch MCP servers in the api image (#83)
+
+- *(frontend)* add download buttons for built reference indexes (#176)
+Index files are sidecar DataObjects with their own object_ids. Expose
+the ids via the references API and add download links next to each
+built index in the reference detail panel. The existing downloa…
+
+- *(ops)* staged alpha/beta releases via release.sh (#107) (#172)
+* docs(spec): staged alpha/beta releases via release.sh (#107)
+
+- *(frontend)* add BUSCO completeness stacked bar chart
+Render a stacked horizontal bar showing single-copy, duplicated,
+fragmented, and missing percentages with a color legend. The existing
+completeness facts already carry all the data; this adds the visu…
+
+- *(ui)* add Infer-from-FASTQ button for molecule type
+
+- *(api)* add manual molecule-type inference endpoint
+Wires up Task 4's infer_molecule_type sampler behind a new user-triggered
+POST /{object_id}/infer-molecule-type route so the frontend Infer button has
+something to call. Runs synchronously and does no…
+
+- *(metadata)* add manual FASTQ base-composition molecule-type inference
+
+- *(metadata)* derive molecule type and library source from SRA
+
+- *(metadata)* add molecule type and library source fields
+
+- *(ui)* hide the Feedback page behind a settings toggle, off by default
+Adds a Settings \xc2\xb7 General tab with a "Show the Feedback page" checkbox.
+While off, Feedback is excluded from the Help menu and the /help/feedback
+route redirects to /help/about, so direct navig…
+
+- *(api)* add general settings endpoint for feedback page visibility
+Adds an AppSettings singleton with a feedback_enabled flag, off by
+default, plus GET/PUT /settings/general to read and update it.
+
+- *(ui)* recommend tools by read chemistry in the tool picker (#109)
+Adds a recommendations field to ToolMeta keyed on short/long read
+chemistry, surfaced as a 'Recommended' badge in PipelineToolSelector
+rows. The picker already receives the object's QC-inferred chemis…
+
+- *(ui)* show the per-tile quality heatmap on the QC tab
+
+- *(ui)* draw per-tile quality as a heatmap with two colour scales
+
+- *(frontend)* type the per-tile quality matrix and its fetch
+
+- *(api)* serve the per-tile quality matrix as JSON
+
+- *(pipelines)* scan flow-cell tiles as part of short-read QC
+Wires tile_scanner into _run_short_read_qc as a third optional extra
+alongside FastQC: its failure is logged and swallowed, never the job's,
+so an unexpected header format never costs the user the fas…
+
+- *(pipelines)* write the tile matrix as a sidecar, not into object facts
+
+- *(pipelines)* summarise read quality by flow-cell tile and position
+
+- *(pipelines)* read flow-cell tile and coordinates from read headers
+
+- *(qc)* N content chart, and mount both new charts in the QC tab
+Adds NContentChart to SequenceCharts.tsx, drawing per-cycle N percent
+with a dashed reference line at the 5% grading threshold (N_SPIKE_REFERENCE,
+a deliberate duplicate of readQuality.ts's N_SPIKE_LI…
+
+- *(qc)* per-sequence GC distribution chart
+
+- *(qc)* demote a read file for a collapsed sequencing cycle
+
+- *(qc)* expose expected GC on the object detail endpoint
+Wires expected_gc.resolve() into GET /objects/{id}: queries the project's
+reference-role objects, resolves against organism metadata, and returns the
+result as ExpectedGc on ObjectDetail. references_f…
+
+- *(qc)* resolve expected GC from a project reference genome
+
+- *(qc)* cited genome GC table for the expected-GC cascade
+Tier 2 of the three-tier expected-GC cascade: a small, hand-maintained
+table of published GC percentages for well-known genomes, each with a
+citation, plus from_organism() to resolve a normalized orga…
+
+- *(qc)* parse per-cycle N content from fastp's content_curves
+Adds qc_n_per_position to parse_qc_facts, scaled from fastp's raw
+fractions to percentages. Omitted when the curve is absent or entirely
+zero, matching how the rest of QcReport self-suppresses.
+
+- *(qc)* bin per-read GC into a histogram at ingest
+Replaces the per-read float list with a Counter[int] binned at integer
+GC%. gc_per_read_mean is now derived from the same counts rather than
+kept as a parallel accumulator, and a new gc_per_read_histo…
+
+- *(qc)* mount contamination charts, prefer whole-file duplication
+
+- *(qc)* adapter content and duplication level charts
+
+- *(qc)* fact types for contamination charts
+
+- *(qc)* run contamination scan during short-read QC
+Wires scan_contamination() into _run_short_read_qc, right after the
+FastQC block and before the qc_read_chemistry fact. Compression is
+sniffed from magic bytes via the new compression_of() helper rath…
+
+- *(qc)* whole-file contamination scan entry point
+Ties build_probes, DuplicationTracker, and AdapterTracker into
+scan_contamination(), one whole-file FASTQ pass producing qc_-prefixed
+facts for the QC job. Failures short of cancellation return {} rat…
+
+- *(qc)* per-position cumulative adapter tracker
+
+- *(qc)* duplication tracker with frozen-dictionary correction
+
+- *(qc)* duplication level slot binning
+
+- *(qc)* port FastQC duplication correction formula
+
+- *(qc)* adapter probe set for contamination scan
+
+- *(ops)* generate CHANGELOG.md from Conventional Commits with git-cliff (#106)
+ops/release.sh now bootstraps a pinned, checksum-verified git-cliff 2.13.1
+(cached under ~/.cache/bioflow-tools) and regenerates CHANGELOG.md as part
+of the app release commit, before the tag is creat…
+
+- *(frontend)* render read length distribution chart in QC tab
+
+- *(frontend)* add LengthDistributionChart component
+
+- *(frontend)* add ReadLengthHistogramBucket type
+
+- *(backend)* add read length histogram to alignment_stats
+Adds 10bp-binned length histogram to alignment_stats output for BAM/CRAM/SAM
+files, mirroring the histogram already added to fastq_stats. Unlike insert size,
+read length has no ceiling to support long…
+
+- *(backend)* add read length histogram to fastq_stats
+Adds 10bp-binned length histogram to fastq_stats output, following the
+pattern already used by insert_size_histogram. Unlike insert size, read length
+has no ceiling to support PacBio HiFi reads exceed…
+
+- *(frontend)* record project visits for recent-projects list
+
+- *(frontend)* mount RecentProjects in header status strip
+
+- *(frontend)* add RecentProjects chip-list component
+
+- *(frontend)* add useElementWidth ResizeObserver hook
+
+- *(frontend)* add localStorage-backed recent-projects tracker
+
+- *(ui)* drop quality word from the row metadata line
+The n/5 badge on the file icon already states the grade, with the
+word available on hover/aria-label; repeating it as "Excellent" etc.
+in the metadata line was redundant.
+
+- *(ui)* move R1/R2 badge into the metadata line for paired reads
+The read-number badge sat outside the row icon, ahead of the filename;
+now it leads the size/type/quality line instead, so the filename gets
+the full row width and no longer truncates.
+
+- *(settings)* group Settings · Tools by pipeline step
+Restructures the Tools page from one flat alphabetical card grid into
+seven headed groups -- Reads & QC, Alignment, Variants, Assembly,
+Expression, Archive, Utilities -- so it reads the way the pipeli…
+
+- *(ui)* draw Files and Projects icons in the header stats strip
+Replaces the words "files" and "projects" in the "150 files · 7 projects ·
+76.4 GB stored" strip under the masthead with their BioIcon glyphs (variant
+A: the dog-eared document and the tabbed folder),…
+
+- *(icons)* extract round-2 Section VII icons, wire raw/trimmed reads, replace profile emoji
+Adds connection_closed, database_not_found, reads_raw, reads_trimmed and
+user from the second icon design system review, following the existing
+a/b/c variant pattern.
+
+- *(icons)* extract Section VII icon set and use them in the footer
+Adds the six remaining glyphs from the icon design system review
+(queued, running, projects, files, ask, agent, live) to BioIcon.tsx,
+following the same a/b/c variant pattern as the rest of the set.
+S…
+
+- *(ui)* restructure the History tab to the 1c mockup layout
+Two columns: the lineage and runs table on the left, the methods paragraph
+and a "Not recorded" rail on the right. Gaps move off the front of the panel
+into that rail, where they read as a list of thi…
+
+- *(provenance)* serve the lineage as structured rows, merged and ordered
+The History tab rendered `ProvenanceNarrativeOut.markdown`, so every fact it
+showed had to be read back out of rendered prose. Its replacement (next
+commit) renders numbered rows with inline gap marke…
+
+- *(ui)* draw file and project icons in the explorer
+Wires BioIcon into ProjectExplorer, which is what makes the set visible: the
+old FileIcon/getFileIcon and the fifteen format PNGs were dead code, and file
+rows carried no icon at all. Categories are n…
+
+- *(ui)* quality badge as a serif figure instead of a color dot
+Replaces the 9px green-to-red dot with the tier set as a numeral (option B
+from the design review).
+
+- *(icons)* add BioIcon set with reviewed variants and SVG assets
+Lands the 48-concept icon set from the design review as a React component
+plus standalone SVG files.
+
+- *(activity)* say what each run is doing, not just what it acted on
+A run's card led with its stored label, which names the operands and never the
+verb: "DRR1066343 (paired) → GCF_000146045.2_R64_genomic.fna" does not say
+that this is an alignment. Downloads and trims…
+
+- *(activity)* fold workflows into the run columns
+The Workflows section had its own strip above the run columns and its own
+visual language -- a bordered card with a chevron head -- which put a
+third way of showing "a thing the user started" on a pag…
+
+- *(agent)* say when the drawer is resuming an existing conversation
+Track whether onConnectionChange attaches to an already-running agent
+with no local transcript, and show that as "Resuming an earlier
+conversation" in the empty state instead of the generic first-run
+…
+
+- *(agent)* add a New session button that clears the conversation
+Restart respawns the pi process but keeps its session file, so memory
+survives. This new button calls POST /new-session, which deletes the
+session file too -- a distinct operation from restart, with i…
+
+- *(agent)* add new-session endpoint that clears the conversation
+Distinct from /restart (which respawns against the same pi session and
+keeps memory), /new-session stops the process and deletes its session
+file so the next prompt starts a clean conversation. Matche…
+
+- *(agent)* persist conversations via pi sessions per (profile, project)
+Replace --no-session with --session-dir/--session-id so a pi process lost
+to the idle reaper, a crash, or an api restart reloads its conversation
+on respawn instead of starting fresh. Session id is st…
+
+- *(agent)* add agent_sessions_dir config property
+Derived from BIOINFO_HOME following the same pattern as objects_dir,
+staging_dir, tmp_dir, and logs_dir. Kept outside tmp/ since session
+files are the conversation itself, not a rebuildable cache. Fir…
+
+- *(workflow)* bind files at the input node
+A project selector on the toolbar, file pickers on input nodes, and slots
+that hold several files. Bindings stay per-run -- the definition still
+stores no object ids. The run-side binding dict now acc…
+
+- *(frontend)* node detail panel with a generated parameter form
+Double-click opens a node in full: tool, parameters (reusing the existing
+aligner-schema endpoint AlignDialog already uses), wiring, and
+continue_on_failure -- which no UI could set before. Part of #9…
+
+- *(frontend)* choose a node's tool on the canvas
+Nodes drop with the registry default, show their tool, and re-shape their
+ports on a change -- reporting any wires that drop. Also fixes the stale
+static-port derivation Task 6 flagged: port dots and …
+
+- *(frontend)* per-node port resolution and multi-port wiring rules
+portsFor mirrors the backend's ports_for; canConnect relaxes fan-in for
+multi ports only; edgesInvalidatedBy reports what a tool change breaks.
+Part of #94.
+
+- *(api)* serve tool choices, per-tool ports, and tool schemas
+Part of #94.
+
+- *(workflow)* ports resolve per node from its chosen tool
+STAR gains an annotation port; every other aligner keeps the base set.
+Validator and binder both route through ports_for. Part of #94.
+
+- *(align)* pass extra read files through to the aligner
+Concatenated into the primary read file before alignment, since none of
+the six aligners this runner drives take several read files positionally
+or share a multi-file convention -- concatenation is th…
+
+- *(workflow)* bind and launch multi-valued ports as lists
+Scalar ports keep binding bare ids -- the union return type avoids a
+no-behaviour diff across every existing consumer. Fixes _bound_inputs,
+which previously overwrote rather than accumulated when two …
+
+- *(workflow)* multi-valued input ports, and align.reads becomes one
+Only the one-wire-per-port rule relaxes; type checking still applies per
+wire. Part of #94.
+
+- *(agent)* edit per-project agent instructions from the drawer (#98)
+
+- *(agent)* restart respawns with the project's composed prompt (#98)
+
+- *(agent)* append the project's custom prompt to the default grounding (#98)
+
+- *(agent)* store a per-project custom system prompt (#98)
+
+- *(agent)* persist conversation across drawer open/close (#97)
+The agent drawer lost its entire conversation when closed. This adds
+persistence to ProjectConversation (reusing the existing Q&A model), keyed
+by (owner, project_id).
+
+- *(activity)* show why a run failed when its ledger row is opened
+
+- *(activity)* add RunFailureBlock for a failed run's errors and logs
+
+- *(timing)* add per-thread-count segments to stats() diagnostics
+Extends the /timing-model diagnostics stats() output with a `segments`
+list per job type, showing which thread counts have qualified for their
+own duration fit (>= MIN_SAMPLES same-thread rows). Each …
+
+- *(timing)* pass known thread counts into duration/memory estimates
+worker.py's _eta_model_ms and jobs.py's get_job route now pass
+job.payload.get("threads") through to timing_service.estimate,
+timing_service.estimate_memory, and memory_estimate.resolve -- the
+three c…
+
+- *(timing)* thread threads through memory_estimate.resolve()
+
+- *(timing)* thread-count segmentation for estimate() and estimate_memory()
+
+- *(timing)* add _fit_segmented grouping function
+
+- *(agent)* add useAgentSSE hook and AgentPanel UI components (#88, #89)
+
+- *(agent)* add agent API router with SSE stream, stop/restart, lifespan cleanup (#87)
+POST /projects/{project_id}/agent/ask spawns lazily (ownership-scoped
+project lookup feeds the spawn-time system prompt) and returns accepted;
+everything after that arrives on GET /events, an SSE stre…
+
+- *(agent)* add AgentService spawning a pi RPC subprocess per (profile, project) (#86)
+AgentProcess speaks pi's JSONL RPC protocol over stdin/stdout and
+translates events to SSE shapes for the drawer: agent_start, message_delta
+(text/thinking), tool_call/tool_result (unwrapping pi-mcp-a…
+
+- *(agent)* install pi + pi-mcp-adapter in api image, add agent config and starter skills (#85)
+Task 1 of the AI agent harness epic (#30): backend config, Node 22 + pi
+installation in the api container, and four starter skills.
+
+- *(frontend)* workflow runs in the activity view
+A workflow's nodes are ordinary PipelineRuns and jobs, deliberately (§1.5),
+which is exactly why this section had to exist: without it a workflow was a
+flat pile of unrelated rows with nothing saying …
+
+- *(api)* read workflow runs, retry failed nodes, cancel
+Nothing exposed workflow runs before this: `/workflows/{id}/runs` launched one
+and handed back an id, and there was no way to ask what happened next. Adds
+GET /workflows/runs and /workflows/runs/{id},…
+
+- *(frontend)* add Local Databases section and drop dice emoji
+Wires the Local Databases catalog into HelpDatabases.tsx (list + submit
+modal via react-query) and removes the dice emoji from Surprise me.
+
+- *(frontend)* add AddLocalDatabaseModal component
+
+- *(api-client)* add local-databases types and client methods
+
+- *(api)* add local-databases submit and list endpoints
+
+- *(models)* add LocalDatabase document
+
+- *(workflows)* derive a canvas from previous runs
+Design §7: read a set of PipelineRuns, map each to its node type, make an INPUT
+node per external RunInput, and infer edges where one run's output id appears in
+another's inputs. The result is unsaved…
+
+- *(frontend)* bind inputs and launch a workflow from the canvas
+The Run dialog: choose a project, bind each input slot to a real file, start
+the run. `bindableObjects` (6 vitest cases) does the filtering, and filtering is
+the whole point -- an aligner's reference …
+
+- *(frontend)* the workflow canvas
+A hand-rolled SVG editor rather than a graph library: this frontend runs on six
+runtime dependencies, and `NodePosition` was already modelled, so the editor is
+drag, click-to-wire, and delete over pla…
+
+- *(api)* workflow definition CRUD, node-type palette, and launch
+The service layer shipped in #20 was unreachable -- no router, so a definition
+could only be created from a Python shell. This is the HTTP surface the canvas
+(and #80's activity view) needs.
+
+- *(queue)* wire the orchestrator to job completions and worker startup
+The orchestrator was inert: `on_node_finished` and `reconcile_workflows`
+existed and were tested, but nothing called either, so a workflow would launch
+its first wave and stop forever.
+
+- *(services)* the workflow orchestrator
+Launch, progressive advance, retry-in-place, cancellation, and the reconciler
+the design's §10 names as a structural risk. The two decisions stay pure in
+workflow_planner and workflow_binding; this is…
+
+- *(services)* resolve a finished node's outputs onto downstream ports
+Resolution is by declared output name with type as validation, per the
+design's §6 -- not by type alone. Type-only matching picks arbitrarily the
+moment a node produces two objects of one type, which …
+
+- *(services)* the workflow scheduling decision, as a pure function
+`runnable_nodes` and `doomed_nodes` are duals: what may start now, and what
+never can. A node in neither is still waiting.
+
+- *(queue)* honour per-edge failure tolerance in the two cascade routes
+#20 landed `classify_dependencies`' `tolerate_failure_of` parameter but no
+caller: both routes that fail a dependent re-read `depends_on` from the
+database, and neither had anywhere to learn which edg…
+
+- *(services)* workflow definition CRUD with version bumping
+create_definition/update_definition validate before persisting, raising
+InvalidGraph rather than silently saving an unrunnable graph. update_definition
+always bumps version, even for no-op edits, sinc…
+
+- *(services)* workflow graph validation
+
+- *(pipelines)* classify every launcher as a node type or exclusion
+Classifies the 19 remaining launch_* functions (variant calling,
+quantification/DE, de novo and reference-guided assembly, QC/stats
+checks, annotation, and the three launch_download shapes) as NodeTyp…
+
+- *(pipelines)* node-type registry scaffolding with exhaustiveness test
+Adds NODE_TYPES/EXCLUDED_LAUNCHES and the launch_function_names() inspection
+helper that backs test_every_launch_function_is_classified. Only trim, align,
+and qc are classified here; the remaining ~17…
+
+- *(models)* register WorkflowRun and WorkflowNodeRun in ALL_MODELS
+Task 4's own DB-backed tests need these registered with Beanie to
+avoid AttributeError/no-unique-index failures -- same gap Task 3 hit
+and pulled forward for WorkflowDefinition. Task 5 no longer needs…
+
+- *(models)* WorkflowRun, WorkflowNodeRun, derived status
+WorkflowStatus is derived from NodeRunState via derive_status(), never
+stored, mirroring RunStatus. WorkflowNodeRun is a separate document
+(link-collection pattern) rather than an array on WorkflowRun…
+
+- *(models)* register WorkflowDefinition in ALL_MODELS early, needed for its own DB-backed test
+Task 5 was going to register the workflow documents in ALL_MODELS, but
+WorkflowDefinition's own insert/get round-trip test needs Beanie to know
+about it now, not later. Task 5 still registers Workflow…
+
+- *(models)* WorkflowDefinition document
+Adds NodePosition, WorkflowNode, WorkflowEdge, and WorkflowDefinition to
+app/models/workflow.py. A definition is a saved graph, deliberately
+project-independent: no project_id, no bindings, and no por…
+
+- *(models)* workflow port types and node kinds
+
+- *(queue)* let a dependent tolerate named dependencies' failure
+
+- *(frontend)* render the refusal card from both launch dialogs
+AlignDialog renders ResourceRefusalCard pre-flight when its client-side
+band computation hits "block", replacing the old dead-end banner (warn
+still gets the plain banner). AssembleDialog has no clien…
+
+- *(frontend)* add the four-choice resource refusal card
+Task 8 of the #70 plan: shared component with props for AlignDialog's
+pre-flight band computation and AssembleDialog's reactive 422 body.
+Wiring happens in Task 9.
+
+- *(frontend)* add replan types and client call
+Mirrors replan_service.ReplanResult's tagged union and the /pipelines/replan
+endpoint response, plus the 422 resource-refusal details shape both
+launch_alignment and launch_assembly now attach. Feeds …
+
+- *(api)* add POST /pipelines/replan for the refusal card
+Alignment's refusal card (a later task) calls this directly to power its
+"Auto re-plan" button. Assembly does not need it -- its replan result
+already rides along in the 422 raised at enqueue time (Ta…
+
+- *(pipelines)* honour the resource override and enrich refusal details
+launch_alignment and launch_assembly now skip the enqueue-time BLOCK raise
+when resource_override is set, letting the job ride through to claim.lua's
+sole-occupant admission (Tasks 1-4). The refusal's…
+
+- *(queue)* admit an overridden job when it is the sole occupant
+
+- *(queue)* rebuild the override flag on reconcile
+
+- *(queue)* carry the override flag into the Redis job hash
+enqueue() now accepts resource_override and threads it through the
+Job document into _push_to_redis's hash write, always writing "1" or
+"0" rather than omitting the field -- claim.lua (Task 4) will re…
+
+- *(queue)* persist a per-job resource override flag
+Adds Job.resource_override, set when the user chooses "Launch anyway"
+on the refusal card (issue #70). Defaults to False; must survive
+retries the same way last_attempt_progress does, since its purpos…
+
+- assembly proposer descends threads against the graph floor (#71)
+
+- alignment descent moves sort buffer before threads (#71)
+
+- alignment feasibility test refuses index-dominated jobs (#71)
+
+- capacity clamp for thread counts above core count (#71)
+
+- verify every replan proposal before offering it (#71)
+
+- replan result types and empty proposer registry (#71)
+
+- *(ui)* state the hard-limit distinction and clamp the budget
+
+- *(api)* clamp the admission budget to the cgroup hard limit
+
+- apply opt-in mem_limit to the worker container
+Compose v5 type-checks mem_limit as a byte-size field and rejects an empty
+string, so the plan's original ${BIOFLOW_HARD_MEM_LIMIT:-} fails config
+validation in the default, unset state -- caught by a…
+
+- *(launcher)* read the hard memory limit back from .env
+Adds current_settings, a new Tauri command that parses
+BIOFLOW_HARD_MEM_MB out of .env (None on any malformed or absent
+value), registers it in lib.rs, and wires App.tsx's mount effect to
+populate the…
+
+- *(launcher)* hard memory limit field with both-state copy
+Adds hardMemGb to the Settings type, wires it through applySettings
+(GB string -> hard_mem_mb: number | null via parseHardMemGb), and adds
+the field to the Settings dialog with copy for the none/set/i…
+
+- *(launcher)* parse the hard memory limit field
+
+- *(launcher)* carry hard_mem_mb through apply_settings
+
+- *(launcher)* write hard memory limit vars to .env
+CurrentSettings gains hard_mem_mb; render_env emits
+BIOFLOW_HARD_MEM_LIMIT, BIOFLOW_HARD_MEM_MB, and WORKER_REPLICAS=1
+only when a limit is set, so "off" means the variables are absent
+rather than emp…
+
+- recognize a running biopipe stack outside ~/.bioflow (dev-trunk compose case)
+The launcher only ever looked for an install at the fixed ~/.bioflow path,
+so a biopipe stack started by hand with plain compose from a repo checkout
+(this repo's own dev-trunk workflow) was invisible…
+
+- add ops/migrate-storage.sh for manual BIOINFO_HOME migration
+
+- add storage migration dialog to the launcher UI
+
+- add finish_storage_migration command to rewrite .env and restart after a successful migration
+
+- wire the real migration sequence and live progress polling into start_storage_migration
+
+- add start_storage_migration and migration_progress Tauri commands (plumbing)
+
+- orchestrate storage migration scan/copy/validate/cleanup sequence
+
+- add original-directory removal step for storage migration
+
+- add count/size and hash validation for storage migration copies
+
+- add recursive directory copy with progress callback for storage migration
+
+- add source directory scan and free-space check for storage migration
+
+- report estimate provenance on the job detail endpoint
+
+- resolve assembly memory through the layered estimate
+launch_assembly now routes its heuristic estimate through
+memory_estimate.resolve() instead of using estimate_assembly_mb's None as
+the sole "say nothing" signal. History for assemble_reads can now an…
+
+- name the estimate source in the alignment refusal message
+The alignment BLOCK check now resolves memory through the layered
+memory_estimate.resolve() (heuristic or measured) instead of calling
+the heuristic estimator directly, and passes the resolved provena…
+
+- resolve the alignment reservation through the layered estimate
+declared_align_mem_mb now goes through memory_estimate.resolve() instead of
+only the heuristic estimator, so once align_reads has enough trustworthy
+history on this machine the queue reservation becom…
+
+- let explain() name the model its number came from
+
+- guard the measured model on extrapolation distance and fit quality
+Two independent trust checks, since neither subsumes the other: a clean
+fit can still be extrapolated too far past what was observed, and a poor
+fit (low r_squared) can be wrong entirely inside the ob…
+
+- prefer the measured model over the heuristic when history exists
+
+- add MemoryEstimate types and the UNKNOWN resolution case
+Test fixture used get_motor_collection(), which doesn't exist on this
+Beanie version; switched to the working drop pattern from
+tests/storage/test_memory_model.py (raw motor db handle, drop before
+ini…
+
+- add measured-model trust guards for the estimate resolver
+
+- add winnowmap as GCI's second aligner for continuity cross-checking (#73)
+GCI's own FAQ recommends pairing winnowmap with minimap2 -- two aligners
+cross-check better in repetitive regions. Its --hifi/--nano are nargs='+'
+natively, so pairing needs no merge step: both BAMs g…
+
+
+
+
+
+### 🐛 Bug Fixes
+
+- *(provenance)* use job-type-aware verbs for branch merges in methods
+The hardcoded 'combined two inputs' phrase was used for every branch
+convergence regardless of what kind of merge happened. Record the
+destination node's ID in each branch entry and add a per-job-type…
+
+- *(backend)* prefer trimmed reads for QV assessment when raw+trimmed are the same sample
+group_read_sets treats raw and trimmed versions of the same sample as
+distinct read sets, causing the QV card to refuse with '2 read sets'.
+When all sets are just raw+trimmed of one sample, collapse t…
+
+- *(backend)* default sample_id from BioSample accession on SRA import
+The schema's sample_id field (user-facing sample identifier) was
+never populated automatically from SRA metadata. Default it from
+the NCBI BioSample accession when present, so imported runs
+carry at l…
+
+- *(frontend)* hide 'Paired End' option for alignment files
+isReads() excluded references and sidecars but not alignments, so BAM
+files could show a 'Paired End' control that doesn't apply. Gate on
+role !== 'alignment' as well. Closes #144.
+
+- *(backend)* say 'reference genome' not 'reference assembly' in scaffold error
+'Reference assembly' reads as the user's own assembly output, confusing
+projects that do have a downloaded reference genome. Change to 'reference
+genome to order contigs against' so it's clear what's …
+
+- *(backend)* explain polypolish absence on arm64 instead of generic PATH error
+The generic 'was not found on PATH' message prompted users to hunt
+for a fix that doesn't exist when polypolish is intentionally absent
+on arm64 / Apple Silicon. Provide an explicit architecture note.…
+
+- *(frontend)* translate raw format confidence enum to human-readable labels
+Raw values like 'magic' and 'extension' read as bugs or leaked
+placeholders. Map them: magic → 'Identified from contents',
+extension → 'Guessed from filename', user → 'Set by user',
+none → 'Unknown'. …
+
+- *(frontend)* capitalize 'Ai' to 'AI' in auto-generated fact labels
+The fallback label formatter title-cased snake_case keys, producing
+'Ai summary' from 'ai_summary'. Add a post-processing step to correct
+the leading 'Ai' to 'AI' for keys like ai_summary, ai_summary_…
+
+- *(frontend)* show assembly level, taxonomy ID, and release date on references
+The NCBI assembly block already showed name, sequences, total bases, and
+GC content. Add assembly level, taxonomy ID, and release date (formatted
+as locale date) so the reference headline gives a full…
+
+- *(api)* reject molecule-type inference for non-FASTQ objects
+The frontend only shows the "Infer from FASTQ" button for FASTQ objects,
+but the endpoint trusted that gating instead of enforcing it: a direct
+call against a BAM, FASTA, or any other stored file woul…
+
+- *(scripts)* narrow molecule-type backfill to run/experiment accessions
+Sample/study accessions can span multiple runs with different
+library_source values, and sra.lookup() silently falls back to an
+arbitrary first run when given one -- dropping them from the
+candidate s…
+
+- *(ui)* surface a notification when Infer-from-FASTQ fails
+
+- *(frontend)* add key prop to LeadStory for React identity tracking
+Without a key={lead.id}, React cannot track which lead instance is
+which across re-renders, so a finished lead's visual slot is not
+visibly replaced by the next running activity. Closes #128.
+
+- *(frontend)* add note that clicking a chromosome opens NCBI viewer
+Chromosome bars that link to NCBI had no visual indication they were
+clickable. Add an explanatory note below the diagram when chromosomes
+are linkable, matching the existing note for non-linkable one…
+
+- *(frontend)* label inherited reads metadata on alignment files
+Alignment (BAM) metadata carries the sample-level fields from the source
+reads, but the Custom fields section didn't indicate this -- the fields
+read as if they belong to the alignment file. When role…
+
+- *(backend)* flag trim card as unavailable for already-trimmed reads
+build_preprocess_card did not check whether the object was already
+a trimmed derivative, so the Actions tab showed a trim-for-trimming
+suggestion on files that had already been through the pipeline.
+M…
+
+- *(frontend)* label the Copy report button with its output format
+The button copies markdown but nothing indicated the format.
+Change 'Copy report' to 'Copy report (Markdown)' so the user
+knows what they're pasting. Closes #143.
+
+- *(frontend)* sync stage rail toggle on cross-stage navigation
+Clicking a 'Derived from' link on a trimmed file navigated to the raw
+counterpart but left the Raw/Trimmed toggle on Trimmed -- the selected
+raw file was invisible in the list because the sidebar stil…
+
+- *(frontend)* wire ⓘ info bubbles to their help text
+The ⓘ icons next to Sample ID, Subject/Patient ID, and Tissue/Source
+metadata fields were inert -- a plain span with no click handler and no
+tooltip of its own. The help text sat on the parent label's…
+
+- *(provenance)* stop flagging params as unrecorded for downloads
+Download jobs (SRA, assembly, UniProt, lineage) structurally never record
+parameters -- the accession and source are facts, not knobs -- so the
+History view's 'parameters not recorded' gap implied a h…
+
+- *(ai)* report the served model, not the requested one
+OpenAI-compatible local servers (mlx_lm, LM Studio) can keep serving a
+previously-loaded model while accepting a new 'model' field in the
+request. The adapter never read the model name back from the r…
+
+- *(pipelines)* find the Illumina header in any token, not just the first
+Verifying against real files in this app's /data surfaced a gap: every
+SRA-sourced short-read FASTQ available here wraps the original machine
+header as a *later* space-delimited token rather than stri…
+
+- *(ui)* make the canvas hover tooltip match the tile it's showing
+Code review found that on a large flow cell (NovaSeq scale, 1408+
+tiles), where several tiles share one pixel row, the paint loop wrote
+tiles in ascending order with later ones overpainting earlier on…
+
+- *(pipelines)* bound tile extents by the same cap as the quality matrix
+Code review found extents grew unconditionally in scan(), so a
+malformed file with many fabricated tile values kept accumulating
+coordinate boxes even after sums/counts correctly stopped at
+MAX_TILES …
+
+- *(help)* disambiguate the new N-spike bullet, correct N-chart caption claim
+"A collapsed cycle" sat directly under the pre-existing "Collapsed cycles"
+bullet, describing an unrelated rule (N-base spike vs. quality dropout) --
+a reader had no way to tell these were two distinc…
+
+- *(qc)* move misplaced test imports to top of file, add query type hints
+test_expected_gc.py had two imports mid-file after the first test classes,
+which fails ruff's E402 (module-level import not at top). Moved with the
+rest. Also gave references_for_project explicit para…
+
+- *(qc)* key the E. coli GC table entry to its strain, not the bare species
+GC genuinely varies by E. coli strain, and normalize_organism's own
+docstring gives K-12 vs O157:H7 as the reason strain suffixes are kept in
+the key rather than stripped. The bare "escherichia coli" …
+
+- *(test)* correct GC% docstring in gc histogram test
+
+- *(qc)* prefer whole-file duplication number in FileHeadline too
+Task 10's spec updated QcReport.tsx's Duplication row to prefer
+qc_percent_unique over fastp's sampled qc_duplication_rate, but missed
+that FileHeadline.tsx reads qc_duplication_rate directly for the …
+
+- *(qc)* keep contamination scan's progress phase monotonic
+
+- *(qc)* bound adapter fill and denominator by each read's own length
+
+- *(frontend)* handle narrow-range and single-length edge cases in axis ticks
+Final whole-feature review caught two gaps the per-task reviews missed:
+a long-read sample entirely under 100bp produced zero log-scale ticks
+(unlabelled axis), and a uniform-length sample repeated th…
+
+- *(frontend)* compute per-bar width from actual pixel spacing in LengthDistributionChart
+
+- *(ci)* point the CLA action at the branch that holds the signatures
+Every PR was failing with "Branch master not found. Make sure the branch
+where signatures are stored is NOT protected."
+
+- *(ci)* make release notes actually contain the changes
+`gh release create` was passed both --generate-notes and --notes-file.
+--notes-file overrides --generate-notes rather than appending to it, so every
+release through v0.2.6 published the static image-p…
+
+- *(provenance)* redirect sidecar walk targets to their parent
+walk() skipped sidecars when they appeared as parents but did nothing
+special when a sidecar was the walk's own target -- walking a .bai or
+.fai directly produced a lineage whose last row read "proces…
+
+- *(frontend)* hide RECENT block entirely when zero chips fit
+chipCount reaching 0 from a narrow header (not from zero visited
+projects, which already returned null earlier) still rendered an
+empty div, leaving an orphaned border-left divider with no content
+nex…
+
+- *(frontend)* measure header-right, not RecentProjects's own div, for chip width budget
+RecentProjects measured its own root div, which renders empty until
+chipCount is decided -- a self-referential measurement that always saw
+~0px and produced chipBudget < 0, so the RECENT block never r…
+
+- *(frontend)* record a project visit once per navigation, not per refetch
+
+- *(frontend)* align RecentProjects query key with ProjectExplorer's cache
+
+- *(frontend)* correct useElementWidth's RefObject return type
+The tuple return type annotated React.RefObject<T | null>, which is not
+assignable to a JSX ref prop (RefObject<T> is expected) despite the
+underlying useRef<T | null>(null) call being the standard pa…
+
+- *(ui)* remove stale BioIcon import from Header
+The icon-sheet branch moved the Files/Projects icons from the header
+stats strip to the footer but left the now-unused import behind,
+breaking tsc --noEmit.
+
+- *(ui)* stop file-size units wrapping in the row metadata line
+.row-sub items had no white-space guard, so a narrow row broke
+"415.4 MB" across the space between number and unit. Each chip now
+stays on one line; the whole line wraps between chips instead.
+
+- *(ui)* import BioIcon in Header
+Header.tsx used <BioIcon> for the files/projects stats-strip icons
+without importing it, throwing ReferenceError on every page load and
+blocking the app entirely.
+
+- *(header)* import BioIcon, which Header.tsx used without importing
+The icon-sheet merge (d42b2b1) added two <BioIcon> usages to the header
+stats strip but no import, so `tsc --noEmit` failed with TS2304 on both
+lines. Vite's dev server transforms without typechecking…
+
+- *(ui)* drop the user icon next to profile names entirely
+Neither the drawn icon nor the emoji it replaced looked right beside
+the username -- just the plain username reads cleaner. Removes the
+BioIcon usage from the header menu, profile picker tiles, and th…
+
+- *(icons)* use variant A for the footer's Ask and Agent glyphs
+The b variants (circle+dot marks) were picked by mistake -- the
+speech-bubble (ask.a) and robot-head (agent.a) enclosures are the
+recognisable shapes for these two, unlike the rest of Section VII.
+Dro…
+
+- *(ui)* align Results-tab Download TSV links with app link style
+VariantTable and ContigTable rendered their "Download TSV" link as a
+bare <a> with an inline 11px font-size instead of the shared
+.btn-text class used by "Copy report" (History) and "Re-ingest"
+(Actio…
+
+- *(ops)* give each worktree stack its own ports automatically
+WT_WEB_PORT/WT_API_PORT were fixed at 5273/8100, so the second concurrent
+worktree stack died on "Bind for 0.0.0.0:8100 failed: port is already
+allocated" unless the user set them by hand. Eight workt…
+
+- *(ui)* move Provenance to History tab, style Generate prose as a button
+- Provenance report + prose now render under History, below the
+  computation-run table, instead of on Actions.
+- The "Provenance" tab hint moves from Metadata to History, matching
+  where the section…
+
+- *(ops)* initiate the replica set with a member name that can work
+ops/worktree-up.sh failed roughly one run in three with "container
+biopipe-wt-*-mongo-1 is unhealthy". The cause was not a timeout: mongo was
+healthy seconds later, and the replica set was being initi…
+
+- *(queue)* advance workflow nodes on every terminal path, not just complete()
+A workflow run sat on "running · 0/3 nodes" forever after its alignment
+failed. The align job was correctly FAILED with `dependency_failed` -- its
+build_index was OOM-killed -- but the WorkflowNodeRun…
+
+- *(ui)* lay out Settings > Tools as a responsive multi-column grid
+Replaced the single <table> with card-based rows in a CSS grid
+(minmax(360px, 1fr)) so the list packs 2-3 columns on wide viewports
+and falls back to 1 on narrow ones, instead of one long single-colum…
+
+- *(ui)* put provenance prose in a second column, not below
+Reuses the existing .detail-columns grid (already used for the
+Overview/Project-metadata pair) so the generated prose sits beside
+the structured report when there's width for it, stacking below on
+nar…
+
+- *(ui)* match header menu button weight to nav link weight
+.theme-broadsheet button sets a bold heading font for real buttons
+(.btn), which the header-menu override didn't undo for the File/
+Reference/Help/profile dropdown triggers -- so they rendered bolder
+…
+
+- *(ui)* put param checkboxes beside their labels, not above
+`.trim-check` asks for a flex row, but `.trim-fields label` (0,1,1) outranks
+it (0,1,0) and forces `flex-direction: column`, so every checkbox inside a
+`.trim-fields` grid stacked above its own label …
+
+- *(align)* size references by measured bases, not compressed file size
+`reference_bases` was `reference.size`, justified by a FASTA carrying about
+one byte per base. That holds uncompressed and is wrong by ~6x for the
+gzipped references NCBI downloads produce by default.
+
+- *(align)* size bwa-mem2 index builds from its published 28N figure
+bwa-mem2's README states indexing "Requires 28N GB memory where N is the
+size of the reference sequence". The model had 2.0 bytes/base with a 2.0
+build multiplier -- 4 effective, 7x under. It also car…
+
+- *(provenance)* render the report as markdown, not raw text
+The provenance report is generated as markdown by the backend
+(services/provenance_report.py) but ProvenanceNarrative rendered
+data.markdown inside a <pre class="mono">, so the panel showed literal
+`#…
+
+- *(queue)* classify SIGKILL as -9, not just 137
+run_subprocess returns Popen.returncode unchanged, and Python reports a
+signal death as the negative signal number -- SIGKILL is -9. 137 is the
+shell's 128+signal convention, which nothing in this pro…
+
+- *(ui)* stop generic .modal rules from breaking NCBI download checkboxes
+.modal label and .modal input both had higher specificity than
+.assembly-component and .assembly-component input, so inside the NCBI
+download dialog the assembly-component checkbox rows fell back to
+d…
+
+- *(agent)* don't show 'resuming' before the agent's real status arrives
+
+- tighten suppressResumedRef comment for accuracy
+The flag is cleared by a fixed timeout, not by observing messages --
+correct the comment left over from an earlier draft of the fix.
+
+- *(agent)* confirm before starting a new session
+The 🗑 New session button permanently clears the agent's conversation
+history with no confirmation, unlike every other delete-class action
+in this codebase (project/object delete, provider delete, tool…
+
+- *(frontend)* move agent.css @import to the top of styles.css
+CSS requires @import to precede all other rules; PostCSS silently
+dropped it at end-of-file, so .agent-drawer never got position: fixed
+and the backdrop overlay swallowed every click meant for the dra…
+
+- *(agent)* render the user's prompt and stream replies into a bubble
+ask.onSuccess built the user message with content: "" (the typed prompt
+never rendered) and never appended an assistant placeholder with
+isStreaming: true (the delta/tool handlers all bail without one…
+
+- *(agent)* surface provider errors from turn_end instead of reporting success
+A provider auth failure (e.g. bad API key) arrives in message.errorMessage
+on the turn_end RPC event, which _translate didn't handle at all -- the
+drawer saw agent_start -> done with no text, reading …
+
+- *(workflow-canvas)* keep tool-name text off the first port dot
+The tool-name <text> under a node's label sat at a fixed y+34, which
+overlaps the first port dot for align's tool-choice node: 3-port tools
+(minimap2, bwa-mem2, bowtie2, HISAT2, Winnowmap) put that do…
+
+- *(workflow)* derive tool-configured ports via ports_for, not the static spec
+workflow_derive.py's _port_for_role and the output-port lookup read
+NODE_TYPES[node_type].inputs/.outputs directly, so they never saw a
+reconstructed node's actual params. A real STAR alignment run's
+…
+
+- *(align)* reject self-referential/duplicate extra reads, dedupe blob resolution
+Code review on the extra-reads-for-alignment change (issue #94 Task 3) found
+two gaps:
+
+- *(agent)* respawn on prompt change and stop dropping it on restart (#98)
+
+- *(config)* correct pi_path to /usr/bin/pi (npm global prefix is /usr on Debian)
+
+- *(timing)* score segment r_squared/range against the segment's own samples
+
+- *(pipelines)* give reference-guided assembly launchers a PipelineRun (#91)
+launch_consensus, launch_polish, and launch_scaffold are reference-guided
+assembly work by RunKind's own comment, but none created a PipelineRun --
+so a finished consensus/polish/scaffold had no run t…
+
+- *(ci)* stop CLA Assistant from requiring a PAT it doesn't have
+remote-organization-name/remote-repository-name pointed at this same
+repo, which pushes the action down its "remote repository" storage
+path and makes it require PERSONAL_ACCESS_TOKEN (repo scope) ins…
+
+- *(queue)* skip re-ingesting an SRA accession the project already has
+The job-level dedup_key in sra_service.launch_download only collapses a
+second download request while the first job is still in flight. Once
+that job finishes, a second request for the same accession …
+
+- *(services)* bind mate pairs, and reconcile workflows periodically
+Three bugs, all found by running a real trim -> qc workflow against the live
+stack. The 3997-test suite was green throughout; none of them are reachable
+from a fixture.
+
+- *(services)* exclude sidecars and order mates when collecting node outputs
+Both found by checking `_outputs_of` against the real database rather than
+fixtures, exactly as CLAUDE.md prescribes -- the unit tests were green and
+wrong. Of 70 real jobs with objects attributed to …
+
+- *(tests)* read the Lua scripts outside the async fixture
+
+- *(mcp)* give each guide resource a unique registered name
+_make_guide_reader's inner closure was always named _read, and
+MCPServer.resource() falls back to the wrapped function's __name__
+when no name= is given -- so every one of the six guide resources
+regi…
+
+- run-level progress bar not moving for single-job runs
+LeadStory's top bar computed pct purely as settled-jobs / total-jobs,
+so a run with one long-running job (the common shape for an SRA
+download) stayed at a literal 0% for the entire transfer and only
+…
+
+- *(services)* give InvalidGraph a real place in the AppError hierarchy
+
+- *(models)* assert derive_status's FAILED precondition instead of a dead fallthrough
+The prior fix wired _UNSUCCESSFUL_NODE_STATES into an if-branch but left
+the original bare return as an unreachable trailing statement -- the
+same class of dead code the review flagged, just moved dow…
+
+- *(models)* make derive_status's FAILED branch assert its precondition
+
+- *(frontend)* send reference_bases/building_index to the replan endpoint
+AlignDialog's replan query sent only AlignParams (aligner/threads/
+sort_memory_mb/mark_duplicates), but replan_service's align proposer reads
+reference_bases/building_index directly with no default --…
+
+- *(frontend)* guard Launch anyway against double-submit
+ResourceRefusalCard's "Launch anyway" button had no pending guard,
+unlike the primary Launch button in both dialogs -- a double-click
+before the modal closed could enqueue the job twice. Add an option…
+
+- *(pipelines)* document the replan params deviation and cover assembly's refusal path
+Two follow-ups from code review on the resource-override change:
+
+- *(api)* treat BIOFLOW_HARD_MEM_MB='' as unset, not an int-parse error
+docker-compose.yml always sets this env var on the api container, resolving
+to an empty string whenever the launcher has not configured a hard limit --
+the default, off state. Without this fix, pydant…
+
+- *(ui)* drop role=alert, style the hard-limit warning as a real banner
+role=alert had no precedent in this codebase and is the wrong ARIA severity
+for a hint that updates on every keystroke -- it would re-announce
+assertively each time the typed budget crosses the hard-l…
+
+- *(worker)* make exit 137 terminal under a cgroup hard limit
+
+- *(launcher)* use install_dir_str in current_settings, not the raw mutex
+current_settings read app.install_dir directly, which starts None on every
+process start and is only populated by status()'s poll via install_dir_str's
+disk fallback. Since both effects fire on App mo…
+
+- SRA download progress bar freezing during transfer
+fasterq-dump and prefetch redraw their progress bars with a bare `\r`
+rather than printing a new `\n`-terminated line each tick. The
+subprocess reader (_run_streaming) iterated stdout in text mode, wh…
+
+- *(mcp)* drop the doubled /mcp/mcp segment from the server's mount path
+streamable_http_app() defaults its own endpoint path to /mcp, which
+stacked with the /api/v1/mcp mount point to make the only reachable
+URL /api/v1/mcp/mcp -- a bare /api/v1/mcp 404'd. Pass
+streamable…
+
+- show storage location and port as plain text (not editable inputs) in Settings while the stack is Running
+
+- use rsync flags portable to BSD/openrsync, and stop grep-miss silently short-circuiting under pipefail in migrate-storage.sh
+
+- sync in-memory port state after finish_storage_migration, matching apply_settings
+
+- decompress gzip reference/GTF before STAR index build
+STAR's genomeGenerate reads --genomeFastaFiles and --sjdbGTFfile as
+plain text, unlike every other aligner materialize() feeds, which
+accepts gzip transparently. NCBI assemblies are stored gzip-compre…
+
+- close claim.lua's stale mem_free cross-worker admission race (#74)
+claim.lua compared a candidate's demand against a free-capacity value the
+caller computed one Redis round trip earlier. Redis serializes concurrent
+claim.lua executions, but that snapshot argument doe…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.2.6] - 2026-08-07
 
 
