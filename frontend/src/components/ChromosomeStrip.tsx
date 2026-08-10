@@ -136,6 +136,11 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
           NCBI.
         </div>
       )}
+      {view.linkable && (
+        <div className="chrom-note">
+          Click a chromosome to open it in NCBI's sequence viewer.
+        </div>
+      )}
 
       {view.overflow.length > 0 && (
         <select
