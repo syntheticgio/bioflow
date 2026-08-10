@@ -2724,6 +2724,113 @@ a.btn {
   font-weight: 600;
 }
 
+/* Metrics page ---------------------------------------------------------- */
+
+/* Its own class rather than .help-page: that one is a 760px prose measure,
+   and this page is two columns of data tables. Same reason .software-page
+   overrides the measure. #129 -- the narrow measure is also part of why the
+   page looked like it had a stranded column on the right. */
+.metrics-page {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 32px;
+  padding: 24px 32px;
+  overflow-y: auto;
+  color: var(--text);
+  align-items: start;
+}
+
+/* The see-more page has no second column to balance. */
+.metrics-page-single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1100px;
+}
+
+.metrics-page h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.metrics-overview,
+.metrics-runs {
+  min-width: 0;
+}
+
+.run-group {
+  margin-bottom: 28px;
+}
+
+.run-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.run-group-head h3 {
+  font-size: 13px;
+  margin: 0;
+  color: var(--text);
+}
+
+.run-see-more {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.run-table {
+  font-size: 12px;
+}
+
+.run-table-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.run-outcome {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.run-outcome-succeeded {
+  color: var(--text-dim);
+}
+
+/* Failures are listed here on purpose, so they have to read as failures
+   rather than as just another row. */
+.run-outcome-failed,
+.run-outcome-dead {
+  color: var(--error);
+}
+
+.run-outcome-cancelled {
+  color: var(--text-secondary);
+}
+
+.run-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.run-pager-at {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Two columns are unreadable at tablet width and below: six columns of run
+   data cannot share a viewport with the summary table. */
+@media (max-width: 1100px) {
+  .metrics-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* --- Feedback help page --- */
 
 .feedback-form {
@@ -3775,10 +3882,30 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* CSS columns rather than grid: the groups are wildly uneven (four rows here,
    twelve there), and column flow packs them by height instead of leaving a
-   grid row as tall as its tallest cell. */
+   grid row as tall as its tallest cell.
+
+   column-fill: auto (rather than the default "balance") is what makes column
+   two's first group start level with column one's -- balance instead computes
+   an ideal column height to even out total *content* between the two
+   columns, and starts column two wherever that height lands, which is
+   rarely the top of a group. A short group landing first in column two while
+   a tall one fills all of column one is exactly that: column one stops after
+   one tall break-inside:avoid block because balance decided that already
+   equalizes height, and whatever comes next in source order opens column two
+   partway down the page (#133).
+
+   auto only fills sequentially, though, and per spec falls back to balance
+   again when the container's height is 'auto' -- an unconstrained multicol
+   box has no "column is full" threshold to fill against. FactsColumns.tsx
+   supplies that threshold: a ResizeObserver measures each break-inside:avoid
+   block and computes the height a real two-column greedy fill would need,
+   writing it back as the `--facts-columns-height` custom property so auto
+   has a real target to fill column one to before spilling into column two. */
 .facts-columns {
   columns: 2;
   column-gap: 32px;
+  column-fill: auto;
+  height: var(--facts-columns-height, auto);
 }
 
 /* A group must never be split across a column boundary -- half of "Measured
@@ -3815,10 +3942,15 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--text-faint);
 }
 
-/* Below this the two columns are narrower than the label/value pair wants. */
+/* Below this the two columns are narrower than the label/value pair wants.
+   height must drop back to auto here too -- --facts-columns-height holds
+   the tallest of the two computed columns, not the full stacked height, and
+   a single column pinned to that would clip whatever was meant for column
+   two instead of stacking it below column one's content. */
 @media (max-width: 900px) {
   .facts-columns {
     columns: 1;
+    height: auto;
   }
 }
 

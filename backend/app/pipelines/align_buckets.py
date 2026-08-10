@@ -1,0 +1,132 @@
+"""Split a multi-sequence reference into memory-budget-aware buckets.
+
+The bucket planner reads a FASTA index and packs sequences using a greedy
+first-fit-decreasing algorithm keyed by estimated per-sequence memory usage.
+Per-sequence estimates come from the aligner's MemoryModel.
+
+Chunking is unnecessary for single-sequence references (returns None).
+STAR and Winnowmap are gated at the AlignerSpec level; the planner does
+not check — callers must gate before invoking.
+"""
+
+import math
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class BucketSpec:
+    index: int
+    sequences: list[str]
+    total_bases: int
+    estimated_mb: int
+    fasta_path: Path | None = None
+
+
+def pack_buckets(
+    *,
+    sequences: list[tuple[str, int]],  # (name, bases) from .fai
+    memory_budget_mb: int,
+    per_base_index_mb: float,
+    fixed_overhead_mb: int = 256,
+    bytes_per_thread_mb: int = 512,
+    threads: int = 4,
+    sort_memory_mb: int = 1024,
+) -> list[BucketSpec] | None:
+    """Pack reference sequences into memory-budget-aware buckets.
+
+    Returns None when chunking is unnecessary (<= 1 bucket or <= 1 sequence).
+    """
+    if len(sequences) <= 1:
+        return None
+
+    # Per-bucket overhead: aligner fixed cost + worker memory + sort buffers
+    worker_mb = threads * bytes_per_thread_mb
+    sort_mb = threads * sort_memory_mb
+    per_bucket_overhead = fixed_overhead_mb + worker_mb + sort_mb
+    effective_budget = memory_budget_mb - per_bucket_overhead
+
+    if effective_budget <= 0:
+        # Budget too tight — single bucket, will likely OOM
+        total_bases = sum(b for _, b in sequences)
+        return [
+            BucketSpec(
+                index=0,
+                sequences=[name for name, _ in sequences],
+                total_bases=total_bases,
+                estimated_mb=memory_budget_mb,
+            )
+        ]
+
+    sorted_seqs = sorted(sequences, key=lambda s: s[1], reverse=True)
+    buckets: list[BucketSpec] = []
+
+    for name, bases in sorted_seqs:
+        seq_index_mb = math.ceil((bases * per_base_index_mb))
+        placed = False
+        for bucket in buckets:
+            if bucket.estimated_mb + seq_index_mb <= memory_budget_mb:
+                bucket.sequences.append(name)
+                bucket.total_bases += bases
+                bucket.estimated_mb += seq_index_mb
+                placed = True
+                break
+        if not placed:
+            buckets.append(
+                BucketSpec(
+                    index=len(buckets),
+                    sequences=[name],
+                    total_bases=bases,
+                    estimated_mb=seq_index_mb + per_bucket_overhead,
+                )
+            )
+
+    if len(buckets) <= 1:
+        return None
+    return buckets
+
+
+def write_bucket_fastas(
+    full_fasta: Path,
+    buckets: list[BucketSpec],
+    out_dir: Path,
+) -> list[BucketSpec]:
+    """Write per-bucket FASTA files by extracting sequences from `full_fasta`.
+
+    Uses a simple line-based parser — no pyfaidx dependency. Returns updated
+    BucketSpecs with fasta_path set. The caller is responsible for cleanup.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build a name → lines map from the FASTA
+    records: dict[str, list[str]] = {}
+    current_name: str | None = None
+    current_lines: list[str] = []
+
+    with open(full_fasta) as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if line.startswith(">"):
+                if current_name is not None:
+                    records[current_name] = current_lines
+                # Strip the '>' and take everything up to the first space
+                current_name = line[1:].split()[0]
+                current_lines = []
+            elif current_name is not None:
+                current_lines.append(line)
+    if current_name is not None:
+        records[current_name] = current_lines
+
+    for bucket in buckets:
+        path = out_dir / f"bucket_{bucket.index}.fa"
+        with open(path, "w") as f:
+            for name in bucket.sequences:
+                seq_lines = records.get(name)
+                if seq_lines is None:
+                    continue
+                f.write(f">{name}\n")
+                f.write("\n".join(seq_lines))
+                f.write("\n")
+        bucket.fasta_path = path
+
+    return buckets

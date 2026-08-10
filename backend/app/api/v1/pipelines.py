@@ -1306,7 +1306,8 @@ async def launch_assembly_continuity_route(
 
 @router.get("/align-envelope")
 async def align_envelope(
-    object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep
+    object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep,
+    chunked: bool = False,
 ) -> dict:
     """Everything the dialog needs to estimate memory without a round trip.
 
@@ -1315,12 +1316,12 @@ async def align_envelope(
     the coefficients ship -- so there is no second implementation to drift,
     and `launch_alignment` re-runs the authoritative check regardless.
 
-    The host budgets in the response are global, but the input sizes are not:
-    reporting a reference's size back to a caller who cannot otherwise see it
-    would confirm both that the id exists and roughly how big that genome is.
+    When `chunked=true`, includes bucket-planning preview for the chunked
+    alignment path.
     """
     return await pipeline_service.align_envelope(
-        object_id=object_id, reference_id=reference_id, owner=owner
+        object_id=object_id, reference_id=reference_id, owner=owner,
+        chunked=chunked,
     )
 
 

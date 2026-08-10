@@ -17,6 +17,7 @@ import { Header } from "./components/Header";
 import { HelpAbout } from "./components/HelpAbout";
 import { HelpCalculations } from "./components/HelpCalculations";
 import { Metrics } from "./components/Metrics";
+import { MetricsJobType } from "./components/MetricsJobType";
 import { HelpDatabases } from "./components/HelpDatabases";
 import { HelpFeedback } from "./components/HelpFeedback";
 import { HelpGenomeAnalysisReview } from "./components/HelpGenomeAnalysisReview";
@@ -83,6 +84,11 @@ function Shell() {
     // The canvas needs the whole width to be usable at all -- a graph squeezed
     // beside the file list and a DetailPanel has no room to lay nodes out.
     pathname === "/workflows" ||
+    // Metrics lays out its own two columns, the right one being per-job-type
+    // run tables. A DetailPanel beside that is a third column, and with
+    // nothing ever selected here it renders EmptyDetail -- the splash screen,
+    // which is what #129 reported as marketing content on a data page.
+    pathname.startsWith("/metrics") ||
     pathname.startsWith("/help/") ||
     pathname.startsWith("/settings");
 
@@ -122,6 +128,7 @@ function Shell() {
           <Route path="/settings/general" element={<SettingsGeneral />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/metrics" element={<Metrics />} />
+          <Route path="/metrics/:jobType" element={<MetricsJobType />} />
           <Route path="/help/software" element={<HelpSoftware />} />
           <Route path="/help/sources" element={<HelpSources />} />
           <Route path="/help/databases" element={<HelpDatabases />} />

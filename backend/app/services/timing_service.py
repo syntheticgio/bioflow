@@ -232,6 +232,55 @@ async def records_for_object(
     return await query.to_list()
 
 
+async def runs_for_type(
+    job_type: str, *, limit: int | None = None, offset: int = 0
+) -> list[JobRunTiming]:
+    """Recent runs of one job type, **including failures**.
+
+    The read path behind the Metrics page's per-run tables, and the second
+    explicitly-named opt-out of the outcome filter alongside
+    `records_for_object`. It must not be built on `_modelled`: that filter
+    exists so a failed run cannot bias a predictive fit, but a user reading
+    "what has call_variants been doing" is owed the failures -- they are the
+    most informative rows on the page. Naming it plainly is what keeps that a
+    visible choice rather than an omission.
+
+    Newest first, so a caller taking the first N gets the most recent N.
+    """
+    query = JobRunTiming.find(JobRunTiming.job_type == job_type).sort(
+        "-finished_at"
+    )
+    if offset:
+        query = query.skip(offset)
+    if limit is not None:
+        query = query.limit(limit)
+    return await query.to_list()
+
+
+async def recent_runs_by_type(*, limit: int = 5) -> dict[str, dict]:
+    """The most recent `limit` runs of every job type, plus each type's total.
+
+    One call rather than one per type: the Metrics page renders a table per
+    job type, and a component fetching its own rows would turn a page load
+    into N requests.
+
+    `total` counts every recorded run of the type, failures included, so the
+    UI can decide whether a "see more" link is warranted without a second
+    round trip. It is deliberately the full history while `runs` is only the
+    recent window -- the same split `metrics()` makes between its outcome
+    counts and its summaries.
+    """
+    out: dict[str, dict] = {}
+    for job_type in sorted(await JobRunTiming.distinct("job_type")):
+        out[job_type] = {
+            "runs": await runs_for_type(job_type, limit=limit),
+            "total": await JobRunTiming.find(
+                JobRunTiming.job_type == job_type
+            ).count(),
+        }
+    return out
+
+
 def _fit(samples: list[tuple[int, int]]) -> dict | None:
     """Least-squares fit of duration = intercept + slope * bytes.
 

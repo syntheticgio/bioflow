@@ -90,6 +90,8 @@ import type {
   VariantStructure,
   DerivedGraph,
   MetricsStats,
+  RecentRuns,
+  JobTypeRuns,
   NodeTypeMeta,
   WorkflowRunDetail,
   WorkflowRunRow,
@@ -521,6 +523,11 @@ export const api = {
 
   /** Aggregated computation cost, for the Reference → Metrics page. */
   metrics: () => request<MetricsStats>("/jobs/metrics"),
+  metricsRuns: () => request<RecentRuns>("/jobs/metrics/runs"),
+  metricsRunsFor: (jobType: string, limit: number, offset: number) =>
+    request<JobTypeRuns>(
+      `/jobs/metrics/runs?job_type=${encodeURIComponent(jobType)}&limit=${limit}&offset=${offset}`,
+    ),
 
   // --- Pipelines ---
 

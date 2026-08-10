@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { JobTypeMetrics, MetricSummary, MetricsStats } from "../api/types";
+import type {
+  JobRun,
+  JobTypeMetrics,
+  MetricSummary,
+  MetricsStats,
+} from "../api/types";
 import { formatBytes, formatDuration } from "../lib/format";
 import { FileHeadlineStats } from "./FileHeadline";
 import type { Stat } from "./FileHeadline";
@@ -46,6 +52,122 @@ function toolName(row: JobTypeMetrics): string {
   return top.version ? `${top.name} ${top.version}` : top.name;
 }
 
+/** A run's tool as "name version", or the dash when unrecorded. */
+function runTool(run: JobRun): string {
+  if (!run.tool) return DASH;
+  return run.tool_version ? `${run.tool} ${run.tool_version}` : run.tool;
+}
+
+/** An optional measurement as text, or the dash. Never renders 0 for null. */
+function opt<T>(v: T | null, f: (x: T) => string): string {
+  return v == null ? DASH : f(v);
+}
+
+/**
+ * One job type's runs, newest first.
+ *
+ * Failures are listed alongside successes, which makes this table
+ * deliberately inconsistent with the medians in the left column -- those read
+ * successful runs only, so a failure cannot make a job type look fast and
+ * cheap. Both are correct for their own question, and the outcome column is
+ * what keeps the difference legible.
+ */
+export function RunTable({ runs }: { runs: JobRun[] }) {
+  if (runs.length === 0) {
+    return <p className="run-table-empty">No runs recorded yet.</p>;
+  }
+  return (
+    <table className="help-table run-table">
+      <thead>
+        <tr>
+          <th>Finished</th>
+          <th>Outcome</th>
+          <th>Duration</th>
+          <th>Input</th>
+          <th>Peak memory</th>
+          <th>Tool</th>
+        </tr>
+      </thead>
+      <tbody>
+        {/* Keyed by position, not by job_id or finished_at. Both look like
+            better keys and neither is unique here: job_id is null on rows
+            recorded before it was stored, and batch-recorded runs share a
+            finished_at to the second (eight ingest_headers rows sit on one
+            timestamp in a real library). The list is a plain ordered window
+            that is only ever replaced wholesale, never reordered or edited
+            in place, so the index is stable for as long as a row lives. */}
+        {runs.map((run, i) => (
+          <tr key={i}>
+            <td className="mono">
+              {opt(run.finished_at, (s) => new Date(s).toLocaleString())}
+            </td>
+            <td>
+              <span className={`run-outcome run-outcome-${run.outcome}`}>
+                {run.outcome}
+              </span>
+            </td>
+            <td className="mono">{formatDuration(run.duration_ms)}</td>
+            <td className="mono">{formatBytes(run.input_bytes)}</td>
+            <td className="mono">{opt(run.peak_rss_bytes, formatBytes)}</td>
+            <td>{runTool(run)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * The right column: one table per job type, most recent runs first.
+ *
+ * Every type is drawn on load rather than behind a selection, so the column
+ * answers "what has each job type been doing" without a click. One request
+ * serves them all -- see the endpoint's own note on why.
+ */
+function RecentRunsColumn() {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["jobs", "metrics", "runs"],
+    queryFn: api.metricsRuns,
+  });
+
+  if (isLoading) return <p className="help-intro">Loading runs…</p>;
+  if (isError || !data) {
+    return <p className="help-intro">Couldn't load runs.</p>;
+  }
+
+  const types = Object.keys(data.by_type).sort(
+    (a, b) =>
+      data.by_type[b].total - data.by_type[a].total || a.localeCompare(b),
+  );
+
+  return (
+    <section className="help-section">
+      <h2>Recent runs</h2>
+      {types.length === 0 && (
+        <p className="run-table-empty">
+          No runs recorded yet — this fills in as jobs complete.
+        </p>
+      )}
+      {types.map((jobType) => {
+        const entry = data.by_type[jobType];
+        return (
+          <div className="run-group" key={jobType}>
+            <div className="run-group-head">
+              <h3 className="mono">{jobType}</h3>
+              {entry.total > entry.runs.length && (
+                <Link className="run-see-more" to={`/metrics/${jobType}`}>
+                  See all {entry.total.toLocaleString()} →
+                </Link>
+              )}
+            </div>
+            <RunTable runs={entry.runs} />
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 export function Metrics() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["jobs", "metrics"],
@@ -54,14 +176,14 @@ export function Metrics() {
 
   if (isLoading) {
     return (
-      <div className="help-page">
+      <div className="metrics-page metrics-page-single">
         <p className="help-intro">Loading…</p>
       </div>
     );
   }
   if (isError || !data) {
     return (
-      <div className="help-page">
+      <div className="metrics-page metrics-page-single">
         <p className="help-intro">Couldn't load metrics.</p>
       </div>
     );
@@ -88,7 +210,8 @@ function MetricsBody({ data }: { data: MetricsStats }) {
   );
 
   return (
-    <div className="help-page">
+    <div className="metrics-page">
+      <div className="metrics-overview">
       <h1>Metrics</h1>
       <p className="help-intro">
         What BioFlow's computations have cost — how long they took, how much
@@ -158,6 +281,11 @@ function MetricsBody({ data }: { data: MetricsStats }) {
           </tbody>
         </table>
       </section>
+      </div>
+
+      <div className="metrics-runs">
+        <RecentRunsColumn />
+      </div>
     </div>
   );
 }

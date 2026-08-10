@@ -513,6 +513,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.star,
         index=aligners.layout_for(Aligner.STAR),
         params_class=align_params.StarParams,
+        chunking_supported=False,
         # ~10 bytes/base: about 30 GB for a 3.1 Gb human genome, which is the
         # figure STAR's own manual gives for the RAM needed to align against
         # human. The index is an uncompressed suffix array held resident, so
@@ -591,6 +592,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.winnowmap,
         index=aligners.layout_for(Aligner.WINNOWMAP),
         params_class=align_params.WinnowmapParams,
+        chunking_supported=False,
         # builder_tool is meryl, not winnowmap's own binary -- the same
         # separate-builder shape as bowtie2/HISAT2, except what meryl
         # produces is consumed via -W rather than discovered by suffix.
