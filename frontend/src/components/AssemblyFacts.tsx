@@ -119,7 +119,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
         targetLengths: rawSynteny.target_lengths,
         queryLengths: rawSynteny.query_lengths,
         segments: rawSynteny.segments,
-        segmentsPartial: facts.synteny_segments_partial === true,
+        segmentsPartial: rawSynteny.synteny_segments_partial === true,
       }
     : undefined;
 
