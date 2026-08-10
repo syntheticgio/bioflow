@@ -93,6 +93,11 @@ class SraMetadata:
             out["bioproject"] = self.bioproject
         if self.biosample:
             out["biosample"] = self.biosample
+            # The schema's `sample_id` field is the user-facing identifier for
+            # the biological sample. Default it from the NCBI BioSample accession
+            # when nothing else has set it -- an imported run should at least
+            # carry *some* sample identifier automatically.
+            out.setdefault("sample_id", self.biosample)
         if self.organism:
             out["organism"] = self.organism
         if self.instrument:
