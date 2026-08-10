@@ -977,6 +977,14 @@ export const api = {
       body: JSON.stringify({ object_id: objectId }),
     }),
 
+  /** Queue RNA-seq transcript QC (gene body coverage + read distribution)
+   * for a BAM against a chosen GTF/GFF annotation. */
+  launchTranscriptQc: (objectId: string, gtfObjectId: string) =>
+    request<JobSummary>("/pipelines/transcript-qc", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId, gtf_object_id: gtfObjectId }),
+    }),
+
   /** A page of the per-contig table, sorted the same way the job wrote it
    * (mapped reads descending). */
   bamStatsContigs: (objectId: string, reportPath: string, offset: number, limit: number) =>

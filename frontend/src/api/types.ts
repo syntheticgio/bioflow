@@ -1290,6 +1290,19 @@ export interface ReadLengthHistogramBucket {
   count: number;
 }
 
+export interface GeneBodyPoint {
+  /** 0 = 5' end, 99 = 3' end. */
+  percentile: number;
+  /** Normalized to the curve's own maximum. */
+  coverage: number;
+}
+
+export interface FeatureDistribution {
+  exonic: number;
+  intronic: number;
+  intergenic: number;
+}
+
 /** Facts produced by the run_bam_stats job. Read from ObjectDetail.facts
  * under the bam_stats_ prefix -- see BamResults.tsx. */
 export interface BamStatsFacts {
@@ -1308,6 +1321,11 @@ export interface BamStatsFacts {
   /** Present only when the values are STAR's locus codes, not phred scores. */
   mapq_scale?: "star";
   insert_size_histogram?: InsertSizeHistogramBucket[];
+  transcript_qc_status?: "ok";
+  transcript_qc_sampled_reads?: number;
+  transcript_qc_annotation?: string;
+  gene_body_coverage?: GeneBodyPoint[];
+  feature_distribution?: FeatureDistribution;
 }
 
 export interface ContigsPage {

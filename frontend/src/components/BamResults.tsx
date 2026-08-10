@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type {
@@ -13,6 +13,7 @@ import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart"
 import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
 import { DepthHistogramChart } from "./DepthHistogramChart";
+import { TranscriptQc } from "./TranscriptQc";
 
 /**
  * What the alignment produced: mapped/unmapped totals, coverage across the
@@ -40,6 +41,24 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
   const hasResults = f.bam_stats_status === "ok";
   const sortedCoordinate = obj.facts.sort_order === "coordinate";
   const hasIndex = obj.facts.has_index === true;
+
+  // Same project-object list DerivedFiles.tsx already fetches under this key
+  // -- React Query dedupes the request rather than issuing a second one, so
+  // this costs nothing when that panel is also open. Filtered to GTF/GFF
+  // candidates for a good picker; the backend is the final authority on
+  // whether a chosen object is actually usable (resolve_annotation).
+  const { data: projectObjects = [] } = useQuery({
+    queryKey: ["objects", obj.project_id],
+    queryFn: () => api.listObjects(obj.project_id),
+  });
+  const gtfObjects = projectObjects
+    .filter((o) => o.format.kind === "gtf" || o.format.kind === "gff")
+    .sort((a, b) => (a.format.kind === b.format.kind ? 0 : a.format.kind === "gtf" ? -1 : 1))
+    .map((o) => ({ id: o.id, name: o.name }));
+
+  const rnaApplicability = transcriptQcApplicability(obj);
+  const rnaApplies =
+    rnaApplicability.geneBody || rnaApplicability.featureDistribution;
 
   return (
     <>
@@ -164,6 +183,15 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               </div>
             )}
           </div>
+
+          {rnaApplies && (
+            <TranscriptQc
+              obj={obj}
+              gtfs={gtfObjects}
+              geneBody={rnaApplicability.geneBody}
+              featureDistribution={rnaApplicability.featureDistribution}
+            />
+          )}
 
           <div className="section">
             <div className="section-title">Provenance</div>
@@ -306,4 +334,25 @@ function Histogram<T extends MapqHistogramBucket | InsertSizeHistogramBucket>({
       </text>
     </svg>
   );
+}
+
+/** Mirrors backend services/transcript_qc_gating.py -- keep the two in step. */
+function transcriptQcApplicability(obj: ObjectDetailData) {
+  const md = (obj.metadata ?? {}) as Record<string, unknown>;
+  const molecule = md.molecule_type;
+  if (molecule === "RNA") return { geneBody: true, featureDistribution: true };
+  if (molecule === "DNA" || molecule === "Other")
+    return { geneBody: false, featureDistribution: false };
+
+  const assay = md.assay;
+  if (assay === "RNA-seq") return { geneBody: true, featureDistribution: true };
+  if (assay === "ChIP-seq" || assay === "ATAC-seq")
+    return { geneBody: false, featureDistribution: true };
+  if (assay) return { geneBody: false, featureDistribution: false };
+
+  const aligner = String(obj.facts.aligned_by ?? "").toLowerCase();
+  if (aligner === "star" || aligner === "hisat2")
+    return { geneBody: true, featureDistribution: true };
+
+  return { geneBody: false, featureDistribution: false };
 }
