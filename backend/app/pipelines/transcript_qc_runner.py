@@ -226,25 +226,29 @@ def _covers(intervals: list[tuple[int, int]], position: int) -> bool:
     """Whether any interval contains the position.
 
     Intervals can overlap, so the candidate found by bisect is not
-    necessarily the containing one -- scan back while starts are still at or
-    below the position.
+    necessarily the containing one -- scan back through every interval
+    starting at or before `position` and check whether it also ends at or
+    after it. This is O(k) in the number of intervals with start <= position,
+    not O(1) -- a real interval tree (tracking max-end-in-subtree) would do
+    better, but is out of scope here since the interval counts this deals
+    with (exons/genes on one contig) are small relative to the BAM pass this
+    runs inside.
+
+    Earlier versions of this function stopped the scan early once an
+    interval's start fell more than a fixed distance before `position`, on
+    the assumption real gene/intron spans stay under that distance. That
+    assumption doesn't hold in general -- a malformed annotation or an
+    unusually large feature can have a start arbitrarily far before a
+    position it still covers -- and the early stop produced a silent false
+    "not covered" in exactly that case. There is no correct way to bound the
+    scan without a data structure that tracks it explicitly, so this no
+    longer tries.
     """
     i = bisect.bisect_right(intervals, (position, float("inf")))
-    for start, end in reversed(intervals[:i]):
+    for start, end in intervals[:i]:
         if end >= position:
             return True
-        # Sorted by start; a run of non-covering intervals can still be
-        # followed by a long one that does, so only stop once starts are far
-        # enough back that nothing can reach.
-        if start < position - _MAX_FEATURE_SPAN:
-            break
     return False
-
-
-# Longest interval we scan back through in _covers. Human introns reach ~2 Mb;
-# beyond this a position is treated as uncovered rather than walking the whole
-# contig for every read.
-_MAX_FEATURE_SPAN = 3_000_000
 
 
 def classify_position(index: dict, contig: str, position: int) -> str:
