@@ -131,6 +131,14 @@ def _sampling_plan(af, budget: int) -> list[tuple[str, int]]:
     alignment stats do -- takes every read from the start of the first contig
     on a coordinate-sorted BAM. For a gene body curve that is a few hundred
     genes on one chromosome, not a genome-wide answer. See issue #191.
+
+    A contig whose proportional share truncates to zero still gets 1 read
+    (mirrors bam_stats_runner.allocate_bins's floor-then-distribute
+    approach: a contig shorter than one bin still gets one bin, so small
+    contigs never vanish from the plan). This is a floor, not an equal
+    split -- a scaffold-heavy assembly still spends most of the budget on
+    its large contigs -- so the extra spend beyond `budget` is at most one
+    read per contig, bounded by the reference's contig count.
     """
     lengths = [(c, af.get_reference_length(c) or 0) for c in af.references]
     total = sum(n for _, n in lengths)
@@ -138,7 +146,19 @@ def _sampling_plan(af, budget: int) -> list[tuple[str, int]]:
         return [(c, budget) for c, _ in lengths[:1]]
     plan = []
     for contig, length in lengths:
+        if length <= 0:
+            continue
         share = int(budget * length / total)
-        if share > 0:
-            plan.append((contig, share))
-    return plan or [(lengths[0][0], budget)]
+        plan.append((contig, share if share > 0 else 1))
+    if not plan:
+        return [(lengths[0][0], budget)]
+
+    planned_total = sum(share for _, share in plan)
+    if planned_total != budget:
+        log.info(
+            "transcript_qc_sampling_plan_shortfall",
+            budget=budget,
+            planned_total=planned_total,
+            contigs=len(plan),
+        )
+    return plan
