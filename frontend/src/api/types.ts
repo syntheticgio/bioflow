@@ -237,6 +237,44 @@ export interface MetricsStats {
 }
 
 /**
+ * One recorded run, for the Metrics page's per-job-type tables.
+ *
+ * Every measurement is nullable and means "not measured", never zero:
+ * `peak_rss_bytes` is unset for runs below the executor's 60s sampling
+ * floor, which is most short jobs.
+ */
+export interface JobRun {
+  finished_at: string | null;
+  outcome: string;
+  duration_ms: number;
+  input_bytes: number;
+  peak_rss_bytes: number | null;
+  threads: number | null;
+  tool: string | null;
+  tool_version: string | null;
+  job_id: string | null;
+  object_id: string | null;
+}
+
+/**
+ * Recent runs grouped by job type, from GET /jobs/metrics/runs.
+ *
+ * `total` is the type's whole history (failures included) while `runs` is
+ * only the recent window, so the UI can offer "see more" without a second
+ * request.
+ */
+export interface RecentRuns {
+  by_type: Record<string, { runs: JobRun[]; total: number }>;
+}
+
+/** One job type's runs, paged, from GET /jobs/metrics/runs?job_type=. */
+export interface JobTypeRuns {
+  job_type: string;
+  total: number;
+  runs: JobRun[];
+}
+
+/**
  * One numbered row of "How this file was made".
  *
  * `name` is already formatted for display and covers every object the row is
