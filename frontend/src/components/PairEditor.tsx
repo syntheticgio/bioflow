@@ -22,7 +22,7 @@ interface Props {
  * signals are missing, and trimmed reads pair like any others.
  */
 export function isReads(o: DataObject): boolean {
-  return o.role !== "reference" && o.sidecar_of === null;
+  return o.role !== "reference" && o.role !== "alignment" && o.sidecar_of === null;
 }
 
 /**
