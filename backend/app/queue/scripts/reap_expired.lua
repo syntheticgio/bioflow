@@ -21,16 +21,27 @@ for i = 1, #expired do
   local jkey = 'bp:job:' .. job_id
 
   if redis.call('ZREM', KEYS[1], job_id) == 1 then
-    local h = redis.call('HMGET', jkey, 'cpu', 'mem_mb', 'io', 'score')
+    local h = redis.call('HMGET', jkey, 'cpu', 'mem_mb', 'io', 'score', 'node')
     local cpu   = tonumber(h[1]) or 0
     local mem   = tonumber(h[2]) or 0
     local io    = h[3] or 'none'
     local score = tonumber(h[4]) or now_ms
+    local node  = h[5] or ''
 
-    redis.call('DECRBY', 'bp:conc:cpu', cpu)
-    redis.call('DECRBY', 'bp:conc:mem_mb', mem)
+    -- Per-node concurrency counter keys, or global keys when node is empty.
+    local conc_cpu = 'bp:conc:cpu'
+    local conc_mem = 'bp:conc:mem_mb'
+    local conc_io  = 'bp:conc:io_heavy'
+    if node ~= '' then
+      conc_cpu = conc_cpu .. ':' .. node
+      conc_mem = conc_mem .. ':' .. node
+      conc_io  = conc_io .. ':' .. node
+    end
+
+    redis.call('DECRBY', conc_cpu, cpu)
+    redis.call('DECRBY', conc_mem, mem)
     if io == 'heavy' then
-      redis.call('DECR', 'bp:conc:io_heavy')
+      redis.call('DECR', conc_io)
     end
 
     local attempts = redis.call('HINCRBY', jkey, 'attempts', 1)

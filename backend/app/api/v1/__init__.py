@@ -9,6 +9,7 @@ from app.api.v1 import (
     jobs,
     local_databases,
     ncbi,
+    nodes,
     objects,
     pipelines,
     profiles,
@@ -54,5 +55,6 @@ api_router.include_router(local_databases.router)
 api_router.include_router(settings.router)
 api_router.include_router(version.router)
 api_router.include_router(workflows.router)
+api_router.include_router(nodes.router)
 
 __all__ = ["api_router"]

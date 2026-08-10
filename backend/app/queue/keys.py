@@ -18,6 +18,7 @@ JOB = f"{PREFIX}:job"  # bp:job:{job_id}
 # --- Control ---
 CANCEL = f"{PREFIX}:cancel"  # set of job_ids with cancellation requested
 WORKERS = f"{PREFIX}:workers"  # hash worker_id -> json
+NODES = f"{PREFIX}:nodes"  # hash node_id -> json (aggregated across workers)
 EVENTS = f"{PREFIX}:events"  # pub/sub channel *prefix*, never published to
 
 # Events are partitioned per profile: `events_channel(owner)` below. Nothing
@@ -26,6 +27,8 @@ EVENTS = f"{PREFIX}:events"  # pub/sub channel *prefix*, never published to
 # rather than as a missing filter, so the prefix is deliberately not a valid
 # channel on its own.
 SYSTEM_OWNER = "system"
+# Per-node ready queues: bp:q:ready:{node_id}
+# Per-node concurrency counters: bp:conc:{resource}:{node_id}
 """Owner sentinel for events that belong to the installation, not a profile.
 
 Storage faults and queue-wide conditions describe the machine; blobs are global
@@ -62,9 +65,24 @@ def job_key(job_id: str) -> str:
     return f"{JOB}:{job_id}"
 
 
-def conc_key(resource: str) -> str:
+def conc_key(resource: str, node_id: str | None = None) -> str:
+    """Concurrency counter for a resource, optionally scoped to a node."""
+    if node_id:
+        return f"{CONC}:{resource}:{node_id}"
     return f"{CONC}:{resource}"
+
+
+def ready_key(node_id: str | None = None) -> str:
+    """Ready queue for a node, or the global pool."""
+    if node_id:
+        return f"{READY}:{node_id}"
+    return READY
 
 
 def sched_next_key(name: str) -> str:
     return f"{SCHED_NEXT}:{name}"
+
+
+def node_conc_keys(node_id: str) -> list[str]:
+    """All concurrency counter keys for one node."""
+    return [conc_key(r, node_id) for r in ("cpu", "mem_mb", "io_heavy")]
