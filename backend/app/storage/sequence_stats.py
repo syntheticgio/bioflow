@@ -376,6 +376,11 @@ def alignment_stats(
     measured at ~300k records/sec -- a 200k sample costs well under a second,
     so the same budget applies.
 
+    When a .bai index is present the sample is drawn per contig in proportion
+    to contig length, so the derived statistics describe the whole library
+    rather than the head of the first contig. Unindexed files keep the cheaper
+    head-sample behaviour.
+
     Reverse-strand reads are stored as the reverse complement of what the
     sequencer produced. Both the sequence and the quality string are therefore
     flipped back before counting, or the per-position curve would be the
@@ -403,62 +408,154 @@ def alignment_stats(
     length_histogram: Counter[int] = Counter()
     saw_paired = False
 
+    def _count_read(rec) -> bool:
+        """Process one alignment record, updating accumulators in place.
+
+        Returns True if the read was counted, False if it was skipped
+        (secondary/supplementary or no sequence).
+        """
+        nonlocal reads, mapped, duplicates, total_gc, total_acgt
+        nonlocal mapq_sum, mapq_n, saw_paired
+
+        if rec.is_secondary or rec.is_supplementary:
+            return False
+
+        seq = rec.query_sequence
+        if not seq:
+            return False
+
+        reads += 1
+        length_bucket = (len(seq) // READ_LENGTH_BIN_WIDTH) * READ_LENGTH_BIN_WIDTH
+        length_histogram[length_bucket] += 1
+        if not rec.is_unmapped:
+            mapped += 1
+            mapq_sum += rec.mapping_quality
+            mapq_n += 1
+            mapq_histogram[rec.mapping_quality] += 1
+        if rec.is_duplicate:
+            duplicates += 1
+
+        if rec.is_paired:
+            saw_paired = True
+            # template_length is signed (mate orientation); only
+            # positive values are counted so each pair's fragment size
+            # is tallied once rather than twice (the mate's own record
+            # reports the same length negated).
+            tlen = rec.template_length
+            if tlen > 0:
+                capped = min(tlen, INSERT_SIZE_MAX)
+                bucket = (capped // INSERT_SIZE_BIN_WIDTH) * INSERT_SIZE_BIN_WIDTH
+                insert_size_histogram[bucket] += 1
+
+        quals = rec.query_qualities
+        if rec.is_reverse:
+            seq = _revcomp(seq)
+            if quals is not None:
+                quals = list(quals)[::-1]
+
+        counts.update(seq)
+        gc = seq.count("G") + seq.count("C")
+        total_gc += gc
+        total_acgt += gc + seq.count("A") + seq.count("T")
+
+        if quals is not None:
+            for i, score in enumerate(quals[:MAX_POSITIONS]):
+                qual_sum[i] += score
+                qual_n[i] += 1
+
+        return True
+
     try:
         with pysam.AlignmentFile(str(path), mode, check_sq=False) as af:
-            for rec in af:
-                if rec.is_secondary or rec.is_supplementary:
-                    # Secondary/supplementary records repeat sequence already
-                    # counted from the primary alignment.
-                    continue
+            # Check whether a .bai index is available for strided sampling.
+            # Any failure (e.g. "AlignmentFile.mapped only available in bam
+            # files" for SAM, or no index file present) means we fall back to
+            # head sampling rather than strided.
+            try:
+                af.check_index()
+                has_index = af.has_index()
+            except Exception:
+                has_index = False
 
-                seq = rec.query_sequence
-                if not seq:
-                    continue
+            if has_index and af.nreferences > 0:
+                # Strided sampling: draw reads per contig in proportion to
+                # contig length, so every chromosome contributes to the
+                # derived statistics rather than only the head of the first.
+                references = af.references
+                lengths = af.lengths
+                total_length = sum(lengths)
 
-                reads += 1
-                length_bucket = (len(seq) // READ_LENGTH_BIN_WIDTH) * READ_LENGTH_BIN_WIDTH
-                length_histogram[length_bucket] += 1
-                if not rec.is_unmapped:
-                    mapped += 1
-                    mapq_sum += rec.mapping_quality
-                    mapq_n += 1
-                    mapq_histogram[rec.mapping_quality] += 1
-                if rec.is_duplicate:
-                    duplicates += 1
+                # Calculate proportional read targets per contig.
+                contig_targets: dict[str, int] = {}
+                remaining = max_reads
+                for ref, length in zip(references, lengths):
+                    target = max(1, int(max_reads * length / total_length))
+                    contig_targets[ref] = target
+                    remaining -= target
 
-                if rec.is_paired:
-                    saw_paired = True
-                    # template_length is signed (mate orientation); only
-                    # positive values are counted so each pair's fragment size
-                    # is tallied once rather than twice (the mate's own record
-                    # reports the same length negated).
-                    tlen = rec.template_length
-                    if tlen > 0:
-                        capped = min(tlen, INSERT_SIZE_MAX)
-                        bucket = (capped // INSERT_SIZE_BIN_WIDTH) * INSERT_SIZE_BIN_WIDTH
-                        insert_size_histogram[bucket] += 1
+                # Distribute any residual reads to the longest contig so the
+                # total matches max_reads exactly.
+                if remaining > 0 and references:
+                    contig_targets[references[0]] += remaining
 
-                quals = rec.query_qualities
-                if rec.is_reverse:
-                    seq = _revcomp(seq)
-                    if quals is not None:
-                        quals = list(quals)[::-1]
+                for ref, target in contig_targets.items():
+                    if reads >= max_reads:
+                        break
+                    reads_this_contig = 0
+                    for rec in af.fetch(ref):
+                        if reads >= max_reads:
+                            break
+                        if not _count_read(rec):
+                            continue
+                        reads_this_contig += 1
+                        if reads_this_contig >= target:
+                            break
+                        if reads % CANCEL_CHECK_READS == 0 and cancel_event is not None:
+                            if cancel_event.is_set():
+                                raise JobCancelled(
+                                    "Cancelled during alignment statistics"
+                                )
 
-                counts.update(seq)
-                gc = seq.count("G") + seq.count("C")
-                total_gc += gc
-                total_acgt += gc + seq.count("A") + seq.count("T")
+                # Sample unmapped reads from the unmapped portion at the end
+                # of the file, using a small fixed budget so they contribute
+                # to mapped_percent realistically.  Using fetch('*') selects
+                # only unmapped records via the index rather than scanning the
+                # entire file.
+                if reads < max_reads:
+                    try:
+                        unmapped_iter = af.fetch("*")
+                    except (ValueError, OSError):
+                        # A BAM sorted without an unmapped-read bucket may
+                        # not have '*' as a reference; fall back to scanning
+                        # to EOF for unmapped reads.
+                        unmapped_iter = af.fetch(until_eof=True)
+                    for rec in unmapped_iter:
+                        if reads >= max_reads:
+                            break
+                        if not rec.is_unmapped:
+                            continue
+                        if not _count_read(rec):
+                            continue
+                        if reads >= max_reads:
+                            break
+                        if reads % CANCEL_CHECK_READS == 0 and cancel_event is not None:
+                            if cancel_event.is_set():
+                                raise JobCancelled(
+                                    "Cancelled during alignment statistics"
+                                )
 
-                if quals is not None:
-                    for i, score in enumerate(quals[:MAX_POSITIONS]):
-                        qual_sum[i] += score
-                        qual_n[i] += 1
-
-                if reads % CANCEL_CHECK_READS == 0 and cancel_event is not None:
-                    if cancel_event.is_set():
-                        raise JobCancelled("Cancelled during alignment statistics")
-                if reads >= max_reads:
-                    break
+                sample_method = "strided"
+            else:
+                # Head sampling: read from the start until max_reads is
+                # reached. For unindexed files this is the only option.
+                for rec in af:
+                    if reads >= max_reads:
+                        break
+                    _count_read(rec)
+                    if reads % CANCEL_CHECK_READS == 0 and cancel_event is not None:
+                        if cancel_event.is_set():
+                            raise JobCancelled("Cancelled during alignment statistics")
+                sample_method = "head"
     except JobCancelled:
         raise
     except (ValueError, OSError) as e:
@@ -470,7 +567,10 @@ def alignment_stats(
     if reads == 0:
         return {}
 
-    facts: dict = {"stats_sampled_reads": reads}
+    facts: dict = {
+        "stats_sampled_reads": reads,
+        "stats_sampling": sample_method,
+    }
 
     composition = _composition(counts)
     if composition:

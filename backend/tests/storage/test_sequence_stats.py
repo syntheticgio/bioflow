@@ -403,6 +403,112 @@ def _write_bam(path, records):
     return path
 
 
+
+class TestAlignmentSampling:
+    """Verify the sampling method is recorded and that indexed BAMs use
+    strided per-contig sampling rather than a head-sample."""
+
+    def test_unindexed_bam_reports_head_sampling(self, tmp_path):
+        """Without a .bai the sample is taken from the head of the file."""
+        from app.models import FormatKind
+
+        p = _write_bam(
+            tmp_path / "t.bam",
+            [{"name": "r1"}, {"name": "r2"}],
+        )
+        r = ss.alignment_stats(p, FormatKind.BAM)
+        assert r["stats_sampling"] == "head"
+
+    def test_indexed_bam_reports_strided_sampling(self, tmp_path):
+        """With a .bai present the sample is drawn per contig."""
+        pysam = pytest.importorskip("pysam")
+        from app.models import FormatKind
+
+        p = tmp_path / "t.bam"
+        hdr = {
+            "HD": {"VN": "1.6"},
+            "SQ": [
+                {"SN": "chr1", "LN": 10000},
+                {"SN": "chr2", "LN": 10000},
+            ],
+        }
+        with pysam.AlignmentFile(str(p), "wb", header=hdr) as out:
+            # Write all chr1 reads first, then chr2 reads -- coordinate-sorted
+            # order is required by samtools index.
+            for i in range(10):
+                a = pysam.AlignedSegment()
+                a.query_name = f"r{i}"
+                a.query_sequence = "ACGT"
+                a.flag = 0
+                a.reference_id = 0
+                a.reference_start = 10 + i * 10
+                a.cigar = [(0, 4)]
+                a.query_qualities = pysam.qualitystring_to_array("IIII")
+                out.write(a)
+            for i in range(10):
+                a = pysam.AlignedSegment()
+                a.query_name = f"s{i}"
+                a.query_sequence = "ACGT"
+                a.flag = 0
+                a.reference_id = 1
+                a.reference_start = 10 + i * 10
+                a.cigar = [(0, 4)]
+                a.query_qualities = pysam.qualitystring_to_array("IIII")
+                out.write(a)
+        pysam.index(str(p))
+
+        r = ss.alignment_stats(p, FormatKind.BAM)
+        assert r["stats_sampling"] == "strided"
+        # With 20 reads and 2 equal contigs, both contigs should contribute.
+        assert r["stats_sampled_reads"] == 20
+
+    def test_strided_sample_spans_multiple_contigs(self, tmp_path):
+        """The whole point of the fix: a head-sample only ever sees contig 1."""
+        pysam = pytest.importorskip("pysam")
+        from app.models import FormatKind
+
+        p = tmp_path / "t.bam"
+        hdr = {
+            "HD": {"VN": "1.6"},
+            "SQ": [
+                {"SN": "chr1", "LN": 1000000},
+                {"SN": "chr2", "LN": 1000000},
+            ],
+        }
+        with pysam.AlignmentFile(str(p), "wb", header=hdr) as out:
+            # chr1 reads: all A-rich
+            for i in range(10):
+                a = pysam.AlignedSegment()
+                a.query_name = f"a{i}"
+                a.query_sequence = "AAAA"
+                a.flag = 0
+                a.reference_id = 0
+                a.reference_start = 10
+                a.cigar = [(0, 4)]
+                a.query_qualities = pysam.qualitystring_to_array("IIII")
+                out.write(a)
+            # chr2 reads: all C-rich
+            for i in range(10):
+                a = pysam.AlignedSegment()
+                a.query_name = f"b{i}"
+                a.query_sequence = "CCCC"
+                a.flag = 0
+                a.reference_id = 1
+                a.reference_start = 10
+                a.cigar = [(0, 4)]
+                a.query_qualities = pysam.qualitystring_to_array("IIII")
+                out.write(a)
+        pysam.index(str(p))
+
+        r = ss.alignment_stats(p, FormatKind.BAM)
+        assert r["stats_sampling"] == "strided"
+        counts = {c["base"]: c["count"] for c in r["base_composition"]}
+        # A head-sample would only see chr1 reads (all A), missing all C's.
+        # A strided sample sees both contigs, so C must be present.
+        assert counts["C"] > 0
+        assert counts["A"] > 0
+
+
 class TestMapqHistogram:
     def test_bucketed_by_mapping_quality(self, tmp_path):
         from app.models import FormatKind
