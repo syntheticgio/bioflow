@@ -131,7 +131,12 @@ def write_bucket_fastas(
             for name in bucket.sequences:
                 seq_lines = records.get(name)
                 if seq_lines is None:
-                    continue
+                    raise ValueError(
+                        f"Sequence '{name}' in bucket {bucket.index} "
+                        f"was not found in the reference FASTA "
+                        f"({full_fasta}). The .fai index and FASTA "
+                        f"disagree — the reference may be corrupt."
+                    )
                 f.write(f">{name}\n")
                 f.write("\n".join(seq_lines))
                 f.write("\n")
