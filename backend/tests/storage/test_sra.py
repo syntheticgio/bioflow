@@ -160,6 +160,44 @@ class TestMetadataMapping:
         meta = sra.parse_experiment_xml(chipseq_xml).to_metadata()
         assert meta["sra_chromatin_factor"] == "TbDMT"
 
+    def test_library_source_maps_to_our_vocabulary(self, chipseq_xml):
+        meta = sra.parse_experiment_xml(chipseq_xml).to_metadata()
+        assert meta["library_source"] == "Genomic"  # SRA writes "GENOMIC"
+
+    def test_library_source_derives_molecule_type(self, chipseq_xml):
+        meta = sra.parse_experiment_xml(chipseq_xml).to_metadata()
+        assert meta["molecule_type"] == "DNA"
+
+    def test_transcriptomic_source_maps_to_rna(self):
+        m = sra.SraMetadata(library_source="TRANSCRIPTOMIC")
+        out = m.to_metadata()
+        assert out["library_source"] == "Transcriptomic"
+        assert out["molecule_type"] == "RNA"
+
+    def test_metagenomic_and_synthetic_map_to_dna(self):
+        assert sra.SraMetadata(library_source="METAGENOMIC").to_metadata()["molecule_type"] == "DNA"
+        assert sra.SraMetadata(library_source="SYNTHETIC").to_metadata()["molecule_type"] == "DNA"
+
+    def test_metatranscriptomic_and_viral_rna_map_to_rna(self):
+        assert sra.SraMetadata(library_source="METATRANSCRIPTOMIC").to_metadata()["molecule_type"] == "RNA"
+        assert sra.SraMetadata(library_source="VIRAL RNA").to_metadata()["molecule_type"] == "RNA"
+
+    def test_unrecognized_source_passes_through_but_molecule_type_is_other(self):
+        """Losing information to an incomplete lookup table would be worse than
+        showing SRA's own wording -- same rule test_unknown_strategy_passes_through_unchanged
+        applies to assay. molecule_type has no free-text escape hatch (it is a
+        closed field), so an unrecognized source becomes "Other" there instead."""
+        m = sra.SraMetadata(library_source="OTHER EXOTIC THING")
+        out = m.to_metadata()
+        assert out["library_source"] == "OTHER EXOTIC THING"
+        assert out["molecule_type"] == "Other"
+
+    def test_no_library_source_emits_neither_key(self):
+        m = sra.SraMetadata(library_strategy="WGS")
+        out = m.to_metadata()
+        assert "library_source" not in out
+        assert "molecule_type" not in out
+
 
 class TestAccessionResolution:
     def test_explicit_metadata_beats_the_filename(self):
