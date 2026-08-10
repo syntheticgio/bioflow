@@ -8,6 +8,7 @@ interface Props {
   value: Record<string, unknown>;
   formatKind: string;
   role: ObjectRole | null;
+  objectId: string;
   onSave: (next: Record<string, unknown>) => void;
   saving?: boolean;
   /**
@@ -38,6 +39,7 @@ export function SchemaMetadataEditor({
   value,
   formatKind,
   role,
+  objectId,
   onSave,
   saving,
   onDirtyChange,
@@ -55,6 +57,8 @@ export function SchemaMetadataEditor({
   const [custom, setCustom] = useState<Custom[]>([]);
   const [dirty, setDirty] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [inferring, setInferring] = useState(false);
+  const [inferBasis, setInferBasis] = useState<string | null>(null);
 
   const schemaKeys = new Set(
     (schema?.groups ?? []).flatMap((g) => g.fields.map((f) => f.key)),
@@ -104,6 +108,19 @@ export function SchemaMetadataEditor({
     setDirty(false);
   };
 
+  const inferMoleculeType = async (objectId: string) => {
+    setInferring(true);
+    try {
+      const result = await api.inferMoleculeType(objectId);
+      if (result.molecule_type) {
+        setField("molecule_type", result.molecule_type);
+      }
+      setInferBasis(result.basis);
+    } finally {
+      setInferring(false);
+    }
+  };
+
   if (!schema) {
     return <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Loading fields…</div>;
   }
@@ -136,12 +153,31 @@ export function SchemaMetadataEditor({
             <div className="meta-group" key={group.group}>
               <div className="meta-group-title">{group.group}</div>
               {visible.map((f) => (
-                <FieldInput
-                  key={f.key}
-                  field={f}
-                  value={values[f.key]}
-                  onChange={(v) => setField(f.key, v)}
-                />
+                <div key={f.key}>
+                  <FieldInput
+                    field={f}
+                    value={values[f.key]}
+                    onChange={(v) => setField(f.key, v)}
+                  />
+                  {f.key === "molecule_type" && formatKind === "fastq" && (
+                    <div style={{ marginTop: -4, marginBottom: 7, fontSize: 12 }}>
+                      <button
+                        type="button"
+                        className="btn"
+                        style={{ padding: "2px 8px", fontSize: 12 }}
+                        disabled={inferring}
+                        onClick={() => inferMoleculeType(objectId)}
+                      >
+                        {inferring ? "Sampling…" : "Infer from FASTQ"}
+                      </button>
+                      {inferBasis && (
+                        <span style={{ color: "var(--text-faint)", marginLeft: 6 }}>
+                          {inferBasis}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           );
