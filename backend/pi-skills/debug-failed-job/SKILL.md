@@ -21,10 +21,20 @@ not produce its expected output.
    - **Tool failures** — tool not installed (`needs_install`), resource
      limits (memory/OOM, disk), or a tool version mismatch. The fix is
      install/pin the tool, retry with fewer threads, or free disk.
-3. Suggest the concrete fix and offer to retry. If the job is stuck rather
-   than failed, `bioflow_cancel_job(job_id)` may be the right move before
-   relaunching.
-4. For a freshly failed run, check `bioflow_suggest_next` on the input
+3. Suggest the concrete fix and say exactly what to rerun:
+   - **Input problems** — the fix is on the data side (re-upload,
+     re-download, correct params); rerun the same job once the input is
+     fixed.
+   - **Tool not installed** (`needs_install`) — check
+     `bioflow_list_tools()` for what is missing, install it, then rerun.
+   - **Resource limits** (memory/OOM, disk) — retry with fewer threads or
+     free disk; the job may need the input split or the tool's resource
+     settings changed.
+   - **Tool version mismatch** — pin or update the tool, then rerun.
+   State the job kind and the object to rerun, not just "try again".
+4. If the job is stuck rather than failed, `bioflow_cancel_job(job_id)`
+   may be the right move before relaunching.
+5. For a freshly failed run, check `bioflow_suggest_next` on the input
    object — it will say whether the input is actually runnable, which
    distinguishes "the tool is broken" from "this object was never runnable".
 

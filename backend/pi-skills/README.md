@@ -26,4 +26,13 @@ BioFlow.
 - `run-qc` — assess raw read quality before anything else
 - `interpret-multiqc` — explain a QC report in plain terms
 - `suggest-next-steps` — what should the user run next
-- `debug-failed-job` — diagnose a failed or stuck job
+- `debug-failed-job` — diagnose a failed or stuck job, and say what to rerun
+- `drive-pipelines` — the general pattern for running any BioFlow pipeline
+- `interpret-alignment` — mapping rate, coverage, and whether an alignment is good enough
+- `variant-analysis` — variants vs a reference genome
+- `bioflow-database-access` — how to reach NCBI, EBI/Ensembl/UniProt, and literature
+
+## External servers (installed in the image, wired via AGENT_EXTRA_MCP_SERVERS)
+
+- `fetch` — web content and literature verification (`mcp-server-fetch`)
+- `datasets` — NCBI Datasets assembly/taxonomy browsing and downloads (`ncbi-datasets-mcp`)
