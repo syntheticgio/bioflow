@@ -66,3 +66,26 @@ class TestApplicability:
         got = applicability(_obj(metadata={"assay": "WGS"}))
         assert got.gene_body is False
         assert got.feature_distribution is False
+
+    def test_explicit_rna_molecule_type_beats_a_conflicting_assay(self):
+        """The two adjacent-strength signals, in direct conflict: an
+        explicit molecule_type must win even when assay disagrees, not just
+        when assay is absent (the existing molecule_type tests never supply
+        a conflicting assay, so this is the only test proving that specific
+        ordering rather than assuming it from disjoint fixtures)."""
+        got = applicability(
+            _obj(metadata={"molecule_type": "RNA", "assay": "WGS"})
+        )
+        assert got.gene_body is True
+        assert got.feature_distribution is True
+        assert got.reason == "molecule_type"
+
+    def test_rnaseq_assay_beats_a_conflicting_aligner(self):
+        """The other adjacent pairing: assay must win over aligned_by even
+        when they disagree, not just when aligned_by is absent."""
+        got = applicability(
+            _obj(metadata={"assay": "WGS"}, facts={"aligned_by": "star"})
+        )
+        assert got.gene_body is False
+        assert got.feature_distribution is False
+        assert got.reason is None
