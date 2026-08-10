@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { accessionUrl } from "../lib/format";
+import { BuscoChart } from "./BuscoChart";
 
 interface Props {
   facts: Record<string, unknown>;
@@ -482,6 +483,16 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
               </>
             )}
           </dl>
+          {singlePct !== undefined && duplicatedPct !== undefined
+            && fragmentedPct !== undefined && missingPct !== undefined && (
+            <BuscoChart
+              singlePct={singlePct}
+              duplicatedPct={duplicatedPct}
+              fragmentedPct={fragmentedPct}
+              missingPct={missingPct}
+              total={completenessTotal}
+            />
+          )}
           {/* Duplicated percentage is the haplotypic-duplication signal, and
               a single headline "complete" number throws it away -- worth
               flagging when it is large enough to matter rather than left to
