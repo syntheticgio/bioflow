@@ -1000,6 +1000,7 @@ export interface ReferenceOption {
   size: number;
   role: ObjectRole | null;
   indexes: IndexStatus;
+  index_ids: Record<string, string>;  // aligner name → sidecar object id, for download links
 }
 
 export interface AlignRequest {

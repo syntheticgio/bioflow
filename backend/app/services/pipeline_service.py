@@ -1104,11 +1104,21 @@ async def reference_index_status(reference: DataObject) -> dict:
 
     sidecars = await object_service.list_sidecars(reference.id, owner=reference.owner)
     have = {s.sidecar_role for s in sidecars if s.sidecar_role}
+    # Map each built index to its sidecar object id so the frontend can offer
+    # download buttons. A role not in the map simply has no download link.
+    role_to_aligner = {v: k.value for k, v in aligners.INDEX_ROLE.items()}
+    index_ids: dict[str, str] = {}
+    for s in sidecars:
+        if s.sidecar_role and s.sidecar_role in role_to_aligner:
+            index_ids[role_to_aligner[s.sidecar_role]] = str(s.id)
+        elif s.sidecar_role == SidecarRole.FAI:
+            index_ids["fai"] = str(s.id)
     return {
         aligner.value: aligners.INDEX_ROLE[aligner] in have for aligner in Aligner
     } | {
         "fai": SidecarRole.FAI in have,
         "star_annotated": SidecarRole.STAR_ANNOTATED_INDEX in have,
+        "index_ids": index_ids,
     }
 
 
