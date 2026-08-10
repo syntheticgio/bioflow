@@ -850,7 +850,15 @@ export interface AlignParams {
   threads: number;
   sort_memory_mb: number;
   mark_duplicates: boolean;
-  preset?: AlignPreset | "";
+  // AlignPreset | "" would be accurate for minimap2/winnowmap alone, whose
+  // fixed vocabularies MINIMAP2_PRESETS/WINNOWMAP_PRESETS the backend
+  // actually validates against -- but align_params.BaseAlignParams.preset is
+  // a bare `str = ""` with no fixed vocabulary, and bwa-mem2's organism
+  // presets (AlignerSchema.presets, an open Record<string, AlignerPreset>)
+  // write arbitrary ids like "human" into this same field. Widened to match
+  // what the backend actually accepts, at the cost of losing autocomplete
+  // for the minimap2/winnowmap literals.
+  preset?: AlignPreset | string;
   sensitivity?: string;
   local?: boolean;
   maxins?: number;
