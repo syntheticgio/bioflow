@@ -544,6 +544,15 @@ async def verify_files(ctx: JobContext) -> dict:
             {"checked": len(blobs), "missed": miss_total, "path": home.path},
             owner=keys.SYSTEM_OWNER,
         )
+        # Advance last_verified_at for blobs that were confirmed present so
+        # they rotate out of the oldest-first selection and the rest of the
+        # library can be checked.  Without this a transient mount glitch
+        # that persists for minutes stalls the entire verification rotation.
+        present_ids = [b.id for b, s in zip(blobs, stats.values()) if s is not None]
+        if present_ids:
+            await Blob.find(
+                {"_id": {"$in": present_ids}}
+            ).update({"$set": {"last_verified_at": now, "updated_at": now}})
         return {
             "skipped": True,
             "reason": "mass_miss_circuit_breaker",
@@ -661,15 +670,37 @@ async def verify_files(ctx: JobContext) -> dict:
             continue
 
         recovered += 1
-        await blob.set(
-            {
-                Blob.state: BlobState.PRESENT,
-                Blob.miss_count: 0,
-                Blob.last_miss_at: None,
-                Blob.last_verified_at: now,
-                Blob.updated_at: now,
-            }
-        )
+        updates = {
+            Blob.state: BlobState.PRESENT,
+            Blob.miss_count: 0,
+            Blob.last_miss_at: None,
+            Blob.last_verified_at: now,
+            Blob.updated_at: now,
+        }
+        # An external blob that recovered must still be checked for size
+        # or mtime drift — a file that was replaced while marked MISSING
+        # is the same silent-data-loss class as one that changed while
+        # PRESENT, and the main pass's external-drift check never reached
+        # a MISSING blob.
+        if blob.storage is BlobStorage.EXTERNAL and blob.observed_size is not None:
+            if stat.st_size != blob.observed_size or (
+                blob.observed_mtime is not None
+                and abs(stat.st_mtime - blob.observed_mtime) > 1.0
+            ):
+                updates[Blob.state] = BlobState.QUARANTINED
+                log.warning(
+                    "external_blob_drifted_on_recovery",
+                    digest=blob.id,
+                    path=str(_path_for(blob)),
+                    recorded_size=blob.observed_size,
+                    actual_size=stat.st_size,
+                )
+                await queue_mod.publish_event(
+                    "blob.drifted",
+                    {"sha256": blob.id, "path": str(_path_for(blob))},
+                    owner=keys.SYSTEM_OWNER,
+                )
+        await blob.set(updates)
         # Scoped to status == MISSING, not every object referencing this blob:
         # an object could have moved to ERROR for an unrelated reason since,
         # and this heal should not paper over that.
@@ -708,6 +739,10 @@ async def gc_blobs(ctx: JobContext) -> dict:
 
     External blobs are never unlinked -- we do not own files the user registered
     in place, so only the database record is removed.
+
+    Each managed blob is claimed atomically before unlinking: a find_one_and_update
+    sets ref_count to a tombstone (-1) only when it is still ≤ 0, closing the race
+    between the GC query and the unlink.
     """
     import asyncio
 
@@ -728,19 +763,31 @@ async def gc_blobs(ctx: JobContext) -> dict:
     for blob in candidates:
         ctx.check_cancel()
         if blob.storage is BlobStorage.EXTERNAL:
-            await blob.delete()
+            # Atomically claim this external record — re-check ref_count at
+            # delete time so a re-reference between query and delete doesn't
+            # silently remove a live blob record.
+            claimed = await Blob.find_one(
+                Blob.id == blob.id, Blob.ref_count <= 0
+            ).delete()
+            continue
+        # Atomically claim the managed blob for deletion: set ref_count to
+        # a tombstone only if it is still ≤ 0.  If nothing was matched the
+        # blob was re-referenced between query and claim — skip it.
+        claimed = await Blob.find_one(
+            Blob.id == blob.id, Blob.ref_count <= 0
+        ).update({"$set": {Blob.ref_count: -1}})
+        if claimed is None:
             continue
         if await asyncio.to_thread(cas.unlink_blob, blob.id):
             unlinked += 1
-        await blob.delete()
+        await Blob.find_one(Blob.id == blob.id).delete()
 
     # External records with no references carry no bytes to reclaim.
-    external_pruned = 0
-    async for blob in Blob.find(
+    # Batch-delete in one round trip rather than N+1 per-blob deletes.
+    external_result = await Blob.find(
         Blob.ref_count <= 0, Blob.storage == BlobStorage.EXTERNAL
-    ):
-        await blob.delete()
-        external_pruned += 1
+    ).delete()
+    external_pruned = external_result.deleted_count
 
     if unlinked or external_pruned:
         log.info("gc_completed", unlinked=unlinked, external_pruned=external_pruned)
@@ -778,12 +825,16 @@ async def reap_uploads(ctx: JobContext) -> dict:
     max_age_hours = float(ctx.payload.get("max_age_hours", 24))
     cutoff = datetime.now(UTC) - timedelta(hours=max_age_hours)
 
-    active_ids = {
-        str(s.id)
-        for s in await UploadSession.find(
-            {"state": {"$in": [UploadState.OPEN.value, UploadState.ASSEMBLING.value]}}
-        ).to_list()
-    }
+    try:
+        active_ids = {
+            str(s.id)
+            for s in await UploadSession.find(
+                {"state": {"$in": [UploadState.OPEN.value, UploadState.ASSEMBLING.value]}}
+            ).to_list()
+        }
+    except Exception:
+        log.warning("reap_uploads_db_unavailable", exc_info=True)
+        return {"skipped": True, "reason": "db_unavailable"}
 
     removed = 0
     staging_root = settings.staging_dir
