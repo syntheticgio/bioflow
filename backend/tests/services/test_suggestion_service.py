@@ -113,6 +113,7 @@ def _fake_obj(
     obj_id="abc123",
     status=ObjectStatus.READY,
     project_id="proj1",
+    role=None,
 ):
     """A stand-in for DataObject carrying only what the rules read.
 
@@ -139,6 +140,9 @@ def _fake_obj(
         # suggestions_for now calls for every BAM/SAM/CRAM to build the
         # consensus card's alignment_target.
         derived_from=[],
+        # Read by build_preprocess_card to flag already-trimmed reads as
+        # unavailable for re-trimming; None means "not a trim output".
+        role=role,
     )
 
 
