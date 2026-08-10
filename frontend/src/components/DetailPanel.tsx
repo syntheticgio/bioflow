@@ -1198,6 +1198,20 @@ function QcTab({
 }
 
 /** What the file is and where it came from. */
+
+// Confidence of format detection. The raw enum values are jargon and read
+// as bugs; map them to short human-readable labels.
+const CONFIDENCE_LABELS: Record<string, string> = {
+  magic: "Identified from contents",
+  extension: "Guessed from filename",
+  user: "Set by user",
+  none: "Unknown",
+};
+
+function confidenceLabel(raw: string): string {
+  return CONFIDENCE_LABELS[raw] ?? raw;
+}
+
 function MetadataTab({
   obj,
   isReference,
@@ -1232,7 +1246,7 @@ function MetadataTab({
             <dt>Compression</dt>
             <dd>{compression ?? "None"}</dd>
             <dt>Confidence</dt>
-            <dd>{obj.format.confidence}</dd>
+            <dd>{confidenceLabel(obj.format.confidence)}</dd>
             {obj.format.detected_at && (
               <>
                 <dt>Detected at</dt>
