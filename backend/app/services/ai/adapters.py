@@ -269,7 +269,12 @@ class OpenAICompatAdapter(_BaseAdapter):
         if not isinstance(text, str) or not text.strip():
             return Failure(FailureReason.BAD_RESPONSE)
 
-        return Completion(text.strip(), model)
+        # Trust the server's own claim about which model answered over the
+        # requested one: OpenAI-compatible local servers (mlx_lm, LM Studio)
+        # can keep serving a previously-loaded model while accepting a new
+        # `model` field in the request, and the UI shows this name.
+        served_model = result.get("model") or model
+        return Completion(text.strip(), served_model)
 
     def list_models(self) -> list[str] | Failure:
         result = self._request(
