@@ -145,6 +145,7 @@ _STEP_VERBS: dict[str, str] = {
     "assess_assembly_errors": "assessed for assembly errors with",
     "assess_assembly_qv": "assessed for k-mer QV with",
     "assess_assembly_continuity": "assessed for continuity with",
+    "analyze_synteny": "aligned for synteny with",
     "download_sra_run": "downloaded from the SRA",
     "download_assembly": "downloaded from NCBI",
     "download_uniprot": "downloaded from UniProt",

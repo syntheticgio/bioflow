@@ -1285,6 +1285,106 @@ def build_misassembly_card(obj, references) -> SuggestionCard | None:
     )
 
 
+def build_synteny_card(obj, references) -> SuggestionCard | None:
+    """Whole-genome synteny alignment of a draft assembly against a
+    reference, by minimap2, for a synteny dot plot.
+
+    Anchored on the draft, `references` reused verbatim from the
+    orchestrator's `scaffold_references` -- the identical input shape
+    `build_scaffold_card` and `build_misassembly_card` take beside it (a
+    draft assembly plus the project's reference-role FASTA, already
+    excluding the draft from its own candidate pool). Deliberately not a
+    separate listing query: this is the third card fed by that one shared
+    list, following the established precedent rather than re-deriving the
+    same "role=REFERENCE, FASTA, not this object" filter a third time.
+
+    Unlike its two siblings, this dedups `references` by `blob_sha256`
+    before applying the ambiguity gate. Two separate `DataObject` uploads of
+    byte-identical content are possible in this system -- `object_service`
+    always inserts a new object row before checking blob-level dedup
+    (`object_service.py` around the `find_present_blob_by_content` call), so
+    dedup there only avoids storing the bytes twice, not the object record --
+    and without this step a project holding the same reference genome
+    uploaded twice would see this card refuse as "2 reference assemblies"
+    for what is, on disk, exactly one. `build_scaffold_card` and
+    `build_misassembly_card` do not do this today; that is an existing gap
+    in both, not something this card's own behavior depends on, and fixing
+    it for them is out of scope here.
+
+    Same "ambiguity is unavailable, not a guess" rule `build_misassembly_card`
+    documents: more than one distinct reference is refused rather than
+    picked, since a card cannot host a chooser (`SuggestionCard.launch`'s own
+    docstring: `body` must be the complete request). The manual Synteny
+    dialog, which carries its own reference chooser, is where the launch
+    happens when this card is unavailable for that reason.
+
+    `category="ASSEMBLY_QC"`, matching the misassembly and completeness
+    cards -- this evaluates an assembly against a reference rather than
+    improving the assembly itself, unlike the `REFERENCE_ASSEMBLY` cards
+    (polish, scaffold) beside it in this module.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "Compare to reference (synteny)"
+    description = (
+        "Align this assembly against a reference genome and plot it as a "
+        "synteny dot plot -- breaks, inversions and translocations show up "
+        "as visual discontinuities from the diagonal, with minimap2."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="synteny",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    tool = tools.minimap2()
+    if not tool.available:
+        return unavailable(tool.error or "minimap2 is not installed.")
+
+    if not references:
+        return unavailable(
+            "Synteny analysis needs a reference genome to compare against, "
+            "and this project has none."
+        )
+
+    # Dedup by content: two object records can share one blob (see
+    # docstring above). A digest missing from an unwritten fixture or a
+    # not-yet-hashed object collapses onto `None`, so at most one such
+    # object survives the dedup rather than each counting separately.
+    distinct = list({getattr(o, "blob_sha256", None): o for o in references}.values())
+
+    if len(distinct) > 1:
+        return unavailable(
+            f"This project has {len(distinct)} reference assemblies. Use "
+            "the Synteny tool to pick one."
+        )
+
+    reference = distinct[0]
+    return SuggestionCard(
+        kind="synteny",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"Reference: {reference.name}.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/synteny",
+            "body": {
+                "draft_object_id": str(obj.id),
+                "reference_object_id": str(reference.id),
+            },
+        },
+    )
+
+
 def build_assembly_error_card(
     obj, alignments: tuple[list, list, list] | None
 ) -> SuggestionCard | None:
@@ -1852,6 +1952,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
         ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
         ("gc_tracks", lambda: build_gc_tracks_card(obj)),
+        ("synteny", lambda: build_synteny_card(obj, scaffold_references)),
         ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
         ("assembly_qv", lambda: build_qv_card(obj, all_read_sets)),
         (

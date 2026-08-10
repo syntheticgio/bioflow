@@ -469,6 +469,98 @@ class TestApplyAssessMisassemblies:
         assert refreshed.updated_at == before
 
 
+class TestApplyAnalyzeSynteny:
+    """`_apply_analyze_synteny` -- facts merged onto the draft assembly
+    minimap2 aligned, read-only like misassemblies' applier.
+
+    A dispatch-table registration test is included here because a missing
+    `_APPLIERS` entry is exactly the silent-skip failure this repo's own
+    CLAUDE.md documents for hand-maintained registries keyed by a job-type
+    string: `apply()` looks up the handler with `.get(...)` and simply does
+    nothing when it is absent, so the job reports success, minimap2 really
+    ran, and the parsed alignment never reaches the object -- with nothing
+    in the suite failing to say so unless this test exists.
+    """
+
+    def test_dispatch_table_includes_the_new_type(self):
+        assert "analyze_synteny" in results._APPLIERS
+        assert results._APPLIERS["analyze_synteny"] is results._apply_analyze_synteny
+
+    async def test_facts_are_merged_onto_the_object(self):
+        owner = "results-synteny-a"
+        assembly = await _parent(owner, "draft.fasta")
+
+        await results._apply_analyze_synteny(
+            {
+                "object_id": str(assembly.id),
+                "facts": {
+                    "synteny_alignment": {
+                        "reference_object_id": "ref-id",
+                        "reference_name": "GCF_000146045.2",
+                        "divergence": "same_species",
+                        "target_lengths": {"chrI": 230218},
+                        "query_lengths": {"contig_1": 812430},
+                        "segments": [
+                            ["chrI", 0, 5000, "contig_1", 0, 5000, "+"],
+                        ],
+                    }
+                },
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        alignment = refreshed.facts["synteny_alignment"]
+        assert alignment["reference_name"] == "GCF_000146045.2"
+        assert alignment["segments"] == [["chrI", 0, 5000, "contig_1", 0, 5000, "+"]]
+
+    async def test_preserves_existing_facts_on_the_object(self):
+        """Merged, not replaced -- contiguity facts already on the object
+        from ingest-time `_parse_fasta` must survive a synteny run landing
+        beside them."""
+        owner = "results-synteny-b"
+        assembly = await _parent(owner, "draft.fasta")
+        await assembly.set({DataObject.facts: {"sequence_n50": 200000}})
+
+        await results._apply_analyze_synteny(
+            {
+                "object_id": str(assembly.id),
+                "facts": {"synteny_alignment": {"segments": []}},
+            },
+            owner=owner,
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.facts["sequence_n50"] == 200000
+        assert refreshed.facts["synteny_alignment"] == {"segments": []}
+
+    async def test_missing_object_is_logged_not_raised(self):
+        """A deleted object between job launch and job completion must not
+        crash the applier -- the same posture every other applier in this
+        module takes."""
+        await results._apply_analyze_synteny(
+            {
+                "object_id": "000000000000000000000000",
+                "facts": {"synteny_alignment": {"segments": []}},
+            },
+            owner="nobody",
+        )
+
+    async def test_empty_facts_is_a_no_op(self):
+        """No facts means the applier has nothing to write -- skip the write
+        rather than merge an empty dict and bump updated_at for nothing."""
+        owner = "results-synteny-c"
+        assembly = await _parent(owner, "draft.fasta")
+        before = assembly.updated_at
+
+        await results._apply_analyze_synteny(
+            {"object_id": str(assembly.id), "facts": {}}, owner=owner
+        )
+
+        refreshed = await DataObject.get(assembly.id)
+        assert refreshed.updated_at == before
+
+
 class TestApplyAssessAssemblyErrors:
     """`_apply_assess_assembly_errors` -- CRAQ's facts merge onto the scored
     assembly exactly like misassemblies, plus an opt-in ingest of the

@@ -25,7 +25,10 @@ from app.pipelines import (
     craq_runner,
     gci_runner,
     merqury_runner,
+    polypolish_runner,
     quast_runner,
+    ragtag_runner,
+    synteny_runner,
     tools,
 )
 from app.queue.executor import run_subprocess
@@ -366,6 +369,115 @@ def _copy_report(ctx: JobContext, out_dir: Path) -> str | None:
     # repeats it names a path nothing was ever written to. Matches the
     # `qc_fastp_report`/`qc_fastqc_report` convention in pipeline_handlers.py.
     return "quast/report.html"
+
+
+# A single minimap2 whole-genome alignment, no separate report-generation
+# step -- the same class of job as assess_misassemblies (QUAST), which also
+# runs one external tool once and parses one output file. Matches
+# MISASSEMBLY_LEASE_SECONDS's hour rather than assess_completeness's three:
+# there is no lineage-scale miniprot/hmmsearch search here, just an alignment.
+SYNTENY_LEASE_SECONDS = 3600
+
+
+@handler(
+    "analyze_synteny",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT),
+    # One attempt: deterministic tool on deterministic input, so a retry
+    # fails the same way twice -- same reasoning assess_completeness gives.
+    max_attempts=1,
+)
+def analyze_synteny(ctx: JobContext) -> dict:
+    """Whole-genome synteny alignment of a draft assembly against a
+    reference, with minimap2.
+
+    Read-only like the other handlers in this module: no new object, only
+    facts merged onto the draft assembly that was aligned.
+
+    **minimap2 writes PAF to stdout, and `run_subprocess` cannot capture
+    stdout separately from stderr** -- it always redirects both into one
+    `log_path` file. `synteny_runner.build_synteny_command` returns a plain
+    argv for exactly this reason (see its own docstring), and this handler
+    wraps it with `polypolish_runner.redirect_stdout` before running it, the
+    same way polypolish's own alignment and polish steps send their stdout
+    output to a file instead of the shared log.
+    """
+    tool = tools.require(tools.minimap2())
+
+    work = _prepare_workdir(ctx, "synteny")
+
+    draft = _resolve_input(ctx.payload, "draft")
+    draft = _named_link(work, draft, ctx.payload.get("draft_name"))
+
+    reference = _resolve_input(ctx.payload, "reference")
+    reference = _named_link(work, reference, ctx.payload.get("reference_name"))
+
+    divergence = ctx.payload.get("divergence") or ragtag_runner.Divergence.SAME_SPECIES
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+
+    cmd = synteny_runner.build_synteny_command(
+        minimap2_path=tool.path,
+        reference=reference,
+        draft=draft,
+        divergence=divergence,
+        threads=threads,
+    )
+
+    paf_path = work / "alignment.paf"
+    redirect_cmd = polypolish_runner.redirect_stdout(cmd, paf_path)
+
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="starting", pct=None, message="starting minimap2")
+    ctx.extend_lease(SYNTENY_LEASE_SECONDS)
+
+    log.info(
+        "synteny_started",
+        job_id=ctx.job_id,
+        reference_object_id=ctx.payload.get("reference_object_id"),
+        divergence=divergence,
+        threads=threads,
+    )
+
+    code = run_subprocess(ctx, redirect_cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "minimap2")
+
+    if not paf_path.exists():
+        # Retryable, the same reasoning assess_misassemblies gives for a
+        # missing report.tsv: an exit-0 run with no PAF output is most
+        # plausibly a disk that filled during the final write.
+        # max_attempts=1 means this will not actually retry -- the class is
+        # what tells the user whether re-running is worth their time.
+        raise RetryableError("minimap2 exited successfully but wrote no PAF output")
+
+    parsed = synteny_runner.parse_paf(paf_path.read_text(errors="replace"))
+
+    facts = {
+        "synteny_alignment": {
+            "reference_object_id": ctx.payload.get("reference_object_id"),
+            "reference_name": ctx.payload.get("reference_name"),
+            "divergence": divergence,
+            **parsed,
+        }
+    }
+
+    ctx.progress(phase="done", pct=1.0, message="synteny alignment complete")
+    log.info(
+        "synteny_finished",
+        job_id=ctx.job_id,
+        segments=len(parsed.get("segments") or []),
+        partial=parsed.get("synteny_segments_partial", False),
+    )
+
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
+        "workdir": str(work),
+    }
 
 
 # CRAQ over pre-made BAMs skips the read-mapping step its own README calls

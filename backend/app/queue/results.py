@@ -1718,6 +1718,41 @@ async def _apply_analyze_gc_tracks(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_analyze_synteny(result: dict, *, owner: str) -> None:
+    """Record minimap2's synteny alignment on the draft assembly it
+    described.
+
+    Near-copy of `_apply_assess_misassemblies`: read-only, no files to
+    ingest, and the draft need not have been produced by a prior BioFlow
+    run -- an uploaded assembly is aligned exactly like one this application
+    produced.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("synteny_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    alignment = facts.get("synteny_alignment") or {}
+    log.info(
+        "synteny_applied",
+        object_id=object_id,
+        segments=len(alignment.get("segments") or []),
+        reference_id=alignment.get("reference_object_id"),
+    )
+
+
 async def _apply_assess_assembly_continuity(result: dict, *, owner: str) -> None:
     """Record GCI's continuity facts on the assembly they describe.
 
@@ -2535,6 +2570,7 @@ _APPLIERS = {
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
     "analyze_gc_tracks": _apply_analyze_gc_tracks,
+    "analyze_synteny": _apply_analyze_synteny,
     "assess_assembly_errors": _apply_assess_assembly_errors,
     "assess_assembly_qv": _apply_assess_assembly_qv,
     "assess_assembly_continuity": _apply_assess_assembly_continuity,
