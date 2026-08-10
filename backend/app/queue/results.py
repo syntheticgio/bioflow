@@ -1690,6 +1690,34 @@ async def _apply_assess_misassemblies(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_analyze_gc_tracks(result: dict, *, owner: str) -> None:
+    """Record per-contig GC content and skew tracks on the assembly."""
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("gc_tracks_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    gc_tracks = facts.get("gc_tracks") or {}
+    log.info(
+        "gc_tracks_applied",
+        object_id=object_id,
+        contigs=len(gc_tracks.get("contigs") or []),
+        partial=gc_tracks.get("gc_tracks_partial"),
+    )
+
+
 async def _apply_assess_assembly_continuity(result: dict, *, owner: str) -> None:
     """Record GCI's continuity facts on the assembly they describe.
 
@@ -2506,6 +2534,7 @@ _APPLIERS = {
     "assemble_reads": _apply_assemble_reads,
     "assess_completeness": _apply_assess_completeness,
     "assess_misassemblies": _apply_assess_misassemblies,
+    "analyze_gc_tracks": _apply_analyze_gc_tracks,
     "assess_assembly_errors": _apply_assess_assembly_errors,
     "assess_assembly_qv": _apply_assess_assembly_qv,
     "assess_assembly_continuity": _apply_assess_assembly_continuity,

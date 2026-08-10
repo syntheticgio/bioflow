@@ -3793,6 +3793,65 @@ async def launch_completeness(
     return job
 
 
+async def launch_gc_tracks(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+) -> Job:
+    """Queue GC content and GC skew track computation for one assembly.
+
+    Modelled on launch_completeness: single input, read-only, no run
+    record, no new RunJobRole.  The result is facts merged onto the
+    assembly, not a new object.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    _check_completeness_callable(obj)  # same gates: FASTA, not protein/transcript
+
+    digest, path = await _resolve_readable(obj)
+    if not digest and not path:
+        raise ValidationError(
+            f"{obj.name!r} has no stored content yet (status={obj.status.value})",
+            details={"object_id": str(obj.id)},
+        )
+
+    payload: dict = {
+        "object_id": str(obj.id),
+        "assembly_name": obj.name,
+    }
+    if digest:
+        payload["assembly_sha256"] = digest
+    if path:
+        payload["assembly_path"] = path
+    payload["compression"] = (obj.format.compression or "none").lower()
+
+    job = await queue.enqueue(
+        "analyze_gc_tracks",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"gc_tracks:{obj.id}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "GC track analysis is already queued or running for this assembly",
+            details={"object_id": str(obj.id)},
+        )
+
+    log.info(
+        "gc_tracks_launched",
+        job_id=str(job.id),
+        object_id=str(obj.id),
+    )
+    return job
+
+
 async def launch_consensus(
     *,
     bam_object_id: PydanticObjectId,
