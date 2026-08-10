@@ -41,17 +41,17 @@ async def apply_chunked_alignment(result: dict, *, owner: str) -> None:
     )
 
     # Chain post-alignment pipeline (same as _apply_align_reads)
-    queue.enqueue(
+    await queue.enqueue(
         "index_bam",
         payload={"object_id": str(obj.id), "project_id": str(project_id)},
         owner=owner,
     )
-    queue.enqueue(
+    await queue.enqueue(
         "ingest_headers",
         payload={"object_id": str(obj.id), "project_id": str(project_id)},
         owner=owner,
     )
-    queue.enqueue(
+    await queue.enqueue(
         "run_bam_stats",
         payload={"object_id": str(obj.id), "project_id": str(project_id)},
         owner=owner,

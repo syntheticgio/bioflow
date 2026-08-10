@@ -25,6 +25,7 @@ from app.models import (
     RunJobRole,
     SidecarRole,
 )
+from app.models.job import Job
 from app.pipelines.aligners import Aligner
 from app.queue.chunked_align_results import apply_chunked_alignment as _apply_chunked_alignment
 from app.queue.queue import publish_event
@@ -1216,6 +1217,77 @@ def align_provenance(*, result: dict, reads_facts: dict | None) -> dict:
     if chemistry:
         provenance["qc_read_chemistry"] = chemistry
     return provenance
+
+
+async def _apply_align_reads_chunked(result: dict, *, owner: str) -> None:
+    """Resolve per-bucket sub-job BAMs and enqueue merge_chunked_buckets.
+
+    The orchestrator returns sub_job_ids but does not enqueue the merge itself
+    (it runs in async mode with no DB access to find output objects by sub-job
+    id). This applier resolves each succeeded sub-job, collects its BAM path,
+    and enqueues the merge handler.
+    """
+    from app.queue import queue
+
+    sub_job_ids = result.get("sub_job_ids") or []
+    if not sub_job_ids:
+        log.warning("chunked_orchestrator_no_sub_jobs")
+        return
+
+    bucket_bam_paths: list[str] = []
+    for jid in sub_job_ids:
+        try:
+            job = await Job.get(PydanticObjectId(jid))
+        except Exception:
+            log.warning("chunked_orchestrator_sub_job_lookup_failed", job_id=jid)
+            continue
+        if job is None or job.state != JobState.SUCCEEDED:
+            log.warning(
+                "chunked_orchestrator_sub_job_not_succeeded",
+                job_id=jid,
+                state=job.state.value if job else "missing",
+            )
+            continue
+        job_result = job.result or {}
+        output = job_result.get("output") or {}
+        tmp_path = output.get("tmp_path")
+        if not tmp_path:
+            log.warning("chunked_orchestrator_sub_job_no_output_path", job_id=jid)
+            continue
+        bucket_bam_paths.append(tmp_path)
+
+    if not bucket_bam_paths:
+        log.error(
+            "chunked_orchestrator_no_bams_found",
+            sub_job_ids=sub_job_ids,
+            expected=len(sub_job_ids),
+        )
+        return
+
+    output_name = result.get("output_name") or "merged.bam"
+
+    merge_payload: dict = {
+        "bucket_bam_paths": bucket_bam_paths,
+        "output_name": output_name,
+        "reference_id": result.get("reference_id"),
+        "project_id": result.get("project_id"),
+        "reads_object_id": result.get("reads_object_id"),
+        "aligner": result.get("aligner"),
+        "params": result.get("params"),
+        "bucket_count": result.get("bucket_count"),
+    }
+
+    await queue.enqueue(
+        "merge_chunked_buckets",
+        payload=merge_payload,
+        owner=owner,
+    )
+
+    log.info(
+        "chunked_orchestrator_applied",
+        sub_job_count=len(sub_job_ids),
+        bam_count=len(bucket_bam_paths),
+    )
 
 
 async def _apply_align_reads(result: dict, *, owner: str) -> None:
@@ -2421,6 +2493,7 @@ _APPLIERS = {
     "download_assembly": _apply_assembly_download,
     "download_uniprot": _apply_uniprot_download,
     "build_index": _apply_build_index,
+    "align_reads_chunked": _apply_align_reads_chunked,
     "merge_chunked_buckets": _apply_chunked_alignment,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
