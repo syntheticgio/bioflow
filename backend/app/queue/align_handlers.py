@@ -827,9 +827,23 @@ def run_bam_stats(ctx: JobContext) -> dict:
         raise _failure(code, depth_path, "samtools depth")
 
     contig_lengths = [(c["contig"], c["length"]) for c in contigs]
+
+    # Mean depth is already known from `samtools coverage`, two phases back,
+    # so the histogram's axis can be sized before the depth pass rather than
+    # needing a second one.
+    provisional = bam_stats_runner.genome_summary(contigs=contigs, bins=[])
+    bucket_width = bam_stats_runner.histogram_bucket_width(
+        mean_depth=provisional["mean_depth"]
+    )
+    histogram = (
+        bam_stats_runner.DepthHistogram(bucket_width=bucket_width)
+        if bucket_width is not None
+        else None
+    )
+
     with open(depth_path, errors="replace") as fh:
         bins, boundaries = bam_stats_runner.bin_depth(
-            contig_lengths=contig_lengths, depth_lines=fh
+            contig_lengths=contig_lengths, depth_lines=fh, histogram=histogram
         )
 
     cumulative = bam_stats_runner.cumulative_coverage(
@@ -854,6 +868,16 @@ def run_bam_stats(ctx: JobContext) -> dict:
         "bam_stats_coverage_bins": bins,
         "bam_stats_coverage_boundaries": boundaries,
         "bam_stats_cumulative": cumulative,
+        # Absent rather than empty when there is no usable mean depth, so the
+        # frontend can tell "not computed" from "measured as flat".
+        **(
+            {
+                "bam_stats_depth_histogram": histogram.to_facts(),
+                "bam_stats_depth_bucket_width": bucket_width,
+            }
+            if histogram is not None
+            else {}
+        ),
         "bam_stats_contigs_top": top_n,
         "bam_stats_report": report_name,
     }
