@@ -181,7 +181,7 @@ async def test_multiple_spine_parents_record_a_branch():
     chain = await walk(asm.id, owner=OWNER)
 
     assert chain.branches
-    assert set(chain.branches[0]) == {long_reads.id, short_reads.id}
+    assert set(chain.branches[0][1:]) == {long_reads.id, short_reads.id}
 
 
 async def test_walk_is_owner_scoped():

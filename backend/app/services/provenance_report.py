@@ -71,6 +71,19 @@ _GAP_LABELS_BY_KIND: dict[GapKind, str] = {
     GapKind.DEPTH_EXCEEDED: "Ancestry beyond the depth limit",
 }
 
+# How to describe a branch convergence in a methods section. Keyed by
+# the merge-point's job_type. Mirror of `_STEP_VERBS` in the walker:
+# job types are open vocabulary, so an unmapped one falls back to a
+# generic phrase rather than raising.
+_BRANCH_MERGE_VERBS: dict[str, str] = {
+    "align_reads": "paired as mate pairs with",
+    "polish_assembly": "merged with",
+    "scaffold_assembly": "merged with",
+    "assemble_reads": "assembled together with",
+}
+
+_GENERIC_MERGE_VERB = "combined two inputs from"
+
 
 def is_step_level(gap: Gap) -> bool:
     """Whether a gap belongs inline on a step row.
@@ -185,11 +198,16 @@ def render_markdown(chain: ProvenanceChain) -> str:
     if chain.branches:
         lines.append("")
         for branch in chain.branches:
+            dest_id = branch[0]
+            parent_ids = branch[1:]
             names = ", ".join(
-                f"`{chain.nodes[b].name}`" for b in branch if b in chain.nodes
+                f"`{chain.nodes[b].name}`" for b in parent_ids if b in chain.nodes
             )
+            dest_node = chain.nodes.get(dest_id)
+            job_type = dest_node.produced_by.job_type if dest_node and dest_node.produced_by else None
+            verb = _BRANCH_MERGE_VERBS.get(job_type or "", _GENERIC_MERGE_VERB)
             lines.append(
-                f"- _This step combined two inputs (a branch in the lineage): {names}._"
+                f"- _This step {verb}: {names}._"
             )
 
     if supporting:
