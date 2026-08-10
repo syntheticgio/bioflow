@@ -14,6 +14,8 @@ every contig with nonzero length now gets at least 1 read of budget.
 `pysam.AlignmentFile` -- no BAM file needed.
 """
 
+from unittest.mock import patch
+
 from app.queue.transcript_qc_handlers import _sampling_plan
 
 
@@ -96,3 +98,21 @@ class TestSamplingPlanFloor:
         plan = _sampling_plan(af, budget=200_000)
 
         assert plan == [("chr1", 200_000)]
+
+    def test_no_log_when_no_contig_needed_the_floor(self):
+        """Ordinary rounding always makes planned_total != budget, but that
+        alone is not floor activity -- the log must stay silent unless a
+        contig's share actually truncated to zero and got bumped to 1."""
+        af = _FakeAlignmentFile({"chr1": 100_000, "chr2": 100_000, "chr3": 100_000})
+        with patch("app.queue.transcript_qc_handlers.log") as mock_log:
+            _sampling_plan(af, budget=200_000)
+            mock_log.info.assert_not_called()
+
+    def test_logs_floored_contig_count_when_floor_fires(self):
+        af = _FakeAlignmentFile({"chr1": 200_000_000, "scaffold_1": 500})
+        with patch("app.queue.transcript_qc_handlers.log") as mock_log:
+            _sampling_plan(af, budget=200_000)
+            mock_log.info.assert_called_once()
+            args, kwargs = mock_log.info.call_args
+            assert args[0] == "transcript_qc_sampling_plan_floored"
+            assert kwargs["floored_contigs"] == 1

@@ -145,20 +145,26 @@ def _sampling_plan(af, budget: int) -> list[tuple[str, int]]:
     if total <= 0:
         return [(c, budget) for c, _ in lengths[:1]]
     plan = []
+    floored = 0
     for contig, length in lengths:
         if length <= 0:
             continue
         share = int(budget * length / total)
-        plan.append((contig, share if share > 0 else 1))
+        if share > 0:
+            plan.append((contig, share))
+        else:
+            plan.append((contig, 1))
+            floored += 1
     if not plan:
         return [(lengths[0][0], budget)]
 
-    planned_total = sum(share for _, share in plan)
-    if planned_total != budget:
+    if floored > 0:
+        planned_total = sum(share for _, share in plan)
         log.info(
-            "transcript_qc_sampling_plan_shortfall",
+            "transcript_qc_sampling_plan_floored",
             budget=budget,
             planned_total=planned_total,
             contigs=len(plan),
+            floored_contigs=floored,
         )
     return plan
