@@ -1531,6 +1531,71 @@ async def launch_alignment(
     if reference.project_id != obj.project_id:
         raise ValidationError("Reads and reference must be in the same project")
 
+    # --- Chunked alignment path ---
+    chunked = merged_params.pop("chunked", False)
+    if chunked:
+        from app.queue.governor import LoadGovernor
+
+        spec = aligner_registry.spec_for(aligner)
+        if not spec.chunking_supported:
+            raise ValidationError(
+                f"{aligner.value} does not support chunked alignment"
+            )
+
+        fai_path = Path(settings.bioinfo_home) / "objects" / str(reference.id) / f"{reference.name}.fai"
+        if not fai_path.exists():
+            raise ValidationError("Reference has no .fai — cannot chunk")
+
+        governor = LoadGovernor()
+        budget_mb = int(governor.mem_budget_bytes() / (1024 * 1024))
+        sequences = _parse_fai(fai_path)
+
+        from app.pipelines.align_buckets import pack_buckets, write_bucket_fastas
+
+        fasta_path = blob_path(reference.blob_sha256) if reference.blob_sha256 else None
+        if not fasta_path or not fasta_path.exists():
+            raise ValidationError("Reference FASTA file not found — cannot chunk")
+
+        buckets = pack_buckets(
+            sequences=sequences,
+            memory_budget_mb=budget_mb,
+            per_base_index_mb=spec.memory_model.index_bytes_per_ref_base / (1024 * 1024),
+            fixed_overhead_mb=spec.memory_model.fixed_overhead_mb,
+            bytes_per_thread_mb=spec.memory_model.bytes_per_thread_mb,
+            threads=align_params.threads,
+            sort_memory_mb=align_params.sort_memory_mb,
+        )
+
+        if buckets is None:
+            # Single bucket — fall through to normal path below
+            pass
+        else:
+            cache_dir = settings.tmp_dir / "chunked-refs"
+            buckets = write_bucket_fastas(fasta_path, buckets, cache_dir)
+
+            return await queue.enqueue(
+                "align_reads_chunked",
+                owner=owner,
+                payload={
+                    "bucket_specs": [
+                        {"index": b.index, "sequences": b.sequences,
+                         "total_bases": b.total_bases, "estimated_mb": b.estimated_mb,
+                         "fasta_path": str(b.fasta_path)}
+                        for b in buckets
+                    ],
+                    "reference_id": str(reference.id),
+                    "reference_path": str(fasta_path),
+                    "reads": [{"name": obj.name, "path": str(obj.id)}],
+                    "aligner": aligner.value,
+                    "params": align_params.as_dict(),
+                    "project_id": str(obj.project_id),
+                    "owner": owner,
+                    "reads_object_id": str(obj.id),
+                },
+            )
+
+    # --- Normal (single-shot) path ---
+
     # The authoritative check. The dialog runs the same arithmetic for
     # immediacy, but it can be bypassed -- the API is directly callable -- and
     # its envelope goes stale if the host's load changes between opening the
