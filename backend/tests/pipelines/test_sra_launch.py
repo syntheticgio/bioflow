@@ -76,6 +76,16 @@ class TestIngestMetadata:
         assert meta["read_type"] == "paired-end"
         assert meta["assay"] == "ChIP-seq"
 
+    def test_library_source_and_molecule_type_flow_through_ingest(self):
+        run = RunInfo(
+            accession="SRR11768093",
+            library_strategy="ChIP-Seq",
+            library_source="GENOMIC",
+        )
+        meta = sra_service._ingest_metadata(run)
+        assert meta["library_source"] == "Genomic"
+        assert meta["molecule_type"] == "DNA"
+
     def test_single_end_layout_maps_through(self):
         meta = sra_service._ingest_metadata(
             RunInfo(accession="SRR1", library_layout="SINGLE")
