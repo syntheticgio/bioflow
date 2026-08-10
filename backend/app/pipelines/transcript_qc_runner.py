@@ -6,6 +6,7 @@ over strings and lists, with no queue, filesystem, or pysam involved. Mirrors
 bam_stats_runner.py's split for the same reason.
 """
 
+import bisect
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -110,3 +111,166 @@ def representative_transcripts(transcripts: list[Transcript]) -> list[Transcript
         if current is None or t.length > current.length:
             best[t.gene_id] = t
     return list(best.values())
+
+
+class GeneBodyCoverage:
+    """Mean coverage across transcript position, 5' to 3', over all genes.
+
+    Each read contributes to the bin holding its position *within the
+    transcript* -- spliced coordinates, so an intron never shifts a read
+    toward the 3' end -- and minus-strand transcripts are flipped so every
+    curve runs 5' to 3'. Without that flip half the genes run backwards and
+    averaging the two opposing gradients flattens the result to a
+    meaningless straight line.
+
+    A curve that climbs steeply toward the 3' end is the signature of RNA
+    degraded before sequencing: poly-A selection captures only the surviving
+    3' tail.
+    """
+
+    def __init__(self, bins: int = GENE_BODY_BINS):
+        self.bins = bins
+        self._sums = [0.0] * bins
+
+    def add_read(self, transcript: Transcript, position: int) -> None:
+        offset = transcript_offset(transcript, position)
+        if offset is None:
+            return
+        length = transcript.length
+        if length <= 0:
+            return
+        if transcript.strand == "-":
+            # The 5' end of a minus-strand transcript is its highest
+            # coordinate, so the offset measured in ascending coordinates
+            # runs 3'->5' and has to be reversed.
+            offset = length - 1 - offset
+        # Integer division rather than float(offset/length)*bins: floating
+        # point rounding on fraction*bins put a handful of positions in the
+        # wrong bin, which shows up as +/-1 count noise across an otherwise
+        # uniform curve.
+        idx = min(offset * self.bins // length, self.bins - 1)
+        self._sums[idx] += 1.0
+
+    def to_facts(self) -> list[dict]:
+        """Normalized to the curve's own maximum: absolute depth is reported
+        elsewhere, and the question here is shape."""
+        peak = max(self._sums, default=0.0)
+        if peak <= 0:
+            return []
+        return [
+            {"percentile": i, "coverage": round(v / peak, 4)}
+            for i, v in enumerate(self._sums)
+        ]
+
+
+def transcript_offset(transcript: Transcript, position: int) -> int | None:
+    """How far into the transcript a genomic position falls, in spliced
+    coordinates. None when the position is not inside an exon.
+
+    Genomic distance would be wrong for any spliced transcript: a read at the
+    start of a final exon beyond a 9 kb intron is at the transcript's
+    midpoint, not at 90% of its genomic span.
+    """
+    consumed = 0
+    for start, end in transcript.exons:
+        if start <= position <= end:
+            return consumed + (position - start)
+        consumed += end - start + 1
+    return None
+
+
+def build_feature_index(transcripts: list[Transcript]) -> dict:
+    """Per-contig sorted exon and gene-span intervals, for classification.
+
+    Sorted lists searched with bisect rather than a full interval tree: the
+    per-contig lists are small enough that the log-n lookup is not the
+    bottleneck (the BAM pass is), and there is no dependency to add.
+    """
+    exons: dict[str, list[tuple[int, int]]] = {}
+    genes: dict[str, dict[str, tuple[int, int]]] = {}
+    for t in transcripts:
+        exons.setdefault(t.contig, []).extend(t.exons)
+        start, end = t.span
+        by_gene = genes.setdefault(t.contig, {})
+        current = by_gene.get(t.gene_id)
+        by_gene[t.gene_id] = (
+            min(start, current[0]) if current else start,
+            max(end, current[1]) if current else end,
+        )
+
+    return {
+        "exons": {c: sorted(v) for c, v in exons.items()},
+        "genes": {c: sorted(v.values()) for c, v in genes.items()},
+    }
+
+
+def _covers(intervals: list[tuple[int, int]], position: int) -> bool:
+    """Whether any interval contains the position.
+
+    Intervals can overlap, so the candidate found by bisect is not
+    necessarily the containing one -- scan back while starts are still at or
+    below the position.
+    """
+    i = bisect.bisect_right(intervals, (position, float("inf")))
+    for start, end in reversed(intervals[:i]):
+        if end >= position:
+            return True
+        # Sorted by start; a run of non-covering intervals can still be
+        # followed by a long one that does, so only stop once starts are far
+        # enough back that nothing can reach.
+        if start < position - _MAX_FEATURE_SPAN:
+            break
+    return False
+
+
+# Longest interval we scan back through in _covers. Human introns reach ~2 Mb;
+# beyond this a position is treated as uncovered rather than walking the whole
+# contig for every read.
+_MAX_FEATURE_SPAN = 3_000_000
+
+
+def classify_position(index: dict, contig: str, position: int) -> str:
+    """Exonic, intronic, or intergenic for one alignment position.
+
+    Exonic wins when a position is both -- overlapping genes on opposite
+    strands are common, and mutually exclusive categories are what let the
+    three counts sum to the classified total.
+    """
+    if _covers(index["exons"].get(contig, []), position):
+        return "exonic"
+    if _covers(index["genes"].get(contig, []), position):
+        return "intronic"
+    return "intergenic"
+
+
+class FeatureCounts:
+    """Reads by genomic feature class.
+
+    For mRNA the exonic share should dominate; a high intronic share suggests
+    immature pre-mRNA, and a high intergenic share suggests genomic DNA
+    contamination.
+    """
+
+    def __init__(self):
+        self._counts = {"exonic": 0, "intronic": 0, "intergenic": 0}
+
+    def add(self, category: str) -> None:
+        self._counts[category] += 1
+
+    @property
+    def total(self) -> int:
+        return sum(self._counts.values())
+
+    def to_facts(self) -> dict:
+        return dict(self._counts)
+
+
+def contig_overlap(bam_contigs: set[str], gtf_contigs: set[str]) -> int:
+    """How many contig names the BAM and GTF share.
+
+    Zero is the classic silent failure -- a GTF naming contigs `1,2,3`
+    against a BAM naming them `chr1,chr2,chr3`. Every read then falls outside
+    every gene and the job produces a plausible-looking 100% intergenic
+    result with no error anywhere, so the caller refuses instead.
+    """
+    return len(bam_contigs & gtf_contigs)
