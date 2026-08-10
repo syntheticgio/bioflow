@@ -82,6 +82,22 @@ class TestAppLine:
         assert 'version = "0.2.0"' in text
         assert 'version = "9.9.9"' in text
 
+    def test_writes_a_prerelease_version(self, app_tree):
+        r = run_bump(app_tree, "app", "0.3.0-alpha")
+        assert r.returncode == 0, r.stderr
+
+        assert (app_tree / "VERSION").read_text() == "0.3.0-alpha\n"
+        assert '__version__ = "0.3.0-alpha"' in (
+            app_tree / "backend" / "app" / "version.py"
+        ).read_text()
+        assert 'version = "0.3.0-alpha"' in (
+            app_tree / "backend" / "pyproject.toml"
+        ).read_text()
+        assert (
+            json.loads((app_tree / "frontend" / "package.json").read_text())["version"]
+            == "0.3.0-alpha"
+        )
+
 
 class TestLauncherLine:
     def test_writes_cargo_and_package_json(self, launcher_tree):
@@ -111,3 +127,15 @@ class TestValidation:
         r = run_bump(tmp_path, "app", "0.2.0")
         assert r.returncode != 0
         assert "VERSION" in r.stderr
+
+    def test_rejects_a_bare_build_metadata_suffix(self, app_tree):
+        r = run_bump(app_tree, "app", "0.2.0-rc")
+        assert r.returncode != 0
+
+    def test_rejects_an_uppercase_suffix(self, app_tree):
+        r = run_bump(app_tree, "app", "0.2.0-ALPHA")
+        assert r.returncode != 0
+
+    def test_rejects_a_v_prefixed_version(self, app_tree):
+        r = run_bump(app_tree, "app", "v0.2.0")
+        assert r.returncode != 0

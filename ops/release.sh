@@ -6,7 +6,9 @@
 # and recovering from the second means deleting a pushed tag that CI has
 # already acted on. One command makes both states unreachable.
 #
-#   ops/release.sh app 0.2.0        -> tag v0.2.0
+#   ops/release.sh app 0.2.0        -> tag v0.2.0, branch release/0.2.0
+#   ops/release.sh app 0.3.0-alpha  -> tag v0.3.0-alpha, branch alpha/0.3.0
+#   ops/release.sh app 0.3.0-beta   -> tag v0.3.0-beta, branch beta/0.3.0
 #   ops/release.sh launcher 0.1.1   -> tag launcher-v0.1.1
 #
 # See VERSION.md for the operator's guide and what CI does with each tag.
@@ -86,15 +88,59 @@ bootstrap_git_cliff() {
 # --- preflight -------------------------------------------------------------
 # Every check refuses rather than warns, and names the precondition it tripped.
 
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-  || die "'$VERSION' is not semver MAJOR.MINOR.PATCH (no 'v', no -rc suffix)"
+VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+(-alpha|-beta)?$'
+[[ "$VERSION" =~ $VERSION_RE ]] \
+  || die "'$VERSION' is not semver MAJOR.MINOR.PATCH, optionally -alpha or -beta (no 'v', no -rc)"
 
 [ -z "$(git status --porcelain)" ] \
   || die "working tree is not clean -- commit or stash first"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[ "$BRANCH" = "main" ] \
-  || die "releases are cut from main, not '$BRANCH'"
+
+# Staged branches are an app-line mechanism (#107): the version suffix IS
+# the stage, and the release lands on alpha/X.Y.Z / beta/X.Y.Z /
+# release/X.Y.Z. The launcher line keeps its pre-existing behavior -- cut
+# from main, push main and the launcher-v tag, no stage branch.
+if [ "$LINE" = "app" ]; then
+  # CORE is the bare version the stage branch is named after: `alpha/0.3.0`,
+  # not `alpha/0.3.0-alpha`.
+  CORE="${VERSION%-alpha}"
+  CORE="${CORE%-beta}"
+  case "$VERSION" in
+    *-alpha)
+      STAGE="alpha"
+      TARGET="alpha/$CORE"
+      # Retrying a cut that died after switching (see the branch check below)
+      # legitimately starts from the target branch itself.
+      [ "$BRANCH" = "main" ] || [ "$BRANCH" = "$TARGET" ] \
+        || die "an alpha release must be cut from main, not '$BRANCH'"
+      ;;
+    *-beta)
+      STAGE="beta"
+      TARGET="beta/$CORE"
+      [ "$BRANCH" = "alpha/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
+        || die "a beta release must be cut from alpha/$CORE, not '$BRANCH'"
+      ;;
+    *)
+      STAGE="release"
+      TARGET="release/$CORE"
+      [ "$BRANCH" = "main" ] || [ "$BRANCH" = "beta/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
+        || die "a production release must be cut from main or beta/$CORE, not '$BRANCH'"
+      ;;
+  esac
+
+  # The stage branch must be usable: absent (created below) or already at HEAD
+  # (a previous cut that died between switching and pushing). One pointing at a
+  # different commit is a different tree than the operator's checkout, so the
+  # release must not happen -- checked here, before any bump/commit/tag.
+  if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TARGET")" ] \
+      || die "branch $TARGET exists but does not point at HEAD -- inspect it before cutting"
+  fi
+else
+  [ "$BRANCH" = "main" ] \
+    || die "launcher releases are cut from main, not '$BRANCH'"
+fi
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
   && die "tag $TAG already exists locally"
@@ -111,10 +157,24 @@ else
 fi
 [ -n "$CURRENT" ] || die "could not read the current $LINE version"
 
-# sort -V puts the greater version last; equal versions are caught first.
+# Versions compared by a normalized key: CORE + stage rank (alpha=1, beta=2,
+# production=3), so 0.3.0-alpha < 0.3.0-beta < 0.3.0 under any sort -V, not
+# just GNU's. macOS's BSD sort -V orders a pre-release suffix AFTER the bare
+# version (0.3.0 < 0.3.0-alpha), which would silently make a beta release
+# unable to graduate to production. Equal versions are caught first.
+rank_version() {
+  local v="$1" core stage
+  case "$v" in
+    *-alpha) core="${v%-alpha}"; stage="1" ;;
+    *-beta)  core="${v%-beta}";  stage="2" ;;
+    *)       core="$v";           stage="3" ;;
+  esac
+  printf '%s.%s\n' "$core" "$stage"
+}
+
 [ "$VERSION" != "$CURRENT" ] || die "$VERSION is already the current version"
-GREATER="$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -n1)"
-[ "$GREATER" = "$VERSION" ] \
+GREATER="$(printf '%s\n%s\n' "$(rank_version "$CURRENT")" "$(rank_version "$VERSION")" | sort -V | tail -n1)"
+[ "$GREATER" = "$(rank_version "$VERSION")" ] \
   || die "$VERSION is not greater than the current version $CURRENT"
 
 # --- bump, commit, tag, push ----------------------------------------------
@@ -149,9 +209,21 @@ git add -- "${WRITTEN[@]}"
 git commit -m "release: $TAG"
 git tag -a "$TAG" -m "$TAG"
 
-# Commit and tag together: a pushed tag whose commit never landed is a tag CI
-# cannot check out.
-git push origin main "refs/tags/$TAG"
+if [ "$LINE" = "app" ]; then
+  # Move the release commit onto the stage branch, then push branch and tag
+  # together: a pushed tag whose commit never landed is a tag CI cannot check
+  # out.
+  if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
+    git switch "$TARGET"            # at HEAD, guaranteed by the preflight
+  else
+    git switch -c "$TARGET"         # from the current tip (the release commit)
+  fi
+  git push -u origin "refs/heads/$TARGET" "refs/tags/$TAG"
+else
+  # The launcher line has no stage branches: the bump commit and tag go to
+  # main, and the operator stays where they were.
+  git push origin main "refs/tags/$TAG"
+fi
 
 echo
 echo "Pushed $TAG. CI is now building it -- watch:"
