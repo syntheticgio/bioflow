@@ -2157,9 +2157,7 @@ async def launch_transcript_qc(
             details={"object_id": str(bam.id)},
         )
 
-    gtf = await object_service.get_object(gtf_object_id, owner=owner)
-    if gtf.project_id != bam.project_id:
-        raise ValidationError("The annotation must be in the same project as the BAM.")
+    gtf = await resolve_annotation(bam.project_id, gtf_object_id, owner=owner)
 
     _, bam_path = await _resolve_readable(bam)
     _, gtf_path = await _resolve_readable(gtf)
