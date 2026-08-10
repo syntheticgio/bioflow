@@ -14,7 +14,7 @@ the frontend is the copy nobody updates.
 """
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from app.pipelines import align_params, aligners, tools
@@ -84,6 +84,16 @@ class AlignerSpec:
     # `index.builder` (on IndexLayout) is only the binary's bare name, kept
     # for cross-checking and error messages.
     builder_tool: Callable[[], tools.Tool] | None = None
+    # True when this aligner's index works against a subset of the reference
+    # FASTA. STAR's index is tied to the exact reference; Winnowmap requires
+    # whole-reference meryl preprocessing.
+    chunking_supported: bool = True
+    # Named bundles of parameter values, keyed by preset id. When present, the
+    # dialog offers a preset selector instead of (or in addition to) individual
+    # biology fields. The value is a dict of param key -> value that gets
+    # applied on top of defaults. An "advanced" preset name is reserved to mean
+    # "show all individual fields" -- see schema_for().
+    presets: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 # Threads and sort memory are on every aligner, so they are declared once and
@@ -148,7 +158,144 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
             bytes_per_thread_mb=256,
             index_build_multiplier=8.75,
         ),
-        fields=_SHARED_FIELDS,
+        fields=(
+            ParamField(
+                key="min_score",
+                label="Min alignment score (-T)",
+                kind="int",
+                default=30,
+                group="biology",
+                help="Alignments with a score below this threshold are not output. Lower it to keep weak alignments; raise it to filter noisy ones.",
+                min=0,
+            ),
+            ParamField(
+                key="mark_split",
+                label="Mark split hits as secondary (-M)",
+                kind="bool",
+                default=False,
+                group="biology",
+                help="Marks split alignments as secondary for Picard/GATK compatibility. Needed for GATK Best Practices but wrong for most other workflows.",
+            ),
+            ParamField(
+                key="max_seed_occ",
+                label="Max seed occurrences (-c)",
+                kind="int",
+                default=500,
+                group="biology",
+                help="Maximum number of occurrences of a seed before it is discarded. Raise for repeat-heavy genomes (e.g. 2000 for wheat); lower to save compute if only unique regions matter.",
+                min=1,
+            ),
+            ParamField(
+                key="reseed_factor",
+                label="Re-seeding trigger factor (-r)",
+                kind="int",
+                default=1.5,
+                group="biology",
+                help="Raise to 2-3 to reduce redundant seed extensions in repeat zones. Lower for faster seeding on simple genomes.",
+                min=1,
+            ),
+            ParamField(
+                key="all_alignments",
+                label="Output all alignments for unpaired reads (-a)",
+                kind="bool",
+                default=False,
+                group="biology",
+                help="Outputs all alignments for unpaired reads instead of just the best. Useful for transposon/repeat-copy-number analysis.",
+            ),
+            ParamField(
+                key="max_mate_rescue",
+                label="Max mate-rescue attempts (-m)",
+                kind="int",
+                default=100,
+                group="biology",
+                help="Number of attempts to rescue mates that don't align near each other. Lower to 20-50 to avoid slowdowns in repetitive genomes.",
+                min=0,
+            ),
+            ParamField(
+                key="soft_clip_supp",
+                label="Soft-clip supplementary alignments (-Y)",
+                kind="bool",
+                default=False,
+                group="biology",
+                help="Soft-clips supplementary alignments instead of hard-clipping. Needed by structural variant callers (Manta, LUMPY, Delly).",
+            ),
+            ParamField(
+                key="clip_penalty",
+                label="Clipping penalty (-L)",
+                kind="text",
+                default="5,5",
+                group="biology",
+                help="Comma-separated pair: clipping penalty for 5' and 3' ends. Lower to 2,2-3,3 for RNA-seq or heavy structural rearrangements.",
+            ),
+            ParamField(
+                key="multimap_xa",
+                label="Multi-mapping XA tag limits (-h)",
+                kind="text",
+                default="5,200",
+                group="biology",
+                help="Comma-separated: max alignments to output as XA tags, max alignments to consider. Raise for decoy/pseudogene/contaminant tracking.",
+            ),
+            ParamField(
+                key="batch_size",
+                label="Fixed read batch size (-K)",
+                kind="int",
+                default=0,
+                group="performance",
+                help="Set a fixed batch size (e.g. 100000000) for deterministic, reproducible runs regardless of thread count. 0 means bwa-mem2's default.",
+                min=0,
+            ),
+            *_SHARED_FIELDS,
+        ),
+        presets={
+            "bacteria": {
+                "label": "Bacteria / Virus / Yeast",
+                "description": "Minimal tuning: small, compact genomes with few repeats.",
+                "values": {
+                    "mark_split": False,
+                    "min_score": 30,
+                    "max_seed_occ": 500,
+                    "reseed_factor": 1.5,
+                    "all_alignments": False,
+                    "max_mate_rescue": 100,
+                    "soft_clip_supp": False,
+                    "clip_penalty": "5,5",
+                    "multimap_xa": "5,200",
+                    "batch_size": 0,
+                },
+            },
+            "large_repetitive": {
+                "label": "Large / Repetitive (Plants, etc.)",
+                "description": "Adjusted seeding for polyploid, repeat-heavy genomes (wheat, maize, barley, conifers).",
+                "values": {
+                    "mark_split": False,
+                    "min_score": 30,
+                    "max_seed_occ": 2000,
+                    "reseed_factor": 3,
+                    "all_alignments": True,
+                    "max_mate_rescue": 50,
+                    "soft_clip_supp": False,
+                    "clip_penalty": "5,5",
+                    "multimap_xa": "5,200",
+                    "batch_size": 0,
+                },
+            },
+            "eukaryote": {
+                "label": "Human / other Eukaryote",
+                "description": "Standard resequencing: GATK Best Practices compatible defaults for human, mouse, and similar genomes.",
+                "values": {
+                    "mark_split": True,
+                    "min_score": 30,
+                    "max_seed_occ": 500,
+                    "reseed_factor": 1.5,
+                    "all_alignments": False,
+                    "max_mate_rescue": 100,
+                    "soft_clip_supp": True,
+                    "clip_penalty": "5,5",
+                    "multimap_xa": "5,200",
+                    "batch_size": 100000000,
+                },
+            },
+        },
     ),
     Aligner.MINIMAP2: AlignerSpec(
         aligner=Aligner.MINIMAP2,
@@ -508,9 +655,24 @@ def schema_for(aligner: Aligner) -> dict:
 
     `asdict` on each field rather than a hand-written projection: a field
     added to ParamField should reach the form without a second edit here.
+
+    When the spec has presets, returns them alongside the fields. The frontend
+    uses presets to offer a preset selector; selecting "advanced" (a reserved
+    name) shows all individual fields instead.
     """
     spec = spec_for(aligner)
-    return {
+    result: dict = {
         "aligner": aligner.value,
         "fields": [asdict(f) for f in spec.fields],
     }
+    if spec.presets:
+        result["presets"] = {
+            k: {
+                "id": k,
+                "label": v["label"],
+                "description": v["description"],
+                "values": v["values"],
+            }
+            for k, v in spec.presets.items()
+        }
+    return result

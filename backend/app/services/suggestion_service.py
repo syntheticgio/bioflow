@@ -30,7 +30,7 @@ from app.pipelines import (
     variant_runner,
 )
 from app.pipelines.aligners import Aligner
-from app.pipelines.organism_taxonomy import is_eukaryotic
+from app.pipelines.organism_taxonomy import classify_organism, is_eukaryotic
 from app.services import object_service, pipeline_service, prior_runs, reference_assembly
 
 log = get_logger(__name__)
@@ -370,6 +370,23 @@ def _align_tool_and_why(obj, chemistry) -> tuple[dict, str]:
         # estimator's warning is visible next to the thread and memory knobs.
         params = {**params, "aligner": "hisat2"}
         return params, "RNA-seq on a eukaryote: splice-aware alignment."
+
+    # bwa-mem2 preset auto-selection from organism classification.
+    # When the chosen aligner is bwa-mem2, set the preset based on the
+    # organism's genome characteristics so the card's launch payload carries
+    # sensible defaults. The user can override in the dialog.
+    if params.get("aligner") == "bwa-mem2":
+        organism_class = classify_organism(organism)
+        preset_map = {
+            "bacteria": "bacteria",
+            "large_repetitive": "large_repetitive",
+            "eukaryote": "eukaryote",
+        }
+        params = {
+            **params,
+            "preset": preset_map[organism_class.value],
+        }
+        return params, f"{organism_class.value.replace('_', ' ').title()} preset for bwa-mem2."
 
     # QC already wrote a human-readable justification for the chemistry it
     # inferred. Preferring it keeps the card agreeing with the QC report

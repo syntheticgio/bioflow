@@ -64,6 +64,11 @@ export function AlignDialog({
   const [overrides, setOverrides] = useState<Partial<AlignParams>>({});
   const [rgOverrides, setRgOverrides] = useState<Partial<ReadGroup>>({});
   const [advanced, setAdvanced] = useState(false);
+  const [chunked, setChunked] = useState(false);
+  // Which bwa-mem2 preset is selected. null means use the server default;
+  // "advanced" means show all individual fields. Only meaningful when the
+  // schema has presets (currently bwa-mem2 only).
+  const [presetOverride, setPresetOverride] = useState<string | null>(null);
   // Dismissed by "Edit parameters": the band is still "block", but the user
   // has asked to go back to the fields rather than be shown the card again.
   // Reset whenever the band leaves "block" so a fresh refusal re-renders it.
@@ -358,10 +363,52 @@ export function AlignDialog({
           </label>
         </fieldset>
 
+        {/* Preset selector for bwa-mem2 (and any future aligner with presets) */}
+        {schema?.presets && (
+          <div className="trim-fields">
+            <label>
+              <span>Organism preset</span>
+              <select
+                value={presetOverride ?? params.preset ?? ""}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setPresetOverride(value);
+                  if (value && value !== "advanced" && schema.presets[value]) {
+                    // Apply preset values as overrides
+                    const preset = schema.presets[value];
+                    setOverrides((o) => ({ ...o, ...preset.values, preset: value }));
+                  } else if (value === "advanced") {
+                    // Advanced mode: clear preset, keep existing field values
+                    setOverrides((o) => ({ ...o, preset: "" }));
+                  }
+                }}
+              >
+                {Object.entries(schema.presets).map(([id, preset]) => (
+                  <option key={id} value={id}>
+                    {preset.label}
+                  </option>
+                ))}
+                <option value="advanced">Advanced / fine-grained</option>
+              </select>
+              {presetOverride && presetOverride !== "advanced" && schema.presets[presetOverride] && (
+                <small>{schema.presets[presetOverride].description}</small>
+              )}
+              {presetOverride === "advanced" && (
+                <small>Show all individual parameters for full control.</small>
+              )}
+            </label>
+          </div>
+        )}
+
         {schema && (
           <div className="trim-fields">
+            {/* When a preset is active (not advanced), hide individual biology
+                fields -- the preset sets them. Only show them in advanced mode
+                or when the schema has no presets at all. */}
             <AlignerParamFields
-              fields={schema.fields.filter((f) => f.group === "biology")}
+              fields={schema.fields.filter(
+                (f) => f.group === "biology" && (presetOverride === "advanced" || !schema.presets)
+              )}
               params={params}
               onChange={(k, v) =>
                 // The registry's field metadata is validated server-side (see

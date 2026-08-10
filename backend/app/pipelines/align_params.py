@@ -64,11 +64,118 @@ class BaseAlignParams:
 
 @dataclass
 class Bwa2Params(BaseAlignParams):
+    """bwa-mem2 tuning parameters.
+
+    Most of these map directly to bwa-mem2 CLI flags. The defaults match the
+    "Human / other Eukaryote" preset behavior; organism-type presets override
+    specific values via the preset system in aligner_registry.py.
+
+    Fields with type "text" accept comma-separated pairs (e.g. "5,5" for
+    clip_penalty) and are stored as strings -- the validation ensures they
+    match the expected pattern.
+    """
+
     aligner: Aligner = Aligner.BWA_MEM2
+    # -T: minimum alignment score threshold
+    min_score: int = 30
+    # -M: mark shorter split hits as secondary (Picard/GATK compat)
+    mark_split: bool = False
+    # -c: max seed occurrences before discarding
+    max_seed_occ: int = 500
+    # -r: re-seeding trigger factor
+    reseed_factor: float = 1.5
+    # -a: output all alignments for unpaired reads
+    all_alignments: bool = False
+    # -m: max mate-rescue attempts
+    max_mate_rescue: int = 100
+    # -Y: soft-clip supplementary alignments instead of hard-clipping
+    soft_clip_supp: bool = False
+    # -L: clipping penalty (5' and 3'), comma-separated pair
+    clip_penalty: str = "5,5"
+    # -h: multi-mapping hits reported as XA tags, comma-separated pair
+    multimap_xa: str = "5,200"
+    # -K: fixed read batch size (0 = bwa-mem2's default)
+    batch_size: int = 0
+    # Which preset is active, if any. "" means no preset / advanced mode.
+    preset: str = ""
+
+    def as_dict(self) -> dict:
+        return {
+            **super().as_dict(),
+            "min_score": self.min_score,
+            "mark_split": self.mark_split,
+            "max_seed_occ": self.max_seed_occ,
+            "reseed_factor": self.reseed_factor,
+            "all_alignments": self.all_alignments,
+            "max_mate_rescue": self.max_mate_rescue,
+            "soft_clip_supp": self.soft_clip_supp,
+            "clip_penalty": self.clip_penalty,
+            "multimap_xa": self.multimap_xa,
+            "batch_size": self.batch_size,
+            "preset": self.preset,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Bwa2Params":
-        return cls(aligner=Aligner.BWA_MEM2, **cls._shared(data))
+        min_score = int(data.get("min_score", 30))
+        if min_score < 0:
+            raise ValidationError("min_score cannot be negative")
+
+        max_seed_occ = int(data.get("max_seed_occ", 500))
+        if max_seed_occ < 1:
+            raise ValidationError("max_seed_occ must be at least 1")
+
+        reseed_factor = float(data.get("reseed_factor", 1.5))
+        if reseed_factor < 1:
+            raise ValidationError("reseed_factor must be at least 1")
+
+        max_mate_rescue = int(data.get("max_mate_rescue", 100))
+        if max_mate_rescue < 0:
+            raise ValidationError("max_mate_rescue cannot be negative")
+
+        clip_penalty = str(data.get("clip_penalty", "5,5"))
+        _validate_comma_pair(clip_penalty, "clip_penalty")
+
+        multimap_xa = str(data.get("multimap_xa", "5,200"))
+        _validate_comma_pair(multimap_xa, "multimap_xa")
+
+        batch_size = int(data.get("batch_size", 0))
+        if batch_size < 0:
+            raise ValidationError("batch_size cannot be negative")
+
+        preset = str(data.get("preset", ""))
+
+        return cls(
+            aligner=Aligner.BWA_MEM2,
+            min_score=min_score,
+            mark_split=bool(data.get("mark_split", False)),
+            max_seed_occ=max_seed_occ,
+            reseed_factor=reseed_factor,
+            all_alignments=bool(data.get("all_alignments", False)),
+            max_mate_rescue=max_mate_rescue,
+            soft_clip_supp=bool(data.get("soft_clip_supp", False)),
+            clip_penalty=clip_penalty,
+            multimap_xa=multimap_xa,
+            batch_size=batch_size,
+            preset=preset,
+            **cls._shared(data),
+        )
+
+
+def _validate_comma_pair(value: str, name: str) -> None:
+    """Validate a comma-separated pair of integers (e.g. "5,5" or "5,200")."""
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValidationError(
+            f"{name} must be a comma-separated pair of integers, got {value!r}"
+        )
+    try:
+        int(parts[0].strip())
+        int(parts[1].strip())
+    except ValueError:
+        raise ValidationError(
+            f"{name} must be a comma-separated pair of integers, got {value!r}"
+        )
 
 
 # minimap2 presets. Not cosmetic: the wrong preset for long reads produces
