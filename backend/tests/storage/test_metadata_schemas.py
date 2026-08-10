@@ -13,6 +13,25 @@ class TestFieldResolution:
             keys = {f.key for f in schemas.fields_for(kind)}
             assert {"sample_id", "organism", "assay"} <= keys
 
+    def test_molecule_type_and_library_source_are_common_fields(self):
+        keys = {f.key for f in schemas.fields_for(FormatKind.FASTQ)}
+        assert {"molecule_type", "library_source", "assay"} <= keys
+
+    def test_molecule_type_is_closed_vocabulary(self):
+        field = next(f for f in schemas.COMMON_FIELDS if f.key == "molecule_type")
+        assert field.type == FieldType.ENUM
+        assert field.options == ("DNA", "RNA", "Other")
+        assert field.open_vocabulary is False
+
+    def test_library_source_is_open_vocabulary(self):
+        field = next(f for f in schemas.COMMON_FIELDS if f.key == "library_source")
+        assert field.type == FieldType.ENUM
+        assert field.options == (
+            "Genomic", "Transcriptomic", "Metagenomic",
+            "Metatranscriptomic", "Synthetic", "Viral RNA", "Other",
+        )
+        assert field.open_vocabulary is True
+
     def test_format_specific_fields_are_added(self):
         fastq = {f.key for f in schemas.fields_for(FormatKind.FASTQ)}
         bam = {f.key for f in schemas.fields_for(FormatKind.BAM)}
