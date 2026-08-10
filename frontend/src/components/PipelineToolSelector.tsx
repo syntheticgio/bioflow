@@ -41,6 +41,25 @@ function longReadChemistry(object: DataObject | undefined): string | null {
   return null;
 }
 
+/**
+ * The coarse read-type bucket for tool recommendations, based on the object's
+ * QC-inferred chemistry. Returns "short", "long", or null when unknown.
+ *
+ * Matches the bucket keys in ToolMeta.recommendations on the backend.
+ */
+function chemistryBucket(object: DataObject | undefined): string | null {
+  const chemistry = object?.facts?.qc_read_chemistry;
+  if (typeof chemistry === "string") {
+    if (LONG_READ_CHEMISTRIES.has(chemistry)) {
+      return "long";
+    }
+    if (chemistry === "short") {
+      return "short";
+    }
+  }
+  return null;
+}
+
 // Exhaustive by type, deliberately: this is the one mirror of PipelineType
 // that TypeScript can police, and it earned its keep on 2026-08-01 by being
 // the only thing that noticed `expression` had reached the backend without
@@ -96,6 +115,7 @@ export function PipelineToolSelector({
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const chemistry = pipeline === "align" ? longReadChemistry(object) : null;
+  const bucket = chemistryBucket(object);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["pipelines", "tools"],
@@ -237,6 +257,9 @@ export function PipelineToolSelector({
                       <span className="tool-row-badge">
                         {!tool.available ? "not installed" : "not supported yet"}
                       </span>
+                    )}
+                    {!disabled && bucket && tool.recommendations[bucket] === "recommended" && (
+                      <span className="tool-row-badge recommended">Recommended</span>
                     )}
                   </div>
                 );

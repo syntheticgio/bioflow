@@ -2499,6 +2499,11 @@ a.btn {
   color: var(--warn);
 }
 
+.tool-row-badge.recommended {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
 .tool-detail {
   overflow-y: auto;
   max-height: 60vh;

@@ -873,6 +873,11 @@ class Delivery(StrEnum):
     ON_DEMAND_IMAGE = "on_demand"
 
 
+class RecommendationLevel(StrEnum):
+    RECOMMENDED = "recommended"
+    COMPATIBLE = "compatible"
+
+
 @dataclass(frozen=True)
 class ToolMeta:
     # Plural, and a tuple, because membership is genuinely many-to-many: fastp
@@ -938,6 +943,14 @@ class ToolMeta:
     # `docker pull`'s own progress output reports against.
     download_bytes: int | None = None
 
+    # --- Tool selection recommendations, keyed on read chemistry. ---
+    # Maps a coarse bucket ("short" / "long") to a recommendation level.
+    # Absent keys mean no opinion: the tool is not recommended for that
+    # read type. The frontend renders a "Recommended" badge for RECOMMENDED
+    # and nothing for COMPATIBLE (which is the "works but not first choice"
+    # tier).
+    recommendations: dict[str, str] = field(default_factory=dict, repr=False)
+
 
 TOOL_META: dict[str, ToolMeta] = {
     "fastp": ToolMeta(
@@ -969,6 +982,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "and its JSON report supplies the per-base quality and duplication "
             "numbers the QC screen charts."
         ),
+        recommendations={"short": RecommendationLevel.RECOMMENDED.value, "long": RecommendationLevel.COMPATIBLE.value},
     ),
     "cutadapt": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -997,6 +1011,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "the trim summary shows; it reports no progress while running, "
             "since it emits no progress stream to follow."
         ),
+        recommendations={"short": RecommendationLevel.COMPATIBLE.value, "long": RecommendationLevel.RECOMMENDED.value},
     ),
     "trimmomatic": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -1034,6 +1049,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "the trim report shows. The adapter file is checked against that "
             "shipped set before use, since it reaches an unescaped argument."
         ),
+        recommendations={"short": RecommendationLevel.COMPATIBLE.value},
     ),
     "fastqc": ToolMeta(
         pipelines=(PipelineType.QC,),
@@ -1062,6 +1078,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "if the binary is missing the QC job still finishes on fastp's "
             "numbers rather than failing."
         ),
+        recommendations={"short": RecommendationLevel.RECOMMENDED.value},
     ),
     "nanoplot": ToolMeta(
         pipelines=(PipelineType.QC,),
@@ -1089,6 +1106,7 @@ TOOL_META: dict[str, ToolMeta] = {
             "becomes the QC report, and its summary statistics supply the read "
             "counts and length figures the QC screen shows."
         ),
+        recommendations={"long": RecommendationLevel.RECOMMENDED.value},
     ),
     "fasterq-dump": ToolMeta(
         pipelines=(PipelineType.DOWNLOAD,),
@@ -2103,6 +2121,7 @@ def tool_with_meta(tool: Tool) -> dict:
             "citation_url": "",
             "license": "",
             "usage": "",
+            "recommendations": {},
             # Same reasoning as `runnable` above: a tool with no entry here
             # has no delivery story either, so it defaults to the same
             # BUNDLED/absent shape `ToolMeta`'s own fields default to.
