@@ -125,7 +125,7 @@ export function ProvenanceNarrative({
             className="btn-text"
             onClick={() => copy(data.markdown, "report")}
           >
-            {copied === "report" ? "Copied" : "Copy report"}
+            {copied === "report" ? "Copied" : "Copy report (Markdown)"}
           </button>
         </div>
         <div className="section-note">
