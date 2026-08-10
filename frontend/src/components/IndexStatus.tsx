@@ -94,6 +94,16 @@ export function IndexStatus({ object }: { object: DataObject }) {
               <span className={built ? "index-built" : "index-missing"}>
                 {built ? "✓ built" : usable ? "not built" : "unavailable here"}
               </span>
+              {built && entry.index_ids[name] && (
+                <a
+                  href={api.objectDownloadUrl(entry.index_ids[name])}
+                  className="btn"
+                  style={{ padding: "1px 8px", fontSize: 11, textDecoration: "none" }}
+                  download
+                >
+                  ↓ Download
+                </a>
+              )}
               {!built && usable && (
                 <button
                   type="button"
