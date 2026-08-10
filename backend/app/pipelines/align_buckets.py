@@ -35,7 +35,8 @@ def pack_buckets(
 ) -> list[BucketSpec] | None:
     """Pack reference sequences into memory-budget-aware buckets.
 
-    Returns None when chunking is unnecessary (<= 1 bucket or <= 1 sequence).
+    Returns None when chunking is unnecessary (<= 1 bucket or <= 1 sequence),
+    or when the budget is too tight for any configuration.
     """
     if len(sequences) <= 1:
         return None
@@ -47,22 +48,16 @@ def pack_buckets(
     effective_budget = memory_budget_mb - per_bucket_overhead
 
     if effective_budget <= 0:
-        # Budget too tight — single bucket, will likely OOM
-        total_bases = sum(b for _, b in sequences)
-        return [
-            BucketSpec(
-                index=0,
-                sequences=[name for name, _ in sequences],
-                total_bases=total_bases,
-                estimated_mb=memory_budget_mb,
-            )
-        ]
+        # Budget too tight for even a single bucket with overhead — the
+        # caller should run the single-shot check and surface a refusal.
+        return None
 
     sorted_seqs = sorted(sequences, key=lambda s: s[1], reverse=True)
     buckets: list[BucketSpec] = []
 
     for name, bases in sorted_seqs:
         seq_index_mb = math.ceil((bases * per_base_index_mb))
+        seq_total_mb = seq_index_mb + per_bucket_overhead
         placed = False
         for bucket in buckets:
             if bucket.estimated_mb + seq_index_mb <= memory_budget_mb:
@@ -72,12 +67,25 @@ def pack_buckets(
                 placed = True
                 break
         if not placed:
+            if seq_total_mb > memory_budget_mb:
+                # This sequence alone cannot fit a bucket.  Raising here
+                # gives the caller a useful ValidationError naming the
+                # sequence and the budget instead of a plan that OOMs
+                # forty minutes in.
+                from app.errors import PermanentError
+
+                raise PermanentError(
+                    f"Sequence '{name}' ({bases:,} bp) requires "
+                    f"{seq_total_mb:,} MB (index + overhead) but the "
+                    f"per-bucket budget is {memory_budget_mb:,} MB — "
+                    f"cannot produce a chunked alignment plan that fits."
+                )
             buckets.append(
                 BucketSpec(
                     index=len(buckets),
                     sequences=[name],
                     total_bases=bases,
-                    estimated_mb=seq_index_mb + per_bucket_overhead,
+                    estimated_mb=seq_total_mb,
                 )
             )
 
@@ -98,7 +106,7 @@ def write_bucket_fastas(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build a name → lines map from the FASTA
+    # Build a name -> lines map from the FASTA
     records: dict[str, list[str]] = {}
     current_name: str | None = None
     current_lines: list[str] = []
