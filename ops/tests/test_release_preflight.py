@@ -5,6 +5,7 @@ messages matter as much as the exit codes: the whole point of refusing is to
 tell the operator which precondition they tripped.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,22 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RELEASE = REPO_ROOT / "ops" / "release.sh"
 
+FAKE_GIT_CLIFF = """#!/usr/bin/env bash
+# Mimics `git-cliff --unreleased --tag <tag> --prepend CHANGELOG.md` for the
+# fixture repo: parse --tag, append a matching section, create the file.
+tag=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tag) tag="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+{
+  if [ -f CHANGELOG.md ]; then printf '\n'; fi
+  printf '## [%s]\n\n- fixture entry\n' "${tag#v}"
+} >> CHANGELOG.md
+"""
+
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -20,7 +37,7 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def run_release(repo: Path, line: str, version: str) -> subprocess.CompletedProcess:
+def run_release(repo: Path, line: str, version: str, env=None) -> subprocess.CompletedProcess:
     # Invoke the fixture repo's OWN copy of release.sh, not the real
     # worktree's. release.sh resolves its own lib directory via
     # `dirname "${BASH_SOURCE[0]}"`, which follows the path it was invoked
@@ -32,11 +49,21 @@ def run_release(repo: Path, line: str, version: str) -> subprocess.CompletedProc
     # real one with this bug -- the fixture copy at repo/ops/release.sh
     # made at setup time (see the `repo` fixture above) must be the one
     # actually executed.
+    run_env = dict(os.environ)
+    # Point the git-cliff cache at the fixture's fake binary: release.sh
+    # computes GIT_CLIFF_DIR from XDG_CACHE_HOME (falling back to the real
+    # $HOME/.cache), and its bootstrap runs whatever it finds there. Without
+    # this the app cut would silently use the real ~/.cache git-cliff -- or
+    # download it -- instead of the fake. An explicit env from a caller wins.
+    run_env.setdefault("XDG_CACHE_HOME", str(repo.parent / "xdg-cache"))
+    if env:
+        run_env.update(env)
     return subprocess.run(
         [str(repo / "ops" / "release.sh"), line, version],
         cwd=repo,
         capture_output=True,
         text=True,
+        env=run_env,
     )
 
 
@@ -73,6 +100,19 @@ def repo(tmp_path):
     (work / "ops" / "lib" / "bump_version.py").write_bytes(
         (REPO_ROOT / "ops" / "lib" / "bump_version.py").read_bytes()
     )
+
+    # Hermetic git-cliff: the app cut regenerates CHANGELOG.md (#106), and the
+    # script's bootstrap returns early when the cached binary exists -- so a
+    # fake at the cache path is what runs. Never hits the network. The cache
+    # dir lives under this test's own tmp_path: run_release derives
+    # XDG_CACHE_HOME from the repo's parent, so no test sees another test's
+    # fake and the real ~/.cache is never touched.
+    xdg_cache = tmp_path / "xdg-cache"
+    git_cliff_dir = xdg_cache / "bioflow-tools" / "git-cliff-2.13.1"
+    git_cliff_dir.mkdir(parents=True)
+    (git_cliff_dir / "git-cliff").write_text(FAKE_GIT_CLIFF)
+    (git_cliff_dir / "git-cliff").chmod(0o755)
+    (work / "CHANGELOG.md").write_text("# Changelog\n")
 
     git(work, "add", "-A")
     git(work, "commit", "-m", "initial")
@@ -128,14 +168,26 @@ class TestSuccessfulRelease:
         subject = git(repo, "log", "-1", "--format=%s").stdout.strip()
         assert subject == "release: v0.2.0"
 
-        # The commit touches only version declarations.
+        # The release commit touches the version declarations plus the
+        # regenerated changelog.
         files = set(git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split())
         assert files == {
             "VERSION",
             "backend/app/version.py",
             "backend/pyproject.toml",
             "frontend/package.json",
+            "CHANGELOG.md",
         }
+
+        # The release commit carries the section for this tag (the fixture
+        # CHANGELOG.md was committed, so the script prepends to it). The
+        # fixture-entry marker is the fake git-cliff's signature -- real
+        # git-cliff would render commit subjects -- so its presence proves
+        # the hermetic fake ran, not a real ~/.cache binary.
+        changelog = (repo / "CHANGELOG.md").read_text()
+        assert "## [0.2.0]" in changelog
+        assert "- fixture entry" in changelog
+        assert "## [0.1.0]" not in changelog
 
         # And it reached the origin, tag included.
         remote_tags = git(repo, "ls-remote", "--tags", "origin").stdout
