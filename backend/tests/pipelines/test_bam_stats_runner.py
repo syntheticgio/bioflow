@@ -322,6 +322,48 @@ class TestDepthHistogram:
         h.add(3.0)
         assert [f["count"] for f in h.to_facts()] == [1, 0, 0, 1, 0]
 
+    def test_bin_depth_feeds_the_histogram_from_the_same_pass(self):
+        """The histogram must see per-base depths, not the regional means
+        bin_depth produces -- averaging is precisely what destroys the
+        distribution this chart reports."""
+        h = DepthHistogram(bucket_width=1.0, buckets=10)
+        bins, boundaries = bin_depth(
+            contig_lengths=[("chr1", 4)],
+            depth_lines=iter(["chr1\t1\t2", "chr1\t2\t2", "chr1\t3\t8", "chr1\t4\t8"]),
+            bin_count=2,
+            histogram=h,
+        )
+        # Two bins of two positions each, averaged: the shape is gone here.
+        assert bins == [2.0, 8.0]
+        # The histogram kept both modes.
+        counts = {f["depth"]: f["count"] for f in h.to_facts()}
+        assert counts[2.0] == 2
+        assert counts[8.0] == 2
+
+    def test_bin_depth_without_a_histogram_is_unchanged(self):
+        """The sink is optional; omitting it must behave exactly as before."""
+        bins, boundaries = bin_depth(
+            contig_lengths=[("chr1", 4)],
+            depth_lines=iter(["chr1\t1\t10", "chr1\t3\t20"]),
+            bin_count=4,
+        )
+        assert bins == [10.0, 0.0, 20.0, 0.0]
+
+    def test_histogram_skips_depths_for_contigs_not_in_the_geometry(self):
+        """A depth line for an unknown contig is already skipped for binning;
+        it must not be counted in the histogram either, or the two outputs
+        would describe different reference sets."""
+        h = DepthHistogram(bucket_width=1.0, buckets=5)
+        bin_depth(
+            contig_lengths=[("chr1", 2)],
+            depth_lines=iter(["chr1\t1\t1", "chrUnknown\t1\t4"]),
+            bin_count=2,
+            histogram=h,
+        )
+        counts = {f["depth"]: f["count"] for f in h.to_facts()}
+        assert counts[1.0] == 1
+        assert counts[4.0] == 0
+
 
 class TestAllocateBins:
     def test_bins_sum_to_exactly_bin_count(self):
