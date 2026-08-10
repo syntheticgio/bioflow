@@ -101,12 +101,21 @@ def write_bucket_fastas(
 ) -> list[BucketSpec]:
     """Write per-bucket FASTA files by extracting sequences from `full_fasta`.
 
-    Uses a simple line-based parser — no pyfaidx dependency. Returns updated
-    BucketSpecs with fasta_path set. The caller is responsible for cleanup.
+    Two-pass to avoid loading the whole reference into memory:
+    1. Collect the set of sequence names needed across all buckets.
+    2. Stream through the FASTA, collecting only those sequences.
+
+    For a 3.2 GB human genome this keeps peak memory at roughly the
+    largest single sequence rather than the whole file.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build a name -> lines map from the FASTA
+    # Pass 1: which sequences do we need?
+    needed: set[str] = set()
+    for bucket in buckets:
+        needed.update(bucket.sequences)
+
+    # Pass 2: stream the FASTA, collecting only needed sequences
     records: dict[str, list[str]] = {}
     current_name: str | None = None
     current_lines: list[str] = []
@@ -117,14 +126,18 @@ def write_bucket_fastas(
             if line.startswith(">"):
                 if current_name is not None:
                     records[current_name] = current_lines
-                # Strip the '>' and take everything up to the first space
-                current_name = line[1:].split()[0]
-                current_lines = []
+                    current_lines = []
+                    # Stop early once all needed sequences are collected
+                    if len(records) == len(needed):
+                        break
+                name = line[1:].split()[0]
+                current_name = name if name in needed else None
             elif current_name is not None:
                 current_lines.append(line)
-    if current_name is not None:
+    if current_name is not None and len(records) < len(needed):
         records[current_name] = current_lines
 
+    # Write per-bucket files
     for bucket in buckets:
         path = out_dir / f"bucket_{bucket.index}.fa"
         with open(path, "w") as f:
