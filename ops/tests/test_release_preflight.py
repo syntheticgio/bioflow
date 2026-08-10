@@ -246,6 +246,16 @@ class TestSuccessfulRelease:
         files = set(git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split())
         assert files == {"launcher/src-tauri/Cargo.toml", "launcher/package.json"}
 
+        # The launcher line has no stage machinery: the operator stays on
+        # main, the bump commit lands on main, and no release/ branch appears
+        # locally or on origin.
+        assert git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
+        remote = git(repo, "ls-remote", "--heads", "origin").stdout
+        assert "refs/heads/main" in remote
+        assert "refs/heads/release/0.1.1" not in remote
+        local_heads = git(repo, "for-each-ref", "--format=%(refname)", "refs/heads").stdout
+        assert "refs/heads/release/0.1.1" not in local_heads
+
     def test_app_release_leaves_the_launcher_version_alone(self, repo):
         run_release(repo, "app", "0.2.0")
         cargo = (repo / "launcher" / "src-tauri" / "Cargo.toml").read_text()

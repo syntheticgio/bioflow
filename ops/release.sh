@@ -97,40 +97,49 @@ VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+(-alpha|-beta)?$'
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
-# The suffix IS the stage. CORE is the bare version the stage branch is named
-# after: `alpha/0.3.0`, not `alpha/0.3.0-alpha`.
-CORE="${VERSION%-alpha}"
-CORE="${CORE%-beta}"
-case "$VERSION" in
-  *-alpha)
-    STAGE="alpha"
-    TARGET="alpha/$CORE"
-    # Retrying a cut that died after switching (see the branch check below)
-    # legitimately starts from the target branch itself.
-    [ "$BRANCH" = "main" ] || [ "$BRANCH" = "$TARGET" ] \
-      || die "an alpha release must be cut from main, not '$BRANCH'"
-    ;;
-  *-beta)
-    STAGE="beta"
-    TARGET="beta/$CORE"
-    [ "$BRANCH" = "alpha/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
-      || die "a beta release must be cut from alpha/$CORE, not '$BRANCH'"
-    ;;
-  *)
-    STAGE="release"
-    TARGET="release/$CORE"
-    [ "$BRANCH" = "main" ] || [ "$BRANCH" = "beta/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
-      || die "a production release must be cut from main or beta/$CORE, not '$BRANCH'"
-    ;;
-esac
+# Staged branches are an app-line mechanism (#107): the version suffix IS
+# the stage, and the release lands on alpha/X.Y.Z / beta/X.Y.Z /
+# release/X.Y.Z. The launcher line keeps its pre-existing behavior -- cut
+# from main, push main and the launcher-v tag, no stage branch.
+if [ "$LINE" = "app" ]; then
+  # CORE is the bare version the stage branch is named after: `alpha/0.3.0`,
+  # not `alpha/0.3.0-alpha`.
+  CORE="${VERSION%-alpha}"
+  CORE="${CORE%-beta}"
+  case "$VERSION" in
+    *-alpha)
+      STAGE="alpha"
+      TARGET="alpha/$CORE"
+      # Retrying a cut that died after switching (see the branch check below)
+      # legitimately starts from the target branch itself.
+      [ "$BRANCH" = "main" ] || [ "$BRANCH" = "$TARGET" ] \
+        || die "an alpha release must be cut from main, not '$BRANCH'"
+      ;;
+    *-beta)
+      STAGE="beta"
+      TARGET="beta/$CORE"
+      [ "$BRANCH" = "alpha/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
+        || die "a beta release must be cut from alpha/$CORE, not '$BRANCH'"
+      ;;
+    *)
+      STAGE="release"
+      TARGET="release/$CORE"
+      [ "$BRANCH" = "main" ] || [ "$BRANCH" = "beta/$CORE" ] || [ "$BRANCH" = "$TARGET" ] \
+        || die "a production release must be cut from main or beta/$CORE, not '$BRANCH'"
+      ;;
+  esac
 
-# The stage branch must be usable: absent (created below) or already at HEAD
-# (a previous cut that died between switching and pushing). One pointing at a
-# different commit is a different tree than the operator's checkout, so the
-# release must not happen -- checked here, before any bump/commit/tag.
-if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
-  [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TARGET")" ] \
-    || die "branch $TARGET exists but does not point at HEAD -- inspect it before cutting"
+  # The stage branch must be usable: absent (created below) or already at HEAD
+  # (a previous cut that died between switching and pushing). One pointing at a
+  # different commit is a different tree than the operator's checkout, so the
+  # release must not happen -- checked here, before any bump/commit/tag.
+  if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
+    [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TARGET")" ] \
+      || die "branch $TARGET exists but does not point at HEAD -- inspect it before cutting"
+  fi
+else
+  [ "$BRANCH" = "main" ] \
+    || die "launcher releases are cut from main, not '$BRANCH'"
 fi
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
@@ -200,14 +209,21 @@ git add -- "${WRITTEN[@]}"
 git commit -m "release: $TAG"
 git tag -a "$TAG" -m "$TAG"
 
-# Move the release commit onto the stage branch, then push branch and tag
-# together: a pushed tag whose commit never landed is a tag CI cannot check out.
-if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
-  git switch "$TARGET"            # at HEAD, guaranteed by the preflight
+if [ "$LINE" = "app" ]; then
+  # Move the release commit onto the stage branch, then push branch and tag
+  # together: a pushed tag whose commit never landed is a tag CI cannot check
+  # out.
+  if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
+    git switch "$TARGET"            # at HEAD, guaranteed by the preflight
+  else
+    git switch -c "$TARGET"         # from the current tip (the release commit)
+  fi
+  git push -u origin "refs/heads/$TARGET" "refs/tags/$TAG"
 else
-  git switch -c "$TARGET"         # from the current tip (the release commit)
+  # The launcher line has no stage branches: the bump commit and tag go to
+  # main, and the operator stays where they were.
+  git push origin main "refs/tags/$TAG"
 fi
-git push -u origin "refs/heads/$TARGET" "refs/tags/$TAG"
 
 echo
 echo "Pushed $TAG. CI is now building it -- watch:"
