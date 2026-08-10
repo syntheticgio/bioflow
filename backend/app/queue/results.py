@@ -26,6 +26,7 @@ from app.models import (
     SidecarRole,
 )
 from app.pipelines.aligners import Aligner
+from app.queue.chunked_align_results import apply_chunked_alignment as _apply_chunked_alignment
 from app.queue.queue import publish_event
 
 log = get_logger(__name__)
@@ -2420,6 +2421,7 @@ _APPLIERS = {
     "download_assembly": _apply_assembly_download,
     "download_uniprot": _apply_uniprot_download,
     "build_index": _apply_build_index,
+    "merge_chunked_buckets": _apply_chunked_alignment,
     "align_reads": _apply_align_reads,
     "index_bam": _apply_index_bam,
     "call_variants": _apply_call_variants,
