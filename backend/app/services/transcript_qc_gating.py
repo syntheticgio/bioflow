@@ -20,6 +20,18 @@ SPLICE_AWARE_ALIGNERS = {"star", "hisat2"}
 # ChIP-seq is DNA, so a gene body curve says nothing -- but where its reads
 # sit relative to gene structure is precisely the question being asked.
 FEATURE_ONLY_ASSAYS = {"ChIP-seq", "ATAC-seq"}
+
+# Deliberately excludes "scRNA-seq", a first-class value of the same `assay`
+# enum (schemas.py). Both charts here are computed by pooling reads across
+# the whole BAM with no regard for which cell they came from. For bulk
+# RNA-seq that pooling is the point -- it's what produces the average
+# coverage shape across a population of molecules that these metrics are
+# meant to measure. For single-cell data, pooling across cells mixes each
+# cell's separate capture/degradation profile into one curve that doesn't
+# represent any individual library, unlike the bulk case. So scRNA-seq falls
+# through to the `if assay: return _NONE` branch below and is treated as not
+# applicable -- an explicit decision, not a gap in this set. See
+# test_single_cell_rnaseq_assay_does_not_apply.
 RNA_ASSAYS = {"RNA-seq"}
 
 

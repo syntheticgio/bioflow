@@ -66,3 +66,18 @@ class TestApplicability:
         got = applicability(_obj(metadata={"assay": "WGS"}))
         assert got.gene_body is False
         assert got.feature_distribution is False
+
+    def test_single_cell_rnaseq_assay_does_not_apply(self):
+        """Different reason from the WGS case above: scRNA-seq is RNA, not
+        DNA, but both charts pool reads across the whole BAM with no regard
+        for which cell they came from. That pooling is the point for bulk
+        RNA-seq -- it's what produces the average coverage shape across a
+        population of molecules -- but for single-cell data it mixes each
+        cell's separate capture/degradation profile into one curve that
+        doesn't represent any individual library. So RNA_ASSAYS intentionally
+        excludes "scRNA-seq" even though it's a first-class value of the same
+        `assay` enum, and this pins that exclusion as a decision rather than
+        an oversight."""
+        got = applicability(_obj(metadata={"assay": "scRNA-seq"}))
+        assert got.gene_body is False
+        assert got.feature_distribution is False
