@@ -12,7 +12,7 @@
  * positions are user-placed and stored.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import cytoscape from "cytoscape";
 
 interface Props {
@@ -32,6 +32,17 @@ function radiusFor(length: number, max: number): number {
 
 export function AssemblyGraph({ segments, links }: Props) {
   const box = useRef<HTMLDivElement>(null);
+
+  // A caller that builds `segments`/`links` inline (e.g. mapping over
+  // fetched data on every render) hands us a new array identity each time
+  // with identical content. Array identity is not a reliable signal that
+  // the graph changed, and rebuilding cytoscape -- including the
+  // 400-iteration cose layout -- is expensive, so the effect below keys off
+  // this cheap length-based signature instead of the arrays themselves.
+  const signature = useMemo(
+    () => `${segments.length}:${links.length}`,
+    [segments, links],
+  );
 
   useEffect(() => {
     if (!box.current || segments.length === 0) return;
@@ -99,7 +110,9 @@ export function AssemblyGraph({ segments, links }: Props) {
     });
 
     return () => cy.destroy();
-  }, [segments, links]);
+    // Gated on the cheap `signature` above rather than `segments`/`links`
+    // directly; see the comment at the signature's definition.
+  }, [signature]);
 
   if (segments.length === 0) return null;
 
