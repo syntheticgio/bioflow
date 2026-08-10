@@ -51,9 +51,17 @@ to avoid touching one well-tested function.
 
 ## Backend
 
-### `bin_depth` returns the histogram too
+### `bin_depth` accumulates the histogram via an optional sink
 
-`bin_depth` becomes a single pass producing both outputs:
+The obvious move — returning a third element — was rejected after checking the
+call sites. `bin_depth` currently returns a 2-tuple and is unpacked as one in
+six places (`align_handlers.py:831` and five tests). Widening the return type
+breaks all six at once, and one of those tests
+(`test_bin_count_is_constant_regardless_of_reference_size`) indexes `small[0]`
+positionally, so it would keep passing while silently meaning something
+different. That is a bad trade for a purely additive feature.
+
+Instead the histogram is an **optional output parameter**:
 
 ```python
 def bin_depth(
@@ -61,20 +69,27 @@ def bin_depth(
     contig_lengths: list[tuple[str, int]],
     depth_lines: Iterator[str],
     bin_count: int = BIN_COUNT,
-    histogram_bucket_width: float | None = None,
-) -> tuple[list[float], list[dict], list[dict]]:
-    """... returns (bins, boundaries, histogram)."""
+    histogram: "DepthHistogram | None" = None,
+) -> tuple[list[float], list[dict]]:
 ```
 
-`bins` and `boundaries` keep their current meaning and values exactly. The
-existing tests for `bin_depth` must pass unchanged apart from unpacking a
-third element — if any existing assertion about `bins` changes, the refactor
-is wrong.
+When `histogram` is provided, each parsed depth value is also fed to it during
+the same pass. When it is `None` the function behaves exactly as today.
 
-When `histogram_bucket_width` is `None` the histogram comes back empty, so the
-binning behaviour is available standalone (variant density reuses
-`allocate_bins`, not `bin_depth`, but keeping the parameter optional avoids
-forcing a bucket decision on any future caller).
+**Every existing test and the existing handler call keep working untouched** —
+which is also the regression check: if any current assertion about `bins` has
+to change, the refactor is wrong.
+
+`DepthHistogram` is a small class holding the bucket width and counts, so the
+accumulation state lives with the code that owns its meaning rather than being
+a bare list the caller has to interpret:
+
+```python
+class DepthHistogram:
+    def __init__(self, *, bucket_width: float, buckets: int = HISTOGRAM_BUCKETS): ...
+    def add(self, depth: float) -> None: ...
+    def to_facts(self) -> list[dict]: ...
+```
 
 ### Adaptive bucket width
 
