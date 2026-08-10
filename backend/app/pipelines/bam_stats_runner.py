@@ -289,6 +289,7 @@ def bin_depth(
     contig_lengths: list[tuple[str, int]],
     depth_lines: Iterator[str],
     bin_count: int = BIN_COUNT,
+    histogram: "DepthHistogram | None" = None,
 ) -> tuple[list[float], list[dict]]:
     """Bin per-base depth into a fixed-size array across the whole reference.
 
@@ -306,6 +307,12 @@ def bin_depth(
     Returns `(bins, boundaries)`: `bins` is the mean depth per bin, and
     `boundaries` marks which bin index starts each contig, for drawing
     separators and axis labels.
+
+    `histogram`, when given, is fed every per-base depth during this same
+    pass. It is an output parameter rather than a third return value because
+    the 2-tuple return is unpacked at six call sites, one of which indexes it
+    positionally -- widening it would break them all and silently change that
+    one's meaning. Passing None leaves behaviour identical.
     """
     geometry, boundaries, contig_bin_counts = allocate_bins(
         contig_lengths=contig_lengths, bin_count=bin_count
@@ -335,6 +342,8 @@ def bin_depth(
         idx = start_bin + offset_in_contig
         bin_sum[idx] += float(depth_str)
         bin_n[idx] += 1
+        if histogram is not None:
+            histogram.add(float(depth_str))
 
     bins = [bin_sum[i] / bin_n[i] if bin_n[i] else 0.0 for i in range(bin_count)]
     return bins, boundaries
