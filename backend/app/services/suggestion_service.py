@@ -1110,8 +1110,8 @@ def build_scaffold_card(obj, references) -> SuggestionCard | None:
 
     if not references:
         return unavailable(
-            "Scaffolding needs a reference assembly, and this project has "
-            "none."
+            "Scaffolding needs a reference genome to order contigs against, "
+            "and this project has none."
         )
     if len(references) > 1:
         return unavailable(
