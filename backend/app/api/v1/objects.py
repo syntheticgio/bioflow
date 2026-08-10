@@ -12,6 +12,7 @@ from app.api.v1.schemas import (
     BlobOut,
     ComputationRecord,
     ExpectedGc,
+    MoleculeTypeInferenceOut,
     ObjectComputationsOut,
     ObjectDetail,
     ObjectOut,
@@ -24,6 +25,7 @@ from app.api.v1.schemas import (
 )
 from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
+from app.metadata import infer_molecule
 from app.models import BlobStorage, JobClass, JobRunTiming
 from app.models.ai import TaskSlot
 from app.services import (
@@ -329,6 +331,36 @@ async def reingest_object(object_id: PydanticObjectId, owner: OwnerDep) -> dict:
         job_class=JobClass.USER_INTERACTIVE,
     )
     return {"object_id": str(object_id), "job_id": job_id}
+
+
+@router.post("/{object_id}/infer-molecule-type", response_model=MoleculeTypeInferenceOut)
+async def infer_molecule_type_endpoint(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> MoleculeTypeInferenceOut:
+    """Sample a FASTQ's own bases to suggest DNA or RNA.
+
+    User-triggered only -- never runs automatically. Returns a suggestion for
+    the caller to apply to an in-progress metadata edit; does not write
+    anything itself. Runs synchronously: sampling ~2000 reads from the start
+    of the file is bounded regardless of the file's total size, unlike
+    reingest's full pipeline dispatch.
+    """
+    obj, blob = await object_service.object_with_blob(object_id, owner=owner)
+    if blob is None or not obj.blob_sha256:
+        raise NotFoundError("Object has no stored content to sample yet")
+
+    if blob.storage is BlobStorage.EXTERNAL:
+        if not blob.external_path:
+            raise NotFoundError("External blob has no recorded path")
+        target = Path(blob.external_path)
+    else:
+        target = blob_path(obj.blob_sha256)
+
+    if not target.is_file():
+        raise NotFoundError(f"Stored content is not available: {obj.name}")
+
+    result = infer_molecule.infer_molecule_type(target)
+    return MoleculeTypeInferenceOut(**result)
 
 
 @router.delete("/{object_id}", status_code=status.HTTP_204_NO_CONTENT)

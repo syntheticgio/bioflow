@@ -96,6 +96,17 @@ class PairRequest(BaseModel):
     read_number: int = Field(ge=1, le=2)
 
 
+class MoleculeTypeInferenceOut(BaseModel):
+    """Result of sampling a FASTQ's bases for the manual Infer button.
+
+    Deliberately not written to the object -- the caller applies it to an
+    in-progress edit and Saves (or doesn't) through the normal metadata PATCH.
+    """
+
+    molecule_type: str | None
+    basis: str
+
+
 class BlobOut(BaseModel):
     sha256: str
     size: int
