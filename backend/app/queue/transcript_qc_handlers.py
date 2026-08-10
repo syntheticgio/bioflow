@@ -6,16 +6,30 @@ would parse the GTF twice and traverse the BAM twice for two charts that sit
 side by side.
 """
 
+import gzip
 from pathlib import Path
 
 from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import transcript_qc_runner
+from app.pipelines import aligners, transcript_qc_runner
+from app.queue.pipeline_handlers import _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.sequence_stats import DEFAULT_SAMPLE_READS
 
 log = get_logger(__name__)
+
+
+def _is_gzip(path: Path) -> bool:
+    """Sniff the gzip magic bytes rather than trusting the `.gtf`/`.gz`
+    suffix -- mirrors align_handlers.py's `_is_gzip`. GTFs downloaded from
+    NCBI, and files this app compresses on ingest, are routinely gzipped;
+    reading gzip bytes with plain `open()` doesn't raise, it just silently
+    produces zero valid `exon` lines, which reads as "bad annotation" rather
+    than "wrong opener".
+    """
+    with open(path, "rb") as handle:
+        return handle.read(2) == b"\x1f\x8b"
 
 
 @handler(
@@ -41,11 +55,25 @@ def run_transcript_qc(ctx: JobContext) -> dict:
     if not object_id:
         raise PermanentError("run_transcript_qc requires an 'object_id'")
 
-    bam_path = Path(ctx.payload["bam_path"])
+    # pysam's .fetch() needs the index next to the BAM, under the name it
+    # expects (<name>.bam.bai) -- same convention run_bam_stats uses, since
+    # the payload's bam_path/bai_path point at content-addressed blobs with
+    # no naming relationship to each other.
+    work = _prepare_workdir(ctx, "transcript_qc")
+    bam_name = Path(ctx.payload.get("bam_name") or "aligned.bam").name
+    bam_path = work / bam_name
+    bam_path.unlink(missing_ok=True)
+    bam_path.symlink_to(Path(ctx.payload["bam_path"]))
+
+    bai_path = work / f"{bam_name}{aligners.BAI_SUFFIX}"
+    bai_path.unlink(missing_ok=True)
+    bai_path.symlink_to(Path(ctx.payload["bai_path"]))
+
     gtf_path = Path(ctx.payload["gtf_path"])
 
     ctx.progress(phase="gtf", pct=0.1, message="reading the gene annotation")
-    with open(gtf_path, errors="replace") as fh:
+    opener = gzip.open if _is_gzip(gtf_path) else open
+    with opener(gtf_path, "rt", errors="replace") as fh:
         transcripts = transcript_qc_runner.parse_gtf_transcripts(fh)
     representatives = transcript_qc_runner.representative_transcripts(transcripts)
     if not representatives:

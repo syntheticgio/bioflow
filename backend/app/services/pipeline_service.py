@@ -2148,6 +2148,19 @@ async def launch_transcript_qc(
     bam = await object_service.get_object(object_id, owner=owner)
     _check_bam_stats_callable(bam)
 
+    # pysam's .fetch() (used to walk the BAM per-contig) requires an index,
+    # unlike run_bam_stats which shells out to samtools with -a. Missing
+    # index is checked separately from _check_bam_stats_callable, matching
+    # how launch_bam_stats/launch_variant_calling separate "wrong file type"
+    # from "fixable precondition".
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no index (.bai). Compute results (coverage) "
+            "first, or index it, then retry transcript QC.",
+            details={"object_id": str(bam.id)},
+        )
+
     got = applicability({"metadata": bam.metadata, "facts": bam.facts})
     if not (got.gene_body or got.feature_distribution):
         raise ValidationError(
@@ -2161,8 +2174,10 @@ async def launch_transcript_qc(
         raise ValidationError("The annotation must be in the same project as the BAM.")
 
     bam_digest, bam_path = await _resolve_readable(bam)
+    bai_digest, bai_path = await _resolve_readable(bai)
     gtf_digest, gtf_path = await _resolve_readable(gtf)
     bam_path = bam_path or str(blob_path(bam_digest))
+    bai_path = bai_path or str(blob_path(bai_digest))
     gtf_path = gtf_path or str(blob_path(gtf_digest))
 
     job = await queue.enqueue(
@@ -2171,7 +2186,9 @@ async def launch_transcript_qc(
         payload={
             "object_id": str(bam.id),
             "project_id": str(bam.project_id),
+            "bam_name": bam.name,
             "bam_path": bam_path,
+            "bai_path": bai_path,
             "gtf_path": gtf_path,
             "gtf_name": gtf.name,
         },
