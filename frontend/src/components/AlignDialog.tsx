@@ -371,11 +371,16 @@ export function AlignDialog({
               <select
                 value={presetOverride ?? params.preset ?? ""}
                 onChange={(e) => {
+                  // `schema?.presets` narrows the JSX above but not a nested
+                  // closure -- TypeScript can't carry that narrowing across a
+                  // function boundary, so it's re-checked here.
+                  const presets = schema?.presets;
+                  if (!presets) return;
                   const value = e.target.value;
                   setPresetOverride(value);
-                  if (value && value !== "advanced" && schema.presets[value]) {
+                  if (value && value !== "advanced" && presets[value]) {
                     // Apply preset values as overrides
-                    const preset = schema.presets[value];
+                    const preset = presets[value];
                     setOverrides((o) => ({ ...o, ...preset.values, preset: value }));
                   } else if (value === "advanced") {
                     // Advanced mode: clear preset, keep existing field values
