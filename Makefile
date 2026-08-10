@@ -1,6 +1,10 @@
-.PHONY: up down logs ps build test test-queue lint shell mongo redis clean check-home release release-launcher
+.PHONY: up down logs ps build containers test test-queue lint shell mongo redis clean check-home release release-launcher
 
 COMPOSE := docker compose
+
+containers: ## Rebuild and restart api/web/worker, then restart worker (picks up handler code)
+	$(COMPOSE) up -d --build api web worker
+	$(COMPOSE) restart worker
 
 up: check-home ## Build and start the whole stack
 	$(COMPOSE) up -d --build
