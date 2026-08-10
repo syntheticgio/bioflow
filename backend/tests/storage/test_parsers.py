@@ -477,6 +477,92 @@ class TestFastaContiguity:
         assert facts["sequence_n90"] == 500
         assert facts["sequence_l50"] == 1
 
+
+class TestGfaParsing:
+    """Segment/link counts and graph topology.
+
+    The counts predate this class; the topology is what the assembly-graph
+    viewer draws. Both come from one pass over the file.
+    """
+
+    def test_counts_segments_and_links(self, tmp_path):
+        p = tmp_path / "g.gfa"
+        p.write_text(
+            "S\ts1\tACGTACGT\n"
+            "S\ts2\tACGT\n"
+            "L\ts1\t+\ts2\t+\t0M\n"
+        )
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert facts["gfa_segment_count"] == 2
+        assert facts["gfa_link_count"] == 1
+        assert facts["gfa_total_length"] == 12
+
+    def test_segments_carry_id_and_length(self, tmp_path):
+        p = tmp_path / "g.gfa"
+        p.write_text("S\ts1\tACGTACGT\nS\ts2\tACGT\n")
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert facts["gfa_segments"] == [["s1", 8], ["s2", 4]]
+
+    def test_length_comes_from_the_ln_tag_when_sequence_is_absent(self, tmp_path):
+        """A GFA may carry `*` instead of the sequence. Reading that as a
+        zero-length contig would make a valid graph look empty."""
+        p = tmp_path / "g.gfa"
+        p.write_text("S\ts1\t*\tLN:i:5000\n")
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert facts["gfa_segments"] == [["s1", 5000]]
+        assert facts["gfa_total_length"] == 5000
+
+    def test_links_keep_both_orientations(self, tmp_path):
+        """Orientation says which end of a segment joins which. A graph read
+        without it misrepresents the topology it is drawn from."""
+        p = tmp_path / "g.gfa"
+        p.write_text(
+            "S\ts1\tACGT\n"
+            "S\ts2\tACGT\n"
+            "L\ts1\t+\ts2\t-\t0M\n"
+        )
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert facts["gfa_links"] == [["s1", "+", "s2", "-"]]
+
+    def test_a_bubble_keeps_all_four_links(self, tmp_path):
+        # s1 -> {s2, s3} -> s4: the classic unresolved-haplotype shape.
+        p = tmp_path / "g.gfa"
+        p.write_text(
+            "S\ts1\tACGT\nS\ts2\tACGT\nS\ts3\tACGT\nS\ts4\tACGT\n"
+            "L\ts1\t+\ts2\t+\t0M\n"
+            "L\ts1\t+\ts3\t+\t0M\n"
+            "L\ts2\t+\ts4\t+\t0M\n"
+            "L\ts3\t+\ts4\t+\t0M\n"
+        )
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert facts["gfa_link_count"] == 4
+        assert len(facts["gfa_links"]) == 4
+
+    def test_oversized_graph_keeps_counts_but_drops_topology(self, tmp_path, monkeypatch):
+        """The counts stay exact -- they are cheap and already correct, and a
+        graph too large to draw is still a graph worth counting."""
+        monkeypatch.setattr(parsers, "MAX_GRAPH_SEGMENTS", 3)
+        p = tmp_path / "g.gfa"
+        p.write_text("".join(f"S\ts{i}\tACGT\n" for i in range(10)))
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert facts["gfa_segment_count"] == 10
+        assert facts["gfa_topology_partial"] is True
+        assert "gfa_segments" not in facts
+        assert "gfa_links" not in facts
+
+    def test_graph_within_the_cap_is_not_flagged_partial(self, tmp_path):
+        p = tmp_path / "g.gfa"
+        p.write_text("S\ts1\tACGT\n")
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert "gfa_topology_partial" not in facts
+
+    def test_empty_graph_has_no_facts(self, tmp_path):
+        p = tmp_path / "g.gfa"
+        p.write_text("")
+        facts = parsers.parse(p, FormatKind.GFA, Compression.NONE)
+        assert "gfa_segment_count" not in facts
+        assert "gfa_segments" not in facts
+
     def test_auN_of_equal_contigs_equals_their_length(self, tmp_path):
         # auN degenerates to the contig length when every contig is the same
         # size: sum(len^2) / total == len^2 * k / (len * k) == len.
