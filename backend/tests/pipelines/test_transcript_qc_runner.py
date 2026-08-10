@@ -194,6 +194,38 @@ class TestFeatureClassification:
         # 250 is inside GA's intron and inside GB's exon.
         assert classify_position(idx, "chr1", 250) == "exonic"
 
+    def test_a_long_covering_interval_is_found_behind_short_noncovering_ones(self):
+        """Regression for a backward-scan early exit: a short interval whose
+        start is far from the query position must not stop the scan before
+        an even-earlier-starting, very long interval that actually covers
+        the position is checked.
+
+        Gene spans in particular can be enormous (an intron-heavy gene can
+        run for megabases), so `genes` intervals are exactly where a
+        proximity-based stopping rule silently drops a real match. Three
+        genes on one contig: GA is short and nowhere near position
+        5,000,000; GB starts at 500,000 and runs to 6,000,000, covering the
+        query position; GC sits between them and does not cover it. A scan
+        that stops as soon as it sees one interval "too far back" (GC, or
+        even GB before it's checked) without accounting for how far GB's own
+        end reaches would wrongly call this intergenic.
+        """
+        genes = [
+            _t("TA", "chr1", "+", [(100, 200)], gene="GA"),
+            # Two exons bracketing the query position: the gene *span*
+            # (500,000-6,000,000) covers position 5,000,000, but neither
+            # individual exon does, so this must classify as intronic, not
+            # exonic -- otherwise the test can't tell "found via gene span"
+            # apart from "found via exon".
+            _t("TB", "chr1", "+", [(500_000, 500_100), (5_999_900, 6_000_000)], gene="GB"),
+            _t("TC", "chr1", "+", [(1_000_000, 1_500_000)], gene="GC"),
+        ]
+        idx = build_feature_index(genes)
+        # 5,000,000 is inside GB's span, inside neither GA's nor GC's, and
+        # not inside any exon (no exon reaches this far), so it should be
+        # classified intronic -- covered by a gene span but no exon.
+        assert classify_position(idx, "chr1", 5_000_000) == "intronic"
+
     def test_counts_sum_to_the_classified_total(self):
         c = FeatureCounts()
         c.add("exonic")

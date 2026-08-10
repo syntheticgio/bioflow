@@ -199,34 +199,67 @@ def build_feature_index(transcripts: list[Transcript]) -> dict:
         )
 
     return {
-        "exons": {c: sorted(v) for c, v in exons.items()},
-        "genes": {c: sorted(v.values()) for c, v in genes.items()},
+        "exons": {c: _with_suffix_max(sorted(v)) for c, v in exons.items()},
+        "genes": {c: _with_suffix_max(sorted(v.values())) for c, v in genes.items()},
     }
 
 
-def _covers(intervals: list[tuple[int, int]], position: int) -> bool:
+def _with_suffix_max(
+    intervals: list[tuple[int, int]],
+) -> tuple[list[tuple[int, int]], list[int]]:
+    """Pair a start-sorted interval list with, at each index, the maximum
+    `end` among that interval and every interval after it.
+
+    This is what makes `_covers` correct for overlapping intervals: a single
+    early-starting interval with a very long span (a whole-gene interval, for
+    instance) can outlast many later-starting, short ones. Without knowing
+    the best `end` still reachable from the start of the candidate range, a
+    scan has no sound place to stop short of the beginning of the list.
+    Built once per contig at index-construction time, O(n); used by
+    `_covers` below as an O(1) up-front existence check before it falls back
+    to an O(n) scan of the candidate prefix.
+    """
+    n = len(intervals)
+    suffix_max = [0] * n
+    running_max = float("-inf")
+    for i in range(n - 1, -1, -1):
+        running_max = max(running_max, intervals[i][1])
+        suffix_max[i] = running_max
+    return intervals, suffix_max
+
+
+def _covers(
+    indexed: tuple[list[tuple[int, int]], list[int]], position: int
+) -> bool:
     """Whether any interval contains the position.
 
     Intervals can overlap, so the candidate found by bisect is not
-    necessarily the containing one -- scan back while starts are still at or
-    below the position.
+    necessarily the containing one. `bisect` still narrows the search: no
+    interval starting after `position` can contain it, so only indices
+    `[0, i)` are candidates. Within that prefix, `suffix_max[idx]` -- the
+    largest `end` among `intervals[idx:]` -- is used once, up front, as an
+    existence check: if even the best `end` reachable from the very start of
+    the prefix falls short of `position`, nothing in the whole prefix can
+    cover it and the scan is skipped entirely.
+
+    Note `suffix_max` is *not* monotonic in the direction a backward scan
+    walks (it can only grow as the scanned range widens going toward index
+    0), so it cannot be used as a per-step early-exit condition -- a low
+    value at one index says nothing about indices before it, which is
+    exactly the shape of the original bug. Once the existence check passes,
+    every remaining candidate in the prefix has to be checked; there is no
+    sound way to stop early without an interval tree, and the per-contig
+    lists here are small enough that this is not the bottleneck (see
+    `build_feature_index`'s docstring).
     """
+    intervals, suffix_max = indexed
     i = bisect.bisect_right(intervals, (position, float("inf")))
-    for start, end in reversed(intervals[:i]):
-        if end >= position:
+    if i == 0 or suffix_max[0] < position:
+        return False
+    for start, end in intervals[:i]:
+        if start <= position <= end:
             return True
-        # Sorted by start; a run of non-covering intervals can still be
-        # followed by a long one that does, so only stop once starts are far
-        # enough back that nothing can reach.
-        if start < position - _MAX_FEATURE_SPAN:
-            break
     return False
-
-
-# Longest interval we scan back through in _covers. Human introns reach ~2 Mb;
-# beyond this a position is treated as uncovered rather than walking the whole
-# contig for every read.
-_MAX_FEATURE_SPAN = 3_000_000
 
 
 def classify_position(index: dict, contig: str, position: int) -> str:
@@ -236,9 +269,9 @@ def classify_position(index: dict, contig: str, position: int) -> str:
     strands are common, and mutually exclusive categories are what let the
     three counts sum to the classified total.
     """
-    if _covers(index["exons"].get(contig, []), position):
+    if _covers(index["exons"].get(contig, ([], [])), position):
         return "exonic"
-    if _covers(index["genes"].get(contig, []), position):
+    if _covers(index["genes"].get(contig, ([], [])), position):
         return "intronic"
     return "intergenic"
 
