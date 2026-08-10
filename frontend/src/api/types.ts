@@ -462,6 +462,20 @@ export interface SystemLoad {
   governor_active: boolean;
 }
 
+export interface NodeInfo {
+  node_id: string;
+  workers: number;
+  online_workers: number;
+  running_jobs: number;
+  slots: number;
+  online: boolean;
+  reserved: {
+    cpu: number;
+    mem_mb: number;
+    io_heavy: number;
+  };
+}
+
 export interface ScheduleInfo {
   name: string;
   job_type: string;

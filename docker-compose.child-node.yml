@@ -1,0 +1,31 @@
+# Worker-only stack for a BioFlow child node.
+#
+# This machine runs only the worker; it reaches the primary node's Redis
+# and Mongo over the network.  No api, no web, no local databases.
+#
+# Usage:
+#   cp docker-compose.child-node.yml docker-compose.override.yml
+#   # Edit .env to set MONGO_URL, REDIS_URL, WORKER_NODE_ID
+#   docker compose up -d
+
+name: bioflow-child
+
+services:
+  worker:
+    image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}
+    command: ["python", "-m", "app.worker_main"]
+    environment:
+      MONGO_URL: ${MONGO_URL}
+      REDIS_URL: ${REDIS_URL}
+      BIOINFO_HOME: /data
+      WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}
+      WORKER_NODE_ID: ${WORKER_NODE_ID:?WORKER_NODE_ID must be set}
+    volumes:
+      - ${BIOINFO_HOME:-./data}:/data
+      # Docker socket so the worker can start sibling containers for tools
+      # too large to vendor into the image (e.g. DeepVariant).
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}
+    restart: unless-stopped

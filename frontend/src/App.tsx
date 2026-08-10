@@ -31,6 +31,7 @@ import { SearchView } from "./components/SearchView";
 import { WorkflowCanvas } from "./components/WorkflowCanvas";
 import { SettingsGeneral } from "./components/SettingsGeneral";
 import { SettingsMcp } from "./components/SettingsMcp";
+import { SettingsNodes } from "./components/SettingsNodes";
 import { SettingsResources } from "./components/SettingsResources";
 import { SettingsTools } from "./components/SettingsTools";
 import { SettingsView } from "./components/SettingsView";
@@ -126,6 +127,7 @@ function Shell() {
           <Route path="/settings/resources" element={<SettingsResources />} />
           <Route path="/settings/mcp" element={<SettingsMcp />} />
           <Route path="/settings/general" element={<SettingsGeneral />} />
+          <Route path="/settings/nodes" element={<SettingsNodes />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/metrics/:jobType" element={<MetricsJobType />} />
