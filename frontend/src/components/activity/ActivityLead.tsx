@@ -71,6 +71,7 @@ export function ActivityLead({
       ) : (
         lead && (
           <LeadStory
+            key={lead.id}
             run={lead}
             detail={details.get(lead.id)}
             onSelect={onSelect}
