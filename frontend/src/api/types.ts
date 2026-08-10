@@ -1278,6 +1278,13 @@ export interface InsertSizeHistogramBucket {
   count: number;
 }
 
+export interface DepthHistogramBucket {
+  /** The bucket's lower bound. The final bucket is the overflow bucket. */
+  depth: number;
+  /** Reference positions at this depth -- not reads. */
+  count: number;
+}
+
 export interface ReadLengthHistogramBucket {
   length_bin: number;
   count: number;
@@ -1293,6 +1300,8 @@ export interface BamStatsFacts {
   bam_stats_coverage_bins?: number[];
   bam_stats_coverage_boundaries?: CoverageBoundary[];
   bam_stats_cumulative?: CumulativeCoveragePoint[];
+  bam_stats_depth_histogram?: DepthHistogramBucket[];
+  bam_stats_depth_bucket_width?: number;
   bam_stats_contigs_top?: ContigCoverage[];
   bam_stats_report?: string;
   mapq_histogram?: MapqHistogramBucket[];
