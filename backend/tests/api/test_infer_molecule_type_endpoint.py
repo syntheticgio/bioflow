@@ -12,8 +12,8 @@ from beanie import PydanticObjectId
 
 from app.api.v1.objects import infer_molecule_type_endpoint
 from app.config import settings
-from app.errors import NotFoundError
-from app.models import Blob, BlobState, BlobStorage, DataObject
+from app.errors import NotFoundError, ValidationError
+from app.models import Blob, BlobState, BlobStorage, DataObject, FormatInfo, FormatKind
 from app.storage.paths import blob_rel_path
 
 pytestmark = [
@@ -26,13 +26,18 @@ OWNER = "local"
 
 DNA_BYTES = b"@read1\nACGTACGTACGT\n+\nIIIIIIIIIIII\n"
 RNA_BYTES = b"@read1\nACGUACGUACGU\n+\nIIIIIIIIIIII\n"
+FASTA_BYTES = b">seq1\nACGTACGTACGT\n"
 DNA_SHA = "2f3c1c8e5c1d1f2b4a3d0e9f8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c"
 RNA_SHA = "3f3c1c8e5c1d1f2b4a3d0e9f8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c"
+FASTA_SHA = "4f3c1c8e5c1d1f2b4a3d0e9f8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c"
+
+FASTQ_FORMAT = FormatInfo(kind=FormatKind.FASTQ)
 
 
 @pytest_asyncio.fixture(loop_scope="module")
 async def objects(tmp_path_factory, monkeypatch):
-    """A DNA-like managed object, an RNA-like one, and a pending upload."""
+    """A DNA-like managed object, an RNA-like one, a pending upload, and a
+    ready non-FASTQ (FASTA) object that inference must refuse to sample."""
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setattr(settings, "bioinfo_home", home)
 
@@ -43,6 +48,10 @@ async def objects(tmp_path_factory, monkeypatch):
     rna_file = home / "objects" / blob_rel_path(RNA_SHA)
     rna_file.parent.mkdir(parents=True, exist_ok=True)
     rna_file.write_bytes(RNA_BYTES)
+
+    fasta_file = home / "objects" / blob_rel_path(FASTA_SHA)
+    fasta_file.parent.mkdir(parents=True, exist_ok=True)
+    fasta_file.write_bytes(FASTA_BYTES)
 
     await Blob(
         id=DNA_SHA,
@@ -60,22 +69,47 @@ async def objects(tmp_path_factory, monkeypatch):
         rel_path=blob_rel_path(RNA_SHA),
         ref_count=1,
     ).insert()
+    await Blob(
+        id=FASTA_SHA,
+        size=len(FASTA_BYTES),
+        state=BlobState.PRESENT,
+        storage=BlobStorage.MANAGED,
+        rel_path=blob_rel_path(FASTA_SHA),
+        ref_count=1,
+    ).insert()
 
     dna_obj = await DataObject(
-        project_id=PROJECT_ID, name="dna_reads.fastq", blob_sha256=DNA_SHA
+        project_id=PROJECT_ID,
+        name="dna_reads.fastq",
+        blob_sha256=DNA_SHA,
+        format=FASTQ_FORMAT,
     ).insert()
     rna_obj = await DataObject(
-        project_id=PROJECT_ID, name="rna_reads.fastq", blob_sha256=RNA_SHA
+        project_id=PROJECT_ID,
+        name="rna_reads.fastq",
+        blob_sha256=RNA_SHA,
+        format=FASTQ_FORMAT,
     ).insert()
     pending = await DataObject(
-        project_id=PROJECT_ID, name="still_uploading.fastq"
+        project_id=PROJECT_ID, name="still_uploading.fastq", format=FASTQ_FORMAT
+    ).insert()
+    fasta_obj = await DataObject(
+        project_id=PROJECT_ID,
+        name="reference.fasta",
+        blob_sha256=FASTA_SHA,
+        format=FormatInfo(kind=FormatKind.FASTA),
     ).insert()
 
-    yield {"dna": dna_obj.id, "rna": rna_obj.id, "pending": pending.id}
+    yield {
+        "dna": dna_obj.id,
+        "rna": rna_obj.id,
+        "pending": pending.id,
+        "fasta": fasta_obj.id,
+    }
 
-    for doc in (dna_obj, rna_obj, pending):
+    for doc in (dna_obj, rna_obj, pending, fasta_obj):
         await doc.delete()
-    for digest in (DNA_SHA, RNA_SHA):
+    for digest in (DNA_SHA, RNA_SHA, FASTA_SHA):
         blob = await Blob.get(digest)
         if blob:
             await blob.delete()
@@ -115,3 +149,14 @@ class TestUnavailableContent:
     async def test_another_profile_cannot_sample_the_bytes(self, objects):
         with pytest.raises(NotFoundError):
             await infer_molecule_type_endpoint(objects["dna"], "someone-else")
+
+
+class TestNonFastqRejected:
+    """The frontend only shows the infer button for FASTQ objects, but the
+    endpoint must not trust that -- a direct call against a BAM, FASTA, or
+    any other stored file must not silently produce a confident-looking
+    (and meaningless) DNA/RNA verdict."""
+
+    async def test_a_fasta_object_is_rejected_before_sampling(self, objects):
+        with pytest.raises(ValidationError):
+            await infer_molecule_type_endpoint(objects["fasta"], OWNER)
