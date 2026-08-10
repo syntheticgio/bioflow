@@ -44,6 +44,7 @@ _PLUMBING_KEYS = frozenset(
     {
         "stats_sampled_reads",
         "stats_sampled_bases",
+        "stats_sampling",
         "sampled_records",
         "reference_names_truncated",
         "sample_names_truncated",
