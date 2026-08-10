@@ -250,7 +250,8 @@ function groupKeys(keys: string[]): { title: string; note?: string; keys: string
 }
 
 function label(key: string): string {
-  return LABELS[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  return (LABELS[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase()))
+    .replace(/^Ai\b/, "AI");
 }
 
 function formatNumber(n: number): string {
