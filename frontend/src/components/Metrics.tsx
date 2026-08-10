@@ -89,8 +89,15 @@ export function RunTable({ runs }: { runs: JobRun[] }) {
         </tr>
       </thead>
       <tbody>
+        {/* Keyed by position, not by job_id or finished_at. Both look like
+            better keys and neither is unique here: job_id is null on rows
+            recorded before it was stored, and batch-recorded runs share a
+            finished_at to the second (eight ingest_headers rows sit on one
+            timestamp in a real library). The list is a plain ordered window
+            that is only ever replaced wholesale, never reordered or edited
+            in place, so the index is stable for as long as a row lives. */}
         {runs.map((run, i) => (
-          <tr key={run.job_id ?? `${run.finished_at}-${i}`}>
+          <tr key={i}>
             <td className="mono">
               {opt(run.finished_at, (s) => new Date(s).toLocaleString())}
             </td>
