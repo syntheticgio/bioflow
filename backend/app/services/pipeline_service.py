@@ -2131,6 +2131,67 @@ async def launch_bam_stats(*, object_id: PydanticObjectId, owner: str):
     return job
 
 
+async def launch_transcript_qc(
+    *, object_id: PydanticObjectId, gtf_object_id: PydanticObjectId, owner: str
+):
+    """Queue RNA-seq transcript QC for a BAM against a chosen annotation.
+
+    On demand rather than automatic: applicability is inferred (see
+    services/transcript_qc_gating), and an automatic job on a mislabelled DNA
+    BAM would burn a full pass to render a meaningless curve. The GTF is
+    chosen by the caller rather than guessed, for the same reason.
+    """
+    from app.queue import queue
+    from app.services import object_service
+    from app.services.transcript_qc_gating import applicability
+
+    bam = await object_service.get_object(object_id, owner=owner)
+    _check_bam_stats_callable(bam)
+
+    got = applicability({"metadata": bam.metadata, "facts": bam.facts})
+    if not (got.gene_body or got.feature_distribution):
+        raise ValidationError(
+            "This BAM doesn't look like RNA-seq (checked molecule type, "
+            "assay, and aligner) -- transcript QC isn't offered for it.",
+            details={"object_id": str(bam.id)},
+        )
+
+    gtf = await object_service.get_object(gtf_object_id, owner=owner)
+    if gtf.project_id != bam.project_id:
+        raise ValidationError("The annotation must be in the same project as the BAM.")
+
+    bam_digest, bam_path = await _resolve_readable(bam)
+    gtf_digest, gtf_path = await _resolve_readable(gtf)
+    bam_path = bam_path or str(blob_path(bam_digest))
+    gtf_path = gtf_path or str(blob_path(gtf_digest))
+
+    job = await queue.enqueue(
+        "run_transcript_qc",
+        owner=owner,
+        payload={
+            "object_id": str(bam.id),
+            "project_id": str(bam.project_id),
+            "bam_path": bam_path,
+            "gtf_path": gtf_path,
+            "gtf_name": gtf.name,
+        },
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+        max_attempts=2,
+        # Keyed by both, so re-running against a different annotation is a
+        # different job rather than a silently deduped no-op.
+        dedup_key=f"transcriptqc:{bam.id}:{gtf.id}",
+        project_id=bam.project_id,
+        object_id=bam.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Transcript QC is already queued or running for this file",
+            details={"object_id": str(bam.id)},
+        )
+    return job
+
+
 VCF_STATS_CALLABLE_KINDS = {FormatKind.VCF, FormatKind.BCF}
 
 

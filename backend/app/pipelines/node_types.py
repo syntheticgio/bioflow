@@ -815,6 +815,13 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # assembly rather than a new object — no output port to wire.
         "pipeline_service.launch_completeness",
         "pipeline_service.launch_gc_tracks",
+        # On-demand analysis over an existing BAM against a caller-chosen
+        # GTF, not a graph step: applicability is inferred per-object (see
+        # services/transcript_qc_gating) rather than derivable from a node's
+        # input port type, and it produces facts only, no output object for
+        # a downstream node to consume. Canvas wiring, if ever added, is a
+        # separate task.
+        "pipeline_service.launch_transcript_qc",
     }
 )
 
