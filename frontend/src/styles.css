@@ -2724,6 +2724,113 @@ a.btn {
   font-weight: 600;
 }
 
+/* Metrics page ---------------------------------------------------------- */
+
+/* Its own class rather than .help-page: that one is a 760px prose measure,
+   and this page is two columns of data tables. Same reason .software-page
+   overrides the measure. #129 -- the narrow measure is also part of why the
+   page looked like it had a stranded column on the right. */
+.metrics-page {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 32px;
+  padding: 24px 32px;
+  overflow-y: auto;
+  color: var(--text);
+  align-items: start;
+}
+
+/* The see-more page has no second column to balance. */
+.metrics-page-single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 1100px;
+}
+
+.metrics-page h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.metrics-overview,
+.metrics-runs {
+  min-width: 0;
+}
+
+.run-group {
+  margin-bottom: 28px;
+}
+
+.run-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+
+.run-group-head h3 {
+  font-size: 13px;
+  margin: 0;
+  color: var(--text);
+}
+
+.run-see-more {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.run-table {
+  font-size: 12px;
+}
+
+.run-table-empty {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin: 8px 0;
+}
+
+.run-outcome {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.run-outcome-succeeded {
+  color: var(--text-dim);
+}
+
+/* Failures are listed here on purpose, so they have to read as failures
+   rather than as just another row. */
+.run-outcome-failed,
+.run-outcome-dead {
+  color: var(--error);
+}
+
+.run-outcome-cancelled {
+  color: var(--text-secondary);
+}
+
+.run-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.run-pager-at {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* Two columns are unreadable at tablet width and below: six columns of run
+   data cannot share a viewport with the summary table. */
+@media (max-width: 1100px) {
+  .metrics-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* --- Feedback help page --- */
 
 .feedback-form {
