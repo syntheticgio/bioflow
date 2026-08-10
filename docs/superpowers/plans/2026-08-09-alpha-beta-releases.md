@@ -460,8 +460,11 @@ class TestStagedReleases:
         assert "alpha/0.3.0" in (r.stderr + r.stdout).lower()
 
     def test_refuses_recutting_an_older_stage(self, repo):
-        # The tree says 0.3.0 (production). Cutting 0.3.0-alpha again sorts
-        # lower under `sort -V` and must refuse on the ordering check.
+        # The tree already says 0.3.0 (production). Cutting 0.3.0-alpha again
+        # sorts lower under `sort -V` and must refuse on the ordering check.
+        (repo / "VERSION").write_text("0.3.0\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-m", "prod at 0.3.0")
         r = run_release(repo, "app", "0.3.0-alpha")
         assert r.returncode != 0
         assert "greater" in (r.stderr + r.stdout).lower()
@@ -470,11 +473,34 @@ class TestStagedReleases:
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `/opt/homebrew/bin/pytest ops/tests/test_release_preflight.py::TestStagedReleases -q`
-Expected: the six cut-path tests fail — the script still pushes `main` and never switches branches. `test_refuses_recutting_an_older_stage` already **passes** at this point: `0.3.0-alpha` sorts below the fixture's `0.3.0` under `sort -V`, so the pre-existing ordering check refuses it without any new code. (The branch-exists-at-HEAD test deliberately leaves VERSION at the fixture's `0.1.0`, so the ordering check does not fire first; the new target-branch code is what must refuse it.)
+Expected: four cut-path tests fail — the script still pushes `main` and never
+switches branches — and three already pass before any new code:
 
-- [ ] **Step 3: Implement branch creation and the staged push**
+- `test_refuses_a_stage_branch_left_at_a_different_commit` passes because
+  Task 3's guard refuses any alpha cut from a branch that is not `main` (the
+  message names `alpha/0.3.0`, which the test asserts).
+- `test_refuses_recutting_an_older_stage` passes because the pre-existing
+  ordering check (`0.3.0-alpha` sorts below `0.3.0`) refuses it.
+- `test_reuses_a_stage_branch_left_at_head_by_a_failed_cut` fails — it
+  expects the cut to *succeed* by reusing the branch, but Task 3's guard
+  refuses an alpha cut off `main`; Task 4's code is what makes reuse work.
 
-In `ops/release.sh`, replace the final push block:
+- [ ] **Step 3: Implement the stage-branch check (preflight) and the switch (post-commit)**
+
+Two edits in `ops/release.sh`. First, add the target-branch usability check to the preflight, right after the stage-derivation `case` block from Task 3:
+
+```bash
+# The stage branch must be usable: absent (created below) or already at HEAD
+# (a previous cut that died between switching and pushing). One pointing at a
+# different commit is a different tree than the operator's checkout, so the
+# release must not happen -- checked here, before any bump/commit/tag.
+if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
+  [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TARGET")" ] \
+    || die "branch $TARGET exists but does not point at HEAD -- inspect it before cutting"
+fi
+```
+
+Then replace the final push block:
 
 ```bash
 git push origin main "refs/tags/$TAG"
@@ -483,20 +509,13 @@ git push origin main "refs/tags/$TAG"
 with:
 
 ```bash
-# Create (or reuse) the stage branch from the current tip, then cut from it.
-# A stage branch already pointing at HEAD is a previous cut that died between
-# the switch and the push -- retrying it is safe. One pointing elsewhere is a
-# different tree than the operator's checkout, so the release must not happen.
+# Move the release commit onto the stage branch, then push branch and tag
+# together: a pushed tag whose commit never landed is a tag CI cannot check out.
 if git rev-parse -q --verify "refs/heads/$TARGET" >/dev/null; then
-  git switch "$TARGET"
-  [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TARGET")" ] \
-    || die "branch $TARGET exists but does not point at HEAD -- inspect it before cutting"
+  git switch "$TARGET"            # at HEAD, guaranteed by the preflight
 else
-  git switch -c "$TARGET"
+  git switch -c "$TARGET"         # from the current tip (the release commit)
 fi
-
-# Commit and tag together: a pushed tag whose commit never landed is a tag CI
-# cannot check out.
 git push -u origin "refs/heads/$TARGET" "refs/tags/$TAG"
 ```
 
