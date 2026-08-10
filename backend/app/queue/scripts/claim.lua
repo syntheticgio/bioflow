@@ -19,6 +19,7 @@
 -- ARGV[4] allowed classes (comma separated)
 -- ARGV[5] cpu_budget      ARGV[6] mem_mb_budget  ARGV[7] io_heavy_budget
 -- ARGV[8] scan_limit      ARGV[9] ignore_reservations ("1" or "0")
+-- ARGV[10] node_id        (for per-node conc counter keys; "" for global)
 --
 -- ignore_reservations is the caller's in-flight self-healing clamp: a worker
 -- with nothing running cannot still owe a reservation, so when true the live
@@ -44,11 +45,23 @@ local mem_budget  = tonumber(ARGV[6])
 local io_budget   = tonumber(ARGV[7])
 local scan_limit  = tonumber(ARGV[8]) or 50
 local ignore_reservations = ARGV[9] == '1'
+local node_id = ARGV[10] or ''
 
 -- Set membership for the admitted classes.
 local allowed = {}
 for cls in string.gmatch(ARGV[4], "[^,]+") do
   allowed[cls] = true
+end
+
+-- Per-node concurrency counter keys, or global keys when node_id is empty
+-- (backward compat with jobs enqueued before per-node queues existed).
+local conc_cpu = 'bp:conc:cpu'
+local conc_mem = 'bp:conc:mem_mb'
+local conc_io  = 'bp:conc:io_heavy'
+if node_id ~= '' then
+  conc_cpu = conc_cpu .. ':' .. node_id
+  conc_mem = conc_mem .. ':' .. node_id
+  conc_io  = conc_io .. ':' .. node_id
 end
 
 -- Live headroom, read as part of this same atomic execution. A negative
@@ -64,7 +77,7 @@ local reserved_io  = 0
 -- sole-occupancy from them there would fire the override whenever the claiming
 -- worker happened to be idle -- strictly more permissive than an unconditional
 -- exemption, while reading as if it were more conservative.
-local live = redis.call('MGET', 'bp:conc:cpu', 'bp:conc:mem_mb', 'bp:conc:io_heavy')
+local live = redis.call('MGET', conc_cpu, conc_mem, conc_io)
 local sole = math.max(tonumber(live[1]) or 0, 0) == 0
              and math.max(tonumber(live[2]) or 0, 0) == 0
              and math.max(tonumber(live[3]) or 0, 0) == 0
@@ -121,12 +134,13 @@ for i = 1, #candidates do
                  'worker_id', worker_id,
                  'lease_expires', now_ms + lease_ms,
                  'started_at', now_ms,
-                 'epoch', epoch)
+                 'epoch', epoch,
+                 'node', node_id)
 
-      redis.call('INCRBY', 'bp:conc:cpu', cpu)
-      redis.call('INCRBY', 'bp:conc:mem_mb', mem)
+      redis.call('INCRBY', conc_cpu, cpu)
+      redis.call('INCRBY', conc_mem, mem)
       if io == 'heavy' then
-        redis.call('INCR', 'bp:conc:io_heavy')
+        redis.call('INCR', conc_io)
       end
 
       return {job_id, class, tostring(cpu), tostring(mem), io, tostring(epoch)}

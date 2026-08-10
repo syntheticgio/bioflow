@@ -374,7 +374,7 @@ async def _release_dependents(job_id: str, *, succeeded: bool) -> None:
         log.info("job_unblocked", job_id=str(dep.id), type=dep.type, after=job_id)
 
 
-async def _push_to_redis(job: Job, *, delay_seconds: float = 0) -> None:
+async def _push_to_redis(job: Job, *, delay_seconds: float = 0, target_node: str | None = None) -> None:
     r = get_redis()
     job_id = str(job.id)
     score = compute_score(job.job_class, job.timing.enqueued_at)
@@ -395,13 +395,17 @@ async def _push_to_redis(job: Job, *, delay_seconds: float = 0) -> None:
             # Always written, never omitted: claim.lua reads this at a fixed
             # HMGET position, where an absent field is nil rather than "0".
             "override": "1" if job.resource_override else "0",
+            # Node the job is targeted at, or empty for the global pool.
+            # Written so release/reap know which per-node counters to decrement.
+            "node": target_node or "",
         },
     )
+    ready_key = keys.ready_key(target_node)
     if delay_seconds > 0:
         pipe.zadd(keys.DELAYED, {job_id: now_ms + int(delay_seconds * 1000)})
         state = JobState.DELAYED
     else:
-        pipe.zadd(keys.READY, {job_id: score})
+        pipe.zadd(ready_key, {job_id: score})
         state = JobState.QUEUED
     await pipe.execute()
 
@@ -417,6 +421,8 @@ async def claim(
     io_heavy_budget: int,
     ignore_reservations: bool = False,
     lease_seconds: int | None = None,
+    node_id: str = "",
+    ready_key: str | None = None,
 ) -> ClaimedJob | None:
     """Atomically claim the best dispatchable job, or None.
 

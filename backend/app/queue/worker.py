@@ -97,6 +97,7 @@ def compute_free_resources(
 class Worker:
     def __init__(self, worker_id: str | None = None):
         self.worker_id = worker_id or settings.worker_id or f"{socket.gethostname()}:{os.getpid()}"
+        self.node_id: str = settings.worker_node_id
         self.max_concurrent = settings.worker_max_concurrent
         self.shutdown = asyncio.Event()
         self.executor = JobExecutor(self.worker_id)
@@ -135,6 +136,7 @@ class Worker:
         log.info(
             "worker_starting",
             worker_id=self.worker_id,
+            node_id=self.node_id,
             max_concurrent=self.max_concurrent,
             restored_jobs=restored,
             recovered_workflow_nodes=recovered,
@@ -200,17 +202,39 @@ class Worker:
             return None
 
         budgets = await self._resource_budgets()
-        claimed = await queue.claim(
+        # Try the node-specific queue first, then the global pool.
+        claimed = await self._try_claim_queue(
+            keys.ready_key(self.node_id),
+            allowed,
+            budgets,
+        )
+        if claimed is None:
+            claimed = await self._try_claim_queue(
+                keys.ready_key(),
+                allowed,
+                budgets,
+            )
+        if claimed is not None and self._local_governor is not None:
+            self._local_governor.record_admission()
+        return claimed
+
+    async def _try_claim_queue(
+        self,
+        ready_key: str,
+        allowed: set[str],
+        budgets: dict,
+    ):
+        """Claim one job from a specific queue, or None."""
+        return await queue.claim(
             self.worker_id,
             allowed_classes=sorted(allowed),
             cpu_budget=budgets["cpu"],
             mem_mb_budget=budgets["mem_mb"],
             io_heavy_budget=budgets["io_heavy"],
             ignore_reservations=len(self._running) == 0,
+            node_id=self.node_id,
+            ready_key=ready_key,
         )
-        if claimed is not None and self._local_governor is not None:
-            self._local_governor.record_admission()
-        return claimed
 
     async def _maintenance_starving(self) -> bool:
         """True when the oldest queued maintenance job has waited too long.
@@ -329,9 +353,9 @@ class Worker:
         """
         try:
             values = await get_redis().mget(
-                keys.conc_key("cpu"),
-                keys.conc_key("mem_mb"),
-                keys.conc_key("io_heavy"),
+                keys.conc_key("cpu", self.node_id),
+                keys.conc_key("mem_mb", self.node_id),
+                keys.conc_key("io_heavy", self.node_id),
             )
         except Exception as e:  # noqa: BLE001 - dispatch must survive a Redis blip
             log.warning("reservation_read_failed", error=str(e))
@@ -473,6 +497,7 @@ class Worker:
                     "slots": self.max_concurrent,
                     "running": list(self._running),
                     "draining": self.shutdown.is_set(),
+                    "node_id": self.node_id,
                 }
             ),
         )

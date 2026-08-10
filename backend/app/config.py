@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     lease_ttl_seconds: int = 30
     worker_max_concurrent: int = 4
     worker_id: str = ""  # defaults to hostname:pid at startup
+    worker_node_id: str = "primary"  # stable name for this physical machine
     job_max_attempts: int = 5
     # Reaper/promotion cadence.
     reaper_interval_seconds: float = 10.0
