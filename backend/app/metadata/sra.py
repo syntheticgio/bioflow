@@ -99,6 +99,9 @@ class SraMetadata:
             out["platform"] = self.instrument
         if self.library_strategy:
             out["assay"] = _map_strategy(self.library_strategy)
+        if self.library_source:
+            out["library_source"] = _map_source(self.library_source)
+            out["molecule_type"] = _map_molecule_type(self.library_source)
         if self.library_layout:
             out["read_type"] = (
                 "paired-end" if self.library_layout.upper() == "PAIRED" else "single-end"
@@ -137,6 +140,40 @@ _STRATEGY_MAP = {
 
 def _map_strategy(strategy: str) -> str:
     return _STRATEGY_MAP.get(strategy.strip().upper(), strategy)
+
+
+# SRA library sources map onto our library_source vocabulary the same way
+# strategies do -- anything unrecognized passes through unchanged.
+_SOURCE_MAP = {
+    "GENOMIC": "Genomic",
+    "TRANSCRIPTOMIC": "Transcriptomic",
+    "METAGENOMIC": "Metagenomic",
+    "METATRANSCRIPTOMIC": "Metatranscriptomic",
+    "SYNTHETIC": "Synthetic",
+    "VIRAL RNA": "Viral RNA",
+    "OTHER": "Other",
+}
+
+# Coarse DNA/RNA bucket derived from library source. Not a judgment call SRA
+# makes explicitly -- METAGENOMIC and SYNTHETIC are assumed DNA-like (both are
+# overwhelmingly genomic-DNA preps in practice), anything not recognized here
+# maps to "Other" rather than a guess.
+_SOURCE_TO_MOLECULE = {
+    "GENOMIC": "DNA",
+    "METAGENOMIC": "DNA",
+    "SYNTHETIC": "DNA",
+    "TRANSCRIPTOMIC": "RNA",
+    "METATRANSCRIPTOMIC": "RNA",
+    "VIRAL RNA": "RNA",
+}
+
+
+def _map_source(source: str) -> str:
+    return _SOURCE_MAP.get(source.strip().upper(), source)
+
+
+def _map_molecule_type(source: str) -> str:
+    return _SOURCE_TO_MOLECULE.get(source.strip().upper(), "Other")
 
 
 def parse_accession(filename: str) -> str | None:
