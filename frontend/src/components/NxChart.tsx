@@ -49,11 +49,21 @@ function tick(n: number): string {
  * NGx: the same walk as Nx, but against expected genome size instead of the
  * assembly's own total.
  *
- * The curve deliberately stops early when the assembly is shorter than the
- * genome is expected to be -- the cumulative length never reaches 100% of
- * that size, and a curve that ends at x=78 is the visualization saying 22%
- * of the expected genome is not in this file. Extending it to the axis would
- * erase the finding.
+ * scale = assemblyTotal / genomeSize. Two cases:
+ *
+ * - scale < 1 (assembly shorter than the expected genome): the curve
+ *   deliberately stops early. The cumulative length never reaches 100% of
+ *   that size, and a curve that ends at x=78 is the visualization saying 22%
+ *   of the expected genome is not in this file. This is intentional and
+ *   unclamped -- extending it to the axis would erase the finding.
+ * - scale > 1 (assembly at least as large as the expected genome -- a
+ *   plausible reading when genome size is an estimate, or when the assembly
+ *   retains duplicated haplotypes): gx = round(x * scale) can exceed 100
+ *   while x itself is still under 100. Rather than dropping those points
+ *   (which would truncate the curve early and look identical to the
+ *   missing-sequence case above, even though nothing is missing), gx is
+ *   clamped to 100: the curve reaches the axis, correctly showing the
+ *   assembly covers the full expected genome.
  */
 function ngxPoints(
   curve: [number, number][],
@@ -64,12 +74,14 @@ function ngxPoints(
   const out: [number, number][] = [];
   let lastX = 0;
   for (const [x, length] of curve) {
-    const gx = Math.round(x * scale);
+    const gx = Math.min(100, Math.round(x * scale));
     // Rounding collapses several source points onto one x when the assembly
     // is much shorter than the genome. Keeping only the first of each run
     // preserves a strictly increasing path; without this the line doubles
-    // back on itself and renders as a scribble.
-    if (gx >= 1 && gx <= 100 && gx > lastX) {
+    // back on itself and renders as a scribble. The same guard, now applied
+    // to the clamped value, also stops the loop from adding anything past
+    // the first point that reaches x=100.
+    if (gx >= 1 && gx > lastX) {
       out.push([gx, length]);
       lastX = gx;
     }
