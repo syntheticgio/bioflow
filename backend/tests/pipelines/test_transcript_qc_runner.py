@@ -228,6 +228,40 @@ class TestFeatureClassification:
         assert facts == {"exonic": 2, "intronic": 1, "intergenic": 1}
         assert sum(facts.values()) == c.total
 
+    def test_multiple_transcripts_of_one_gene_merge_into_one_span(self):
+        """build_feature_index can receive more than one transcript per gene
+        (representative_transcripts already dedupes for the real caller, but
+        this function doesn't assume that) -- the merged span must cover the
+        union of both transcripts' extents, not just the last one seen."""
+        two_transcripts_one_gene = [
+            _t("T1", "chr1", "+", [(100, 200)], gene="G1"),
+            _t("T2", "chr1", "+", [(1000, 1100)], gene="G1"),
+        ]
+        idx = build_feature_index(two_transcripts_one_gene)
+        # A position between the two transcripts' spans is inside neither
+        # transcript's own exons, but IS inside the gene's merged span.
+        assert classify_position(idx, "chr1", 500) == "intronic"
+        # A position before the first transcript's span is outside the gene
+        # entirely.
+        assert classify_position(idx, "chr1", 50) == "intergenic"
+
+
+class TestCovers:
+    def test_a_position_inside_a_very_long_interval_is_covered(self):
+        """A gene/exon spanning more than any fixed distance bound must
+        still be found -- the previous scan-back cutoff silently missed
+        this exact shape."""
+        from app.pipelines.transcript_qc_runner import _covers
+
+        intervals = [(0, 5_000_000), (100, 200)]
+        assert _covers(intervals, 4_500_000) is True
+
+    def test_a_position_just_past_the_end_of_a_long_interval_is_not_covered(self):
+        from app.pipelines.transcript_qc_runner import _covers
+
+        intervals = [(0, 5_000_000)]
+        assert _covers(intervals, 5_000_001) is False
+
 
 class TestContigOverlap:
     def test_matching_names_overlap(self):
