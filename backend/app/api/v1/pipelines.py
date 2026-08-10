@@ -662,6 +662,23 @@ async def launch_bam_stats(body: BamStatsRequest, owner: OwnerDep) -> JobOut:
     return JobOut.of(job)
 
 
+class TranscriptQcRequest(BaseModel):
+    object_id: PydanticObjectId
+    gtf_object_id: PydanticObjectId
+
+
+@router.post(
+    "/transcript-qc", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_transcript_qc(body: TranscriptQcRequest, owner: OwnerDep) -> JobOut:
+    """Queue RNA-seq transcript QC: gene body coverage and feature
+    distribution. Read-only: produces facts only."""
+    job = await pipeline_service.launch_transcript_qc(
+        object_id=body.object_id, gtf_object_id=body.gtf_object_id, owner=owner
+    )
+    return JobOut.of(job)
+
+
 @router.get("/bamstats/report/{object_id}/{report_path:path}")
 async def get_bam_stats_report(
     object_id: PydanticObjectId,
