@@ -21,6 +21,7 @@ import { readQuality } from "../lib/readQuality";
 import { notify } from "../stores/messageStore";
 import { AiSummary } from "./AiSummary";
 import { AssemblyFacts } from "./AssemblyFacts";
+import { AssemblyGraph } from "./AssemblyGraph";
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
@@ -1179,6 +1180,24 @@ function QcTab({
            same kind, and they pack by height together rather than the last
            two spanning the full width under the rest. */
         <FactsColumns>
+          {/* An assembly graph object. Rendered above the fact table because
+              the shape is the finding and the counts merely quantify it.
+              Absent for a graph past the topology cap, where the parser keeps
+              gfa_topology_partial and the counts alone. Wrapped in .section so
+              FactsColumns' height measurement (:scope > .facts-group,
+              .section) treats it as one indivisible block like its
+              siblings. */}
+          {Array.isArray(obj.facts.gfa_segments) &&
+            Array.isArray(obj.facts.gfa_links) && (
+              <div className="section">
+                <AssemblyGraph
+                  key={obj.id}
+                  segments={obj.facts.gfa_segments as [string, number][]}
+                  links={obj.facts.gfa_links as [string, string, string, string][]}
+                />
+              </div>
+            )}
+
           {/* Already grouped by subject -- File contents, Measured quality,
               Header and so on. */}
           {hasFacts && <FactsTable facts={obj.facts} columns />}
