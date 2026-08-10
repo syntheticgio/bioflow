@@ -20,8 +20,13 @@ log = get_logger(__name__)
 
 @handler(
     "run_transcript_qc",
-    mode=HandlerMode.SUBPROCESS,
+    # THREAD, not SUBPROCESS: pysam runs in this process -- there is no
+    # binary to spawn or kill via process group.
+    mode=HandlerMode.THREAD,
     job_class=JobClass.COMPUTE,
+    # Covers the in-memory feature index built from the GTF's exons and
+    # genes, plus the per-contig transcript lookup dict, for annotations up
+    # to roughly vertebrate-genome scale.
     resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
     max_attempts=2,
 )
@@ -75,7 +80,12 @@ def run_transcript_qc(ctx: JobContext) -> dict:
                 "Use an annotation built against the same reference."
             )
 
-        for contig, per_contig_budget in _sampling_plan(af, DEFAULT_SAMPLE_READS):
+        for contig, per_contig_budget in transcript_qc_runner.sampling_plan(
+            contig_lengths=[
+                (c, af.get_reference_length(c) or 0) for c in af.references
+            ],
+            budget=DEFAULT_SAMPLE_READS,
+        ):
             taken = 0
             for rec in af.fetch(contig):
                 if rec.is_secondary or rec.is_supplementary or rec.is_unmapped:
@@ -122,23 +132,3 @@ def run_transcript_qc(ctx: JobContext) -> dict:
         "job_id": ctx.job_id,
         "facts": facts,
     }
-
-
-def _sampling_plan(af, budget: int) -> list[tuple[str, int]]:
-    """How many reads to take from each contig, proportional to its length.
-
-    Reading the first `budget` records instead -- which is what the existing
-    alignment stats do -- takes every read from the start of the first contig
-    on a coordinate-sorted BAM. For a gene body curve that is a few hundred
-    genes on one chromosome, not a genome-wide answer. See issue #191.
-    """
-    lengths = [(c, af.get_reference_length(c) or 0) for c in af.references]
-    total = sum(n for _, n in lengths)
-    if total <= 0:
-        return [(c, budget) for c, _ in lengths[:1]]
-    plan = []
-    for contig, length in lengths:
-        share = int(budget * length / total)
-        if share > 0:
-            plan.append((contig, share))
-    return plan or [(lengths[0][0], budget)]

@@ -13,6 +13,7 @@ from app.pipelines.transcript_qc_runner import (
     _attribute,
     parse_gtf_transcripts,
     representative_transcripts,
+    sampling_plan,
 )
 from app.pipelines.transcript_qc_runner import (  # noqa: E402
     FeatureCounts,
@@ -272,3 +273,29 @@ class TestContigOverlap:
         outside every gene and the result is a plausible-looking 100%
         intergenic with no error anywhere."""
         assert contig_overlap({"1", "2"}, {"chr1", "chr2"}) == 0
+
+
+class TestSamplingPlan:
+    def test_short_contigs_still_get_at_least_one_read(self):
+        """A contig whose proportional share rounds to zero must not be
+        silently skipped -- a genuine gene-bearing scaffold in a non-model
+        genome could otherwise contribute nothing to either chart with no
+        signal anywhere that it happened."""
+        plan = sampling_plan(
+            contig_lengths=[("chr1", 250_000_000), ("tiny_scaffold", 500)],
+            budget=200_000,
+        )
+        by_contig = dict(plan)
+        assert by_contig["tiny_scaffold"] >= 1
+
+    def test_shares_are_roughly_proportional_to_length(self):
+        plan = sampling_plan(
+            contig_lengths=[("big", 900_000), ("small", 100_000)],
+            budget=1000,
+        )
+        by_contig = dict(plan)
+        assert by_contig["big"] > by_contig["small"]
+
+    def test_zero_total_length_falls_back_to_the_first_contig(self):
+        plan = sampling_plan(contig_lengths=[("c1", 0), ("c2", 0)], budget=500)
+        assert plan == [("c1", 500)]

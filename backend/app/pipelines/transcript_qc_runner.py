@@ -296,3 +296,28 @@ def contig_overlap(bam_contigs: set[str], gtf_contigs: set[str]) -> int:
     result with no error anywhere, so the caller refuses instead.
     """
     return len(bam_contigs & gtf_contigs)
+
+
+def sampling_plan(
+    *, contig_lengths: list[tuple[str, int]], budget: int
+) -> list[tuple[str, int]]:
+    """How many reads to take from each contig, proportional to its length.
+
+    Reading the first `budget` records instead -- which is what the existing
+    alignment stats do -- takes every read from the start of the first contig
+    on a coordinate-sorted BAM. For a gene body curve that is a few hundred
+    genes on one chromosome, not a genome-wide answer. See issue #191.
+
+    Every contig with at least one base gets at least one read in its
+    budget, even if its proportional share rounds down to zero -- a small
+    but genuine gene-bearing scaffold should never be silently skipped
+    entirely, which is exactly what a bare `int(budget * length / total)`
+    would do for anything short relative to the genome and the budget.
+    """
+    total = sum(n for _, n in contig_lengths)
+    if total <= 0:
+        return [(c, budget) for c, _ in contig_lengths[:1]]
+    plan = []
+    for contig, length in contig_lengths:
+        plan.append((contig, max(int(budget * length / total), 1)))
+    return plan
