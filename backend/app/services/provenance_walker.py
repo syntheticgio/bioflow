@@ -179,6 +179,9 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # steps; the BAM they produce is the narrative object.
         "align_reads_chunked",
         "merge_chunked_buckets",
+        # GC track analysis is read-only facts merged onto an existing
+        # assembly, same class as completeness scoring.
+        "analyze_gc_tracks",
         # AI features that write a field rather than producing an object.
         "summarize_object",
         "summarize_de_results",

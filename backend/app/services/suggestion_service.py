@@ -929,6 +929,45 @@ def build_completeness_card(obj) -> SuggestionCard | None:
     )
 
 
+def build_gc_tracks_card(obj) -> SuggestionCard | None:
+    """Circos plot: GC content and skew rings for a finished genome.
+
+    Gated on shape (FASTA, not protein/transcript) rather than provenance
+    — an uploaded assembly with a known organism is the best case for the
+    origin-of-replication diagnostic this card offers.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    # Gate on contig count where already known: offering a Circos plot
+    # for a 200,000-contig draft offers a run whose output will not
+    # render.
+    contig_count = obj.facts.get("reference_count") if obj.facts else None
+    if isinstance(contig_count, int) and contig_count > 200:
+        return None
+
+    title = "Circos plot: GC tracks"
+    description = (
+        "Draw GC content and GC skew rings around a finished genome. "
+        "GC skew can visually pinpoint a bacterial chromosome's origin "
+        "of replication."
+    )
+
+    return SuggestionCard(
+        kind="gc_tracks",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/gc-tracks",
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_consensus_card(obj, reference) -> SuggestionCard | None:
     """Amplicon/viral consensus calling, by iVar.
 
@@ -1812,6 +1851,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("polish", lambda: build_polish_card(obj, read_sets)),
         ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
         ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
+        ("gc_tracks", lambda: build_gc_tracks_card(obj)),
         ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
         ("assembly_qv", lambda: build_qv_card(obj, all_read_sets)),
         (

@@ -1108,6 +1108,20 @@ async def lineage_status(lineage: str, odb: str | None = None) -> dict:
     return {"lineage": lineage, "odb": odb, "present": present}
 
 
+class GcTracksRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.post("/gc-tracks", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_gc_tracks_route(body: GcTracksRequest, owner: OwnerDep) -> JobOut:
+    """Queue GC content and skew track computation for one assembly.
+    Read-only: produces facts, no derived object."""
+    job = await pipeline_service.launch_gc_tracks(
+        object_id=body.object_id, owner=owner,
+    )
+    return JobOut.of(job)
+
+
 class ConsensusRequest(BaseModel):
     bam_object_id: PydanticObjectId
     # Optional: consensus without primer trimming is a legitimate workflow

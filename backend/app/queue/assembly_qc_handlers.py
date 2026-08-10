@@ -989,3 +989,67 @@ def assess_assembly_continuity(ctx: JobContext) -> dict:
         "facts": facts,
         "workdir": str(work),
     }
+
+
+# GC tracks for a genome assembly is a pure-Python scan — no subprocess,
+# no external tool.  A full scan of a large genome can run for tens of
+# minutes, so a lease extension is appropriate.
+_GC_TRACKS_LEASE_SECONDS = 7200  # 2h
+
+
+@handler(
+    "analyze_gc_tracks",
+    mode=HandlerMode.THREAD,
+    job_class=JobClass.COMPUTE,
+    # One core: the scan is single-threaded.  Modest memory: one contig
+    # buffered at a time.  Heavy IO: it reads the entire file, unlike the
+    # sampler in sequence_stats which spends a fixed byte budget.
+    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def analyze_gc_tracks(ctx: JobContext) -> dict:
+    """Scan an assembly FASTA and compute per-contig GC content and skew
+    tracks for a Circos plot.
+
+    This is a THREAD handler — pure Python, no subprocess — so it must
+    not call asyncio.run().  If it ever needs to touch Mongo through an
+    async path, use app.db.client.run_from_thread.
+    """
+    from pathlib import Path
+
+    from app.models import Compression
+    from app.pipelines.gc_tracks import compute_gc_tracks
+
+    assembly = _resolve_input(ctx.payload, "assembly")
+    compression_raw = ctx.payload.get("compression") or "none"
+    try:
+        compression = Compression(compression_raw)
+    except ValueError:
+        compression = Compression.NONE
+
+    ctx.progress(phase="starting", pct=None, message="scanning assembly for GC tracks")
+    ctx.extend_lease(_GC_TRACKS_LEASE_SECONDS)
+
+    log.info("gc_tracks_started", job_id=ctx.job_id, path=str(assembly))
+
+    result = compute_gc_tracks(Path(assembly), compression, cancel_event=ctx.cancel_event)
+
+    ctx.progress(phase="done", pct=1.0, message="GC tracks computed")
+    log.info(
+        "gc_tracks_finished",
+        job_id=ctx.job_id,
+        contigs=len(result.get("contigs") or []),
+        partial=result.get("gc_tracks_partial"),
+    )
+
+    if result and result.get("contigs"):
+        return {
+            "object_id": ctx.payload.get("object_id"),
+            "job_id": ctx.job_id,
+            "facts": {"gc_tracks": result},
+        }
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "facts": {},
+    }

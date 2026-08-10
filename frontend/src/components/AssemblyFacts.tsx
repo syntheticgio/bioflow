@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { accessionUrl } from "../lib/format";
 import { BuscoChart } from "./BuscoChart";
 import { NxChart } from "./NxChart";
+import CircosPlot from "./CircosPlot";
 
 interface Props {
   facts: Record<string, unknown>;
@@ -337,6 +338,12 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
 
       {nxCurve !== undefined && totalBases !== undefined && (
         <NxChart curve={nxCurve} totalBases={totalBases} genomeSize={genomeSize} />
+      )}
+
+      {facts.gc_tracks !== undefined && (
+        <CircosPlot
+          tracks={facts.gc_tracks as import("./CircosPlot").GcTracksFacts}
+        />
       )}
 
       {/* This note's visibility rides on hasAnything, which for a truncated
