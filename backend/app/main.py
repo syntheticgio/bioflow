@@ -3,8 +3,9 @@
 import asyncio
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
+from app.api.deps import target_node_ctx
 from app.api.v1 import api_router
 from app.api.v1.health import router as health_router
 from app.config import settings
@@ -118,6 +119,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     register_exception_handlers(app)
+
+    @app.middleware("http")
+    async def extract_target_node(request: Request, call_next):
+        """Capture ?target_node= from pipeline launch URLs so enqueue() can route."""
+        tn = request.query_params.get("target_node")
+        token = target_node_ctx.set(tn or None)
+        try:
+            return await call_next(request)
+        finally:
+            target_node_ctx.reset(token)
+
     app.include_router(health_router)
     app.include_router(api_router)
     # Chains the MCP app's own lifespan into this app's -- see

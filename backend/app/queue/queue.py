@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from beanie import PydanticObjectId
 from pymongo.errors import DuplicateKeyError
 
+from app.api.deps import target_node_ctx
 from app.config import settings
 from app.db.redis_client import get_redis, get_script
 from app.logging import get_logger
@@ -68,6 +69,7 @@ async def enqueue(
     tolerate_failure_of: list[PydanticObjectId] | None = None,
     parent_job_id: PydanticObjectId | None = None,
     resource_override: bool = False,
+    target_node: str | None = None,
 ) -> Job | None:
     """Create and dispatch a job. Returns None if deduplicated away.
 
@@ -111,6 +113,9 @@ async def enqueue(
     never coming.
     """
     now = datetime.now(UTC)
+    # Auto-detect target_node from the HTTP request context (set by middleware
+    # in main.py). An explicit parameter always wins; None means "check the URL."
+    _node = target_node if target_node is not None else target_node_ctx.get()
     resources = resources or JobResources()
     available_at = now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else None
     depends_on = list(depends_on or [])
@@ -172,7 +177,7 @@ async def enqueue(
             )
             return job
 
-    await _push_to_redis(job, delay_seconds=delay_seconds)
+    await _push_to_redis(job, delay_seconds=delay_seconds, target_node=_node)
     await publish_event(
         "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
     )

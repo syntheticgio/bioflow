@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { PipelineSuggestion, PriorRun } from "../api/types";
+import { NodeSelector } from "./NodeSelector";
 
 /** What this card has already produced.
  *
@@ -74,6 +76,7 @@ export function PipelineSuggestions({
   projectId: string;
 }) {
   const qc = useQueryClient();
+  const [targetNode, setTargetNode] = useState("");
 
   // No `enabled` guard: this component only mounts inside the Actions tab, so
   // mounting *is* the "only when the tab is open" condition. A flag here would
@@ -88,7 +91,7 @@ export function PipelineSuggestions({
     // verbatim is what keeps this component ignorant of the three launch
     // request shapes -- see `PipelineSuggestion`.
     mutationFn: (card: PipelineSuggestion) =>
-      api.launchSuggestion(card.launch!.endpoint, card.launch!.body),
+      api.launchSuggestion(card.launch!.endpoint, card.launch!.body, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       // The launched job changes what should be offered next, so the cards
@@ -117,6 +120,10 @@ export function PipelineSuggestions({
   const firstAvailable = cards.find((c) => c.status === "available");
 
   return (
+    <>
+    {cards.length > 0 && (
+      <NodeSelector value={targetNode} onChange={setTargetNode} />
+    )}
     <div className="suggestion-grid">
       {cards.map((card) => {
         // "needs_install" is not blocked -- it is one click from working,
@@ -166,7 +173,8 @@ export function PipelineSuggestions({
             </button>
           </div>
         );
-      })}
+      })} 
     </div>
+    </>
   );
 }
