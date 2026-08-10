@@ -3,6 +3,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type {
+  BamStatsFacts,
   FeatureDistribution,
   GeneBodyPoint,
   ObjectDetail as ObjectDetailData,
@@ -26,13 +27,7 @@ export function TranscriptQc({
   featureDistribution: boolean;
 }) {
   const qc = useQueryClient();
-  const f = obj.facts as {
-    transcript_qc_status?: "ok";
-    transcript_qc_sampled_reads?: number;
-    transcript_qc_annotation?: string;
-    gene_body_coverage?: GeneBodyPoint[];
-    feature_distribution?: FeatureDistribution;
-  };
+  const f = obj.facts as BamStatsFacts;
 
   // GTF objects in this BAM's project -- self-fetched rather than threaded
   // down from DetailPanel, which has no project-wide object list in scope
@@ -46,10 +41,17 @@ export function TranscriptQc({
     .filter((o) => o.format.kind === "gtf")
     .map((o) => ({ id: o.id, name: o.name }));
 
-  const [gtfId, setGtfId] = useState(gtfs[0]?.id ?? "");
+  // Not synced from `gtfs` via an initializer or effect -- `gtfs` is `[]`
+  // until the query resolves, and a `useState` initializer only runs once,
+  // so it would lock `gtfId` to "" forever whenever a project has exactly
+  // one GTF (the common case), permanently disabling the button below.
+  // Recomputing the effective id every render fixes that without an effect;
+  // `gtfId` itself stays reserved for an explicit user pick via the select.
+  const [gtfId, setGtfId] = useState("");
+  const effectiveGtfId = gtfId || gtfs[0]?.id || "";
 
   const compute = useMutation({
-    mutationFn: () => api.launchTranscriptQc(obj.id, gtfId),
+    mutationFn: () => api.launchTranscriptQc(obj.id, effectiveGtfId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.info("Computing transcript QC");
@@ -78,7 +80,7 @@ export function TranscriptQc({
             </div>
             {gtfs.length > 1 && (
               <select
-                value={gtfId}
+                value={effectiveGtfId}
                 onChange={(e) => setGtfId(e.target.value)}
                 style={{ marginRight: 8 }}
               >
@@ -93,7 +95,7 @@ export function TranscriptQc({
               type="button"
               className="btn"
               onClick={() => compute.mutate()}
-              disabled={compute.isPending || !gtfId}
+              disabled={compute.isPending || !effectiveGtfId}
             >
               {compute.isPending ? "Computing…" : "Compute transcript QC"}
             </button>
