@@ -5,6 +5,7 @@ import { accessionUrl } from "../lib/format";
 import { BuscoChart } from "./BuscoChart";
 import { NxChart } from "./NxChart";
 import CircosPlot from "./CircosPlot";
+import { SyntenyPlot, type SyntenyAlignment } from "./SyntenyPlot";
 
 interface Props {
   facts: Record<string, unknown>;
@@ -97,6 +98,30 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
   // NCBI-downloaded assembly has none, and the chart drops to Nx alone.
   const genomeSize = facts.assembly_genome_size as number | undefined;
   const hasContiguity = n50 !== undefined;
+
+  // Synteny: minimap2 draft-vs-reference alignment, merged onto the draft
+  // assembly's facts after the run. Raw fact keys are snake_case (matching
+  // the stored document shape); mapped here into SyntenyPlot's camelCase
+  // Props rather than teaching that component the storage format.
+  type RawSyntenyAlignment = {
+    reference_object_id?: string;
+    reference_name?: string;
+    divergence?: string;
+    target_lengths: Record<string, number>;
+    query_lengths: Record<string, number>;
+    segments: [string, number, number, string, number, number, "+" | "-"][];
+    synteny_segments_partial?: boolean;
+  };
+  const rawSynteny = facts.synteny_alignment as RawSyntenyAlignment | undefined;
+  const syntenyAlignment: SyntenyAlignment | undefined = rawSynteny
+    ? {
+        referenceName: rawSynteny.reference_name,
+        targetLengths: rawSynteny.target_lengths,
+        queryLengths: rawSynteny.query_lengths,
+        segments: rawSynteny.segments,
+        segmentsPartial: facts.synteny_segments_partial === true,
+      }
+    : undefined;
 
   // Completeness: compleasm, a separate job the user launches.
   const completenessTool = facts.assembly_completeness_tool as string | undefined;
@@ -345,6 +370,8 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
           tracks={facts.gc_tracks as import("./CircosPlot").GcTracksFacts}
         />
       )}
+
+      {syntenyAlignment !== undefined && <SyntenyPlot {...syntenyAlignment} />}
 
       {/* This note's visibility rides on hasAnything, which for a truncated
           parse depends on sequence_stats.fasta_stats having also set
