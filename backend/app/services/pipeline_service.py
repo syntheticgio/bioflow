@@ -1573,6 +1573,83 @@ async def launch_alignment(
             cache_dir = settings.tmp_dir / "chunked-refs"
             buckets = write_bucket_fastas(fasta_path, buckets, cache_dir)
 
+            # Resolve mate (same logic as the single-shot path below,
+            # but the chunked path returns before that code runs).
+            if paired and mate_object_id is not None:
+                mate_obj = await object_service.get_object(
+                    mate_object_id, owner=owner
+                )
+            elif paired:
+                mate_obj = await suggest_mate(obj)
+            else:
+                mate_obj = None
+
+            if mate_obj is not None:
+                if mate_obj.id == obj.id:
+                    raise ValidationError("A file cannot be its own mate")
+                if mate_obj.project_id != obj.project_id:
+                    raise ValidationError("Paired reads must be in the same project")
+                _check_alignable(mate_obj)
+                if pairing.mate_of(obj.name) == "R2" and pairing.mate_of(mate_obj.name) == "R1":
+                    obj, mate_obj = mate_obj, obj
+
+            rg = align_runner.ReadGroup.from_dict(
+                {**default_read_group(obj), **(read_group or {})}
+            )
+
+            # Build the reads payload the same way the single-shot path
+            # assembles it (lines ~1749–1793), so every field the align_reads
+            # handler expects is present in the per-bucket sub-job.
+            r1_digest, r1_path = await _resolve_readable(obj)
+            ref_digest, ref_path = await _resolve_readable(reference)
+
+            reads_payload: dict = {
+                "object_id": str(obj.id),
+                "project_id": str(obj.project_id),
+                "reference_object_id": str(reference.id),
+                "reference_name": reference.name,
+                "r1_name": obj.name,
+                "aligner": aligner.value,
+                "params": align_params.as_dict(),
+                "read_group": rg.as_dict(),
+                "paired": paired,
+                "output_name": _bam_name(obj.name, rg.sample),
+                "reads_object_id": str(obj.id),
+                "reference_id": str(reference.id),
+                "reference_path": ref_path or str(fasta_path),
+            }
+            if ref_digest:
+                reads_payload["reference_sha256"] = ref_digest
+            if r1_digest:
+                reads_payload["r1_sha256"] = r1_digest
+            if r1_path:
+                reads_payload["r1_path"] = r1_path
+
+            # Extra read files (same as single-shot path, lines 1770-1780).
+            if extra_reads:
+                extra_payload = []
+                for extra_obj in extra_reads:
+                    extra_digest, extra_path = await _resolve_readable(extra_obj)
+                    entry: dict = {"name": extra_obj.name}
+                    if extra_digest:
+                        entry["sha256"] = extra_digest
+                    if extra_path:
+                        entry["path"] = extra_path
+                    extra_payload.append(entry)
+                reads_payload["extra_reads"] = extra_payload
+
+            # Mate / R2 (same as single-shot path, lines 1786-1793).
+            if mate_obj is not None:
+                r2_digest, r2_path = await _resolve_readable(mate_obj)
+                reads_payload["mate_object_id"] = str(mate_obj.id)
+                reads_payload["r2_name"] = mate_obj.name
+                if r2_digest:
+                    reads_payload["r2_sha256"] = r2_digest
+                if r2_path:
+                    reads_payload["r2_path"] = r2_path
+
+            reads_payload["owner"] = owner
+
             return await queue.enqueue(
                 "align_reads_chunked",
                 owner=owner,
@@ -1583,14 +1660,7 @@ async def launch_alignment(
                          "fasta_path": str(b.fasta_path)}
                         for b in buckets
                     ],
-                    "reference_id": str(reference.id),
-                    "reference_path": str(fasta_path),
-                    "reads": [{"name": obj.name, "path": str(obj.id)}],
-                    "aligner": aligner.value,
-                    "params": align_params.as_dict(),
-                    "project_id": str(obj.project_id),
-                    "owner": owner,
-                    "reads_object_id": str(obj.id),
+                    **reads_payload,
                 },
             )
 

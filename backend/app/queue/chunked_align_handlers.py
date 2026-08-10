@@ -63,10 +63,21 @@ async def align_reads_chunked(ctx):
 
     # Poll sub-jobs
     failed: str | None = None
+    completed: int = 0
     deadline = time.time() + 86400  # 24h hard cap
 
     while time.time() < deadline:
-        ctx.check_cancel()
+        try:
+            ctx.check_cancel()
+        except Exception:
+            # Cancel every sub-job so they don't orphan worker slots,
+            # then re-raise.
+            from app.queue.queue import request_cancel
+
+            for cid in sub_job_ids:
+                await request_cancel(cid)
+            raise
+
         completed = 0
         for jid in sub_job_ids:
             try:
@@ -75,6 +86,9 @@ async def align_reads_chunked(ctx):
                 log.warning("chunked_sub_job_lookup_failed", job_id=jid)
                 continue
             if job and job.state == JobState.FAILED:
+                failed = str(jid)
+                break
+            if job and job.state == JobState.CANCELLED:
                 failed = str(jid)
                 break
             if job and job.state == JobState.SUCCEEDED:
@@ -92,6 +106,12 @@ async def align_reads_chunked(ctx):
             message=f"Buckets {completed}/{total}",
         )
         await asyncio.sleep(_POLL_SECONDS)
+    else:
+        # Loop exited without reaching completed == total — deadline expired.
+        raise RetryableError(
+            f"Chunked alignment timed out after 24h "
+            f"({completed}/{total} buckets completed)"
+        )
 
     ctx.progress(phase="merging", pct=1.0, message="Merging buckets")
 
@@ -104,6 +124,7 @@ async def align_reads_chunked(ctx):
         "aligner": ctx.payload.get("aligner"),
         "params": ctx.payload.get("params"),
         "owner": owner,
+        "output_name": ctx.payload.get("output_name", "merged.bam"),
     }
 
 
@@ -186,23 +207,17 @@ def _run_subprocess(ctx, cmd, log_path, capture_stdout=False):
 
     import shlex
 
-    with open(log_path, "w") as log_f:
-        log_f.write(f"# {' '.join(shlex.quote(str(a)) for a in cmd)}\n\n")
-
-    sp_kwargs = {"stdout": log_path, "stderr": sp.STDOUT}
     if capture_stdout:
-        sp_kwargs = {"stdout": sp.PIPE, "stderr": sp.PIPE}
-
-    try:
-        proc = sp.run(cmd, **sp_kwargs)
-        if capture_stdout:
-            with open(log_path, "wb") as log_f:
-                log_f.write(proc.stdout or b"")
-                if proc.stderr:
-                    log_f.write(b"\n# stderr:\n")
-                    log_f.write(proc.stderr)
-            return proc.stdout.decode(errors="replace")
-        return proc.returncode
-    except Exception as e:
-        log.error("chunked_subprocess_failed", cmd=cmd[0], error=str(e))
-        raise
+        proc = sp.run(cmd, stdout=sp.PIPE, stderr=sp.PIPE)
+        with open(log_path, "w") as log_f:
+            log_f.write(f"# {' '.join(shlex.quote(str(a)) for a in cmd)}\n\n")
+            if proc.stdout:
+                log_f.write(proc.stdout.decode(errors="replace"))
+            if proc.stderr:
+                log_f.write("\n# stderr:\n" + proc.stderr.decode(errors="replace"))
+        return str(proc.stdout.decode(errors="replace"))
+    else:
+        with open(log_path, "w") as log_f:
+            log_f.write(f"# {' '.join(shlex.quote(str(a)) for a in cmd)}\n\n")
+            proc = sp.run(cmd, stdout=log_f, stderr=sp.STDOUT)
+        return int(proc.returncode)
