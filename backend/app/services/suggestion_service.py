@@ -1388,11 +1388,26 @@ def build_qv_card(obj, read_sets) -> SuggestionCard | None:
             "and this project has none."
         )
     if len(read_sets) > 1:
-        return unavailable(
-            f"This project has {len(read_sets)} read sets. QV assessment "
-            "needs a specific one, and picking for you could score this "
-            "assembly against the wrong sample's reads."
-        )
+        # Raw and trimmed versions of the same sample look like distinct
+        # read sets, but they're the same biological material -- prefer the
+        # trimmed set when that's the only difference, and still refuse when
+        # the project genuinely holds reads from multiple distinct samples.
+        trimmed_sets = [
+            s for s in read_sets
+            if all(o.role == ObjectRole.TRIMMED_READS for o in s)
+        ]
+        raw_sets = [
+            s for s in read_sets
+            if all(o.role != ObjectRole.TRIMMED_READS for o in s)
+        ]
+        if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and len(trimmed_sets) + len(raw_sets) == len(read_sets):
+            read_sets = trimmed_sets
+        else:
+            return unavailable(
+                f"This project has {len(read_sets)} read sets. QV assessment "
+                "needs a specific one, and picking for you could score this "
+                "assembly against the wrong sample's reads."
+            )
 
     chosen = read_sets[0]
     body = {"object_id": str(obj.id), "read_object_id": str(chosen[0].id)}
