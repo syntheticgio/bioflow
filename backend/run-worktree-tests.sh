@@ -133,6 +133,8 @@ docker run --rm \
   -v "$REPO_ROOT/backend/app:/srv/app" \
   -v "$REPO_ROOT/backend/tests:/srv/tests" \
   -v "$REPO_ROOT/VERSION:/VERSION:ro" \
+  -v "$REPO_ROOT/docker-compose.override.yml:/docker-compose.override.yml:ro" \
+  -v "$REPO_ROOT/backend/pi-skills:/backend/pi-skills:ro" \
   -v "$DATA_SOURCE:/data" \
   -w /srv \
   -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \
