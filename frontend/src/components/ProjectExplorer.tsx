@@ -653,6 +653,25 @@ function StageRailCard({
     return stage === "trimmed" && trimmed ? trimmed : raw;
   });
 
+  // When navigation (e.g. clicking a "Derived from" link) selects an
+  // object in the other stage, sync the toggle so the file row is visible
+  // in the list. The Raw/Trimmed buttons call switchStage (which also
+  // re-selects); this handles external navigation where only the URL
+  // changed -- browser back, bookmarks, and cross-stage links.
+  useEffect(() => {
+    if (sel === null || !sel.startsWith("object:")) return;
+    const targetId = sel.slice("object:".length);
+
+    const inRaw = entry.raw.some((o) => o.id === targetId);
+    const inTrimmed = entry.trimmed.some((o) => o?.id === targetId);
+
+    if (stage === "trimmed" && inRaw && !inTrimmed) {
+      setStage("raw");
+    } else if (stage === "raw" && inTrimmed && !inRaw) {
+      setStage("trimmed");
+    }
+  }, [sel, entry.raw, entry.trimmed, stage]);
+
   // Switching stage swaps which objects are on screen, so a selected row's
   // id goes stale -- it would keep pointing at the old stage's object until
   // the user clicked a row again. Clicking Raw/Trimmed on this card always
