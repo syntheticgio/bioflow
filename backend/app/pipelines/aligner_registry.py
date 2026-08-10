@@ -84,6 +84,10 @@ class AlignerSpec:
     # `index.builder` (on IndexLayout) is only the binary's bare name, kept
     # for cross-checking and error messages.
     builder_tool: Callable[[], tools.Tool] | None = None
+    # True when this aligner's index works against a subset of the reference
+    # FASTA. STAR's index is tied to the exact reference; Winnowmap requires
+    # whole-reference meryl preprocessing.
+    chunking_supported: bool = True
 
 
 # Threads and sort memory are on every aligner, so they are declared once and
@@ -366,6 +370,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.star,
         index=aligners.layout_for(Aligner.STAR),
         params_class=align_params.StarParams,
+        chunking_supported=False,
         # ~10 bytes/base: about 30 GB for a 3.1 Gb human genome, which is the
         # figure STAR's own manual gives for the RAM needed to align against
         # human. The index is an uncompressed suffix array held resident, so
@@ -444,6 +449,7 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         tool=tools.winnowmap,
         index=aligners.layout_for(Aligner.WINNOWMAP),
         params_class=align_params.WinnowmapParams,
+        chunking_supported=False,
         # builder_tool is meryl, not winnowmap's own binary -- the same
         # separate-builder shape as bowtie2/HISAT2, except what meryl
         # produces is consumed via -W rather than discovered by suffix.
