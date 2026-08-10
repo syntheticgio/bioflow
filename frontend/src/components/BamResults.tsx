@@ -13,6 +13,7 @@ import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart"
 import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
 import { DepthHistogramChart } from "./DepthHistogramChart";
+import { TranscriptQc } from "./TranscriptQc";
 
 /**
  * What the alignment produced: mapped/unmapped totals, coverage across the
@@ -40,6 +41,9 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
   const hasResults = f.bam_stats_status === "ok";
   const sortedCoordinate = obj.facts.sort_order === "coordinate";
   const hasIndex = obj.facts.has_index === true;
+  const rnaApplicability = transcriptQcApplicability(obj);
+  const rnaApplies =
+    rnaApplicability.geneBody || rnaApplicability.featureDistribution;
 
   return (
     <>
@@ -165,6 +169,14 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             )}
           </div>
 
+          {rnaApplies && (
+            <TranscriptQc
+              obj={obj}
+              geneBody={rnaApplicability.geneBody}
+              featureDistribution={rnaApplicability.featureDistribution}
+            />
+          )}
+
           <div className="section">
             <div className="section-title">Provenance</div>
             <dl className="kv">
@@ -244,6 +256,27 @@ function SummaryRow({ summary }: { summary?: BamStatsFacts["bam_stats_summary"] 
       )}
     </div>
   );
+}
+
+/** Mirrors backend services/transcript_qc_gating.py -- keep the two in step. */
+function transcriptQcApplicability(obj: ObjectDetailData) {
+  const md = (obj.metadata ?? {}) as Record<string, unknown>;
+  const molecule = md.molecule_type;
+  if (molecule === "RNA") return { geneBody: true, featureDistribution: true };
+  if (molecule === "DNA" || molecule === "Other")
+    return { geneBody: false, featureDistribution: false };
+
+  const assay = md.assay;
+  if (assay === "RNA-seq") return { geneBody: true, featureDistribution: true };
+  if (assay === "ChIP-seq" || assay === "ATAC-seq")
+    return { geneBody: false, featureDistribution: true };
+  if (assay) return { geneBody: false, featureDistribution: false };
+
+  const aligner = String(obj.facts.aligned_by ?? "").toLowerCase();
+  if (aligner === "star" || aligner === "hisat2")
+    return { geneBody: true, featureDistribution: true };
+
+  return { geneBody: false, featureDistribution: false };
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
