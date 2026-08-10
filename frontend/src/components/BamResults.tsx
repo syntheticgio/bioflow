@@ -11,6 +11,8 @@ import { isStarMapqScale, mapqBucketLabel, mapqScaleNote } from "../lib/mapq";
 import { AlignmentReport } from "./AlignmentReport";
 import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart";
 import { ContigTable } from "./ContigTable";
+import { ContigDepthChart } from "./ContigDepthChart";
+import { DepthHistogramChart } from "./DepthHistogramChart";
 
 /**
  * What the alignment produced: mapped/unmapped totals, coverage across the
@@ -86,9 +88,32 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             <SummaryRow summary={f.bam_stats_summary} />
           </div>
 
-          {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+            {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
+              <div className="section" style={{ flex: "1 1 300px" }}>
+                <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
+              </div>
+            )}
+            {f.bam_stats_depth_histogram &&
+              f.bam_stats_depth_histogram.length > 0 &&
+              f.bam_stats_depth_bucket_width != null && (
+                <div className="section" style={{ flex: "1 1 300px" }}>
+                  <DepthHistogramChart
+                    buckets={f.bam_stats_depth_histogram}
+                    bucketWidth={f.bam_stats_depth_bucket_width}
+                    meanDepth={f.bam_stats_summary?.mean_depth}
+                  />
+                </div>
+              )}
+          </div>
+
+          {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
             <div className="section">
-              <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
+              <ContigDepthChart
+                contigs={f.bam_stats_contigs_top}
+                meanDepth={f.bam_stats_summary?.mean_depth}
+                totalContigs={f.bam_stats_summary?.total_contigs}
+              />
             </div>
           )}
 
