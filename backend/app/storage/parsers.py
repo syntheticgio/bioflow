@@ -28,6 +28,11 @@ SAMPLE_BYTES_CAP = 8 * 1024 * 1024
 # assemblies). Store a bounded sample plus the true count.
 MAX_STORED_CONTIGS = 50
 MAX_STORED_SAMPLES = 100
+# Above this many segments a graph is not drawable -- a force-directed layout
+# of it is a hairball whatever the renderer, and the fact document would carry
+# megabytes nothing reads. The counts are still exact above the cap; only the
+# topology is dropped.
+MAX_GRAPH_SEGMENTS = 5000
 # A reference genome FASTA is a few GB; counting '>' lines and scanning bases
 # across that is cheap relative to a FASTQ scan, but not free. Cap it. Module
 # level rather than a local so a test can patch it down instead of writing a
@@ -617,7 +622,7 @@ def _parse_fasta(path: Path, compression: Compression, cancel) -> dict:
 
 
 def _parse_gfa(path: Path, compression: Compression, cancel) -> dict:
-    """Segment and link counts for an assembly graph.
+    """Segment and link counts, plus the topology the graph viewer draws.
 
     The two numbers that say what the graph is: how many pieces, and how
     tangled. A graph with as many links as segments is a resolved assembly; one
@@ -627,6 +632,11 @@ def _parse_gfa(path: Path, compression: Compression, cancel) -> dict:
     field otherwise -- Flye writes both, but a GFA is allowed to carry `*` in
     place of the sequence, and reading that as a zero-length contig would make
     a valid graph look empty.
+
+    Topology is kept only up to `MAX_GRAPH_SEGMENTS`; past that the counts
+    remain exact and `gfa_topology_partial` says the node and edge lists were
+    dropped. Link orientation is retained because it says which end of a
+    segment joins which, and a graph drawn without it is a different graph.
     """
     facts: dict = {}
     segments = 0
@@ -638,6 +648,10 @@ def _parse_gfa(path: Path, compression: Compression, cancel) -> dict:
     # draft is large, and the counts are worth more than exactness on a file
     # nobody will read to the end.
     limit = 256 * 1024 * 1024
+
+    segment_list: list[list] = []
+    link_list: list[list] = []
+    over_cap = False
 
     with _open_text(path, compression) as fh:
         for i, line in enumerate(fh):
@@ -656,8 +670,18 @@ def _parse_gfa(path: Path, compression: Compression, cancel) -> dict:
                 if length is None and len(cols) > 2 and cols[2] != "*":
                     length = len(cols[2])
                 total_length += length or 0
+                if segments > MAX_GRAPH_SEGMENTS:
+                    # Stop accumulating, but keep counting: the counts are the
+                    # facts that survive for an undrawable graph.
+                    over_cap = True
+                    segment_list = []
+                    link_list = []
+                elif not over_cap and len(cols) > 1:
+                    segment_list.append([cols[1], length or 0])
             elif cols[0] == "L":
                 links += 1
+                if not over_cap and len(cols) >= 5:
+                    link_list.append([cols[1], cols[2], cols[3], cols[4]])
             if i % 5000 == 0:
                 _check(cancel)
             if compression is Compression.NONE and read_bytes > limit:
@@ -671,6 +695,11 @@ def _parse_gfa(path: Path, compression: Compression, cancel) -> dict:
             facts["gfa_total_length"] = total_length
         if truncated:
             facts["gfa_counts_partial"] = True
+        if over_cap:
+            facts["gfa_topology_partial"] = True
+        else:
+            facts["gfa_segments"] = segment_list
+            facts["gfa_links"] = link_list
     return facts
 
 
