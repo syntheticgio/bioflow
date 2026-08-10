@@ -570,11 +570,14 @@ export const api = {
     ),
 
   /** Queue a QC run. Read-only: produces a report, derives no files. */
-  launchQC: (objectId: string) =>
-    request<JobSummary>("/pipelines/qc", {
-      method: "POST",
-      body: JSON.stringify({ object_id: objectId }),
-    }),
+  launchQC: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/qc${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId }),
+      }),
+  },
 
   /**
    * Whether a local model is up and could write a summary right now.
@@ -592,20 +595,26 @@ export const api = {
     request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
       "/pipelines/de-summary/status"
     ),
-  launchDeSummary: (objectId: string) =>
-    request<JobSummary>("/pipelines/de-summary", {
-      method: "POST",
-      body: JSON.stringify({ object_id: objectId }),
-    }),
+  launchDeSummary: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/de-summary${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId }),
+      }),
+    },
   variantSummaryStatus: () =>
     request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
       "/pipelines/variant-summary/status"
     ),
-  launchVariantSummary: (objectId: string) =>
-    request<JobSummary>("/pipelines/variant-summary", {
-      method: "POST",
-      body: JSON.stringify({ object_id: objectId }),
-    }),
+  launchVariantSummary: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/variant-summary${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId }),
+      }),
+  },
 
   /** The known-provider table. Static; safe to cache indefinitely. */
   aiPresets: () => request<AiPreset[]>("/settings/ai/presets"),
@@ -695,11 +704,14 @@ export const api = {
     ),
 
   /** Queue a narrative summary of a file's QC data and metadata. */
-  launchSummary: (objectId: string) =>
-    request<JobSummary>("/pipelines/summary", {
-      method: "POST",
-      body: JSON.stringify({ object_id: objectId, force: true }),
-    }),
+  launchSummary: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/summary${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId, force: true }),
+      }),
+  },
 
   /**
    * URL of a generated QC report.
@@ -867,11 +879,14 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  launchAlignment: (body: AlignRequest) =>
-    request<JobSummary>("/pipelines/align", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchAlignment: (body: AlignRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/align${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
   /** Propose a fitting configuration for a refused job, or say why there is
    * none. Feeds the resource-refusal card's Auto-adjust button. */
@@ -890,26 +905,35 @@ export const api = {
   assembleDefaults: (objectId: string) =>
     request<Partial<AssemblyParams>>(`/pipelines/assemble/defaults/${objectId}`),
 
-  launchAssembly: (body: AssembleRequest) =>
-    request<JobSummary>("/pipelines/assemble", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchAssembly: (body: AssembleRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/assemble${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
   completenessDefaults: (objectId: string) =>
     request<CompletenessDefaults>(`/pipelines/completeness/defaults/${objectId}`),
 
-  launchCompleteness: (body: CompletenessRequest) =>
-    request<JobSummary>("/pipelines/completeness", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchCompleteness: (body: CompletenessRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/completeness${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
-  launchScaffold: (body: ScaffoldRequest) =>
-    request<JobSummary>("/pipelines/scaffold", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchScaffold: (body: ScaffoldRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/scaffold${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
   downloadLineage: (body: LineageDownloadRequest) =>
     request<JobSummary>("/pipelines/completeness/lineage", {
@@ -928,22 +952,28 @@ export const api = {
   variantDefaults: (bamId: string) =>
     request<VariantDefaults>(`/pipelines/variants/defaults/${bamId}`),
 
-  launchVariantCalling: (body: VariantRequest) =>
-    request<JobSummary>("/pipelines/variants", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchVariantCalling: (body: VariantRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/variants${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
   /** Counting defaults for one BAM: the annotation it would use, and the
    * strandedness read off its alignment. */
   quantifyDefaults: (bamId: string) =>
     request<QuantifyDefaults>(`/pipelines/quantify/defaults/${bamId}`),
 
-  launchQuantify: (body: QuantifyRequest) =>
-    request<JobSummary>("/pipelines/quantify", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchQuantify: (body: QuantifyRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/quantify${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
   /** The samples, conditions and contrast the DE dialog opens with.
    * Project-scoped, unlike every other defaults route here -- differential
@@ -951,11 +981,14 @@ export const api = {
   deDefaults: (projectId: string) =>
     request<DeDefaults>(`/pipelines/differential-expression/defaults/${projectId}`),
 
-  launchDifferentialExpression: (body: DeRequest) =>
-    request<JobSummary>("/pipelines/differential-expression", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchDifferentialExpression: (body: DeRequest, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/differential-expression${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  },
 
   /** A page of a DE results table, sorted and filtered server-side. */
   deResults: (
@@ -984,11 +1017,14 @@ export const api = {
 
   /** Queue the Results computation for a BAM. Read-only: produces facts and
    * one TSV report, no derived objects. */
-  launchBamStats: (objectId: string) =>
-    request<JobSummary>("/pipelines/bamstats", {
-      method: "POST",
-      body: JSON.stringify({ object_id: objectId }),
-    }),
+  launchBamStats: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/bamstats${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId }),
+      }),
+  },
 
   /** Queue the RNA-seq transcript QC computation for a BAM against a GTF
    * annotation. Read-only: produces facts only, no derived objects. */
@@ -1011,11 +1047,14 @@ export const api = {
 
   /** Queue the Results computation for a VCF/BCF. Read-only: produces facts
    * and a variants TSV, no derived objects. */
-  launchVcfStats: (objectId: string) =>
-    request<JobSummary>("/pipelines/vcfstats", {
-      method: "POST",
-      body: JSON.stringify({ object_id: objectId }),
-    }),
+  launchVcfStats: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/vcfstats${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId }),
+      }),
+  },
 
   /** A page of the variant table. Filters are applied server-side against
    *  the SQLite index rather than by slicing a TSV -- a plant VCF holds

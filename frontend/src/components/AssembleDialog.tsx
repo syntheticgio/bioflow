@@ -5,6 +5,7 @@ import { api, ApiRequestError } from "../api/client";
 import { notify } from "../stores/messageStore";
 import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import type {
   AssemblyParams,
@@ -74,6 +75,7 @@ export function AssembleDialog({
   // pre-flight: assembly has no envelope endpoint and no client-side mirror
   // of estimate_assembly_mb, so the server's refusal is what produces the card.
   const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
+  const [targetNode, setTargetNode] = useState("");
 
   const params = { ...defaults, ...overrides } as Partial<AssemblyParams>;
   const chemistry = object.facts?.qc_read_chemistry as string | undefined;
@@ -92,7 +94,7 @@ export function AssembleDialog({
 
   const launch = useMutation({
     mutationFn: () =>
-      api.launchAssembly({ object_id: object.id, params }),
+      api.launchAssembly({ object_id: object.id, params }, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Assembly started");
@@ -269,6 +271,8 @@ export function AssembleDialog({
             You can close this window; it runs in the background.
           </div>
         </div>
+
+        <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
 
         <div className="modal-actions">
           <button type="button" onClick={onClose}>

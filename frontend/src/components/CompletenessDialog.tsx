@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { DataObject } from "../api/types";
+import { NodeSelector } from "./NodeSelector";
 
 /**
  * Launch compleasm against one assembly.
@@ -38,6 +39,7 @@ export function CompletenessDialog({
   });
 
   const [lineageOverride, setLineageOverride] = useState<string | null>(null);
+  const [targetNode, setTargetNode] = useState("");
   const lineage = lineageOverride ?? defaults?.lineage ?? null;
   const odb = defaults?.odb ?? "odb12";
 
@@ -64,7 +66,7 @@ export function CompletenessDialog({
 
   const launch = useMutation({
     mutationFn: () =>
-      api.launchCompleteness({ object_id: object.id, lineage, odb }),
+      api.launchCompleteness({ object_id: object.id, lineage, odb }, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Completeness scoring started");
@@ -153,6 +155,8 @@ export function CompletenessDialog({
             background.
           </div>
         </div>
+
+        <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
 
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
