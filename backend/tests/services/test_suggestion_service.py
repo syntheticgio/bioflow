@@ -1609,6 +1609,86 @@ class TestMisassemblyCardOrchestration:
         assert misassembly["launch"]["body"]["reference_object_id"] == "ref2"
 
 
+class TestSyntenyCardOrchestration:
+    """`suggestions_for`'s own listing for the synteny card, mirroring
+    `TestMisassemblyCardOrchestration` above -- `build_synteny_card` is fed
+    the identical `scaffold_references` list `build_scaffold_card` and
+    `build_misassembly_card` are, which already carries the self-reference
+    exclusion. These tests exist so a future refactor that gives the
+    synteny card its own candidate list cannot silently reintroduce that
+    same bug for this card alone.
+    """
+
+    async def test_a_reference_role_fasta_is_not_offered_as_its_own_target(self):
+        from types import SimpleNamespace
+
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="draft1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.minimap2",
+                  return_value=_FakeTool(True)),
+            patch(
+                "app.services.object_service.list_objects",
+                return_value=[
+                    SimpleNamespace(
+                        id="draft1",
+                        name="self.fasta",
+                        role=ObjectRole.REFERENCE,
+                        format=SimpleNamespace(kind=FormatKind.FASTA),
+                        blob_sha256="digest-draft1",
+                    )
+                ],
+            ),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        synteny = next(c for c in cards if c["kind"] == "synteny")
+        assert synteny["status"] == "unavailable"
+        assert "reference genome" in synteny["reason"]
+
+    async def test_a_second_real_reference_in_the_project_is_still_offered(self):
+        from types import SimpleNamespace
+
+        obj = _fake_obj(kind=FormatKind.FASTA, obj_id="draft1")
+        obj.role = None
+        with (
+            patch("app.services.suggestion_service.tools.minimap2",
+                  return_value=_FakeTool(True)),
+            patch(
+                "app.services.object_service.list_objects",
+                return_value=[
+                    SimpleNamespace(
+                        id="draft1",
+                        name="self.fasta",
+                        role=ObjectRole.REFERENCE,
+                        format=SimpleNamespace(kind=FormatKind.FASTA),
+                        blob_sha256="digest-draft1",
+                    ),
+                    SimpleNamespace(
+                        id="ref2",
+                        name="real_reference.fasta",
+                        role=ObjectRole.REFERENCE,
+                        format=SimpleNamespace(kind=FormatKind.FASTA),
+                        blob_sha256="digest-ref2",
+                    ),
+                ],
+            ),
+            patch("app.services.pipeline_service.read_chemistry_for_alignment",
+                  return_value=None),
+            patch("app.services.pipeline_service.resolve_annotation_inputs",
+                  return_value=None),
+            patch("app.services.prior_runs._runs_touching", return_value=[]),
+        ):
+            cards = await suggestions_for(obj)
+        synteny = next(c for c in cards if c["kind"] == "synteny")
+        assert synteny["status"] == "available"
+        assert synteny["launch"]["body"]["reference_object_id"] == "ref2"
+
+
 def _assembly_object(obj_id="asm1"):
     """A READY assembly-shaped FASTA, matching `_fake_obj`'s pattern of a
     SimpleNamespace carrying only what the builder reads. `role` is set
