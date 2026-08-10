@@ -17,6 +17,7 @@ export function SettingsNav() {
     { to: "/settings/tools", label: "Tools" },
     { to: "/settings/resources", label: "Resources" },
     { to: "/settings/mcp", label: "MCP" },
+    { to: "/settings/general", label: "General" },
   ];
 
   // `/settings` with no section renders the AI page, so it counts as AI being

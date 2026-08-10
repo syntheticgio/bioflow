@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   BrowserRouter,
@@ -28,6 +28,7 @@ import { ProfilePicker } from "./components/ProfilePicker";
 import { ProjectExplorer } from "./components/ProjectExplorer";
 import { SearchView } from "./components/SearchView";
 import { WorkflowCanvas } from "./components/WorkflowCanvas";
+import { SettingsGeneral } from "./components/SettingsGeneral";
 import { SettingsMcp } from "./components/SettingsMcp";
 import { SettingsResources } from "./components/SettingsResources";
 import { SettingsTools } from "./components/SettingsTools";
@@ -118,6 +119,7 @@ function Shell() {
           <Route path="/settings/tools" element={<SettingsTools />} />
           <Route path="/settings/resources" element={<SettingsResources />} />
           <Route path="/settings/mcp" element={<SettingsMcp />} />
+          <Route path="/settings/general" element={<SettingsGeneral />} />
           <Route path="/help/calculations" element={<HelpCalculations />} />
           <Route path="/metrics" element={<Metrics />} />
           <Route path="/help/software" element={<HelpSoftware />} />
@@ -131,7 +133,7 @@ function Shell() {
             path="/help/genome-analysis-review"
             element={<HelpGenomeAnalysisReview />}
           />
-          <Route path="/help/feedback" element={<HelpFeedback />} />
+          <Route path="/help/feedback" element={<FeedbackRoute />} />
           <Route path="/help/placeholder" element={<HelpPlaceholder />} />
         </Routes>
         {!singleColumn && <DetailPanel />}
@@ -220,6 +222,22 @@ function startupCheck(): Promise<void> {
  * straight back -- and would throw a tablet user out of the screen they
  * were reading the instant they rotated.
  */
+/**
+ * Guards direct navigation to /help/feedback: the Header hides the menu
+ * entry when the setting is off, but a bookmarked or typed URL bypasses
+ * that, so the route itself has to check the same flag.
+ */
+function FeedbackRoute() {
+  const settings = useQuery({
+    queryKey: ["settings", "general"],
+    queryFn: api.generalSettings,
+  });
+
+  if (settings.isLoading) return null;
+  if (!settings.data?.feedback_enabled) return <Navigate to="/help/about" replace />;
+  return <HelpFeedback />;
+}
+
 function MobileRedirect() {
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
