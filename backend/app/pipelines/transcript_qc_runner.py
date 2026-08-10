@@ -21,13 +21,23 @@ MIN_TRANSCRIPT_LENGTH = 200
 
 @dataclass
 class Transcript:
-    """One transcript's exon structure, in reference coordinates."""
+    """One transcript's exon structure, in reference coordinates.
+
+    `exons` is kept sorted by coordinate at all times -- enforced in
+    __post_init__ rather than only by parse_gtf_transcripts, so `.span`
+    (which assumes exons[0] is the lowest-coordinate exon and exons[-1] is
+    the highest) can never be silently wrong regardless of construction
+    order.
+    """
 
     transcript_id: str
     gene_id: str
     contig: str
     strand: str
     exons: list[tuple[int, int]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.exons.sort()
 
     @property
     def length(self) -> int:
@@ -47,13 +57,19 @@ def _attribute(attrs: str, key: str) -> str | None:
 
     The column is `key "value"; key "value";` -- parsed by scanning rather
     than with a regex so a missing or unquoted attribute yields None instead
-    of raising.
+    of raising. Matches the exact attribute name, not a prefix -- GTF
+    attribute columns routinely carry keys like `gene_biotype` alongside
+    `gene_id`, and prefix matching would silently return the wrong value
+    for a query like `gene_id` against a column ordered with `gene_id_2`
+    (or similar) first.
     """
     for part in attrs.split(";"):
         part = part.strip()
-        if not part.startswith(key):
+        if not part:
             continue
-        _, _, value = part.partition(" ")
+        name, _, value = part.partition(" ")
+        if name != key:
+            continue
         return value.strip().strip('"')
     return None
 

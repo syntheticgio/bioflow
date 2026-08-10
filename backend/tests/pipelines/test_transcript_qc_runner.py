@@ -9,6 +9,7 @@ import pytest
 from app.pipelines.transcript_qc_runner import (
     MIN_TRANSCRIPT_LENGTH,
     Transcript,
+    _attribute,
     parse_gtf_transcripts,
     representative_transcripts,
 )
@@ -54,6 +55,29 @@ class TestParseGtf:
         ts = parse_gtf_transcripts(GTF.splitlines())
         t1 = next(t for t in ts if t.transcript_id == "T1")
         assert t1.length == 200  # 100 + 100
+
+
+class TestAttribute:
+    def test_does_not_match_a_key_that_is_only_a_prefix(self):
+        """gene_id_2 must not satisfy a query for gene_id -- a real GTF can
+        carry both, and prefix-matching would silently return the wrong
+        transcript's/gene's id."""
+        assert _attribute('gene_id_2 "WRONG"; gene_id "G1";', "gene_id") == "G1"
+
+    def test_returns_none_when_the_key_is_absent(self):
+        assert _attribute('gene_biotype "protein_coding";', "gene_id") is None
+
+
+class TestTranscriptSpan:
+    def test_span_is_correct_even_if_exons_are_constructed_out_of_order(self):
+        """__post_init__ sorts on construction so this invariant can't be
+        silently violated by a caller that doesn't go through
+        parse_gtf_transcripts (e.g. a hand-built test fixture)."""
+        t = Transcript(
+            transcript_id="T1", gene_id="G1", contig="chr1", strand="+",
+            exons=[(301, 400), (101, 200)],
+        )
+        assert t.span == (101, 400)
 
 
 class TestRepresentativeTranscripts:
