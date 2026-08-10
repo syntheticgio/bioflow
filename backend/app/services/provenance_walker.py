@@ -511,6 +511,23 @@ async def walk(
     )
 
 
+# Job types whose steps structurally never record parameters. A download has
+# no knobs to report the way a trim or an align does -- the accession and
+# source are facts, not parameters -- so flagging missing params as a gap
+# would tell a methods reader that something was lost when nothing was ever
+# there to record. Mirrors `_STEP_VERBS` as a hand-maintained registry: a
+# new download type that forgets to join this set gets a false gap, not a
+# crash, so it is fail-open like the verb table.
+_JOB_TYPES_WITHOUT_PARAMS: frozenset[str] = frozenset(
+    {
+        "download_sra_run",
+        "download_assembly",
+        "download_uniprot",
+        "download_lineage",
+    }
+)
+
+
 async def _step_for(obj: DataObject) -> tuple[Step | None, list[Gap]]:
     """The job that produced `obj`, if any, plus whatever it failed to record.
 
@@ -530,7 +547,7 @@ async def _step_for(obj: DataObject) -> tuple[Step | None, list[Gap]]:
 
     if tool is not None and version is None:
         gaps.append(Gap(kind=GapKind.VERSION_UNRECORDED, object_id=obj.id))
-    if not params:
+    if not params and job_type not in _JOB_TYPES_WITHOUT_PARAMS:
         gaps.append(Gap(kind=GapKind.PARAMS_UNRECORDED, object_id=obj.id))
 
     ran_at = None

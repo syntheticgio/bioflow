@@ -170,7 +170,7 @@ def test_every_gap_kind_has_a_rail_label():
 
 def test_a_known_job_type_gets_its_specific_phrase():
     gap = Gap(kind=GapKind.PARAMS_UNRECORDED, object_id=READS)
-    assert gap_label(gap, "download_sra_run") == "Download parameters"
+    assert gap_label(gap, "trim_reads") == "Trimming parameters"
 
 
 def test_an_unmapped_job_type_falls_back_rather_than_raising():

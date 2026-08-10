@@ -226,6 +226,44 @@ async def test_failed_runs_appear_in_the_chain():
     assert chain.nodes[bam.id].produced_by.outcome == "failed"
 
 
+async def test_download_step_without_params_is_not_a_gap():
+    """Downloads structurally never record parameters -- the accession and
+    source are facts, not knobs -- so the History tab must not imply a hole
+    in tracked data where there is nothing to have recorded."""
+    from app.models.job import Job, JobState
+
+    job = Job(type="download_sra_run", owner=OWNER, state=JobState.SUCCEEDED)
+    await job.insert()
+    fastq = await _obj(
+        "reads.fastq.gz",
+        produced_by_job=job.id,
+        facts={"sra_downloaded_from": "DRR106634", "sra_download_source": "ncbi"},
+    )
+    chain = await walk(fastq.id, owner=OWNER)
+
+    kinds = {g.kind for g in chain.gaps}
+    assert GapKind.PARAMS_UNRECORDED not in kinds
+
+
+async def test_a_real_step_without_params_is_still_a_gap():
+    """The exemption is specific to job types that structurally have no
+    parameters -- a tool step that failed to record its params must still be
+    flagged, or a silent omission would read as a complete record."""
+    from app.models.job import Job, JobState
+
+    job = Job(type="trim_reads", owner=OWNER, state=JobState.SUCCEEDED)
+    await job.insert()
+    trimmed = await _obj(
+        "reads_trimmed.fastq.gz",
+        produced_by_job=job.id,
+        facts={"trimmed_by": "trimmomatic"},
+    )
+    chain = await walk(trimmed.id, owner=OWNER)
+
+    kinds = {g.kind for g in chain.gaps}
+    assert GapKind.PARAMS_UNRECORDED in kinds
+
+
 async def test_step_carries_the_job_that_produced_it():
     """`job_id` is what lets two mates be recognized as one step downstream;
     without it on the Step, merging has nothing to key on."""

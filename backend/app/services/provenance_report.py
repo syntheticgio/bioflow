@@ -49,11 +49,8 @@ _CHAIN_LEVEL_KINDS = frozenset(
 # missing entry here costs a generic phrase, never a missing rail row.
 _GAP_LABELS: dict[tuple[str, GapKind], str] = {
     ("download_sra_run", GapKind.VERSION_UNRECORDED): "Download tool and version",
-    ("download_sra_run", GapKind.PARAMS_UNRECORDED): "Download parameters",
     ("download_assembly", GapKind.VERSION_UNRECORDED): "Download tool and version",
-    ("download_assembly", GapKind.PARAMS_UNRECORDED): "Download parameters",
     ("download_uniprot", GapKind.VERSION_UNRECORDED): "Download tool and version",
-    ("download_uniprot", GapKind.PARAMS_UNRECORDED): "Download parameters",
     ("trim_reads", GapKind.VERSION_UNRECORDED): "Trimming tool version",
     ("trim_reads", GapKind.PARAMS_UNRECORDED): "Trimming parameters",
     ("align_reads", GapKind.VERSION_UNRECORDED): "Aligner version",
