@@ -40,6 +40,17 @@ class TestAppTags:
         assert "0.9.0" in (r.stdout + r.stderr)
         assert "0.2.0" in (r.stdout + r.stderr)
 
+    def test_accepts_a_matching_prerelease_tag(self, tree):
+        (tree / "VERSION").write_text("0.3.0-alpha\n")
+        r = run_guard(tree, "v0.3.0-alpha")
+        assert r.returncode == 0, r.stderr
+
+    def test_rejects_a_prerelease_tag_mismatched_to_the_tree(self, tree):
+        (tree / "VERSION").write_text("0.3.0-beta\n")
+        r = run_guard(tree, "v0.3.0-alpha")
+        assert r.returncode != 0
+        assert "0.3.0-alpha" in (r.stdout + r.stderr)
+
 
 class TestLauncherTags:
     def test_accepts_a_matching_tag(self, tree):

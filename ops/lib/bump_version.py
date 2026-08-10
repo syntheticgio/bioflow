@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+SEMVER = re.compile(r"^\d+\.\d+\.\d+(-alpha|-beta)?$")
 
 
 def fail(message: str) -> None:
