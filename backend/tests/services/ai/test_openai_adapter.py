@@ -54,6 +54,30 @@ class TestComplete:
         assert result.text == "The reads look usable."
         assert result.model == "m"
 
+    def test_prefers_the_servers_own_model_claim(self, adapter, monkeypatch):
+        """A local server can keep serving a previously-loaded model while
+        echoing back a different requested one -- report what actually
+        answered, not what was asked for."""
+        payload = {
+            "model": "mlx-community/other-model",
+            "choices": [{"message": {"content": "ok"}}],
+        }
+        monkeypatch.setattr(
+            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+        )
+        result = adapter.complete(system="s", user="u", model="requested", max_tokens=10)
+        assert isinstance(result, Completion)
+        assert result.model == "mlx-community/other-model"
+
+    def test_falls_back_to_the_requested_model_when_absent(self, adapter, monkeypatch):
+        """Some servers omit the `model` field; the requested name then stands."""
+        monkeypatch.setattr(
+            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(CHAT_OK)
+        )
+        result = adapter.complete(system="s", user="u", model="m", max_tokens=100)
+        assert isinstance(result, Completion)
+        assert result.model == "m"
+
     def test_sends_a_bearer_header(self, adapter, monkeypatch):
         seen = {}
 
