@@ -5077,10 +5077,17 @@ def _parse_fai(fai_path: Path) -> list[tuple[str, int]]:
     """Read a .fai file into (name, length) tuples."""
     result = []
     with open(fai_path) as f:
-        for line in f:
+        for lineno, line in enumerate(f, start=1):
             if not line.strip():
                 continue
             parts = line.split("\t")
             if len(parts) >= 2:
-                result.append((parts[0], int(parts[1])))
+                try:
+                    length = int(parts[1])
+                except ValueError:
+                    raise ValidationError(
+                        f"Malformed .fai line {lineno} in {fai_path}: "
+                        f"expected integer length, got {parts[1]!r}"
+                    ) from None
+                result.append((parts[0], length))
     return result

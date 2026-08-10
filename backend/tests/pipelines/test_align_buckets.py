@@ -105,3 +105,16 @@ class TestWriteBucketFastas:
         assert "AAAA" in result[0].fasta_path.read_text()
         assert ">chr2" in result[1].fasta_path.read_text()
         assert "GGGG" in result[1].fasta_path.read_text()
+
+    def test_missing_sequence_raises(self, tmp_path):
+        fasta = tmp_path / "ref.fa"
+        fasta.write_text(">chr1\nAAAA\n")
+
+        buckets = [
+            BucketSpec(index=0, sequences=["chr1"], total_bases=4, estimated_mb=100),
+            BucketSpec(index=1, sequences=["chr2"], total_bases=4, estimated_mb=100),
+        ]
+
+        out_dir = tmp_path / "buckets"
+        with pytest.raises(ValueError, match="was not found in the reference FASTA"):
+            write_bucket_fastas(fasta, buckets, out_dir)
