@@ -86,15 +86,39 @@ bootstrap_git_cliff() {
 # --- preflight -------------------------------------------------------------
 # Every check refuses rather than warns, and names the precondition it tripped.
 
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
-  || die "'$VERSION' is not semver MAJOR.MINOR.PATCH (no 'v', no -rc suffix)"
+VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+(-alpha|-beta)?$'
+[[ "$VERSION" =~ $VERSION_RE ]] \
+  || die "'$VERSION' is not semver MAJOR.MINOR.PATCH, optionally -alpha or -beta (no 'v', no -rc)"
 
 [ -z "$(git status --porcelain)" ] \
   || die "working tree is not clean -- commit or stash first"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[ "$BRANCH" = "main" ] \
-  || die "releases are cut from main, not '$BRANCH'"
+
+# The suffix IS the stage. CORE is the bare version the stage branch is named
+# after: `alpha/0.3.0`, not `alpha/0.3.0-alpha`.
+CORE="${VERSION%-alpha}"
+CORE="${CORE%-beta}"
+case "$VERSION" in
+  *-alpha)
+    STAGE="alpha"
+    TARGET="alpha/$CORE"
+    [ "$BRANCH" = "main" ] \
+      || die "an alpha release must be cut from main, not '$BRANCH'"
+    ;;
+  *-beta)
+    STAGE="beta"
+    TARGET="beta/$CORE"
+    [ "$BRANCH" = "alpha/$CORE" ] \
+      || die "a beta release must be cut from alpha/$CORE, not '$BRANCH'"
+    ;;
+  *)
+    STAGE="release"
+    TARGET="release/$CORE"
+    [ "$BRANCH" = "main" ] || [ "$BRANCH" = "beta/$CORE" ] \
+      || die "a production release must be cut from main or beta/$CORE, not '$BRANCH'"
+    ;;
+esac
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
   && die "tag $TAG already exists locally"

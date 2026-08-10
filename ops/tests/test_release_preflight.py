@@ -154,6 +154,46 @@ class TestPreflightRefusals:
         r = run_release(repo, "app", "0.1.0")
         assert r.returncode != 0
 
+    def test_refuses_an_alpha_cut_off_main(self, repo):
+        git(repo, "checkout", "-b", "feature/x")
+        r = run_release(repo, "app", "0.3.0-alpha")
+        assert r.returncode != 0
+        assert "alpha" in (r.stderr + r.stdout).lower()
+        assert "main" in (r.stderr + r.stdout).lower()
+
+    def test_refuses_a_beta_cut_off_main(self, repo):
+        # main is the right source for an alpha, never for a beta.
+        r = run_release(repo, "app", "0.3.0-beta")
+        assert r.returncode != 0
+        assert "beta" in (r.stderr + r.stdout).lower()
+        assert "alpha/0.3.0" in (r.stderr + r.stdout).lower()
+
+    def test_refuses_a_beta_cut_off_the_wrong_alpha_branch(self, repo):
+        git(repo, "checkout", "-b", "alpha/0.3.0")
+        r = run_release(repo, "app", "0.4.0-beta")
+        assert r.returncode != 0
+        assert "alpha/0.4.0" in (r.stderr + r.stdout).lower()
+
+    def test_refuses_a_prod_cut_off_an_alpha_branch(self, repo):
+        git(repo, "checkout", "-b", "alpha/0.3.0")
+        r = run_release(repo, "app", "0.3.0")
+        assert r.returncode != 0
+        assert "main" in (r.stderr + r.stdout).lower()
+
+    def test_refuses_a_prod_cut_off_an_unrelated_branch(self, repo):
+        git(repo, "checkout", "-b", "feature/x")
+        r = run_release(repo, "app", "0.3.0")
+        assert r.returncode != 0
+
+    def test_refuses_a_rc_suffix(self, repo):
+        r = run_release(repo, "app", "0.3.0-rc")
+        assert r.returncode != 0
+        assert "semver" in (r.stderr + r.stdout).lower()
+
+    def test_refuses_an_uppercase_suffix(self, repo):
+        r = run_release(repo, "app", "0.3.0-ALPHA")
+        assert r.returncode != 0
+
 
 class TestSuccessfulRelease:
     def test_bumps_commits_tags_and_pushes(self, repo):
