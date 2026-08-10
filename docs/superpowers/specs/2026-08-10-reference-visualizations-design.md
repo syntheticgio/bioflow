@@ -177,11 +177,24 @@ Render with **cytoscape.js** using its `cose` force-directed layout. Node
 radius scales with segment length, colour marks length tier; pan and zoom come
 from the library.
 
+Taken as a **normal npm dependency** in `package.json`, alongside the six
+runtime dependencies already there. Vendoring into the tree was considered and
+rejected: it would not change a single byte that reaches the browser (Vite
+bundles from `vendor/` exactly as from `node_modules/`), and its main
+attraction — escaping a transitive dependency tree — does not apply, because
+cytoscape has none. What it would cost is a second dependency pattern
+alongside the existing six and the loss of automated security advisories.
+
 This is a **deliberate departure from a stated convention**, and the spec
 records it as such rather than letting it look like an oversight.
 `SequenceCharts.tsx` says, of its hand-rolled SVG, that "the smallest chart
-dependency would outweigh the entire rest of the bundle" — true, and the
-frontend runs on six runtime dependencies today.
+dependency would outweigh the entire rest of the bundle."
+
+Measured, as of cytoscape 3.34.0: **MIT licensed, zero runtime dependencies,
+435KB minified, 137KB gzipped.** The gzipped figure is what crosses the wire,
+and this is a localhost-served application — the bundle is read off a loopback
+interface, not a mobile network. That is a real cost, weighed and accepted,
+and much smaller than the convention's phrasing implies.
 
 The reason to depart: the alternative was a hand-rolled Fruchterman–Reingold
 layout capped at a couple of thousand segments, showing counts and a "too
@@ -197,7 +210,8 @@ been bitten by exactly that failure — `ToolMeta.runnable`'s comment cited
 cutadapt and Trimmomatic as undispatched years after `trim_reads` grew its
 three-way dispatch, and nothing caught it because a comment cannot fail. The
 replacement states what will then be true: hand-rolled SVG for fixed, simple
-shapes; a library where a computed layout is required.
+shapes; a library where a computed layout is required, cytoscape being the one
+case that cleared that bar.
 
 ### Testing
 
