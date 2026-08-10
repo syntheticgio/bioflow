@@ -18,11 +18,20 @@ services:
       # same as ops/tests' throwaway container -- VERSION must be mounted at
       # that root or tests/test_version_consistency.py's repo-root read 404s.
       - ./VERSION:/VERSION:ro
+      # Repo-root files the test containers read (test_compose_agent_servers.py
+      # reads the override; test_pi_skills.py reads backend/pi-skills).
+      - ./docker-compose.override.yml:/docker-compose.override.yml:ro
+      - ./backend/pi-skills:/backend/pi-skills:ro
       # Docker socket and BIOINFO_HOME_HOST moved to docker-compose.yml: they
       # are needed by the shipped stack too, not just local development. See
       # the comment on the api service there.
     environment:
       LOG_LEVEL: DEBUG
+      # External stdio MCP servers for the agent, merged into every spawn by
+      # AgentService._build_mcp_config(). The commands are the absolute venv
+      # console-script paths installed in the image (see backend/Dockerfile).
+      # Keep in sync with backend/tests/test_compose_agent_servers.py.
+      AGENT_EXTRA_MCP_SERVERS: '{"mcpServers": {"fetch": {"command": "/opt/agent-mcp/venv/bin/mcp-server-fetch"}, "datasets": {"command": "/opt/agent-mcp/venv/bin/ncbi-datasets-mcp"}}}'
 
   worker:
     build:
