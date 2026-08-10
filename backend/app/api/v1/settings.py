@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.models.ai import AiRouting, ProviderKind, TaskSlot
+from app.models.app_settings import AppSettings
 from app.services import resource_limit_service
 from app.services.ai import presets as presets_mod
 from app.services.ai import provider_service
@@ -92,6 +93,14 @@ class FetchModelsOut(BaseModel):
     models: list[str]
     reason: str | None = None
     detail: str | None = None
+
+
+class GeneralSettingsOut(BaseModel):
+    feedback_enabled: bool
+
+
+class GeneralSettingsIn(BaseModel):
+    feedback_enabled: bool
 
 
 class ResourceLimitsOut(BaseModel):
@@ -270,6 +279,20 @@ async def set_routing(body: RoutingIn) -> RoutingOut:
         slots=routing.slots,
         catalog=[SlotOut(name=s.value, label=s.label) for s in TaskSlot],
     )
+
+
+@router.get("/general", response_model=GeneralSettingsOut)
+async def get_general_settings() -> GeneralSettingsOut:
+    settings = await AppSettings.load()
+    return GeneralSettingsOut(feedback_enabled=settings.feedback_enabled)
+
+
+@router.put("/general", response_model=GeneralSettingsOut)
+async def set_general_settings(body: GeneralSettingsIn) -> GeneralSettingsOut:
+    settings = await AppSettings.load()
+    settings.feedback_enabled = body.feedback_enabled
+    await settings.save()
+    return GeneralSettingsOut(feedback_enabled=settings.feedback_enabled)
 
 
 def _machine_budget() -> tuple[int, float]:
