@@ -139,6 +139,16 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
     if obj.format.kind is not FormatKind.FASTQ:
         return None
 
+    if obj.role == ObjectRole.TRIMMED_READS:
+        return SuggestionCard(
+            kind="preprocess",
+            category="PREPROCESS",
+            title="Trim &amp; filter -- fastp",
+            description="Already trimmed -- this file is the output of a previous trim job. Re-trimming is unusual; use the QC tab to inspect quality instead.",
+            status=CardStatus.UNAVAILABLE,
+            reason="This file is already the product of trimming.",
+        )
+
     fastp = tools.fastp()
     chemistry = pipeline_service.read_chemistry(obj)
     long_read = _is_long_read(chemistry)
