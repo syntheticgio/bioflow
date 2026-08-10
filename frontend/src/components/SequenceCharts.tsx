@@ -4,8 +4,14 @@ import { useState } from "react";
  * Base-composition pie and per-position quality curve.
  *
  * Hand-rolled SVG rather than a charting library: these are two fixed,
- * simple shapes, and the smallest chart dependency would outweigh the entire
- * rest of the bundle.
+ * simple shapes, and a charting dependency to draw them would outweigh what
+ * it replaced.
+ *
+ * That reasoning covers every chart here except `AssemblyGraph`, which needs
+ * a *computed* graph layout rather than a fixed shape and takes cytoscape for
+ * it. The line is whether the layout is already known: it is for a pie, a
+ * curve, and a stacked bar, and it is not for a few thousand assembly-graph
+ * segments with no positions.
  */
 
 interface BaseCount {
