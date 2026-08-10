@@ -492,6 +492,13 @@ ENV PI_TELEMETRY=0
 ARG NODE_VERSION=22.23.2
 ARG PI_VERSION=0.84.1
 ARG PI_MCP_ADAPTER_VERSION=2.21.1
+ARG PI_SUBAGENTS_VERSION=0.45.1
+ARG PI_HERMES_MEMORY_VERSION=0.9.4
+ARG MCP_FETCH_VERSION=2026.7.10
+ARG NCBI_DATASETS_MCP_VERSION=0.1.4
+# The external MCP servers must run against mcp<2 (see the venv RUN below),
+# while the backend pins mcp>=2.0,<3 for its own Streamable HTTP server.
+ARG AGENT_MCP_MCP_VERSION=1.29.0
 #
 # pi requires Node >= 22.19 (its package.json engines field). python:3.12-slim
 # ships no Node at all, and trixie's apt nodejs is 20.x, so Node comes from
@@ -538,7 +545,31 @@ RUN set -e \
 # caught before it can produce an image whose agent has no tools.
 RUN set -e \
     && pi install npm:pi-mcp-adapter@${PI_MCP_ADAPTER_VERSION} \
+    && pi install npm:pi-subagents@${PI_SUBAGENTS_VERSION} \
+    && pi install npm:pi-hermes-memory@${PI_HERMES_MEMORY_VERSION} \
     && pi list
+
+# The two external stdio MCP servers, installed in an isolated venv.
+# They cannot share the main environment: the backend pins mcp>=2.0,<3 for
+# its own Streamable HTTP server, but mcp-server-fetch (every PyPI release)
+# and its dependency graph import the pre-2.0 name `McpError`, which mcp
+# 2.0.0 renamed to `MCPError` -- so in the main env either the backend or
+# the fetch server is broken. This venv pins mcp<2, so the servers run
+# against the API they were written for, and the backend's mcp 2.x stays
+# untouched. The venv bin paths are what the agent's --mcp-config references.
+ENV AGENT_MCP_VENV=/opt/agent-mcp/venv
+RUN set -e \
+    && python -m venv ${AGENT_MCP_VENV} \
+    && ${AGENT_MCP_VENV}/bin/pip install --no-cache-dir \
+        mcp==${AGENT_MCP_MCP_VERSION} \
+        mcp-server-fetch==${MCP_FETCH_VERSION} \
+        ncbi-datasets-mcp==${NCBI_DATASETS_MCP_VERSION} \
+    && ${AGENT_MCP_VENV}/bin/python -c "import mcp_server_fetch, ncbi_datasets_mcp"
+
+# Verify the console scripts exist (they are what the agent's config invokes).
+RUN set -e \
+    && command -v ${AGENT_MCP_VENV}/bin/mcp-server-fetch \
+    && command -v ${AGENT_MCP_VENV}/bin/ncbi-datasets-mcp
 
 # Skills that teach the agent how to use BioFlow (written against the mcp
 # proxy tool and the real bioflow_* tool names; see pi-skills/README.md).
