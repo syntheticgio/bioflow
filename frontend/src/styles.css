@@ -3775,10 +3775,30 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* CSS columns rather than grid: the groups are wildly uneven (four rows here,
    twelve there), and column flow packs them by height instead of leaving a
-   grid row as tall as its tallest cell. */
+   grid row as tall as its tallest cell.
+
+   column-fill: auto (rather than the default "balance") is what makes column
+   two's first group start level with column one's -- balance instead computes
+   an ideal column height to even out total *content* between the two
+   columns, and starts column two wherever that height lands, which is
+   rarely the top of a group. A short group landing first in column two while
+   a tall one fills all of column one is exactly that: column one stops after
+   one tall break-inside:avoid block because balance decided that already
+   equalizes height, and whatever comes next in source order opens column two
+   partway down the page (#133).
+
+   auto only fills sequentially, though, and per spec falls back to balance
+   again when the container's height is 'auto' -- an unconstrained multicol
+   box has no "column is full" threshold to fill against. FactsColumns.tsx
+   supplies that threshold: a ResizeObserver measures each break-inside:avoid
+   block and computes the height a real two-column greedy fill would need,
+   writing it back as the `--facts-columns-height` custom property so auto
+   has a real target to fill column one to before spilling into column two. */
 .facts-columns {
   columns: 2;
   column-gap: 32px;
+  column-fill: auto;
+  height: var(--facts-columns-height, auto);
 }
 
 /* A group must never be split across a column boundary -- half of "Measured
@@ -3815,10 +3835,15 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--text-faint);
 }
 
-/* Below this the two columns are narrower than the label/value pair wants. */
+/* Below this the two columns are narrower than the label/value pair wants.
+   height must drop back to auto here too -- --facts-columns-height holds
+   the tallest of the two computed columns, not the full stacked height, and
+   a single column pinned to that would clip whatever was meant for column
+   two instead of stacking it below column one's content. */
 @media (max-width: 900px) {
   .facts-columns {
     columns: 1;
+    height: auto;
   }
 }
 
