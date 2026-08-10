@@ -1,13 +1,10 @@
 # Versioning and releases
 
-> **This file documents the tooling as it exists today, which predates the
-> four-stage alpha/beta/production methodology adopted on 2026-08-09.** See
-> "Release methodology" in [CLAUDE.md](CLAUDE.md) for the intended flow and
-> the diagrams in `assets/`. The gap is real and not yet closed: `ops/release.sh`
-> refuses pre-release versions, so it cannot cut the `-alpha` and `-beta` tags
-> that flow calls for, and the `main`-only check below assumes releases come
-> straight off the trunk. Closing that gap is tracked in
-> [#107](https://github.com/syntheticgio/bioflow/issues/107).
+> **This file documents the tooling as of the staged release methodology
+> adopted on 2026-08-09.** `ops/release.sh` now accepts `-alpha` and `-beta`
+> pre-release suffixes and cuts onto `alpha/X.Y.Z` / `beta/X.Y.Z` / `release/X.Y.Z`
+> branches accordingly. See "Release methodology" in [CLAUDE.md](CLAUDE.md) for
+> the intended flow and the diagrams in `assets/`.
 
 BioFlow has **two independent version lines.** They never need to agree, and
 bumping one does not imply bumping the other.
@@ -31,7 +28,9 @@ numbers.
 One command. It bumps, commits, tags, and pushes:
 
 ```bash
-make release VERSION=0.2.0
+make release VERSION=0.2.0            # production release
+make release VERSION=0.3.0-alpha      # alpha pre-release
+make release VERSION=0.3.0-beta       # beta pre-release
 ```
 
 ```bash
@@ -39,6 +38,17 @@ make release-launcher VERSION=0.1.1
 ```
 
 Give the bare version — `0.2.0`, not `v0.2.0`. The script adds the prefix.
+
+The version suffix determines the stage and the target branch:
+
+| Version | Stage | Source branch | Target branch | Tag |
+|---|---|---|---|---|
+| `0.2.0` | production | `main` or `beta/0.2.0` | `release/0.2.0` | `v0.2.0` |
+| `0.3.0-alpha` | alpha | `main` | `alpha/0.3.0` | `v0.3.0-alpha` |
+| `0.3.0-beta` | beta | `alpha/0.3.0` | `beta/0.3.0` | `v0.3.0-beta` |
+
+The script leaves you on the stage branch after cutting. Switch back to `main`
+after the cut if you need to continue working there.
 
 For the app line, the release commit also carries a regenerated
 `CHANGELOG.md`: the script runs git-cliff (`--unreleased --tag`), which
@@ -54,16 +64,16 @@ and recovering from the second means deleting a tag CI has already acted on.
 
 The script stops, with a message naming the cause, if:
 
-- the version is not bare `MAJOR.MINOR.PATCH`
+- the version is not bare `MAJOR.MINOR.PATCH`, optionally suffixed with
+  `-alpha` or `-beta` (no `v` prefix, no `-rc`, no `-ALPHA`)
 - the working tree is dirty
-- you are not on `main`
+- you are not on the correct source branch for the stage (see table above)
 - the tag already exists, locally or on `origin`
 - the version is not greater than the current one
 
-The `main` check is a hard refusal even though much of this repo's work happens
-in worktrees. If it ever obstructs something real, loosening it is a one-line
-change in `ops/release.sh` — that is the expected direction, not a design
-failure.
+The source-branch check is per-stage: alpha cuts require `main`, beta cuts
+require `alpha/X.Y.Z`, and production cuts accept `main` or `beta/X.Y.Z`.
+This replaces the old `main`-only check from the pre-methodology tooling.
 
 ## Which number to bump
 
@@ -76,7 +86,8 @@ Ordinary semver, read from the user's side:
 - **Major** (`0.9.0` → `1.0.0`) — a migration is required, or something that
   worked before stops working.
 
-Pre-release and `-rc` versions are not supported; the script rejects them.
+Pre-release `-alpha` and `-beta` suffixes are supported (see the stage table
+above). Other suffixes (`-rc`, `-ALPHA`, build metadata) are rejected.
 
 ## What each line writes
 

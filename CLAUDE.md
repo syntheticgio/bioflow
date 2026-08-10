@@ -210,14 +210,10 @@ Which number to bump, from `BioFlowReleaseSemantics.svg`:
 - **Patch** (`1.0.X`) -- bug fixes, typos, unexpected behaviour. 100%
   compatible, no new features.
 
-Note that `ops/release.sh` currently **rejects** `-alpha` and `-beta`
-suffixes (`VERSION.md` says pre-release versions are not supported). That
-predates this methodology and is a real gap: the script cannot yet cut the
-alpha and beta tags the pipeline calls for
-([#107](https://github.com/syntheticgio/bioflow/issues/107)). Do not work
-around it by tagging by hand -- `publish-images.yml`'s version-guard exists
-to catch exactly that, and a hand-rolled tag publishes images labelled with a
-version the tree does not have.
+`ops/release.sh` now accepts `-alpha` and `-beta` pre-release suffixes and
+cuts onto the appropriate stage branches (`alpha/X.Y.Z` / `beta/X.Y.Z` /
+`release/X.Y.Z`). See [VERSION.md](VERSION.md) for the cut commands and stage
+table.
 
 ## Release notes come from PR titles
 

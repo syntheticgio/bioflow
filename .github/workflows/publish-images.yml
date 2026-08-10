@@ -208,8 +208,9 @@ jobs:
 
       # `latest` on a push to main; on a `v*` tag, the bare version plus
       # `latest` again (metadata-action's default `latest=auto` flavor moves it
-      # for semver tags). `type=sha` gives every build a permanent handle even
-      # after `latest` moves off it.
+      # for semver tags but skips pre-release versions like `0.3.0-alpha`).
+      # `type=sha` gives every build a permanent handle even after `latest`
+      # moves off it.
       - id: meta
         uses: docker/metadata-action@v5
         with:
@@ -329,11 +330,22 @@ jobs:
 
           printf '\n%s\n' "$notes_body" >> "$notes_file"
 
+          # Pre-release tags (alpha/beta) get the --prerelease flag so they
+          # are not surfaced as the latest release. The spec in #107 requires
+          # this: a pre-release tag must never move :latest or appear as the
+          # top item on the Releases page.
+          prerelease=""
+          case "$TAG" in
+            *-alpha|*-beta) prerelease="--prerelease" ;;
+          esac
+
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "BioFlow ${version}" \
             --notes-file "$notes_file" \
+            $prerelease \
           || gh release edit "$TAG" \
             --repo "${{ github.repository }}" \
             --title "BioFlow ${version}" \
-            --notes-file "$notes_file"
+            --notes-file "$notes_file" \
+            $prerelease
