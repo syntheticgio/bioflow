@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { NodeSelector } from "./NodeSelector";
 import { notify } from "../stores/messageStore";
 import type { CountsParams, DataObject, Strandedness } from "../api/types";
 
@@ -40,6 +41,7 @@ export function QuantifyDialog({
   const [annotationId, setAnnotationId] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Partial<CountsParams>>({});
   const [advanced, setAdvanced] = useState(false);
+  const [targetNode, setTargetNode] = useState("");
 
   const params = {
     ...(defaults?.params as CountsParams | undefined),
@@ -73,6 +75,7 @@ export function QuantifyDialog({
         bam_id: object.id,
         annotation_id: chosenAnnotationId,
         params: overrides,
+      }, targetNode || undefined
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -289,6 +292,8 @@ export function QuantifyDialog({
             </div>
           )}
         </div>
+
+        <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>

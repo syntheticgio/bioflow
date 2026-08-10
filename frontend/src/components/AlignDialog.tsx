@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { classify, estimateMb, explain } from "../lib/estimate";
 import { notify } from "../stores/messageStore";
@@ -73,6 +74,7 @@ export function AlignDialog({
   // has asked to go back to the fields rather than be shown the card again.
   // Reset whenever the band leaves "block" so a fresh refusal re-renders it.
   const [cardDismissed, setCardDismissed] = useState(false);
+  const [targetNode, setTargetNode] = useState("");
 
   // `selectedTool` wins over both the server default and the advanced
   // override, and does so on every render rather than via an effect that
@@ -204,7 +206,7 @@ export function AlignDialog({
         // back to its own default. Send the full merged `params` so the
         // aligner actually chosen in the tool selector is the one that runs.
         params: { ...params, chunked },
-      }),
+      }, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success(
@@ -499,6 +501,8 @@ export function AlignDialog({
           )
         )}
         </div>
+
+        <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { NodeSelector } from "./NodeSelector";
 import { notify } from "../stores/messageStore";
 import type { DataObject } from "../api/types";
 
@@ -48,6 +49,7 @@ export function ScaffoldDialog({
 
   const [referenceId, setReferenceId] = useState<string | null>(null);
   const [divergence, setDivergence] = useState<string>("same_species");
+  const [targetNode, setTargetNode] = useState("");
 
   const references = (refs?.references ?? []).filter(
     (r) => r.object_id !== object.id,
@@ -61,6 +63,7 @@ export function ScaffoldDialog({
         draft_object_id: object.id,
         reference_object_id: chosenId,
         divergence,
+      }, targetNode || undefined
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -142,6 +145,8 @@ export function ScaffoldDialog({
             arrangement with your sample's sequence in it.
           </div>
         </div>
+
+        <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
 
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
