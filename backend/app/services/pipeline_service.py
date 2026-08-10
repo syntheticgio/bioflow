@@ -2157,7 +2157,8 @@ async def launch_transcript_qc(
     if bai is None:
         raise ValidationError(
             f"{bam.name!r} has no index (.bai). Compute results (coverage) "
-            "first, or index it, then retry transcript QC.",
+            "will index it automatically -- run that first, then retry "
+            "transcript QC.",
             details={"object_id": str(bam.id)},
         )
 

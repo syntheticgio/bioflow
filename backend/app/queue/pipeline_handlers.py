@@ -903,7 +903,7 @@ async def reap_pipeline_scratch(ctx: JobContext) -> dict:
     # Every scratch root a pipeline handler writes into. An alignment workdir
     # holds a whole BAM plus samtools' sort spills, so one left behind by a
     # crashed run is tens of gigabytes that nothing else would reclaim.
-    for kind in ("trim", "align", "qc"):
+    for kind in ("trim", "align", "qc", "bam_stats", "transcript_qc"):
         removed_dirs += await _reap_dir(
             ctx,
             settings.tmp_dir / kind,
