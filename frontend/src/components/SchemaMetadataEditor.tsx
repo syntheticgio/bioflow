@@ -156,7 +156,9 @@ export function SchemaMetadataEditor({
                 every file -- otherwise a set that changes per file reads as
                 the editor losing fields. */}
             <span className="custom-fields-note">
-              {sraCount > 0
+              {role === "alignment"
+                ? `${custom.length} inherited from the source reads file — sample-level metadata that applies to any file from the same sample`
+                : sraCount > 0
                 ? `${custom.length} parsed from the SRA record for this file — the set differs file to file`
                 : `${custom.length} not covered by the schema for this file type`}
             </span>
