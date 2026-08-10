@@ -71,9 +71,13 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
   const ncbiUrl = ncbiAccession
     ? accessionUrl("assembly_accession", ncbiAccession)
     : null;
+  const assemblyLevel = facts.assembly_level as string | undefined;
+  const ncbiTaxId = facts.tax_id as number | undefined;
+  const assemblyDate = facts.assembly_date as string | undefined;
   const assemblyError = facts.assembly_error as string | undefined;
   const hasNcbi =
-    ncbiTotal !== undefined || ncbiSequences !== undefined || ncbiGc !== undefined;
+    ncbiTotal !== undefined || ncbiSequences !== undefined || ncbiGc !== undefined
+    || assemblyLevel !== undefined || ncbiTaxId !== undefined || assemblyDate !== undefined;
 
   // Contiguity: computed in the parser at ingest, not by a separate tool --
   // see docs/superpowers/specs/2026-08-02-post-assembly-qc-design.md.
@@ -405,6 +409,24 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
               <>
                 <dt>GC content</dt>
                 <dd>{ncbiGc}%</dd>
+              </>
+            )}
+            {assemblyLevel !== undefined && (
+              <>
+                <dt>Assembly level</dt>
+                <dd>{assemblyLevel}</dd>
+              </>
+            )}
+            {ncbiTaxId !== undefined && (
+              <>
+                <dt>NCBI taxonomy ID</dt>
+                <dd>{ncbiTaxId}</dd>
+              </>
+            )}
+            {assemblyDate !== undefined && (
+              <>
+                <dt>Release date</dt>
+                <dd>{new Date(assemblyDate + "T12:00:00Z").toLocaleDateString()}</dd>
               </>
             )}
           </dl>
