@@ -41,6 +41,7 @@ import type {
   MateSuggestion,
   MetadataSchema,
   NcbiResolveResponse,
+  NodeInfo,
   ObjectComputations,
   ObjectDetail,
   ObjectRole,
@@ -429,6 +430,7 @@ export const api = {
   systemStats: () => request<SystemStats>("/system/stats"),
 
   systemLoad: () => request<SystemLoad>("/system/load"),
+  nodes: () => request<NodeInfo[]>("/nodes"),
 
   getVersion: () => request<VersionInfo>("/version"),
 
