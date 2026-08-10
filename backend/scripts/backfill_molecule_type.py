@@ -39,30 +39,41 @@ from app.models import DataObject  # noqa: E402
 
 
 def _accession(obj: DataObject) -> str | None:
-    return (
-        obj.metadata.get("sra_run")
-        or obj.metadata.get("sra_experiment")
-        or obj.metadata.get("sra_sample")
-        or obj.metadata.get("sra_study")
-    )
+    """Only run or experiment accessions -- both resolve unambiguously to a
+    single run's library_source. A sample or study accession can span many
+    runs with different sources, and `sra.lookup()` would silently pick an
+    arbitrary one (its own fallback to the first run in the package) rather
+    than the one this specific file actually came from."""
+    return obj.metadata.get("sra_run") or obj.metadata.get("sra_experiment")
 
 
 async def main(apply: bool) -> int:
     await connect_to_mongo()
 
-    candidates = [
-        obj
-        for obj in await DataObject.find().to_list()
-        if _accession(obj) and not obj.metadata.get("molecule_type")
-    ]
+    all_objects = await DataObject.find().to_list()
+    without_molecule_type = [obj for obj in all_objects if not obj.metadata.get("molecule_type")]
+    candidates = [obj for obj in without_molecule_type if _accession(obj)]
 
     planned, skipped = [], []
+
+    # Objects that only have a sample/study accession are not candidates (no
+    # unambiguous run to resolve to) but are worth surfacing separately from
+    # an ordinary "no record found" skip, so a human scanning the dry-run
+    # output can see why they were excluded rather than not seeing them at all.
+    for obj in without_molecule_type:
+        if _accession(obj) is None and (
+            obj.metadata.get("sra_sample") or obj.metadata.get("sra_study")
+        ):
+            skipped.append(
+                (obj, "only sample/study accession -- can't resolve a single run unambiguously")
+            )
+
     for obj in candidates:
         accession = _accession(obj)
         try:
             meta = sra.lookup(accession)
         except Exception as exc:  # unexpected failure -- report, don't crash the batch
-            skipped.append((obj, str(exc)))
+            skipped.append((obj, f"unexpected error: {exc}"))
             continue
         if meta is None:
             skipped.append((obj, "SRA lookup returned no record"))
@@ -78,7 +89,7 @@ async def main(apply: bool) -> int:
         else:
             skipped.append((obj, "SRA record has no library_source"))
 
-    print(f"{len(candidates)} objects with an SRA accession and no molecule_type")
+    print(f"{len(candidates)} objects with a run/experiment accession and no molecule_type")
     print(f"{len(planned)} to backfill, {len(skipped)} skipped\n")
 
     for obj, updates in planned:
