@@ -1193,7 +1193,9 @@ function QcTab({
                 <AssemblyGraph
                   key={obj.id}
                   segments={obj.facts.gfa_segments as [string, number][]}
-                  links={obj.facts.gfa_links as [string, string, string, string][]}
+                  links={
+                    obj.facts.gfa_links as [string, string, string, string][]
+                  }
                 />
               </div>
             )}
