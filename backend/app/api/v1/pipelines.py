@@ -1227,6 +1227,31 @@ async def launch_misassembly_qc_route(
     return JobOut.of(job)
 
 
+class SyntenyRequest(BaseModel):
+    draft_object_id: PydanticObjectId
+    # Optional, same reasoning MisassemblyQcRequest's reference_object_id
+    # gives: a project holding more than one reference-role assembly is the
+    # ordinary case, so the frontend dialog is expected to always pass this
+    # rather than lean on the launch's own single-candidate fallback.
+    reference_object_id: PydanticObjectId | None = None
+    divergence: str | None = None
+
+
+@router.post("/synteny", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_synteny_route(body: SyntenyRequest, owner: OwnerDep) -> JobOut:
+    """Queue a minimap2 run: whole-genome synteny alignment of a draft
+    assembly against a reference, for a synteny dot-plot.
+
+    Read-only, like /misassemblies: produces facts, no derived object."""
+    job = await pipeline_service.launch_synteny(
+        draft_object_id=body.draft_object_id,
+        reference_object_id=body.reference_object_id,
+        divergence=body.divergence,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
 class AssemblyErrorRequest(BaseModel):
     object_id: PydanticObjectId
     # Both optional, same reasoning MisassemblyQcRequest's reference_object_id

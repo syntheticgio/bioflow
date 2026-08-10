@@ -4429,6 +4429,132 @@ async def launch_misassembly_qc(
     return job
 
 
+async def launch_synteny(
+    *,
+    draft_object_id: PydanticObjectId,
+    owner: str,
+    reference_object_id: PydanticObjectId | None = None,
+    divergence: str | None = None,
+) -> Job:
+    """Queue a minimap2 run: whole-genome alignment of a draft assembly
+    against a reference, for a synteny dot-plot.
+
+    Same reference-resolution shape as `launch_scaffold` and
+    `launch_misassembly_qc`, since all three take an assembly-shaped draft
+    plus a reference and treat "a project holds more than one reference-role
+    FASTA" as the ordinary case rather than an edge case -- the real yeast
+    project carries both the GCA and GCF genomic FASTA for one organism, so
+    picking one silently would be a guess, not a resolution.
+    `reference_object_id` is expected to arrive from a dialog's chooser in
+    the ambiguous case.
+
+    Read-only: this never produces a new object, only facts (the parsed PAF
+    alignment) merged onto the draft -- matches `launch_misassembly_qc` and
+    `launch_completeness`, not `launch_scaffold`, so there is no run record
+    and no `run_service.link_job` call.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tool = tools.require(tools.minimap2())
+
+    draft = await object_service.get_object(draft_object_id, owner=owner)
+    reference_assembly.check_draft_assembly(draft)
+
+    if reference_object_id is None:
+        candidates = [
+            o
+            for o in await object_service.list_objects(
+                draft.project_id, owner=owner, status=ObjectStatus.READY
+            )
+            if o.role is ObjectRole.REFERENCE
+            and o.format.kind is FormatKind.FASTA
+            and o.id != draft.id
+        ]
+        if not candidates:
+            raise ValidationError(
+                "Synteny analysis needs a reference assembly, and this "
+                "project has none",
+                details={"draft_id": str(draft.id)},
+            )
+        if len(candidates) > 1:
+            raise ValidationError(
+                "This project has several reference assemblies; name the "
+                "one to compare against",
+                details={
+                    "draft_id": str(draft.id),
+                    "candidates": [str(o.id) for o in candidates],
+                },
+            )
+        reference = candidates[0]
+    else:
+        reference = await object_service.get_object(
+            reference_object_id, owner=owner
+        )
+
+    reference_assembly.check_reference_assembly(reference)
+
+    if reference.project_id != draft.project_id:
+        raise ValidationError(
+            "The draft and the reference must be in the same project"
+        )
+
+    if reference.id == draft.id:
+        raise ValidationError(
+            "The draft and the reference cannot be the same object",
+            details={"object_id": str(draft.id)},
+        )
+
+    draft_digest, draft_path = await _resolve_readable(draft)
+    ref_digest, ref_path = await _resolve_readable(reference)
+
+    divergence = divergence or ragtag_runner.Divergence.SAME_SPECIES
+    payload: dict = {
+        "object_id": str(draft.id),
+        "draft_name": draft.name,
+        "reference_object_id": str(reference.id),
+        "reference_name": reference.name,
+        "divergence": divergence,
+        "threads": 4,
+    }
+    if draft_digest:
+        payload["draft_sha256"] = draft_digest
+    if draft_path:
+        payload["draft_path"] = draft_path
+    if ref_digest:
+        payload["reference_sha256"] = ref_digest
+    if ref_path:
+        payload["reference_path"] = ref_path
+
+    job = await queue.enqueue(
+        "analyze_synteny",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT),
+        max_attempts=1,
+        dedup_key=f"analyze_synteny:{draft.id}:{reference.id}",
+        project_id=draft.project_id,
+        object_id=draft.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Synteny analysis is already queued or running for this "
+            "assembly against this reference",
+            details={"object_id": str(draft.id)},
+        )
+
+    log.info(
+        "synteny_launched",
+        job_id=str(job.id),
+        draft_id=str(draft.id),
+        reference_id=str(reference.id),
+        divergence=divergence,
+        tool_version=tool.version,
+    )
+    return job
+
+
 async def launch_assembly_error_qc(
     *,
     object_id: PydanticObjectId,

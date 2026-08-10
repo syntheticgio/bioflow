@@ -25,10 +25,11 @@ bare-string registry would silently collapse three different launchers into
 one classifiable unit, defeating the exhaustiveness check it was meant to
 serve. Qualifying by module is what keeps them distinguishable.
 
-Status: every launch_* is classified. 26 launch_* functions exist across
+Status: every launch_* is classified. 27 launch_* functions exist across
 services/; 12 create a PipelineRun (trim, align, variant_calling, quantify,
 differential_expression, assembly, the three downloads, and -- since GitHub
-issue #91 -- consensus, polish, and scaffold) and the rest do not.
+issue #91 -- consensus, polish, and scaffold) and the rest do not, including
+`launch_synteny` (issue #149), read-only like `launch_misassembly_qc`.
 
 Those last three are the one place a RunKind maps to more than one node type:
 all are RunKind.REFERENCE_ASSEMBLY, so `run_tool` is what tells them apart
@@ -243,6 +244,15 @@ async def _launch_misassembly_qc(*, inputs: dict, params: dict, owner: str):
         draft_object_id=inputs["draft"],
         owner=owner,
         reference_object_id=inputs.get("reference"),
+    )
+
+
+async def _launch_synteny(*, inputs: dict, params: dict, owner: str):
+    return await pipeline_service.launch_synteny(
+        draft_object_id=inputs["draft"],
+        owner=owner,
+        reference_object_id=inputs.get("reference"),
+        divergence=params.get("divergence"),
     )
 
 
@@ -628,6 +638,26 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
         label="Misassembly QC (QUAST)",
         launch_name="pipeline_service.launch_misassembly_qc",
         launch=_launch_misassembly_qc,
+        run_kind=None,  # Read-only: facts merged onto the draft.
+        inputs=(
+            PortSpec(
+                "draft",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+            ),
+            # Optional: auto-picked from the project's one unambiguous
+            # reference-role FASTA (excluding the draft itself) when unwired.
+            PortSpec(
+                "reference",
+                PortType(format=FormatKind.FASTA, role=ObjectRole.REFERENCE),
+                required=False,
+            ),
+        ),
+        outputs=(),
+    ),
+    "synteny": NodeTypeSpec(
+        label="Synteny (minimap2)",
+        launch_name="pipeline_service.launch_synteny",
+        launch=_launch_synteny,
         run_kind=None,  # Read-only: facts merged onto the draft.
         inputs=(
             PortSpec(
