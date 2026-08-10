@@ -11,8 +11,11 @@ model input. Two things about it are load-bearing and worth pinning down:
     floor did not measure zero memory, it measured nothing.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
+from app.api.v1.jobs import metrics_runs
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import timing_service
 
@@ -95,6 +98,8 @@ async def _record(
     tool="minimap2",
     tool_version="2.28",
     features=None,
+    finished_at=None,
+    threads=None,
 ):
     resources = RunResources()
     if peak_rss_bytes is not None:
@@ -108,6 +113,8 @@ async def _record(
         tool_version=tool_version,
         features=features or {},
         resources=resources,
+        finished_at=finished_at,
+        threads=threads,
     ).insert()
 
 
@@ -198,3 +205,137 @@ class TestMetrics:
     async def test_empty_history_is_a_clean_empty_response(self):
         data = await timing_service.metrics()
         assert data == {"totals": {}, "types": []}
+
+
+class TestRunsForType:
+    """Per-run rows for the Metrics page's right column.
+
+    The counterpart to `_modelled`, and deliberately not built on it: these
+    rows are what a user reads to see what actually happened, and a failed
+    run is the most informative row on the page. The first test is the one
+    that fails if someone later rewires this through the outcome filter.
+    """
+
+    async def test_includes_failures(self):
+        await _record(duration_ms=100_000)
+        await _record(outcome=RunOutcome.FAILED, duration_ms=500)
+
+        runs = await timing_service.runs_for_type("align_reads")
+        assert {r.outcome for r in runs} == {"succeeded", "failed"}
+
+    async def test_most_recent_first(self):
+        for day in (1, 3, 2):
+            await _record(finished_at=datetime(2026, 8, day, tzinfo=timezone.utc))
+
+        runs = await timing_service.runs_for_type("align_reads")
+        assert [r.finished_at.day for r in runs] == [3, 2, 1]
+
+    async def test_limit_and_offset_page(self):
+        for day in range(1, 6):
+            await _record(finished_at=datetime(2026, 8, day, tzinfo=timezone.utc))
+
+        page = await timing_service.runs_for_type("align_reads", limit=2, offset=2)
+        assert [r.finished_at.day for r in page] == [3, 2]
+
+    async def test_unknown_type_is_empty_not_an_error(self):
+        assert await timing_service.runs_for_type("no_such_type") == []
+
+    async def test_other_types_excluded(self):
+        await _record(job_type="align_reads")
+        await _record(job_type="call_variants")
+
+        runs = await timing_service.runs_for_type("call_variants")
+        assert len(runs) == 1
+        assert runs[0].job_type == "call_variants"
+
+
+class TestRecentRunsByType:
+    async def test_caps_each_type_at_the_limit(self):
+        for _ in range(7):
+            await _record(job_type="align_reads")
+        for _ in range(2):
+            await _record(job_type="call_variants")
+
+        by_type = await timing_service.recent_runs_by_type(limit=5)
+        assert len(by_type["align_reads"]["runs"]) == 5
+        assert len(by_type["call_variants"]["runs"]) == 2
+
+    async def test_reports_total_so_the_ui_knows_to_offer_see_more(self):
+        for _ in range(7):
+            await _record(job_type="align_reads")
+        for _ in range(2):
+            await _record(job_type="call_variants")
+
+        by_type = await timing_service.recent_runs_by_type(limit=5)
+        assert by_type["align_reads"]["total"] == 7
+        assert by_type["call_variants"]["total"] == 2
+
+    async def test_total_counts_failures_too(self):
+        await _record(job_type="qc")
+        await _record(job_type="qc", outcome=RunOutcome.FAILED)
+
+        by_type = await timing_service.recent_runs_by_type(limit=5)
+        assert by_type["qc"]["total"] == 2
+
+    async def test_covers_every_type_present(self):
+        await _record(job_type="align_reads")
+        await _record(job_type="call_variants")
+        await _record(job_type="qc")
+
+        by_type = await timing_service.recent_runs_by_type(limit=5)
+        assert set(by_type) == {"align_reads", "call_variants", "qc"}
+
+    async def test_empty_collection_is_empty_dict(self):
+        assert await timing_service.recent_runs_by_type(limit=5) == {}
+
+
+class TestRunsEndpoint:
+    """The serialized shape the frontend consumes.
+
+    Kept separate from the accessor tests because the field list is a
+    contract with `frontend/src/api/types.ts` -- a rename here is a silent
+    breakage there, since nothing type-checks across that boundary.
+    """
+
+    async def test_serializes_the_fields_the_table_renders(self):
+        await _record(
+            duration_ms=90_000,
+            input_bytes=2_000_000,
+            peak_rss_bytes=4_000_000_000,
+            threads=8,
+        )
+
+        body = await metrics_runs()
+        run = body["by_type"]["align_reads"]["runs"][0]
+        assert run["outcome"] == "succeeded"
+        assert run["duration_ms"] == 90_000
+        assert run["input_bytes"] == 2_000_000
+        assert run["peak_rss_bytes"] == 4_000_000_000
+        assert run["threads"] == 8
+        assert run["tool"] == "minimap2"
+        assert run["tool_version"] == "2.28"
+
+    async def test_unmeasured_memory_is_null_not_zero(self):
+        # The 60s sampling floor leaves peak_rss_bytes unset. Null is the
+        # absence of a measurement; 0 would claim the run used no memory.
+        await _record(peak_rss_bytes=None)
+
+        body = await metrics_runs()
+        assert body["by_type"]["align_reads"]["runs"][0]["peak_rss_bytes"] is None
+
+    async def test_single_type_query_is_paged(self):
+        for day in range(1, 6):
+            await _record(finished_at=datetime(2026, 8, day, tzinfo=timezone.utc))
+
+        body = await metrics_runs(job_type="align_reads", limit=2, offset=0)
+        assert body["job_type"] == "align_reads"
+        assert body["total"] == 5
+        assert len(body["runs"]) == 2
+
+    async def test_default_caps_each_type_at_five(self):
+        for _ in range(9):
+            await _record()
+
+        body = await metrics_runs()
+        assert len(body["by_type"]["align_reads"]["runs"]) == 5
+        assert body["by_type"]["align_reads"]["total"] == 9
