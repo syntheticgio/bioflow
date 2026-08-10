@@ -557,11 +557,17 @@ export const api = {
   detectMate: (objectId: string) =>
     request<MateSuggestion | null>(`/pipelines/mate/${objectId}`),
 
-  launchTrim: (body: TrimRequest) =>
-    request<JobSummary>("/pipelines/trim", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchTrim: (
+    body: TrimRequest,
+    targetNode?: string,
+  ) =>
+    request<JobSummary>(
+      `/pipelines/trim${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
 
   /** Queue a QC run. Read-only: produces a report, derives no files. */
   launchQC: (objectId: string) =>
@@ -838,13 +844,18 @@ export const api = {
       `/pipelines/suggestions/${objectId}`,
     ),
 
-  /** Post a suggestion's launch payload verbatim. The endpoint and body both
-   * come from the card, so this adds nothing -- see `PipelineSuggestion`. */
-  launchSuggestion: (endpoint: string, body: Record<string, unknown>) =>
-    request<JobSummary>(endpoint, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  launchSuggestion: (
+    endpoint: string,
+    body: Record<string, unknown>,
+    targetNode?: string,
+  ) =>
+    request<JobSummary>(
+      `${endpoint}${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
 
   buildIndex: (body: {
     reference_id: string;

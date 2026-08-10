@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { NodeSelector } from "./NodeSelector";
 import { notify } from "../stores/messageStore";
 import type { CutadaptParams, DataObject, TrimmomaticParams, TrimParams } from "../api/types";
 
@@ -87,6 +88,7 @@ export function TrimDialog({
   const params = { ...defaults?.params, ...overrides };
   const activeToolInfo = tools?.tools.find((t) => t.name === activeTool);
   const usePair = paired && mate != null;
+  const [targetNode, setTargetNode] = useState("");
 
   const launch = useMutation({
     mutationFn: () =>
@@ -96,7 +98,7 @@ export function TrimDialog({
         paired: usePair,
         params: overrides,
         tool: activeTool,
-      }),
+      }, targetNode || undefined),
     onSuccess: (job) => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success(usePair ? "Trimming the pair" : "Trimming started");
@@ -345,6 +347,8 @@ export function TrimDialog({
           </div>
         )}
         </div>
+
+        <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose}>

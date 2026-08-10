@@ -16,6 +16,7 @@ catch a stale or mistyped header before it silently partitions someone's
 library into a profile that does not exist, not to keep anyone out.
 """
 
+from contextvars import ContextVar
 from typing import Annotated
 
 from beanie import PydanticObjectId
@@ -79,6 +80,9 @@ async def get_current_owner(
 # the dependency named in a single place -- swapping what resolution does is
 # then a change here, not in every signature that consumes an owner.
 OwnerDep = Annotated[str, Depends(get_current_owner)]
+
+
+target_node_ctx: ContextVar[str | None] = ContextVar("target_node", default=None)
 
 
 async def get_current_owner_linkable(
