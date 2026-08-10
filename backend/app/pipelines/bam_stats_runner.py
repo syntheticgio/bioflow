@@ -20,6 +20,19 @@ BIN_COUNT = 1000
 # a heterozygous and a somatic variant respectively.
 COVERAGE_THRESHOLDS = (1, 10, 30)
 
+# The depth histogram's x-axis spans 0 .. 3x the genome's mean depth across a
+# fixed number of buckets, so a 30x WGS run and a 2000x amplicon panel both
+# get a readable curve rather than one of them collapsing into a single bar.
+# Spanning 3x the mean keeps the main peak in the left third with room to
+# show a high-depth second mode -- a duplicated region or a high-copy
+# contaminant -- which is the signal the chart exists for.
+HISTOGRAM_BUCKETS = 60
+HISTOGRAM_MEAN_MULTIPLE = 3.0
+# samtools depth reports integers, so a width below 1x would give several
+# buckets per representable depth, most of them structurally empty: a comb
+# rather than a distribution.
+HISTOGRAM_MIN_BUCKET_WIDTH = 1.0
+
 CONTIGS_TSV_COLUMNS = (
     "contig",
     "length",
@@ -325,6 +338,56 @@ def bin_depth(
 
     bins = [bin_sum[i] / bin_n[i] if bin_n[i] else 0.0 for i in range(bin_count)]
     return bins, boundaries
+
+
+def histogram_bucket_width(*, mean_depth: float) -> float | None:
+    """Bucket width for the depth histogram, derived from mean depth.
+
+    Returns None when there is no usable mean (an empty or wholly uncovered
+    reference), which callers treat as "emit no histogram" rather than
+    dividing by zero.
+    """
+    if mean_depth <= 0:
+        return None
+    width = mean_depth * HISTOGRAM_MEAN_MULTIPLE / HISTOGRAM_BUCKETS
+    return max(width, HISTOGRAM_MIN_BUCKET_WIDTH)
+
+
+class DepthHistogram:
+    """Counts reference positions by their depth, into fixed-width buckets.
+
+    Accumulated during bin_depth's single pass over `samtools depth -a`
+    output -- the per-base values that pass would otherwise average away.
+    The distribution's shape is the point: a tight peak is a healthy uniform
+    library, a long tail is coverage bias, and two modes flag contamination
+    or a large copy-number change. None of those survive the regional
+    averaging in `bam_stats_coverage_bins`.
+    """
+
+    def __init__(self, *, bucket_width: float, buckets: int = HISTOGRAM_BUCKETS):
+        self.bucket_width = bucket_width
+        self.buckets = buckets
+        # One extra slot: everything at or beyond the span, so a high-copy
+        # contaminant stays visible rather than being dropped.
+        self._counts = [0] * (buckets + 1)
+
+    def add(self, depth: float) -> None:
+        idx = int(depth / self.bucket_width)
+        if idx >= self.buckets:
+            idx = self.buckets
+        self._counts[idx] += 1
+
+    def to_facts(self) -> list[dict]:
+        """Every bucket, including empty ones: a gap mid-distribution is
+        signal, and omitting it would misrepresent the x-axis spacing.
+
+        `depth` is the bucket's lower bound. The final entry is the overflow
+        bucket, which the frontend labels with a leading '>='.
+        """
+        return [
+            {"depth": round(i * self.bucket_width, 4), "count": n}
+            for i, n in enumerate(self._counts)
+        ]
 
 
 def cumulative_coverage(*, bins: list[float], thresholds: list[int]) -> list[dict]:
