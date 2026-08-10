@@ -154,7 +154,7 @@ export function ProvenanceNarrative({
       </div>
 
       <div>
-        <div className="section-title">Methods paragraph</div>
+        <div className="section-title">{proseText ? "Methods paragraph" : "Summarize"}</div>
 
         {proseText ? (
           <>
@@ -182,26 +182,22 @@ export function ProvenanceNarrative({
             </div>
           </>
         ) : (
-          <>
-            <div className="section-note">
-              The lineage on the left, written as one citable paragraph.
+          <div className="prose-invite">
+            <div className="prose-invite-body">
+              The lineage on the left, set as one citable paragraph
+              {gapCount > 0
+                ? ` — ${gapCount} of its ${gapCount === 1 ? "fact is" : "facts are"} not recorded and will read as “unrecorded”.`
+                : "."}
             </div>
-            <div className="prose-invite">
-              <div className="prose-invite-body">
-                {gapCount > 0
-                  ? `${gapCount} ${gapCount === 1 ? "fact is" : "facts are"} missing, so the paragraph will say “an unrecorded tool”. Filling them in gives a cleaner sentence.`
-                  : "Every fact this needs is recorded."}
-              </div>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => prose.mutate()}
-                disabled={prose.isPending}
-              >
-                {prose.isPending ? "Generating…" : "Generate paragraph"}
-              </button>
-            </div>
-          </>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => prose.mutate()}
+              disabled={prose.isPending}
+            >
+              {prose.isPending ? "Generating…" : "Generate paragraph"}
+            </button>
+          </div>
         )}
 
         {prose.data?.unavailable_reason && (
