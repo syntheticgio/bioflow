@@ -26,7 +26,7 @@ from app.api.v1.schemas import (
 from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
 from app.metadata import infer_molecule
-from app.models import BlobStorage, JobClass, JobRunTiming
+from app.models import BlobStorage, FormatKind, JobClass, JobRunTiming
 from app.models.ai import TaskSlot
 from app.services import (
     ai,
@@ -346,6 +346,11 @@ async def infer_molecule_type_endpoint(
     reingest's full pipeline dispatch.
     """
     obj, blob = await object_service.object_with_blob(object_id, owner=owner)
+    if obj.format.kind is not FormatKind.FASTQ:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not FASTQ reads to sample",
+            details={"object_id": str(object_id), "kind": obj.format.kind.value},
+        )
     if blob is None or not obj.blob_sha256:
         raise NotFoundError("Object has no stored content to sample yet")
 
