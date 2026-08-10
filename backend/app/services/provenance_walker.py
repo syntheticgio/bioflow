@@ -161,6 +161,7 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # producing one; the numbers already show in the file panel.
         "run_bam_stats",
         "run_vcf_stats",
+        "run_transcript_qc",
         "ingest_headers",
         # Bookkeeping on bytes already ingested.
         "hash_blob",
