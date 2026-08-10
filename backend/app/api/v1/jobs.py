@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.api.deps import OwnerDep
 from app.errors import NotFoundError, ValidationError
 from app.models import Job, JobClass, JobState
+from app.models.timing import JobRunTiming
 from app.queue import keys, queue
 from app.queue.registry import all_handlers, get_handler
 
@@ -216,6 +217,74 @@ async def metrics() -> dict:
         "resource_floor_ms": RESOURCE_FLOOR_MS,
         **await timing_service.metrics(),
     }
+
+
+def _run_out(record: JobRunTiming) -> dict:
+    """One run as the Metrics table renders it.
+
+    Every unmeasured value stays None rather than becoming 0: memory is only
+    sampled above the executor's resource floor, so most short runs have no
+    peak, and a zero here would read as "used no memory" instead of "not
+    measured".
+    """
+    return {
+        "finished_at": record.finished_at.isoformat()
+        if record.finished_at
+        else None,
+        "outcome": record.outcome,
+        "duration_ms": record.duration_ms,
+        "input_bytes": record.input_bytes,
+        "peak_rss_bytes": record.resources.peak_rss_bytes,
+        "threads": record.threads,
+        "tool": record.tool,
+        "tool_version": record.tool_version,
+        "job_id": record.job_id,
+        "object_id": record.object_id,
+    }
+
+
+@router.get("/metrics/runs")
+async def metrics_runs(
+    job_type: str | None = None,
+    limit: int = 5,
+    offset: int = 0,
+) -> dict:
+    """Individual runs for the Metrics page's per-job-type tables.
+
+    Two shapes from one route. Without `job_type` it returns every type's
+    most recent runs at once, because the page draws a table per type and
+    per-table fetching would make a page load N requests. With `job_type` it
+    pages one type, which is what the "see more" page reads.
+
+    Failures are included in both -- see `timing_service.runs_for_type`.
+    """
+    from app.services import timing_service
+
+    if job_type:
+        runs = await timing_service.runs_for_type(
+            job_type, limit=limit, offset=offset
+        )
+        total = await JobRunTiming.find(
+            JobRunTiming.job_type == job_type
+        ).count()
+        return {
+            "job_type": job_type,
+            "total": total,
+            "runs": [_run_out(r) for r in runs],
+        }
+
+    by_type = await timing_service.recent_runs_by_type(limit=limit)
+    return {
+        "by_type": {
+            name: {
+                "runs": [_run_out(r) for r in entry["runs"]],
+                "total": entry["total"],
+            }
+            for name, entry in by_type.items()
+        }
+    }
+
+
 @router.get("/types")
 async def list_job_types() -> dict:
     return {

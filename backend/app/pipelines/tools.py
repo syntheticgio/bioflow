@@ -15,7 +15,7 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from functools import lru_cache
 
