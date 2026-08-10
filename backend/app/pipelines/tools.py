@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from functools import lru_cache
 
-from app.config import settings
+from app.config import is_arm64, settings
 from app.errors import PermanentError
 from app.logging import get_logger
 
@@ -634,10 +634,22 @@ def polypolish() -> Tool:
     # and exits zero.
     #
     # Absent on arm64 by design rather than by accident: upstream ships no
-    # linux-aarch64 build and the install script skips it there, so this
-    # probe reporting "not installed" on Apple Silicon is the intended
-    # outcome, not a broken image. See install-polypolish.sh.
-    return _probe("polypolish", settings.polypolish_path, ["--version"])
+    # linux-aarch64 build and the install script skips it there. The generic
+    # "not found on PATH" message from _probe reads as a broken install, so
+    # replace it with an explicit architecture note on arm64.
+    tool = _probe("polypolish", settings.polypolish_path, ["--version"])
+    if tool.error and is_arm64():
+        return Tool(
+            name="polypolish",
+            path=None,
+            version=None,
+            error=(
+                "Polypolish is not available on arm64 / Apple Silicon. "
+                "Upstream ships only x86-64 and macOS binaries; there is no "
+                "linux-aarch64 build, so BioFlow intentionally skips it."
+            ),
+        )
+    return tool
 
 
 @lru_cache(maxsize=1)
