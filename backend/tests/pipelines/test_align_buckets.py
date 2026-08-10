@@ -39,6 +39,9 @@ class TestPackBuckets:
             sequences=[(f"ctg{i}", 10_000_000) for i in range(100)],
             memory_budget_mb=2048,
             per_base_index_mb=3.2 / (1024 * 1024),
+            fixed_overhead_mb=0,
+            bytes_per_thread_mb=0,
+            sort_memory_mb=0,
         )
         assert result is not None
         assert len(result) < 100
@@ -57,16 +60,29 @@ class TestPackBuckets:
         for bucket in result:
             assert bucket.estimated_mb <= 8192
 
-    def test_tiny_budget_still_produces_single_bucket(self):
+    def test_tiny_budget_returns_none(self):
         result = pack_buckets(
             sequences=[("a", 1_000), ("b", 2_000), ("c", 3_000)],
             memory_budget_mb=1,
             per_base_index_mb=0.0,
         )
-        # Effective budget is negative → single bucket returned as list
-        assert result is not None
-        assert len(result) == 1
-        assert len(result[0].sequences) == 3
+        # Effective budget is negative → the packer refuses rather than
+        # returning a plan it knows will OOM.
+        assert result is None
+
+    def test_single_sequence_exceeds_budget_raises(self):
+        from app.errors import PermanentError
+
+        with pytest.raises(PermanentError, match="cannot produce a chunked"):
+            pack_buckets(
+                sequences=[("chr1", 3_000_000_000), ("chr2", 10_000)],
+                memory_budget_mb=12000,  # 12 GB — chr1 alone (3 Gbp) needs ~14 GB
+                per_base_index_mb=3.2 / (1024 * 1024),
+                fixed_overhead_mb=512,
+                bytes_per_thread_mb=256,
+                threads=4,
+                sort_memory_mb=1024,
+            )
 
 
 class TestWriteBucketFastas:
