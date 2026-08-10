@@ -785,6 +785,13 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # assembly rather than a new object — no output port to wire.
         "pipeline_service.launch_completeness",
         "pipeline_service.launch_gc_tracks",
+        # Read-only RNA-seq QC (gene body coverage, feature distribution)
+        # merged onto the BAM as facts. On-demand from the Results tab
+        # against a caller-chosen GTF, like bamstats/vcfstats -- but unlike
+        # those two it takes a second input object (the annotation) that the
+        # node-type/port model here has no way to express, so it stays a
+        # plain API launch rather than a canvas node.
+        "pipeline_service.launch_transcript_qc",
     }
 )
 
