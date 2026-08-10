@@ -602,6 +602,13 @@ export interface PipelineTool {
   usage: string;
 
   /**
+   * Tool selection recommendations keyed on read chemistry bucket.
+   * Keys are "short" or "long"; values are "recommended" or "compatible".
+   * An empty or absent entry means no opinion.
+   */
+  recommendations: Record<string, string>;
+
+  /**
    * How this tool reaches the running stack. "bundled" ships in the backend
    * image; "on_demand" is a pinned OCI image pulled on first use and run as
    * a sibling container (the DeepVariant shape). See
