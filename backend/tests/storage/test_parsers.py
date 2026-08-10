@@ -539,6 +539,7 @@ class TestFastaContiguity:
             "sequence_auN",
             "sequence_gap_count",
             "sequence_gap_bases",
+            "sequence_nx_curve",
         ):
             assert key not in facts
 
@@ -548,3 +549,88 @@ class TestFastaContiguity:
         facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
         assert "sequence_n50" not in facts
         assert "sequence_gap_count" not in facts
+
+    def test_nx_curve_has_one_hundred_points(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            ">a\n" + "A" * 100 + "\n"
+            ">b\n" + "A" * 80 + "\n"
+            ">c\n" + "A" * 60 + "\n"
+            ">d\n" + "A" * 40 + "\n"
+            ">e\n" + "A" * 20 + "\n"
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        curve = facts["sequence_nx_curve"]
+        assert len(curve) == 100
+        assert curve[0][0] == 1
+        assert curve[-1][0] == 100
+
+    def test_nx_curve_at_fifty_equals_n50(self, tmp_path):
+        """The curve generalizes N50 rather than recomputing it differently:
+        the x=50 point and sequence_n50 must never disagree."""
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            ">a\n" + "A" * 100 + "\n"
+            ">b\n" + "A" * 80 + "\n"
+            ">c\n" + "A" * 60 + "\n"
+            ">d\n" + "A" * 40 + "\n"
+            ">e\n" + "A" * 20 + "\n"
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        at_fifty = dict(facts["sequence_nx_curve"])[50]
+        assert at_fifty == facts["sequence_n50"] == 80
+
+    def test_nx_curve_at_ninety_equals_n90(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            ">a\n" + "A" * 100 + "\n"
+            ">b\n" + "A" * 80 + "\n"
+            ">c\n" + "A" * 60 + "\n"
+            ">d\n" + "A" * 40 + "\n"
+            ">e\n" + "A" * 20 + "\n"
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        at_ninety = dict(facts["sequence_nx_curve"])[90]
+        assert at_ninety == facts["sequence_n90"] == 40
+
+    def test_single_contig_curve_is_flat(self, tmp_path):
+        p = tmp_path / "one.fasta"
+        p.write_text(">only\n" + "A" * 500 + "\n")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert {length for _, length in facts["sequence_nx_curve"]} == {500}
+
+    def test_uniform_contigs_give_a_flat_curve(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text("".join(f">c{i}\n" + "A" * 50 + "\n" for i in range(4)))
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert {length for _, length in facts["sequence_nx_curve"]} == {50}
+
+    def test_dominant_contig_curve_drops_sharply(self, tmp_path):
+        """One 900bp contig and ten 10bp ones: the curve holds 900 until the
+        big contig's own share of the total is exhausted, then falls to 10.
+        This shape is the whole point of the visualization."""
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            ">big\n" + "A" * 900 + "\n"
+            + "".join(f">s{i}\n" + "A" * 10 + "\n" for i in range(10))
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        curve = dict(facts["sequence_nx_curve"])
+        assert curve[50] == 900
+        assert curve[90] == 900
+        assert curve[100] == 10
+
+    def test_curve_is_monotonically_non_increasing(self, tmp_path):
+        p = tmp_path / "ref.fasta"
+        p.write_text(
+            "".join(f">c{i}\n" + "A" * (100 - i * 7) + "\n" for i in range(12))
+        )
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        lengths = [length for _, length in facts["sequence_nx_curve"]]
+        assert lengths == sorted(lengths, reverse=True)
+
+    def test_empty_file_has_no_nx_curve(self, tmp_path):
+        p = tmp_path / "empty.fasta"
+        p.write_text("")
+        facts = parsers.parse(p, FormatKind.FASTA, Compression.NONE)
+        assert "sequence_nx_curve" not in facts

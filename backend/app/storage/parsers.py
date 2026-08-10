@@ -33,6 +33,12 @@ MAX_STORED_SAMPLES = 100
 # level rather than a local so a test can patch it down instead of writing a
 # 256 MB fixture to exercise the truncation path.
 FASTA_EXACT_LIMIT = 256 * 1024 * 1024
+# The Nx curve is stored at fixed resolution rather than as raw contig
+# lengths: a fragmented draft is hundreds of thousands of contigs, fact
+# documents live in Mongo, and Mongo caps a document at 16MB. A hundred
+# points costs the same for an 8-contig finished genome and a 500,000-contig
+# draft, and it is exactly what the chart draws.
+NX_CURVE_POINTS = 100
 
 
 def _check(cancel: threading.Event | None) -> None:
@@ -425,7 +431,8 @@ def _infer_pair_hint(filename: str, facts: dict) -> None:
 
 
 def _contiguity_stats(lengths: list[int], gap_bases: int, gap_count: int) -> dict:
-    """N50/N90/L50/auN and gap counts, over every record's true length.
+    """N50/N90/L50/auN, the Nx curve, and gap counts, over every record's
+    true length.
 
     Genuinely absent from anywhere else now that `assembly_runner._n50` is
     gone: Flye's own table gave an N50 for its own output, and nothing gave
@@ -436,6 +443,10 @@ def _contiguity_stats(lengths: list[int], gap_bases: int, gap_count: int) -> dic
     dict, deliberately -- N50 over 50 stored contigs of a 40,000-contig draft
     is not an approximate N50, it is a different number computed from the
     wrong population.
+
+    `sequence_nx_curve` is the continuous form of the same walk: N50 is its
+    x=50 point and N90 its x=90 point, computed here in one pass so the three
+    can never disagree the way two separate implementations eventually would.
     """
     if not lengths:
         return {}
@@ -452,6 +463,30 @@ def _contiguity_stats(lengths: list[int], gap_bases: int, gap_count: int) -> dic
                 if label == "n50":
                     facts["sequence_l50"] = i + 1
                 break
+
+    # One pass for all 100 thresholds: walk the sorted lengths once, and
+    # every time the running total crosses the next percentage boundary,
+    # record the contig that carried it there. A per-point rescan would be
+    # 100 walks of a list that can hold half a million entries.
+    curve: list[list[int]] = []
+    running = 0
+    x = 1
+    for length in ordered:
+        running += length
+        while x <= NX_CURVE_POINTS and running >= total * x / NX_CURVE_POINTS:
+            curve.append([x, length])
+            x += 1
+        if x > NX_CURVE_POINTS:
+            break
+    # Floating-point comparison can leave the final point unreached when the
+    # running total lands a hair under the threshold it should have met
+    # exactly. The last contig is the answer for any remaining x by
+    # definition, so fill rather than emit a short curve.
+    while x <= NX_CURVE_POINTS:
+        curve.append([x, ordered[-1]])
+        x += 1
+    facts["sequence_nx_curve"] = curve
+
     # auN: the area under the Nx curve, treating each base as weighted by the
     # length of the contig it sits in. Unlike N50 it does not jump
     # discontinuously when one contig crosses the halfway point, which is why
