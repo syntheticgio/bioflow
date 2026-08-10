@@ -919,6 +919,7 @@ from app.queue import (  # noqa: E402, F401
     sra_handlers,
     summary_handlers,
     tool_handlers,
+    transcript_qc_handlers,
     uniprot_handlers,
     variant_handlers,
     variant_summary_handlers,
