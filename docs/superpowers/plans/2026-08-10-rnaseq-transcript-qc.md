@@ -1,749 +1,597 @@
-# RNA-seq transcript QC Implementation Plan
+# RNA-seq Transcript QC Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add two on-demand RNA-seq alignment QC charts — gene body coverage (5'→3' bias) and genomic feature distribution (exonic/intronic/intergenic) — computed in one job from a BAM plus a GTF.
+**Goal:** For RNA-seq alignments, add a gene body coverage curve (5'→3' bias) and a genomic feature distribution (exonic / intronic / intergenic), computed in one job.
 
-**Architecture:** One new job, `run_transcript_qc`, following the established
-`run_bam_stats` split: pure functions in a new
-`backend/app/pipelines/transcript_qc_runner.py` (GTF parsing, binning,
-classification — testable over strings and lists), a thin handler in
-`backend/app/queue/align_handlers.py` that does I/O and pysam traversal, a
-facts applier in `backend/app/queue/results.py`, a launch path in
-`backend/app/services/pipeline_service.py`, and a new `TranscriptQc.tsx`
-rendered from `BamResults.tsx`. Both metrics come from one GTF parse and one
-BAM pass but land as two independent facts, because their gating differs
-(ChIP-seq gets feature distribution only).
+**Architecture:** A new on-demand job parses exons from a project GTF into a transcript model, then makes one strided pass over the BAM with pysam, accumulating both metrics simultaneously. Applicability is a fallback chain (`molecule_type` → `assay` → aligner) because the authoritative field is unpopulated on real data. Pure functions live in a new `transcript_qc_runner.py`; the handler mirrors `run_bam_stats`.
 
-**Tech Stack:** Python 3, pysam 0.24 (already installed), pytest, React +
-TypeScript, hand-rolled SVG (no charting library in this repo).
+**Tech Stack:** Python 3, pysam (already a dependency), pytest, React 18 + TypeScript, hand-rolled SVG.
 
-**Spec:** [docs/superpowers/specs/2026-08-10-rnaseq-transcript-qc-design.md](../specs/2026-08-10-rnaseq-transcript-qc-design.md)
-— Approved. Issues [#158](https://github.com/syntheticgio/bioflow/issues/158),
-[#159](https://github.com/syntheticgio/bioflow/issues/159), epic
-[#154](https://github.com/syntheticgio/bioflow/issues/154).
+**Spec:** `docs/superpowers/specs/2026-08-10-rnaseq-transcript-qc-design.md`
+
+**Issues:** Closes #158, closes #159.
 
 ---
 
-## Decisions this plan makes that the spec left open
+## Background the engineer needs
 
-The spec is approved and authoritative. Three points it under-specified are
-resolved here, each grounded in code that already exists in this repo:
+**Why one job for two charts.** Both need the same two expensive things: a parsed transcript model from a GTF, and a pass over the BAM classifying reads against it. Separately, that means parsing the GTF twice and traversing the BAM twice for two charts that sit side by side.
 
-1. **Sampling strategy.** The spec said "iterate over transcripts and sample
-   reads per region, **or** stride across contigs proportionally." This plan
-   picks **stride across contigs proportionally to length**, mirroring
-   `sequence_stats._fasta_sample_strided` (`backend/app/storage/sequence_stats.py:286`),
-   which solves the identical head-of-file problem for FASTA and documents its
-   own truncation failure mode. Per-transcript region fetches would issue
-   hundreds of thousands of `fetch()` calls on a large annotation; striding is
-   one linear pass with the same read budget.
+**Why custom pysam and not RSeQC.** RSeQC is the reference implementation, but adding it means a system dependency plus a `TOOL_META` entry with license/citation/usage and its completeness test, plus `suggestion_service` wiring — for two curves that are a few dozen lines over pysam. It also matches precedent: the comparable insert-size and MAPQ histograms were built with pysam in `storage/sequence_stats.py`, not by adding `samtools stats`. Accepted consequence: numbers won't match RSeQC to the decimal. These charts are read for shape, and this plan fixes the binning choices so the shape is stable.
 
-2. **GTF vs GFF3 attribute names.** The spec says "parse exons from the GTF"
-   without addressing format. `counts_runner.attributes_for_format`
-   (`backend/app/pipelines/counts_runner.py:112`) already solved this
-   empirically: NCBI GFF3 exon lines carry **no `gene_id` at all**, and
-   `locus_tag` is the correct GFF3 grouping key (present on 100% of exon
-   lines vs `gene`'s 84.5%). Task 2 reuses that function rather than
-   reinventing it. Getting this wrong yields zero transcripts and a
-   100%-intergenic chart — the same silent-failure shape the spec's contig
-   check guards against.
+**The gating trap — read this before writing the chain.** Both issues say there's no stored RNA-vs-DNA flag. That's now half wrong: `molecule_type` (DNA/RNA/Other) **is** implemented, mapped from SRA's `LIBRARY_SOURCE` in `metadata/sra.py`. Gating on it is the obvious design and it is wrong. Querying the live database:
 
-3. **Interval overlap structure.** `intervaltree` is a declared dependency
-   (`backend/pyproject.toml`) but is currently unused anywhere in `backend/app`.
-   This plan uses plain sorted arrays plus `bisect` instead: exon lookup here
-   is a static, build-once-query-many problem where a sorted array with
-   binary search is both faster and dependency-free. Introducing the repo's
-   first `intervaltree` usage for this is not justified.
+| field | populated on BAMs |
+|---|---|
+| `molecule_type` | **0 of 9** |
+| `assay` | **9 of 9**, and discriminates correctly (`RNA-seq` on exactly the STAR-aligned objects) |
 
----
+`molecule_type` only lands when an SRA record supplies it. Gating on it alone ships a feature **no current user can see**, with a fully green test suite. Hence the fallback chain in Task 3.
 
-## File Structure
+**There are also zero GTF objects in the database.** GTF availability is a live gate, and "no GTF" is the state every current user is in — it must read as a clear next action, not a broken feature.
 
-**Create:**
-- `backend/app/pipelines/transcript_qc_runner.py` — GTF parsing, transcript
-  model, binning, read classification. Pure functions, no queue, no pysam.
-- `backend/app/services/transcript_qc_gating.py` — the applicability chain and
-  GTF resolution. Separate from the runner because it is a metadata question,
-  not a computation, and it is consumed by both the API and the launch path.
-- `backend/tests/pipelines/test_transcript_qc_runner.py`
-- `backend/tests/services/test_transcript_qc_gating.py`
-- `backend/tests/pipelines/test_transcript_qc_launch.py`
-- `frontend/src/components/TranscriptQc.tsx`
+**Running tests from this worktree.** Use `./backend/run-worktree-tests.sh`, never `docker compose exec api python -m pytest` — the `api` container bind-mounts the *main* checkout, so the latter silently tests main's code.
 
-**Modify:**
-- `backend/app/queue/align_handlers.py` — add `run_transcript_qc` handler
-  (append after `run_bam_stats`, which ends at :900).
-- `backend/app/queue/results.py` — add `_apply_run_transcript_qc` and register
-  it in the applier map at :2501.
-- `backend/app/services/pipeline_service.py` — add `launch_transcript_qc`.
-- `backend/app/api/v1/objects.py` — expose the gating decision + GTF choices.
-- `frontend/src/api/types.ts` — facts types.
-- `frontend/src/api/client.ts` — `launchTranscriptQc`.
-- `frontend/src/components/BamResults.tsx` — render `TranscriptQc`.
+## File structure
+
+| File | Responsibility |
+|---|---|
+| `backend/app/pipelines/transcript_qc_runner.py` (create) | GTF parsing, transcript model, both accumulators — all pure |
+| `backend/tests/pipelines/test_transcript_qc_runner.py` (create) | Unit tests for the above |
+| `backend/app/services/transcript_qc_gating.py` (create) | The applicability chain, pure and separately testable |
+| `backend/tests/services/test_transcript_qc_gating.py` (create) | Chain tests, including the branch-precedence cases |
+| `backend/app/queue/transcript_qc_handlers.py` (create) | The `run_transcript_qc` handler |
+| `backend/app/queue/results.py` (modify) | Register `_apply_run_transcript_qc` |
+| `backend/app/services/pipeline_service.py` (modify) | `launch_transcript_qc` |
+| `backend/app/api/v1/pipelines.py` (modify) | `POST /pipelines/transcript-qc` |
+| `frontend/src/api/types.ts`, `client.ts` (modify) | Types + launch call |
+| `frontend/src/components/TranscriptQc.tsx` (create) | Both charts, gating states |
+| `frontend/src/components/BamResults.tsx` (modify) | Render it |
 
 ---
 
-## Task 1: Transcript model — parse exons from a GTF
+### Task 1: Parse a GTF into a transcript model
 
 **Files:**
 - Create: `backend/app/pipelines/transcript_qc_runner.py`
-- Create: `backend/tests/pipelines/test_transcript_qc_runner.py`
+- Test: `backend/tests/pipelines/test_transcript_qc_runner.py`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Create `backend/tests/pipelines/test_transcript_qc_runner.py`:
 
 ```python
-from app.pipelines import transcript_qc_runner as tq
+"""Transcript-model parsing and RNA-seq QC accumulation.
 
-# Two transcripts of one gene, plus a second gene. Tab-separated, GTF spec
-# order: seqname source feature start end score strand frame attributes.
-# GTF coordinates are 1-based and inclusive on both ends.
+Pure functions over strings and lists, mirroring bam_stats_runner.py: no
+queue, no filesystem, no pysam objects.
+"""
+
+import pytest
+
+from app.pipelines.transcript_qc_runner import (
+    MIN_TRANSCRIPT_LENGTH,
+    Transcript,
+    parse_gtf_transcripts,
+    representative_transcripts,
+)
+
+# Two transcripts of one gene, plus a minus-strand gene on another contig.
 GTF = "\n".join(
     [
-        '# a comment line, which GTF permits and parsers must skip',
-        'chr1\tsrc\texon\t1001\t1300\t.\t+\t.\tgene_id "G1"; transcript_id "T1";',
-        'chr1\tsrc\texon\t2001\t2400\t.\t+\t.\tgene_id "G1"; transcript_id "T1";',
-        # Shorter isoform of the same gene -- must lose to T1.
-        'chr1\tsrc\texon\t1001\t1100\t.\t+\t.\tgene_id "G1"; transcript_id "T2";',
-        'chr1\tsrc\tCDS\t1001\t1300\t.\t+\t.\tgene_id "G1"; transcript_id "T1";',
-        'chr2\tsrc\texon\t500\t900\t.\t-\t.\tgene_id "G2"; transcript_id "T3";',
+        '#!genome-build GRCh38',
+        'chr1\tx\texon\t101\t200\t.\t+\t.\tgene_id "G1"; transcript_id "T1";',
+        'chr1\tx\texon\t301\t400\t.\t+\t.\tgene_id "G1"; transcript_id "T1";',
+        'chr1\tx\texon\t101\t150\t.\t+\t.\tgene_id "G1"; transcript_id "T2";',
+        'chr2\tx\texon\t1001\t1300\t.\t-\t.\tgene_id "G2"; transcript_id "T3";',
+        'chr1\tx\tCDS\t101\t200\t.\t+\t.\tgene_id "G1"; transcript_id "T1";',
     ]
 )
 
 
-def test_parse_groups_exons_by_transcript_and_keeps_longest_per_gene():
-    model = tq.parse_gtf(GTF.splitlines(), feature="exon", group_key="gene_id")
+class TestParseGtf:
+    def test_groups_exons_by_transcript(self):
+        ts = parse_gtf_transcripts(GTF.splitlines())
+        assert {t.transcript_id for t in ts} == {"T1", "T2", "T3"}
+        t1 = next(t for t in ts if t.transcript_id == "T1")
+        assert t1.exons == [(101, 200), (301, 400)]
+        assert t1.contig == "chr1"
+        assert t1.strand == "+"
+        assert t1.gene_id == "G1"
 
-    # One representative transcript per gene, not per transcript_id.
-    assert {t.gene_id for t in model.transcripts} == {"G1", "G2"}
+    def test_ignores_non_exon_features(self):
+        """Counting a CDS as well as its exon would double-count those bases."""
+        ts = parse_gtf_transcripts(GTF.splitlines())
+        t1 = next(t for t in ts if t.transcript_id == "T1")
+        assert len(t1.exons) == 2
 
-    t1 = next(t for t in model.transcripts if t.gene_id == "G1")
-    # T1 (300 + 400 = 700 bp) beats T2 (100 bp).
-    assert t1.transcript_id == "T1"
-    assert t1.exons == [(1000, 1300), (2000, 2400)]  # half-open, 0-based
-    assert t1.length == 700
-    assert t1.strand == "+"
-    assert t1.contig == "chr1"
+    def test_skips_comments_and_blank_lines(self):
+        ts = parse_gtf_transcripts(["", "# comment", "#!genome-build x"])
+        assert ts == []
 
-    t3 = next(t for t in model.transcripts if t.gene_id == "G2")
-    assert t3.strand == "-"
-    assert t3.length == 400
+    def test_records_strand(self):
+        ts = parse_gtf_transcripts(GTF.splitlines())
+        assert next(t for t in ts if t.transcript_id == "T3").strand == "-"
 
-
-def test_parse_ignores_non_exon_features():
-    model = tq.parse_gtf(GTF.splitlines(), feature="exon", group_key="gene_id")
-    t1 = next(t for t in model.transcripts if t.gene_id == "G1")
-    # The CDS line duplicates the first exon's span; counting it would
-    # double that region's length.
-    assert t1.length == 700
-
-
-def test_parse_reads_gff3_style_attributes():
-    # NCBI GFF3 exon lines carry no gene_id -- see
-    # counts_runner.attributes_for_format. Grouping key is locus_tag there.
-    gff = (
-        'chr1\tsrc\texon\t1\t300\t.\t+\t.\t'
-        'ID=exon-NM_1-1;Parent=rna-NM_1;gene=PAU8;locus_tag=YAL068C;'
-    )
-    model = tq.parse_gtf([gff], feature="exon", group_key="locus_tag")
-    assert [t.gene_id for t in model.transcripts] == ["YAL068C"]
+    def test_transcript_length_is_summed_exon_length(self):
+        ts = parse_gtf_transcripts(GTF.splitlines())
+        t1 = next(t for t in ts if t.transcript_id == "T1")
+        assert t1.length == 200  # 100 + 100
 
 
-def test_parse_skips_transcripts_under_the_length_floor():
-    short = 'chr1\tsrc\texon\t1\t120\t.\t+\t.\tgene_id "S"; transcript_id "S1";'
-    model = tq.parse_gtf([short], feature="exon", group_key="gene_id")
-    # 120 bp normalized into 100 bins is noise, not signal.
-    assert model.transcripts == []
+class TestRepresentativeTranscripts:
+    def test_picks_the_longest_transcript_per_gene(self):
+        """Averaging over isoforms blurs the 3' signal the chart exists to
+        show: isoforms differ in length, so their positions do not align."""
+        ts = representative_transcripts(parse_gtf_transcripts(GTF.splitlines()))
+        by_gene = {t.gene_id: t.transcript_id for t in ts}
+        assert by_gene["G1"] == "T1"  # 200 bp beats T2's 50 bp
 
-
-def test_parse_ignores_malformed_and_short_lines():
-    lines = [
-        "not a gtf line at all",
-        'chr1\tsrc\texon\tNOT_AN_INT\t300\t.\t+\t.\tgene_id "X";',
-        'chr1\tsrc\texon\t1001\t1900\t.\t+\t.\tgene_id "OK"; transcript_id "T";',
-    ]
-    model = tq.parse_gtf(lines, feature="exon", group_key="gene_id")
-    assert [t.gene_id for t in model.transcripts] == ["OK"]
+    def test_drops_transcripts_below_the_length_floor(self):
+        """Normalizing a very short transcript into 100 bins produces noise,
+        not signal."""
+        short = "\n".join(
+            [
+                f'c\tx\texon\t1\t{MIN_TRANSCRIPT_LENGTH - 1}\t.\t+\t.\t'
+                'gene_id "S"; transcript_id "S1";'
+            ]
+        )
+        assert representative_transcripts(parse_gtf_transcripts(short.splitlines())) == []
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q
+./backend/run-worktree-tests.sh tests/pipelines/test_transcript_qc_runner.py -q
 ```
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'app.pipelines.transcript_qc_runner'`
+Expected: FAIL — `ModuleNotFoundError: No module named 'app.pipelines.transcript_qc_runner'`.
 
 - [ ] **Step 3: Write the implementation**
 
 Create `backend/app/pipelines/transcript_qc_runner.py`:
 
 ```python
-"""Gene body coverage and genomic feature distribution for RNA-seq BAMs.
+"""Transcript-model parsing and RNA-seq QC accumulation.
 
 Kept separate from the job handler so the parts worth testing -- GTF parsing,
-transcript selection, bin math, read classification -- are pure functions over
-strings and lists, with no queue, no filesystem, and no pysam involved.
-Mirrors bam_stats_runner.py's split for the same reason.
-
-Numbers here are deliberately not expected to match RSeQC's to the decimal:
-bin counts and tie-breaking are implementation choices. These charts are read
-for shape -- is there a 3' cliff, is the exonic fraction dominant -- not for a
-figure quoted in a methods section.
+representative-transcript choice, and both accumulators -- are pure functions
+over strings and lists, with no queue, filesystem, or pysam involved. Mirrors
+bam_stats_runner.py's split for the same reason.
 """
 
-from __future__ import annotations
-
-import re
-from bisect import bisect_right
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
-# 100 bins gives one point per percentile of transcript length: fine enough to
-# show a 3' cliff, coarse enough that a single 200 bp transcript does not
-# contribute a spike to every bin.
-BIN_COUNT = 100
+# Gene body coverage is reported at percentile resolution: 100 bins from the
+# 5' end to the 3' end, so transcripts of wildly different lengths can be
+# averaged onto one axis.
+GENE_BODY_BINS = 100
 
-# Normalizing a transcript shorter than this into BIN_COUNT bins produces
-# noise -- several bins would share one base, and one read would swing the
-# whole curve.
+# Below this, normalizing into GENE_BODY_BINS bins interpolates more than it
+# measures -- several bins per base is noise, not signal.
 MIN_TRANSCRIPT_LENGTH = 200
-
-# GTF: gene_id "G1";   GFF3: locus_tag=YAL068C;
-_GTF_ATTR = re.compile(r'(\w+)\s+"([^"]*)"')
-_GFF3_ATTR = re.compile(r"(\w+)=([^;]*)")
 
 
 @dataclass
 class Transcript:
-    """One gene's representative transcript, exons in ascending coordinate
-    order, as 0-based half-open [start, end) intervals."""
+    """One transcript's exon structure, in reference coordinates."""
 
-    gene_id: str
     transcript_id: str
+    gene_id: str
     contig: str
     strand: str
-    exons: list[tuple[int, int]]
+    exons: list[tuple[int, int]] = field(default_factory=list)
 
     @property
     def length(self) -> int:
-        return sum(end - start for start, end in self.exons)
+        """Summed exon length -- the transcript's own length, not its genomic
+        span, which would include introns."""
+        return sum(end - start + 1 for start, end in self.exons)
 
     @property
     def span(self) -> tuple[int, int]:
-        """The gene body: first exon start to last exon end, introns included."""
-        return (self.exons[0][0], self.exons[-1][1])
+        """First to last exon coordinate, introns included. This is the gene
+        body used to classify a read as intronic."""
+        return self.exons[0][0], self.exons[-1][1]
 
 
-@dataclass
-class TranscriptModel:
-    transcripts: list[Transcript] = field(default_factory=list)
+def _attribute(attrs: str, key: str) -> str | None:
+    """Pull one value out of a GTF attribute column.
 
-    @property
-    def contigs(self) -> set[str]:
-        return {t.contig for t in self.transcripts}
-
-
-def parse_attributes(raw: str) -> dict[str, str]:
-    """Column 9 of a GTF or GFF3 line, whichever style it is written in.
-
-    Both are tried because a project can hold either; see
-    counts_runner.attributes_for_format for why the *key* differs between them
-    (NCBI GFF3 exon lines carry no gene_id at all).
+    The column is `key "value"; key "value";` -- parsed by scanning rather
+    than with a regex so a missing or unquoted attribute yields None instead
+    of raising.
     """
-    attrs = {k: v for k, v in _GTF_ATTR.findall(raw)}
-    if not attrs:
-        attrs = {k: v for k, v in _GFF3_ATTR.findall(raw)}
-    return attrs
+    for part in attrs.split(";"):
+        part = part.strip()
+        if not part.startswith(key):
+            continue
+        _, _, value = part.partition(" ")
+        return value.strip().strip('"')
+    return None
 
 
-def parse_gtf(
-    lines,
-    *,
-    feature: str = "exon",
-    group_key: str = "gene_id",
-    min_length: int = MIN_TRANSCRIPT_LENGTH,
-) -> TranscriptModel:
-    """Build a one-transcript-per-gene model from GTF/GFF3 annotation lines.
+def parse_gtf_transcripts(lines: Iterable[str]) -> list[Transcript]:
+    """Group a GTF's exon features by transcript.
 
-    `feature` and `group_key` come from counts_runner.attributes_for_format so
-    GTF and GFF3 are keyed by the attribute each actually carries.
-
-    One representative transcript per gene -- the longest by summed exon
-    length -- rather than an average over isoforms. Isoforms of one gene have
-    different lengths and their positions do not align, so averaging them
-    blurs the 3' signal the chart exists to show.
+    Only `exon` rows are read. A GTF repeats the same bases across `exon`,
+    `CDS`, `start_codon` and more, so counting anything else would
+    double-count them. Exons are sorted by coordinate, which the gene-body
+    walk depends on.
     """
-    # (gene, transcript) -> exons, so isoforms stay separable until we choose.
-    by_transcript: dict[tuple[str, str], Transcript] = {}
-
+    by_id: dict[str, Transcript] = {}
     for line in lines:
-        if not line or line.startswith("#"):
+        if not line.strip() or line.startswith("#"):
             continue
-        parts = line.rstrip("\n").split("\t")
-        if len(parts) < 9 or parts[2] != feature:
+        parts = line.split("\t")
+        if len(parts) < 9 or parts[2] != "exon":
             continue
-
-        attrs = parse_attributes(parts[8])
-        gene = attrs.get(group_key)
-        if not gene:
+        transcript_id = _attribute(parts[8], "transcript_id")
+        gene_id = _attribute(parts[8], "gene_id")
+        if not transcript_id or not gene_id:
             continue
-        # A GFF3 exon has no transcript_id; fall back to the gene so its exons
-        # still group into one transcript rather than one per line.
-        transcript = attrs.get("transcript_id") or attrs.get("Parent") or gene
-
-        try:
-            # GTF is 1-based inclusive; convert to 0-based half-open.
-            start = int(parts[3]) - 1
-            end = int(parts[4])
-        except ValueError:
-            continue
-        if end <= start:
-            continue
-
-        key = (gene, transcript)
-        existing = by_transcript.get(key)
-        if existing is None:
-            by_transcript[key] = Transcript(
-                gene_id=gene,
-                transcript_id=transcript,
+        t = by_id.get(transcript_id)
+        if t is None:
+            t = Transcript(
+                transcript_id=transcript_id,
+                gene_id=gene_id,
                 contig=parts[0],
-                strand=parts[6] if parts[6] in {"+", "-"} else "+",
-                exons=[(start, end)],
+                strand=parts[6],
             )
-        else:
-            existing.exons.append((start, end))
+            by_id[transcript_id] = t
+        t.exons.append((int(parts[3]), int(parts[4])))
 
-    # Longest isoform wins, deterministically: ties break on transcript_id so
-    # two runs over the same annotation always pick the same one.
-    best: dict[str, Transcript] = {}
-    for t in by_transcript.values():
+    for t in by_id.values():
         t.exons.sort()
+    return list(by_id.values())
+
+
+def representative_transcripts(transcripts: list[Transcript]) -> list[Transcript]:
+    """One transcript per gene: the longest by summed exon length.
+
+    Averaging the gene-body curve over every isoform blurs exactly the signal
+    it exists to show. Isoforms of one gene differ in length, so a given
+    percentile is a different place in each -- the 3' cliff of a degraded
+    sample smears across the axis. One representative per gene keeps each
+    percentile meaning one thing.
+    """
+    best: dict[str, Transcript] = {}
+    for t in transcripts:
+        if t.length < MIN_TRANSCRIPT_LENGTH:
+            continue
         current = best.get(t.gene_id)
-        if current is None or (t.length, t.transcript_id) > (
-            current.length,
-            current.transcript_id,
-        ):
+        if current is None or t.length > current.length:
             best[t.gene_id] = t
-
-    kept = [t for t in best.values() if t.length >= min_length]
-    kept.sort(key=lambda t: (t.contig, t.span[0], t.gene_id))
-    return TranscriptModel(transcripts=kept)
+    return list(best.values())
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 4: Run to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q
+./backend/run-worktree-tests.sh tests/pipelines/test_transcript_qc_runner.py -q
 ```
 
-Expected: PASS, 5 passed.
+Expected: PASS, 7 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/pipelines/transcript_qc_runner.py backend/tests/pipelines/test_transcript_qc_runner.py
-git commit -m "feat(pipelines): parse a one-transcript-per-gene model from GTF or GFF3"
+git commit -m "feat(pipelines): parse a GTF into per-gene representative transcripts"
 ```
 
 ---
 
-## Task 2: Choose parsing keys by annotation format
+### Task 2: The two accumulators
 
 **Files:**
 - Modify: `backend/app/pipelines/transcript_qc_runner.py`
-- Modify: `backend/tests/pipelines/test_transcript_qc_runner.py`
+- Test: `backend/tests/pipelines/test_transcript_qc_runner.py`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
-Append to `backend/tests/pipelines/test_transcript_qc_runner.py`:
-
-```python
-def test_keys_for_format_reuses_the_counts_runner_decision():
-    # Not a reimplementation: counts_runner measured this against the
-    # annotations this app actually downloads (locus_tag on 100% of NCBI GFF3
-    # exon lines, gene_id on 0%).
-    assert tq.keys_for_format("gtf") == ("exon", "gene_id")
-    assert tq.keys_for_format("gff") == ("exon", "locus_tag")
-    assert tq.keys_for_format(None) == ("exon", "gene_id")
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py::test_keys_for_format_reuses_the_counts_runner_decision -q
-```
-
-Expected: FAIL — `AttributeError: module 'app.pipelines.transcript_qc_runner' has no attribute 'keys_for_format'`
-
-- [ ] **Step 3: Write the implementation**
-
-Add to `backend/app/pipelines/transcript_qc_runner.py`, after the imports:
+Append to the test file (add the new names to its import block):
 
 ```python
-from app.pipelines.counts_runner import attributes_for_format
+from app.pipelines.transcript_qc_runner import (  # noqa: E402
+    FeatureCounts,
+    GeneBodyCoverage,
+    build_feature_index,
+    classify_position,
+    contig_overlap,
+)
 
 
-def keys_for_format(kind) -> tuple[str, str]:
-    """The feature type and grouping attribute for an annotation format.
-
-    Delegates to counts_runner rather than duplicating the mapping: that
-    function's choice of `locus_tag` for GFF3 was measured against the files
-    this application downloads, and a second copy of the rule here would be
-    one more thing to keep in sync with it.
-    """
-    return attributes_for_format(kind)
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q
-```
-
-Expected: PASS, 6 passed.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/app/pipelines/transcript_qc_runner.py backend/tests/pipelines/test_transcript_qc_runner.py
-git commit -m "feat(pipelines): key transcript parsing off the annotation format"
-```
-
----
-
-## Task 3: Gene body coverage binning, strand-corrected
-
-**Files:**
-- Modify: `backend/app/pipelines/transcript_qc_runner.py`
-- Modify: `backend/tests/pipelines/test_transcript_qc_runner.py`
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `backend/tests/pipelines/test_transcript_qc_runner.py`:
-
-```python
-def _transcript(strand: str, gene: str = "G") -> tq.Transcript:
-    # One 1000 bp exon: transcript coordinate == genomic offset, so a test can
-    # reason about positions directly.
-    return tq.Transcript(
-        gene_id=gene,
-        transcript_id=f"{gene}-T",
-        contig="chr1",
-        strand=strand,
-        exons=[(0, 1000)],
+def _t(tid, contig, strand, exons, gene=None):
+    return Transcript(
+        transcript_id=tid, gene_id=gene or tid, contig=contig, strand=strand, exons=exons
     )
 
 
-def test_transcript_offset_maps_genomic_position_into_transcript_space():
-    t = tq.Transcript(
-        gene_id="G", transcript_id="T", contig="chr1", strand="+",
-        exons=[(100, 200), (500, 600)],
-    )
-    assert tq.transcript_offset(t, 100) == 0     # first base of exon 1
-    assert tq.transcript_offset(t, 199) == 99    # last base of exon 1
-    assert tq.transcript_offset(t, 500) == 100   # first base of exon 2
-    assert tq.transcript_offset(t, 599) == 199
-    assert tq.transcript_offset(t, 300) is None  # intronic, not in transcript
+class TestGeneBodyCoverage:
+    def test_uniform_coverage_gives_a_flat_curve(self):
+        t = _t("T1", "chr1", "+", [(1, 1000)])
+        g = GeneBodyCoverage()
+        for pos in range(1, 1001):
+            g.add_read(t, pos)
+        curve = [p["coverage"] for p in g.to_facts()]
+        assert max(curve) == 1.0
+        assert min(curve) > 0.9  # flat within binning noise
+
+    def test_three_prime_pileup_rises_toward_the_end(self):
+        """The degraded-RNA signature: poly-A selection keeps only the 3'
+        tail, so coverage climbs from 5' to 3'."""
+        t = _t("T1", "chr1", "+", [(1, 1000)])
+        g = GeneBodyCoverage()
+        for pos in range(900, 1001):
+            g.add_read(t, pos)
+        curve = [p["coverage"] for p in g.to_facts()]
+        assert curve[0] == 0.0
+        assert curve[-1] == 1.0
+
+    def test_minus_strand_transcripts_are_oriented_five_to_three(self):
+        """A minus-strand transcript's 5' end is its *highest* coordinate.
+        Skipping this inverts half the genes, and averaging the two opposing
+        gradients flattens the curve into meaninglessness."""
+        plus = _t("P", "chr1", "+", [(1, 1000)])
+        minus = _t("M", "chr1", "-", [(1, 1000)])
+
+        gp = GeneBodyCoverage()
+        for pos in range(900, 1001):  # 3' end of a plus-strand transcript
+            gp.add_read(plus, pos)
+
+        gm = GeneBodyCoverage()
+        for pos in range(1, 102):  # 3' end of a minus-strand transcript
+            gm.add_read(minus, pos)
+
+        assert [p["coverage"] for p in gp.to_facts()] == [
+            p["coverage"] for p in gm.to_facts()
+        ]
+
+    def test_spliced_transcripts_measure_transcript_position_not_genomic(self):
+        """Two exons with a large intron: a read at the start of exon 2 is at
+        the transcript's midpoint, not at 90% of its genomic span."""
+        t = _t("T1", "chr1", "+", [(1, 500), (9501, 10000)])
+        g = GeneBodyCoverage()
+        g.add_read(t, 9501)
+        curve = [p["coverage"] for p in g.to_facts()]
+        assert curve[50] == 1.0
+        assert curve[90] == 0.0
+
+    def test_curve_is_normalized_to_its_maximum(self):
+        t = _t("T1", "chr1", "+", [(1, 1000)])
+        g = GeneBodyCoverage()
+        for pos in range(1, 1001):
+            g.add_read(t, pos)
+        assert max(p["coverage"] for p in g.to_facts()) == 1.0
+
+    def test_emits_one_point_per_bin(self):
+        t = _t("T1", "chr1", "+", [(1, 1000)])
+        g = GeneBodyCoverage()
+        g.add_read(t, 1)
+        facts = g.to_facts()
+        assert len(facts) == GENE_BODY_BINS
+        assert facts[0]["percentile"] == 0
+        assert facts[-1]["percentile"] == 99
+
+    def test_no_reads_gives_an_empty_curve(self):
+        assert GeneBodyCoverage().to_facts() == []
 
 
-def test_uniform_coverage_gives_a_flat_curve():
-    acc = tq.GeneBodyAccumulator()
-    t = _transcript("+")
-    for pos in range(0, 1000, 10):
-        acc.add_read(t, pos, pos + 10)
-    curve = acc.to_facts()
-    assert len(curve) == tq.BIN_COUNT
-    assert all(abs(p["coverage"] - 1.0) < 0.01 for p in curve)
+class TestFeatureClassification:
+    TS = [
+        _t("T1", "chr1", "+", [(101, 200), (301, 400)]),
+        _t("T2", "chr2", "-", [(1001, 1100)]),
+    ]
+
+    def test_a_read_inside_an_exon_is_exonic(self):
+        idx = build_feature_index(self.TS)
+        assert classify_position(idx, "chr1", 150) == "exonic"
+
+    def test_a_read_between_exons_of_one_gene_is_intronic(self):
+        idx = build_feature_index(self.TS)
+        assert classify_position(idx, "chr1", 250) == "intronic"
+
+    def test_a_read_outside_every_gene_is_intergenic(self):
+        idx = build_feature_index(self.TS)
+        assert classify_position(idx, "chr1", 5000) == "intergenic"
+
+    def test_a_read_on_an_unknown_contig_is_intergenic(self):
+        idx = build_feature_index(self.TS)
+        assert classify_position(idx, "chrUnplaced", 5) == "intergenic"
+
+    def test_exonic_wins_when_a_position_is_both(self):
+        """Overlapping genes on opposite strands are common. Exonic winning
+        keeps the three categories mutually exclusive so they sum to the
+        classified total."""
+        overlapping = [
+            _t("A", "chr1", "+", [(100, 200), (400, 500)], gene="GA"),
+            _t("B", "chr1", "-", [(250, 260)], gene="GB"),
+        ]
+        idx = build_feature_index(overlapping)
+        # 250 is inside GA's intron and inside GB's exon.
+        assert classify_position(idx, "chr1", 250) == "exonic"
+
+    def test_counts_sum_to_the_classified_total(self):
+        c = FeatureCounts()
+        c.add("exonic")
+        c.add("intronic")
+        c.add("intergenic")
+        c.add("exonic")
+        facts = c.to_facts()
+        assert facts == {"exonic": 2, "intronic": 1, "intergenic": 1}
+        assert sum(facts.values()) == c.total
 
 
-def test_three_prime_pileup_gives_a_rising_curve():
-    acc = tq.GeneBodyAccumulator()
-    t = _transcript("+")
-    # Reads only in the last 20% of the transcript: classic degradation.
-    for pos in range(800, 1000, 10):
-        acc.add_read(t, pos, pos + 10)
-    curve = acc.to_facts()
-    assert curve[0]["coverage"] == 0.0
-    assert curve[-1]["coverage"] == 1.0
-    assert curve[10]["coverage"] <= curve[90]["coverage"]
+class TestContigOverlap:
+    def test_matching_names_overlap(self):
+        assert contig_overlap({"chr1", "chr2"}, {"chr1", "chr3"}) == 1
 
-
-def test_minus_strand_curve_mirrors_the_plus_strand_curve():
-    # The orientation bug that passes every symmetric fixture: a minus-strand
-    # transcript's 5' end is its *highest* coordinate. Skipping the flip
-    # inverts half the genes and flattens the averaged curve to meaningless.
-    plus = tq.GeneBodyAccumulator()
-    minus = tq.GeneBodyAccumulator()
-    for pos in range(800, 1000, 10):
-        plus.add_read(_transcript("+"), pos, pos + 10)
-        minus.add_read(_transcript("-"), pos, pos + 10)
-
-    plus_curve = [p["coverage"] for p in plus.to_facts()]
-    minus_curve = [p["coverage"] for p in minus.to_facts()]
-    assert minus_curve == list(reversed(plus_curve))
-
-
-def test_curve_is_normalized_to_a_maximum_of_one():
-    acc = tq.GeneBodyAccumulator()
-    t = _transcript("+")
-    for _ in range(37):  # arbitrary depth
-        for pos in range(0, 1000, 10):
-            acc.add_read(t, pos, pos + 10)
-    assert max(p["coverage"] for p in acc.to_facts()) == 1.0
-
-
-def test_empty_accumulator_returns_no_curve():
-    assert tq.GeneBodyAccumulator().to_facts() == []
+    def test_ensembl_style_names_do_not_match_ucsc_style(self):
+        """'1' vs 'chr1' is the classic silent failure: every read lands
+        outside every gene and the result is a plausible-looking 100%
+        intergenic with no error anywhere."""
+        assert contig_overlap({"1", "2"}, {"chr1", "chr2"}) == 0
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q -k "offset or curve or coverage or accumulator"
+./backend/run-worktree-tests.sh tests/pipelines/test_transcript_qc_runner.py -q
 ```
 
-Expected: FAIL — `AttributeError: ... has no attribute 'transcript_offset'`
+Expected: FAIL — `ImportError: cannot import name 'GeneBodyCoverage'`.
 
 - [ ] **Step 3: Write the implementation**
 
-Add to `backend/app/pipelines/transcript_qc_runner.py`:
+Append to `backend/app/pipelines/transcript_qc_runner.py`:
 
 ```python
-def transcript_offset(t: Transcript, genomic_pos: int) -> int | None:
-    """Position within the spliced transcript, or None if not in an exon.
-
-    Exons are sorted and non-overlapping, so a binary search over their
-    cumulative lengths finds the containing exon without scanning them all --
-    which matters when this runs once per sampled read against a transcript
-    that can have dozens of exons.
-    """
-    starts = [start for start, _ in t.exons]
-    idx = bisect_right(starts, genomic_pos) - 1
-    if idx < 0:
-        return None
-    start, end = t.exons[idx]
-    if not (start <= genomic_pos < end):
-        return None
-    preceding = sum(e - s for s, e in t.exons[:idx])
-    return preceding + (genomic_pos - start)
+import bisect
 
 
-class GeneBodyAccumulator:
-    """Mean depth per percentile of transcript length, 5' to 3'.
+class GeneBodyCoverage:
+    """Mean coverage across transcript position, 5' to 3', over all genes.
 
-    Accumulates across every sampled transcript so one lightly-covered gene
-    does not dominate; the curve is normalized at the end because absolute
-    depth is already reported by bam_stats and the question here is shape.
+    Each read contributes to the bin holding its position *within the
+    transcript* -- spliced coordinates, so an intron never shifts a read
+    toward the 3' end -- and minus-strand transcripts are flipped so every
+    curve runs 5' to 3'. Without that flip half the genes run backwards and
+    averaging the two opposing gradients flattens the result to a
+    meaningless straight line.
+
+    A curve that climbs steeply toward the 3' end is the signature of RNA
+    degraded before sequencing: poly-A selection captures only the surviving
+    3' tail.
     """
 
-    def __init__(self, bins: int = BIN_COUNT):
+    def __init__(self, bins: int = GENE_BODY_BINS):
         self.bins = bins
-        self._totals = [0.0] * bins
+        self._sums = [0.0] * bins
 
-    def add_read(self, t: Transcript, ref_start: int, ref_end: int) -> None:
-        """Add one read's overlap with a transcript, in transcript space."""
-        length = t.length
+    def add_read(self, transcript: Transcript, position: int) -> None:
+        offset = transcript_offset(transcript, position)
+        if offset is None:
+            return
+        length = transcript.length
         if length <= 0:
             return
-        for pos in range(ref_start, ref_end):
-            offset = transcript_offset(t, pos)
-            if offset is None:
-                continue
-            # A minus-strand transcript is transcribed from its highest
-            # coordinate down, so its 5' end is the far end of the array.
-            if t.strand == "-":
-                offset = length - 1 - offset
-            idx = min(self.bins - 1, (offset * self.bins) // length)
-            self._totals[idx] += 1.0
+        fraction = offset / length
+        if transcript.strand == "-":
+            # The 5' end of a minus-strand transcript is its highest
+            # coordinate, so the fraction measured in ascending coordinates
+            # runs 3'->5' and has to be reversed.
+            fraction = 1.0 - fraction
+        idx = min(int(fraction * self.bins), self.bins - 1)
+        self._sums[idx] += 1.0
 
     def to_facts(self) -> list[dict]:
-        peak = max(self._totals, default=0.0)
+        """Normalized to the curve's own maximum: absolute depth is reported
+        elsewhere, and the question here is shape."""
+        peak = max(self._sums, default=0.0)
         if peak <= 0:
             return []
         return [
             {"percentile": i, "coverage": round(v / peak, 4)}
-            for i, v in enumerate(self._totals)
+            for i, v in enumerate(self._sums)
         ]
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q
-```
-
-Expected: PASS, 12 passed.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/app/pipelines/transcript_qc_runner.py backend/tests/pipelines/test_transcript_qc_runner.py
-git commit -m "feat(pipelines): bin gene body coverage 5' to 3', correcting for strand"
-```
-
----
-
-## Task 4: Classify reads as exonic, intronic, or intergenic
-
-**Files:**
-- Modify: `backend/app/pipelines/transcript_qc_runner.py`
-- Modify: `backend/tests/pipelines/test_transcript_qc_runner.py`
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `backend/tests/pipelines/test_transcript_qc_runner.py`:
-
-```python
-def _two_gene_model() -> tq.TranscriptModel:
-    return tq.TranscriptModel(
-        transcripts=[
-            # Two exons with a 1000..2000 intron between them.
-            tq.Transcript("G1", "T1", "chr1", "+", [(1000, 1500), (2000, 2500)]),
-            tq.Transcript("G2", "T2", "chr1", "-", [(5000, 5800)]),
-        ]
-    )
 
 
-def test_classify_read_inside_an_exon_is_exonic():
-    idx = tq.FeatureIndex(_two_gene_model())
-    assert idx.classify("chr1", 1100, 1200) == "exonic"
+def transcript_offset(transcript: Transcript, position: int) -> int | None:
+    """How far into the transcript a genomic position falls, in spliced
+    coordinates. None when the position is not inside an exon.
 
-
-def test_classify_read_inside_a_gene_but_between_exons_is_intronic():
-    idx = tq.FeatureIndex(_two_gene_model())
-    assert idx.classify("chr1", 1600, 1700) == "intronic"
-
-
-def test_classify_read_outside_all_genes_is_intergenic():
-    idx = tq.FeatureIndex(_two_gene_model())
-    assert idx.classify("chr1", 8000, 8100) == "intergenic"
-
-
-def test_classify_read_on_an_unknown_contig_is_intergenic():
-    idx = tq.FeatureIndex(_two_gene_model())
-    assert idx.classify("chrZ", 1100, 1200) == "intergenic"
-
-
-def test_exonic_wins_over_intronic_when_a_read_overlaps_both():
-    # A read in G1's intron that also clips G3's exon counts exonic, so the
-    # three categories stay mutually exclusive and sum to the classified total.
-    model = tq.TranscriptModel(
-        transcripts=[
-            tq.Transcript("G1", "T1", "chr1", "+", [(1000, 1500), (2000, 2500)]),
-            tq.Transcript("G3", "T3", "chr1", "+", [(1600, 1900)]),
-        ]
-    )
-    assert tq.FeatureIndex(model).classify("chr1", 1550, 1650) == "exonic"
-
-
-def test_counts_sum_to_the_classified_total():
-    idx = tq.FeatureIndex(_two_gene_model())
-    counts = tq.FeatureCounts()
-    for start in (1100, 1600, 8000, 5100):
-        counts.add(idx.classify("chr1", start, start + 50))
-    facts = counts.to_facts()
-    assert facts == {"exonic": 2, "intronic": 1, "intergenic": 1}
-    assert sum(facts.values()) == counts.total == 4
-
-
-def test_contig_overlap_detects_the_chr_prefix_mismatch():
-    model = _two_gene_model()  # chr1
-    # The classic silent failure: a GTF using 1,2,3 against a BAM using
-    # chr1,chr2,chr3 yields 100% intergenic with no error anywhere.
-    assert tq.contig_overlap(model, ["1", "2", "3"]) == 0
-    assert tq.contig_overlap(model, ["chr1", "chr2"]) == 1
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q -k "classify or exonic or sum_to or contig_overlap"
-```
-
-Expected: FAIL — `AttributeError: ... has no attribute 'FeatureIndex'`
-
-- [ ] **Step 3: Write the implementation**
-
-Add to `backend/app/pipelines/transcript_qc_runner.py`:
-
-```python
-EXONIC = "exonic"
-INTRONIC = "intronic"
-INTERGENIC = "intergenic"
-
-
-class FeatureIndex:
-    """Per-contig sorted exon and gene-span arrays, queried by binary search.
-
-    Sorted arrays rather than an interval tree: the model is built once and
-    queried hundreds of thousands of times, exons within a contig are already
-    disjoint after merging, and this keeps the dependency surface flat.
+    Genomic distance would be wrong for any spliced transcript: a read at the
+    start of a final exon beyond a 9 kb intron is at the transcript's
+    midpoint, not at 90% of its genomic span.
     """
-
-    def __init__(self, model: TranscriptModel):
-        exons: dict[str, list[tuple[int, int]]] = {}
-        spans: dict[str, list[tuple[int, int]]] = {}
-        for t in model.transcripts:
-            exons.setdefault(t.contig, []).extend(t.exons)
-            spans.setdefault(t.contig, []).append(t.span)
-        self._exons = {c: _merge(v) for c, v in exons.items()}
-        self._spans = {c: _merge(v) for c, v in spans.items()}
-
-    def classify(self, contig: str, start: int, end: int) -> str:
-        """Exonic if the read touches any exon, else intronic if it falls
-        within any gene body, else intergenic.
-
-        Exonic wins ties deliberately -- a read overlapping one gene's exon
-        and another's intron is evidence of mature mRNA, which is what the
-        chart is asking about.
-        """
-        if _overlaps(self._exons.get(contig), start, end):
-            return EXONIC
-        if _overlaps(self._spans.get(contig), start, end):
-            return INTRONIC
-        return INTERGENIC
+    consumed = 0
+    for start, end in transcript.exons:
+        if start <= position <= end:
+            return consumed + (position - start)
+        consumed += end - start + 1
+    return None
 
 
-def _merge(intervals: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Sort and coalesce overlapping intervals so a later binary search can
-    assume they are disjoint and ascending."""
-    if not intervals:
-        return []
-    intervals = sorted(intervals)
-    merged = [intervals[0]]
-    for start, end in intervals[1:]:
-        last_start, last_end = merged[-1]
-        if start <= last_end:
-            merged[-1] = (last_start, max(last_end, end))
-        else:
-            merged.append((start, end))
-    return merged
+def build_feature_index(transcripts: list[Transcript]) -> dict:
+    """Per-contig sorted exon and gene-span intervals, for classification.
+
+    Sorted lists searched with bisect rather than a full interval tree: the
+    per-contig lists are small enough that the log-n lookup is not the
+    bottleneck (the BAM pass is), and there is no dependency to add.
+    """
+    exons: dict[str, list[tuple[int, int]]] = {}
+    genes: dict[str, dict[str, tuple[int, int]]] = {}
+    for t in transcripts:
+        exons.setdefault(t.contig, []).extend(t.exons)
+        start, end = t.span
+        by_gene = genes.setdefault(t.contig, {})
+        current = by_gene.get(t.gene_id)
+        by_gene[t.gene_id] = (
+            min(start, current[0]) if current else start,
+            max(end, current[1]) if current else end,
+        )
+
+    return {
+        "exons": {c: sorted(v) for c, v in exons.items()},
+        "genes": {c: sorted(v.values()) for c, v in genes.items()},
+    }
 
 
-def _overlaps(intervals: list[tuple[int, int]] | None, start: int, end: int) -> bool:
-    if not intervals:
-        return False
-    starts = [s for s, _ in intervals]
-    # The last interval beginning at or before the read's end; if that one
-    # does not reach the read's start, no earlier one can either.
-    idx = bisect_right(starts, end - 1) - 1
-    if idx < 0:
-        return False
-    return intervals[idx][1] > start
+def _covers(intervals: list[tuple[int, int]], position: int) -> bool:
+    """Whether any interval contains the position.
+
+    Intervals can overlap, so the candidate found by bisect is not
+    necessarily the containing one -- scan back while starts are still at or
+    below the position.
+    """
+    i = bisect.bisect_right(intervals, (position, float("inf")))
+    for start, end in reversed(intervals[:i]):
+        if end >= position:
+            return True
+        # Sorted by start; a run of non-covering intervals can still be
+        # followed by a long one that does, so only stop once starts are far
+        # enough back that nothing can reach.
+        if start < position - _MAX_FEATURE_SPAN:
+            break
+    return False
+
+
+# Longest interval we scan back through in _covers. Human introns reach ~2 Mb;
+# beyond this a position is treated as uncovered rather than walking the whole
+# contig for every read.
+_MAX_FEATURE_SPAN = 3_000_000
+
+
+def classify_position(index: dict, contig: str, position: int) -> str:
+    """Exonic, intronic, or intergenic for one alignment position.
+
+    Exonic wins when a position is both -- overlapping genes on opposite
+    strands are common, and mutually exclusive categories are what let the
+    three counts sum to the classified total.
+    """
+    if _covers(index["exons"].get(contig, []), position):
+        return "exonic"
+    if _covers(index["genes"].get(contig, []), position):
+        return "intronic"
+    return "intergenic"
 
 
 class FeatureCounts:
-    """Raw exonic/intronic/intergenic counts; percentages are the frontend's
-    job, so the stored fact stays the measurement rather than a derived view."""
+    """Reads by genomic feature class.
+
+    For mRNA the exonic share should dominate; a high intronic share suggests
+    immature pre-mRNA, and a high intergenic share suggests genomic DNA
+    contamination.
+    """
 
     def __init__(self):
-        self._counts = {EXONIC: 0, INTRONIC: 0, INTERGENIC: 0}
+        self._counts = {"exonic": 0, "intronic": 0, "intergenic": 0}
 
     def add(self, category: str) -> None:
-        if category in self._counts:
-            self._counts[category] += 1
+        self._counts[category] += 1
 
     @property
     def total(self) -> int:
@@ -753,312 +601,197 @@ class FeatureCounts:
         return dict(self._counts)
 
 
-def contig_overlap(model: TranscriptModel, bam_contigs) -> int:
-    """How many contig names the annotation and the BAM share.
+def contig_overlap(bam_contigs: set[str], gtf_contigs: set[str]) -> int:
+    """How many contig names the BAM and GTF share.
 
-    Zero means the two use different naming conventions (`1` vs `chr1`), which
-    would otherwise produce a confident, entirely wrong 100%-intergenic
-    result. Callers must fail rather than store that.
+    Zero is the classic silent failure -- a GTF naming contigs `1,2,3`
+    against a BAM naming them `chr1,chr2,chr3`. Every read then falls outside
+    every gene and the job produces a plausible-looking 100% intergenic
+    result with no error anywhere, so the caller refuses instead.
     """
-    return len(model.contigs & set(bam_contigs))
+    return len(bam_contigs & gtf_contigs)
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 4: Run to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q
+./backend/run-worktree-tests.sh tests/pipelines/test_transcript_qc_runner.py -q
 ```
 
-Expected: PASS, 19 passed.
+Expected: PASS, 22 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add backend/app/pipelines/transcript_qc_runner.py backend/tests/pipelines/test_transcript_qc_runner.py
-git commit -m "feat(pipelines): classify reads as exonic, intronic, or intergenic"
+git commit -m "feat(pipelines): accumulate gene body coverage and feature distribution"
 ```
 
 ---
 
-## Task 5: Stride the read sample across contigs
-
-**Files:**
-- Modify: `backend/app/pipelines/transcript_qc_runner.py`
-- Modify: `backend/tests/pipelines/test_transcript_qc_runner.py`
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `backend/tests/pipelines/test_transcript_qc_runner.py`:
-
-```python
-def test_sample_plan_allocates_reads_proportionally_to_contig_length():
-    plan = tq.sample_plan(
-        contig_lengths=[("chr1", 900_000), ("chr2", 100_000)],
-        max_reads=100_000,
-    )
-    assert dict(plan) == {"chr1": 90_000, "chr2": 10_000}
-
-
-def test_sample_plan_gives_every_contig_at_least_one_read():
-    # A 500 bp plasmid alongside a 3 Gb genome rounds to zero reads and
-    # vanishes from the chart entirely -- the same "small contigs never
-    # disappear" rule bam_stats_runner.bin_depth follows.
-    plan = dict(tq.sample_plan(
-        contig_lengths=[("chr1", 3_000_000_000), ("plasmid", 500)],
-        max_reads=1000,
-    ))
-    assert plan["plasmid"] >= 1
-
-
-def test_sample_plan_handles_a_single_contig():
-    assert dict(tq.sample_plan([("chr1", 1000)], max_reads=50)) == {"chr1": 50}
-
-
-def test_sample_plan_is_empty_for_no_contigs():
-    assert tq.sample_plan([], max_reads=1000) == []
-
-
-def test_sample_plan_ignores_zero_length_contigs():
-    plan = dict(tq.sample_plan([("chr1", 1000), ("empty", 0)], max_reads=100))
-    assert "empty" not in plan
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q -k sample_plan
-```
-
-Expected: FAIL — `AttributeError: ... has no attribute 'sample_plan'`
-
-- [ ] **Step 3: Write the implementation**
-
-Add to `backend/app/pipelines/transcript_qc_runner.py`:
-
-```python
-# Matches sequence_stats.DEFAULT_SAMPLE_READS: the same budget the insert-size
-# and MAPQ histograms spend, so this job's cost is predictable next to them.
-DEFAULT_SAMPLE_READS = 200_000
-
-
-def sample_plan(contig_lengths, *, max_reads: int = DEFAULT_SAMPLE_READS):
-    """Split the read budget across contigs in proportion to their length.
-
-    A coordinate-sorted BAM's first 200k reads all come from the start of the
-    first contig -- for gene body coverage that is a few hundred genes on one
-    chromosome, which is not a genome-wide answer. Same problem, and the same
-    fix, as sequence_stats._fasta_sample_strided.
-
-    Every contig with any length gets at least one read so a short plasmid
-    does not round away to nothing.
-    """
-    usable = [(name, length) for name, length in contig_lengths if length > 0]
-    if not usable:
-        return []
-
-    total = sum(length for _, length in usable)
-    plan = []
-    for name, length in usable:
-        share = max(1, (max_reads * length) // total)
-        plan.append((name, share))
-    return plan
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_runner.py -q
-```
-
-Expected: PASS, 24 passed.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/app/pipelines/transcript_qc_runner.py backend/tests/pipelines/test_transcript_qc_runner.py
-git commit -m "feat(pipelines): stride the transcript QC read sample across contigs"
-```
-
----
-
-## Task 6: The applicability chain
+### Task 3: The applicability chain
 
 **Files:**
 - Create: `backend/app/services/transcript_qc_gating.py`
-- Create: `backend/tests/services/test_transcript_qc_gating.py`
+- Test: `backend/tests/services/test_transcript_qc_gating.py`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Create `backend/tests/services/test_transcript_qc_gating.py`:
 
 ```python
-from app.services import transcript_qc_gating as gating
+"""Which BAMs the RNA-seq QC charts apply to.
+
+Inference, not a stored fact -- see the module docstring. The precedence
+between signals is the part worth testing: the authoritative field is
+unpopulated on real data, so the fallbacks carry the feature.
+"""
+
+from app.services.transcript_qc_gating import Applicability, applicability
 
 
-def _obj(*, molecule_type=None, assay=None, aligned_by=None):
-    """The three fields the chain reads, shaped as an object document."""
-    return {
-        "metadata": {"molecule_type": molecule_type, "assay": assay},
-        "facts": {"aligned_by": aligned_by},
-    }
+def _obj(metadata=None, facts=None):
+    return {"metadata": metadata or {}, "facts": facts or {}}
 
 
-def test_molecule_type_rna_is_applicable():
-    d = gating.decide(_obj(molecule_type="RNA"))
-    assert d.gene_body is True
-    assert d.feature_distribution is True
-    assert d.reason == "molecule_type"
+class TestApplicability:
+    def test_explicit_rna_molecule_type_applies(self):
+        got = applicability(_obj(metadata={"molecule_type": "RNA"}))
+        assert got.gene_body is True
+        assert got.feature_distribution is True
+        assert got.reason == "molecule_type"
 
+    def test_explicit_dna_molecule_type_beats_a_splice_aware_aligner(self):
+        """An explicit answer outranks every inference below it. STAR is
+        routinely used for DNA in some workflows, so the aligner must not
+        override a stated molecule type."""
+        got = applicability(
+            _obj(metadata={"molecule_type": "DNA"}, facts={"aligned_by": "star"})
+        )
+        assert got.gene_body is False
+        assert got.feature_distribution is False
 
-def test_explicit_dna_beats_a_splice_aware_aligner():
-    # The branch that matters: an explicit DNA answer outranks inference. A
-    # STAR-aligned DNA BAM must not render a gene body curve.
-    d = gating.decide(_obj(molecule_type="DNA", aligned_by="star"))
-    assert d.gene_body is False
-    assert d.feature_distribution is False
-    assert d.reason == "molecule_type"
+    def test_rnaseq_assay_applies_when_molecule_type_is_missing(self):
+        """This is the branch that carries the feature in practice:
+        molecule_type is populated on 0 of 9 BAMs in the real database, while
+        assay is populated on all 9."""
+        got = applicability(_obj(metadata={"assay": "RNA-seq"}))
+        assert got.gene_body is True
+        assert got.feature_distribution is True
+        assert got.reason == "assay"
 
+    def test_chipseq_gets_feature_distribution_only(self):
+        """ChIP-seq is DNA, so a gene body curve is meaningless for it -- but
+        where its reads fall relative to genes is exactly the question."""
+        got = applicability(_obj(metadata={"assay": "ChIP-seq"}))
+        assert got.gene_body is False
+        assert got.feature_distribution is True
 
-def test_assay_rnaseq_is_applicable_when_molecule_type_is_absent():
-    # This is the branch every BAM in the real database takes: molecule_type
-    # is populated on 0 of 9, assay on 9 of 9.
-    d = gating.decide(_obj(assay="RNA-seq"))
-    assert d.gene_body is True
-    assert d.feature_distribution is True
-    assert d.reason == "assay"
+    def test_splice_aware_aligner_applies_as_a_last_resort(self):
+        for aligner in ("star", "hisat2"):
+            got = applicability(_obj(facts={"aligned_by": aligner}))
+            assert got.gene_body is True, aligner
+            assert got.reason == "aligner"
 
+    def test_a_dna_aligner_does_not_apply(self):
+        got = applicability(_obj(facts={"aligned_by": "bwa-mem2"}))
+        assert got.gene_body is False
+        assert got.feature_distribution is False
 
-def test_chipseq_enables_feature_distribution_only():
-    # ChIP-seq is DNA: the exonic/intronic split is meaningful, a 5'->3'
-    # transcript curve is not.
-    d = gating.decide(_obj(assay="ChIP-seq"))
-    assert d.gene_body is False
-    assert d.feature_distribution is True
-    assert d.reason == "assay"
+    def test_nothing_known_does_not_apply(self):
+        got = applicability(_obj())
+        assert got.gene_body is False
+        assert got.feature_distribution is False
+        assert got.reason is None
 
-
-def test_splice_aware_aligner_is_the_weakest_signal():
-    for aligner in ("star", "hisat2"):
-        d = gating.decide(_obj(aligned_by=aligner))
-        assert d.gene_body is True
-        assert d.feature_distribution is True
-        assert d.reason == "aligner"
-
-
-def test_dna_aligner_is_not_applicable():
-    d = gating.decide(_obj(aligned_by="bwa-mem2"))
-    assert d.gene_body is False
-    assert d.feature_distribution is False
-    assert d.reason == "none"
-
-
-def test_nothing_known_is_not_applicable():
-    d = gating.decide(_obj())
-    assert d.applicable is False
-    assert d.reason == "none"
-
-
-def test_assay_outranks_the_aligner():
-    d = gating.decide(_obj(assay="WGS", aligned_by="star"))
-    assert d.applicable is False
+    def test_wgs_assay_does_not_apply(self):
+        got = applicability(_obj(metadata={"assay": "WGS"}))
+        assert got.gene_body is False
+        assert got.feature_distribution is False
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [ ] **Step 2: Run to verify it fails**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_transcript_qc_gating.py -q
+./backend/run-worktree-tests.sh tests/services/test_transcript_qc_gating.py -q
 ```
 
-Expected: FAIL — `ModuleNotFoundError: No module named 'app.services.transcript_qc_gating'`
+Expected: FAIL — `ModuleNotFoundError`.
 
 - [ ] **Step 3: Write the implementation**
 
 Create `backend/app/services/transcript_qc_gating.py`:
 
 ```python
-"""Whether transcript QC applies to a BAM, and why.
+"""Whether the RNA-seq QC charts apply to a given BAM.
 
-Separate from the runner because this is a metadata question rather than a
-computation, and it is read by both the API (to decide what the Results tab
-offers) and the launch path (to refuse a job that cannot mean anything).
+There is no hard stored answer. `pipeline_service` records that RNA-ness is
+not knowable from a BAM's bytes, and while `molecule_type` now exists as a
+metadata field, it is only populated when an SRA record supplied it -- zero
+of the nine BAMs in a real working database carry it, while `assay` is
+populated on all nine and discriminates correctly. Gating on `molecule_type`
+alone would therefore ship a feature nobody could see, with a green test
+suite.
 
-There is no stored RNA-vs-DNA flag on a BAM -- pipeline_service documents that
-this "is not knowable from the bytes." What exists instead is a chain of
-signals of decreasing confidence. Checked against the real database rather
-than the schema, which overturned the obvious design: `molecule_type` is
-populated on 0 of 9 BAMs and `assay` on 9 of 9, so gating on molecule_type
-alone would ship a feature that never appears for anyone.
+So this is a fallback chain, strongest signal first, and the result carries
+the reason so the UI can say what it inferred from rather than presenting a
+guess as a fact.
 """
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 
 SPLICE_AWARE_ALIGNERS = {"star", "hisat2"}
 
+# ChIP-seq is DNA, so a gene body curve says nothing -- but where its reads
+# sit relative to gene structure is precisely the question being asked.
+FEATURE_ONLY_ASSAYS = {"ChIP-seq", "ATAC-seq"}
+RNA_ASSAYS = {"RNA-seq"}
 
-@dataclass(frozen=True)
+
+@dataclass
 class Applicability:
     gene_body: bool
     feature_distribution: bool
-    # Which link in the chain decided: molecule_type, assay, aligner, or none.
-    reason: str
-
-    @property
-    def applicable(self) -> bool:
-        return self.gene_body or self.feature_distribution
+    #: Which signal decided it: "molecule_type", "assay", "aligner", or None.
+    reason: str | None
 
 
-_NOT_APPLICABLE = Applicability(False, False, "none")
+_NONE = Applicability(gene_body=False, feature_distribution=False, reason=None)
 
 
-def decide(obj) -> Applicability:
-    """First hit wins, strongest signal first."""
-    metadata = _get(obj, "metadata") or {}
-    facts = _get(obj, "facts") or {}
+def applicability(obj: dict) -> Applicability:
+    """Decide from metadata and facts, strongest signal first."""
+    metadata = obj.get("metadata") or {}
+    facts = obj.get("facts") or {}
 
-    molecule_type = (_get(metadata, "molecule_type") or "").strip().upper()
+    molecule_type = metadata.get("molecule_type")
     if molecule_type == "RNA":
         return Applicability(True, True, "molecule_type")
-    if molecule_type in {"DNA", "OTHER"}:
-        # An explicit answer outranks every inference below it.
-        return Applicability(False, False, "molecule_type")
+    if molecule_type in {"DNA", "Other"}:
+        # An explicit answer outranks every inference below. STAR is used for
+        # DNA in some workflows, so the aligner must not override this.
+        return _NONE
 
-    assay = (_get(metadata, "assay") or "").strip().lower()
+    assay = metadata.get("assay")
+    if assay in RNA_ASSAYS:
+        return Applicability(True, True, "assay")
+    if assay in FEATURE_ONLY_ASSAYS:
+        return Applicability(False, True, "assay")
     if assay:
-        if assay == "rna-seq":
-            return Applicability(True, True, "assay")
-        if assay == "chip-seq":
-            # DNA, so the transcript curve is meaningless -- but the
-            # exonic/intronic split is exactly what a ChIP experiment is read
-            # for. This is the one place the two charts' gating differs, and
-            # why the job writes two independent facts.
-            return Applicability(False, True, "assay")
-        # A known, non-RNA assay is an answer, not silence: do not fall
-        # through to the aligner guess.
-        return _NOT_APPLICABLE
+        # A stated non-RNA assay (WGS, WES, ...) is an answer too.
+        return _NONE
 
-    aligned_by = (_get(facts, "aligned_by") or "").strip().lower()
-    if aligned_by in SPLICE_AWARE_ALIGNERS:
+    if str(facts.get("aligned_by") or "").lower() in SPLICE_AWARE_ALIGNERS:
         # Weakest signal: a splice-aware aligner is evidence, not proof.
         return Applicability(True, True, "aligner")
 
-    return _NOT_APPLICABLE
-
-
-def _get(source, key):
-    """Read a field from either a mapping or a model object."""
-    if source is None:
-        return None
-    if isinstance(source, dict):
-        return source.get(key)
-    return getattr(source, key, None)
+    return _NONE
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [ ] **Step 4: Run to verify it passes**
 
 ```bash
-docker compose exec api python -m pytest tests/services/test_transcript_qc_gating.py -q
+./backend/run-worktree-tests.sh tests/services/test_transcript_qc_gating.py -q
 ```
 
 Expected: PASS, 8 passed.
@@ -1067,148 +800,131 @@ Expected: PASS, 8 passed.
 
 ```bash
 git add backend/app/services/transcript_qc_gating.py backend/tests/services/test_transcript_qc_gating.py
-git commit -m "feat(services): decide transcript QC applicability from metadata, not aligner alone"
+git commit -m "feat(services): infer whether RNA-seq QC applies to a BAM"
 ```
 
 ---
 
-## Task 7: The job handler
+### Task 4: The job handler
 
 **Files:**
-- Modify: `backend/app/queue/align_handlers.py` (append after `run_bam_stats`, which ends at :900)
+- Create: `backend/app/queue/transcript_qc_handlers.py`
+- Modify: `backend/app/queue/results.py`
+
+Like `run_bam_stats`, this handler has no unit test — it shells out to pysam and the queue. Its logic lives in the pure functions already covered by Tasks 1-3; verification is Task 7.
 
 - [ ] **Step 1: Write the handler**
 
-Append to `backend/app/queue/align_handlers.py`:
+Create `backend/app/queue/transcript_qc_handlers.py`:
 
 ```python
+"""RNA-seq transcript QC: gene body coverage and genomic feature distribution.
+
+One job for both charts. They need the same two expensive things -- a parsed
+transcript model and a pass over the BAM -- so computing them separately
+would parse the GTF twice and traverse the BAM twice for two charts that sit
+side by side.
+"""
+
+from pathlib import Path
+
+from app.errors import PermanentError
+from app.logging import get_logger
+from app.models import IoClass, JobClass, JobResources
+from app.pipelines import transcript_qc_runner
+from app.queue.registry import HandlerMode, JobContext, handler
+from app.storage.sequence_stats import DEFAULT_SAMPLE_READS
+
+log = get_logger(__name__)
+
+
 @handler(
     "run_transcript_qc",
     mode=HandlerMode.SUBPROCESS,
     job_class=JobClass.COMPUTE,
-    # Heavier than run_bam_stats: the transcript model for a mammalian
-    # annotation is held in memory for the whole BAM pass.
-    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.LIGHT),
+    resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
     max_attempts=2,
 )
 def run_transcript_qc(ctx: JobContext) -> dict:
-    """Gene body coverage and genomic feature distribution for an RNA-seq BAM.
+    """Gene body coverage and feature distribution for one RNA-seq BAM.
 
-    Read-only: derives no files, returns two facts. One GTF parse and one
-    strided BAM pass produce both charts, because they need the same expensive
-    inputs and appear side by side.
-
-    Applicability is decided before this is enqueued (see
-    pipeline_service.launch_transcript_qc); a failure here is a real problem
-    with the BAM or the annotation, not a missing precondition.
+    Read-only: derives no files, just facts merged onto the object.
     """
     import pysam
-
-    from app.pipelines import transcript_qc_runner as tq
 
     object_id = ctx.payload.get("object_id")
     if not object_id:
         raise PermanentError("run_transcript_qc requires an 'object_id'")
 
-    work = _prepare_workdir(ctx, "transcript_qc")
+    bam_path = Path(ctx.payload["bam_path"])
+    gtf_path = Path(ctx.payload["gtf_path"])
 
-    bam_name = Path(ctx.payload.get("bam_name") or "aligned.bam").name
-    bam = work / bam_name
-    bam.unlink(missing_ok=True)
-    bam.symlink_to(_resolve_blob(ctx.payload, "bam"))
-
-    bai = work / f"{bam_name}{aligners.BAI_SUFFIX}"
-    bai.unlink(missing_ok=True)
-    bai.symlink_to(_resolve_blob(ctx.payload, "bai"))
-
-    gtf_path = _resolve_blob(ctx.payload, "gtf")
-
-    ctx.progress(phase="annotation", pct=0.1, message="parsing the annotation")
-    feature, group_key = tq.keys_for_format(ctx.payload.get("gtf_format"))
+    ctx.progress(phase="gtf", pct=0.1, message="reading the gene annotation")
     with open(gtf_path, errors="replace") as fh:
-        model = tq.parse_gtf(fh, feature=feature, group_key=group_key)
-
-    if not model.transcripts:
+        transcripts = transcript_qc_runner.parse_gtf_transcripts(fh)
+    representatives = transcript_qc_runner.representative_transcripts(transcripts)
+    if not representatives:
         raise PermanentError(
-            f"No usable transcripts found in {ctx.payload.get('gtf_name')!r}. "
-            f"Expected {feature!r} lines carrying a {group_key!r} attribute."
+            "No usable transcripts in the annotation. Check that it is a GTF "
+            "with 'exon' features and gene_id/transcript_id attributes."
         )
+    index = transcript_qc_runner.build_feature_index(representatives)
 
-    with pysam.AlignmentFile(str(bam), "rb") as af:
-        bam_contigs = list(af.references)
-        contig_lengths = list(zip(af.references, af.lengths))
-
-    # A GTF using 1,2,3 against a BAM using chr1,chr2,chr3 yields 100%
-    # intergenic with no error anywhere. Fail loudly instead of storing a
-    # confident, entirely wrong result.
-    if tq.contig_overlap(model, bam_contigs) == 0:
-        raise PermanentError(
-            "The annotation and the BAM share no contig names "
-            f"(annotation: {sorted(model.contigs)[:3]}, "
-            f"BAM: {bam_contigs[:3]}). They likely use different naming "
-            "conventions, such as '1' versus 'chr1'."
-        )
-
-    ctx.progress(phase="classify", pct=0.3, message="classifying reads")
-    index = tq.FeatureIndex(model)
-    counts = tq.FeatureCounts()
-    gene_body = tq.GeneBodyAccumulator()
-
-    # Transcripts by contig, so each sampled read is matched only against the
-    # genes that could possibly contain it.
+    gene_body = transcript_qc_runner.GeneBodyCoverage()
+    features = transcript_qc_runner.FeatureCounts()
+    # Transcripts are looked up per contig by position; a dict keyed by
+    # contig keeps the gene-body walk from scanning every gene per read.
     by_contig: dict[str, list] = {}
-    for t in model.transcripts:
+    for t in representatives:
         by_contig.setdefault(t.contig, []).append(t)
+    for v in by_contig.values():
+        v.sort(key=lambda t: t.span)
 
-    plan = tq.sample_plan(contig_lengths, max_reads=tq.DEFAULT_SAMPLE_READS)
-    reads_used = 0
+    ctx.progress(phase="reads", pct=0.3, message="classifying reads")
+    reads = 0
+    with pysam.AlignmentFile(str(bam_path), "rb") as af:
+        bam_contigs = set(af.references)
+        gtf_contigs = {t.contig for t in representatives}
+        if transcript_qc_runner.contig_overlap(bam_contigs, gtf_contigs) == 0:
+            # Refuse rather than store a plausible-looking 100% intergenic
+            # result -- the '1' vs 'chr1' mismatch produces exactly that.
+            raise PermanentError(
+                "The annotation and the BAM name their contigs differently "
+                f"(BAM: {sorted(bam_contigs)[:3]}..., "
+                f"annotation: {sorted(gtf_contigs)[:3]}...). "
+                "Use an annotation built against the same reference."
+            )
 
-    with pysam.AlignmentFile(str(bam), "rb") as af:
-        for contig, budget in plan:
+        for contig, per_contig_budget in _sampling_plan(af, DEFAULT_SAMPLE_READS):
             taken = 0
             for rec in af.fetch(contig):
-                if taken >= budget:
-                    break
-                if rec.is_secondary or rec.is_supplementary:
+                if rec.is_secondary or rec.is_supplementary or rec.is_unmapped:
                     continue
-                if rec.is_unmapped or rec.is_duplicate:
+                if rec.is_duplicate:
                     continue
-
-                start = rec.reference_start
-                end = rec.reference_end
-                if end is None:
-                    continue
-
-                counts.add(index.classify(contig, start, end))
-
+                position = rec.reference_start + 1
+                features.add(
+                    transcript_qc_runner.classify_position(index, contig, position)
+                )
                 for t in by_contig.get(contig, ()):
-                    span_start, span_end = t.span
-                    if span_start <= start < span_end:
-                        gene_body.add_read(t, start, end)
+                    start, end = t.span
+                    if start <= position <= end:
+                        gene_body.add_read(t, position)
                         break
-
+                reads += 1
                 taken += 1
-                reads_used += 1
+                if taken >= per_contig_budget:
+                    break
 
-                if reads_used % 20_000 == 0:
-                    ctx.progress(
-                        phase="classify",
-                        pct=min(0.9, 0.3 + 0.6 * reads_used / tq.DEFAULT_SAMPLE_READS),
-                        message=f"classified {reads_used:,} reads",
-                    )
+    if reads == 0:
+        raise PermanentError("No usable alignments found in this BAM.")
 
     facts = {
         "transcript_qc_status": "ok",
-        "transcript_qc_computed_at": datetime.now(UTC).isoformat(),
-        "transcript_qc_gtf_name": ctx.payload.get("gtf_name"),
-        "transcript_qc_reads_sampled": reads_used,
-        "transcript_qc_transcripts": len(model.transcripts),
-        # Two independent facts, not one blob: ChIP-seq gets the feature
-        # distribution without the gene body curve.
-        "feature_distribution": counts.to_facts(),
-        # Absent rather than empty when no read landed in a transcript, so the
-        # frontend can tell "not computed" from "measured as flat".
-        **({"gene_body_coverage": gene_body.to_facts()} if gene_body.to_facts() else {}),
+        "transcript_qc_sampled_reads": reads,
+        "transcript_qc_annotation": ctx.payload.get("gtf_name"),
+        "gene_body_coverage": gene_body.to_facts(),
+        "feature_distribution": features.to_facts(),
     }
 
     ctx.progress(phase="done", pct=1.0, message="transcript QC complete")
@@ -1216,8 +932,8 @@ def run_transcript_qc(ctx: JobContext) -> dict:
         "transcript_qc_finished",
         job_id=ctx.job_id,
         object_id=object_id,
-        reads=reads_used,
-        transcripts=len(model.transcripts),
+        reads=reads,
+        exonic=facts["feature_distribution"]["exonic"],
     )
 
     return {
@@ -1225,335 +941,234 @@ def run_transcript_qc(ctx: JobContext) -> dict:
         "project_id": ctx.payload.get("project_id"),
         "job_id": ctx.job_id,
         "facts": facts,
-        "workdir": str(work),
     }
+
+
+def _sampling_plan(af, budget: int) -> list[tuple[str, int]]:
+    """How many reads to take from each contig, proportional to its length.
+
+    Reading the first `budget` records instead -- which is what the existing
+    alignment stats do -- takes every read from the start of the first contig
+    on a coordinate-sorted BAM. For a gene body curve that is a few hundred
+    genes on one chromosome, not a genome-wide answer. See issue #191.
+    """
+    lengths = [(c, af.get_reference_length(c) or 0) for c in af.references]
+    total = sum(n for _, n in lengths)
+    if total <= 0:
+        return [(c, budget) for c, _ in lengths[:1]]
+    plan = []
+    for contig, length in lengths:
+        share = int(budget * length / total)
+        if share > 0:
+            plan.append((contig, share))
+    return plan or [(lengths[0][0], budget)]
 ```
 
-- [ ] **Step 2: Verify the handler registers**
+- [ ] **Step 2: Register the fact applier**
 
-```bash
-docker compose restart worker && sleep 8 && docker compose logs worker --tail 40 | grep -i "handlers_loaded"
-```
-
-Expected: the `handlers_loaded` line includes `run_transcript_qc`.
-
-Per CLAUDE.md: `worker` does not hot-reload, so this restart is required or
-the job will not exist in the running process.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add backend/app/queue/align_handlers.py
-git commit -m "feat(pipelines): compute gene body coverage and feature distribution in one BAM pass"
-```
-
----
-
-## Task 8: Apply the facts
-
-**Files:**
-- Modify: `backend/app/queue/results.py` (applier near :1559, registry at :2501)
-
-- [ ] **Step 1: Read the neighbouring applier**
-
-```bash
-sed -n '1559,1600p' backend/app/queue/results.py
-```
-
-Match its shape exactly — this repo's appliers share one structure, and the
-registry at :2501 is a hand-maintained dict keyed by handler name. Per
-CLAUDE.md's registry warning, a handler with no entry here **silently stores
-nothing while the job reports success** — the exact failure that cost the
-`build_index` job its eight index files.
-
-- [ ] **Step 2: Add the applier**
-
-Add to `backend/app/queue/results.py`, immediately after `_apply_run_bam_stats`:
+In `backend/app/queue/results.py`, add next to `_apply_run_bam_stats` (around line 1487):
 
 ```python
 async def _apply_run_transcript_qc(result: dict, *, owner: str) -> None:
-    """Merge gene body coverage and feature distribution onto the BAM.
+    """Record RNA-seq transcript QC on the BAM it described.
 
-    Read-only job: facts only, no derived objects and no sidecars, so there is
-    no SidecarRole to register alongside this.
+    Read-only like BAM stats: no files to ingest, just facts merged onto the
+    object.
     """
     object_id = result.get("object_id")
     facts = result.get("facts") or {}
     if not object_id or not facts:
         return
-    await _merge_facts(object_id, facts, owner=owner)
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("transcript_qc_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info("transcript_qc_applied", object_id=object_id)
 ```
 
-Adjust the final call to match whatever `_apply_run_bam_stats` actually uses
-to merge facts — read it in Step 1 rather than assuming `_merge_facts`.
-
-- [ ] **Step 3: Register it**
-
-At `backend/app/queue/results.py:2501`, beside `"run_bam_stats"`:
+And register it in the dispatch dict near line 2428, beside `"run_bam_stats": _apply_run_bam_stats,`:
 
 ```python
     "run_transcript_qc": _apply_run_transcript_qc,
 ```
 
-- [ ] **Step 4: Verify the registration**
+This dict is exactly the hand-maintained-registry shape CLAUDE.md warns about — a handler with no entry here runs, succeeds, and stores nothing.
+
+- [ ] **Step 3: Register the handler module for import**
+
+**This step is load-bearing and its failure is silent.** `registry.load_handlers()` imports only `app/queue/handlers.py`, which in turn imports every pipeline handler module by name in one explicit list at the bottom of the file (around line 907). A module missing from that list is never imported, so its `@handler` decorator never runs, and the job type simply does not exist — the enqueue fails at runtime with nothing at import time saying why.
+
+Add `transcript_qc_handlers` to that list, in alphabetical position between `summary_handlers` and `tool_handlers`:
+
+```python
+from app.queue import (  # noqa: E402, F401
+    align_handlers,
+    ...
+    summary_handlers,
+    tool_handlers,
+    transcript_qc_handlers,
+    uniprot_handlers,
+    ...
+)
+```
+
+- [ ] **Step 3b: Verify the handler actually registered**
+
+Do not take the import on faith — check the registry sees it:
 
 ```bash
-docker compose exec api python -c "
-from app.queue import results
-assert 'run_transcript_qc' in results._APPLIERS, 'applier not registered'
-print('registered ok')
+./backend/run-worktree-tests.sh tests/queue -q
+```
+
+Then confirm directly:
+
+```bash
+docker compose -p biopipe exec -T api python -c "
+from app.queue import registry
+registry.load_handlers()
+names = sorted(registry.all_handlers())
+print('run_transcript_qc' in names)
 "
 ```
 
-Expected: `registered ok`. Correct `_APPLIERS` to the map's real name if it differs.
+Expected: `True`. If the registry exposes its handlers under a different accessor, `grep -n 'def all_handlers\|_HANDLERS' backend/app/queue/registry.py` will name it.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add backend/app/queue/results.py
-git commit -m "feat(queue): merge transcript QC facts onto the aligned BAM"
+git add backend/app/queue/transcript_qc_handlers.py backend/app/queue/results.py
+git commit -m "feat(queue): compute RNA-seq gene body coverage and feature distribution"
 ```
 
 ---
 
-## Task 9: The launch path
+### Task 5: Launch path — service and route
 
 **Files:**
 - Modify: `backend/app/services/pipeline_service.py`
-- Create: `backend/tests/pipelines/test_transcript_qc_launch.py`
+- Modify: `backend/app/api/v1/pipelines.py`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Add the service function**
 
-Create `backend/tests/pipelines/test_transcript_qc_launch.py`:
-
-```python
-import pytest
-
-from app.services import transcript_qc_gating as gating
-
-
-def test_gating_refuses_a_dna_bam():
-    d = gating.decide({"metadata": {"molecule_type": "DNA"}, "facts": {}})
-    assert not d.applicable
-
-
-def test_gating_allows_a_star_aligned_bam():
-    d = gating.decide({"metadata": {}, "facts": {"aligned_by": "star"}})
-    assert d.applicable
-
-
-def test_resolve_gtf_prefers_the_annotation_recorded_on_the_run():
-    from app.services.transcript_qc_gating import resolve_gtf_choice
-
-    chosen = resolve_gtf_choice(
-        run_annotation_id="gtf-from-run",
-        project_gtf_ids=["gtf-a", "gtf-b"],
-    )
-    assert chosen == "gtf-from-run"
-
-
-def test_resolve_gtf_preselects_a_lone_project_gtf():
-    from app.services.transcript_qc_gating import resolve_gtf_choice
-
-    assert resolve_gtf_choice(run_annotation_id=None, project_gtf_ids=["only"]) == "only"
-
-
-def test_resolve_gtf_refuses_to_guess_between_several():
-    from app.services.transcript_qc_gating import resolve_gtf_choice
-
-    assert resolve_gtf_choice(run_annotation_id=None, project_gtf_ids=["a", "b"]) is None
-
-
-def test_resolve_gtf_is_none_when_the_project_has_none():
-    from app.services.transcript_qc_gating import resolve_gtf_choice
-
-    assert resolve_gtf_choice(run_annotation_id=None, project_gtf_ids=[]) is None
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_launch.py -q
-```
-
-Expected: FAIL — `ImportError: cannot import name 'resolve_gtf_choice'`
-
-- [ ] **Step 3: Add the GTF resolver**
-
-Add to `backend/app/services/transcript_qc_gating.py`:
-
-```python
-def resolve_gtf_choice(*, run_annotation_id, project_gtf_ids):
-    """Which GTF to use, or None if the user must choose.
-
-    The annotation recorded on the run that produced this BAM wins: a STAR
-    index built with --sjdbGTFfile already names the exact annotation the
-    alignment used, which is a fact rather than a guess. Failing that, a lone
-    project GTF is preselected. Several means an explicit pick -- guessing
-    between annotations silently changes the answer.
-    """
-    if run_annotation_id:
-        return run_annotation_id
-    if len(project_gtf_ids) == 1:
-        return project_gtf_ids[0]
-    return None
-```
-
-- [ ] **Step 4: Add the launch function**
-
-Add to `backend/app/services/pipeline_service.py`, beside `launch_bam_stats` (:2044):
+In `backend/app/services/pipeline_service.py`, after `launch_bam_stats`:
 
 ```python
 async def launch_transcript_qc(
     *, object_id: PydanticObjectId, gtf_object_id: PydanticObjectId, owner: str
 ):
-    """Queue gene body coverage and feature distribution for an RNA-seq BAM.
+    """Queue RNA-seq transcript QC for a BAM against a chosen annotation.
 
-    On demand behind a button rather than automatic after alignment: the
-    applicability chain is inference, and an automatic job on a mis-labelled
-    DNA BAM burns a full pass to render a curve the user must learn to
-    distrust.
+    On demand rather than automatic: applicability is inferred (see
+    services/transcript_qc_gating), and an automatic job on a mislabelled DNA
+    BAM would burn a full pass to render a meaningless curve. The GTF is
+    chosen by the caller rather than guessed, for the same reason.
     """
     from app.queue import queue
-    from app.services import object_service, transcript_qc_gating
+    from app.services import object_service
 
     bam = await object_service.get_object(object_id, owner=owner)
     _check_bam_stats_callable(bam)
 
-    decision = transcript_qc_gating.decide(bam)
-    if not decision.applicable:
-        raise ValidationError(
-            f"{bam.name!r} does not look like RNA-seq or ChIP-seq data, so "
-            "transcript QC would not be meaningful."
-        )
-
-    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
-    if bai is None:
-        raise ValidationError(
-            f"{bam.name!r} has no index (.bai). Compute results first, which "
-            "indexes the BAM."
-        )
-
     gtf = await object_service.get_object(gtf_object_id, owner=owner)
-    if not gtf.blob_sha256:
-        raise ValidationError(f"{gtf.name!r} has no stored content yet")
+    if gtf.project_id != bam.project_id:
+        raise ValidationError("The annotation must be in the same project as the BAM.")
 
-    return await queue.enqueue(
+    _, bam_path = await _resolve_readable(bam)
+    _, gtf_path = await _resolve_readable(gtf)
+    if not bam_path or not gtf_path:
+        raise ValidationError("The BAM and its annotation must both have stored content.")
+
+    job = await queue.enqueue(
         "run_transcript_qc",
         owner=owner,
         payload={
             "object_id": str(bam.id),
             "project_id": str(bam.project_id),
-            "bam_name": bam.name,
-            "bam": bam.blob_sha256,
-            "bai": bai.blob_sha256,
-            "gtf": gtf.blob_sha256,
+            "bam_path": bam_path,
+            "gtf_path": gtf_path,
             "gtf_name": gtf.name,
-            "gtf_format": str(getattr(gtf.format, "kind", "") or ""),
         },
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.LIGHT),
+        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
         max_attempts=2,
-        dedup_key=f"transcript_qc:{bam.blob_sha256}:{gtf.blob_sha256}",
+        # Keyed by both, so re-running against a different annotation is a
+        # different job rather than a silently deduped no-op.
+        dedup_key=f"transcriptqc:{bam.id}:{gtf.id}",
+        project_id=bam.project_id,
+        object_id=bam.id,
     )
+    if job is None:
+        raise ConflictError(
+            "Transcript QC is already queued or running for this file",
+            details={"object_id": str(bam.id)},
+        )
+    return job
 ```
 
-Check the payload keys `bam`/`bai`/`gtf` against what `_resolve_blob` expects
-by reading `launch_bam_stats`'s own enqueue call — match it rather than
-assuming.
+- [ ] **Step 2: Add the route**
 
-- [ ] **Step 5: Run the tests to verify they pass**
-
-```bash
-docker compose exec api python -m pytest tests/pipelines/test_transcript_qc_launch.py -q
-```
-
-Expected: PASS, 6 passed.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add backend/app/services/pipeline_service.py backend/app/services/transcript_qc_gating.py backend/tests/pipelines/test_transcript_qc_launch.py
-git commit -m "feat(services): launch transcript QC against a chosen annotation"
-```
-
----
-
-## Task 10: The API endpoint
-
-**Files:**
-- Modify: `backend/app/api/v1/objects.py`
-
-- [ ] **Step 1: Read the neighbouring endpoint**
-
-```bash
-grep -n "bam-stats\|launch_bam_stats" backend/app/api/v1/objects.py
-```
-
-Match its decorator, response shape, and owner handling.
-
-- [ ] **Step 2: Add the endpoint**
-
-Add to `backend/app/api/v1/objects.py`, beside the bam-stats route:
+In `backend/app/api/v1/pipelines.py`, after the `bamstats` route:
 
 ```python
-@router.post("/{object_id}/transcript-qc")
-async def launch_transcript_qc(
-    object_id: PydanticObjectId,
-    body: dict,
-    owner: str = Depends(current_owner),
-):
-    """Queue transcript QC for a BAM against a chosen annotation."""
-    gtf_object_id = body.get("gtf_object_id")
-    if not gtf_object_id:
-        raise HTTPException(status_code=400, detail="gtf_object_id is required")
+class TranscriptQcRequest(BaseModel):
+    object_id: PydanticObjectId
+    gtf_object_id: PydanticObjectId
+
+
+@router.post(
+    "/transcript-qc", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_transcript_qc(body: TranscriptQcRequest, owner: OwnerDep) -> JobOut:
+    """Queue RNA-seq transcript QC: gene body coverage and feature
+    distribution. Read-only: produces facts only."""
     job = await pipeline_service.launch_transcript_qc(
-        object_id=object_id,
-        gtf_object_id=PydanticObjectId(gtf_object_id),
-        owner=owner,
+        object_id=body.object_id, gtf_object_id=body.gtf_object_id, owner=owner
     )
-    return {"job_id": str(job.id)}
+    return JobOut.of(job)
 ```
 
-Match the surrounding routes' owner dependency and error idiom — read Step 1's
-output rather than assuming `current_owner` and `HTTPException` are what this
-file uses.
-
-- [ ] **Step 3: Verify the route registers**
+- [ ] **Step 3: Run the suite**
 
 ```bash
-docker compose exec api python -c "
-from app.main import app
-paths = [r.path for r in app.routes]
-assert any('transcript-qc' in p for p in paths), 'route missing'
-print('route ok')
-"
+./backend/run-worktree-tests.sh tests/ -q
 ```
 
-Expected: `route ok`
+Expected: PASS. Read the printed count.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/app/api/v1/objects.py
-git commit -m "feat(api): expose a transcript QC launch endpoint"
+git add backend/app/services/pipeline_service.py backend/app/api/v1/pipelines.py
+git commit -m "feat(api): launch RNA-seq transcript QC against a chosen annotation"
 ```
 
 ---
 
-## Task 11: Frontend types and client
+### Task 6: Frontend
 
 **Files:**
-- Modify: `frontend/src/api/types.ts`
-- Modify: `frontend/src/api/client.ts`
+- Modify: `frontend/src/api/types.ts`, `frontend/src/api/client.ts`
+- Create: `frontend/src/components/TranscriptQc.tsx`
+- Modify: `frontend/src/components/BamResults.tsx`
 
-- [ ] **Step 1: Add the types**
+- [ ] **Step 1: Add types**
 
-Add to `frontend/src/api/types.ts`, beside `BamStatsFacts`:
+In `frontend/src/api/types.ts`, after `DepthHistogramBucket` (or after `InsertSizeHistogramBucket` if plan 1 has not landed):
 
 ```typescript
-export interface GeneBodyCoveragePoint {
+export interface GeneBodyPoint {
+  /** 0 = 5' end, 99 = 3' end. */
   percentile: number;
+  /** Normalized to the curve's own maximum. */
   coverage: number;
 }
 
@@ -1562,180 +1177,263 @@ export interface FeatureDistribution {
   intronic: number;
   intergenic: number;
 }
+```
 
-export interface TranscriptQcFacts {
+And to `BamStatsFacts`:
+
+```typescript
   transcript_qc_status?: "ok";
-  transcript_qc_computed_at?: string;
-  transcript_qc_gtf_name?: string;
-  transcript_qc_reads_sampled?: number;
-  transcript_qc_transcripts?: number;
-  gene_body_coverage?: GeneBodyCoveragePoint[];
+  transcript_qc_sampled_reads?: number;
+  transcript_qc_annotation?: string;
+  gene_body_coverage?: GeneBodyPoint[];
   feature_distribution?: FeatureDistribution;
-}
 ```
 
 - [ ] **Step 2: Add the client call**
 
-Add to `frontend/src/api/client.ts`, beside `launchBamStats`:
+In `frontend/src/api/client.ts`, next to `launchBamStats`:
 
 ```typescript
   launchTranscriptQc: (objectId: string, gtfObjectId: string) =>
-    post(`/objects/${objectId}/transcript-qc`, { gtf_object_id: gtfObjectId }),
+    request<JobSummary>("/pipelines/transcript-qc", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId, gtf_object_id: gtfObjectId }),
+    }),
 ```
 
-Match `launchBamStats`'s exact request helper and path prefix — read it first.
+- [ ] **Step 3: Write `TranscriptQc.tsx`**
 
-- [ ] **Step 3: Verify it typechecks**
-
-```bash
-docker compose exec web npx tsc --noEmit
-```
-
-Expected: no errors.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add frontend/src/api/types.ts frontend/src/api/client.ts
-git commit -m "feat(frontend): type the transcript QC facts and launch call"
-```
-
----
-
-## Task 12: The charts
-
-**Files:**
-- Create: `frontend/src/components/TranscriptQc.tsx`
-
-- [ ] **Step 1: Write the component**
-
-Create `frontend/src/components/TranscriptQc.tsx`:
-
-```typescript
+```tsx
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { api } from "../api/client";
+import { notify } from "../stores/messageStore";
 import type {
   FeatureDistribution,
-  GeneBodyCoveragePoint,
-  TranscriptQcFacts,
+  GeneBodyPoint,
+  ObjectDetail as ObjectDetailData,
 } from "../api/types";
 
 /**
- * RNA-seq transcript QC: 5'->3' coverage bias and where reads land relative
- * to genes.
+ * RNA-seq QC: where reads sit within a transcript, and where they sit
+ * relative to gene structure.
  *
- * Hand-rolled SVG, matching CoverageChart.tsx and SequenceCharts.tsx -- this
- * repo has no charting library and two charts do not justify adding one.
- *
- * Both state the annotation used and the number of reads sampled: these are
- * sampled measurements, and a chart that hides that invites over-reading.
+ * On demand rather than automatic, because applicability is inferred rather
+ * than known -- there is no stored RNA-vs-DNA flag on a BAM. The button turns
+ * a soft signal into a suggestion the user confirms.
  */
-
-export function GeneBodyCoverageChart({
-  curve,
+export function TranscriptQc({
+  obj,
+  gtfs,
+  geneBody,
+  featureDistribution,
 }: {
-  curve: GeneBodyCoveragePoint[];
+  obj: ObjectDetailData;
+  /** GTF objects available in this project. */
+  gtfs: { id: string; name: string }[];
+  geneBody: boolean;
+  featureDistribution: boolean;
 }) {
-  if (!curve?.length) return null;
+  const qc = useQueryClient();
+  const f = obj.facts as {
+    transcript_qc_status?: "ok";
+    transcript_qc_sampled_reads?: number;
+    transcript_qc_annotation?: string;
+    gene_body_coverage?: GeneBodyPoint[];
+    feature_distribution?: FeatureDistribution;
+  };
+  const [gtfId, setGtfId] = useState(gtfs[0]?.id ?? "");
 
-  const w = 360;
-  const h = 180;
-  const pad = { top: 12, right: 12, bottom: 28, left: 40 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
+  const compute = useMutation({
+    mutationFn: () => api.launchTranscriptQc(obj.id, gtfId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.info("Computing transcript QC");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
 
-  const x = (i: number) => pad.left + (i / (curve.length - 1)) * plotW;
-  const y = (v: number) => pad.top + plotH - v * plotH;
+  const hasResults = f.transcript_qc_status === "ok";
 
-  const path = curve
-    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.coverage).toFixed(1)}`)
-    .join(" ");
+  if (!hasResults) {
+    return (
+      <div className="section">
+        <div className="section-title">RNA-seq transcript QC</div>
+        {gtfs.length === 0 ? (
+          // The state every project starts in -- say what to add, rather
+          // than leaving a disabled button with no explanation.
+          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+            These charts need a gene annotation (GTF) in this project. Add one
+            from NCBI or import your own, then come back.
+          </div>
+        ) : (
+          <>
+            <div style={{ color: "var(--text-faint)", fontSize: 12, marginBottom: 8 }}>
+              Where reads fall within transcripts (5'→3' bias) and across
+              exons, introns, and intergenic space.
+            </div>
+            {gtfs.length > 1 && (
+              <select
+                value={gtfId}
+                onChange={(e) => setGtfId(e.target.value)}
+                style={{ marginRight: 8 }}
+              >
+                {gtfs.map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              className="btn"
+              onClick={() => compute.mutate()}
+              disabled={compute.isPending || !gtfId}
+            >
+              {compute.isPending ? "Computing…" : "Compute transcript QC"}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
 
   return (
-    <div>
-      <div className="section-title">Gene body coverage</div>
-      <svg width={w} height={h} role="img" aria-label="Gene body coverage curve">
-        <line
-          x1={pad.left} y1={pad.top + plotH} x2={pad.left + plotW} y2={pad.top + plotH}
-          stroke="var(--border)"
-        />
-        <line
-          x1={pad.left} y1={pad.top} x2={pad.left} y2={pad.top + plotH}
-          stroke="var(--border)"
-        />
-        <path d={path} fill="none" stroke="var(--accent)" strokeWidth={2} />
-        <text x={pad.left} y={h - 8} fontSize={11} fill="var(--text-faint)">
-          5′
-        </text>
-        <text x={pad.left + plotW} y={h - 8} fontSize={11} fill="var(--text-faint)" textAnchor="end">
-          3′
-        </text>
-        <text x={pad.left - 6} y={pad.top + 4} fontSize={11} fill="var(--text-faint)" textAnchor="end">
-          1.0
-        </text>
-        <text x={pad.left - 6} y={pad.top + plotH} fontSize={11} fill="var(--text-faint)" textAnchor="end">
-          0
-        </text>
-      </svg>
-      <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-        Normalized mean coverage along the transcript. A sharp rise toward 3′
-        suggests RNA degradation before sequencing.
-      </div>
+    <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+      {geneBody && f.gene_body_coverage && f.gene_body_coverage.length > 0 && (
+        <div className="section" style={{ flex: "1 1 300px" }}>
+          <div className="section-title">Gene body coverage</div>
+          <GeneBodyChart curve={f.gene_body_coverage} />
+          <Provenance
+            annotation={f.transcript_qc_annotation}
+            reads={f.transcript_qc_sampled_reads}
+          />
+        </div>
+      )}
+      {featureDistribution && f.feature_distribution && (
+        <div className="section" style={{ flex: "1 1 300px" }}>
+          <div className="section-title">Read distribution</div>
+          <FeatureBar counts={f.feature_distribution} />
+          <Provenance
+            annotation={f.transcript_qc_annotation}
+            reads={f.transcript_qc_sampled_reads}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-const CATEGORIES = [
-  { key: "exonic", label: "Exonic", color: "var(--accent)" },
-  { key: "intronic", label: "Intronic", color: "var(--warn)" },
-  { key: "intergenic", label: "Intergenic", color: "var(--text-faint)" },
-] as const;
+function Provenance({ annotation, reads }: { annotation?: string; reads?: number }) {
+  return (
+    <div style={{ fontSize: 10, color: "var(--text-faint)", marginTop: 4 }}>
+      {annotation ? `${annotation} · ` : ""}
+      {reads != null ? `${reads.toLocaleString()} reads sampled` : ""}
+    </div>
+  );
+}
 
-export function FeatureDistributionChart({
-  distribution,
-}: {
-  distribution: FeatureDistribution;
-}) {
-  const total =
-    distribution.exonic + distribution.intronic + distribution.intergenic;
-  if (!total) return null;
+/**
+ * Coverage from the 5' end to the 3' end, averaged over genes.
+ *
+ * A curve that climbs steeply toward the 3' end means the RNA was degraded
+ * before sequencing: poly-A selection captures only the surviving 3' tail.
+ */
+function GeneBodyChart({ curve }: { curve: GeneBodyPoint[] }) {
+  const w = 340;
+  const h = 150;
+  const pad = { top: 10, right: 10, bottom: 22, left: 30 };
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
 
-  const w = 360;
-  const barH = 28;
+  const x = (p: number) => pad.left + (p / 99) * plotW;
+  const y = (v: number) => pad.top + plotH - v * plotH;
+  const line = curve
+    .map((p, i) => `${i ? "L" : "M"} ${x(p.percentile)} ${y(p.coverage)}`)
+    .join(" ");
 
+  return (
+    <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ maxWidth: w, display: "block" }}>
+      {[0, 0.5, 1].map((v) => (
+        <g key={v}>
+          <line
+            x1={pad.left}
+            x2={w - pad.right}
+            y1={y(v)}
+            y2={y(v)}
+            stroke="var(--border)"
+            strokeWidth="1"
+          />
+          <text x={pad.left - 4} y={y(v) + 3} textAnchor="end" fontSize="9" fill="var(--text-faint)">
+            {v}
+          </text>
+        </g>
+      ))}
+      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+      <text x={pad.left} y={h - 6} fontSize="9" fill="var(--text-faint)">
+        5′
+      </text>
+      <text x={w - pad.right} y={h - 6} fontSize="9" fill="var(--text-faint)" textAnchor="end">
+        3′
+      </text>
+    </svg>
+  );
+}
+
+/**
+ * Exonic / intronic / intergenic as one stacked bar.
+ *
+ * A stacked bar rather than a pie: three categories at very uneven
+ * proportions are easier to read and to compare between samples this way,
+ * and it matches the app's existing visual language.
+ */
+function FeatureBar({ counts }: { counts: FeatureDistribution }) {
+  const total = counts.exonic + counts.intronic + counts.intergenic;
+  if (total === 0) return null;
+
+  const segments = [
+    { label: "Exonic", value: counts.exonic, opacity: 1 },
+    { label: "Intronic", value: counts.intronic, opacity: 0.66 },
+    { label: "Intergenic", value: counts.intergenic, opacity: 0.33 },
+  ];
+
+  const w = 340;
+  const barH = 26;
   let offset = 0;
-  const segments = CATEGORIES.map((c) => {
-    const value = distribution[c.key];
-    const width = (value / total) * w;
-    const seg = { ...c, value, width, x: offset, pct: (value / total) * 100 };
-    offset += width;
-    return seg;
-  });
 
   return (
     <div>
-      <div className="section-title">Genomic feature distribution</div>
-      {/* A stacked bar rather than a pie: three categories at very uneven
-          proportions are easier to read and to compare between samples, and
-          it matches the existing visual language. */}
-      <svg width={w} height={barH} role="img" aria-label="Read distribution across genomic features">
-        {segments.map((s) => (
-          <rect key={s.key} x={s.x} y={0} width={Math.max(0, s.width)} height={barH} fill={s.color} />
-        ))}
+      <svg width="100%" viewBox={`0 0 ${w} ${barH}`} style={{ maxWidth: w, display: "block" }}>
+        {segments.map((s) => {
+          const width = (s.value / total) * w;
+          const x = offset;
+          offset += width;
+          return (
+            <rect key={s.label} x={x} y={0} width={width} height={barH} fill="var(--accent)" opacity={s.opacity}>
+              <title>
+                {s.label}: {s.value.toLocaleString()} (
+                {((100 * s.value) / total).toFixed(1)}%)
+              </title>
+            </rect>
+          );
+        })}
       </svg>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 6, fontSize: 11 }}>
         {segments.map((s) => (
-          <div key={s.key} style={{ fontSize: 12 }}>
+          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <span
               style={{
+                width: 9,
+                height: 9,
+                background: "var(--accent)",
+                opacity: s.opacity,
                 display: "inline-block",
-                width: 10,
-                height: 10,
-                background: s.color,
-                marginRight: 6,
               }}
             />
-            {s.label} {s.pct.toFixed(1)}%{" "}
-            <span style={{ color: "var(--text-faint)" }}>
-              ({s.value.toLocaleString()})
+            <span style={{ color: "var(--text-faint)" }}>{s.label}</span>
+            <span style={{ fontWeight: 600 }}>
+              {((100 * s.value) / total).toFixed(1)}%
             </span>
           </div>
         ))}
@@ -1743,395 +1441,241 @@ export function FeatureDistributionChart({
     </div>
   );
 }
-
-export function TranscriptQc({
-  facts,
-  showGeneBody,
-}: {
-  facts: TranscriptQcFacts;
-  showGeneBody: boolean;
-}) {
-  if (facts.transcript_qc_status !== "ok") return null;
-
-  const curve = facts.gene_body_coverage;
-  const distribution = facts.feature_distribution;
-
-  return (
-    <div className="section">
-      <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-        {showGeneBody && curve && curve.length > 0 && (
-          <GeneBodyCoverageChart curve={curve} />
-        )}
-        {distribution && <FeatureDistributionChart distribution={distribution} />}
-      </div>
-      <div style={{ color: "var(--text-faint)", fontSize: 12, marginTop: 10 }}>
-        Based on {(facts.transcript_qc_reads_sampled ?? 0).toLocaleString()}{" "}
-        sampled reads across{" "}
-        {(facts.transcript_qc_transcripts ?? 0).toLocaleString()} transcripts
-        {facts.transcript_qc_gtf_name ? ` from ${facts.transcript_qc_gtf_name}` : ""}.
-      </div>
-    </div>
-  );
-}
 ```
 
-Check `var(--accent)`, `var(--warn)`, `var(--border)`, and `var(--text-faint)`
-exist in this repo's CSS variables; substitute the real names if not:
+- [ ] **Step 4: Render it from `BamResults.tsx`**
 
-```bash
-grep -rn "\-\-accent\|\-\-warn\|\-\-border\|\-\-text-faint" frontend/src/index.css | head
-```
+Add the import and mirror the backend chain (the two must agree; a divergence shows as a button that launches a job whose results never render):
 
-- [ ] **Step 2: Verify it typechecks**
-
-```bash
-docker compose exec web npx tsc --noEmit
-```
-
-Expected: no errors.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add frontend/src/components/TranscriptQc.tsx
-git commit -m "feat(ui): chart gene body coverage and genomic feature distribution"
-```
-
----
-
-## Task 13: Wire the charts into the Results tab
-
-**Files:**
-- Modify: `frontend/src/components/BamResults.tsx`
-
-- [ ] **Step 1: Add the import and the gated section**
-
-Add the import beside the others at the top of `frontend/src/components/BamResults.tsx`:
-
-```typescript
+```tsx
 import { TranscriptQc } from "./TranscriptQc";
 ```
 
-Inside the `hasResults && (...)` block, after the existing charts, add:
+Add above the Provenance section inside the `hasResults` block:
 
-```typescript
-          <TranscriptQc facts={obj.facts} showGeneBody={rnaApplicable} />
+```tsx
+          <TranscriptQc
+            obj={obj}
+            gtfs={gtfObjects}
+            geneBody={rnaApplicability.geneBody}
+            featureDistribution={rnaApplicability.featureDistribution}
+          />
 ```
 
-And above the `return`, derive the gate. This mirrors the backend chain in
-`transcript_qc_gating.decide` — keep the two in step:
+with this helper at the bottom of the file:
 
-```typescript
-  const moleculeType = (obj.metadata?.molecule_type ?? "").toUpperCase();
-  const assay = (obj.metadata?.assay ?? "").toLowerCase();
-  const alignedBy = (obj.facts.aligned_by ?? "").toLowerCase();
+```tsx
+/** Mirrors backend services/transcript_qc_gating.py -- keep the two in step. */
+function transcriptQcApplicability(obj: ObjectDetailData) {
+  const md = (obj.metadata ?? {}) as Record<string, unknown>;
+  const molecule = md.molecule_type;
+  if (molecule === "RNA") return { geneBody: true, featureDistribution: true };
+  if (molecule === "DNA" || molecule === "Other")
+    return { geneBody: false, featureDistribution: false };
 
-  const rnaApplicable =
-    moleculeType === "RNA" ||
-    (moleculeType !== "DNA" &&
-      moleculeType !== "OTHER" &&
-      (assay === "rna-seq" ||
-        (!assay && (alignedBy === "star" || alignedBy === "hisat2"))));
+  const assay = md.assay;
+  if (assay === "RNA-seq") return { geneBody: true, featureDistribution: true };
+  if (assay === "ChIP-seq" || assay === "ATAC-seq")
+    return { geneBody: false, featureDistribution: true };
+  if (assay) return { geneBody: false, featureDistribution: false };
 
-  const featureApplicable = rnaApplicable || assay === "chip-seq";
+  const aligner = String(obj.facts.aligned_by ?? "").toLowerCase();
+  if (aligner === "star" || aligner === "hisat2")
+    return { geneBody: true, featureDistribution: true };
+
+  return { geneBody: false, featureDistribution: false };
+}
 ```
 
-- [ ] **Step 2: Add the compute button for the empty state**
+In the component body, compute it and gate the whole block:
 
-Inside the `hasResults` block, before `<TranscriptQc .../>`:
-
-```typescript
-          {featureApplicable && obj.facts.transcript_qc_status !== "ok" && (
-            <div className="section">
-              <div className="section-title">RNA-seq transcript QC</div>
-              {gtfChoices.length === 0 ? (
-                <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-                  These charts need a gene annotation (GTF or GFF3) in this
-                  project. Import or download one, then compute.
-                </div>
-              ) : (
-                <>
-                  <div style={{ color: "var(--text-faint)", fontSize: 12, marginBottom: 8 }}>
-                    Coverage bias along transcripts and where reads land
-                    relative to genes — computed on demand.
-                  </div>
-                  {gtfChoices.length > 1 && (
-                    <select
-                      value={gtfId ?? ""}
-                      onChange={(e) => setGtfId(e.target.value)}
-                      style={{ marginRight: 8 }}
-                    >
-                      <option value="">Choose an annotation…</option>
-                      {gtfChoices.map((g) => (
-                        <option key={g.id} value={g.id}>{g.name}</option>
-                      ))}
-                    </select>
-                  )}
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={() => gtfId && computeTranscriptQc.mutate(gtfId)}
-                    disabled={!gtfId || computeTranscriptQc.isPending}
-                  >
-                    {computeTranscriptQc.isPending ? "Computing…" : "Compute transcript QC"}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
+```tsx
+  const rnaApplicability = transcriptQcApplicability(obj);
+  const rnaApplies =
+    rnaApplicability.geneBody || rnaApplicability.featureDistribution;
 ```
 
-With this state and mutation added beside the existing `compute` mutation:
+and wrap the `<TranscriptQc .../>` above in `{rnaApplies && ( ... )}`.
 
-```typescript
-  const gtfChoices = (obj.project_annotations ?? []) as { id: string; name: string }[];
-  const [gtfId, setGtfId] = useState<string | null>(
-    gtfChoices.length === 1 ? gtfChoices[0].id : null,
-  );
+`gtfObjects` comes from the project's object list. If `BamResults` has no such list in scope, pass it down from the parent that already queries project objects rather than adding a second query here — check `DetailPanel.tsx` for what is already available.
 
-  const computeTranscriptQc = useMutation({
-    mutationFn: (gtf: string) => api.launchTranscriptQc(obj.id, gtf),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing transcript QC");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
-```
-
-`obj.project_annotations` does not exist yet. Either add it to the object
-detail response beside the existing facts, or fetch the project's GTF objects
-with the existing objects query filtered to `format.kind in {gtf, gff}` —
-check which pattern the neighbouring components use before choosing:
+- [ ] **Step 5: Typecheck**
 
 ```bash
-grep -rn "useQuery(\[\"objects\"" frontend/src/components/*.tsx | head -5
+cd frontend && npm run lint
 ```
 
-Add `useState` to the React import if it is not already there.
+Expected: no output, exit 0.
 
-- [ ] **Step 3: Verify it typechecks and builds**
-
-```bash
-docker compose exec web npx tsc --noEmit
-```
-
-Expected: no errors.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add frontend/src/components/BamResults.tsx
-git commit -m "feat(ui): offer transcript QC on RNA-seq alignments in the Results tab"
+git add frontend/src/api/types.ts frontend/src/api/client.ts frontend/src/components/TranscriptQc.tsx frontend/src/components/BamResults.tsx
+git commit -m "feat(frontend): plot gene body coverage and read distribution"
 ```
 
 ---
 
-## Task 14: Full suite, then verify against the real database
+### Task 7: Verify against real objects
 
-**Files:** none — verification only.
+Every fixture in Tasks 1-3 feeds hand-built objects that already look the way the code expects — the exact shape of green-suite-wrong-behaviour this repo has hit before. This task is not optional.
 
-Per CLAUDE.md: green unit tests are not sufficient here. The Actions-tab
-suggestion rules passed a full green suite while being wrong about two things
-that one look at a real project exposed. This job has the same shape: every
-fixture above feeds it hand-built objects that already look the way the code
-expects.
-
-- [ ] **Step 1: Run the full backend suite**
+- [ ] **Step 1: Bring up the worktree stack**
 
 ```bash
-docker compose exec api python -m pytest tests/ -q
+./ops/worktree-up.sh
 ```
 
-Expected: all pass. **Read the count, not the exit code.** Compare the total
-against the pre-change baseline; a suite that collects fewer tests than before
-is a failure wearing a green hat. If it dies with `EXIT=137`, that is host
-memory, not a test failure — rerun with fewer concurrent stacks.
+- [ ] **Step 2: Import a GTF**
 
-- [ ] **Step 2: Confirm the worker loaded the handler**
+There are **zero GTF objects** in the seeded database, so this walks the empty state first. Open a project with the STAR-aligned RNA-seq BAMs (`ERR458494.bam` and siblings) at http://localhost:5273. Confirm the transcript QC section shows the "needs a gene annotation" message and no button.
+
+Then download an annotation for the matching reference via the NCBI dialog, or import one. The `ERR458*` samples are *S. cerevisiae*, so a yeast GTF is small and quick.
+
+- [ ] **Step 3: Run it**
+
+Press **Compute transcript QC**. When it finishes, check:
+
+- The gene body curve renders, 5' on the left, 3' on the right.
+- The read distribution bar renders with three segments summing to 100%.
+- **The exonic share dominates.** For RNA-seq it should be the large majority. A near-100% *intergenic* result means the contig-name check did not catch a mismatch, or classification is broken — investigate rather than accepting the number.
+
+- [ ] **Step 4: Confirm the contig-mismatch guard actually fires**
+
+The check that matters most, because its failure mode is a plausible number rather than an error. Point the job at an annotation for a *different* organism:
 
 ```bash
-docker compose up -d --build api web worker && sleep 12 && docker compose logs worker --tail 40 | grep -i handlers_loaded
-```
-
-Expected: `run_transcript_qc` present. Without this the job silently never
-runs — `worker` has no reload mechanism.
-
-- [ ] **Step 3: Check the gating against real objects, not fixtures**
-
-```bash
-docker compose exec api python -c "
+docker compose -p biopipe-issue-129-37ae8a exec -T api python -c "
 import asyncio
-from app.db.client import connect_to_mongo
-from app.models.object import StoredObject
-from app.services import transcript_qc_gating as g
-
+from app.db.client import connect_to_mongo, get_db
 async def main():
     await connect_to_mongo()
-    bams = await StoredObject.find({'format.kind': 'bam'}).to_list()
-    print(f'{len(bams)} BAMs')
-    for b in bams:
-        d = g.decide(b)
-        print(f'  {b.name[:45]:45} gene_body={d.gene_body!s:5} '
-              f'feat={d.feature_distribution!s:5} via={d.reason}')
-
+    db = get_db()
+    async for o in db.objects.find({'facts.transcript_qc_status':'ok'}, {'name':1,'facts':1}).limit(3):
+        f=o['facts']
+        fd=f['feature_distribution']
+        total=sum(fd.values())
+        print(o['name'], '| reads:', f['transcript_qc_sampled_reads'], '| annotation:', f.get('transcript_qc_annotation'))
+        print('   exonic %.1f%% intronic %.1f%% intergenic %.1f%%' % tuple(100*fd[k]/total for k in ('exonic','intronic','intergenic')))
+        gb=f['gene_body_coverage']
+        print('   gene body points:', len(gb), '(expect 100), peak at percentile', max(gb, key=lambda p: p['coverage'])['percentile'])
 asyncio.run(main())
 "
 ```
 
-Expected: the four STAR-aligned `ERR458*` RNA-seq BAMs decide
-`gene_body=True feat=True via=assay`; the WGS BAMs decide False. If every BAM
-comes back False, the chain is reading the wrong field names — fix that before
-going further, because the feature would ship invisible.
+Expected: 100 gene-body points; exonic dominant; a peak percentile that is not pinned at 0 or 99 unless the sample is genuinely degraded.
 
-- [ ] **Step 4: Walk the empty state by hand**
+- [ ] **Step 5: Check a DNA BAM does not offer the feature**
 
-The database has **zero GTF objects**, so this is the state every current user
-is in. Open a STAR-aligned BAM's Results tab at http://localhost:5173 and
-confirm the section reads as "needs an annotation," not as a broken feature.
+Open `ERR17609896.bam` (assay `WGS`). The transcript QC section must not appear at all. This is the gating direction that fails when the chain breaks — the other direction passes whether or not the chain works.
 
-- [ ] **Step 5: Import a GTF and run the job end to end**
-
-Download or import a GTF for the reference those BAMs were aligned against,
-then click Compute transcript QC. Confirm:
-- the job completes and both charts render
-- the exonic fraction dominates (it is RNA-seq; if it does not, suspect a
-  contig-name mismatch that the guard should have caught)
-- the reads-sampled and annotation-name line is populated
-- the gene body curve is not flat-zero
-
-- [ ] **Step 6: Verify the contig-mismatch guard fires**
-
-The most valuable negative test, and the one no fixture proves. If an
-Ensembl-style GTF (contigs `1`, `2`, `3`) is available for a BAM using
-`chr1`, run against it and confirm the job **fails with the naming message**
-rather than storing a 100%-intergenic result.
-
-- [ ] **Step 7: Commit any fixes**
+- [ ] **Step 6: Tear down and run the full suite**
 
 ```bash
-git add -A && git commit -m "fix(pipelines): correct transcript QC against real objects"
+./ops/worktree-up.sh --down
 ```
 
-Skip if nothing needed fixing.
+```bash
+./backend/run-worktree-tests.sh tests/ -q
+```
+
+Expected: PASS. Read the count.
 
 ---
 
-## Task 15: Close out the issues and open the PR
+### Task 8: Open the PR
 
-**Files:**
-- Modify: `docs/TODO.md` / `docs/TODO-done.md` (only if an entry covers this work)
-
-- [ ] **Step 1: Check whether a TODO entry covers this**
-
-```bash
-grep -n -i "transcript\|gene body\|exonic\|rna-seq" docs/TODO.md
-```
-
-If an entry exists, append ` — FIXED` to its heading, note what shipped and
-what the implementation did differently from the spec, and move the whole
-entry to `docs/TODO-done.md`. If nothing matches, skip — these are tracked as
-GitHub issues, not TODO entries.
-
-- [ ] **Step 2: Push and open the PR**
+- [ ] **Step 1: Push**
 
 ```bash
 git push -u origin HEAD
 ```
 
+- [ ] **Step 2: Open the PR**
+
 ```bash
-gh pr create --base main --title "feat(pipelines): chart RNA-seq 5'→3' coverage bias and read distribution across gene features" --body "$(cat <<'EOF'
-Adds the two RNA-seq alignment QC charts from epic #154: gene body coverage
-(5'→3' bias, a degradation signal) and genomic feature distribution
-(exonic/intronic/intergenic, a gDNA-contamination signal).
+gh pr create --base main --title "feat(pipelines): add RNA-seq gene body coverage and read distribution" --body "$(cat <<'EOF'
+Two RNA-seq alignment QC charts, computed in one job: gene body coverage
+(5'->3' bias, the RNA-degradation signature) and the exonic / intronic /
+intergenic read distribution.
 
-## Why one PR
+One job because both need the same two expensive things -- a parsed transcript
+model from a GTF and a pass over the BAM -- so computing them separately would
+parse the GTF twice and traverse the BAM twice for two charts that sit side by
+side.
 
-Both metrics need the same two expensive things — a parsed transcript model
-from a GTF and a pass over the BAM classifying reads against it. Splitting
-them would parse the GTF twice and traverse the BAM twice for two charts that
-render side by side. One job, one parse, one pass, two independent facts.
+Custom pysam rather than RSeQC: it avoids a new system dependency plus its
+TOOL_META/licence/suggestion wiring for what is a few dozen lines, and it
+matches how the comparable insert-size and MAPQ histograms were actually built
+here. The numbers will not match RSeQC to the decimal; these charts are read
+for shape, and the binning choices are fixed in the spec so the shape is
+stable.
 
-The facts stay separate because the gating differs: ChIP-seq is DNA, so it
-gets the feature distribution but not the transcript curve.
+The gating is the part worth reviewing. There is no stored RNA-vs-DNA flag,
+and while `molecule_type` exists as a metadata field it is populated on 0 of 9
+BAMs in a real database (it only lands with an SRA record), while `assay` is
+populated on all 9 and discriminates correctly. Gating on `molecule_type`
+alone would have shipped a feature nobody could see, with a green suite. So
+applicability is a fallback chain -- explicit molecule_type, then assay, then
+aligner -- and the job is on demand behind a button rather than automatic,
+since inference can be wrong.
 
-## Notable decisions
+ChIP-seq gets the read-distribution chart only: it is DNA, so a gene body
+curve is meaningless for it, which is why the job writes two independent facts
+rather than one blob.
 
-- **Custom pysam, not RSeQC.** Matches how insert-size and MAPQ were actually
-  built here (`sequence_stats.py`) and avoids a new system dependency plus its
-  TOOL_META, suggestion wiring, and help-page entries. Numbers will not match
-  RSeQC to the decimal; these charts are read for shape.
-- **Gating is a chain, not a flag.** There is no stored RNA-vs-DNA field.
-  Checking the real database rather than the schema overturned the obvious
-  design: `molecule_type` is populated on 0 of 9 BAMs, `assay` on 9 of 9.
-  Gating on `molecule_type` alone would have shipped a feature nobody could
-  see.
-- **Strided sampling.** A coordinate-sorted BAM's first 200k reads all come
-  from one chromosome, which is not a genome-wide answer. Mirrors
-  `_fasta_sample_strided`.
-- **Contig-name mismatch fails loudly.** A GTF using `1,2,3` against a BAM
-  using `chr1,chr2,chr3` otherwise yields a confident 100%-intergenic result
-  with no error.
+A contig-name mismatch ('1' vs 'chr1') is refused up front. It is the classic
+silent failure here -- every read falls outside every gene and the job would
+otherwise store a plausible-looking 100% intergenic result with no error.
+
+Reads are sampled strided across contigs rather than from the head of the
+file, so the curve is genome-wide (see #191 for the same bias in the existing
+alignment stats).
 
 Closes #158
 Closes #159
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
 )"
 ```
 
 - [ ] **Step 3: Label the PR**
 
-`.github/release.yml` categorizes notes by label, not by the title prefix, so
-an unlabelled PR lands under "Other changes":
-
 ```bash
 gh pr edit --add-label "type:feature" --add-label "area:pipelines" --add-label "area:frontend" --add-label "area:backend"
 ```
 
-- [ ] **Step 4: Update the issues**
-
-```bash
-gh issue comment 158 --body "Implemented in the linked PR: gene body coverage computed with pysam over a one-transcript-per-gene model, strand-corrected, 100 bins, normalized to peak. Gated by the applicability chain in \`transcript_qc_gating.decide\`."
-```
-
-```bash
-gh issue comment 159 --body "Implemented in the linked PR alongside #158, sharing one GTF parse and one BAM pass. Feature distribution is available for ChIP-seq as well as RNA-seq, which is why it is a separate fact from the gene body curve."
-```
-
-- [ ] **Step 5: Report the PR URL and stop**
-
-Do not merge. Per CLAUDE.md the end state of this work is an open PR; the user
-reviews and merges.
+- [ ] **Step 4: Report the PR URL and stop.** Do not merge.
 
 ---
 
-## Spec coverage check
+## Self-review
 
-| Spec section | Task |
+**Spec coverage**
+
+| Spec requirement | Task |
 |---|---|
-| One spec, one job, two facts | 7 |
-| Custom pysam, not RSeQC | 7 (no TOOL_META needed) |
-| Applicability chain, 5 branches | 6 |
-| ChIP-seq gets feature distribution only | 6, 13 |
-| On demand, not automatic | 9, 13 |
-| GTF selection: run role → single → picker | 9, 13 |
-| No-GTF empty state reads as next action | 13, 14 |
-| Contig-name overlap fails loudly | 4, 7, 14 |
-| Representative transcript = longest isoform | 1 |
-| Length floor ~200 bp | 1 |
-| 100 bins, strand-corrected, peak-normalized | 3 |
-| Exonic wins ties; categories sum to total | 4 |
-| Skip secondary/supplementary/duplicate | 7 |
-| Sample capped, strided, count recorded | 5, 7 |
-| Line plot + stacked bar, hand-rolled SVG | 12 |
-| Both state GTF and reads sampled | 12 |
-| Neither renders absent its fact | 12 |
-| Full test list from the spec | 1, 3, 4, 6 |
-| Registry-audit warning | 8 |
-| Verify against real objects | 14 |
+| One job, one GTF parse, one BAM pass | 4 |
+| Custom pysam, no new tool | 4 |
+| Longest transcript per gene | 1 |
+| ~200 bp transcript length floor | 1 |
+| 100 bins, strand-corrected | 2 |
+| Normalized to max | 2 |
+| Exonic wins ties; categories exclusive | 2 |
+| Skip secondary/supplementary/duplicate | 4 |
+| Contig-overlap check, fail loudly | 2 (pure), 4 (raises), 7 (verified) |
+| Strided sampling, count recorded | 4 |
+| Applicability chain, 5 branches | 3 |
+| ChIP-seq → feature distribution only | 3 |
+| On-demand button | 5, 6 |
+| GTF selection: none / one / several | 6 |
+| Facts `gene_body_coverage`, `feature_distribution` | 4 |
+| Hand-rolled SVG; stacked bar not pie | 6 |
+| States GTF used and reads sampled | 6 |
+| Registry check (`results.py` dispatch) | 4 |
+| Real-object verification, unavailable direction | 7 |
 
-Out of scope per the spec, and absent here by intent: backfilling
-`molecule_type`, matching RSeQC's numbers, per-gene drill-down, and the
-head-of-file bias in the existing insert-size histogram.
+**Placeholder scan:** none. Task 6 Step 4 leaves *where* `gtfObjects` is sourced to inspection of `DetailPanel.tsx` rather than inventing a prop chain — flagged explicitly as a thing to check, not a blank to fill.
+
+**Type consistency:** `Transcript(transcript_id, gene_id, contig, strand, exons)` with `.length` / `.span` is used identically in Tasks 1, 2, 4. `GeneBodyCoverage.add_read(transcript, position)` / `.to_facts()`, `FeatureCounts.add(category)` / `.to_facts()` / `.total`, `build_feature_index` → `classify_position(index, contig, position)`, and `contig_overlap(bam, gtf)` match between definition (Task 2) and use (Task 4). `Applicability(gene_body, feature_distribution, reason)` matches its use in Task 3's tests; the frontend mirror in Task 6 returns camelCase `geneBody` / `featureDistribution`, matching `TranscriptQc`'s props. Fact keys `gene_body_coverage` / `feature_distribution` / `transcript_qc_*` agree across Tasks 4 and 6.
+
+**One risk worth naming:** `_covers` uses a bisect-and-scan-back over sorted intervals with a `_MAX_FEATURE_SPAN` bound rather than a real interval tree. That is correct for the overlap cases tested and cheap to build, but a pathological annotation with many very long overlapping genes would scan more than it should. If Task 7 shows the job running slowly on a real genome, replace `_covers` with an interval tree — the seam is one function and its tests do not change.
