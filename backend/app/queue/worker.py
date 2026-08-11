@@ -7,6 +7,7 @@ import os
 import socket
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import psutil
 from beanie import PydanticObjectId
 
@@ -113,6 +114,10 @@ class Worker:
         self._starvation_checked_at = 0.0
         self._starvation_cached = False
 
+        # Node enrollment (compute nodes only).
+        self._revoked: bool = False
+        self._enrollment_task: asyncio.Task | None = None
+
     # ---------- lifecycle ----------
 
     async def start(self) -> None:
@@ -142,6 +147,13 @@ class Worker:
             recovered_workflow_nodes=recovered,
         )
 
+        # Enroll with the primary if this is a compute node.
+        if settings.primary_api_url:
+            await self._enroll()
+            self._enrollment_task = asyncio.create_task(
+                self._enrollment_watch_loop(), name="enrollment-watch"
+            )
+
         self._tasks = [
             asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
             asyncio.create_task(self._cancel_watch_loop(), name="cancel-watch"),
@@ -166,6 +178,11 @@ class Worker:
         backoff = CLAIM_BACKOFF_MIN
 
         while not self.shutdown.is_set():
+            if self._revoked:
+                # Node was revoked by the primary — stop claiming.
+                await self._sleep_interruptible(5.0)
+                continue
+
             if len(self._running) >= self.max_concurrent:
                 await self._sleep_interruptible(0.1)
                 continue
@@ -501,6 +518,81 @@ class Worker:
                 }
             ),
         )
+
+    # ---------- enrollment ----------
+
+    async def _enroll(self) -> None:
+        """Call POST /nodes/enroll on the primary at startup.
+
+        Only called when ``primary_api_url`` is set (compute nodes).
+        Does not crash the worker on failure — enrollment is advisory, and
+        the primary may not be reachable yet at startup.
+        """
+        url = f"{settings.primary_api_url.rstrip('/')}/api/v1/nodes/enroll"
+        payload = {
+            "node_id": self.node_id,
+            "hostname": socket.gethostname(),
+            "enrollment_key": settings.enrollment_key,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 403:
+                    log.error(
+                        "enrollment_rejected",
+                        node_id=self.node_id,
+                        status=resp.status_code,
+                        detail=resp.text[:200],
+                    )
+                    self._revoked = True
+                elif resp.status_code >= 400:
+                    log.warning(
+                        "enrollment_failed",
+                        node_id=self.node_id,
+                        status=resp.status_code,
+                        detail=resp.text[:200],
+                    )
+                else:
+                    log.info("enrolled", node_id=self.node_id)
+        except Exception as e:  # noqa: BLE001 — enrollment is advisory
+            log.warning("enrollment_error", node_id=self.node_id, error=str(e))
+
+    async def _enrollment_watch_loop(self) -> None:
+        """Periodically check whether this node is still active.
+
+        If the primary revokes this node, we stop claiming jobs until the
+        next enrollment attempt (which will also be rejected).
+        """
+        await asyncio.sleep(30)  # Let the enrollment request settle first.
+        while not self.shutdown.is_set():
+            try:
+                url = (
+                    f"{settings.primary_api_url.rstrip('/')}"
+                    f"/api/v1/nodes/{self.node_id}/status"
+                )
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 403:
+                        self._revoked = True
+                        log.warning(
+                            "node_revoked",
+                            node_id=self.node_id,
+                            detail=resp.text[:200],
+                        )
+                    elif resp.status_code == 404:
+                        # Not yet enrolled — try again.
+                        log.info("node_not_found_re_enrolling", node_id=self.node_id)
+                        await self._enroll()
+                    elif resp.status_code == 200:
+                        data = resp.json()
+                        if data.get("status") == "revoked":
+                            self._revoked = True
+                            log.warning("node_revoked", node_id=self.node_id)
+                        else:
+                            self._revoked = False
+            except Exception as e:  # noqa: BLE001
+                log.debug("enrollment_watch_error", node_id=self.node_id, error=str(e))
+            await asyncio.sleep(30)
 
     # ---------- cancellation ----------
 

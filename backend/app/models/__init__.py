@@ -29,6 +29,7 @@ from app.models.job import (
     JobTiming,
 )
 from app.models.local_database import LocalDatabase, LocalDatabaseCategory
+from app.models.node import Node
 from app.models.object import (
     Compression,
     DataObject,
@@ -48,7 +49,6 @@ from app.models.organism import OrganismBlurb, normalize_organism
 from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
 from app.models.resource_limits import ResourceLimits
-from app.models.share import Share, ShareState
 from app.models.run import (
     OPTIONAL_ROLES,
     PipelineRun,
@@ -60,6 +60,7 @@ from app.models.run import (
     RunStatus,
 )
 from app.models.schedule import Schedule
+from app.models.share import Share, ShareState
 from app.models.structure import StructureLookup
 from app.models.timing import JobRunTiming
 from app.models.upload_session import UploadSession, UploadState
@@ -89,6 +90,7 @@ ALL_MODELS = [
     StructureLookup,
     Feedback,
     LocalDatabase,
+    Node,
     Share,
     ProjectConversation,
     ResourceLimits,
@@ -130,6 +132,7 @@ __all__ = [
     "JobTiming",
     "LocalDatabase",
     "LocalDatabaseCategory",
+    "Node",
     "OPTIONAL_ROLES",
     "ObjectError",
     "ObjectRole",

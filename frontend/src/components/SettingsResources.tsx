@@ -154,7 +154,11 @@ export function SettingsResources() {
       )}
 
       <div className="settings-actions">
-        <button onClick={() => save.mutate()} disabled={save.isPending || invalidMem}>
+        <button
+          className="btn primary"
+          onClick={() => save.mutate()}
+          disabled={save.isPending || invalidMem}
+        >
           {save.isPending ? "Saving…" : "Save"}
         </button>
       </div>

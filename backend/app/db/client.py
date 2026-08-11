@@ -79,8 +79,8 @@ async def _assert_replica_set(client: AsyncIOMotorClient) -> None:
 
 
 async def _init_models(client: AsyncIOMotorClient) -> None:
-    from app.models import ALL_MODELS
     from app.db.index_reconcile import reconcile_indexes
+    from app.models import ALL_MODELS
 
     db = client[settings.mongo_db]
     for model in ALL_MODELS:

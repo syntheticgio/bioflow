@@ -119,6 +119,8 @@ export function runFirstSetup(args: {
 export interface CurrentSettings {
   hardMemMb: number | null;
   port: number | null;
+  storageLocation: string | null;
+  networkExposed: boolean | null;
   /** Tag the stack is pinned to in release mode. Mirrors BIOFLOW_TAG in .env. */
   bioflowTag: string;
   /** When non-null, the stack runs in developer mode using locally built images
@@ -135,17 +137,23 @@ export interface VersionOptions {
 }
 
 // Reads back whatever settings can be recovered from .env on disk -- the
-// hard memory limit, the port, and the version tag/developer repo. See
-// App.tsx's mount effect for why this exists.
+// hard memory limit, port, storage location, network exposure, and version
+// tag/developer repo, the
+// fields the UI could not otherwise reconstruct on a relaunch. See App.tsx's
+// mount effect for why this exists.
 export function currentSettings(): Promise<CurrentSettings> {
   return invoke<{
     hard_mem_mb: number | null;
     port: number | null;
+    storage_location: string | null;
+    network_exposed: boolean | null;
     bioflow_tag: string;
     developer_repo: string | null;
   }>("current_settings").then((d) => ({
     hardMemMb: d.hard_mem_mb,
     port: d.port,
+    storageLocation: d.storage_location,
+    networkExposed: d.network_exposed,
     bioflowTag: d.bioflow_tag,
     developerRepo: d.developer_repo,
   }));

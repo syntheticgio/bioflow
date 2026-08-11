@@ -1003,7 +1003,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "and its JSON report supplies the per-base quality and duplication "
             "numbers the QC screen charts."
         ),
-        recommendations={"short": RecommendationLevel.RECOMMENDED.value, "long": RecommendationLevel.COMPATIBLE.value},
+        recommendations={
+            "short": RecommendationLevel.RECOMMENDED.value,
+            "long": RecommendationLevel.COMPATIBLE.value,
+        },
     ),
     "cutadapt": ToolMeta(
         pipelines=(PipelineType.TRIM,),
@@ -1032,7 +1035,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "the trim summary shows; it reports no progress while running, "
             "since it emits no progress stream to follow."
         ),
-        recommendations={"short": RecommendationLevel.COMPATIBLE.value, "long": RecommendationLevel.RECOMMENDED.value},
+        recommendations={
+            "short": RecommendationLevel.COMPATIBLE.value,
+            "long": RecommendationLevel.RECOMMENDED.value,
+        },
     ),
     "trimmomatic": ToolMeta(
         pipelines=(PipelineType.TRIM,),

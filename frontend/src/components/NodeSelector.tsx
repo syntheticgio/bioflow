@@ -19,7 +19,14 @@ export function NodeSelector({ value, onChange, fullWidth }: NodeSelectorProps) 
     staleTime: 10_000,
   });
 
-  if (nodes.isLoading || !nodes.data || nodes.data.length <= 1) {
+  // The backend groups workers that never declared a node_id into a
+  // catch-all bucket named "unknown". It is not a real target: no worker
+  // enrolls under it, and selecting it would route the job nowhere useful.
+  // Exclude it both from the count (so a single real node hides the
+  // selector) and from the offered options.
+  const selectable = (nodes.data ?? []).filter((n) => n.node_id !== "unknown");
+
+  if (nodes.isLoading || !nodes.data || selectable.length <= 1) {
     // Nothing to pick: only one node or still loading.
     return null;
   }
@@ -33,7 +40,7 @@ export function NodeSelector({ value, onChange, fullWidth }: NodeSelectorProps) 
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">Default (any node)</option>
-        {nodes.data.map((n) => (
+        {selectable.map((n) => (
           <option key={n.node_id} value={n.node_id}>
             {n.node_id} ({n.online ? "online" : "offline"})
           </option>

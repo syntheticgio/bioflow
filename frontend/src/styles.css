@@ -1633,6 +1633,20 @@ a.btn {
   color: var(--text-dim);
 }
 
+.trim-fields select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+
+.trim-fields select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .trim-fields label small {
   color: var(--text-faint);
   font-size: 11px;
@@ -5141,6 +5155,17 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--text-dim);
 }
 
+/* Inline variant (e.g. the target-node selector in the Actions tab):
+   shrink to the widest option instead of stretching across the page. */
+.settings-field.inline {
+  display: inline-flex;
+  width: max-content;
+}
+
+.settings-field.inline .settings-input {
+  width: auto;
+}
+
 .settings-input {
   width: 100%;
   font-size: 13px;
@@ -5282,6 +5307,236 @@ table.software-matrix thead th.software-matrix-corner {
 .nodes-status.online {
   background: color-mix(in srgb, var(--success) 15%, transparent);
   color: var(--success);
+}
+
+/* --- Node provisioning form --- */
+
+.provision-add-btn {
+  margin-bottom: 12px;
+}
+
+.provision-form {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.provision-form-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.provision-form-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: 0 0 14px 0;
+  line-height: 1.5;
+}
+
+.provision-label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.provision-input {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input, var(--bg-root));
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.provision-field-row {
+  display: flex;
+  gap: 12px;
+}
+
+.provision-field-row .provision-label {
+  flex: 1;
+}
+
+.provision-port {
+  flex: 0 0 80px;
+}
+
+.provision-auth-section {
+  margin-bottom: 12px;
+}
+
+.provision-auth-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 8px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.provision-auth-tab {
+  flex: 1;
+  padding: 5px 0;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  background: var(--bg-root);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.provision-auth-tab.active {
+  background: var(--primary, #0d7c66);
+  color: #fff;
+}
+
+.provision-keyarea {
+  font-family: monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+
+.provision-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.provision-error {
+  background: color-mix(in srgb, var(--danger, #c00) 10%, transparent);
+  color: var(--danger, #c00);
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+/* --- Provisioning progress --- */
+
+.provision-progress {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.provision-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.provision-progress-phase {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.provision-progress-host {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.provision-progress-msg {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.provision-bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.provision-bar-fill {
+  height: 100%;
+  background: var(--primary, #0d7c66);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+  min-width: 4px;
+}
+
+@keyframes provision-indeterminate {
+  0%   { transform: translateX(-100%); width: 40%; }
+  50%  { transform: translateX(50%);  width: 40%; }
+  100% { transform: translateX(200%); width: 40%; }
+}
+
+/* --- Provisioning result --- */
+
+.provision-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.provision-result.success {
+  border-color: var(--success);
+}
+
+.provision-result.failure {
+  border-color: var(--danger, #c00);
+}
+
+.provision-result-icon {
+  font-size: 18px;
+  font-weight: 700;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.provision-result.success .provision-result-icon {
+  color: var(--success);
+}
+
+.provision-result.failure .provision-result-icon {
+  color: var(--danger, #c00);
+}
+
+.provision-result-text {
+  flex: 1;
+}
+
+.provision-result-text strong {
+  font-size: 13px;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.provision-result-text p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.provision-result-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* Settings section nav (AI / Tools), above the AI page's own rail-and-detail

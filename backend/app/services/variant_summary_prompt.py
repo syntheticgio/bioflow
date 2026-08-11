@@ -59,7 +59,11 @@ def _top_variant_lines(top_variants: list[dict]) -> list[str]:
             if isinstance(name, str) and name.strip()
             else f"an intergenic variant at {position} ({consequence})"
         )
-        lines.append(f"- {label}, {position}" if isinstance(name, str) and name.strip() else f"- {label}")
+        lines.append(
+        f"- {label}, {position}"
+        if isinstance(name, str) and name.strip()
+        else f"- {label}"
+    )
     return lines
 
 

@@ -15,20 +15,15 @@ from pathlib import Path
 from app.errors import ValidationError
 from app.logging import get_logger
 from app.pipelines import aligners
-from app.pipelines.aligners import Aligner
 
 # Parameter classes moved to align_params.py when the second and third
 # aligners arrived: one flat class covering four tools would be a union of
 # mostly-inapplicable fields. Re-exported here because this is where every
 # existing call site imports them from.
 from app.pipelines.align_params import (
-    BaseAlignParams,
-    Bowtie2Params,
-    Bwa2Params,
-    Hisat2Params,
     Minimap2Params,
-    WinnowmapParams,
 )
+from app.pipelines.aligners import Aligner
 
 log = get_logger(__name__)
 

@@ -1204,7 +1204,6 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
     # ── Step 1: k-mer spectra from reads ──────────────────────────────
 
     read_db = work / "reads.meryl"
-    built_read_db = False
 
     cached = ctx.payload.get("read_db_path")
     if cached:
@@ -1226,7 +1225,6 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
             code = run_subprocess(ctx, count_cmd, log_path=str(log_path))
             if code != 0:
                 raise _failure(code, log_path, "meryl")
-            built_read_db = True
 
     if read_db.exists():
         ctx.progress(phase="spectra", pct=None, message="computing k-mer spectra")
@@ -1405,7 +1403,16 @@ def annotate_genome(ctx: JobContext) -> dict:
                 facts["gene_density"] = density
 
     ctx.progress(phase="done", pct=1.0, message="annotation complete")
-    gene_count = sum(len(v) for v in (bakta_runner.parse_gff3(gff3_text) if gff3_path.exists() else {}).values()) if "gene_density" in facts else 0
+    gene_count = (
+        sum(
+            len(v)
+            for v in (
+                bakta_runner.parse_gff3(gff3_text) if gff3_path.exists() else {}
+            ).values()
+        )
+        if "gene_density" in facts
+        else 0
+    )
     log.info(
         "bakta_annotation_finished",
         job_id=ctx.job_id,

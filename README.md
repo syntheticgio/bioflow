@@ -19,6 +19,9 @@
 [![React + TypeScript](https://img.shields.io/badge/React-TypeScript-61DAFB?logo=react&logoColor=white)](frontend)
 [![MongoDB](https://img.shields.io/badge/MongoDB-replica%20set-47A248?logo=mongodb&logoColor=white)](#storage-layout)
 
+[![Build check](https://img.shields.io/github/actions/workflow/status/syntheticgio/bioflow/.github/workflows/build-check.yml?branch=main&label=build%20check&style=flat-square&logo=github%20actions&logoColor=2088EF)](https://github.com/syntheticgio/bioflow/actions/workflows/build-check.yml)
+[![Container releases](https://img.shields.io/github/v/release/syntheticgio/bioflow?branch=main&style=flat-square&logo=github)](https://github.com/syntheticgio/bioflow/releases)
+
 <strong>A local, single-user web app for managing bioinformatics data: projects, uploads,
 metadata, and a priority- and load-aware background job queue.</strong>
 

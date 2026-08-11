@@ -876,9 +876,11 @@ def launch_function_names() -> set[str]:
 
     from app.services import (
         ncbi_assembly_service,
-        pipeline_service as ps,
         sra_service,
         uniprot_service,
+    )
+    from app.services import (
+        pipeline_service as ps,
     )
 
     names: set[str] = set()

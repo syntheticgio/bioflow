@@ -15,9 +15,9 @@ from typing import Protocol, runtime_checkable
 import psutil
 from beanie import PydanticObjectId
 
+from app.config import settings
 from app.db.client import get_db
 from app.errors import JobCancelled, PermanentError, RetryableError
-from app.config import settings
 from app.logging import get_logger
 from app.models import Job, JobState
 from app.models.timing import RunOutcome

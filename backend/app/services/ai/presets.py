@@ -36,9 +36,12 @@ ALL: list[Preset] = [
         "https://dashscope-intl.aliyuncs.com/compatible-mode",
         True,
     ),
-    Preset("moonshot", "Moonshot (Kimi)", ProviderKind.OPENAI_COMPAT, "https://api.moonshot.ai", True),
-    Preset("zhipu", "Zhipu (GLM)", ProviderKind.OPENAI_COMPAT, "https://open.bigmodel.cn/api/paas", True),
-    Preset("openrouter", "OpenRouter", ProviderKind.OPENAI_COMPAT, "https://openrouter.ai/api", True),
+    Preset("moonshot", "Moonshot (Kimi)",
+           ProviderKind.OPENAI_COMPAT, "https://api.moonshot.ai", True),
+    Preset("zhipu", "Zhipu (GLM)",
+           ProviderKind.OPENAI_COMPAT, "https://open.bigmodel.cn/api/paas", True),
+    Preset("openrouter", "OpenRouter",
+           ProviderKind.OPENAI_COMPAT, "https://openrouter.ai/api", True),
     # The default this feature started as. Not a plugin system: a base URL the
     # user edits, covering LM Studio, Ollama, vLLM and anything else local.
     Preset(

@@ -146,14 +146,22 @@ export function ProviderForm({ provider }: { provider: AiProvider }) {
       </label>
 
       <div className="settings-actions">
-        <button onClick={() => save.mutate()} disabled={save.isPending}>
+        <button
+          className="btn primary"
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+        >
           Save
         </button>
-        <button onClick={() => fetchModels.mutate()} disabled={fetchModels.isPending}>
+        <button
+          className="btn"
+          onClick={() => fetchModels.mutate()}
+          disabled={fetchModels.isPending}
+        >
           {fetchModels.isPending ? "Fetching…" : "Fetch models"}
         </button>
         <button
-          className="settings-danger"
+          className="btn danger settings-danger"
           onClick={() => {
             if (confirm(`Delete ${provider.name}? Any task using it falls back to the default.`)) {
               remove.mutate();

@@ -165,7 +165,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="int",
                 default=30,
                 group="biology",
-                help="Alignments with a score below this threshold are not output. Lower it to keep weak alignments; raise it to filter noisy ones.",
+                help=(
+                    "Alignments with a score below this threshold are not output. Lower it to keep "
+                    "weak alignments; raise it to filter noisy ones."
+                ),
                 min=0,
             ),
             ParamField(
@@ -174,7 +177,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="bool",
                 default=False,
                 group="biology",
-                help="Marks split alignments as secondary for Picard/GATK compatibility. Needed for GATK Best Practices but wrong for most other workflows.",
+                help=(
+                    "Marks split alignments as secondary for Picard/GATK compatibility. Needed for "
+                    "GATK Best Practices but wrong for most other workflows."
+                ),
             ),
             ParamField(
                 key="max_seed_occ",
@@ -182,7 +188,11 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="int",
                 default=500,
                 group="biology",
-                help="Maximum number of occurrences of a seed before it is discarded. Raise for repeat-heavy genomes (e.g. 2000 for wheat); lower to save compute if only unique regions matter.",
+                help=(
+                    "Maximum number of occurrences of a seed before it is discarded. Raise for "
+                    "repeat-heavy genomes (e.g. 2000 for wheat); lower to save compute if only "
+                    "unique regions matter."
+                ),
                 min=1,
             ),
             ParamField(
@@ -191,7 +201,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="int",
                 default=1.5,
                 group="biology",
-                help="Raise to 2-3 to reduce redundant seed extensions in repeat zones. Lower for faster seeding on simple genomes.",
+                help=(
+                    "Raise to 2-3 to reduce redundant seed extensions in repeat zones. Lower for "
+                    "faster seeding on simple genomes."
+                ),
                 min=1,
             ),
             ParamField(
@@ -200,7 +213,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="bool",
                 default=False,
                 group="biology",
-                help="Outputs all alignments for unpaired reads instead of just the best. Useful for transposon/repeat-copy-number analysis.",
+                help=(
+                    "Outputs all alignments for unpaired reads instead of just the best. Useful "
+                    "for transposon/repeat-copy-number analysis."
+                ),
             ),
             ParamField(
                 key="max_mate_rescue",
@@ -208,7 +224,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="int",
                 default=100,
                 group="biology",
-                help="Number of attempts to rescue mates that don't align near each other. Lower to 20-50 to avoid slowdowns in repetitive genomes.",
+                help=(
+                    "Number of attempts to rescue mates that don't align near each other. Lower to "
+                    "20-50 to avoid slowdowns in repetitive genomes."
+                ),
                 min=0,
             ),
             ParamField(
@@ -217,7 +236,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="bool",
                 default=False,
                 group="biology",
-                help="Soft-clips supplementary alignments instead of hard-clipping. Needed by structural variant callers (Manta, LUMPY, Delly).",
+                help=(
+                    "Soft-clips supplementary alignments instead of hard-clipping. Needed by "
+                    "structural variant callers (Manta, LUMPY, Delly)."
+                ),
             ),
             ParamField(
                 key="clip_penalty",
@@ -225,7 +247,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="text",
                 default="5,5",
                 group="biology",
-                help="Comma-separated pair: clipping penalty for 5' and 3' ends. Lower to 2,2-3,3 for RNA-seq or heavy structural rearrangements.",
+                help=(
+                    "Comma-separated pair: clipping penalty for 5' and 3' ends. Lower to 2,2-3,3 "
+                    "for RNA-seq or heavy structural rearrangements."
+                ),
             ),
             ParamField(
                 key="multimap_xa",
@@ -233,7 +258,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="text",
                 default="5,200",
                 group="biology",
-                help="Comma-separated: max alignments to output as XA tags, max alignments to consider. Raise for decoy/pseudogene/contaminant tracking.",
+                help=(
+                    "Comma-separated: max alignments to output as XA tags, max alignments to "
+                    "consider. Raise for decoy/pseudogene/contaminant tracking."
+                ),
             ),
             ParamField(
                 key="batch_size",
@@ -241,7 +269,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 kind="int",
                 default=0,
                 group="performance",
-                help="Set a fixed batch size (e.g. 100000000) for deterministic, reproducible runs regardless of thread count. 0 means bwa-mem2's default.",
+                help=(
+                    "Set a fixed batch size (e.g. 100000000) for deterministic, reproducible runs "
+                    "regardless of thread count. 0 means bwa-mem2's default."
+                ),
                 min=0,
             ),
             *_SHARED_FIELDS,
@@ -265,7 +296,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
             },
             "large_repetitive": {
                 "label": "Large / Repetitive (Plants, etc.)",
-                "description": "Adjusted seeding for polyploid, repeat-heavy genomes (wheat, maize, barley, conifers).",
+                "description": (
+                    "Adjusted seeding for polyploid, repeat-heavy genomes (wheat, maize, barley, "
+                    "conifers)."
+                ),
                 "values": {
                     "mark_split": False,
                     "min_score": 30,
@@ -281,7 +315,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
             },
             "eukaryote": {
                 "label": "Human / other Eukaryote",
-                "description": "Standard resequencing: GATK Best Practices compatible defaults for human, mouse, and similar genomes.",
+                "description": (
+                    "Standard resequencing: GATK Best Practices compatible defaults for human, "
+                    "mouse, and similar genomes."
+                ),
                 "values": {
                     "mark_split": True,
                     "min_score": 30,

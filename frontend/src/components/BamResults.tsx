@@ -114,6 +114,15 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
                 <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
               </div>
             )}
+            {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
+              <div className="section" style={{ flex: "1 1 300px" }}>
+                <ContigDepthChart
+                  contigs={f.bam_stats_contigs_top}
+                  meanDepth={f.bam_stats_summary?.mean_depth}
+                  totalContigs={f.bam_stats_summary?.total_contigs}
+                />
+              </div>
+            )}
             {f.bam_stats_depth_histogram &&
               f.bam_stats_depth_histogram.length > 0 &&
               f.bam_stats_depth_bucket_width != null && (
@@ -126,16 +135,6 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
                 </div>
               )}
           </div>
-
-          {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
-            <div className="section">
-              <ContigDepthChart
-                contigs={f.bam_stats_contigs_top}
-                meanDepth={f.bam_stats_summary?.mean_depth}
-                totalContigs={f.bam_stats_summary?.total_contigs}
-              />
-            </div>
-          )}
 
           {f.bam_stats_report && (
             <ContigTable

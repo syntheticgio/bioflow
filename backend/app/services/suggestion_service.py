@@ -143,8 +143,11 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
         return SuggestionCard(
             kind="preprocess",
             category="PREPROCESS",
-            title="Trim &amp; filter -- fastp",
-            description="Already trimmed -- this file is the output of a previous trim job. Re-trimming is unusual; use the QC tab to inspect quality instead.",
+            title="Trim & filter -- fastp",
+            description=(
+                "Already trimmed -- this file is the output of a previous trim job. "
+                "Re-trimming is unusual; use the QC tab to inspect quality instead."
+            ),
             status=CardStatus.UNAVAILABLE,
             reason="This file is already the product of trimming.",
         )
@@ -1609,7 +1612,9 @@ def build_qv_card(obj, read_sets) -> SuggestionCard | None:
             s for s in read_sets
             if all(o.role != ObjectRole.TRIMMED_READS for o in s)
         ]
-        if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and len(trimmed_sets) + len(raw_sets) == len(read_sets):
+        if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and (
+            len(trimmed_sets) + len(raw_sets) == len(read_sets)
+        ):
             read_sets = trimmed_sets
         else:
             return unavailable(
@@ -1681,7 +1686,9 @@ def build_kmer_spectra_card(obj, read_sets) -> SuggestionCard | None:
             s for s in read_sets
             if all(o.role != ObjectRole.TRIMMED_READS for o in s)
         ]
-        if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and len(trimmed_sets) + len(raw_sets) == len(read_sets):
+        if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and (
+            len(trimmed_sets) + len(raw_sets) == len(read_sets)
+        ):
             read_sets = trimmed_sets
         else:
             return unavailable(
@@ -1846,7 +1853,8 @@ def build_continuity_card(
     aligners = sorted({*hifi_by_aligner, *nano_by_aligner})
     cross_checked = len(aligners) > 1
     why = f"{len(hifi_candidates) + len(nano_candidates)} long-read alignment(s)"
-    why += f" ({', '.join(aligners)}) against this assembly." if aligners else " against this assembly."
+    why += f" ({', '.join(aligners)}) against this assembly." \
+        if aligners else " against this assembly."
     if cross_checked:
         why += " Both aligners will be cross-checked, per GCI's own recommendation."
 

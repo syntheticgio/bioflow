@@ -136,7 +136,7 @@ def _open_fastq(path: Path) -> IO[str]:
         magic = probe.read(2)
     if magic == b"\x1f\x8b":
         return gzip.open(path, "rt", errors="replace")
-    return open(path, "rt", errors="replace")
+    return open(path, errors="replace")
 
 
 def _estimate_sample_rate(path: Path, target: int) -> int:
@@ -261,7 +261,7 @@ def scan(
     # no fallback needed, and one would risk masking a real Q0 read as the
     # same 0.0 a missing sample would produce.
     matrix = {
-        tile: [s / c for s, c in zip(sums[tile], counts[tile])]
+        tile: [s / c for s, c in zip(sums[tile], counts[tile], strict=False)]
         for tile in sums
     }
 

@@ -1,9 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
 
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
-import { NodeSelector } from "./NodeSelector";
 
 /**
  * A few sentences about what this file's numbers mean, written by a local model.
@@ -26,7 +24,7 @@ export function AiSummary({
   fingerprint,
   factPrefix = "ai_summary",
   statusFn = () => api.summaryStatus(),
-  launchFn = (id: string, targetNode?: string) => api.launchSummary(id, targetNode),
+  launchFn = (id: string) => api.launchSummary(id),
   emptyLabel = "No summary yet for this file.",
 }: {
   facts: Record<string, unknown>;
@@ -42,7 +40,9 @@ export function AiSummary({
   factPrefix?: string;
   /** Overridable for slots other than FILE_SUMMARY. */
   statusFn?: () => ReturnType<typeof api.summaryStatus>;
-  launchFn?: (objectId: string, targetNode?: string) => ReturnType<typeof api.launchSummary>;
+  /** Overridable for slots other than FILE_SUMMARY. Summaries run on the AI
+   * provider, never on a compute node, so there is no target-node param. */
+  launchFn?: (objectId: string) => ReturnType<typeof api.launchSummary>;
   /** Shown when there is no stored summary and generation is unavailable, or
    * before the first one is written. */
   emptyLabel?: string;
@@ -55,7 +55,6 @@ export function AiSummary({
     | string
     | undefined;
   const queryClient = useQueryClient();
-  const [targetNode, setTargetNode] = useState("");
 
   // Whether a model is reachable right now. Not retried and not refetched on
   // focus: a down server is an ordinary state here, and hammering a port that
@@ -69,7 +68,7 @@ export function AiSummary({
   });
 
   const regenerate = useMutation({
-    mutationFn: () => launchFn(objectId, targetNode || undefined),
+    mutationFn: () => launchFn(objectId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       notify.info("Summary queued");
@@ -91,7 +90,6 @@ export function AiSummary({
 
   return (
     <div className="section">
-      <NodeSelector value={targetNode} onChange={setTargetNode} />
       <div className="section-title">
         Summary
         {/* Reuses the existing warn treatment rather than inventing a variant,

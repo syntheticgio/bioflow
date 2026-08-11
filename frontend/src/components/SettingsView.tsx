@@ -193,12 +193,15 @@ function AddProviderModal({
 
         <div className="settings-actions">
           <button
+            className="btn primary"
             onClick={() => create.mutate()}
             disabled={!name || !baseUrl || create.isPending}
           >
             Add
           </button>
-          <button onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={onClose}>
+            Cancel
+          </button>
         </div>
       </div>
     </ModalBackdrop>

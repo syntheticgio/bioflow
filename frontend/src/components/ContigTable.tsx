@@ -39,7 +39,7 @@ export function ContigTable({
       >
         <span>Per-contig coverage</span>
         <a
-          className="btn-text"
+          className="btn"
           href={api.bamStatsDownloadUrl(objectId, reportPath)}
           style={{ marginLeft: "auto" }}
         >

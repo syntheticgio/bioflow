@@ -859,12 +859,48 @@ pub struct CurrentSettingsDto {
     /// set in `.env`); `None` in release mode. Lets the Settings dialog open
     /// on the right version-mode radio without waiting on a second parse.
     pub developer_repo: Option<String>,
+    /// The storage location (`BIOINFO_HOME`) read back from `.env` --
+    /// `None` when there is no install yet or `.env` has no such line. The
+    /// frontend recovers this on launch so a relaunch cannot silently
+    /// overwrite the install's data directory with an empty placeholder
+    /// when the user next presses Apply.
+    pub storage_location: Option<String>,
+    /// Whether the stack is bound to all interfaces, read back from
+    /// `.env`'s `BIND_ADDRESS` -- `None` when there is no install yet or
+    /// `.env` has no such line. Same recovery purpose as
+    /// `storage_location`: without it, a relaunch would reset the
+    /// network-exposure toggle to its default (off) the next time Settings
+    /// is applied.
+    pub network_exposed: Option<bool>,
+}
+
+/// Reads `BIOINFO_HOME` out of a `.env` body -- the storage location.
+pub(crate) fn parse_storage_location(env_contents: &str) -> Option<String> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOINFO_HOME="))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Reads the network-exposure flag out of a `.env` body: the stack is
+/// network-exposed when `BIND_ADDRESS` is `0.0.0.0`, loopback otherwise.
+/// Anything else (unset, unparseable) reads as `false` -- the safe,
+/// locked-down default.
+pub(crate) fn parse_network_exposed(env_contents: &str) -> Option<bool> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIND_ADDRESS="))
+        .map(|value| value.trim() == "0.0.0.0")
 }
 
 /// Reads whatever settings can be recovered from `.env` on disk -- the hard
-/// memory limit and the port, the two fields the UI could not otherwise
-/// reconstruct on a relaunch. See App.tsx's mount effect for why this
-/// exists.
+/// memory limit, the port, the storage location, and network exposure, the
+/// fields the UI could not otherwise reconstruct on a relaunch. See
+/// App.tsx's mount effect for why this exists: without it, a relaunch would
+/// leave storage location and network exposure at their placeholder values,
+/// and the next Apply would silently rewrite `.env` to an empty data
+/// directory and loopback binding.
 #[tauri::command]
 pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSettingsDto, ()> {
     let Some(install_dir) = install_dir_str(&app) else {
@@ -873,12 +909,14 @@ pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSett
             port: None,
             bioflow_tag: DEFAULT_BIOFLOW_TAG.to_string(),
             developer_repo: None,
+            storage_location: None,
+            network_exposed: None,
         });
     };
 
-    // One read of the file, two parses -- `.env` is the source of truth for
-    // both fields, and a missing/unreadable file is the same as a file with
-    // neither line: both read as `None`.
+    // One read of the file, four parses -- `.env` is the source of truth for
+    // all fields, and a missing/unreadable file is the same as a file with
+    // none of the lines: everything reads as `None`.
     let env_contents =
         std::fs::read_to_string(Path::new(&install_dir).join(".env")).unwrap_or_default();
 
@@ -890,6 +928,8 @@ pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSett
         developer_repo: parse_developer_repo(&env_contents),
         bioflow_tag: parse_bioflow_tag(&env_contents)
             .unwrap_or_else(|| DEFAULT_BIOFLOW_TAG.to_string()),
+        storage_location: parse_storage_location(&env_contents),
+        network_exposed: parse_network_exposed(&env_contents),
     })
 }
 
@@ -1398,5 +1438,65 @@ mod tests {
         std::fs::write(tmp.path().join(".env"), "BIOINFO_HOME=/data\nWEB_PORT=9000\n")
             .unwrap();
         assert_eq!(web_port_from_env(tmp.path()), Some(9000));
+    }
+
+    #[test]
+    fn reads_storage_location_back_from_env() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\n";
+        assert_eq!(parse_storage_location(env), Some("/data".to_string()));
+    }
+
+    #[test]
+    fn absent_storage_location_reads_as_none() {
+        let env = "WEB_PORT=5173\n";
+        assert_eq!(parse_storage_location(env), None);
+    }
+
+    #[test]
+    fn empty_storage_location_reads_as_none() {
+        // A hand-emptied BIOINFO_HOME= should read as "not present" rather
+        // than an empty path the UI would show as a blank field and then
+        // apply back to .env.
+        let env = "BIOINFO_HOME=\nWEB_PORT=5173\n";
+        assert_eq!(parse_storage_location(env), None);
+    }
+
+    #[test]
+    fn exposed_bind_address_reads_as_network_exposed() {
+        let env = "BIND_ADDRESS=0.0.0.0\n";
+        assert_eq!(parse_network_exposed(env), Some(true));
+    }
+
+    #[test]
+    fn loopback_bind_address_reads_as_not_exposed() {
+        let env = "BIND_ADDRESS=127.0.0.1\n";
+        assert_eq!(parse_network_exposed(env), Some(false));
+    }
+
+    #[test]
+    fn absent_bind_address_reads_as_none() {
+        // None (not Some(false)) so the frontend can tell "locked down by
+        // explicit choice" from "unknown" and keep its placeholder default.
+        let env = "WEB_PORT=5173\n";
+        assert_eq!(parse_network_exposed(env), None);
+    }
+
+    #[test]
+    fn settings_fields_round_trip_through_render_env() {
+        // Every parser here must agree with render_env's write format, or a
+        // relaunch would silently lose one Settings dialog feature on Apply.
+        let settings = crate::settings::CurrentSettings {
+            storage_location: std::path::PathBuf::from("/data"),
+            port: 5173,
+            network_exposed: true,
+            hard_mem_mb: None,
+            bioflow_tag: "0.3.0-alpha".to_string(),
+            developer_repo: None,
+        };
+        let env = crate::settings::render_env(&settings, &[]);
+        assert_eq!(parse_storage_location(&env), Some("/data".to_string()));
+        assert_eq!(parse_network_exposed(&env), Some(true));
+        assert_eq!(parse_bioflow_tag(&env), Some("0.3.0-alpha".to_string()));
+        assert_eq!(parse_developer_repo(&env), None);
     }
 }

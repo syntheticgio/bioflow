@@ -91,7 +91,9 @@ class ConversationTurnIn(BaseModel):
     tool_calls: list[ToolCallTurnOut] | None = None
 
 
-async def _get_or_create_conversation(project_id: PydanticObjectId, owner: str) -> ProjectConversation:
+async def _get_or_create_conversation(
+    project_id: PydanticObjectId, owner: str
+) -> ProjectConversation:
     convo = await ProjectConversation.find_one(
         ProjectConversation.owner == owner,
         ProjectConversation.project_id == project_id,

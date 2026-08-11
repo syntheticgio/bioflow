@@ -51,7 +51,7 @@ const HELP_ITEMS: { to: string; label: string; section: string }[] = [
   { to: "/help/software", label: "Software", section: "About BioFlow" },
   { to: "/help/sources", label: "Data Sources", section: "About BioFlow" },
   { to: "/help/feedback", label: "Feedback", section: "Support" },
-  { to: "/help/placeholder", label: "Placeholder", section: "Support" },
+  { to: "/help/support", label: "Support", section: "Support" },
 ];
 
 export function Header() {

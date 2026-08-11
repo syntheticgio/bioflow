@@ -30,7 +30,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/launcher-v')
     runs-on: [self-hosted, X64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
 
   # Both jobs run on self-hosted runners: this repo has no GitHub-hosted ones.
@@ -59,7 +59,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Unlock the CI signing keychain
         # The Developer ID identity lives in a dedicated ci-signing.keychain-db,
@@ -157,7 +157,7 @@ jobs:
         if: always()
         run: rm -f "${{ steps.apikey.outputs.path }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: launcher-macos-arm64
           path: launcher/src-tauri/target/release/bundle/dmg/*.dmg
@@ -170,7 +170,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         # Tauri v2 needs the -dev packages, not just the runtime libraries --
@@ -193,7 +193,7 @@ jobs:
         working-directory: launcher
         run: npm run tauri build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: launcher-linux-amd64
           path: |
@@ -212,7 +212,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: bundles
           merge-multiple: true

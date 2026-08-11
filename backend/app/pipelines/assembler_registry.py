@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Literal
 
-from app.pipelines import assemblers, tools
+from app.pipelines import tools
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.aligner_registry import Choice, ParamField
 from app.pipelines.assemblers import Assembler, Output, OutputKind

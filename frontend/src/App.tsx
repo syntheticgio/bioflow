@@ -22,6 +22,7 @@ import { HelpDatabases } from "./components/HelpDatabases";
 import { HelpFeedback } from "./components/HelpFeedback";
 import { HelpGenomeAnalysisReview } from "./components/HelpGenomeAnalysisReview";
 import { HelpPlaceholder } from "./components/HelpPlaceholder";
+import { HelpSupport } from "./components/HelpSupport";
 import { HelpSoftware } from "./components/HelpSoftware";
 import { HelpSources } from "./components/HelpSources";
 import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
@@ -143,6 +144,7 @@ function Shell() {
             element={<HelpGenomeAnalysisReview />}
           />
           <Route path="/help/feedback" element={<FeedbackRoute />} />
+          <Route path="/help/support" element={<HelpSupport />} />
           <Route path="/help/placeholder" element={<HelpPlaceholder />} />
         </Routes>
         {!singleColumn && <DetailPanel />}

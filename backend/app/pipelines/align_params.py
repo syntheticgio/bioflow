@@ -175,7 +175,7 @@ def _validate_comma_pair(value: str, name: str) -> None:
     except ValueError:
         raise ValidationError(
             f"{name} must be a comma-separated pair of integers, got {value!r}"
-        )
+        ) from None
 
 
 # minimap2 presets. Not cosmetic: the wrong preset for long reads produces
