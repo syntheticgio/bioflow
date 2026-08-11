@@ -5309,6 +5309,11 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--success);
 }
 
+.nodes-status.unknown {
+  background: color-mix(in srgb, var(--warn) 15%, transparent);
+  color: var(--warn);
+}
+
 /* --- Node provisioning form --- */
 
 .provision-add-btn {

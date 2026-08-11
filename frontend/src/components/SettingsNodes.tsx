@@ -114,6 +114,7 @@ export function SettingsNodes() {
                 <th>Status</th>
                 <th>Workers</th>
                 <th>Running</th>
+                <th>Queued</th>
                 <th>Reserved CPU</th>
                 <th>Reserved RAM</th>
               </tr>
@@ -425,12 +426,22 @@ function NodeRow({ node }: { node: NodeInfo }) {
     <tr className={node.online ? "" : "offline"}>
       <td className="nodes-name">{node.node_id}</td>
       <td>
-        <span className={`nodes-status ${node.online ? "online" : ""}`}>
-          {node.online ? "Online" : "Offline"}
-        </span>
+        {node.enrollment === "unknown" && node.workers === 0 ? (
+          <span
+            className="nodes-status unknown"
+            title={`Jobs are queued for "${node.node_id}", but no node with that name has ever enrolled. Check the target node name used at launch.`}
+          >
+            Unknown
+          </span>
+        ) : (
+          <span className={`nodes-status ${node.online ? "online" : ""}`}>
+            {node.online ? "Online" : "Offline"}
+          </span>
+        )}
       </td>
       <td>{node.online_workers}/{node.workers}</td>
       <td>{node.running_jobs}</td>
+      <td>{node.queued_jobs}</td>
       <td>{node.reserved.cpu} CPU</td>
       <td>{memLabel}</td>
     </tr>
