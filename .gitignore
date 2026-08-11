@@ -23,6 +23,7 @@ skills-lock.json
 
 # Isolated feature worktrees
 .worktrees/
+.pi-subagents/
 
 # Per-machine build setup: signing identities, API key IDs, local file paths.
 # Never contains the private key itself (that lives outside the repo), but
