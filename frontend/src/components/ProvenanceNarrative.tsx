@@ -175,10 +175,6 @@ export function ProvenanceNarrative({
         {proseText && (
           <>
             <div className="section-title methods-paragraph-title">Methods paragraph</div>
-            <div className="section-note">
-              Generated from {data.lineage.length} lineage{" "}
-              {data.lineage.length === 1 ? "step" : "steps"}.
-            </div>
             <p className="ai-summary-body">{proseText}</p>
             <div className="detail-actions">
               <button
