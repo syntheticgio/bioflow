@@ -27,6 +27,14 @@ pub trait RegistryClient {
     /// collapses to `None` on purpose -- the caller cannot tell network
     /// trouble from "no update," and per the spec it must not try to.
     fn remote_digest(&self, image: &str, tag: &str) -> Option<String>;
+
+    /// The set of tags the registry reports for `image`, or an empty `Vec`
+    /// when the call could not complete for any reason (offline, DNS failure,
+    /// timeout, non-2xx, malformed body). Every failure mode collapses to
+    /// empty on purpose -- the only caller uses this to populate a dropdown,
+    /// and a registry hiccup must not surface as an error to the user, just
+    /// as "no options to offer."
+    fn tags_for(&self, image: &str) -> Vec<String>;
 }
 
 /// The local seam: asks the Docker daemon (already running, so this is a
@@ -48,6 +56,78 @@ pub fn update_available<R: RegistryClient, L: LocalImageInspector>(
     let remote = registry.remote_digest(image, tag)?;
     let local_digest = local.local_digest(image, tag)?;
     Some(remote != local_digest)
+}
+
+/// The version choices the Settings dialog offers for `BIOFLOW_TAG`.
+///
+/// `release` is always present (resolves to the `:latest` tag the published
+/// images carry) and is the dropdown's default. `alpha`/`beta` are `Some` only
+/// when the registry actually reports a tag for that stage -- a stage with no
+/// published image yet renders as a disabled option rather than a phantom
+/// tag. `latest` itself is never emitted as a choice here; "Release" maps to
+/// it implicitly.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct VersionOptions {
+    pub release: String,
+    pub alpha: Option<String>,
+    pub beta: Option<String>,
+}
+
+impl VersionOptions {
+    /// No network available (or the registry could not be reached) -- just the
+    /// always-present release option. The UI falls back to this so the
+    /// dropdown never goes gray; only its pre-release rows disable.
+    pub fn offline() -> Self {
+        Self {
+            release: "latest".to_string(),
+            alpha: None,
+            beta: None,
+        }
+    }
+}
+
+/// Splits a tag like `0.3.0-alpha` into a `(major, minor, patch)` triple for
+/// ordering, returning `None` unless `tag` ends in `-{suffix}` with a parseable
+/// semver-ish stem before it. `sha-*` and bare `latest` never match -- they
+/// are not versioned stage releases.
+fn version_tuple(tag: &str, suffix: &str) -> Option<(u32, u32, u32)> {
+    let stem = tag.strip_suffix(&format!("-{}", suffix))?;
+    let mut parts = stem.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    let patch: u32 = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// Classifies a registry tag list into `VersionOptions`. Pure and
+/// side-effect-free so the classification logic is testable without hitting
+/// GHCR -- the `tags_for` call that produced the list is exercised by the
+/// ignored real-registry test below.
+pub fn classify_version_options(tags: &[String]) -> VersionOptions {
+    let pick_stage = |suffix: &str| -> Option<String> {
+        tags.iter()
+            .filter_map(|t| version_tuple(t, suffix).map(|v| (v, t)))
+            .max_by_key(|(v, _)| *v)
+            .map(|(_, t)| t.clone())
+    };
+
+    VersionOptions {
+        release: "latest".to_string(),
+        alpha: pick_stage("alpha"),
+        beta: pick_stage("beta"),
+    }
+}
+
+/// Builds the dropdown choices for a given image by fetching its tag list
+/// from the registry and classifying it. The tag fetch is delegated to
+/// `RegistryClient::tags_for`, keeping this pure classification in
+/// `classify_version_options` so it is testable without network.
+pub fn list_version_options<R: RegistryClient>(registry: &R, image: &str) -> VersionOptions {
+    let tags = registry.tags_for(image);
+    classify_version_options(&tags)
 }
 
 /// A real `RegistryClient` for GHCR (`ghcr.io`), the registry named in the
@@ -103,6 +183,57 @@ impl RegistryClient for GhcrClient {
             .ok()?;
         response.header("Docker-Content-Digest").map(str::to_string)
     }
+
+    fn tags_for(&self, image: &str) -> Vec<String> {
+        let agent = ureq::AgentBuilder::new().timeout(self.timeout).build();
+
+        // GHCR requires the same anonymous bearer token that `remote_digest`
+        // fetches -- a failed exchange is the "could not complete" case this
+        // method collapses to an empty list.
+        let token_url = format!(
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:{image}:pull"
+        );
+        let token_response = match agent.get(&token_url).call() {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        let token_body: serde_json::Value = match token_response.into_json() {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        let token = match token_body.get("token").and_then(|t| t.as_str()) {
+            Some(t) => t.to_string(),
+            None => return Vec::new(),
+        };
+
+        // `GET /v2/<name>/tags/list` returns {"name": "...", "tags": [...]}.
+        // 404 (image not found, or a name GHCR does not recognize) is the
+        // "no tags" case here, not an error -- degrade to empty.
+        let tags_url = format!("https://ghcr.io/v2/{image}/tags/list");
+        let response = match agent
+            .get(&tags_url)
+            .set("Authorization", &format!("Bearer {token}"))
+            .call()
+        {
+            Ok(r) => r,
+            Err(_) => return Vec::new(),
+        };
+        if response.status() != 200 {
+            return Vec::new();
+        }
+        let body: serde_json::Value = match response.into_json() {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        body.get("tags")
+            .and_then(|t| t.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 /// A real `LocalImageInspector` reading the digest Docker already recorded
@@ -138,6 +269,10 @@ mod tests {
     impl RegistryClient for FakeRegistry {
         fn remote_digest(&self, _image: &str, _tag: &str) -> Option<String> {
             self.0.map(str::to_string)
+        }
+
+        fn tags_for(&self, _image: &str) -> Vec<String> {
+            Vec::new()
         }
     }
 
@@ -192,6 +327,10 @@ mod tests {
             self.calls.set(self.calls.get() + 1);
             None
         }
+
+        fn tags_for(&self, _image: &str) -> Vec<String> {
+            Vec::new()
+        }
     }
 
     #[test]
@@ -201,6 +340,70 @@ mod tests {
         let result = update_available(&registry, &local, "org/img", "latest");
         assert_eq!(result, None);
         assert_eq!(registry.calls.get(), 1);
+    }
+
+    #[test]
+    fn classify_picks_the_highest_alpha_and_leaves_beta_null() {
+        // A mixed bag: versioned release + a sha handle + `latest`, the
+        // kind of tag set GHCR actually returns for the bioflow images.
+        let tags: Vec<String> =
+            vec!["0.2.6", "0.3.0-alpha", "0.1.0", "sha-3055f0e", "latest"]
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
+        let opts = classify_version_options(&tags);
+        assert_eq!(opts.release, "latest");
+        assert_eq!(opts.alpha, Some("0.3.0-alpha".to_string()));
+        assert_eq!(opts.beta, None);
+    }
+
+    #[test]
+    fn classify_picks_the_highest_beta_when_present() {
+        let tags: Vec<String> =
+            vec!["0.4.0-alpha", "0.4.0-beta", "0.4.0", "0.5.0-alpha"]
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect();
+        let opts = classify_version_options(&tags);
+        assert_eq!(opts.alpha, Some("0.5.0-alpha".to_string()));
+        assert_eq!(opts.beta, Some("0.4.0-beta".to_string()));
+    }
+
+    #[test]
+    fn classify_without_any_stage_tag_disables_only_that_stage() {
+        let tags: Vec<String> = vec!["0.2.6", "latest"]
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect();
+        let opts = classify_version_options(&tags);
+        assert_eq!(opts.release, "latest");
+        assert_eq!(opts.alpha, None);
+        assert_eq!(opts.beta, None);
+    }
+
+    #[test]
+    fn classify_on_empty_tag_list_is_release_only() {
+        let opts = classify_version_options(&[]);
+        assert_eq!(opts.release, "latest");
+        assert_eq!(opts.alpha, None);
+        assert_eq!(opts.beta, None);
+    }
+
+    /// Hits the real GHCR registry to prove `tags_for`'s HTTP mechanics
+    /// (token exchange, `GET /v2/<name>/tags/list`, JSON body shape) actually
+    /// work against a real OCI registry, not only against FakeRegistry. Uses a
+    /// well-known public package rather than BioFlow's own image (which does
+    /// not exist yet -- blocked on #37). Ignored by default; run explicitly
+    /// with `cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn ghcr_client_lists_real_tags_from_a_public_image() {
+        let client = GhcrClient::default();
+        let tags = client.tags_for("homebrew/core/rust");
+        assert!(
+            !tags.is_empty(),
+            "expected at least one tag from a real public GHCR image, got {tags:?}"
+        );
     }
 
     /// Hits the real GHCR registry -- not BioFlow's own image, which does

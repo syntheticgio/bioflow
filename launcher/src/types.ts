@@ -15,4 +15,18 @@ export interface Settings {
   networkExposed: boolean;
   /** GB as typed, or "" for no hard cap. Converted to MB at the IPC edge. */
   hardMemGb: string;
+  /** Tag the stack is pinned to in release mode (e.g. "latest", "0.3.0-alpha").
+   *  Mirrors BIOFLOW_TAG in .env. */
+  bioflowTag: string;
+  /** When non-null, the stack runs in developer mode using locally built images
+   *  from this checkout path. Mirrors BIOFLOW_DEVELOPER_REPO in .env. */
+  developerRepo: string | null;
+}
+
+/** Available version choices for the Settings dropdown, fetched from GHCR.
+ *  Mirrors update_check.rs VersionOptions. */
+export interface VersionOptions {
+  release: string;
+  alpha: string | null;
+  beta: string | null;
 }

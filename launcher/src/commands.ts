@@ -119,17 +119,35 @@ export function runFirstSetup(args: {
 export interface CurrentSettings {
   hardMemMb: number | null;
   port: number | null;
+  /** Tag the stack is pinned to in release mode. Mirrors BIOFLOW_TAG in .env. */
+  bioflowTag: string;
+  /** When non-null, the stack runs in developer mode using locally built images
+   *  from this checkout path. Mirrors BIOFLOW_DEVELOPER_REPO in .env. */
+  developerRepo: string | null;
+}
+
+/** Available version choices for the Settings dropdown, fetched from GHCR.
+ *  Mirrors update_check.rs VersionOptions. */
+export interface VersionOptions {
+  release: string;
+  alpha: string | null;
+  beta: string | null;
 }
 
 // Reads back whatever settings can be recovered from .env on disk -- the
-// hard memory limit and the port, the two fields the UI could not otherwise
-// reconstruct on a relaunch. See App.tsx's mount effect for why this exists.
+// hard memory limit, the port, and the version tag/developer repo. See
+// App.tsx's mount effect for why this exists.
 export function currentSettings(): Promise<CurrentSettings> {
-  return invoke<{ hard_mem_mb: number | null; port: number | null }>(
-    "current_settings",
-  ).then((d) => ({
+  return invoke<{
+    hard_mem_mb: number | null;
+    port: number | null;
+    bioflow_tag: string;
+    developer_repo: string | null;
+  }>("current_settings").then((d) => ({
     hardMemMb: d.hard_mem_mb,
     port: d.port,
+    bioflowTag: d.bioflow_tag,
+    developerRepo: d.developer_repo,
   }));
 }
 
@@ -138,6 +156,8 @@ export function applySettings(args: {
   port: number;
   networkExposed: boolean;
   hardMemGb: string;
+  bioflowTag: string;
+  developerRepo: string | null;
 }): Promise<void> {
   const hard = parseHardMemGb(args.hardMemGb);
   return invoke("apply_settings", {
@@ -146,8 +166,26 @@ export function applySettings(args: {
       port: args.port,
       network_exposed: args.networkExposed,
       hard_mem_mb: hard.kind === "set" ? hard.mb : null,
+      bioflow_tag: args.bioflowTag,
+      developer_repo: args.developerRepo,
     },
   });
+}
+
+/** Fetches the available version options (release tag + any alpha/beta stage
+ *  tags) from the GHCR registry. Degrades to Release-only on any failure
+ *  (offline, timeout, registry unreachable) -- the dropdown must open without
+ *  a network dependency. */
+export function listVersionOptions(): Promise<VersionOptions> {
+  return invoke("list_version_options");
+}
+
+/** Rebuilds locally-built images and restarts the stack against them, without
+ *  changing any settings. Only meaningful when developer mode is active
+ *  (developerRepo is set). The button is shown/hidden by Settings.tsx based on
+ *  the selected version mode. */
+export function rebuildDeveloper(): Promise<void> {
+  return invoke("rebuild_developer");
 }
 
 export interface MigrationProgress {

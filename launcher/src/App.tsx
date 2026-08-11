@@ -36,6 +36,8 @@ export function App() {
     port: 5173,
     networkExposed: false,
     hardMemGb: "",
+    bioflowTag: "latest",
+    developerRepo: null,
   });
 
   // Runs once on mount to recover the two settings fields a relaunch
@@ -48,12 +50,14 @@ export function App() {
   // user is mid-typing there.
   useEffect(() => {
     let cancelled = false;
-    currentSettings().then(({ hardMemMb, port }) => {
+    currentSettings().then(({ hardMemMb, port, bioflowTag, developerRepo }) => {
       if (cancelled) return;
       setSettings((prev) => ({
         ...prev,
         ...(hardMemMb != null ? { hardMemGb: String(hardMemMb / 1024) } : {}),
         ...(port != null ? { port } : {}),
+        bioflowTag,
+        developerRepo,
       }));
     });
     return () => {

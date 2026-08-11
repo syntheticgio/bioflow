@@ -19,7 +19,7 @@ use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefau
 use crate::setup::node::{self as node_setup, NodeInstallError, NodeInstallInputs};
 use crate::remote::{self, SshCreds, SshResult};
 use crate::state::{self, InstallInfo, LauncherState};
-use crate::update_check::{self, DockerImageInspector, GhcrClient};
+use crate::update_check::{self, DockerImageInspector, GhcrClient, VersionOptions};
 
 /// The two images the design spec's "Changes required in this repository"
 /// section names -- api and worker share bioflow-backend, so there are only
@@ -456,6 +456,15 @@ pub struct ApplySettingsArgs {
     pub network_exposed: bool,
     /// `None` when the user left the field blank -- no hard cap.
     pub hard_mem_mb: Option<u32>,
+    /// The released version the stack is pinned to: `"latest"` for Release,
+    /// or a pre-release tag string (`0.3.0-alpha`, ...) the version dropdown
+    /// resolved from the registry. Ignored when `developer_repo` is set.
+    pub bioflow_tag: String,
+    /// When `Some`, switch this install to developer mode: build and run images
+    /// locally from this checkout path, ignoring `bioflow_tag`. When `None`,
+    /// release mode -- use `bioflow_tag`. Passed as a String over IPC;
+    /// `settings::apply` converts it to a `PathBuf`.
+    pub developer_repo: Option<String>,
 }
 
 /// `async`/`spawn_blocking` for the same reason as `run_stack` above --
@@ -475,6 +484,8 @@ pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs
         port: args.port,
         network_exposed: args.network_exposed,
         hard_mem_mb: args.hard_mem_mb,
+        bioflow_tag: args.bioflow_tag,
+        developer_repo: args.developer_repo.map(PathBuf::from),
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -485,6 +496,7 @@ pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs
     .map_err(|e| e.to_string())?
     .map_err(|e| match e {
         SettingsUpdateError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
+        SettingsUpdateError::BuildFailed { output } => output,
         SettingsUpdateError::RecreateFailed { output } => output,
     })?;
 
@@ -723,18 +735,21 @@ pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishS
     // The migration dialog carries no hard-limit control of its own, so this
     // preserves whatever is already on disk rather than clobbering it on
     // every migration -- same reasoning as apply_settings not being the
-    // place that introduces a limit change. Read directly rather than via
-    // the current_settings command, matching how the BIOINFO_HOME read above
-    // in start_storage_migration already treats .env as the source of truth.
-    let hard_mem_mb = std::fs::read_to_string(install_dir.join(".env"))
-        .ok()
-        .and_then(|contents| parse_hard_mem_mb(&contents));
+    // place that introduces a limit change, and the same reasoning that
+    // preserves the user's chosen version/tag here rather than resetting it
+    // to defaults. Read .env once and parse every field from it, matching
+    // how start_storage_migration already treats .env as the source of truth.
+    let env_contents =
+        std::fs::read_to_string(install_dir.join(".env")).unwrap_or_default();
 
     let settings = CurrentSettings {
         storage_location: PathBuf::from(args.new_location),
         port: args.port,
         network_exposed: args.network_exposed,
-        hard_mem_mb,
+        hard_mem_mb: parse_hard_mem_mb(&env_contents),
+        bioflow_tag: parse_bioflow_tag(&env_contents)
+            .unwrap_or_else(|| DEFAULT_BIOFLOW_TAG.to_string()),
+        developer_repo: parse_developer_repo(&env_contents).map(PathBuf::from),
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -745,6 +760,7 @@ pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishS
     .map_err(|e| e.to_string())?
     .map_err(|e| match e {
         SettingsUpdateError::CouldNotWriteEnv { reason } => format!("could not write .env: {reason}"),
+        SettingsUpdateError::BuildFailed { output } => output,
         SettingsUpdateError::RecreateFailed { output } => output,
     })?;
 
@@ -781,6 +797,39 @@ fn web_port_from_env(install_dir: &Path) -> Option<u16> {
         .and_then(|contents| parse_web_port(&contents))
 }
 
+/// The default `BIOFLOW_TAG` when `.env` carries no tag line -- the value
+/// `render_env` has always hard-coded, and the choice the dropdown resolves
+/// "Release" to. Named so every reader of this file agrees on it rather than
+/// it being sprinkled as a bare `"latest"` in a few places and drifting.
+const DEFAULT_BIOFLOW_TAG: &str = "latest";
+
+/// Reads `BIOFLOW_TAG` out of a `.env` body -- the released version the stack
+/// is pinned to. `None` when the line is absent (developer mode, or a
+/// hand-written `.env` that omits it): the caller falls back to
+/// `DEFAULT_BIOFLOW_TAG`. An empty value also reads as `None`, so a blank
+/// line cannot accidentally pin an empty tag. Same hand-edited-`.env`
+/// tolerance as `parse_hard_mem_mb`/`parse_web_port`.
+pub(crate) fn parse_bioflow_tag(env_contents: &str) -> Option<String> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOFLOW_TAG="))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// Reads `BIOFLOW_DEVELOPER_REPO` out of a `.env` body -- the on-disk flag
+/// that developer mode is active, set to the path of a local BioFlow checkout
+/// whose images are built into `:local` tags. Absent in release mode. As
+/// with the other `.env` parsers, hand-editing is tolerated: a malformed
+/// (empty) value reads as `None` rather than panicking the launcher on open.
+pub(crate) fn parse_developer_repo(env_contents: &str) -> Option<String> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("BIOFLOW_DEVELOPER_REPO="))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 /// Reads `BIOFLOW_HARD_MEM_MB` out of a `.env` body.
 ///
 /// Anything unparseable reads as `None` rather than erroring: a hand-edited
@@ -802,6 +851,14 @@ pub struct CurrentSettingsDto {
     /// frontend recovers this on launch so the Open button and port display
     /// stay right for installs the launcher did not create this session.
     pub port: Option<u16>,
+    /// The `BIOFLOW_TAG` the stack is pinned to, read from `.env` to round-trip
+    /// a relaunch without the dropdown's registry call. Defaults to
+    /// `DEFAULT_BIOFLOW_TAG` (`latest`) when `.env` omits the line.
+    pub bioflow_tag: String,
+    /// `Some(path)` when developer mode is active (`BIOFLOW_DEVELOPER_REPO` is
+    /// set in `.env`); `None` in release mode. Lets the Settings dialog open
+    /// on the right version-mode radio without waiting on a second parse.
+    pub developer_repo: Option<String>,
 }
 
 /// Reads whatever settings can be recovered from `.env` on disk -- the hard
@@ -814,6 +871,8 @@ pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSett
         return Ok(CurrentSettingsDto {
             hard_mem_mb: None,
             port: None,
+            bioflow_tag: DEFAULT_BIOFLOW_TAG.to_string(),
+            developer_repo: None,
         });
     };
 
@@ -826,6 +885,61 @@ pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSett
     Ok(CurrentSettingsDto {
         hard_mem_mb: parse_hard_mem_mb(&env_contents),
         port: parse_web_port(&env_contents),
+        // Developer mode if BIOFLOW_DEVELOPER_REPO is set (takes precedence);
+        // otherwise the release tag, defaulting to `latest` when absent.
+        developer_repo: parse_developer_repo(&env_contents),
+        bioflow_tag: parse_bioflow_tag(&env_contents)
+            .unwrap_or_else(|| DEFAULT_BIOFLOW_TAG.to_string()),
+    })
+}
+
+/// The version choices offered by the Settings dialog's version dropdown:
+/// always `release` (resolves to the `:latest` image) plus any alpha/beta
+/// stage tag the registry reports. A stage is only included when a published
+/// tag exists, so the dropdown can disable it rather than offer a phantom.
+/// Fails silently: a registry/network hiccup collapses to Release-only
+/// (`VersionOptions::offline`), never an error -- the dropdown must degrade
+/// gracefully offline rather than block opening Settings.
+///
+/// async/spawn_blocking because `GhcrClient::tags_for` makes a real HTTP call
+/// to ghcr.io (the same one check_for_update already makes for the Update
+/// button, so this shares its cost model).
+#[tauri::command]
+pub async fn list_version_options() -> VersionOptions {
+    tauri::async_runtime::spawn_blocking(|| {
+        update_check::list_version_options(&GhcrClient::default(), CHECKABLE_IMAGES[0])
+    })
+    .await
+    .unwrap_or_else(|_| update_check::VersionOptions::offline())
+}
+
+/// Rebuilds the locally-built `:local` images and restarts the stack against
+/// them, without rewriting `.env` or the override file that already point at
+/// them. This is the developer-mode "Rebuild" button: a code edit happened
+/// since the last Apply, and the user wants the running containers to pick it
+/// up without re-saving settings. async/spawn_blocking so the (potentially
+/// long) build does not stall the IPC/UI thread.
+#[tauri::command]
+pub async fn rebuild_developer(app: State<'_, LauncherApp>) -> Result<(), String> {
+    let install_dir = app
+        .install_dir
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("not installed")?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        settings::rebuild_developer(&docker, &install_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| match e {
+        SettingsUpdateError::BuildFailed { output } => output,
+        SettingsUpdateError::CouldNotWriteEnv { reason } => {
+            format!("could not write override: {reason}")
+        }
+        SettingsUpdateError::RecreateFailed { output } => output,
     })
 }
 
@@ -1253,6 +1367,8 @@ mod tests {
             port: 5173,
             network_exposed: false,
             hard_mem_mb: Some(16384),
+            bioflow_tag: "latest".to_string(),
+            developer_repo: None,
         };
         let env = crate::settings::render_env(&settings, &[]);
         assert_eq!(parse_hard_mem_mb(&env), Some(16384));
