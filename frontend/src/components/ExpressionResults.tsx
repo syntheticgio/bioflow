@@ -47,6 +47,7 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [onlySignificant, setOnlySignificant] = useState(false);
+  const [targetNode, setTargetNode] = useState("");
 
   const alpha = f.alpha ?? 0.05;
 
@@ -183,7 +184,7 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
         fingerprint={obj.summary_fingerprint ?? undefined}
         factPrefix="ai_de_summary"
         statusFn={() => api.deSummaryStatus()}
-        launchFn={(id) => api.launchDeSummary(id)}
+        launchFn={(id) => api.launchDeSummary(id, targetNode || undefined)}
         emptyLabel="No summary yet for this result."
       />
 

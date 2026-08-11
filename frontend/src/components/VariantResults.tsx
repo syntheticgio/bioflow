@@ -1,9 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { FactsColumns } from "./FactsColumns";
+import { NodeSelector } from "./NodeSelector";
 import { DistributionChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
@@ -15,9 +17,10 @@ import { VariantTable } from "./VariantTable";
 export function VariantResults({ obj }: { obj: ObjectDetailData }) {
   const qc = useQueryClient();
   const f = obj.facts as VcfStatsFacts;
+  const [targetNode, setTargetNode] = useState("");
 
   const compute = useMutation({
-    mutationFn: () => api.launchVcfStats(obj.id),
+    mutationFn: () => api.launchVcfStats(obj.id, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.info("Computing results");
@@ -30,6 +33,7 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
   if (!hasResults) {
     return (
       <div className="section">
+        <NodeSelector value={targetNode} onChange={setTargetNode} />
         <div className="section-title">Variant summary</div>
         <div className="section-note">
           Call counts, Ti/Tv, QUAL and depth distributions, and the complete
@@ -101,7 +105,7 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
         fingerprint={obj.summary_fingerprint ?? undefined}
         factPrefix="ai_variant_summary"
         statusFn={() => api.variantSummaryStatus()}
-        launchFn={(id) => api.launchVariantSummary(id)}
+        launchFn={(id) => api.launchVariantSummary(id, targetNode || undefined)}
         emptyLabel="No summary yet for this file."
       />
 
