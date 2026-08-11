@@ -432,6 +432,14 @@ async def _node_breakdown() -> tuple[list[dict], str | None]:
 
     Imported inside the function: `app.api.v1.nodes` imports from
     `app.queue`, so a module-level import here would be circular.
+
+    Runs unconditionally on every call, including from the three views that
+    poll this endpoint every 5s but don't render `nodes` (only the nodes
+    settings table does). Accepted rather than cached: node counts on a
+    single-user local install are small, and this repo optimizes for "the
+    person using it can see their change" over correctness-at-scale --
+    caching would trade a real staleness risk for a poll-cost saving that
+    doesn't matter at this scale.
     """
     try:
         from app.api.v1.nodes import enumerate_nodes
