@@ -70,7 +70,7 @@ jobs:
       # — without it, build-push-action falls back to the default `docker`
       # driver which can't export the cache.
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build prod image
         uses: docker/build-push-action@v6
