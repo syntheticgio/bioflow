@@ -1,11 +1,15 @@
 """Object endpoints."""
 
+import hashlib
+import secrets
+
 from dataclasses import asdict
 from pathlib import Path
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, Query, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Header, Query, Request, status
+from fastapi.exceptions import HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.api.deps import LinkableOwnerDep, OwnerDep
 from app.api.v1.schemas import (
@@ -40,7 +44,8 @@ from app.services import (
     timing_service,
 )
 from app.services.ai import Completion
-from app.storage.paths import blob_path
+from app.config import settings
+from app.storage.paths import blob_path, validate_sha256
 
 router = APIRouter(prefix="/objects", tags=["objects"])
 log = get_logger(__name__)
@@ -373,3 +378,102 @@ async def delete_object(object_id: PydanticObjectId, owner: OwnerDep) -> None:
     """Detach the object. The blob's bytes are unlinked later by GC, once its
     refcount has been zero past the grace window."""
     await object_service.delete_object(object_id, owner=owner)
+
+
+# -------------------------------------------------------------------------
+# Blob transfer endpoints — used by compute nodes to pull/push
+# content-addressed blobs to the primary.
+# -------------------------------------------------------------------------
+
+_BLOB_CHUNK = 64 * 1024  # 64 KiB streaming chunks
+
+
+def _check_node_auth(x_node_secret: str | None) -> None:
+    """Reject if the node shared secret is set and the header doesn't match.
+
+    When `node_shared_secret` is empty (default on a primary that never set
+    one up), blob endpoints are open. Once a secret is configured, every
+    blob request must carry the matching `X-Node-Secret` header.
+    """
+    if not settings.node_shared_secret:
+        return
+    if not x_node_secret:
+        raise HTTPException(403, "Missing X-Node-Secret header")
+    # Constant-time comparison.
+    if not secrets.compare_digest(x_node_secret, settings.node_shared_secret):
+        raise HTTPException(403, "Invalid X-Node-Secret header")
+
+
+@router.get("/blob/{digest}")
+async def get_blob(
+    digest: str, x_node_secret: str | None = Header(None)
+) -> StreamingResponse:
+    """Serve a content-addressed blob's bytes as a streaming response.
+
+    Compute nodes call this to pull input files they don't have locally.
+    No owner check — blobs are content-addressed, not project-scoped.
+    """
+    _check_node_auth(x_node_secret)
+
+    try:
+        validate_sha256(digest)
+    except ValidationError:
+        raise ValidationError(f"Invalid digest: {digest}")
+
+    path = blob_path(digest)
+    if not path.is_file():
+        raise NotFoundError(f"Blob not found: {digest}")
+
+    def stream():
+        with open(path, "rb") as f:
+            while chunk := f.read(_BLOB_CHUNK):
+                yield chunk
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Length": str(path.stat().st_size),
+            "X-BioFlow-Sha256": digest,
+        },
+    )
+
+
+@router.put("/blob/{digest}", status_code=status.HTTP_201_CREATED)
+async def put_blob(
+    digest: str,
+    request: Request,
+    x_node_secret: str | None = Header(None),
+) -> dict:
+    """Receive a content-addressed blob from a compute node.
+
+    Writes the blob to the primary's object store after validating its
+    SHA-256. Idempotent: returns 200 if the blob already exists.
+    """
+    _check_node_auth(x_node_secret)
+
+    try:
+        validate_sha256(digest)
+    except ValidationError:
+        raise ValidationError(f"Invalid digest: {digest}")
+
+    path = blob_path(digest)
+    if path.is_file():
+        # Idempotent — blob already exists.
+        return {"status": "already_exists", "digest": digest}
+
+    # Read the body, validate SHA-256, then write atomically.
+    body = await request.body()
+    actual = hashlib.sha256(body).hexdigest()
+    if actual != digest:
+        raise ValidationError(
+            f"SHA-256 mismatch: expected {digest}, got {actual}"
+        )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(body)
+    tmp.rename(path)
+
+    log.info("blob_received", digest=digest, size=len(body))
+    return {"status": "created", "digest": digest, "size": len(body)}

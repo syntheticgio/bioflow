@@ -100,6 +100,7 @@ fn render_node_env(inputs: &NodeInstallInputs) -> String {
          MONGO_URL={}\n\
          REDIS_URL={}\n\
          WORKER_NODE_ID={}\n\
+         PRIMARY_API_URL={}\n\
          BIOINFO_HOME={}\n\
          BIOINFO_REGISTER_ROOTS={}\n\
          BIOFLOW_TAG=latest\n\
@@ -107,6 +108,7 @@ fn render_node_env(inputs: &NodeInstallInputs) -> String {
         inputs.mongo_url,
         inputs.redis_url,
         inputs.node_name,
+        inputs.api_url,
         inputs.storage_location.display(),
         inputs.storage_location.display(),
     )
@@ -144,6 +146,7 @@ mod tests {
         assert!(env.contains("REDIS_URL=redis://192.168.1.50:6379/0"));
         assert!(env.contains("WORKER_NODE_ID=test-node"));
         assert!(env.contains("NODE_TYPE=compute"));
+        assert!(env.contains("PRIMARY_API_URL=http://192.168.1.50:8000"));
     }
 
     #[test]

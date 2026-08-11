@@ -4,9 +4,60 @@
 //! type themselves, with `--project-directory` pointed at the install
 //! directory so it never depends on the launcher's own cwd.
 
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use super::{ActionResult, DockerBackend, DockerPresence, ServiceStatus};
+
+/// Explicit locations a GUI-launched app cannot reach through PATH. These
+/// are the two places a Docker CLI actually lives on most machines, plus
+/// Docker Desktop's own bundled CLI (what both symlinks point at).
+const DOCKER_CANDIDATES: &[&str] = &[
+    "/usr/local/bin/docker",
+    "/opt/homebrew/bin/docker",
+    "/Applications/Docker.app/Contents/Resources/bin/docker",
+];
+
+/// The resolved path to the `docker` CLI, cached for the process lifetime.
+///
+/// Why this exists: a Tauri app launched from Finder on macOS gets a
+/// stripped PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that does not include
+/// `/usr/local/bin` or `/opt/homebrew/bin`, so `Command::new("docker")`
+/// fails with "No such file or directory" from a GUI-launched app even
+/// while Docker Desktop runs fine from a terminal -- which reads to the
+/// user as "Docker not installed." Resolve the binary against the known
+/// install locations first, then fall back to a PATH lookup, which covers
+/// `npm run tauri dev` from a terminal (complete PATH) and Linux distros,
+/// where docker lives wherever the package manager put it.
+fn docker_binary() -> &'static Path {
+    static DOCKER: OnceLock<Option<PathBuf>> = OnceLock::new();
+    DOCKER
+        .get_or_init(|| resolve_docker(DOCKER_CANDIDATES, std::env::var_os("PATH").as_deref()))
+        .as_deref()
+        // No docker anywhere: fall back to the bare name so the failure is
+        // exactly what it was before (command-not-found -> NotInstalled),
+        // rather than a resolved path that reads as if it should exist.
+        .unwrap_or_else(|| Path::new("docker"))
+}
+
+/// Pure resolution logic, split out so tests can exercise it against
+/// fixtures without depending on the host machine's real Docker install.
+fn resolve_docker(candidates: &[&str], path_var: Option<&OsStr>) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .map(Path::new)
+        .find(|p| p.is_file())
+        .map(PathBuf::from)
+        .or_else(|| {
+            path_var
+                .into_iter()
+                .flat_map(std::env::split_paths)
+                .map(|dir| dir.join("docker"))
+                .find(|p| p.is_file())
+        })
+}
 
 pub struct ShellDocker;
 
@@ -16,7 +67,7 @@ impl ShellDocker {
     }
 
     fn compose(install_dir: &str) -> Command {
-        let mut cmd = Command::new("docker");
+        let mut cmd = Command::new(docker_binary());
         cmd.arg("compose").arg("--project-directory").arg(install_dir);
         cmd
     }
@@ -44,7 +95,7 @@ impl Default for ShellDocker {
 
 impl DockerBackend for ShellDocker {
     fn probe(&self) -> DockerPresence {
-        let binary_exists = Command::new("docker")
+        let binary_exists = Command::new(docker_binary())
             .arg("--version")
             .output()
             .map(|o| o.status.success())
@@ -54,7 +105,7 @@ impl DockerBackend for ShellDocker {
             return DockerPresence::NotInstalled;
         }
 
-        let daemon_up = Command::new("docker")
+        let daemon_up = Command::new(docker_binary())
             .arg("info")
             .output()
             .map(|o| o.status.success())
@@ -115,7 +166,7 @@ impl DockerBackend for ShellDocker {
     }
 
     fn pull_image(&self, image: &str) -> ActionResult {
-        let mut cmd = Command::new("docker");
+        let mut cmd = Command::new(docker_binary());
         cmd.arg("pull").arg(image);
         Self::run_action(cmd)
     }
@@ -159,7 +210,7 @@ impl DockerBackend for ShellDocker {
         // for). `-a` is deliberately omitted: a stopped project with
         // leftover containers should not be "discovered" as if it were
         // running.
-        let output = Command::new("docker")
+        let output = Command::new(docker_binary())
             .arg("compose")
             .arg("ls")
             .arg("--format")
@@ -185,7 +236,7 @@ impl DockerBackend for ShellDocker {
         let config_files = matched.get("ConfigFiles")?.as_str()?;
         let first_compose_file = config_files.split(',').next()?;
 
-        let inspect_output = Command::new("docker")
+        let inspect_output = Command::new(docker_binary())
             .arg("inspect")
             .arg("--format")
             .arg("{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}")
@@ -228,5 +279,56 @@ impl DockerBackend for ShellDocker {
                 .args(["/C", "start", "", "Docker Desktop"])
                 .spawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn explicit_candidate_wins_even_without_a_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docker = tmp.path().join("docker");
+        std::fs::write(&docker, "").unwrap();
+        let resolved = resolve_docker(&[docker.to_str().unwrap()], None);
+        assert_eq!(resolved, Some(docker));
+    }
+
+    #[test]
+    fn candidates_are_checked_in_order_before_the_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let first = tmp.path().join("first");
+        let second = tmp.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(first.join("docker"), "").unwrap();
+        std::fs::write(second.join("docker"), "").unwrap();
+        let resolved = resolve_docker(
+            &[
+                first.join("docker").to_str().unwrap(),
+                second.join("docker").to_str().unwrap(),
+            ],
+            None,
+        );
+        assert_eq!(resolved, Some(first.join("docker")));
+    }
+
+    #[test]
+    fn falls_back_to_a_path_lookup_when_no_candidate_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bindir = tmp.path().join("bin");
+        std::fs::create_dir_all(&bindir).unwrap();
+        std::fs::write(bindir.join("docker"), "").unwrap();
+        let resolved = resolve_docker(&[], Some(OsStr::new(bindir.to_str().unwrap())));
+        assert_eq!(resolved, Some(bindir.join("docker")));
+    }
+
+    #[test]
+    fn nothing_found_anywhere_is_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let resolved = resolve_docker(&[], Some(OsStr::new(tmp.path().to_str().unwrap())));
+        assert_eq!(resolved, None);
     }
 }
