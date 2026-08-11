@@ -21,6 +21,8 @@ dependencies = [
     # Fernet, for API keys at rest. See services/ai/crypto.py -- the threat
     # model is a curious look at the Mongo collection, not shell access.
     "cryptography>=44.0",
+    # SSH transport for remote node provisioning.
+    "asyncssh>=2.18,<3",
     # QUAST's install patch replaces its `distutils.version.LooseVersion`
     # import with `packaging.version.Version` (distutils was removed in
     # Python 3.12) -- see backend/scripts/install-quast.sh. Declared
