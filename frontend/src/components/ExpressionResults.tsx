@@ -187,7 +187,7 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
         fingerprint={obj.summary_fingerprint ?? undefined}
         factPrefix="ai_de_summary"
         statusFn={() => api.deSummaryStatus()}
-        launchFn={(id) => api.launchDeSummary(id, targetNode || undefined)}
+        launchFn={(id) => api.launchDeSummary(id)}
         emptyLabel="No summary yet for this result."
       />
 
