@@ -56,14 +56,15 @@ interaction plumbing without manufacturing a broad renderer API.
 
 ## Data flow
 
-1. A chart validates its input and preserves its present early-return path.
-2. The chart calls `useChartScaffold` with its width, height, padding, and
-   data-specific hover resolver.
-3. The hook derives plot dimensions and maps pointer events into the plot
+1. A chart calls `useChartScaffold` unconditionally with its width, height,
+   padding, and data-specific hover resolver, before its current input/empty-
+   data early return. This preserves React's hook rules and the present
+   early-return behavior.
+2. The hook derives plot dimensions and maps pointer events into the plot
    coordinate system.
-4. The resolver returns the same datum the pre-refactor chart would have
+3. The resolver returns the same datum the pre-refactor chart would have
    selected; the hook stores it as hover state.
-5. The chart uses that state and its own scales to render its existing
+4. The chart uses that state and its own scales to render its existing
    crosshair and readout.
 
 The hook must constrain pointer math to the current plot rectangle. No new

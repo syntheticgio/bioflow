@@ -200,9 +200,10 @@ resolver equivalent to:
 }
 ```
 
-Wire the existing hit rectangle to `onMouseMove={onMouseMove}` and
-`onMouseLeave={clearHover}`. Do not modify its path, axes, dashed crosshair,
-or readout text.
+Wire the existing hit rectangle only to `onMouseMove={onMouseMove}`. Retain
+the existing enclosing SVG-level `onMouseLeave={clearHover}` handler so the
+crosshair and readout persist while the pointer moves into an axis or margin.
+Do not modify its path, axes, dashed crosshair, or readout text.
 
 - [ ] **Step 5: Refactor `GcDistributionChart` while retaining nearest-bin behavior**
 
@@ -210,14 +211,16 @@ Use the hook with its current dimensions and padding. Preserve the GC-specific
 resolver exactly: convert the fraction to `gc = fraction * 100`, then choose
 the existing bin whose `gc_percent` has the smallest absolute difference.
 Retain its fixed 0–100 x-axis, optional fitted curve, bars, dashed guides,
-readout, and all labels. Wire the same hit rectangle to the hook handlers.
+readout, and all labels. Wire the hit rectangle only to the hook's mouse-move
+handler and retain the existing SVG-level leave handler.
 
 - [ ] **Step 6: Refactor `NContentChart` while retaining its exact resolver and markup**
 
 Use the hook with its current dimensions and padding. Preserve the same
 rounded-and-clamped curve-index resolver used by `QualityChart`. Leave its
 5% reference line, y-domain calculation, axes, dashed crosshair, and readout
-unchanged, and wire only its existing transparent hit rectangle to the hook.
+unchanged, wire its existing transparent hit rectangle only to the hook's
+mouse-move handler, and retain the existing SVG-level leave handler.
 
 - [ ] **Step 7: Confirm `BaseCompositionChart` was not changed**
 
