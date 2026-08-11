@@ -1685,9 +1685,12 @@ async def launch_alignment(
         sort_memory_mb=align_params.sort_memory_mb,
         building_index=building,
     )
+    # Extra reads are concatenated into the primary by the runner, so the
+    # real input is the sum of all of them -- not just obj.size.
+    total_input_bytes = (obj.size or 0) + sum(e.size or 0 for e in extra_reads) or None
     resolved = await memory_estimate.resolve(
         job_type=JOB_TYPE_ALIGN_READS,
-        input_bytes=obj.size or None,
+        input_bytes=total_input_bytes,
         heuristic_mb=heuristic_mb,
     )
     estimate = resolved.mb
@@ -1884,7 +1887,7 @@ async def launch_alignment(
         threads=align_params.threads,
         sort_memory_mb=align_params.sort_memory_mb,
         building_index=False,
-        input_bytes=obj.size or None,
+        input_bytes=total_input_bytes,
     )
 
     job = await queue.enqueue(
