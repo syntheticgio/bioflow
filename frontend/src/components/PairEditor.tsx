@@ -17,12 +17,16 @@ interface Props {
 
 /** Whether a file can take a paired-end mate.
  *
- * Mirrors the server's `_is_reads`: not a reference, not scaffolding. Not a
- * format check -- the point of manual pairing is files whose conventional
- * signals are missing, and trimmed reads pair like any others.
+ * Only sequencing reads can: a role of null (format-derived, i.e. FASTQ) or
+ * trimmed_reads. Every explicit non-read role -- reference, alignment,
+ * variants, annotation, protein, transcript, counts, de_results,
+ * assembly_graph -- is a result or a reference and has no mate to have.
+ * The check is role-based rather than format-based on purpose: the point of
+ * manual pairing is files whose conventional signals are missing, and
+ * trimmed reads pair like any others.
  */
 export function isReads(o: DataObject): boolean {
-  return o.role !== "reference" && o.role !== "alignment" && o.sidecar_of === null;
+  return (o.role === null || o.role === "trimmed_reads") && o.sidecar_of === null;
 }
 
 /**
