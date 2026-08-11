@@ -122,3 +122,63 @@ class TestListNodes:
             nodes = await list_nodes()
         assert len(nodes) == 1
         assert nodes[0]["node_id"] == "unknown"
+
+
+class TestNodeQueueStats:
+    async def test_queued_jobs_reports_ready_queue_depth(self, fake_redis):
+        await _seed_workers(
+            fake_redis,
+            **{"host1:1234": _worker_blob("primary", slots=4)},
+        )
+        await fake_redis.zadd("bp:q:ready:primary", {"j1": 1, "j2": 2})
+        with (
+            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.node_stats.get_redis", return_value=fake_redis),
+        ):
+            nodes = await list_nodes()
+        assert nodes[0]["queued_jobs"] == 2
+
+    async def test_queued_jobs_is_zero_with_no_queue(self, fake_redis):
+        await _seed_workers(
+            fake_redis,
+            **{"host1:1234": _worker_blob("primary")},
+        )
+        with (
+            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.node_stats.get_redis", return_value=fake_redis),
+        ):
+            nodes = await list_nodes()
+        assert nodes[0]["queued_jobs"] == 0
+
+    async def test_offline_node_still_reports_reservations(self, fake_redis):
+        # Workers died mid-job and the counters have not been reaped. That is
+        # a real condition and hiding it behind zeros makes it undiagnosable.
+        await _seed_workers(
+            fake_redis,
+            **{"dead:host": _worker_blob("primary", online=False)},
+        )
+        await fake_redis.mset({"bp:conc:cpu:primary": "4"})
+        with (
+            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.node_stats.get_redis", return_value=fake_redis),
+        ):
+            nodes = await list_nodes()
+        assert nodes[0]["online"] is False
+        assert nodes[0]["reserved"]["cpu"] == 4
+
+    async def test_orphaned_queue_appears_as_unknown_node(self, fake_redis):
+        await _seed_workers(
+            fake_redis,
+            **{"host1:1234": _worker_blob("primary")},
+        )
+        await fake_redis.zadd("bp:q:ready:gpu-nodee", {"j1": 1})
+        with (
+            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.node_stats.get_redis", return_value=fake_redis),
+        ):
+            nodes = await list_nodes()
+        orphan = next(n for n in nodes if n["node_id"] == "gpu-nodee")
+        assert orphan["queued_jobs"] == 1
+        assert orphan["online"] is False
+        assert orphan["workers"] == 0
+        assert orphan["enrollment"] == "unknown"

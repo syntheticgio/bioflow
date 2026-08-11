@@ -19,7 +19,7 @@ from app.db.redis_client import get_redis
 from app.logging import get_logger
 from app.models.node import Node
 from app.models.node_provision import NodeProvisionTask
-from app.queue import keys
+from app.queue import keys, node_stats as node_stats_mod
 
 log = get_logger(__name__)
 
@@ -64,19 +64,6 @@ class ProvisionStatusOut(BaseModel):
 
 
 # --- Existing node listing ---
-
-
-async def _node_conc(node_id: str) -> dict:
-    """Read per-node concurrency counters, or zeroes if unavailable."""
-    try:
-        values = await get_redis().mget(*keys.node_conc_keys(node_id))
-    except Exception:
-        return {"cpu": 0, "mem_mb": 0, "io_heavy": 0}
-    return {
-        "cpu": max(int(values[0] or 0), 0),
-        "mem_mb": max(int(values[1] or 0), 0),
-        "io_heavy": max(int(values[2] or 0), 0),
-    }
 
 
 async def enumerate_nodes() -> dict[str, dict]:
@@ -169,12 +156,35 @@ async def list_nodes() -> list[dict]:
     """
     by_node = await enumerate_nodes()
 
+    # Ready queues for node ids nobody has enrolled: jobs targeted at a
+    # misspelled node, which no worker will ever claim.
+    for node_id in await node_stats_mod.orphaned_queue_nodes(set(by_node)):
+        by_node[node_id] = {
+            "node_id": node_id,
+            "workers": 0,
+            "online_workers": 0,
+            "running_jobs": 0,
+            "slots": 0,
+            "online": False,
+            "hostname": "",
+            "registered_at": None,
+            "enrollment": "unknown",
+            "last_seen_mongo": None,
+        }
+
+    stats = await node_stats_mod.node_stats(by_node)
+
     result = []
     for node_id, info in sorted(by_node.items()):
-        if info["online"]:
-            info["reserved"] = await _node_conc(node_id)
-        else:
-            info["reserved"] = {"cpu": 0, "mem_mb": 0, "io_heavy": 0}
+        s = stats.get(node_id, {"queued": 0, "cpu": 0, "mem_mb": 0, "io_heavy": 0})
+        info["queued_jobs"] = s["queued"]
+        # Reported for offline nodes too: a stale reservation on a node whose
+        # workers died is exactly what someone reading this table needs to see.
+        info["reserved"] = {
+            "cpu": s["cpu"],
+            "mem_mb": s["mem_mb"],
+            "io_heavy": s["io_heavy"],
+        }
         result.append(info)
 
     return result
