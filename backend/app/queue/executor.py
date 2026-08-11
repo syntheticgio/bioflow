@@ -17,6 +17,7 @@ from beanie import PydanticObjectId
 
 from app.db.client import get_db
 from app.errors import JobCancelled, PermanentError, RetryableError
+from app.config import settings
 from app.logging import get_logger
 from app.models import Job, JobState
 from app.models.timing import RunOutcome
@@ -59,6 +60,21 @@ def _tool_from_payload(payload: dict) -> str | None:
         if value:
             return value
     return None
+
+
+def _resolve_input_blobs(payload: dict) -> None:
+    """Fetch input blobs from the primary before a job runs on a compute node.
+
+    Scans the payload for SHA-256 digest fields and ensures every referenced
+    blob is present locally.  Raises an OSError if the primary is unreachable
+    (retryable — the job will be retried).  Raises FileNotFoundError if a
+    blob is genuinely missing on the primary (permanent).
+    """
+    from app.storage.blob_transfer import resolve_payload_digests
+
+    fetched = resolve_payload_digests(payload)
+    if fetched:
+        log.info("blobs_fetched", count=len(fetched), digests=fetched)
 
 
 @runtime_checkable
@@ -156,6 +172,11 @@ class JobExecutor:
         )
         outcome = RunOutcome.SUCCEEDED
         try:
+            # Compute nodes: fetch input blobs from the primary before running
+            # the handler.  No-op on the primary.
+            if settings.is_compute_node:
+                _resolve_input_blobs(job.payload)
+
             result = await self._dispatch(spec, ctx)
             # Thread-mode handlers cannot touch the database (Beanie is async),
             # so results that need persisting are applied here on the loop.
