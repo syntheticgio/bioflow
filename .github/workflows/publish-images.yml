@@ -118,7 +118,7 @@ jobs:
       # cold, which for the backend image means recompiling bwa-mem2 each time.
       # GitHub Actions cache (`type=gha`) is not an option -- the repo-wide
       # limit is 10GB and the backend image alone is ~7.9GB.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
         with:
           name: bioflow
           keep-state: true
@@ -198,7 +198,7 @@ jobs:
       # place. (v0.2.5's run confirmed this the hard way: an unconditional
       # `security unlock-keychain` here fails with "security: command not
       # found" on Linux, exit 127 -- security(1) doesn't exist off macOS.)
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v3
         with:
