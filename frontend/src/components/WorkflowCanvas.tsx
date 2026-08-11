@@ -20,6 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiRequestError, api } from "../api/client";
+import { NodeSelector } from "./NodeSelector";
 import type {
   GraphValidationError,
   NodeTypeMeta,
@@ -106,6 +107,7 @@ export function WorkflowCanvas() {
   const [notice, setNotice] = useState<string | null>(null);
   const [serverErrors, setServerErrors] = useState<GraphValidationError[]>([]);
   const [launching, setLaunching] = useState(false);
+  const [targetNode, setTargetNode] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   // One object id per slot, or several for a slot marked `multiple`. The
   // union rather than always-an-array keeps the scalar path -- every
@@ -409,7 +411,7 @@ export function WorkflowCanvas() {
         project_id: projectId!,
         label: name,
         bindings,
-      }),
+      }, targetNode || undefined),
     onSuccess: (run) => {
       setLaunching(false);
       setNotice(`Launched "${run.label}" — ${run.status}.`);
@@ -464,6 +466,7 @@ export function WorkflowCanvas() {
             </option>
           ))}
         </select>
+        <NodeSelector value={targetNode} onChange={setTargetNode} />
         <button className="btn" onClick={addInputNode}>
           Add input
         </button>

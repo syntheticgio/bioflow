@@ -24,6 +24,7 @@ import { AssemblyFacts } from "./AssemblyFacts";
 import { AssemblyGraph } from "./AssemblyGraph";
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
+import { NodeSelector } from "./NodeSelector";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
@@ -509,8 +510,9 @@ function ObjectDetail({ id }: { id: string }) {
 
   // No dialog: QC takes no parameters, so a button that opened a form with
   // nothing in it would be a step for its own sake.
+  const [targetNode, setTargetNode] = useState("");
   const runQC = useMutation({
-    mutationFn: () => api.launchQC(id),
+    mutationFn: () => api.launchQC(id, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       // QC is what un-gates the align card, so leaving this stale would keep
@@ -779,15 +781,18 @@ function ObjectDetail({ id }: { id: string }) {
                       from it — and several pipeline suggestions stay disabled
                       without it.
                     </span>
-                    <button
-                      type="button"
-                      className="btn primary"
-                      style={{ flexShrink: 0 }}
-                      onClick={() => runQC.mutate()}
-                      disabled={runQC.isPending || qcActive}
-                    >
-                      {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
-                    </button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <NodeSelector value={targetNode} onChange={setTargetNode} />
+                      <button
+                        type="button"
+                        className="btn primary"
+                        style={{ flexShrink: 0 }}
+                        onClick={() => runQC.mutate()}
+                        disabled={runQC.isPending || qcActive}
+                      >
+                        {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
+                      </button>
+                    </div>
                   </div>
                 ) : null
               }

@@ -1210,11 +1210,15 @@ export const api = {
       label: string;
       bindings: Record<string, string | string[]>;
     },
+    targetNode?: string,
   ) =>
-    request<WorkflowRunSummary>(`/workflows/${id}/runs`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+    request<WorkflowRunSummary>(
+      `/workflows/${id}/runs${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    ),
 
   // --- Agent chat ---
   askAgent: (projectId: string, message: string) =>

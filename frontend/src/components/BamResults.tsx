@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "../api/client";
 import { notify } from "../stores/messageStore";
+import { NodeSelector } from "./NodeSelector";
 import type {
   BamStatsFacts,
   InsertSizeHistogramBucket,
@@ -27,9 +29,10 @@ import { TranscriptQc } from "./TranscriptQc";
 export function BamResults({ obj }: { obj: ObjectDetailData }) {
   const qc = useQueryClient();
   const f = obj.facts as BamStatsFacts;
+  const [targetNode, setTargetNode] = useState("");
 
   const compute = useMutation({
-    mutationFn: () => api.launchBamStats(obj.id),
+    mutationFn: () => api.launchBamStats(obj.id, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.info("Computing results");
@@ -63,6 +66,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
 
       {!hasResults && (
         <div className="section">
+          <NodeSelector value={targetNode} onChange={setTargetNode} />
           <div className="section-title">Coverage &amp; per-contig detail</div>
           {!sortedCoordinate ? (
             <div className="warn-box">
