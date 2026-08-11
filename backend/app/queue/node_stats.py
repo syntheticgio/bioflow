@@ -65,3 +65,28 @@ async def node_stats(node_ids: Iterable[str]) -> dict[str, dict]:
             "io_heavy": _int(io_heavy),
         }
     return stats
+
+
+async def orphaned_queue_nodes(known: set[str]) -> list[str]:
+    """Node IDs that have a ready queue but are not enrolled and have no workers.
+
+    This is how a typo in `?target_node=` becomes visible. Those jobs land in
+    `bp:q:ready:{typo}`, which no worker claims from, and they sit there
+    forever -- the symptom is "my job never ran" with nothing anywhere to
+    explain it.
+
+    `SCAN` rather than `KEYS`: `KEYS` blocks the server for the whole sweep.
+    The prefix match excludes the bare `bp:q:ready` global pool, which has no
+    node suffix and is not a node.
+    """
+    prefix = f"{keys.READY}:"
+    found: set[str] = set()
+    try:
+        async for key in get_redis().scan_iter(match=f"{prefix}*", count=100):
+            node_id = key[len(prefix):]
+            if node_id:
+                found.add(node_id)
+    except Exception as e:  # noqa: BLE001
+        log.warning("orphan_queue_scan_failed", error=str(e))
+        return []
+    return sorted(found - known)
