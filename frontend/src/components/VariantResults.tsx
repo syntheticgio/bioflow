@@ -105,7 +105,7 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
         fingerprint={obj.summary_fingerprint ?? undefined}
         factPrefix="ai_variant_summary"
         statusFn={() => api.variantSummaryStatus()}
-        launchFn={(id) => api.launchVariantSummary(id, targetNode || undefined)}
+        launchFn={(id) => api.launchVariantSummary(id)}
         emptyLabel="No summary yet for this file."
       />
 
