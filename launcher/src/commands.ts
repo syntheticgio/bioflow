@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { LauncherState } from "./types";
 import { parseHardMemGb } from "./settings-logic";
 
@@ -47,6 +48,13 @@ export function validateSetupPort(port: number): Promise<PortValidation> {
 
 export function runStack(): Promise<void> {
   return invoke("run_stack");
+}
+
+// Opens the system browser at the stack's URL. Must go through the opener
+// plugin, not window.open -- a Tauri webview has no URL bar, so a plain
+// window.open from the UI is a silent no-op.
+export function openBioFlow(port: number): Promise<void> {
+  return openUrl(`http://localhost:${port}`);
 }
 
 export function stopStack(): Promise<void> {
@@ -110,14 +118,18 @@ export function runFirstSetup(args: {
 
 export interface CurrentSettings {
   hardMemMb: number | null;
+  port: number | null;
 }
 
-// Reads back whatever settings can be recovered from .env on disk -- today
-// just the hard memory limit, since it's the only field the UI could not
-// otherwise reconstruct. See App.tsx's mount effect for why this exists.
+// Reads back whatever settings can be recovered from .env on disk -- the
+// hard memory limit and the port, the two fields the UI could not otherwise
+// reconstruct on a relaunch. See App.tsx's mount effect for why this exists.
 export function currentSettings(): Promise<CurrentSettings> {
-  return invoke<{ hard_mem_mb: number | null }>("current_settings").then((d) => ({
+  return invoke<{ hard_mem_mb: number | null; port: number | null }>(
+    "current_settings",
+  ).then((d) => ({
     hardMemMb: d.hard_mem_mb,
+    port: d.port,
   }));
 }
 
