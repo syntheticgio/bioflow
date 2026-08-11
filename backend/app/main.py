@@ -135,6 +135,14 @@ def create_app() -> FastAPI:
     # Chains the MCP app's own lifespan into this app's -- see
     # mount_mcp_app's docstring for why a plain app.mount() is not enough.
     mount_mcp_app(app)
+
+    # Register orphan provisioning cleanup on startup.
+    from app.api.v1.nodes import _clean_orphaned_provisions
+
+    @app.on_event("startup")
+    async def _on_startup():
+        await _clean_orphaned_provisions()
+
     return app
 
 
