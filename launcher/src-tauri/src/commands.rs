@@ -3,7 +3,7 @@
 //! and `settings` -- nothing here should ever need its own test, since
 //! everything it does is already covered where the real logic lives.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -226,7 +226,18 @@ const RUN_HEALTH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_
 #[tauri::command]
 pub async fn run_stack(app: tauri::AppHandle, state: State<'_, LauncherApp>) -> Result<(), String> {
     let install_dir = install_dir_str_blocking(&state).await.ok_or("not installed")?;
-    let port = *state.port.lock().unwrap();
+    // The port the browser handoff opens after a successful Run. In-memory
+    // value first (set by run_first_setup / apply_settings), then the
+    // install's own .env, then the compose default -- the stack serves
+    // whatever WEB_PORT resolves to, and compose defaults to 5173 when .env
+    // omits it. In-memory alone is not enough: it starts None every process
+    // launch and is only populated by the setup/settings flows, so a
+    // hand-created install (this repo's own hand-run workflow) or a plain
+    // relaunch would otherwise never hand off to the browser.
+    let in_memory_port = *state.port.lock().unwrap();
+    let port = in_memory_port
+        .or_else(|| web_port_from_env(Path::new(&install_dir)))
+        .unwrap_or(DEFAULT_WEB_PORT);
 
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let docker = ShellDocker::new();
@@ -239,11 +250,9 @@ pub async fn run_stack(app: tauri::AppHandle, state: State<'_, LauncherApp>) -> 
 
     match outcome {
         RunOutcome::Running => {
-            if let Some(port) = port {
-                let _ = app
-                    .opener()
-                    .open_url(format!("http://localhost:{port}"), None::<&str>);
-            }
+            let _ = app
+                .opener()
+                .open_url(format!("http://localhost:{port}"), None::<&str>);
             Ok(())
         }
         RunOutcome::ComposeFailed { output } => Err(output),
@@ -743,6 +752,29 @@ pub async fn finish_storage_migration(app: State<'_, LauncherApp>, args: FinishS
     Ok(())
 }
 
+/// Compose's own fallback when `.env` has no `WEB_PORT` line -- must stay in
+/// step with `docker-compose.yml`'s `${WEB_PORT:-5173}`.
+const DEFAULT_WEB_PORT: u16 = 5173;
+
+/// Reads `WEB_PORT` out of a `.env` body. Anything unparseable reads as
+/// `None`, same rule as `parse_hard_mem_mb`: a hand-edited `.env` must not
+/// stop the launcher from opening.
+pub(crate) fn parse_web_port(env_contents: &str) -> Option<u16> {
+    env_contents
+        .lines()
+        .find_map(|line| line.strip_prefix("WEB_PORT="))
+        .and_then(|value| value.trim().parse().ok())
+}
+
+/// Reads `WEB_PORT` from the install directory's `.env` on disk -- the
+/// source of truth for the port, the same treatment `current_settings` and
+/// `start_storage_migration` already give the hard limit and `BIOINFO_HOME`.
+fn web_port_from_env(install_dir: &Path) -> Option<u16> {
+    std::fs::read_to_string(install_dir.join(".env"))
+        .ok()
+        .and_then(|contents| parse_web_port(&contents))
+}
+
 /// Reads `BIOFLOW_HARD_MEM_MB` out of a `.env` body.
 ///
 /// Anything unparseable reads as `None` rather than erroring: a hand-edited
@@ -759,24 +791,36 @@ pub(crate) fn parse_hard_mem_mb(env_contents: &str) -> Option<u32> {
 pub struct CurrentSettingsDto {
     /// `None` when there is no install yet, or `.env` has no hard-limit line.
     pub hard_mem_mb: Option<u32>,
+    /// The port the stack serves on, read back from `.env` -- `None` when
+    /// there is no install yet or `.env` has no `WEB_PORT` line. The
+    /// frontend recovers this on launch so the Open button and port display
+    /// stay right for installs the launcher did not create this session.
+    pub port: Option<u16>,
 }
 
-/// Reads whatever settings can be recovered from `.env` on disk -- currently
-/// just the hard memory limit, since it is the only setting the UI could
-/// not otherwise reconstruct (port/storage/network-exposed all have
-/// separate flows already; see App.tsx's comment on why this didn't exist
-/// before this field needed it).
+/// Reads whatever settings can be recovered from `.env` on disk -- the hard
+/// memory limit and the port, the two fields the UI could not otherwise
+/// reconstruct on a relaunch. See App.tsx's mount effect for why this
+/// exists.
 #[tauri::command]
 pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSettingsDto, ()> {
     let Some(install_dir) = install_dir_str(&app) else {
-        return Ok(CurrentSettingsDto { hard_mem_mb: None });
+        return Ok(CurrentSettingsDto {
+            hard_mem_mb: None,
+            port: None,
+        });
     };
 
-    let hard_mem_mb = std::fs::read_to_string(std::path::Path::new(&install_dir).join(".env"))
-        .ok()
-        .and_then(|contents| parse_hard_mem_mb(&contents));
+    // One read of the file, two parses -- `.env` is the source of truth for
+    // both fields, and a missing/unreadable file is the same as a file with
+    // neither line: both read as `None`.
+    let env_contents =
+        std::fs::read_to_string(Path::new(&install_dir).join(".env")).unwrap_or_default();
 
-    Ok(CurrentSettingsDto { hard_mem_mb })
+    Ok(CurrentSettingsDto {
+        hard_mem_mb: parse_hard_mem_mb(&env_contents),
+        port: parse_web_port(&env_contents),
+    })
 }
 
 #[cfg(test)]
@@ -815,5 +859,31 @@ mod tests {
         };
         let env = crate::settings::render_env(&settings, &[]);
         assert_eq!(parse_hard_mem_mb(&env), Some(16384));
+    }
+
+    #[test]
+    fn reads_web_port_back_from_env() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIND_ADDRESS=127.0.0.1\n";
+        assert_eq!(parse_web_port(env), Some(5173));
+    }
+
+    #[test]
+    fn absent_web_port_reads_as_none() {
+        let env = "BIOINFO_HOME=/data\n";
+        assert_eq!(parse_web_port(env), None);
+    }
+
+    #[test]
+    fn malformed_web_port_reads_as_none() {
+        let env = "WEB_PORT=not-a-number\n";
+        assert_eq!(parse_web_port(env), None);
+    }
+
+    #[test]
+    fn web_port_from_env_reads_the_install_env_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join(".env"), "BIOINFO_HOME=/data\nWEB_PORT=9000\n")
+            .unwrap();
+        assert_eq!(web_port_from_env(tmp.path()), Some(9000));
     }
 }

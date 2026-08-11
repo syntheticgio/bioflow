@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
-import { checkForUpdate, currentSettings, runStack, status, stopStack, updateStack } from "./commands";
+import { checkForUpdate, currentSettings, openBioFlow, runStack, status, stopStack, updateStack } from "./commands";
 import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
@@ -37,20 +37,23 @@ export function App() {
     hardMemGb: "",
   });
 
-  // Runs once on mount to recover the hard memory limit from .env, since it
-  // is the one setting field that a relaunch cannot otherwise reconstruct
-  // (port/storage/network-exposed all come from run_first_setup's own
-  // return path or the fixed defaults). Only overwrites hardMemGb when a
-  // real value is found -- leaving the placeholder "" alone otherwise -- and
-  // this runs before Settings.tsx can ever be opened, so there is no race
-  // with a value the user is mid-typing there.
+  // Runs once on mount to recover the two settings fields a relaunch
+  // cannot otherwise reconstruct from run_first_setup's return path: the
+  // hard memory limit and the port. Both are read back out of the install's
+  // .env (the source of truth); a missing value leaves the placeholder
+  // untouched -- port's placeholder is the compose default 5173, which is
+  // also what the stack serves when .env omits WEB_PORT. This runs before
+  // Settings.tsx can ever be opened, so there is no race with a value the
+  // user is mid-typing there.
   useEffect(() => {
     let cancelled = false;
-    currentSettings().then(({ hardMemMb }) => {
+    currentSettings().then(({ hardMemMb, port }) => {
       if (cancelled) return;
-      if (hardMemMb != null) {
-        setSettings((prev) => ({ ...prev, hardMemGb: String(hardMemMb / 1024) }));
-      }
+      setSettings((prev) => ({
+        ...prev,
+        ...(hardMemMb != null ? { hardMemGb: String(hardMemMb / 1024) } : {}),
+        ...(port != null ? { port } : {}),
+      }));
     });
     return () => {
       cancelled = true;
@@ -302,7 +305,7 @@ export function App() {
               <div className="state-actions">
                 <button
                   className="btn btn-primary"
-                  onClick={() => window.open(`http://localhost:${settings.port}`)}
+                  onClick={() => openBioFlow(settings.port)}
                 >
                   Open BioFlow
                 </button>
