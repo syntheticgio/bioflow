@@ -3,7 +3,6 @@
 import platform
 import re
 import secrets
-
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
