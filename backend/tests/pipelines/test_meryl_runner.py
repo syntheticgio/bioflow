@@ -62,8 +62,11 @@ def test_genome_size_bimodal():
 
 
 def test_genome_size_no_clear_peak():
-    # Flat distribution — no meaningful peak.
-    hist = [[1, 100], [2, 102], [3, 101], [4, 99]]
+    # Error-peak that dominates the histogram — k-mer spectra from reads
+    # with a strong sequencing error tail have a huge peak at frequency 1
+    # that dwarfs the true coverage peak. This is not a meaningful
+    # genome-size signal.
+    hist = [[1, 1_000_000], [2, 5], [3, 6], [4, 5], [5, 10], [6, 6]]
     result = meryl_runner.compute_genome_size(hist, k=21)
     assert "genome_size_est" not in result
     assert "total_kmers" in result
@@ -148,5 +151,11 @@ def test_repeat_density_skips_bad_lines():
 
 
 def test_repeat_density_empty_input():
+    # No k-mer lines at all — the contig in lengths has zero hits,
+    # so it gets null windows rather than returning empty.
     result = meryl_runner.compute_repeat_density([], {"chrI": 1000})
-    assert result == {}
+    assert len(result["contigs"]) == 1
+    c = result["contigs"][0]
+    assert c["name"] == "chrI"
+    assert all(v is None for v in c["density"])
+    assert all(v is None for v in c["count"])
