@@ -75,8 +75,7 @@ export function QuantifyDialog({
         bam_id: object.id,
         annotation_id: chosenAnnotationId,
         params: overrides,
-      }, targetNode || undefined
-      }),
+      }, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Counting started");

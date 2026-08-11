@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
-import { NodeSelector } from "./NodeSelector";
 import { notify } from "../stores/messageStore";
 import type { DeSample } from "../api/types";
 
@@ -48,7 +47,6 @@ export function DifferentialExpressionDialog({
   // describe a design nobody chose.
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [contrast, setContrast] = useState<{
-  const [targetNode, setTargetNode] = useState("");
     test: string;
     reference: string;
   } | null>(null);
