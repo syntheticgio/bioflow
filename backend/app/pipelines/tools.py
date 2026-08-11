@@ -602,6 +602,14 @@ def flye() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def bakta() -> Tool:
+    # On-demand delivery: this probes the binary, not the database. A missing
+    # database surfaces at launch time, not here -- same posture as compleasm's
+    # lineage probe (the lineage is a runtime check, not a PATH one).
+    return _probe("bakta", settings.bakta_path, ["--version"])
+
+
+@lru_cache(maxsize=1)
 def miniprot() -> Tool:
     # compleasm's protein aligner, built from source alongside it -- see
     # install-compleasm.sh. Probed separately from compleasm() so a broken
@@ -866,6 +874,7 @@ class PipelineType(StrEnum):
     # ASSEMBLY_QC so those picker families do not mix production, improvement,
     # and judgement tools.
     REFERENCE_ASSEMBLY = "reference_assembly"
+    ANNOTATION = "annotation"
 
 
 class Delivery(StrEnum):
@@ -2100,6 +2109,46 @@ TOOL_META: dict[str, ToolMeta] = {
             "of any result it produces."
         ),
     ),
+    "bakta": ToolMeta(
+        pipelines=(PipelineType.ANNOTATION,),
+        one_liner="Rapid standardized annotation of bacterial genomes and plasmids",
+        summary=(
+            "Bakta is a rapid, standardized annotation pipeline for bacterial "
+            "genomes, MAGs, and plasmids. It identifies protein-coding genes, "
+            "tRNAs, rRNAs, tmRNAs, CRISPR arrays, and AMR genes, annotating "
+            "each CDS with functional cross-references (GO, EC, COG, KEGG) "
+            "via alignment-free sequence identification. Outputs GFF3, GBFF, "
+            "and GenBank flat files suitable for NCBI submission."
+        ),
+        strengths=(
+            "AMR gene detection via AMRFinderPlus",
+            "CRISPR array and sORF detection",
+            "Functional annotation: GO terms, EC numbers, COG categories",
+            "Submission-ready GFF3 and GenBank output",
+            "Alignment-free sequence identification for speed",
+        ),
+        homepage="https://github.com/oschwengers/bakta",
+        repository="https://github.com/oschwengers/bakta",
+        citation=(
+            "Schwengers O, Jelonek L, Dieckmann MA, Beyvers S, Blom J, "
+            "Goesmann A. Bakta: rapid and standardized annotation of "
+            "bacterial genomes via alignment-free sequence identification. "
+            "Microbial Genomics. 2021;7(11)."
+        ),
+        citation_url="https://doi.org/10.1099/mgen.0.000685",
+        license="GPL-3.0",
+        usage=(
+            "Annotates a bacterial or archaeal assembly. Runs Bakta with an "
+            "on-demand database, producing GFF3 and GenBank files plus "
+            "per-window gene-density facts for the Circos plot. The database "
+            "is several GB and is pulled on first use rather than shipped "
+            "in the base image."
+        ),
+        # TODO(#214): flip to Delivery.ON_DEMAND_IMAGE once the Bakta image is
+        # built and tagged -- the database is several GB and should not be in
+        # the base image. image and download_bytes must be filled in together.
+        delivery=Delivery.BUNDLED,
+    ),
 }
 
 
@@ -2210,3 +2259,4 @@ def reset_cache() -> None:
     merqury.cache_clear()
     gci.cache_clear()
     winnowmap.cache_clear()
+    bakta.cache_clear()

@@ -1779,6 +1779,39 @@ async def _apply_analyze_synteny(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_annotate_genome(result: dict, *, owner: str) -> None:
+    """Record Bakta's gene density facts on the assembly it describes.
+
+    Near-copy of ``_apply_analyze_gc_tracks``: read-only, no files to
+    ingest, and an uploaded assembly is annotated exactly like one this
+    application produced.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("annotation_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    gene_density = facts.get("gene_density") or {}
+    log.info(
+        "annotation_applied",
+        object_id=object_id,
+        contigs=len(gene_density.get("contigs") or []),
+        partial=gene_density.get("gene_density_partial"),
+    )
+
+
 async def _apply_assess_assembly_continuity(result: dict, *, owner: str) -> None:
     """Record GCI's continuity facts on the assembly they describe.
 
@@ -2598,6 +2631,7 @@ _APPLIERS = {
     "assess_misassemblies": _apply_assess_misassemblies,
     "analyze_gc_tracks": _apply_analyze_gc_tracks,
     "analyze_synteny": _apply_analyze_synteny,
+    "annotate_genome": _apply_annotate_genome,
     "assess_assembly_errors": _apply_assess_assembly_errors,
     "assess_assembly_qv": _apply_assess_assembly_qv,
     "assess_assembly_continuity": _apply_assess_assembly_continuity,

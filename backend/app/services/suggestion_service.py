@@ -30,7 +30,7 @@ from app.pipelines import (
     variant_runner,
 )
 from app.pipelines.aligners import Aligner
-from app.pipelines.organism_taxonomy import classify_organism, is_eukaryotic
+from app.pipelines.organism_taxonomy import OrganismClass, classify_organism, is_eukaryotic
 from app.services import object_service, pipeline_service, prior_runs, reference_assembly
 
 log = get_logger(__name__)
@@ -741,6 +741,59 @@ def build_annotate_card(obj, inputs) -> SuggestionCard | None:
             # The complete request body: `/pipelines/annotate` keys on
             # `object_id` alone and resolves the reference/annotation itself,
             # the same walk `inputs` above already came from.
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
+def build_annotate_genome_card(obj) -> SuggestionCard | None:
+    """Genome annotation for a bacterial or archaeal assembly.
+
+    Gated on organism: only known prokaryote genera are eligible, since Bakta's
+    database is bacterial/archaeal and annotating an unknown eukaryote with it
+    would produce a confidently wrong result.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    # Gate on contig count where already known -- a 200,000-contig draft is
+    # not meaningfully annotatable.
+    contig_count = obj.facts.get("reference_count") if obj.facts else None
+    if isinstance(contig_count, int) and contig_count > 200:
+        return None
+
+    organism = obj.metadata.get("organism") if obj.metadata else None
+    if classify_organism(organism) is not OrganismClass.BACTERIA:
+        return None
+
+    title = "Annotate genome"
+    description = (
+        "Find genes, tRNAs, rRNAs, CRISPR arrays, and AMR genes in "
+        "this bacterial assembly with Bakta."
+    )
+
+    bakta_tool = tools.bakta()
+    if not bakta_tool.available:
+        return SuggestionCard(
+            kind="annotate_genome",
+            category="ANNOTATE_GENOME",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=bakta_tool.error or "Bakta is unavailable.",
+        )
+
+    return SuggestionCard(
+        kind="annotate_genome",
+        category="ANNOTATE_GENOME",
+        title=title,
+        description=description,
+        why=f"Annotating {organism.strip()} with Bakta.",
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/annotate-genome",
             "body": {"object_id": str(obj.id)},
         },
     )
@@ -2068,6 +2121,7 @@ async def suggestions_for(obj) -> list[dict]:
         ("variants", lambda: build_variants_card(obj, chemistry)),
         ("quantify", lambda: build_quantify_card(obj, annotations)),
         ("annotate", lambda: build_annotate_card(obj, annotation_inputs)),
+        ("annotate_genome", lambda: build_annotate_genome_card(obj)),
         ("assemble", lambda: build_assemble_card(obj)),
         ("completeness", lambda: build_completeness_card(obj)),
         ("consensus", lambda: build_consensus_card(obj, alignment_target)),

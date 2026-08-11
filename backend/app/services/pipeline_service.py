@@ -4080,6 +4080,106 @@ async def launch_meryl_analysis(
     return job
 
 
+async def launch_annotate_genome(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+) -> Job:
+    """Queue a Bakta genome annotation for one bacterial assembly.
+
+    Modelled on ``launch_gc_tracks``: single input, read-only, no run
+    record, no new RunJobRole.  The result is facts (gene density) merged
+    onto the assembly, not a new object.  The GFF3 and GenBank files are
+    stored as pipeline artifacts alongside the job log.
+
+    Gated on the same rules as the suggestion card: FASTA, not
+    protein/transcript, and a known bacterial organism.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    tools.require(tools.bakta())
+
+    obj = await object_service.get_object(object_id, owner=owner)
+    _check_completeness_callable(obj)
+
+    organism = obj.metadata.get("organism") if obj.metadata else None
+    if not organism:
+        raise ValidationError(
+            "Genome annotation needs a known organism to improve accuracy. "
+            "Set one on the assembly's metadata tab.",
+            details={"object_id": str(obj.id)},
+        )
+
+    import app.pipelines.organism_taxonomy as ot
+    if ot.classify_organism(organism) is not ot.OrganismClass.BACTERIA:
+        raise ValidationError(
+            f"Bakta annotates bacterial and archaeal genomes. "
+            f"{organism!r} is not a known prokaryote.",
+            details={"object_id": str(obj.id), "organism": organism},
+        )
+
+    digest, path = await _resolve_readable(obj)
+    if not digest and not path:
+        raise ValidationError(
+            f"{obj.name!r} has no stored content yet (status={obj.status.value})",
+            details={"object_id": str(obj.id)},
+        )
+
+    # Split organism into genus/species/strain for Bakta's --genus / --species flags.
+    organism_parts: dict = {}
+    if organism and isinstance(organism, str):
+        parts = organism.split()
+        if len(parts) >= 1:
+            organism_parts["genus"] = parts[0]
+        if len(parts) >= 2:
+            organism_parts["species"] = parts[1]
+        if len(parts) >= 3:
+            organism_parts["strain"] = " ".join(parts[2:])
+
+    payload: dict = {
+        "object_id": str(obj.id),
+        "assembly_name": obj.name,
+        "organism": organism_parts,
+        "threads": 8,
+    }
+    if digest:
+        payload["assembly_sha256"] = digest
+    if path:
+        payload["assembly_path"] = path
+
+    # Pass sequence_lengths for gene density windowing -- same pattern as
+    # launch_meryl_analysis.
+    sequence_lengths = (obj.facts or {}).get("sequence_lengths")
+    if sequence_lengths and isinstance(sequence_lengths, dict):
+        payload["sequence_lengths"] = sequence_lengths
+
+    job = await queue.enqueue(
+        "annotate_genome",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"annotate_genome:{obj.id}",
+        project_id=obj.project_id,
+        object_id=obj.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Genome annotation is already queued or running for this assembly",
+            details={"object_id": str(obj.id)},
+        )
+
+    log.info(
+        "annotate_genome_launched",
+        job_id=str(job.id),
+        object_id=str(obj.id),
+        organism=organism,
+    )
+    return job
+
+
 async def launch_consensus(
     *,
     bam_object_id: PydanticObjectId,

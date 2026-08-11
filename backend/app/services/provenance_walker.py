@@ -187,6 +187,9 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # Meryl k-mer spectra and repeat density — same read-only-facts
         # pattern as completeness and gc_tracks.
         "analyze_meryl_tracks",
+        # Bakta genome annotation -- read-only facts (gene density) merged
+        # onto an existing assembly, same class as gc_tracks and meryl.
+        "annotate_genome",
         # AI features that write a field rather than producing an object.
         "summarize_object",
         "summarize_de_results",

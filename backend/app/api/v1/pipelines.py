@@ -1360,6 +1360,26 @@ async def launch_assembly_continuity_route(
     return JobOut.of(job)
 
 
+class AnnotateGenomeRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.post("/annotate-genome", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+async def launch_annotate_genome_route(
+    body: AnnotateGenomeRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a Bakta genome annotation for one bacterial assembly.
+
+    Read-only, like /gc-tracks and /meryl-tracks — produces facts (gene
+    density) merged onto the assembly, no derived object.  The GFF3 and
+    GenBank files are stored as pipeline artifacts alongside the job log."""
+    job = await pipeline_service.launch_annotate_genome(
+        object_id=body.object_id,
+        owner=owner,
+    )
+    return JobOut.of(job)
+
+
 @router.get("/align-envelope")
 async def align_envelope(
     object_id: PydanticObjectId, reference_id: PydanticObjectId, owner: OwnerDep,
