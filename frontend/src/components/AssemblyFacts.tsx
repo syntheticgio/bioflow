@@ -368,6 +368,16 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
       {facts.gc_tracks !== undefined && (
         <CircosPlot
           tracks={facts.gc_tracks as import("./CircosPlot").GcTracksFacts}
+          rings={[
+            { kind: "gc", label: "GC content" },
+            { kind: "skew", label: "GC skew" },
+            ...(facts.repeat_density !== undefined
+              ? [{ kind: "repeat_density" as const, label: "Repeat density" }]
+              : []),
+            ...(facts.gene_density !== undefined
+              ? [{ kind: "gene_density" as const, label: "Gene density" }]
+              : []),
+          ]}
         />
       )}
 

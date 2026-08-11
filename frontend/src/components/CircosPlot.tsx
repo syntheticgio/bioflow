@@ -8,6 +8,8 @@ interface ContigData {
   window_bases: number;
   gc: (number | null)[];
   skew: (number | null)[];
+  density?: (number | null)[];
+  count?: (number | null)[];
 }
 
 export interface GcTracksFacts {
@@ -16,8 +18,15 @@ export interface GcTracksFacts {
   gc_tracks_partial?: boolean;
 }
 
+export interface DensityTrackFacts {
+  window_count: number;
+  contigs: ContigData[];
+  repeat_density_partial?: boolean;
+  gene_density_partial?: boolean;
+}
+
 export interface RingDescriptor {
-  kind: "gc" | "skew";
+  kind: "gc" | "skew" | "repeat_density" | "gene_density";
   label: string;
 }
 
@@ -58,6 +67,10 @@ const Colors = {
     gcHi: "#2e7d32",
     skewPos: "#42a5f5",
     skewNeg: "#ef5350",
+    repeatLo: "#fce4ec",
+    repeatHi: "#c62828",
+    geneLo: "#e8f5e9",
+    geneHi: "#1b5e20",
     baseline: "#ccc",
   },
   dark: {
@@ -68,6 +81,10 @@ const Colors = {
     gcHi: "#81c784",
     skewPos: "#64b5f6",
     skewNeg: "#e57373",
+    repeatLo: "#4a1c1c",
+    repeatHi: "#ef5350",
+    geneLo: "#1b3a1b",
+    geneHi: "#66bb6a",
     baseline: "#444",
   },
 };
@@ -167,9 +184,24 @@ const CircosPlot: React.FC<CircosPlotProps> = ({
 
           const wedges: React.ReactNode[] = [];
 
+          // Compute max density for normalization (density-based rings only)
+          const isDensityRing = ring.kind === "repeat_density" || ring.kind === "gene_density";
+          let maxDensity = 0;
+          if (isDensityRing) {
+            for (const ctg of contigs) {
+              if (!ctg.density) continue;
+              for (const v of ctg.density) {
+                if (v !== null && v > maxDensity) maxDensity = v;
+              }
+            }
+          }
+
           contigs.forEach((ctg, ci) => {
             const ca = (ctg.length / totalBases) * availAngle;
-            const vals = ring.kind === "gc" ? ctg.gc : ctg.skew;
+            let vals: (number | null)[];
+            if (ring.kind === "gc") vals = ctg.gc;
+            else if (ring.kind === "skew") vals = ctg.skew;
+            else vals = ctg.density ?? [];
             const n = vals.length;
             const wa = ca / n;
 
@@ -184,12 +216,15 @@ const CircosPlot: React.FC<CircosPlotProps> = ({
               angle2 += wa;
 
               let wo: number, wiR: number;
+              let fillColor: string;
+
               if (ring.kind === "gc") {
                 // Fill from inner to outer proportional to GC%
                 const frac = v / 100;
                 wo = rOuter;
                 wiR = rOuter - frac * RING_HEIGHT;
-              } else {
+                fillColor = v > gcMean ? c.gcHi : c.gcLo;
+              } else if (ring.kind === "skew") {
                 // Diverging: positive above mid, negative below mid
                 if (v > 0) {
                   wo = rMid + (v / 0.5) * (rOuter - rMid) * 0.8;
@@ -198,6 +233,19 @@ const CircosPlot: React.FC<CircosPlotProps> = ({
                   wo = rMid;
                   wiR = rMid - (Math.abs(v) / 0.5) * (rMid - rInner) * 0.8;
                 }
+                fillColor = v > 0 ? c.skewPos : c.skewNeg;
+              } else if (ring.kind === "repeat_density") {
+                // Fill from inner to outer proportional to repeat density
+                const frac = maxDensity > 0 ? v / maxDensity : 0;
+                wo = rOuter;
+                wiR = rOuter - Math.min(frac, 1) * RING_HEIGHT;
+                fillColor = frac > 0.5 ? c.repeatHi : c.repeatLo;
+              } else {
+                // gene_density: fill from inner to outer proportional to gene density
+                const frac = maxDensity > 0 ? v / maxDensity : 0;
+                wo = rOuter;
+                wiR = rOuter - Math.min(frac, 1) * RING_HEIGHT;
+                fillColor = frac > 0.5 ? c.geneHi : c.geneLo;
               }
 
               if (Math.abs(wo - wiR) < 1) continue;
@@ -206,13 +254,7 @@ const CircosPlot: React.FC<CircosPlotProps> = ({
                 <path
                   key={`${ri}-${ci}-${wi}`}
                   d={wedgePath(CENTER, CENTER, wo, wiR, a0, a1)}
-                  fill={
-                    ring.kind === "gc"
-                      ? v > gcMean ? c.gcHi : c.gcLo
-                      : v > 0
-                        ? c.skewPos
-                        : c.skewNeg
-                  }
+                  fill={fillColor}
                   opacity={ri === 0 ? 0.9 : 0.8}
                   stroke="none"
                 />
