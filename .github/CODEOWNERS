@@ -1,0 +1,26 @@
+# Auto-reviewers: assign these people to review changes in matching paths.
+# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-branches-and-merges-in-your-repository/managing-who-can-edit-and-delete-pull-requests/configuring-pull-request-reviews
+
+# Backend (Python) — API, worker, queue, models, services, pipelines
+backend/                    @syntheticgio
+backend/app/                @syntheticgio
+backend/tests/              @syntheticgio
+
+# Frontend (React/TypeScript/Vite) — UI, components, stores, hooks
+frontend/src/               @syntheticgio
+frontend/vite.config.ts     @syntheticgio
+frontend/package.json       @syntheticgio
+frontend/tsconfig.json     @syntheticgio
+
+# Native launcher (Rust/Tauri/macOS signing)
+launcher/                   @syntheticgio
+
+# CI/CD, release tooling, and ops scripts
+.github/                    @syntheticgio
+ops/                        @syntheticgio
+Makefile                    @syntheticgio
+CLAUDE.md                   @syntheticgio
+**/*.md                     @syntheticgio
+
+# Default: everything else
+*                           @syntheticgio
