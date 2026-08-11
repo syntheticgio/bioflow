@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     worker_max_concurrent: int = 4
     worker_id: str = ""  # defaults to hostname:pid at startup
     worker_node_id: str = "primary"  # stable name for this physical machine
+    enrollment_key: str = ""  # shared secret for child-node enrollment (empty = open)
+    primary_api_url: str = ""  # where child nodes reach the primary's API (empty = primary)
     job_max_attempts: int = 5
     # Reaper/promotion cadence.
     reaper_interval_seconds: float = 10.0
