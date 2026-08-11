@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import type { DeRow, ObjectDetail as ObjectDetailData } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { MAPlot, SamplePcaPlot, VolcanoPlot, type PcaPoint } from "./ExpressionCharts";
+import { NodeSelector } from "./NodeSelector";
 
 const PAGE_SIZE = 50;
 
@@ -177,6 +178,8 @@ export function ExpressionResults({ obj }: { obj: ObjectDetailData }) {
           </tbody>
         </table>
       </div>
+
+      <NodeSelector value={targetNode} onChange={setTargetNode} />
 
       <AiSummary
         facts={obj.facts}
