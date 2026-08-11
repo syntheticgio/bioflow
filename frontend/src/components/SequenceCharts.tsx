@@ -325,7 +325,6 @@ export function QualityChart({ curve }: { curve: QualityPoint[] }) {
           height={plotH}
           fill="transparent"
           onMouseMove={onMouseMove}
-          onMouseLeave={clearHover}
         />
 
         <text x={pad.left} y={h - 6} fontSize="9" fill="var(--text-faint)">
@@ -647,7 +646,6 @@ export function GcDistributionChart({
           height={plotH}
           fill="transparent"
           onMouseMove={onMouseMove}
-          onMouseLeave={clearHover}
         />
 
         <text x={w / 2} y={h - 2} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
@@ -788,7 +786,6 @@ export function NContentChart({ curve }: { curve: NPoint[] }) {
           height={plotH}
           fill="transparent"
           onMouseMove={onMouseMove}
-          onMouseLeave={clearHover}
         />
 
         <text x={w / 2} y={h - 6} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
