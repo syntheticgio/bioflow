@@ -418,7 +418,10 @@ async def walk(
     # kind can be decided by an edge encountered after the node itself was
     # visited (the reconvergent-reference case), so kind is resolved from
     # `kinds` at the very end rather than baked in during the BFS.
-    raw: dict[PydanticObjectId, tuple[str, ObjectRole | None, Step | None, tuple[PydanticObjectId, ...]]] = {}
+    raw: dict[
+        PydanticObjectId,
+        tuple[str, ObjectRole | None, Step | None, tuple[PydanticObjectId, ...]],
+    ] = {}
 
     queue: deque[tuple[DataObject, int]] = deque([(target_obj, 0)])
     seen: set[PydanticObjectId] = {target_obj.id}

@@ -13,11 +13,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.storage.parsers import MAX_STORED_CONTIGS
-
 # Reused rather than duplicated: the same windowing scheme gc_tracks.py
 # fixes for the Circos plot, because #177 adds a ring to that same plot.
 from app.pipelines.gc_tracks import MIN_WINDOW_BASES, WINDOW_COUNT
+from app.storage.parsers import MAX_STORED_CONTIGS
 
 # A k-mer that appears more than 3 times in the assembly is considered
 # repetitive. This is a low threshold because meryl counts at k=21: a
@@ -160,7 +159,6 @@ def compute_repeat_density(
     were truncated at ``MAX_STORED_CONTIGS``.
     """
     # Build per-contig hit counts by window.
-    from collections import defaultdict
 
     hit_bins: dict[str, list[int]] = {}
     for line in lines:

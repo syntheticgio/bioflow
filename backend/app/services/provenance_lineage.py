@@ -22,7 +22,7 @@ hold their position from the walker's topological order and timed nodes sort
 around them; see `order_lineage`.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from beanie import PydanticObjectId
 
@@ -131,7 +131,7 @@ def order_lineage(entries: list[LineageEntry]) -> list[LineageEntry]:
     ordered = sorted(timed, key=lambda pair: pair[1].step.ran_at)  # type: ignore[union-attr]
 
     result = list(entries)
-    for slot, (_, entry) in zip(slots, ordered):
+    for slot, (_, entry) in zip(slots, ordered, strict=False):
         result[slot] = entry
     return result
 

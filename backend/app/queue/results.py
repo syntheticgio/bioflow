@@ -1985,7 +1985,11 @@ async def _apply_assess_assembly_qv(result: dict, *, owner: str) -> None:
     db_dir = Path(read_db_dir)
     job_id = result.get("job_id")
     k = result.get("k")
-    members = sorted(p for p in db_dir.rglob("*") if p.is_file())
+    members = sorted(
+        p
+        for p in await asyncio.to_thread(lambda: list(db_dir.rglob("*")))
+        if p.is_file()
+    )
     created = []
     for member in members:
         try:

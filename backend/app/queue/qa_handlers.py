@@ -121,7 +121,11 @@ def answer_project_question(ctx: JobContext) -> dict:
     if not isinstance(result, Completion):
         reason = getattr(result, "reason", result)
         log.info("qa_not_answered", conversation_id=conversation_id, reason=reason)
-        return {"conversation_id": conversation_id, "project_id": project_id, "skipped": str(reason)}
+        return {
+            "conversation_id": conversation_id,
+            "project_id": project_id,
+            "skipped": str(reason),
+        }
 
     now = utcnow()
     convo.turns.append(StoredTurn(role="user", content=question, created_at=now))

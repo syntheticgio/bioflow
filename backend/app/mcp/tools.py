@@ -239,7 +239,7 @@ async def cancel_job(job_id: str, *, owner: str) -> dict:
     and is fully stopped now), "cancelling" (it was running and has been
     signalled to stop), or "already_terminal" (it had already finished).
     """
-    job = await _owned_job(job_id, owner=owner)
+    await _owned_job(job_id, owner=owner)
 
     outcome = await queue.request_cancel(str(job_id))
     if outcome == "not_found":

@@ -379,7 +379,9 @@ async def _release_dependents(job_id: str, *, succeeded: bool) -> None:
         log.info("job_unblocked", job_id=str(dep.id), type=dep.type, after=job_id)
 
 
-async def _push_to_redis(job: Job, *, delay_seconds: float = 0, target_node: str | None = None) -> None:
+async def _push_to_redis(
+    job: Job, *, delay_seconds: float = 0, target_node: str | None = None
+) -> None:
     r = get_redis()
     job_id = str(job.id)
     score = compute_score(job.job_class, job.timing.enqueued_at)

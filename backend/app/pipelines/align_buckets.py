@@ -56,7 +56,7 @@ def pack_buckets(
     buckets: list[BucketSpec] = []
 
     for name, bases in sorted_seqs:
-        seq_index_mb = math.ceil((bases * per_base_index_mb))
+        seq_index_mb = math.ceil(bases * per_base_index_mb)
         seq_total_mb = seq_index_mb + per_bucket_overhead
         placed = False
         for bucket in buckets:

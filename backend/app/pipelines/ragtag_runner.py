@@ -108,7 +108,7 @@ def parse_stats(text: str) -> dict:
     if len(header) != len(values):
         return {}
 
-    row = dict(zip(header, values))
+    row = dict(zip(header, values, strict=False))
     facts: dict = {}
     for key in (
         "placed_sequences",

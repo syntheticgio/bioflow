@@ -7,7 +7,7 @@ bam_stats_runner.py's split for the same reason.
 """
 
 import bisect
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 # Gene body coverage is reported at percentile resolution: 100 bins from the
@@ -245,7 +245,7 @@ def _covers(intervals: list[tuple[int, int]], position: int) -> bool:
     longer tries.
     """
     i = bisect.bisect_right(intervals, (position, float("inf")))
-    for start, end in intervals[:i]:
+    for _start, end in intervals[:i]:
         if end >= position:
             return True
     return False

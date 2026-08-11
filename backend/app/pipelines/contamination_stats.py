@@ -293,7 +293,7 @@ class AdapterTracker:
                     "values": [
                         round(100.0 * c / denom, 4) if denom else 0.0
                         for c, denom in zip(
-                            self.counts[name][:width], denominators
+                            self.counts[name][:width], denominators, strict=False
                         )
                     ],
                 }

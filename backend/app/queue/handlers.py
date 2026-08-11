@@ -548,7 +548,7 @@ async def verify_files(ctx: JobContext) -> dict:
         # they rotate out of the oldest-first selection and the rest of the
         # library can be checked.  Without this a transient mount glitch
         # that persists for minutes stalls the entire verification rotation.
-        present_ids = [b.id for b, s in zip(blobs, stats.values()) if s is not None]
+        present_ids = [b.id for b, s in zip(blobs, stats.values(), strict=False) if s is not None]
         if present_ids:
             await Blob.find(
                 {"_id": {"$in": present_ids}}

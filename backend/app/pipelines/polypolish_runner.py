@@ -239,7 +239,7 @@ def parse_polish_stderr(text: str) -> dict:
         # Falls back to a plain mean if the block counts ever disagree,
         # rather than zipping two lists of different lengths into silence.
         if depths and len(depths) == len(lengths) and sum(lengths):
-            total = sum(float(d) * n for d, n in zip(depths, lengths))
+            total = sum(float(d) * n for d, n in zip(depths, lengths, strict=False))
             facts["polish_measured_depth"] = round(total / sum(lengths), 1)
         elif depths:
             facts["polish_measured_depth"] = round(

@@ -19,7 +19,7 @@ import importlib
 from app.logging import get_logger
 from app.models.ai import FailureReason
 from app.services.ai import qa_tools
-from app.services.ai.adapters import Completion, ConversationTurn, Failure, ToolCall
+from app.services.ai.adapters import Completion, ConversationTurn, Failure
 
 # See summary_handlers.py for why this goes through sys.modules via
 # importlib rather than `from app.services.ai import complete_sync` --
@@ -96,7 +96,11 @@ def answer(
         )
         history.append(ConversationTurn(role="tool_call", tool_call=result))
         history.append(
-            ConversationTurn(role="tool_result", tool_call_id=result.id, content=_dumps(tool_result))
+            ConversationTurn(
+                role="tool_result",
+                tool_call_id=result.id,
+                content=_dumps(tool_result),
+            )
         )
 
     # Exhausted -- force a final answer with tools withdrawn.

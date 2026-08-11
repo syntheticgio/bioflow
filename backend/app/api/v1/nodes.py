@@ -1,6 +1,5 @@
 """Compute node status: which machines are connected and what they are doing."""
 
-import os
 import platform
 import re
 import secrets
@@ -73,7 +72,7 @@ async def list_nodes() -> list[dict]:
 
     # Group workers by node_id.
     by_node: dict[str, dict] = {}
-    for worker_id, blob in raw.items():
+    for _worker_id, blob in raw.items():
         try:
             data = json.loads(blob)
         except (json.JSONDecodeError, TypeError):
@@ -104,7 +103,7 @@ async def list_nodes() -> list[dict]:
         entry["slots"] += data.get("slots", 0)
 
     # Fold in any enrolled nodes that have no workers (yet).
-    for node_id, mongo_info in mongo_nodes.items():
+    for node_id, _mongo_info in mongo_nodes.items():
         if node_id not in by_node:
             by_node[node_id] = {
                 "node_id": node_id,

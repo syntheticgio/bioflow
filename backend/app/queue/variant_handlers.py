@@ -15,8 +15,7 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError, ValidationError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import aligners, csq_runner, tools, variant_runner
-from app.pipelines import variant_db, vcf_stats_runner
+from app.pipelines import aligners, csq_runner, tools, variant_db, variant_runner, vcf_stats_runner
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller
 from app.queue.align_handlers import _resolve_blob

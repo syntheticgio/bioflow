@@ -738,7 +738,7 @@ async def get_bam_stats_report(
     for line in page:
         values = line.split("\t")
         row: dict = {}
-        for col, value in zip(header, values):
+        for col, value in zip(header, values, strict=False):
             row[col] = bam_stats_runner.coerce_tsv_value(col, value)
         rows.append(row)
 
