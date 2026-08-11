@@ -212,7 +212,7 @@ jobs:
       # `type=sha` gives every build a permanent handle even after `latest`
       # moves off it.
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }}
           tags: |
