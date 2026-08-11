@@ -144,7 +144,10 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
             kind="preprocess",
             category="PREPROCESS",
             title="Trim &amp; filter -- fastp",
-            description=(\n                    "Already trimmed -- this file is the output of a previous trim job. "\n                    "Re-trimming is unusual; use the QC tab to inspect quality instead."\n                ),
+            description=(
+                "Already trimmed -- this file is the output of a previous trim job. "
+                "Re-trimming is unusual; use the QC tab to inspect quality instead."
+            ),
             status=CardStatus.UNAVAILABLE,
             reason="This file is already the product of trimming.",
         )
