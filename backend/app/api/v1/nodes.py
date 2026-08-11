@@ -1,6 +1,7 @@
 """Compute node status: which machines are connected and what they are doing."""
 
 import asyncio
+import json
 import os
 import pathlib
 import platform
@@ -78,22 +79,20 @@ async def _node_conc(node_id: str) -> dict:
     }
 
 
-@router.get("")
-async def list_nodes() -> list[dict]:
-    """All known compute nodes, with status and resource usage.
+async def enumerate_nodes() -> dict[str, dict]:
+    """Every known node, keyed by node_id, merged from Redis and MongoDB.
 
-    Merges live Redis data (heartbeat, running jobs, slots) with MongoDB
-    enrollment records (status, hostname, registered_at).  A node that has
-    enrolled but has no online workers shows as ``"online": false``; a node
-    whose enrollment was revoked shows ``"enrollment": "revoked"`` even if
-    its workers are still heartbeating.
+    Redis knows which workers are heartbeating; MongoDB knows which nodes
+    enrolled. A node can be in either without the other: enrolled but not yet
+    started (no workers), or heartbeating after its enrollment was revoked.
+    Both belong in the result.
+
+    Shared by `/nodes` and `/system/load` so the two cannot disagree about
+    what a node is.
     """
-    import json
-
     now = datetime.now(UTC)
     threshold = now - timedelta(seconds=_OFFLINE_THRESHOLD_SECONDS)
 
-    # --- MongoDB: enrollment records ---
     mongo_nodes: dict[str, dict] = {}
     try:
         async for doc in Node.find_all():
@@ -106,15 +105,24 @@ async def list_nodes() -> list[dict]:
     except Exception:
         log.warning("node_mongo_read_failed")
 
-    # --- Redis: live worker data ---
     try:
         raw = await get_redis().hgetall(keys.WORKERS)
     except Exception:
         log.warning("nodes_read_failed")
         raw = {}
 
-    # Group workers by node_id.
     by_node: dict[str, dict] = {}
+
+    def _blank(node_id: str) -> dict:
+        return {
+            "node_id": node_id,
+            "workers": 0,
+            "online_workers": 0,
+            "running_jobs": 0,
+            "slots": 0,
+            "online": False,
+        }
+
     for _worker_id, blob in raw.items():
         try:
             data = json.loads(blob)
@@ -128,16 +136,7 @@ async def list_nodes() -> list[dict]:
             last_seen = None
         online = last_seen is not None and last_seen > threshold
 
-        if node_id not in by_node:
-            by_node[node_id] = {
-                "node_id": node_id,
-                "workers": 0,
-                "online_workers": 0,
-                "running_jobs": 0,
-                "slots": 0,
-                "online": False,
-            }
-        entry = by_node[node_id]
+        entry = by_node.setdefault(node_id, _blank(node_id))
         entry["workers"] += 1
         if online:
             entry["online_workers"] += 1
@@ -145,35 +144,37 @@ async def list_nodes() -> list[dict]:
         entry["running_jobs"] += len(data.get("running", []))
         entry["slots"] += data.get("slots", 0)
 
-    # Fold in any enrolled nodes that have no workers (yet).
-    for node_id, _mongo_info in mongo_nodes.items():
-        if node_id not in by_node:
-            by_node[node_id] = {
-                "node_id": node_id,
-                "workers": 0,
-                "online_workers": 0,
-                "running_jobs": 0,
-                "slots": 0,
-                "online": False,
-            }
+    for node_id in mongo_nodes:
+        by_node.setdefault(node_id, _blank(node_id))
 
-    # Build result — merge Redis + MongoDB.
+    for node_id, entry in by_node.items():
+        mongo_info = mongo_nodes.get(node_id, {})
+        entry["hostname"] = mongo_info.get("hostname", "")
+        entry["registered_at"] = mongo_info.get("registered_at")
+        entry["enrollment"] = mongo_info.get("enrollment", "unknown")
+        entry["last_seen_mongo"] = mongo_info.get("last_seen")
+
+    return by_node
+
+
+@router.get("")
+async def list_nodes() -> list[dict]:
+    """All known compute nodes, with status and resource usage.
+
+    Merges live Redis data (heartbeat, running jobs, slots) with MongoDB
+    enrollment records (status, hostname, registered_at).  A node that has
+    enrolled but has no online workers shows as ``"online": false``; a node
+    whose enrollment was revoked shows ``"enrollment": "revoked"`` even if
+    its workers are still heartbeating.
+    """
+    by_node = await enumerate_nodes()
+
     result = []
     for node_id, info in sorted(by_node.items()):
-        # Attach per-node concurrency readings for online nodes.
         if info["online"]:
-            conc = await _node_conc(node_id)
-            info["reserved"] = conc
+            info["reserved"] = await _node_conc(node_id)
         else:
             info["reserved"] = {"cpu": 0, "mem_mb": 0, "io_heavy": 0}
-
-        # Merge MongoDB enrollment info.
-        mongo_info = mongo_nodes.get(node_id, {})
-        info["hostname"] = mongo_info.get("hostname", "")
-        info["registered_at"] = mongo_info.get("registered_at")
-        info["enrollment"] = mongo_info.get("enrollment", "unknown")
-        info["last_seen_mongo"] = mongo_info.get("last_seen")
-
         result.append(info)
 
     return result
