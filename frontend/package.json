@@ -1,31 +1,31 @@
 {
-  "name": "biopipe-frontend",
+  "name": "bioflow-web",
   "private": true,
-  "version": "0.3.0-alpha",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "lint": "tsc --noEmit",
     "preview": "vite preview",
     "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",
     "cytoscape": "^3.34.0",
     "hash-wasm": "^4.12.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "react-router-dom": "^6.28.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@types/cytoscape": "^3.31.0",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
     "typescript": "^7.0.2",
-    "vite": "^6.0.3",
+    "vite": "^8.2.1",
     "vitest": "^4.1.10"
   }
 }

@@ -1,5 +1,6 @@
 import { api } from "../api/client";
 import type { QcFacts } from "../api/types";
+import type { JSX } from "react";
 
 /**
  * A report name that opens the same new-tab, noopener, CSP-sandboxed link
