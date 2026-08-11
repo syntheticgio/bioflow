@@ -427,18 +427,65 @@ def allowed_classes(state: AdmissionState = AdmissionState.OPEN) -> list[str]:
     return sorted(c.value for c in ADMITTED_CLASSES[state])
 
 
+async def _node_breakdown() -> tuple[list[dict], str | None]:
+    """Per-node running/queued/reserved, and an error string if it failed.
+
+    Imported inside the function: `app.api.v1.nodes` imports from
+    `app.queue`, so a module-level import here would be circular.
+    """
+    try:
+        from app.api.v1.nodes import enumerate_nodes
+        from app.queue import node_stats as node_stats_mod
+
+        by_node = await enumerate_nodes()
+        known = set(by_node)
+        orphans = await node_stats_mod.orphaned_queue_nodes(known)
+        stats = await node_stats_mod.node_stats(list(known) + orphans)
+
+        nodes = []
+        for node_id in sorted(known | set(orphans)):
+            info = by_node.get(node_id, {})
+            s = stats.get(node_id, {"queued": 0, "cpu": 0, "mem_mb": 0})
+            nodes.append(
+                {
+                    "node_id": node_id,
+                    "running": info.get("running_jobs", 0),
+                    "queued": s["queued"],
+                    "cpu": s["cpu"],
+                    "mem_mb": s["mem_mb"],
+                    "workers": info.get("workers", 0),
+                    "known": node_id in known,
+                }
+            )
+        return nodes, None
+    except Exception as e:  # noqa: BLE001
+        log.warning("node_breakdown_failed", error=str(e))
+        return [], str(e)
+
+
 async def current_load() -> dict:
-    """Backing data for /system/load and the header indicator."""
+    """Backing data for /system/load and the header indicator.
+
+    The per-node breakdown is computed here rather than published in the
+    leader's snapshot: baking it in would make it stale up to the snapshot TTL
+    and absent entirely on the fallback path below, so the whole feature would
+    vanish exactly when the leader lock lapses.
+    """
     from app.db.redis_client import get_redis
+
+    nodes, nodes_error = await _node_breakdown()
 
     snap = await read_snapshot(get_redis())
     if snap is not None:
+        snap["nodes"] = nodes
+        if nodes_error:
+            snap["nodes_error"] = nodes_error
         return snap
 
     # No leader has published yet (or Redis is empty): report raw metrics so the
     # endpoint stays useful, and say the governor is not driving anything.
     vm = psutil.virtual_memory()
-    return {
+    load = {
         "state": AdmissionState.OPEN.value,
         "admitted_classes": allowed_classes(),
         "ramping": False,
@@ -446,4 +493,8 @@ async def current_load() -> dict:
         "memory": {"percent": vm.percent, "available_bytes": vm.available},
         "disk": None,
         "governor_active": False,
+        "nodes": nodes,
     }
+    if nodes_error:
+        load["nodes_error"] = nodes_error
+    return load
