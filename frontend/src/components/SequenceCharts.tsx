@@ -1,4 +1,9 @@
 import { useState } from "react";
+import {
+  type ChartPadding,
+  plotGeometry,
+  pointerFraction,
+} from "../lib/chartScaffold";
 
 /**
  * Base-composition pie and per-position quality curve.
@@ -24,6 +29,28 @@ interface QualityPoint {
   position: number;
   mean: number;
   count: number;
+}
+
+function useChartScaffold<T>(
+  width: number,
+  height: number,
+  pad: ChartPadding,
+  resolveHover: (fraction: number) => T,
+) {
+  const [hover, setHover] = useState<T | null>(null);
+  const geometry = plotGeometry(width, height, pad);
+
+  const onMouseMove = (event: React.MouseEvent<SVGRectElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    setHover(resolveHover(pointerFraction(event.clientX, box.left, box.width)));
+  };
+
+  return {
+    ...geometry,
+    hover,
+    onMouseMove,
+    clearHover: () => setHover(null),
+  };
 }
 
 export interface LengthBucket {
@@ -191,14 +218,20 @@ export function BaseCompositionChart({
 }
 
 export function QualityChart({ curve }: { curve: QualityPoint[] }) {
-  const [hover, setHover] = useState<QualityPoint | null>(null);
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+    hover,
+    onMouseMove,
+    clearHover,
+  } = useChartScaffold(460, 210, { top: 10, right: 46, bottom: 26, left: 30 }, (fraction) => {
+    const idx = Math.round(fraction * (curve.length - 1));
+    return curve[Math.max(0, Math.min(curve.length - 1, idx))];
+  });
   if (!curve?.length) return null;
-
-  const w = 460;
-  const h = 210;
-  const pad = { top: 10, right: 46, bottom: 26, left: 30 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
 
   const maxPos = curve[curve.length - 1].position;
   // Fixed 0–42 y-axis rather than auto-scaling: Q30 and Q20 are absolute
@@ -227,7 +260,7 @@ export function QualityChart({ curve }: { curve: QualityPoint[] }) {
         width="100%"
         viewBox={`0 0 ${w} ${h}`}
         style={{ maxWidth: w, display: "block" }}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={clearHover}
       >
         {/* Q20/Q30 quality bands, the conventional reference lines. Labelled
             only -- no background fill, so the curve reads without the extra
@@ -291,12 +324,8 @@ export function QualityChart({ curve }: { curve: QualityPoint[] }) {
           width={plotW}
           height={plotH}
           fill="transparent"
-          onMouseMove={(e) => {
-            const box = (e.target as SVGRectElement).getBoundingClientRect();
-            const frac = (e.clientX - box.left) / box.width;
-            const idx = Math.round(frac * (curve.length - 1));
-            setHover(curve[Math.max(0, Math.min(curve.length - 1, idx))]);
-          }}
+          onMouseMove={onMouseMove}
+          onMouseLeave={clearHover}
         />
 
         <text x={pad.left} y={h - 6} fontSize="9" fill="var(--text-faint)">
@@ -486,14 +515,26 @@ export function GcDistributionChart({
   sampledReads?: number;
 }) {
   const [showFit, setShowFit] = useState(false);
-  const [hover, setHover] = useState<GcBin | null>(null);
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+    hover,
+    onMouseMove,
+    clearHover,
+  } = useChartScaffold(460, 210, { top: 10, right: 16, bottom: 26, left: 38 }, (fraction) => {
+    const gc = fraction * 100;
+    let nearest = histogram[0];
+    for (const b of histogram) {
+      if (Math.abs(b.gc_percent - gc) < Math.abs(nearest.gc_percent - gc)) {
+        nearest = b;
+      }
+    }
+    return nearest;
+  });
   if (!histogram?.length) return null;
-
-  const w = 460;
-  const h = 210;
-  const pad = { top: 10, right: 16, bottom: 26, left: 38 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
 
   const maxCount = Math.max(...histogram.map((b) => b.count));
   if (!maxCount) return null;
@@ -529,7 +570,7 @@ export function GcDistributionChart({
         width="100%"
         viewBox={`0 0 ${w} ${h}`}
         style={{ maxWidth: w, display: "block" }}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={clearHover}
       >
         {[0, 25, 50, 75, 100].map((gc) => (
           <g key={gc}>
@@ -605,17 +646,8 @@ export function GcDistributionChart({
           width={plotW}
           height={plotH}
           fill="transparent"
-          onMouseMove={(e) => {
-            const box = (e.target as SVGRectElement).getBoundingClientRect();
-            const gc = ((e.clientX - box.left) / box.width) * 100;
-            let nearest = histogram[0];
-            for (const b of histogram) {
-              if (Math.abs(b.gc_percent - gc) < Math.abs(nearest.gc_percent - gc)) {
-                nearest = b;
-              }
-            }
-            setHover(nearest);
-          }}
+          onMouseMove={onMouseMove}
+          onMouseLeave={clearHover}
         />
 
         <text x={w / 2} y={h - 2} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
@@ -675,14 +707,20 @@ interface NPoint {
  * on the backend rather than drawn as a flat line at zero.
  */
 export function NContentChart({ curve }: { curve: NPoint[] }) {
-  const [hover, setHover] = useState<NPoint | null>(null);
+  const {
+    width: w,
+    height: h,
+    pad,
+    plotW,
+    plotH,
+    hover,
+    onMouseMove,
+    clearHover,
+  } = useChartScaffold(460, 210, { top: 10, right: 16, bottom: 26, left: 38 }, (fraction) => {
+    const idx = Math.round(fraction * (curve.length - 1));
+    return curve[Math.max(0, Math.min(curve.length - 1, idx))];
+  });
   if (!curve?.length) return null;
-
-  const w = 460;
-  const h = 210;
-  const pad = { top: 10, right: 16, bottom: 26, left: 38 };
-  const plotW = w - pad.left - pad.right;
-  const plotH = h - pad.top - pad.bottom;
 
   const maxPos = curve[curve.length - 1].position;
   const observedMax = Math.max(...curve.map((p) => p.percent));
@@ -704,7 +742,7 @@ export function NContentChart({ curve }: { curve: NPoint[] }) {
         width="100%"
         viewBox={`0 0 ${w} ${h}`}
         style={{ maxWidth: w, display: "block" }}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={clearHover}
       >
         {/* The same 5% threshold the grade uses, drawn so the chart and the
             grade cannot appear to disagree about what counts as a spike. */}
@@ -749,12 +787,8 @@ export function NContentChart({ curve }: { curve: NPoint[] }) {
           width={plotW}
           height={plotH}
           fill="transparent"
-          onMouseMove={(e) => {
-            const box = (e.target as SVGRectElement).getBoundingClientRect();
-            const frac = (e.clientX - box.left) / box.width;
-            const idx = Math.round(frac * (curve.length - 1));
-            setHover(curve[Math.max(0, Math.min(curve.length - 1, idx))]);
-          }}
+          onMouseMove={onMouseMove}
+          onMouseLeave={clearHover}
         />
 
         <text x={w / 2} y={h - 6} textAnchor="middle" fontSize="9" fill="var(--text-faint)">
