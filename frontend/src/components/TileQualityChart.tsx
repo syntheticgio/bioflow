@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { TileMatrix } from "../api/types";
+import type { JSX } from "react";
 
 /** Above this many cells, one <rect> per cell is too many DOM nodes and the
  *  chart draws to a canvas instead. A NovaSeq matrix is 200,000+; the SVG

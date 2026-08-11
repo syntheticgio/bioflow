@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
  * is squeezed by sibling content rather than by the window itself.
  */
 export function useElementWidth<T extends HTMLElement>(): [
-  React.RefObject<T>,
+  React.MutableRefObject<T | null>,
   number,
 ] {
   const ref = useRef<T | null>(null);
