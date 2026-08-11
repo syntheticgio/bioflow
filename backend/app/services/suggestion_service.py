@@ -143,7 +143,7 @@ def build_preprocess_card(obj) -> SuggestionCard | None:
         return SuggestionCard(
             kind="preprocess",
             category="PREPROCESS",
-            title="Trim &amp; filter -- fastp",
+            title="Trim & filter -- fastp",
             description=(
                 "Already trimmed -- this file is the output of a previous trim job. "
                 "Re-trimming is unusual; use the QC tab to inspect quality instead."
