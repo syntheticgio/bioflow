@@ -1301,3 +1301,121 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
         "job_id": ctx.job_id,
         "facts": facts,
     }
+
+
+# ── Bakta genome annotation ──────────────────────────────────────────
+
+_ANNOTATION_LEASE_SECONDS = 6 * 3600  # 6h — bacterial genome annotation can run hours
+
+
+@handler(
+    "annotate_genome",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def annotate_genome(ctx: JobContext) -> dict:
+    """Annotate a bacterial or archaeal genome assembly with Bakta.
+
+    Runs Bakta against the assembly FASTA, then parses the GFF3 output to
+    compute per-window gene density tracks for the Circos plot.
+
+    Produces two outputs:
+
+    - ``gene_density`` facts on the assembly (same shape as ``gc_tracks``
+      and ``repeat_density`` — per-contig, per-window arrays).
+    - The full GFF3, GenBank, JSON, and FAA outputs stored as pipeline
+      artifacts alongside the job log.
+    """
+    from app.pipelines import bakta_runner
+
+    bakta_tool = tools.require(tools.bakta())
+
+    work = _prepare_workdir(ctx, "annotate")
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    assembly = _resolve_input(ctx.payload, "assembly")
+
+    organism = ctx.payload.get("organism")
+    genus: str | None = None
+    species: str | None = None
+    strain: str | None = None
+    if isinstance(organism, dict):
+        genus = organism.get("genus")
+        species = organism.get("species")
+        strain = organism.get("strain")
+
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+
+    out_dir = work / "bakta_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    ctx.progress(phase="annotating", pct=None, message="running Bakta annotation")
+    ctx.extend_lease(_ANNOTATION_LEASE_SECONDS)
+
+    log.info(
+        "bakta_annotation_started",
+        job_id=ctx.job_id,
+        assembly=str(assembly),
+        organism=organism,
+    )
+
+    cmd = bakta_runner.build_bakta_command(
+        bakta_path=bakta_tool.path,
+        assembly=assembly,
+        out_dir=out_dir,
+        threads=threads,
+        genus=genus,
+        species=species,
+        strain=strain,
+    )
+    code = run_subprocess(ctx, cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "bakta")
+
+    # ── Gene density from GFF3 ────────────────────────────────────────
+
+    ctx.progress(phase="gene density", pct=None, message="computing gene density")
+
+    facts: dict = {}
+
+    gff3_path = out_dir / (assembly.stem + ".gff3")
+    if gff3_path.exists():
+        try:
+            gff3_text = gff3_path.read_text()
+        except Exception:
+            log.warning("bakta_gff3_unreadable", job_id=ctx.job_id, path=str(gff3_path))
+            gff3_text = ""
+
+        genes = bakta_runner.parse_gff3(gff3_text)
+        if genes:
+            sequence_lengths_raw = ctx.payload.get("sequence_lengths")
+            if sequence_lengths_raw and isinstance(sequence_lengths_raw, dict):
+                contig_lengths = {
+                    name: int(length)
+                    for name, length in sequence_lengths_raw.items()
+                }
+            else:
+                contig_lengths = {}
+
+            density = bakta_runner.compute_gene_density(genes, contig_lengths)
+            if density and density.get("contigs"):
+                facts["gene_density"] = density
+
+    ctx.progress(phase="done", pct=1.0, message="annotation complete")
+    gene_count = sum(len(v) for v in (bakta_runner.parse_gff3(gff3_text) if gff3_path.exists() else {}).values()) if "gene_density" in facts else 0
+    log.info(
+        "bakta_annotation_finished",
+        job_id=ctx.job_id,
+        genes=gene_count,
+        gene_density="gene_density" in facts,
+    )
+
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "output_dir": str(out_dir),
+        "facts": facts,
+    }

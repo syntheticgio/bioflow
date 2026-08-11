@@ -54,6 +54,10 @@ class RunKind(StrEnum):
     # scaffolds, or derives an assembly from existing reference-like inputs.
     REFERENCE_ASSEMBLY = "reference_assembly"
 
+    # Genome annotation: gene finding, functional annotation, and feature
+    # coordinate extraction on a bacterial or archaeal assembly.
+    ANNOTATION = "annotation"
+
 
 class RunStatus(StrEnum):
     """Derived from member job states, never stored.
@@ -89,6 +93,9 @@ class RunInputRole(StrEnum):
     # A per-sample count file going into a differential expression run. The
     # first role that appears many times in one run's `inputs`.
     COUNTS = "counts"
+    # The assembly being annotated — distinct from DRAFT_ASSEMBLY, which is
+    # for assemblies being improved or scaffolded.
+    ASSEMBLY = "assembly"
 
 
 class RunInput(BaseModel):
@@ -165,6 +172,9 @@ class RunJobRole(StrEnum):
     # Reference-guided scaffolding. Named for the action, same reasoning as
     # CONSENSUS and POLISH above.
     SCAFFOLD = "scaffold"
+    # Genome annotation. The whole point of its run — an annotation run
+    # whose annotation failed produced nothing.
+    ANNOTATE = "annotate"
 
 
 # Roles whose failure does not fail the run. The test is whether the expensive
