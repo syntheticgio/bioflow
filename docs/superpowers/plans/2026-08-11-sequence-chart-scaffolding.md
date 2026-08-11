@@ -137,7 +137,7 @@ git commit -m "refactor(frontend): add sequence chart geometry helpers"
 - Produces private `useChartScaffold<T>(width, height, pad, resolveHover)`, returning `geometry`, `hover`, `onMouseMove`, and `clearHover`.
 - `resolveHover(fraction: number): T` is supplied by each chart and preserves its existing data-selection expression.
 
-- [ ] **Step 1: Write the failing hook-support test for the exact pointer boundary**
+- [ ] **Step 1: Add a regression test for the exact pointer boundary**
 
 Extend `frontend/src/lib/chartScaffold.test.ts` with the boundary values used by the line charts’ existing resolver:
 
