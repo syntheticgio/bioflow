@@ -64,6 +64,15 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
     <>
       <AlignmentReport facts={obj.facts} />
 
+      {rnaApplies && (
+        <TranscriptQc
+          obj={obj}
+          gtfs={gtfObjects}
+          geneBody={rnaApplicability.geneBody}
+          featureDistribution={rnaApplicability.featureDistribution}
+        />
+      )}
+
       {!hasResults && (
         <div className="section">
           <div className="section-title">Coverage &amp; per-contig detail</div>
@@ -183,15 +192,6 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               </div>
             )}
           </div>
-
-          {rnaApplies && (
-            <TranscriptQc
-              obj={obj}
-              gtfs={gtfObjects}
-              geneBody={rnaApplicability.geneBody}
-              featureDistribution={rnaApplicability.featureDistribution}
-            />
-          )}
 
           <div className="section">
             <div className="section-title">Provenance</div>
