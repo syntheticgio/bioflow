@@ -144,6 +144,9 @@ class Settings(BaseSettings):
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
     flye_path: str = "flye"
+    # Bacterial genome annotation. On-demand delivery — the database is
+    # several GB — so this probe only checks the binary, not the DB.
+    bakta_path: str = "bakta"
     # Assembly completeness. Built from source in the Dockerfile -- neither is
     # packaged for trixie -- so compleasm resolves miniprot on PATH under this
     # exact name rather than needing a second setting passed through to it.

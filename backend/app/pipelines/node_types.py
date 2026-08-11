@@ -824,6 +824,9 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only meryl spectra and repeat density — facts on an existing
         # assembly, same class as completeness and gc_tracks.
         "pipeline_service.launch_meryl_analysis",
+        # Read-only genome annotation — gene density facts on an existing
+        # assembly, same class as gc_tracks and meryl.
+        "pipeline_service.launch_annotate_genome",
     }
 )
 
