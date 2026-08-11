@@ -375,7 +375,7 @@ function tabsFor(obj: DataObject): TabDef[] {
     {
       id: "history",
       label: "History",
-      hint: typeof obj.facts.sra_accession === "string" ? "Provenance" : undefined,
+      hint: "Provenance",
     },
     { id: "actions", label: "Actions" },
   );
