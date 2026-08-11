@@ -41,8 +41,6 @@ from app.pipelines import (
     aligner_registry,
     aligners,
     assembler_registry,
-    assembly_params as assembly_params_module,
-    assemblers,
     assembly_qc_registry,
     counts_runner,
     csq_parse,
@@ -58,6 +56,9 @@ from app.pipelines import (
     tools,
     trimmomatic_runner,
     variant_runner,
+)
+from app.pipelines import (
+    assembly_params as assembly_params_module,
 )
 from app.pipelines.aligners import Aligner
 from app.services import blob_service, memory_estimate, run_service
@@ -1147,7 +1148,7 @@ async def align_envelope(
 
     status = await reference_index_status(reference)
 
-    from app.pipelines import align_buckets, aligner_registry
+    from app.pipelines import aligner_registry
 
     result = {
         "cpu_budget": governor.cpu_budget(),
@@ -4431,7 +4432,7 @@ async def launch_polish(
     if draft_path:
         payload["draft_path"] = draft_path
 
-    for slot, obj in zip(("reads", "mate"), chosen):
+    for slot, obj in zip(("reads", "mate"), chosen, strict=False):
         digest, path = await _resolve_readable(obj)
         payload[f"{slot}_object_id"] = str(obj.id)
         payload[f"{slot}_name"] = obj.name
@@ -4462,7 +4463,7 @@ async def launch_polish(
             *[
                 RunInput(object_id=obj.id, name=obj.name, role=role)
                 for role, obj in zip(
-                    (RunInputRole.READS, RunInputRole.MATE), chosen
+                    (RunInputRole.READS, RunInputRole.MATE), chosen, strict=False
                 )
             ],
         ],
@@ -5423,8 +5424,8 @@ async def launch_continuity_qc(
     Read-only: no derived object, only facts and (optionally) a depth plot.
     """
     from app.queue import queue
-    from app.services import object_service, reference_assembly
     from app.queue.assembly_qc_handlers import GCI_PLOT_MAX_CONTIGS
+    from app.services import object_service, reference_assembly
 
     tool = tools.require(tools.gci())
 

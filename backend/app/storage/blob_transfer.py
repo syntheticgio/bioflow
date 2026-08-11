@@ -163,11 +163,11 @@ def _fetch(digest: str, dest: Path) -> Path:
                     actual.update(chunk)
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            raise _blob_not_on_primary(digest)
-        raise _fetch_failed(digest, url, str(e))
+            raise _blob_not_on_primary(digest) from e
+        raise _fetch_failed(digest, url, str(e)) from e
     except OSError as e:
         # Network error, DNS failure, timeout — retryable.
-        raise _fetch_failed(digest, url, str(e))
+        raise _fetch_failed(digest, url, str(e)) from e
 
     if actual.hexdigest() != digest:
         tmp.unlink(missing_ok=True)
@@ -193,7 +193,7 @@ def _push(digest: str, path: Path) -> bool:
         return False
     except urllib.error.HTTPError as e:
         if e.code != 404:
-            raise _push_failed(digest, url, str(e))
+            raise _push_failed(digest, url, str(e)) from e
     except OSError:
         pass  # HEAD failed, try PUT anyway.
 
@@ -212,9 +212,9 @@ def _push(digest: str, path: Path) -> bool:
         with urllib.request.urlopen(put_req, timeout=60) as resp:
             _check_status(resp, digest)
     except urllib.error.HTTPError as e:
-        raise _push_failed(digest, url, str(e))
+        raise _push_failed(digest, url, str(e)) from e
     except OSError as e:
-        raise _push_failed(digest, url, str(e))
+        raise _push_failed(digest, url, str(e)) from e
 
     log.info("blob_pushed", digest=digest, size=len(data))
     return True

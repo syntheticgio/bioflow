@@ -204,7 +204,11 @@ def render_markdown(chain: ProvenanceChain) -> str:
                 f"`{chain.nodes[b].name}`" for b in parent_ids if b in chain.nodes
             )
             dest_node = chain.nodes.get(dest_id)
-            job_type = dest_node.produced_by.job_type if dest_node and dest_node.produced_by else None
+            job_type = (
+                dest_node.produced_by.job_type
+                if dest_node and dest_node.produced_by
+                else None
+            )
             verb = _BRANCH_MERGE_VERBS.get(job_type or "", _GENERIC_MERGE_VERB)
             lines.append(
                 f"- _This step {verb}: {names}._"

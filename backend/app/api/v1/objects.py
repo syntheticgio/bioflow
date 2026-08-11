@@ -2,7 +2,6 @@
 
 import hashlib
 import secrets
-
 from dataclasses import asdict
 from pathlib import Path
 
@@ -27,6 +26,7 @@ from app.api.v1.schemas import (
     ProvenanceProseOut,
     ProvenanceStepOut,
 )
+from app.config import settings
 from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
 from app.metadata import infer_molecule
@@ -44,7 +44,6 @@ from app.services import (
     timing_service,
 )
 from app.services.ai import Completion
-from app.config import settings
 from app.storage.paths import blob_path, validate_sha256
 
 router = APIRouter(prefix="/objects", tags=["objects"])
@@ -418,7 +417,7 @@ async def get_blob(
     try:
         validate_sha256(digest)
     except ValidationError:
-        raise ValidationError(f"Invalid digest: {digest}")
+        raise ValidationError(f"Invalid digest: {digest}") from None
 
     path = blob_path(digest)
     if not path.is_file():
@@ -455,7 +454,7 @@ async def put_blob(
     try:
         validate_sha256(digest)
     except ValidationError:
-        raise ValidationError(f"Invalid digest: {digest}")
+        raise ValidationError(f"Invalid digest: {digest}") from None
 
     path = blob_path(digest)
     if path.is_file():

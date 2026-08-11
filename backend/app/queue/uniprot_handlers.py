@@ -16,7 +16,6 @@ Imported by `handlers.py` for the `@handler` registration side effects.
 import gzip
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger

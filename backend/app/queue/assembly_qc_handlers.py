@@ -1204,7 +1204,6 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
     # ── Step 1: k-mer spectra from reads ──────────────────────────────
 
     read_db = work / "reads.meryl"
-    built_read_db = False
 
     cached = ctx.payload.get("read_db_path")
     if cached:
@@ -1226,7 +1225,6 @@ def analyze_meryl_tracks(ctx: JobContext) -> dict:
             code = run_subprocess(ctx, count_cmd, log_path=str(log_path))
             if code != 0:
                 raise _failure(code, log_path, "meryl")
-            built_read_db = True
 
     if read_db.exists():
         ctx.progress(phase="spectra", pct=None, message="computing k-mer spectra")

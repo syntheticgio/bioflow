@@ -5,7 +5,7 @@ from pathlib import Path
 from beanie import PydanticObjectId
 
 from app.logging import get_logger
-from app.models.object import DataObject, ObjectRole
+from app.models.object import ObjectRole
 
 log = get_logger(__name__)
 

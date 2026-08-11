@@ -15,9 +15,8 @@ Two properties matter more than accuracy:
     median are dropped before fitting.
 """
 
-from datetime import UTC, datetime
-
 import math
+from datetime import UTC, datetime
 
 from app.logging import get_logger
 from app.models.timing import (

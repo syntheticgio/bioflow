@@ -15,7 +15,6 @@ a thread via ``asyncio.to_thread``.
 
 import asyncio
 import json
-import socket
 import urllib.error
 import urllib.request
 
@@ -52,7 +51,7 @@ def _post(url: str, payload: dict) -> bool:
     except urllib.error.HTTPError as exc:
         log.warning("feedback_webhook_http_error", status=exc.code, error=str(exc))
         return False
-    except (urllib.error.URLError, socket.timeout, OSError) as exc:
+    except (TimeoutError, urllib.error.URLError, OSError) as exc:
         log.warning("feedback_webhook_transport_error", error=str(exc))
         return False
     except Exception as exc:  # noqa: BLE001 -- notification must never crash the request

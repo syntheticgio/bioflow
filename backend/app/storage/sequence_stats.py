@@ -488,7 +488,7 @@ def alignment_stats(
                 # Calculate proportional read targets per contig.
                 contig_targets: dict[str, int] = {}
                 remaining = max_reads
-                for ref, length in zip(references, lengths):
+                for ref, length in zip(references, lengths, strict=False):
                     target = max(1, int(max_reads * length / total_length))
                     contig_targets[ref] = target
                     remaining -= target

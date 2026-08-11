@@ -203,12 +203,11 @@ def merge_chunked_buckets(ctx):
 
 def _run_subprocess(ctx, cmd, log_path, capture_stdout=False):
     """Run a subprocess with logging, returning exit code or stdout."""
+    import shlex
     import subprocess as sp
 
-    import shlex
-
     if capture_stdout:
-        proc = sp.run(cmd, stdout=sp.PIPE, stderr=sp.PIPE)
+        proc = sp.run(cmd, capture_output=True)
         with open(log_path, "w") as log_f:
             log_f.write(f"# {' '.join(shlex.quote(str(a)) for a in cmd)}\n\n")
             if proc.stdout:

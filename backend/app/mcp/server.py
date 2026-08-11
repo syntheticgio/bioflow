@@ -23,8 +23,8 @@ functions in `app.mcp.tools` takes `owner` as a required keyword argument
 skip resolving a profile.
 """
 
-from contextlib import asynccontextmanager, AsyncExitStack
-from typing import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI
 from mcp.server.mcpserver import Context, MCPServer

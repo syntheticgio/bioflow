@@ -31,7 +31,7 @@ def _open_fastq(path: Path) -> IO[str]:
         magic = probe.read(2)
     if magic == b"\x1f\x8b":
         return gzip.open(path, "rt", errors="replace")
-    return open(path, "rt", errors="replace")
+    return open(path, errors="replace")
 
 
 def infer_molecule_type(path: Path, *, sample_reads: int = 2000) -> dict:
