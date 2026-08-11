@@ -2,16 +2,21 @@
 
 ## Purpose
 
-Refactor the four SVG charts in `frontend/src/components/SequenceCharts.tsx`
-to share their repeated layout and pointer-interaction scaffolding. This
-addresses [#227](https://github.com/syntheticgio/bioflow/issues/227) without
-changing any user-visible behavior.
+Refactor the three pointer-driven SVG charts in
+`frontend/src/components/SequenceCharts.tsx` to share their repeated layout
+and pointer-interaction scaffolding. This addresses
+[#227](https://github.com/syntheticgio/bioflow/issues/227) without changing
+any user-visible behavior.
 
-`BaseCompositionChart`, `QualityChart`, `GcDistributionChart`, and
-`NContentChart` currently each calculate the same plot geometry, construct
-scale functions, install a transparent hover target, and render a
-crosshair/readout interaction. A fifth chart would otherwise reproduce this
-shape again.
+`QualityChart`, `GcDistributionChart`, and `NContentChart` currently each
+calculate the same plot geometry, construct scale functions, install a
+transparent hover target, and render a crosshair/readout interaction. A
+future chart with this interaction would otherwise reproduce this shape again.
+
+`BaseCompositionChart` is not part of that shared scaffold: it uses
+per-series and per-cycle mouse-enter handlers rather than a plot-wide pointer
+target, and it has no matching `pad`/`plotW`/`plotH` or scale setup. It stays
+unchanged.
 
 ## Scope and compatibility boundary
 
@@ -39,7 +44,6 @@ histogram bin. That preserves chart-specific snapping behavior.
 
 Charts retain ownership of their own data transformations and SVG rendering:
 
-- `BaseCompositionChart` retains its four base series and readout.
 - `QualityChart` retains its quality curve, y-domain, and readout.
 - `GcDistributionChart` retains its bins, optional fitted curve, and
   histogram-specific hover behavior.
@@ -68,15 +72,15 @@ each component's current behavior.
 
 ## Verification
 
-Add focused frontend tests around the pure extracted behavior: plot geometry,
-scale calculations, and pointer-selection boundaries. Preserve or add
-chart-level assertions that representative pointer positions select the same
-datum and readout values for all four charts.
+Add focused Vitest coverage around the pure extracted behavior: plot geometry
+and conversion from browser x coordinates to plot fractions. The frontend has
+no DOM component-test harness, so do not add one solely for this maintenance
+refactor; chart-level interaction equivalence is verified in the running UI.
 
-Manually verify the four QC cards in the running application with
+Manually verify the three refactored QC cards in the running application with
 representative data. Hover at left, middle, and right positions; confirm the
 selected datum, crosshair, readout, and mouse-leave clearing match the
-pre-refactor UI.
+pre-refactor UI. Confirm base composition remains unchanged.
 
 ## Alternatives considered
 
