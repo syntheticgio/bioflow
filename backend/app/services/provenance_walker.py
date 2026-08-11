@@ -184,6 +184,9 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         # GC track analysis is read-only facts merged onto an existing
         # assembly, same class as completeness scoring.
         "analyze_gc_tracks",
+        # Meryl k-mer spectra and repeat density — same read-only-facts
+        # pattern as completeness and gc_tracks.
+        "analyze_meryl_tracks",
         # AI features that write a field rather than producing an object.
         "summarize_object",
         "summarize_de_results",

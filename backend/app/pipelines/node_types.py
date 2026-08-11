@@ -821,6 +821,9 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # a downstream node to consume. Canvas wiring, if ever added, is a
         # separate task.
         "pipeline_service.launch_transcript_qc",
+        # Read-only meryl spectra and repeat density — facts on an existing
+        # assembly, same class as completeness and gc_tracks.
+        "pipeline_service.launch_meryl_analysis",
     }
 )
 
