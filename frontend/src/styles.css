@@ -1633,6 +1633,20 @@ a.btn {
   color: var(--text-dim);
 }
 
+.trim-fields select {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+}
+
+.trim-fields select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .trim-fields label small {
   color: var(--text-faint);
   font-size: 11px;
