@@ -440,6 +440,17 @@ export interface TimingEstimate {
   throughput_mb_s?: number | null;
 }
 
+export interface SystemLoadNode {
+  node_id: string;
+  running: number;
+  queued: number;
+  cpu: number;
+  mem_mb: number;
+  workers: number;
+  /** False when a ready queue exists for a node id that never enrolled. */
+  known: boolean;
+}
+
 export interface SystemLoad {
   state: "OPEN" | "THROTTLED" | "CLOSED";
   admitted_classes: string[];
@@ -460,6 +471,8 @@ export interface SystemLoad {
   };
   disk: { free_bytes: number; free_percent?: number; percent_used?: number } | null;
   governor_active: boolean;
+  nodes: SystemLoadNode[];
+  nodes_error?: string;
 }
 
 export interface NodeInfo {
@@ -467,6 +480,7 @@ export interface NodeInfo {
   workers: number;
   online_workers: number;
   running_jobs: number;
+  queued_jobs: number;
   slots: number;
   online: boolean;
   reserved: {
@@ -474,6 +488,9 @@ export interface NodeInfo {
     mem_mb: number;
     io_heavy: number;
   };
+  hostname?: string;
+  registered_at?: string | null;
+  enrollment?: string;
 }
 
 export interface NodeProvisionRequest {
