@@ -3931,6 +3931,155 @@ async def launch_gc_tracks(
     return job
 
 
+async def launch_meryl_analysis(
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    read_object_id: PydanticObjectId | None = None,
+    k: int | None = None,
+) -> Job:
+    """Queue meryl k-mer spectra and repeat-density analysis.
+
+    Takes an assembly and optionally a read set. When ``read_object_id``
+    is not given, auto-picks from the project — same logic as
+    ``launch_assembly_qv``: prefer trimmed, refuse on multiple distinct
+    read sets. The handler runs both analyses (spectra from reads, repeat
+    density from assembly) in one job.
+
+    Read-only: no derived object, no run record, facts merged onto the
+    assembly.
+    """
+    from app.queue import queue
+    from app.services import object_service, reference_assembly
+
+    tools.require(tools.meryl())
+
+    assembly = await object_service.get_object(object_id, owner=owner)
+    reference_assembly.check_draft_assembly(assembly)
+
+    resolved_k = int(k) if k else DEFAULT_MERYL_K
+
+    if read_object_id is None:
+        candidates = reference_assembly.group_read_sets(
+            [
+                o
+                for o in await object_service.list_objects(
+                    assembly.project_id, owner=owner, status=ObjectStatus.READY
+                )
+                if o.format.kind is FormatKind.FASTQ
+            ]
+        )
+        if not candidates:
+            raise ValidationError(
+                "K-mer spectra need the reads this assembly was built "
+                "from, and this project has none",
+                details={"object_id": str(assembly.id)},
+            )
+        if len(candidates) > 1:
+            # Same trimmed-preference logic as launch_assembly_qv.
+            trimmed_sets = [
+                s for s in candidates
+                if all(o.role == ObjectRole.TRIMMED_READS for o in s)
+            ]
+            raw_sets = [
+                s for s in candidates
+                if all(o.role != ObjectRole.TRIMMED_READS for o in s)
+            ]
+            if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and len(trimmed_sets) + len(raw_sets) == len(candidates):
+                candidates = trimmed_sets
+            else:
+                raise ValidationError(
+                    "This project has several read sets; name the one to "
+                    "analyse",
+                    details={
+                        "object_id": str(assembly.id),
+                        "candidates": [
+                            [str(o.id) for o in group] for group in candidates
+                        ],
+                    },
+                )
+        chosen = candidates[0]
+    else:
+        primary = await object_service.get_object(read_object_id, owner=owner)
+        if primary.project_id != assembly.project_id:
+            raise ValidationError(
+                "Reads and assembly must be in the same project",
+                details={
+                    "object_id": str(assembly.id),
+                    "read_object_id": str(primary.id),
+                },
+            )
+        chosen = [primary]
+        mate_id = getattr(primary, "mate_object_id", None)
+        if mate_id is not None:
+            chosen.append(await object_service.get_object(mate_id, owner=owner))
+
+    read_obj = chosen[0]
+
+    # Reuse cached meryl read database if available.
+    read_db_path = await _materialize_meryl_cache(read_obj, resolved_k, owner=owner)
+
+    asm_digest, asm_path = await _resolve_readable(assembly)
+    payload: dict = {
+        "object_id": str(assembly.id),
+        "assembly_name": assembly.name,
+        "k": resolved_k,
+        "threads": 4,
+        "read_object_id": str(read_obj.id),
+        "read_object_name": read_obj.name,
+    }
+    if asm_digest:
+        payload["assembly_sha256"] = asm_digest
+    if asm_path:
+        payload["assembly_path"] = asm_path
+
+    # Pass sequence_lengths for windowing repeat density.
+    sequence_lengths = (assembly.facts or {}).get("sequence_lengths")
+    if sequence_lengths and isinstance(sequence_lengths, dict):
+        payload["sequence_lengths"] = sequence_lengths
+
+    reads_payload = []
+    for r in chosen:
+        digest, path = await _resolve_readable(r)
+        entry: dict = {"read_name": r.name}
+        if digest:
+            entry["read_sha256"] = digest
+        if path:
+            entry["read_path"] = path
+        reads_payload.append(entry)
+    payload["reads"] = reads_payload
+
+    if read_db_path is not None:
+        payload["read_db_path"] = str(read_db_path)
+
+    job = await queue.enqueue(
+        "analyze_meryl_tracks",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        max_attempts=1,
+        dedup_key=f"analyze_meryl_tracks:{assembly.id}",
+        project_id=assembly.project_id,
+        object_id=assembly.id,
+    )
+    if job is None:
+        raise ConflictError(
+            "Meryl analysis is already queued or running for this assembly",
+            details={"object_id": str(assembly.id)},
+        )
+
+    log.info(
+        "meryl_analysis_launched",
+        job_id=str(job.id),
+        object_id=str(assembly.id),
+        read_object_id=str(read_obj.id),
+        k=resolved_k,
+        cached=read_db_path is not None,
+    )
+    return job
+
+
 async def launch_consensus(
     *,
     bam_object_id: PydanticObjectId,

@@ -1721,19 +1721,21 @@ TOOL_META: dict[str, ToolMeta] = {
     ),
     "meryl": ToolMeta(
         pipelines=(PipelineType.ASSEMBLY_QC,),
-        one_liner="K-mer database builder used by Merqury for QV assessment",
+        one_liner="K-mer counter for repeat density, genome size estimation, and Merqury QV",
         summary=(
-            "Builds and manipulates k-mer count databases. Merqury uses it "
-            "to build a k-mer database from a read set and another from an "
-            "assembly, then compares the two -- k-mers in the assembly but "
-            "absent from the reads are evidence of base errors, which is "
-            "how Merqury derives its reference-free QV score."
+            "Builds and manipulates k-mer count databases. Can produce "
+            "frequency spectra for genome size estimation and "
+            "heterozygosity, compute per-window repeat density from "
+            "high-frequency k-mers, and serve as Merqury's database "
+            "builder for reference-free QV assessment."
         ),
         strengths=(
-            "Reference-free: needs only the reads an assembly was built "
-            "from, no related reference genome",
-            "The k-mer database it builds from a read set is reusable "
-            "across every assembly evaluated against those reads",
+            "Reference-free: needs only the reads and assembly, no "
+            "related reference genome",
+            "The k-mer database built from a read set is reusable across "
+            "every assembly evaluated against those reads",
+            "Repeat density from k-mer frequency needs no curated repeat "
+            "library, unlike RepeatMasker",
         ),
         homepage="https://github.com/marbl/meryl",
         repository="https://github.com/marbl/meryl",
@@ -1750,11 +1752,13 @@ TOOL_META: dict[str, ToolMeta] = {
         # Verified 2026-08-06 via `gh api repos/marbl/meryl/contents/README.licenses`.
         license="Public domain (US Government work); some files under other licenses",
         usage=(
-            "Builds the k-mer databases Merqury compares. The database "
-            "built from a read set is cached as a sidecar on that read "
-            "object and reused across assemblies; the one built from an "
-            "assembly is rebuilt per run and discarded. Note this is Marbl "
-            "meryl, not Debian's same-named Celera Assembler k-mer suite."
+            "Builds k-mer databases for three purposes: genome size "
+            "and heterozygosity estimation via k-mer frequency spectra, "
+            "per-window repeat density from high-frequency k-mers in the "
+            "assembly, and Merqury's reference-free QV comparison. The "
+            "database built from a read set is cached as a sidecar and "
+            "reused across assemblies. Note this is Marbl meryl, not "
+            "Debian's same-named Celera Assembler k-mer suite."
         ),
         runnable=True,
     ),
