@@ -63,8 +63,7 @@ export function ScaffoldDialog({
         draft_object_id: object.id,
         reference_object_id: chosenId,
         divergence,
-      }, targetNode || undefined
-      }),
+      }, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Scaffolding started");

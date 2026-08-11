@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../api/client";
-import type { NodeInfo } from "../api/types";
 
 interface NodeSelectorProps {
   value: string;

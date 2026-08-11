@@ -577,7 +577,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ object_id: objectId }),
       }),
-  },
 
   /**
    * Whether a local model is up and could write a summary right now.
@@ -602,7 +601,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ object_id: objectId }),
       }),
-    },
   variantSummaryStatus: () =>
     request<{ available: boolean; reason?: string; model?: string | null; provider_name?: string }>(
       "/pipelines/variant-summary/status"
@@ -614,7 +612,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ object_id: objectId }),
       }),
-  },
 
   /** The known-provider table. Static; safe to cache indefinitely. */
   aiPresets: () => request<AiPreset[]>("/settings/ai/presets"),
@@ -711,7 +708,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ object_id: objectId, force: true }),
       }),
-  },
 
   /**
    * URL of a generated QC report.
@@ -886,7 +882,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   /** Propose a fitting configuration for a refused job, or say why there is
    * none. Feeds the resource-refusal card's Auto-adjust button. */
@@ -912,7 +907,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   completenessDefaults: (objectId: string) =>
     request<CompletenessDefaults>(`/pipelines/completeness/defaults/${objectId}`),
@@ -924,7 +918,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   launchScaffold: (body: ScaffoldRequest, targetNode?: string) =>
     request<JobSummary>(
@@ -933,7 +926,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   downloadLineage: (body: LineageDownloadRequest) =>
     request<JobSummary>("/pipelines/completeness/lineage", {
@@ -959,7 +951,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   /** Counting defaults for one BAM: the annotation it would use, and the
    * strandedness read off its alignment. */
@@ -973,7 +964,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   /** The samples, conditions and contrast the DE dialog opens with.
    * Project-scoped, unlike every other defaults route here -- differential
@@ -988,7 +978,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  },
 
   /** A page of a DE results table, sorted and filtered server-side. */
   deResults: (
@@ -1024,7 +1013,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ object_id: objectId }),
       }),
-  },
 
   /** Queue the RNA-seq transcript QC computation for a BAM against a GTF
    * annotation. Read-only: produces facts only, no derived objects. */
@@ -1054,7 +1042,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ object_id: objectId }),
       }),
-  },
 
   /** A page of the variant table. Filters are applied server-side against
    *  the SQLite index rather than by slicing a TSV -- a plant VCF holds

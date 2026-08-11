@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { ModalBackdrop } from "./ModalBackdrop";
-import { NodeSelector } from "./NodeSelector";
 import { notify } from "../stores/messageStore";
 import type {
   DataObject,
@@ -71,7 +70,6 @@ export function VariantDialog({
   // place this fact could go stale. Cleared on close/tool change so a stale
   // offer never survives past the refusal that produced it.
   const [installOffer, setInstallOffer] = useState<{
-  const [targetNode, setTargetNode] = useState("");
     tool: string;
     downloadBytes: number | null;
   } | null>(null);
