@@ -1348,6 +1348,7 @@ async def declared_align_mem_mb(
         job_type=JOB_TYPE_ALIGN_READS,
         input_bytes=input_bytes,
         heuristic_mb=heuristic_mb,
+        threads=threads,
     )
     return max(resolved.mb or 0, MIN_DECLARED_MEM_MB)
 
@@ -1692,6 +1693,7 @@ async def launch_alignment(
         job_type=JOB_TYPE_ALIGN_READS,
         input_bytes=total_input_bytes,
         heuristic_mb=heuristic_mb,
+        threads=align_params.threads,
     )
     estimate = resolved.mb
     # UNKNOWN cannot arise here (the heuristic always answers for an
@@ -3601,6 +3603,7 @@ async def launch_assembly(
         job_type=JOB_TYPE_ASSEMBLE,
         input_bytes=reads.size or None,
         heuristic_mb=heuristic_mb,
+        threads=parsed.threads,
     )
     estimate = resolved.mb
     if estimate is not None:
