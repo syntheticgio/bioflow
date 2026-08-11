@@ -1060,6 +1060,16 @@ function QcTab({
           button on it. */}
       {runQcPrompt}
 
+      {/* The summary leads: it is the high-level verdict on this file, so it
+          belongs before the charts and tables that back it up. Renders
+          nothing at all when there is no summary and no model server, so a
+          user without one sees this tab exactly as it was. */}
+      <AiSummary
+        facts={obj.facts}
+        objectId={obj.id}
+        fingerprint={obj.summary_fingerprint ?? undefined}
+      />
+
       {/* Charts lead: the shape of the data answers "is this any good?" faster
           than any table of it can, and the numbers below are what you check
           once the shape has raised a question. */}
@@ -1160,16 +1170,6 @@ function QcTab({
             : "No header facts extracted for this format."}
         </div>
       )}
-
-      {/* Ahead of the tables it describes, and outside the reference/reads
-          split because both kinds of file have something worth narrating.
-          Renders nothing at all when there is no summary and no model server,
-          so a user without one sees this tab exactly as it was. */}
-      <AiSummary
-        facts={obj.facts}
-        objectId={obj.id}
-        fingerprint={obj.summary_fingerprint ?? undefined}
-      />
 
       {isReference ? (
         hasFacts && (
