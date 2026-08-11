@@ -1165,7 +1165,11 @@ async def align_envelope(
 
     if chunked:
         # Read .fai to get sequence count
-        fai_path = Path(settings.bioinfo_home) / "objects" / str(reference.id) / f"{reference.name}.fai"
+        fai_path = (
+            Path(settings.bioinfo_home)
+            / "objects" / str(reference.id)
+            / f"{reference.name}.fai"
+        )
         if fai_path.exists():
             sequences = _parse_fai(fai_path)
             result["chunking"] = {
@@ -1543,7 +1547,11 @@ async def launch_alignment(
                 f"{aligner.value} does not support chunked alignment"
             )
 
-        fai_path = Path(settings.bioinfo_home) / "objects" / str(reference.id) / f"{reference.name}.fai"
+        fai_path = (
+            Path(settings.bioinfo_home)
+            / "objects" / str(reference.id)
+            / f"{reference.name}.fai"
+        )
         if not fai_path.exists():
             raise ValidationError("Reference has no .fai — cannot chunk")
 
@@ -3991,7 +3999,9 @@ async def launch_meryl_analysis(
                 s for s in candidates
                 if all(o.role != ObjectRole.TRIMMED_READS for o in s)
             ]
-            if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and len(trimmed_sets) + len(raw_sets) == len(candidates):
+            if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and (
+                len(trimmed_sets) + len(raw_sets) == len(candidates)
+            ):
                 candidates = trimmed_sets
             else:
                 raise ValidationError(
