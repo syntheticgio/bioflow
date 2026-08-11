@@ -1,9 +1,14 @@
 """Compute node status: which machines are connected and what they are doing."""
 
+import os
+import platform
+import re
+
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
+from app.config import settings
 from app.db.redis_client import get_redis
 from app.logging import get_logger
 from app.queue import keys
@@ -90,4 +95,63 @@ async def list_nodes() -> list[dict]:
             info["reserved"] = {"cpu": 0, "mem_mb": 0, "io_heavy": 0}
         result.append(info)
 
+    return result
+
+
+# Canonical Docker service names that are not routable from outside the
+# compose network. Replaced with the request's host when building the
+# connection-details response.
+_REDACTABLE_HOSTS = {"mongo", "redis", "api", "web", "worker"}
+
+
+@router.get("/connection-details")
+async def connection_details(request: Request) -> dict:
+    """Return the URLs a compute node needs to connect to this primary.
+
+    Auto-discovery: the launcher hits this endpoint when the user enters the
+    primary's hostname.  Returns externally-routable Mongo and Redis URLs
+    (internal Docker hostnames rewritten to the request's host), plus a
+    suggested node name derived from the primary's hostname.
+    """
+    host = request.client.host if request.client else "127.0.0.1"
+    # IPv6 localhost often shows up as ::1 -- normalize for hostname use.
+    if host == "::1":
+        host = "127.0.0.1"
+
+    mongo = _rewrite_host(settings.mongo_url, host)
+    redis = _rewrite_host(settings.redis_url, host)
+
+    # Suggest a node name from the primary's hostname.
+    try:
+        primary_hostname = platform.node() or "primary"
+    except Exception:
+        primary_hostname = "primary"
+    suggested = f"{primary_hostname}-node"
+
+    return {
+        "mongo_url": mongo,
+        "redis_url": redis,
+        "api_url": f"http://{host}:8000",
+        "suggested_node_name": suggested,
+    }
+
+
+def _rewrite_host(url: str, host: str) -> str:
+    """Replace Docker service hostnames in `url` with `host`.
+
+    e.g. ``mongodb://mongo:27017/db`` → ``mongodb://192.168.1.50:27017/db``.
+    Hostnames that are already real IPs or FQDNs pass through unchanged.
+    """
+    if not url:
+        return url
+    result = url
+    for name in _REDACTABLE_HOSTS:
+        # Match the service name as a hostname — preceded by :// or @
+        # and followed by :port or / or end-of-string.
+        result = re.sub(
+            rf"(?P<before>(://|@)){re.escape(name)}(?P<after>(:\d+|/|$))",
+            rf"\g<before>{host}\g<after>",
+            result,
+            count=1,
+        )
     return result

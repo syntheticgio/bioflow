@@ -808,7 +808,7 @@ pub struct DiscoverNodeConnectionArgs {
 pub async fn discover_node_connection(
     args: DiscoverNodeConnectionArgs,
 ) -> Result<NodeConnectionInfo, String> {
-    let url = format!("http://{}:{}/api/v1/node-connection", args.host, args.port);
+    let url = format!("http://{}:{}/api/v1/nodes/connection-details", args.host, args.port);
     let host_header = format!("{}:{}", args.host, args.port);
     let url_for_err = url.clone();
 
