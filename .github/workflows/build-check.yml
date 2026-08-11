@@ -1,0 +1,44 @@
+# Verifies the frontend container image actually builds on every PR into
+# main. publish-images.yml builds the same `prod` target but only on push to
+# main/tags -- by then a broken build has already merged. This is the check
+# that should have caught #235: a syntax error in a .tsx file that made
+# `docker compose up -d --build` fail for anyone pulling main, discovered
+# only when someone ran it locally.
+#
+# Frontend only, not backend: the backend image compiles bwa-mem2, Clair3,
+# and compleasm from source and is expensive even with a warm BuildKit cache
+# (see publish-images.yml's comments) -- not worth doing on every PR.
+# Backend correctness is covered by pytest instead, run by hand per
+# CLAUDE.md's Verifying changes section, not by this workflow.
+name: Build check
+
+on:
+  pull_request:
+    branches: [main]
+
+# A new push to the same PR supersedes the in-flight check for the old one.
+concurrency:
+  group: build-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-build:
+    name: Build frontend image (prod target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # No push, no registry login: this only needs to prove the image
+      # builds. `npm run build` runs inside the `build` stage that `prod`
+      # depends on, so a Vite/esbuild syntax error fails this step exactly
+      # the way it fails `docker compose up -d --build` locally.
+      - name: Build prod image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          target: prod
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
