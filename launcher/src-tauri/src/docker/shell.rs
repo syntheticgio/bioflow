@@ -73,6 +73,12 @@ impl DockerBackend for ShellDocker {
         Self::run_action(cmd)
     }
 
+    fn up_node(&self, install_dir: &str) -> ActionResult {
+        let mut cmd = Self::compose(install_dir);
+        cmd.arg("up").arg("-d").arg("--no-deps").arg("worker");
+        Self::run_action(cmd)
+    }
+
     fn down(&self, install_dir: &str) -> ActionResult {
         let mut cmd = Self::compose(install_dir);
         cmd.arg("down");

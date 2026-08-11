@@ -237,3 +237,18 @@ a:hover { color: var(--color-accent-2); }
   background: var(--color-accent-2-100); color: var(--color-accent-2-700);
   font-size: 13px; white-space: pre-wrap; font-family: var(--font-mono);
 }
+
+/* ── mode choice cards ── */
+.mode-card {
+  flex: 1; min-width: 0;
+  padding: 28px 32px; border-radius: var(--radius-md);
+  border: 1px solid var(--color-divider);
+  cursor: pointer; user-select: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.mode-card:first-child { margin-right: 16px; }
+.mode-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent); }
+.mode-card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.mode-card-title { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.mode-card-body { margin: 0 0 14px; font-size: 14px; line-height: 1.5; color: var(--ink-62); }
+.mode-card-action { font-size: 13px; font-weight: 600; color: var(--color-accent); }

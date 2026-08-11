@@ -10,6 +10,7 @@ import {
   type StoragePathValidation,
 } from "./commands";
 import { canInstall as computeCanInstall, setupStatusText } from "./wizard-logic";
+import { NodeSetup } from "./NodeSetup";
 
 interface Props {
   onInstalled: (installed: { storageLocation: string; port: number }) => void;
@@ -28,6 +29,7 @@ const PORT_MESSAGES: Record<PortValidation["kind"], string | null> = {
 };
 
 export function SetupWizard({ onInstalled }: Props) {
+  const [installMode, setInstallMode] = useState<"full" | "node" | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [dockerIsReady, setDockerIsReady] = useState(false);
   const [storageLocation, setStorageLocation] = useState("");
@@ -96,6 +98,89 @@ export function SetupWizard({ onInstalled }: Props) {
   if (!loaded) {
     return <p style={{ padding: 36 }}>Loading…</p>;
   }
+
+  // ── Node compute mode ────────────────────────────────────────────
+
+  if (installMode === "node") {
+    return (
+      <NodeSetup
+        onInstalled={onInstalled}
+        onBack={() => setInstallMode(null)}
+      />
+    );
+  }
+
+  // ── Mode choice (first render) ───────────────────────────────────
+
+  if (installMode === null) {
+    return (
+      <div className="launcher-page">
+        <header className="masthead">
+          <div className="masthead-row">
+            <div className="masthead-brand">
+              <img src={mastheadImg} alt="BioFlow" className="masthead-logo" />
+            </div>
+          </div>
+          <div className="masthead-rule-thick" />
+          <div className="status-line">
+            <span>Setup</span>
+            <span>{dockerIsReady ? "Docker ready" : "Docker not detected"} · Launcher 0.1.0</span>
+          </div>
+          <div className="masthead-rule-thin" />
+        </header>
+
+        <div className="state-body">
+          <h2 className="setup-intro">What do you want to do?</h2>
+          <p className="setup-lede">
+            The BioFlow launcher can either set up the full application on this
+            computer, or connect it as a compute-only node to an existing BioFlow
+            installation running somewhere else on your network.
+          </p>
+
+          <div className="state-columns">
+            <div
+              className="mode-card"
+              onClick={() => setInstallMode("full")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setInstallMode("full");
+              }}
+            >
+              <h3 className="mode-card-title">Set up on this computer</h3>
+              <p className="mode-card-body">
+                Install the complete BioFlow stack — database, API, web interface,
+                and one worker — on this machine. The recommended choice for a
+                first install.
+              </p>
+              <span className="mode-card-action">Start setup →</span>
+            </div>
+
+            <div
+              className="mode-card"
+              onClick={() => setInstallMode("node")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") setInstallMode("node");
+              }}
+            >
+              <h3 className="mode-card-title">Connect as a compute node</h3>
+              <p className="mode-card-body">
+                Connect this machine to an existing BioFlow installation as a
+                compute-only worker. No database, no web UI — just a worker
+                that picks up jobs from the primary. You can also install on a
+                remote machine over SSH.
+              </p>
+              <span className="mode-card-action">Connect to primary →</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Full install (existing flow) ──────────────────────────────────
 
   return (
     <div className="launcher-page">

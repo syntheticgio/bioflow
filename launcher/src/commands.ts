@@ -188,3 +188,99 @@ export async function finishStorageMigration(args: {
     },
   });
 }
+
+// ── #221: Compute-node commands ───────────────────────────────────────
+
+export interface NodeConnectionInfo {
+  mongo_url: string;
+  redis_url: string;
+  api_url: string;
+  suggested_node_name: string;
+}
+
+export function discoverNodeConnection(args: {
+  host: string;
+  port: number;
+}): Promise<NodeConnectionInfo> {
+  return invoke("discover_node_connection", {
+    args: { host: args.host, port: args.port },
+  });
+}
+
+export function installNodeLocal(args: {
+  mongoUrl: string;
+  redisUrl: string;
+  apiUrl: string;
+  nodeName: string;
+  storageLocation: string;
+}): Promise<void> {
+  return invoke("install_node_local", {
+    args: {
+      mongo_url: args.mongoUrl,
+      redis_url: args.redisUrl,
+      api_url: args.apiUrl,
+      node_name: args.nodeName,
+      storage_location: args.storageLocation,
+    },
+  });
+}
+
+export interface RemoteInfo {
+  hostname: string;
+  os_arch: string;
+  docker_ready: boolean;
+}
+
+export function testSshConnection(args: {
+  host: string;
+  user: string;
+  password?: string;
+  port: number;
+}): Promise<RemoteInfo> {
+  return invoke("test_ssh_connection", { args });
+}
+
+export function installNodeRemote(args: {
+  mongoUrl: string;
+  redisUrl: string;
+  apiUrl: string;
+  nodeName: string;
+  storageLocation: string;
+  sshHost: string;
+  sshUser: string;
+  sshPassword?: string;
+  sshPort: number;
+}): Promise<void> {
+  return invoke("install_node_remote", {
+    args: {
+      mongo_url: args.mongoUrl,
+      redis_url: args.redisUrl,
+      api_url: args.apiUrl,
+      node_name: args.nodeName,
+      storage_location: args.storageLocation,
+      ssh_host: args.sshHost,
+      ssh_user: args.sshUser,
+      ssh_password: args.sshPassword,
+      ssh_port: args.sshPort,
+    },
+  });
+}
+
+export function runNode(): Promise<void> {
+  return invoke("run_node");
+}
+
+export function stopNode(): Promise<void> {
+  return invoke("stop_node");
+}
+
+export interface NodeStatus {
+  installed: boolean;
+  running: boolean;
+  node_name: string | null;
+  primary_url: string | null;
+}
+
+export function nodeStatus(): Promise<NodeStatus> {
+  return invoke("node_status");
+}

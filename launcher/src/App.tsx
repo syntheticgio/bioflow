@@ -5,6 +5,7 @@ import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
+import { NodeScreen } from "./NodeScreen";
 import type { LauncherState, Settings as SettingsValues } from "./types";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
@@ -131,26 +132,26 @@ export function App() {
     return <SetupWizard
       onInstalled={({ storageLocation, port }) => {
         setSettings((prev) => ({ ...prev, storageLocation, port }));
-        // run_first_setup already brought the stack up (setup::install's
-        // last step); what's left is exactly Run's health-gated wait and
-        // browser handoff, so reuse handleRun rather than landing on
-        // Stopped and asking for a second click.
-        //
-        // Prefetch (task 9, closing #40) needs the API reachable to call
-        // GET /pipelines/tools, and health-gating is exactly what handleRun
-        // already waits for -- so it is offered *after* this resolves, not
-        // before, which is the ordering inversion the plan calls out: every
-        // other first-run question is answered before the stack exists,
-        // this one only makes sense once it does. handleRun also opens the
-        // browser as its own side effect (run_stack's job, unconditional),
-        // so by the time PrefetchStep renders the app is already open in a
-        // tab -- the prefetch offer appears in the launcher window
-        // alongside it, not gating it.
         setState({ kind: "Stopped" });
         setShowPrefetch(true);
         handleRun();
       }}
     />;
+  }
+
+  // ── Compute-node screen ───────────────────────────────────────────
+
+  if (state.kind === "NodeRunning" || state.kind === "NodeStopped") {
+    return (
+      <NodeScreen
+        onOpenPrimary={() => {
+          // Open the primary's BioFlow UI. The primary URL is embedded in
+          // .env as MONGO_URL; derive from there by polling nodeStatus.
+          // For now, just try to read from .env via the backend.
+          window.open(`http://localhost:${settings.port}`);
+        }}
+      />
+    );
   }
 
   // Renders in place of the running/stopped screen, not layered over it --
