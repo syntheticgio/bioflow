@@ -25,6 +25,7 @@ from app.pipelines import (
     craq_runner,
     gci_runner,
     merqury_runner,
+    meryl_runner,
     polypolish_runner,
     quast_runner,
     ragtag_runner,
@@ -1164,4 +1165,139 @@ def analyze_gc_tracks(ctx: JobContext) -> dict:
         "object_id": ctx.payload.get("object_id"),
         "job_id": ctx.job_id,
         "facts": {},
+    }
+
+
+# ── meryl k-mer spectra and repeat density ────────────────────────────
+
+_MERYL_TRACKS_LEASE_SECONDS = 7200  # 2h — two meryl count runs on a large genome
+
+
+@handler(
+    "analyze_meryl_tracks",
+    mode=HandlerMode.SUBPROCESS,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+    max_attempts=1,
+)
+def analyze_meryl_tracks(ctx: JobContext) -> dict:
+    """Run meryl k-mer spectra and repeat-density analysis on an assembly.
+
+    Two analyses in one job: a k-mer frequency spectrum from the reads
+    (genome size, heterozygosity) and a per-window repeat-density track
+    from the assembly (for the Circos plot's repeat-density ring).
+
+    SUBPROCESS — meryl is an external tool. Returns two facts:
+    ``kmer_spectra`` and ``repeat_density``.
+    """
+    meryl_tool = tools.require(tools.meryl())
+    k = int(ctx.payload.get("k") or 21)
+    threads = max(1, int(ctx.payload.get("threads") or 4))
+
+    work = _prepare_workdir(ctx, "meryl_tracks")
+    log_path = settings.logs_dir / f"{ctx.job_id}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    facts: dict = {}
+    read_object_name = str(ctx.payload.get("read_object_name") or "")
+
+    # ── Step 1: k-mer spectra from reads ──────────────────────────────
+
+    read_db = work / "reads.meryl"
+    built_read_db = False
+
+    cached = ctx.payload.get("read_db_path")
+    if cached:
+        _link_tree(Path(cached), read_db)
+    else:
+        read_files = _resolve_read_inputs(work, ctx.payload)
+        if not read_files:
+            log.warning("meryl_tracks_no_reads", job_id=ctx.job_id)
+        else:
+            ctx.progress(phase="counting reads", pct=None, message="building k-mer database")
+            ctx.extend_lease(_MERYL_TRACKS_LEASE_SECONDS)
+            count_cmd = merqury_runner.build_meryl_count_command(
+                meryl_path=meryl_tool.path,
+                k=k,
+                reads=read_files,
+                output=read_db,
+                threads=threads,
+            )
+            code = run_subprocess(ctx, count_cmd, log_path=str(log_path))
+            if code != 0:
+                raise _failure(code, log_path, "meryl")
+            built_read_db = True
+
+    if read_db.exists():
+        ctx.progress(phase="spectra", pct=None, message="computing k-mer spectra")
+        ctx.extend_lease(_MERYL_TRACKS_LEASE_SECONDS)
+        stats_cmd = meryl_runner.build_meryl_statistics_command(
+            meryl_path=meryl_tool.path,
+            database=read_db,
+        )
+        code = run_subprocess(ctx, stats_cmd, log_path=str(log_path))
+        if code == 0:
+            raw = log_path.read_text()
+            histogram = meryl_runner.parse_meryl_histogram(raw)
+            if histogram:
+                spectra = meryl_runner.compute_genome_size(histogram, k=k)
+                spectra["k"] = k
+                spectra["read_set_name"] = read_object_name
+                facts["kmer_spectra"] = spectra
+
+    # ── Step 2: repeat density from assembly ──────────────────────────
+
+    assembly = _resolve_input(ctx.payload, "assembly")
+    asm_db = work / "assembly.meryl"
+
+    ctx.progress(phase="counting assembly", pct=None, message="building assembly k-mer database")
+    ctx.extend_lease(_MERYL_TRACKS_LEASE_SECONDS)
+    count_cmd = merqury_runner.build_meryl_count_command(
+        meryl_path=meryl_tool.path,
+        k=k,
+        reads=[assembly],
+        output=asm_db,
+        threads=threads,
+    )
+    code = run_subprocess(ctx, count_cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "meryl")
+
+    ctx.progress(phase="repeat density", pct=None, message="computing repeat density")
+    ctx.extend_lease(_MERYL_TRACKS_LEASE_SECONDS)
+    print_cmd = meryl_runner.build_meryl_print_gt_command(
+        meryl_path=meryl_tool.path,
+        database=asm_db,
+    )
+    code = run_subprocess(ctx, print_cmd, log_path=str(log_path))
+    if code != 0:
+        raise _failure(code, log_path, "meryl")
+
+    # Read sequence_lengths fact to get contig lengths for windowing.
+    sequence_lengths_raw = ctx.payload.get("sequence_lengths")
+    if sequence_lengths_raw and isinstance(sequence_lengths_raw, dict):
+        contig_lengths = {
+            name: int(length)
+            for name, length in sequence_lengths_raw.items()
+        }
+    else:
+        contig_lengths = {}
+
+    kmer_lines = log_path.read_text().splitlines()
+    density = meryl_runner.compute_repeat_density(kmer_lines, contig_lengths)
+    if density and density.get("contigs"):
+        facts["repeat_density"] = density
+
+    ctx.progress(phase="done", pct=1.0, message="meryl analysis complete")
+    log.info(
+        "meryl_tracks_finished",
+        job_id=ctx.job_id,
+        spectra=("kmer_spectra" in facts),
+        repeat_density=("repeat_density" in facts),
+    )
+
+    return {
+        "object_id": ctx.payload.get("object_id"),
+        "job_id": ctx.job_id,
+        "facts": facts,
     }

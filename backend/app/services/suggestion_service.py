@@ -1579,6 +1579,129 @@ def build_qv_card(obj, read_sets) -> SuggestionCard | None:
     )
 
 
+def build_kmer_spectra_card(obj, read_sets) -> SuggestionCard | None:
+    """K-mer frequency spectrum and genome characteristics, via meryl.
+
+    Anchored on the assembly. `read_sets` is every read set in the project
+    -- same parameter as `build_qv_card`, because meryl's k-mer counting
+    works for any read chemistry. The card gates on meryl being installed
+    (already probed) and at least one read set being present.
+
+    ``category="ASSEMBLY_QC"`` — this evaluates an assembly, not changes it.
+    """
+    if not reference_assembly._is_assembly_like(obj):
+        return None
+    if obj.status is not ObjectStatus.READY:
+        return None
+
+    title = "K-mer spectrum"
+    description = (
+        "Compute a k-mer frequency spectrum from reads -- estimate genome "
+        "size, ploidy, and heterozygosity -- with meryl."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="kmer_spectra",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    meryl_tool = tools.meryl()
+    if not meryl_tool.available:
+        return unavailable(meryl_tool.error or "meryl is not installed.")
+
+    if not read_sets:
+        return unavailable(
+            "Spectra need the reads this assembly was built from, and "
+            "this project has none."
+        )
+    if len(read_sets) > 1:
+        trimmed_sets = [
+            s for s in read_sets
+            if all(o.role == ObjectRole.TRIMMED_READS for o in s)
+        ]
+        raw_sets = [
+            s for s in read_sets
+            if all(o.role != ObjectRole.TRIMMED_READS for o in s)
+        ]
+        if len(trimmed_sets) == 1 and len(raw_sets) >= 1 and len(trimmed_sets) + len(raw_sets) == len(read_sets):
+            read_sets = trimmed_sets
+        else:
+            return unavailable(
+                f"This project has {len(read_sets)} read sets. Spectra "
+                "need a specific one, and picking for you could analyse "
+                "the wrong sample."
+            )
+
+    chosen = read_sets[0]
+    body = {"object_id": str(obj.id), "read_object_id": str(chosen[0].id)}
+
+    return SuggestionCard(
+        kind="kmer_spectra",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        why=f"Reads: {', '.join(o.name for o in chosen)}.",
+        status=CardStatus.AVAILABLE,
+        launch={"endpoint": "/pipelines/meryl-analysis", "body": body},
+    )
+
+
+def build_repeat_density_card(obj) -> SuggestionCard | None:
+    """Per-window repeat density track for a finished genome, via meryl.
+
+    Gated on shape (FASTA, not protein/transcript) and contig count --
+    a draft with 200,000 contigs has no meaningful density track and
+    won't render. meryl is already installed and probed.
+    """
+    if obj.format.kind is not FormatKind.FASTA:
+        return None
+    if obj.role in pipeline_service.COMPLETENESS_EXCLUDED_ROLES:
+        return None
+
+    contig_count = obj.facts.get("reference_count") if obj.facts else None
+    if isinstance(contig_count, int) and contig_count > 200:
+        return None
+
+    title = "Circos plot: repeat density"
+    description = (
+        "Find repeat-rich regions in this genome by k-mer frequency. "
+        "A contig break aligned with a repeat band is resolvable with "
+        "long reads; a break with no repeat under it is a data-quality "
+        "problem."
+    )
+
+    def unavailable(reason: str) -> SuggestionCard:
+        return SuggestionCard(
+            kind="repeat_density",
+            category="ASSEMBLY_QC",
+            title=title,
+            description=description,
+            status=CardStatus.UNAVAILABLE,
+            reason=reason,
+        )
+
+    meryl_tool = tools.meryl()
+    if not meryl_tool.available:
+        return unavailable(meryl_tool.error or "meryl is not installed.")
+
+    return SuggestionCard(
+        kind="repeat_density",
+        category="ASSEMBLY_QC",
+        title=title,
+        description=description,
+        status=CardStatus.AVAILABLE,
+        launch={
+            "endpoint": "/pipelines/meryl-analysis",
+            "body": {"object_id": str(obj.id)},
+        },
+    )
+
+
 def build_continuity_card(
     obj,
     alignments: tuple[list, list, list] | None,
@@ -1953,6 +2076,8 @@ async def suggestions_for(obj) -> list[dict]:
         ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
         ("gc_tracks", lambda: build_gc_tracks_card(obj)),
         ("synteny", lambda: build_synteny_card(obj, scaffold_references)),
+        ("kmer_spectra", lambda: build_kmer_spectra_card(obj, all_read_sets)),
+        ("repeat_density", lambda: build_repeat_density_card(obj)),
         ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
         ("assembly_qv", lambda: build_qv_card(obj, all_read_sets)),
         (
