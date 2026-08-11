@@ -1,17 +1,14 @@
 # Verifies code quality and build integrity on every PR into main.
 #
-# Three jobs:
+# Two jobs (plus a commented-out full-suite template):
 #   frontend-check — lint + unit tests + prod image build (ubuntu-latest)
-#   backend-smoke  — ruff + import smoke test + ops script tests (self-hosted)
-#   backend-full   — full pytest suite with Mongo service (commented out;
-#                    enable when switching to hosted runners — see below)
+#   backend-smoke  — ruff + import smoke test + ops script tests
 #
-# Frontend only builds on PRs today, not full backend Docker images:
-# the backend image compiles bwa-mem2, Clair3, and compleasm from source
-# and is expensive even with a warm BuildKit cache. The backend is instead
-# smoke-tested here (ruff + import + ops tests); the full pytest suite is
-# deferred until a Mongo replica-set service can be provisioned on
-# GitHub-hosted runners — see the commented-out job at the bottom.
+# Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
+# and compleasm from source and are expensive. The backend is instead
+# smoke-tested here (ruff + import + ops tests). The full pytest suite is
+# deferred to the commented-out backend-full-test job, which needs a Mongo
+# replica-set service — available on ubuntu-latest as a service container.
 
 name: Build check
 
@@ -69,6 +66,12 @@ jobs:
       # builds. `npm run build` runs inside the `build` stage that `prod`
       # depends on, so a Vite/esbuild syntax error fails this step exactly
       # the way it fails `docker compose up -d --build` locally.
+      # setup-buildx-action is required for the GHA cache backend (type=gha)
+      # — without it, build-push-action falls back to the default `docker`
+      # driver which can't export the cache.
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build prod image
         uses: docker/build-push-action@v6
         with:
@@ -81,17 +84,10 @@ jobs:
   backend-smoke:
     name: Backend smoke (ruff + import + ops tests)
     if: ${{ !inputs.skip_backend }}
-    # Self-hosted X64 runner — see docs/ci-runners.md for why self-hosted is
-    # used for this repo (private personal account; no arm64 Linux or macOS
-    # hosted runners available).
-    #
-    # To switch to GitHub-hosted runners: change runs-on to `ubuntu-latest`
-    # and add an "Install build dependencies" step (build-essential, zlib,
-    # etc.) before `pip install` — pysam and cryptography need C/toolchain
-    # headers that the self-hosted runner already has from building the
-    # backend Docker image.
-    runs-on: [self-hosted, X64]
-    # runs-on: ubuntu-latest  # ← flip this line when ready to switch
+    # Runs on GitHub-hosted runners. The self-hosted-only constraint
+    # (see docs/ci-runners.md) applies to publishing arm64 images, not to
+    # test/lint jobs.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -101,6 +97,13 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
           cache-dependency-path: backend/pyproject.toml
+
+      # pysam (C extension against htslib) and cryptography (Rust) need
+      # toolchain headers that aren't in the base ubuntu-latest image.
+      - name: Install system build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential zlib1g-dev
 
       # Ruff is a standalone binary (no dependencies of its own), so install
       # it first — this gives fast lint feedback before the heavier backend
@@ -129,10 +132,9 @@ jobs:
   # ------------------------------------------------------------------
   # FUTURE: Full backend test suite with Mongo replica-set service.
   #
-  # Enable when switching to ubuntu-latest (GitHub-hosted runners).
   # The smoke test above covers ruff + imports; this job adds the
-  # full pytest suite (312 test files) that need a real Mongo replica set
-  # — the conftest.py hardcodes database "biopipe_test" and the
+  # full pytest suite (312 test files) that need a real Mongo replica set —
+  # the conftest hardcodes database "biopipe_test" and the
   # beanie_models fixture (scope="module") drops all collections on entry.
   #
   # Run order: install deps → init replica set → pytest.
@@ -155,22 +157,16 @@ jobs:
   #   steps:
   #     - uses: actions/checkout@v4
   #
-  #     - name: Install system build dependencies
-  #       # pysam (C extension against htslib) and cryptography (Rust) need
-  #       # toolchain headers that aren't in the base Ubuntu image.
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y \
-  #           build-essential \
-  #           zlib1g-dev \
-  #           libhts-dev \
-  #           curl
-  #
   #     - uses: actions/setup-python@v5
   #       with:
   #         python-version: '3.12'
   #         cache: 'pip'
   #         cache-dependency-path: backend/pyproject.toml
+  #
+  #     - name: Install build dependencies
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y build-essential zlib1g-dev libhts-dev curl
   #
   #     - name: Install backend dev dependencies
   #       run: pip install -e 'backend/.[dev]'
