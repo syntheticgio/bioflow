@@ -110,3 +110,39 @@ class TestSystemLoadNodes:
             load = await current_load()
         assert load["nodes"] == []
         assert "boom" in load["nodes_error"]
+
+    async def test_orphan_scan_failure_reports_the_error(self, fake_redis):
+        # Same contract, but the failure comes from the second of three
+        # downstream calls -- confirms the try block covers all of them, not
+        # just the first.
+        p1, p2, p3 = _patches(fake_redis)
+        with (
+            p1,
+            p2,
+            p3,
+            patch(
+                "app.queue.node_stats.orphaned_queue_nodes",
+                side_effect=RuntimeError("scan boom"),
+            ),
+        ):
+            load = await current_load()
+        assert load["nodes"] == []
+        assert "scan boom" in load["nodes_error"]
+
+    async def test_node_stats_failure_reports_the_error(self, fake_redis):
+        # Same contract, but the failure comes from the third downstream
+        # call -- confirms the try block covers all of them, not just the
+        # ones checked by the other two failure tests.
+        p1, p2, p3 = _patches(fake_redis)
+        with (
+            p1,
+            p2,
+            p3,
+            patch(
+                "app.queue.node_stats.node_stats",
+                side_effect=RuntimeError("stats boom"),
+            ),
+        ):
+            load = await current_load()
+        assert load["nodes"] == []
+        assert "stats boom" in load["nodes_error"]
