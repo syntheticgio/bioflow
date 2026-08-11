@@ -17,4 +17,9 @@ describe("pointerFraction", () => {
   it("maps a browser x coordinate relative to the hit rectangle", () => {
     expect(pointerFraction(260, 60, 400)).toBe(0.5);
   });
+
+  it("preserves exact hit-rectangle endpoints", () => {
+    expect(pointerFraction(40, 40, 200)).toBe(0);
+    expect(pointerFraction(240, 40, 200)).toBe(1);
+  });
 });
