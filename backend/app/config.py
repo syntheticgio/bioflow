@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     worker_id: str = ""  # defaults to hostname:pid at startup
     worker_node_id: str = "primary"  # stable name for this physical machine
     enrollment_key: str = ""  # shared secret for child-node enrollment (empty = open)
+    # Externally-routable hostname for node-connection URLs during remote
+    # provisioning. Empty = auto-discover via UDP socket heuristic.
+    primary_hostname: str = ""
     primary_api_url: str = ""  # where child nodes reach the primary's API (empty = primary)
     # "primary" (default) or "compute" — controls blob-transfer behaviour.
     node_type: str = "primary"
