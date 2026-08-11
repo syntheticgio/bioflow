@@ -153,11 +153,28 @@ export function ProvenanceNarrative({
         {runs}
       </div>
 
-      <div>
-        <div className="section-title">{proseText ? "Methods paragraph" : "Summarize"}</div>
+      <div className="history-summary-rail">
+        <div className="section-title">Summarize</div>
+        <div className="prose-invite">
+          <div className="prose-invite-body">
+            The lineage on the left, set as one citable paragraph
+            {gapCount > 0
+              ? ` — ${gapCount} of its ${gapCount === 1 ? "fact is" : "facts are"} not recorded and will read as “unrecorded”.`
+              : "."}
+          </div>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => prose.mutate()}
+            disabled={prose.isPending}
+          >
+            {prose.isPending ? "Generating…" : "Generate paragraph"}
+          </button>
+        </div>
 
-        {proseText ? (
+        {proseText && (
           <>
+            <div className="section-title methods-paragraph-title">Methods paragraph</div>
             <div className="section-note">
               Generated from {data.lineage.length} lineage{" "}
               {data.lineage.length === 1 ? "step" : "steps"}.
@@ -181,23 +198,6 @@ export function ProvenanceNarrative({
               </button>
             </div>
           </>
-        ) : (
-          <div className="prose-invite">
-            <div className="prose-invite-body">
-              The lineage on the left, set as one citable paragraph
-              {gapCount > 0
-                ? ` — ${gapCount} of its ${gapCount === 1 ? "fact is" : "facts are"} not recorded and will read as “unrecorded”.`
-                : "."}
-            </div>
-            <button
-              type="button"
-              className="btn"
-              onClick={() => prose.mutate()}
-              disabled={prose.isPending}
-            >
-              {prose.isPending ? "Generating…" : "Generate paragraph"}
-            </button>
-          </div>
         )}
 
         {prose.data?.unavailable_reason && (
