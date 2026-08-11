@@ -119,17 +119,25 @@ export function runFirstSetup(args: {
 export interface CurrentSettings {
   hardMemMb: number | null;
   port: number | null;
+  storageLocation: string | null;
+  networkExposed: boolean | null;
 }
 
 // Reads back whatever settings can be recovered from .env on disk -- the
-// hard memory limit and the port, the two fields the UI could not otherwise
-// reconstruct on a relaunch. See App.tsx's mount effect for why this exists.
+// hard memory limit, port, storage location, and network exposure, the
+// fields the UI could not otherwise reconstruct on a relaunch. See App.tsx's
+// mount effect for why this exists.
 export function currentSettings(): Promise<CurrentSettings> {
-  return invoke<{ hard_mem_mb: number | null; port: number | null }>(
-    "current_settings",
-  ).then((d) => ({
+  return invoke<{
+    hard_mem_mb: number | null;
+    port: number | null;
+    storage_location: string | null;
+    network_exposed: boolean | null;
+  }>("current_settings").then((d) => ({
     hardMemMb: d.hard_mem_mb,
     port: d.port,
+    storageLocation: d.storage_location,
+    networkExposed: d.network_exposed,
   }));
 }
 

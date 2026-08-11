@@ -29,3 +29,4 @@ skills-lock.json
 # Never contains the private key itself (that lives outside the repo), but
 # does carry Key ID / Issuer ID, which are still not something to publish.
 launcher/BUILDING.local.md
+launcher/node_modules

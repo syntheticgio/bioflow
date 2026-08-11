@@ -38,24 +38,31 @@ export function App() {
     hardMemGb: "",
   });
 
-  // Runs once on mount to recover the two settings fields a relaunch
+  // Runs once on mount to recover the settings fields a relaunch
   // cannot otherwise reconstruct from run_first_setup's return path: the
-  // hard memory limit and the port. Both are read back out of the install's
-  // .env (the source of truth); a missing value leaves the placeholder
-  // untouched -- port's placeholder is the compose default 5173, which is
-  // also what the stack serves when .env omits WEB_PORT. This runs before
-  // Settings.tsx can ever be opened, so there is no race with a value the
-  // user is mid-typing there.
+  // hard memory limit, the port, the storage location, and network
+  // exposure. All are read back out of the install's .env (the source of
+  // truth); a missing value leaves the placeholder untouched -- port's
+  // placeholder is the compose default 5173, which is also what the stack
+  // serves when .env omits WEB_PORT. This runs before Settings.tsx can ever
+  // be opened, so there is no race with a value the user is mid-typing
+  // there. Recovering storage location and network exposure matters: if
+  // they stayed at their placeholders ("" and false), the next Apply would
+  // silently rewrite .env to an empty data directory and loopback binding.
   useEffect(() => {
     let cancelled = false;
-    currentSettings().then(({ hardMemMb, port }) => {
-      if (cancelled) return;
-      setSettings((prev) => ({
-        ...prev,
-        ...(hardMemMb != null ? { hardMemGb: String(hardMemMb / 1024) } : {}),
-        ...(port != null ? { port } : {}),
-      }));
-    });
+    currentSettings().then(
+      ({ hardMemMb, port, storageLocation, networkExposed }) => {
+        if (cancelled) return;
+        setSettings((prev) => ({
+          ...prev,
+          ...(hardMemMb != null ? { hardMemGb: String(hardMemMb / 1024) } : {}),
+          ...(port != null ? { port } : {}),
+          ...(storageLocation != null ? { storageLocation } : {}),
+          ...(networkExposed != null ? { networkExposed } : {}),
+        }));
+      },
+    );
     return () => {
       cancelled = true;
     };
