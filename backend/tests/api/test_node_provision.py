@@ -1,6 +1,5 @@
 """Tests for node provisioning endpoints and executor."""
 
-import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
@@ -9,7 +8,6 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.models.node_provision import NodeProvisionTask
-
 
 # ---- helpers ----
 
@@ -159,8 +157,12 @@ def test_render_node_env_matches_launcher():
     """_render_node_env output must match the launcher's format."""
     from app.api.v1.nodes import _render_node_env
 
+    mongo_url = (
+        "mongodb://192.168.1.50:27017/biopipe"
+        "?replicaSet=rs0&directConnection=true"
+    )
     env = _render_node_env(
-        mongo_url="mongodb://192.168.1.50:27017/biopipe?replicaSet=rs0&directConnection=true",
+        mongo_url=mongo_url,
         redis_url="redis://192.168.1.50:6379/0",
         api_url="http://192.168.1.50:8000",
         node_name="test-node",
@@ -169,7 +171,7 @@ def test_render_node_env_matches_launcher():
     )
 
     assert "NODE_TYPE=compute" in env
-    assert "MONGO_URL=mongodb://192.168.1.50:27017/biopipe?replicaSet=rs0&directConnection=true" in env
+    assert f"MONGO_URL={mongo_url}" in env
     assert "REDIS_URL=redis://192.168.1.50:6379/0" in env
     assert "WORKER_NODE_ID=test-node" in env
     assert "PRIMARY_API_URL=http://192.168.1.50:8000" in env
@@ -184,8 +186,8 @@ def test_render_node_env_matches_launcher():
 
 def test_primary_hostname_uses_config():
     """_primary_hostname returns PRIMARY_HOSTNAME when set."""
-    from app.api.v1.nodes import _primary_hostname
     from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import _primary_hostname
 
     with patch.object(mod.settings, "primary_hostname", "myhost.local"):
         assert _primary_hostname() == "myhost.local"
@@ -193,9 +195,10 @@ def test_primary_hostname_uses_config():
 
 def test_primary_hostname_falls_back_to_socket():
     """_primary_hostname falls back to gethostname when config is empty."""
-    from app.api.v1.nodes import _primary_hostname
-    from app.api.v1 import nodes as mod
     import socket
+
+    from app.api.v1 import nodes as mod
+    from app.api.v1.nodes import _primary_hostname
 
     with patch.object(mod.settings, "primary_hostname", ""), \
          patch.object(mod.socket, "socket", side_effect=OSError("no net")):
@@ -274,7 +277,7 @@ async def test_orphaned_provision_marked_failed(client):
     )
     await task.insert()
 
-    from app.api.v1.nodes import _clean_orphaned_provisions, _active_provisions
+    from app.api.v1.nodes import _active_provisions, _clean_orphaned_provisions
 
     # Ensure the task_id is NOT in _active_provisions
     _active_provisions.pop("orph", None)
