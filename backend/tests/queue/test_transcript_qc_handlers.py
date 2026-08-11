@@ -14,9 +14,44 @@ every contig with nonzero length now gets at least 1 read of budget.
 `pysam.AlignmentFile` -- no BAM file needed.
 """
 
+import gzip
 from unittest.mock import patch
 
-from app.queue.transcript_qc_handlers import _sampling_plan
+from app.queue.transcript_qc_handlers import _opener_for, _sampling_plan
+
+
+class TestOpenerFor:
+    """`_opener_for` picks gzip.open for gzip/bgzf-compressed GTFs and plain
+    `open` otherwise -- see gc_tracks.compute_gc_tracks for the pattern this
+    mirrors. Opening a BGZF-compressed GTF with plain `open()` doesn't raise;
+    it silently reads garbled bytes, which is the bug this guards against
+    (NCBI Datasets ships GTFs bgzf-compressed by default)."""
+
+    def test_bgzf_uses_gzip_open(self):
+        assert _opener_for("bgzf") is gzip.open
+
+    def test_gzip_uses_gzip_open(self):
+        assert _opener_for("gzip") is gzip.open
+
+    def test_none_uses_plain_open(self):
+        assert _opener_for("none") is open
+
+    def test_missing_compression_uses_plain_open(self):
+        assert _opener_for(None) is open
+
+    def test_unknown_compression_value_falls_back_to_plain_open(self):
+        """A payload value that isn't a valid Compression member (e.g. a
+        typo, or a future enum member this code doesn't know about yet)
+        should not raise -- fall back to plain open rather than crash the
+        job on an unrelated string."""
+        assert _opener_for("not-a-real-compression") is open
+
+    def test_zstd_and_bzip2_are_not_treated_as_gzip_compatible(self):
+        """gzip.open cannot read zstd or bzip2 -- only gzip/bgzf go through
+        it. These should fall back to plain open rather than silently
+        garble (matches current behavior: no zstd/bzip2 GTF support yet)."""
+        assert _opener_for("zstd") is open
+        assert _opener_for("bzip2") is open
 
 
 class _FakeAlignmentFile:

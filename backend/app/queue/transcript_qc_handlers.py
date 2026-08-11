@@ -6,16 +6,38 @@ would parse the GTF twice and traverse the BAM twice for two charts that sit
 side by side.
 """
 
-from pathlib import Path
+from typing import IO
 
 from app.errors import PermanentError
 from app.logging import get_logger
-from app.models import IoClass, JobClass, JobResources
+from app.models import Compression, IoClass, JobClass, JobResources
 from app.pipelines import transcript_qc_runner
+from app.queue.pipeline_handlers import _resolve_input
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.sequence_stats import DEFAULT_SAMPLE_READS
 
 log = get_logger(__name__)
+
+
+def _opener_for(compression: str | None):
+    """Pick the right file opener for a GTF's storage compression.
+
+    Mirrors gc_tracks.compute_gc_tracks: gzip.open transparently reads BGZF
+    too, since BGZF is valid block-gzip -- one opener covers both. A plain
+    `open()` on a BGZF/gzip file doesn't raise, it just yields garbled bytes,
+    which is the bug this guards against (see NCBI Datasets GTFs, which ship
+    bgzf-compressed by default).
+    """
+    import gzip
+
+    try:
+        is_compressed = Compression(compression or "none") in (
+            Compression.GZIP,
+            Compression.BGZF,
+        )
+    except ValueError:
+        is_compressed = False
+    return gzip.open if is_compressed else open
 
 
 @handler(
@@ -36,11 +58,13 @@ def run_transcript_qc(ctx: JobContext) -> dict:
     if not object_id:
         raise PermanentError("run_transcript_qc requires an 'object_id'")
 
-    bam_path = Path(ctx.payload["bam_path"])
-    gtf_path = Path(ctx.payload["gtf_path"])
+    bam_path = _resolve_input(ctx.payload, "bam")
+    gtf_path = _resolve_input(ctx.payload, "gtf")
 
     ctx.progress(phase="gtf", pct=0.1, message="reading the gene annotation")
-    with open(gtf_path, errors="replace") as fh:
+    opener = _opener_for(ctx.payload.get("gtf_compression"))
+    fh: IO[str]
+    with opener(gtf_path, "rt", errors="replace") as fh:
         transcripts = transcript_qc_runner.parse_gtf_transcripts(fh)
     representatives = transcript_qc_runner.representative_transcripts(transcripts)
     if not representatives:

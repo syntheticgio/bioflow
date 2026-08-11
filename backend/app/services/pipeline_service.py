@@ -2159,21 +2159,30 @@ async def launch_transcript_qc(
 
     gtf = await resolve_annotation(bam.project_id, gtf_object_id, owner=owner)
 
-    _, bam_path = await _resolve_readable(bam)
-    _, gtf_path = await _resolve_readable(gtf)
-    if not bam_path or not gtf_path:
+    bam_digest, bam_path = await _resolve_readable(bam)
+    gtf_digest, gtf_path = await _resolve_readable(gtf)
+    if not (bam_digest or bam_path) or not (gtf_digest or gtf_path):
         raise ValidationError("The BAM and its annotation must both have stored content.")
+
+    payload: dict = {
+        "object_id": str(bam.id),
+        "project_id": str(bam.project_id),
+        "gtf_name": gtf.name,
+        "gtf_compression": (gtf.format.compression or "none").lower(),
+    }
+    if bam_digest:
+        payload["bam_sha256"] = bam_digest
+    if bam_path:
+        payload["bam_path"] = bam_path
+    if gtf_digest:
+        payload["gtf_sha256"] = gtf_digest
+    if gtf_path:
+        payload["gtf_path"] = gtf_path
 
     job = await queue.enqueue(
         "run_transcript_qc",
         owner=owner,
-        payload={
-            "object_id": str(bam.id),
-            "project_id": str(bam.project_id),
-            "bam_path": bam_path,
-            "gtf_path": gtf_path,
-            "gtf_name": gtf.name,
-        },
+        payload=payload,
         job_class=JobClass.COMPUTE,
         resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
         max_attempts=2,
