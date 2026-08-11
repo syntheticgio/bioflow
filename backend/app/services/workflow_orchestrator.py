@@ -36,7 +36,7 @@ from app.models.workflow import (
     WorkflowStatus,
     derive_status,
 )
-from app.pipelines.node_types import NODE_TYPES
+from app.pipelines.node_types import NODE_TYPES, ports_for
 from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
 from app.services.workflow_planner import UNSUCCESSFUL, doomed_nodes, runnable_nodes
 
@@ -137,7 +137,8 @@ def _is_multi_port(node: WorkflowNode, port_name: str) -> bool:
     spec = NODE_TYPES.get(node.node_type)
     if spec is None:
         return False
-    port = next((p for p in spec.inputs if p.name == port_name), None)
+    inputs, _ = ports_for(node)
+    port = next((p for p in inputs if p.name == port_name), None)
     return port is not None and port.multiple
 
 
@@ -268,7 +269,8 @@ async def _advance(
         # reconciler and the UI can both act on.
         spec = NODE_TYPES.get(node.node_type)
         if spec is not None:
-            missing = [p.name for p in spec.inputs if p.required and p.name not in inputs]
+            node_inputs, _ = ports_for(node)
+            missing = [p.name for p in node_inputs if p.required and p.name not in inputs]
             if missing:
                 log.warning(
                     "workflow_node_inputs_unresolved",
