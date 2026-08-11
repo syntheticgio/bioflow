@@ -13,6 +13,7 @@ pub struct FakeDocker {
     pub services: RefCell<Vec<ServiceStatus>>,
     pub healthy: Cell<bool>,
     pub up_result: RefCell<ActionResult>,
+    pub up_node_result: RefCell<ActionResult>,
     pub down_result: RefCell<ActionResult>,
     pub pull_result: RefCell<ActionResult>,
     pub pull_image_result: RefCell<ActionResult>,
@@ -38,6 +39,7 @@ impl Default for FakeDocker {
             services: RefCell::new(Vec::new()),
             healthy: Cell::new(false),
             up_result: RefCell::new(ActionResult::Ok),
+            up_node_result: RefCell::new(ActionResult::Ok),
             down_result: RefCell::new(ActionResult::Ok),
             pull_result: RefCell::new(ActionResult::Ok),
             pull_image_result: RefCell::new(ActionResult::Ok),
@@ -89,6 +91,10 @@ impl DockerBackend for FakeDocker {
 
     fn up(&self, _install_dir: &str) -> ActionResult {
         self.up_result.borrow().clone()
+    }
+
+    fn up_node(&self, _install_dir: &str) -> ActionResult {
+        self.up_node_result.borrow().clone()
     }
 
     fn down(&self, _install_dir: &str) -> ActionResult {

@@ -8,8 +8,10 @@
 
 pub mod defaults;
 pub mod install;
+pub mod node;
 pub mod validate;
 
 pub use defaults::SetupDefaults;
 pub use install::{install, install_exists, InstallError, InstallInputs};
+pub use node::{install_node, NodeInstallError, NodeInstallInputs};
 pub use validate::{validate_port, validate_storage_path, PortValidation, StoragePathValidation};

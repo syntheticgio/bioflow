@@ -3,7 +3,7 @@
 //! and `settings` -- nothing here should ever need its own test, since
 //! everything it does is already covered where the real logic lives.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,8 @@ use crate::docker::{ActionResult, DockerBackend, DockerPresence, ShellDocker};
 use crate::optional_tools::{OptionalTool, StackToolsClient, ToolsClient};
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
 use crate::setup::{self, InstallError, InstallInputs, PortValidation, SetupDefaults, StoragePathValidation};
+use crate::setup::node::{self as node_setup, NodeInstallError, NodeInstallInputs};
+use crate::remote::{self, SshCreds, SshResult};
 use crate::state::{self, InstallInfo, LauncherState};
 use crate::update_check::{self, DockerImageInspector, GhcrClient};
 
@@ -187,6 +189,8 @@ pub enum LauncherStateDto {
     DockerUnavailable { installed: bool },
     Stopped,
     Running,
+    NodeRunning,
+    NodeStopped,
 }
 
 impl From<LauncherState> for LauncherStateDto {
@@ -198,6 +202,8 @@ impl From<LauncherState> for LauncherStateDto {
             }
             LauncherState::Stopped => LauncherStateDto::Stopped,
             LauncherState::Running => LauncherStateDto::Running,
+            LauncherState::NodeRunning => LauncherStateDto::NodeRunning,
+            LauncherState::NodeStopped => LauncherStateDto::NodeStopped,
         }
     }
 }
@@ -777,6 +783,397 @@ pub async fn current_settings(app: State<'_, LauncherApp>) -> Result<CurrentSett
         .and_then(|contents| parse_hard_mem_mb(&contents));
 
     Ok(CurrentSettingsDto { hard_mem_mb })
+}
+
+// ── #221: Compute-node commands ───────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeConnectionInfo {
+    pub mongo_url: String,
+    pub redis_url: String,
+    pub api_url: String,
+    pub suggested_node_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DiscoverNodeConnectionArgs {
+    pub host: String,
+    pub port: u16,
+}
+
+/// Hits `GET /api/v1/node-connection` on the primary BioFlow's API and
+/// returns the auto-discovered connection details (Mongo URL, Redis URL,
+/// suggested node name).
+#[tauri::command]
+pub async fn discover_node_connection(
+    args: DiscoverNodeConnectionArgs,
+) -> Result<NodeConnectionInfo, String> {
+    let url = format!("http://{}:{}/api/v1/node-connection", args.host, args.port);
+    let host_header = format!("{}:{}", args.host, args.port);
+    let url_for_err = url.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        ureq::get(&url)
+            .set("Host", &host_header)
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+    })
+    .await
+    .map_err(|e| format!("thread error: {e}"))?
+    .map_err(|_e| {
+        format!(
+            "Could not reach the BioFlow API at {url_for_err}. Is the primary running?"
+        )
+    })?;
+
+    let body = result
+        .into_string()
+        .map_err(|e| format!("could not read response: {e}"))?;
+
+    let info: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("invalid response from BioFlow: {e}"))?;
+
+    Ok(NodeConnectionInfo {
+        mongo_url: info["mongo_url"].as_str().unwrap_or("").to_string(),
+        redis_url: info["redis_url"].as_str().unwrap_or("").to_string(),
+        api_url: info["api_url"].as_str().unwrap_or("").to_string(),
+        suggested_node_name: info["suggested_node_name"]
+            .as_str()
+            .unwrap_or("child")
+            .to_string(),
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InstallNodeLocalArgs {
+    pub mongo_url: String,
+    pub redis_url: String,
+    pub api_url: String,
+    pub node_name: String,
+    pub storage_location: String,
+}
+
+/// Installs a compute node on this machine: writes a node `.env`, copies
+/// the bundled compose file, pulls the image, and starts only the worker
+/// service (`docker compose up -d --no-deps worker`).
+#[tauri::command]
+pub async fn install_node_local(
+    handle: tauri::AppHandle,
+    app: State<'_, LauncherApp>,
+    args: InstallNodeLocalArgs,
+) -> Result<(), String> {
+    let bundled_compose_path = handle
+        .path()
+        .resolve(BUNDLED_COMPOSE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|e| format!("could not locate the bundled compose file: {e}"))?;
+
+    let inputs = NodeInstallInputs {
+        mongo_url: args.mongo_url,
+        redis_url: args.redis_url,
+        api_url: args.api_url,
+        node_name: args.node_name,
+        storage_location: PathBuf::from(args.storage_location),
+        install_dir: fixed_install_dir(),
+    };
+
+    let install_result = {
+        let inputs = inputs.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let docker = ShellDocker::new();
+            node_setup::install_node(&docker, &inputs, &bundled_compose_path)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    };
+
+    install_result.map_err(|e| match e {
+        NodeInstallError::CouldNotCreateInstallDir { reason } => {
+            format!("could not create the install directory: {reason}")
+        }
+        NodeInstallError::CouldNotCopyComposeFile { reason } => {
+            format!("could not copy the compose file: {reason}")
+        }
+        NodeInstallError::CouldNotWriteEnv { reason } => {
+            format!("could not write .env: {reason}")
+        }
+        NodeInstallError::PullFailed { output } => output,
+        NodeInstallError::UpFailed { output } => output,
+    })?;
+
+    *app.install_dir.lock().unwrap() = Some(inputs.install_dir);
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TestSshArgs {
+    pub host: String,
+    pub user: String,
+    pub password: Option<String>,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RemoteInfoDto {
+    pub hostname: String,
+    pub os_arch: String,
+    pub docker_ready: bool,
+}
+
+/// Tests SSH connectivity to a remote machine and gathers basic info:
+/// hostname, OS/arch, and whether Docker is available.
+#[tauri::command]
+pub async fn test_ssh_connection(args: TestSshArgs) -> Result<RemoteInfoDto, String> {
+    let creds = SshCreds {
+        host: args.host,
+        user: args.user,
+        password: args.password,
+        port: args.port,
+    };
+
+    let output = tauri::async_runtime::spawn_blocking(move || remote::test_connection(&creds))
+        .await
+        .map_err(|e| format!("thread error: {e}"))?;
+
+    match output {
+        SshResult::Ok(out) => remote::parse_remote_info(&out)
+            .map(|info| RemoteInfoDto {
+                hostname: info.hostname,
+                os_arch: info.os_arch,
+                docker_ready: info.docker_ready,
+            })
+            .ok_or_else(|| format!("unexpected response from remote: {out}")),
+        SshResult::Failed { output } => Err(output),
+        SshResult::SshpassNotFound => Err(
+            "Password authentication requires 'sshpass' to be installed on this machine.\n\n\
+             macOS:  brew install sshpass\n\
+             Linux:  sudo apt install sshpass / sudo dnf install sshpass"
+                .to_string(),
+        ),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct InstallNodeRemoteArgs {
+    pub mongo_url: String,
+    pub redis_url: String,
+    pub api_url: String,
+    pub node_name: String,
+    pub storage_location: String,
+    pub ssh_host: String,
+    pub ssh_user: String,
+    pub ssh_password: Option<String>,
+    pub ssh_port: u16,
+}
+
+/// Installs a compute node on a remote machine via SSH: creates the
+/// install directory, copies the compose file, writes `.env`, pulls the
+/// image, and starts only the worker.
+#[tauri::command]
+pub async fn install_node_remote(
+    handle: tauri::AppHandle,
+    args: InstallNodeRemoteArgs,
+) -> Result<(), String> {
+    let bundled_compose_path = handle
+        .path()
+        .resolve(BUNDLED_COMPOSE_RESOURCE, BaseDirectory::Resource)
+        .map_err(|e| format!("could not locate the bundled compose file: {e}"))?;
+
+    let creds = SshCreds {
+        host: args.ssh_host,
+        user: args.ssh_user,
+        password: args.ssh_password,
+        port: args.ssh_port,
+    };
+    let remote_install_dir = "~/.bioflow";
+    let compose_dest = format!("{}/docker-compose.yml", remote_install_dir);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. Create install directory
+        match remote::remote_exec(&creds, &format!("mkdir -p {}", remote_install_dir)) {
+            SshResult::Ok(_) => {}
+            SshResult::Failed { output } => return Err(output),
+            SshResult::SshpassNotFound => return Err("sshpass not installed".into()),
+        }
+
+        // 2. Copy compose file via scp
+        let bundled_path_str = bundled_compose_path.to_string_lossy();
+        match remote::remote_copy(&creds, &bundled_path_str, &compose_dest) {
+            SshResult::Ok(_) => {}
+            SshResult::Failed { output } => return Err(output),
+            SshResult::SshpassNotFound => return Err("sshpass not installed".into()),
+        }
+
+        // 3. Write .env on remote
+        let env_contents = format!(
+            "NODE_TYPE=compute\\n\
+             MONGO_URL={}\\n\
+             REDIS_URL={}\\n\
+             WORKER_NODE_ID={}\\n\
+             BIOINFO_HOME={}\\n\
+             BIOINFO_REGISTER_ROOTS={}\\n\
+             BIOFLOW_TAG=latest\\n\
+             WORKER_REPLICAS=2\\n",
+            args.mongo_url, args.redis_url, args.node_name,
+            args.storage_location, args.storage_location
+        );
+        match remote::remote_exec(
+            &creds,
+            &format!(
+                "printf '%s' '{}' > {}/.env",
+                env_contents.replace('\'', "'\\\\''"),
+                remote_install_dir
+            ),
+        ) {
+            SshResult::Ok(_) => {}
+            SshResult::Failed { output } => return Err(output),
+            SshResult::SshpassNotFound => return Err("sshpass not installed".into()),
+        }
+
+        // 4. Pull image and start worker
+        for cmd in &[
+            format!("cd {} && docker compose pull", remote_install_dir),
+            format!("cd {} && docker compose up -d --no-deps worker", remote_install_dir),
+        ] {
+            match remote::remote_exec(&creds, cmd) {
+                SshResult::Ok(_) => {}
+                SshResult::Failed { output } => return Err(output),
+                SshResult::SshpassNotFound => return Err("sshpass not installed".into()),
+            }
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Starts only the worker service on an already-installed node.
+#[tauri::command]
+pub async fn run_node(app: State<'_, LauncherApp>) -> Result<(), String> {
+    let install_dir = install_dir_str_blocking(&app)
+        .await
+        .ok_or("not installed")?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::run_node(&docker, &install_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
+        actions::NodeRunOutcome::Running => Ok(()),
+        actions::NodeRunOutcome::ComposeFailed { output } => Err(output),
+    }
+}
+
+/// Stops all containers on a node install (same as `docker compose down`
+/// -- works for both full and node installs).
+#[tauri::command]
+pub async fn stop_node(app: State<'_, LauncherApp>) -> Result<(), String> {
+    let install_dir = install_dir_str_blocking(&app)
+        .await
+        .ok_or("not installed")?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::stop(&docker, &install_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
+        StopOutcome::Stopped => Ok(()),
+        StopOutcome::Failed { output } => Err(output),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeStatusDto {
+    pub installed: bool,
+    pub running: bool,
+    /// The node name from `.env` (WORKER_NODE_ID), or None if not a node.
+    pub node_name: Option<String>,
+    /// The primary API URL derived from .env, or None if not a node.
+    pub primary_url: Option<String>,
+}
+
+/// Reads the local install to determine whether it's a compute node
+/// (NODE_TYPE=compute in .env) and whether the worker is running.
+/// The frontend uses this to decide which screen to show and then
+/// polls the primary's `GET /api/v1/nodes` for live job stats.
+#[tauri::command]
+pub async fn node_status(app: State<'_, LauncherApp>) -> Result<NodeStatusDto, ()> {
+    let install_dir = install_dir_str_blocking(&app).await;
+
+    let Some(dir) = install_dir else {
+        return Ok(NodeStatusDto {
+            installed: false,
+            running: false,
+            node_name: None,
+            primary_url: None,
+        });
+    };
+
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+
+        // Check .env for node type
+        let env_path = Path::new(&dir).join(".env");
+        let env_contents = std::fs::read_to_string(&env_path).ok();
+        let is_node = env_contents
+            .as_ref()
+            .map(|s| s.contains("NODE_TYPE=compute"))
+            .unwrap_or(false);
+
+        if !is_node {
+            return NodeStatusDto {
+                installed: false,
+                running: false,
+                node_name: None,
+                primary_url: None,
+            };
+        }
+
+        let services = docker.ps(&dir);
+        let worker_running = services.iter().any(|s| s.name == "worker" && s.running);
+
+        let node_name = env_contents
+            .as_ref()
+            .and_then(|s| {
+                s.lines()
+                    .find_map(|l| l.strip_prefix("WORKER_NODE_ID="))
+                    .map(|v| v.to_string())
+            });
+
+        let primary_url = env_contents.as_ref().and_then(|s| {
+            let mongo = s
+                .lines()
+                .find_map(|l| l.strip_prefix("MONGO_URL="))?;
+            // Extract host:port from mongodb://host:port/...
+            let host_port = mongo
+                .strip_prefix("mongodb://")?
+                .split('/')
+                .next()?;
+            Some(format!("http://{host_port}"))
+        });
+
+        NodeStatusDto {
+            installed: true,
+            running: worker_running,
+            node_name,
+            primary_url,
+        }
+    })
+    .await
+    .unwrap_or(NodeStatusDto {
+        installed: false,
+        running: false,
+        node_name: None,
+        primary_url: None,
+    });
+    
+    Ok(status)
 }
 
 #[cfg(test)]

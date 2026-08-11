@@ -5,7 +5,9 @@ export type LauncherState =
   | { kind: "NotInstalled" }
   | { kind: "DockerUnavailable"; installed: boolean }
   | { kind: "Stopped" }
-  | { kind: "Running" };
+  | { kind: "Running" }
+  | { kind: "NodeRunning" }
+  | { kind: "NodeStopped" };
 
 export interface Settings {
   storageLocation: string;

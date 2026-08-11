@@ -51,6 +51,28 @@ pub fn run<D: DockerBackend>(
     RunOutcome::NeverBecameHealthy
 }
 
+/// Outcome of `run_node` — starts only the worker service via
+/// `docker compose up -d --no-deps worker`. No healthcheck gate
+/// (the worker heartbeats into Redis, which takes a few seconds).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeRunOutcome {
+    /// Worker container is up.
+    Running,
+    /// `docker compose up` itself failed.
+    ComposeFailed { output: String },
+}
+
+/// Starts only the worker service (no mongo, redis, api, or web) — used
+/// for compute-node installs where the database lives on the primary
+/// machine. No healthcheck polling because there is no API to probe;
+/// the worker reports its own availability through Redis heartbeats.
+pub fn run_node<D: DockerBackend>(docker: &D, install_dir: &str) -> NodeRunOutcome {
+    match docker.up_node(install_dir) {
+        ActionResult::Ok => NodeRunOutcome::Running,
+        ActionResult::Failed { output } => NodeRunOutcome::ComposeFailed { output },
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopOutcome {
     Stopped,

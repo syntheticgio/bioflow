@@ -22,6 +22,12 @@ pub enum LauncherState {
     Stopped,
     /// Containers up AND the API healthcheck passing.
     Running,
+    /// A compute-node install exists and the worker is running. The worker
+    /// reports its own health through Redis heartbeats, not an HTTP endpoint,
+    /// so the health gate here is simpler than the full stack's.
+    NodeRunning,
+    /// A compute-node install exists but the worker is not running.
+    NodeStopped,
 }
 
 /// Whether an install exists at all -- the one input this module does not
@@ -40,6 +46,13 @@ pub fn evaluate<D: DockerBackend>(docker: &D, install: &InstallInfo) -> Launcher
         return LauncherState::NotInstalled;
     };
 
+    // Check whether this is a compute-node install by reading .env before
+    // probing Docker -- the node flag in .env is the source of truth, and
+    // we need it before evaluating service state.
+    let is_node = std::fs::read_to_string(std::path::Path::new(install_dir).join(".env"))
+        .map(|env| env.contains("NODE_TYPE=compute"))
+        .unwrap_or(false);
+
     match docker.probe() {
         DockerPresence::NotInstalled => {
             return LauncherState::DockerUnavailable { installed: false }
@@ -52,6 +65,21 @@ pub fn evaluate<D: DockerBackend>(docker: &D, install: &InstallInfo) -> Launcher
 
     let services = docker.ps(install_dir);
     let any_running = services.iter().any(|s| s.running);
+
+    // Node installs: only the worker runs; no API healthcheck. The worker
+    // reports its own health through Redis heartbeats, so "worker running"
+    // is the NodeRunning gate.
+    if is_node {
+        let worker_running = services
+            .iter()
+            .any(|s| s.name == "worker" && s.running);
+        return if worker_running {
+            LauncherState::NodeRunning
+        } else {
+            LauncherState::NodeStopped
+        };
+    }
+
     if !any_running {
         return LauncherState::Stopped;
     }

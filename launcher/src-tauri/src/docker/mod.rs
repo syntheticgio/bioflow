@@ -50,6 +50,11 @@ pub trait DockerBackend {
     /// `docker compose up -d`.
     fn up(&self, install_dir: &str) -> ActionResult;
 
+    /// `docker compose up -d --no-deps worker`. Starts only the worker
+    /// service (no mongo, redis, api, or web) — for compute-node installs
+    /// where the database lives on a different machine.
+    fn up_node(&self, install_dir: &str) -> ActionResult;
+
     /// `docker compose down`.
     fn down(&self, install_dir: &str) -> ActionResult;
 

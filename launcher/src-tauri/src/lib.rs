@@ -3,6 +3,7 @@ pub mod commands;
 pub mod docker;
 pub mod migrate;
 pub mod optional_tools;
+pub mod remote;
 pub mod settings;
 pub mod setup;
 pub mod state;
@@ -33,6 +34,13 @@ pub fn run() {
       commands::migration_progress,
       commands::finish_storage_migration,
       commands::current_settings,
+      commands::discover_node_connection,
+      commands::install_node_local,
+      commands::test_ssh_connection,
+      commands::install_node_remote,
+      commands::run_node,
+      commands::stop_node,
+      commands::node_status,
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

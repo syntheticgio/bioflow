@@ -26,6 +26,8 @@ services:
   mongo:
     image: mongo:7
     command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "${MONGO_PORT:-27017}:27017"
     volumes:
       # Bind-mounted to the fixed ~/.bioflow install directory rather than a
       # named volume, so the database lives at a known host path instead of
@@ -58,6 +60,8 @@ services:
   redis:
     image: redis:7-alpine
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       # See the comment on the mongo service's volumes above.
       - ${HOME}/.bioflow/redis:/data
@@ -82,6 +86,14 @@ services:
       # `max` and silently skip the clamp -- failing open exactly when a
       # guarantee was requested.
       BIOFLOW_HARD_MEM_MB: ${BIOFLOW_HARD_MEM_MB:-}
+      # Externally-routable Mongo and Redis URLs for the node-connection
+      # endpoint. Passed through from .env rather than computed from the
+      # Docker hostname so the user can override them (e.g., to use a
+      # different port or hostname on the LAN). Default to the internal
+      # Docker hostnames, which the connection endpoint rewrites using
+      # the request Host header.
+      NODE_CONNECTION_MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017/biopipe?replicaSet=rs0&directConnection=true}
+      NODE_CONNECTION_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       # The api never *runs* a sibling container -- the worker does -- but it
@@ -111,8 +123,11 @@ services:
     # unconditional rather than platform-branched.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+# Default 0.0.0.0 so compute nodes on other machines can reach the API
+    # for auto-discovery. Set BIND_ADDRESS=127.0.0.1 in .env to restrict to
+    # localhost only (remote nodes will disconnect).
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${API_PORT:-8000}:8000"
+      - "${BIND_ADDRESS:-0.0.0.0}:${API_PORT:-8000}:8000"
     depends_on:
       mongo:
         condition: service_healthy
@@ -177,7 +192,7 @@ services:
   web:
     image: ghcr.io/syntheticgio/bioflow-web:${BIOFLOW_TAG:-latest}
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-5173}:80"
+      - "${BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-5173}:80"
     depends_on:
       api:
         condition: service_healthy
