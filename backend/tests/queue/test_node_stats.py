@@ -5,7 +5,7 @@ from unittest.mock import patch
 import fakeredis.aioredis
 import pytest
 
-from app.queue.node_stats import node_stats
+from app.queue.node_stats import node_stats, orphaned_queue_nodes
 
 
 @pytest.fixture
@@ -84,3 +84,37 @@ class TestNodeStats:
         assert stats == {
             "gpu": {"queued": 0, "cpu": 0, "mem_mb": 0, "io_heavy": 0}
         }
+
+
+class TestOrphanedQueueNodes:
+    async def test_none_when_every_queue_is_known(self, fake_redis):
+        await fake_redis.zadd("bp:q:ready:gpu", {"j1": 1})
+        with patch("app.queue.node_stats.get_redis", return_value=fake_redis):
+            assert await orphaned_queue_nodes({"gpu"}) == []
+
+    async def test_finds_queue_for_unenrolled_node(self, fake_redis):
+        # The typo case: someone launched with ?target_node=gpu-nodee and the
+        # jobs will sit here forever, drained by nobody.
+        await fake_redis.zadd("bp:q:ready:gpu-nodee", {"j1": 1})
+        with patch("app.queue.node_stats.get_redis", return_value=fake_redis):
+            assert await orphaned_queue_nodes({"gpu"}) == ["gpu-nodee"]
+
+    async def test_global_queue_is_never_orphaned(self, fake_redis):
+        # bp:q:ready has no node suffix and must not be reported as a node.
+        await fake_redis.zadd("bp:q:ready", {"j1": 1})
+        with patch("app.queue.node_stats.get_redis", return_value=fake_redis):
+            assert await orphaned_queue_nodes(set()) == []
+
+    async def test_result_is_sorted(self, fake_redis):
+        await fake_redis.zadd("bp:q:ready:zeta", {"j1": 1})
+        await fake_redis.zadd("bp:q:ready:alpha", {"j2": 1})
+        with patch("app.queue.node_stats.get_redis", return_value=fake_redis):
+            assert await orphaned_queue_nodes(set()) == ["alpha", "zeta"]
+
+    async def test_redis_failure_returns_empty(self):
+        class Boom:
+            def scan_iter(self, *a, **kw):
+                raise ConnectionError("redis is down")
+
+        with patch("app.queue.node_stats.get_redis", return_value=Boom()):
+            assert await orphaned_queue_nodes(set()) == []
