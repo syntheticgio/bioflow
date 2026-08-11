@@ -6,13 +6,14 @@ would parse the GTF twice and traverse the BAM twice for two charts that sit
 side by side.
 """
 
+from pathlib import Path
 from typing import IO
 
 from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import Compression, IoClass, JobClass, JobResources
-from app.pipelines import transcript_qc_runner
-from app.queue.pipeline_handlers import _resolve_input
+from app.pipelines import aligners, transcript_qc_runner
+from app.queue.pipeline_handlers import _prepare_workdir, _resolve_input
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage.sequence_stats import DEFAULT_SAMPLE_READS
 
@@ -58,8 +59,24 @@ def run_transcript_qc(ctx: JobContext) -> dict:
     if not object_id:
         raise PermanentError("run_transcript_qc requires an 'object_id'")
 
-    bam_path = _resolve_input(ctx.payload, "bam")
+    bam_blob = _resolve_input(ctx.payload, "bam")
     gtf_path = _resolve_input(ctx.payload, "gtf")
+    bai_blob = _resolve_input(ctx.payload, "bai")
+
+    # pysam's fetch() (used below for strided per-contig sampling) requires a
+    # .bai index next to the BAM, under the name it expects -- same
+    # convention run_bam_stats uses: symlink both into a scratch workdir
+    # under their user-facing names rather than opening the content-
+    # addressed blob path directly.
+    work = _prepare_workdir(ctx, "transcript_qc")
+    bam_name = Path(ctx.payload.get("bam_name") or "aligned.bam").name
+    bam_path = work / bam_name
+    bam_path.unlink(missing_ok=True)
+    bam_path.symlink_to(bam_blob)
+
+    bai_path = work / f"{bam_name}{aligners.BAI_SUFFIX}"
+    bai_path.unlink(missing_ok=True)
+    bai_path.symlink_to(bai_blob)
 
     ctx.progress(phase="gtf", pct=0.1, message="reading the gene annotation")
     opener = _opener_for(ctx.payload.get("gtf_compression"))

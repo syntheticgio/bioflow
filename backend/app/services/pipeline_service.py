@@ -2159,14 +2159,28 @@ async def launch_transcript_qc(
 
     gtf = await resolve_annotation(bam.project_id, gtf_object_id, owner=owner)
 
+    # Unlike launch_bam_stats, a missing .bai is refused rather than chained
+    # through index_bam: transcript QC is already an on-demand, user-
+    # triggered feature reached only after results have been computed for
+    # this BAM (see _check_bam_stats_callable above), so an index existing
+    # is a reasonable precondition rather than something to build here.
+    bai = await _sidecar_of_role(bam, SidecarRole.BAI)
+    if bai is None:
+        raise ValidationError(
+            f"{bam.name!r} has no BAM index (.bai). Index it first.",
+            details={"bam_id": str(bam.id), "needs": "index_bam"},
+        )
+
     bam_digest, bam_path = await _resolve_readable(bam)
     gtf_digest, gtf_path = await _resolve_readable(gtf)
+    bai_digest, bai_path = await _resolve_readable(bai)
     if not (bam_digest or bam_path) or not (gtf_digest or gtf_path):
         raise ValidationError("The BAM and its annotation must both have stored content.")
 
     payload: dict = {
         "object_id": str(bam.id),
         "project_id": str(bam.project_id),
+        "bam_name": bam.name,
         "gtf_name": gtf.name,
         "gtf_compression": (gtf.format.compression or "none").lower(),
     }
@@ -2178,6 +2192,10 @@ async def launch_transcript_qc(
         payload["gtf_sha256"] = gtf_digest
     if gtf_path:
         payload["gtf_path"] = gtf_path
+    if bai_digest:
+        payload["bai_sha256"] = bai_digest
+    if bai_path:
+        payload["bai_path"] = bai_path
 
     job = await queue.enqueue(
         "run_transcript_qc",
