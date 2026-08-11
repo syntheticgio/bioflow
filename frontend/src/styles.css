@@ -5155,6 +5155,17 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--text-dim);
 }
 
+/* Inline variant (e.g. the target-node selector in the Actions tab):
+   shrink to the widest option instead of stretching across the page. */
+.settings-field.inline {
+  display: inline-flex;
+  width: max-content;
+}
+
+.settings-field.inline .settings-input {
+  width: auto;
+}
+
 .settings-input {
   width: 100%;
   font-size: 13px;
