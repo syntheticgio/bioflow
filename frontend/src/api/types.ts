@@ -476,6 +476,30 @@ export interface NodeInfo {
   };
 }
 
+export interface NodeProvisionRequest {
+  host: string;
+  port: number;
+  username: string;
+  password?: string | null;
+  private_key?: string | null;
+  node_name: string;
+  storage_location: string;
+  worker_replicas: number;
+}
+
+export interface NodeProvisionStatus {
+  task_id: string;
+  status: "provisioning" | "success" | "failed";
+  phase: string;
+  message: string;
+  pct: number | null;
+  node_name: string;
+  host: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+}
+
 export interface ScheduleInfo {
   name: string;
   job_type: string;
