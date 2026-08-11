@@ -77,6 +77,7 @@ const ACCEPT_CHOICES: {
   { key: "bam:alignment", label: "Alignment (BAM)", format: "bam", role: "alignment" },
   { key: "vcf:variants", label: "Variants (VCF)", format: "vcf", role: "variants" },
   { key: "gff:annotation", label: "Annotation (GFF)", format: "gff", role: "annotation" },
+  { key: "gtf:annotation", label: "Annotation (GTF)", format: "gtf", role: "annotation" },
 ];
 
 function acceptsKey(node: WorkflowNode): string {
