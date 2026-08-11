@@ -72,7 +72,11 @@ export function SettingsGeneral() {
       </p>
 
       <div className="settings-actions">
-        <button onClick={() => save.mutate()} disabled={save.isPending}>
+        <button
+          className="btn primary"
+          onClick={() => save.mutate()}
+          disabled={save.isPending}
+        >
           {save.isPending ? "Saving…" : "Save"}
         </button>
       </div>
