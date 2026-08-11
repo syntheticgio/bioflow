@@ -41,7 +41,7 @@ jobs:
     if: ${{ !inputs.skip_frontend }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -89,7 +89,7 @@ jobs:
     # test/lint jobs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -155,7 +155,7 @@ jobs:
   #         MONGO_INITDB_ROOT_PASSWORD: example
   #       options: --replSet rs0 --bind_ip_all
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v7
   #
   #     - uses: actions/setup-python@v5
   #       with:

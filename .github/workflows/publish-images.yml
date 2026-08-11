@@ -42,7 +42,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: [self-hosted, X64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
 
   # One job per (image, architecture). Each pushes an untagged, single-arch
@@ -79,7 +79,7 @@ jobs:
           - arch: arm64
             runner_arch: ARM64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # These self-hosted runners are launchd LaunchAgents with SessionCreate:
       # true, which puts every job in its own macOS security session rather
