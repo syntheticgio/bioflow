@@ -7,12 +7,11 @@ import platform
 import re
 import secrets
 import socket
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from datetime import UTC, datetime, timedelta
-
-from pydantic import BaseModel, model_validator
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, model_validator
 
 from app.config import settings
 from app.db.redis_client import get_redis
@@ -256,7 +255,7 @@ def _primary_hostname() -> str:
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except (OSError, socket.timeout):
+    except (TimeoutError, OSError):
         return socket.gethostname()
 
 
@@ -344,7 +343,7 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 ),
                 timeout=15,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return await _fail(
                 f"Connection to {req.host}:{req.port} timed out."
             )
@@ -366,14 +365,14 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
 
             # Phase 3: setup_install
             await _update("setup_install", "Preparing install directory…")
-            install_dir = os.path.expanduser("~/.bioflow")
+            install_dir = os.path.expanduser("~/.bioflow")  # noqa: ASYNC240
             await asyncio.wait_for(
                 conn.run(f"mkdir -p {install_dir}", check=True),
                 timeout=15,
             )
 
-            compose_src = pathlib.Path("/srv/docker-compose.yml")
-            if compose_src.exists():
+            compose_src = pathlib.Path("/srv/docker-compose.yml")  # noqa: ASYNC240
+            if compose_src.exists():  # noqa: ASYNC240
                 await asyncssh.scp(
                     str(compose_src),
                     (conn, f"{install_dir}/docker-compose.yml"),
