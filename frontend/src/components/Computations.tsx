@@ -166,7 +166,7 @@ export function Computations({
         {canDifferentialExpression && (
           <button
             type="button"
-            className="btn"
+            className="btn primary"
             onClick={onDifferentialExpression}
             title="Compare gene expression between groups of samples"
           >
