@@ -42,6 +42,8 @@ import type {
   MetadataSchema,
   NcbiResolveResponse,
   NodeInfo,
+  NodeProvisionRequest,
+  NodeProvisionStatus,
   ObjectComputations,
   ObjectDetail,
   ObjectRole,
@@ -431,6 +433,15 @@ export const api = {
 
   systemLoad: () => request<SystemLoad>("/system/load"),
   nodes: () => request<NodeInfo[]>("/nodes"),
+
+  provisionNode: (body: NodeProvisionRequest) =>
+    request<{ task_id: string; status: string }>("/nodes/provision", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getProvisionStatus: (taskId: string) =>
+    request<NodeProvisionStatus>(`/nodes/provision/${encodeURIComponent(taskId)}`),
 
   getVersion: () => request<VersionInfo>("/version"),
 
