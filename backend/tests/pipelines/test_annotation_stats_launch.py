@@ -1,5 +1,7 @@
 """Guards on launching an annotation Results computation."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.errors import ValidationError
@@ -28,3 +30,26 @@ class TestCallableGuard:
     def test_rejects_an_object_still_ingesting(self):
         with pytest.raises(ValidationError, match="ready"):
             _check_annotation_stats_callable(_Obj(FormatKind.GFF, status=ObjectStatus.INGESTING))
+
+
+def test_genbank_is_annotation_stats_callable():
+    from app.services.pipeline_service import _check_annotation_stats_callable
+
+    obj = SimpleNamespace(
+        id="x",
+        name="ecoli.gbff",
+        status=ObjectStatus.READY,
+        format=SimpleNamespace(kind=FormatKind.GENBANK),
+    )
+    # Does not raise.
+    _check_annotation_stats_callable(obj)
+
+
+def test_genbank_counts_as_an_annotation():
+    from app.services.pipeline_service import _is_annotation
+
+    obj = SimpleNamespace(
+        status=ObjectStatus.READY,
+        format=SimpleNamespace(kind=FormatKind.GENBANK),
+    )
+    assert _is_annotation(obj) is True
