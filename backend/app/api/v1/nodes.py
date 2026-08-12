@@ -11,6 +11,7 @@ import socket
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import asyncssh
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, model_validator
 
@@ -22,6 +23,8 @@ from app.models.node_provision import NodeProvisionTask
 from app.queue import keys
 from app.queue import node_stats as node_stats_mod
 from app.queue.worker import _own_image_digest
+from app.services import node_ssh
+from app.services.ai import crypto
 from app.version import __version__
 
 log = get_logger(__name__)
@@ -326,8 +329,6 @@ def _render_node_env(
 
 async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
     """Run the full node provisioning flow in a background task."""
-    import asyncssh
-
     task = await NodeProvisionTask.find_one(
         NodeProvisionTask.task_id == task_id
     )
@@ -433,7 +434,29 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 timeout=15,
             )
 
-            # Phase 5: pull_image
+            # Phase 5: install_key
+            #
+            # Before the image is pulled, so a node that cannot take the key
+            # costs nothing. Failing here leaves the node unprovisioned rather
+            # than provisioned-but-not-updatable: a fallback to storing the
+            # user's own credential would make the security property depend on
+            # a condition nobody observed.
+            await _update("install_key", "Installing the BioFlow update key…")
+            private_pem, public_line = node_ssh.generate_keypair(req.node_name)
+            await node_ssh.install_public_key(conn, public_line)
+            await node_ssh.verify_key(req.host, req.port, req.username, private_pem)
+
+            node_doc = await Node.find_one(Node.node_id == req.node_name)
+            if node_doc is None:
+                node_doc = Node(node_id=req.node_name, hostname=req.host)
+            node_doc.ssh_host = req.host
+            node_doc.ssh_port = req.port
+            node_doc.ssh_username = req.username
+            node_doc.ssh_key_enc = crypto.encrypt(private_pem)
+            node_doc.ssh_key_installed_at = datetime.now(UTC)
+            await node_doc.save()
+
+            # Phase 6: pull_image
             await _update("pull_image", "Pulling backend image…")
             pull_result = await asyncio.wait_for(
                 conn.run(
@@ -447,7 +470,7 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                     f"Image pull failed: {pull_result.stderr or pull_result.stdout}"
                 )
 
-            # Phase 6: start_worker
+            # Phase 7: start_worker
             await _update("start_worker", "Starting worker…")
             up_result = await asyncio.wait_for(
                 conn.run(
@@ -461,7 +484,7 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                     f"Worker failed to start: {up_result.stderr or up_result.stdout}"
                 )
 
-            # Phase 7: enrolled
+            # Phase 8: enrolled
             await _update("enrolled", "Node enrolled ✓")
             task.status = "success"
             task.finished_at = datetime.now(UTC)
@@ -469,6 +492,9 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
 
         finally:
             conn.close()
+
+    except node_ssh.KeyInstallError as e:
+        await _fail(str(e))
 
     except Exception as e:
         log.exception("node_provision_failed", task_id=task_id)
