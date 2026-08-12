@@ -226,3 +226,19 @@ async def test_node_ssh_fields_default_to_none():
     assert loaded.ssh_port == 22
     assert loaded.image_digest is None
     await loaded.delete()
+
+
+async def test_current_version_reports_primary_digest(client):
+    with patch("app.api.v1.nodes._own_image_digest", return_value="sha256:cur"):
+        res = await client.get("/api/v1/nodes/current-version")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["image_digest"] == "sha256:cur"
+    assert body["version"]
+
+
+async def test_current_version_tolerates_unknown_digest(client):
+    with patch("app.api.v1.nodes._own_image_digest", return_value=None):
+        res = await client.get("/api/v1/nodes/current-version")
+    assert res.status_code == 200
+    assert res.json()["image_digest"] is None
