@@ -1,4 +1,4 @@
-# Groups the auto-generated release notes that publish-images.yml requests
+# Groups the auto-generated release notes that release.yml requests
 # from GitHub's generate-notes API.
 #
 # Categorization is by PR *label*, not by the Conventional Commits type in the
