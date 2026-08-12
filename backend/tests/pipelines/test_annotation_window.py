@@ -7,7 +7,12 @@ have different fixtures and different failure modes.
 
 import pytest
 
-from app.pipelines.annotation_db import bin_counts, build_annotation_db, count_in_window
+from app.pipelines.annotation_db import (
+    bin_counts,
+    build_annotation_db,
+    count_in_window,
+    features_in_window,
+)
 from app.pipelines.annotation_parse import Feature
 from app.pipelines.annotation_window import pack_rows
 
@@ -119,3 +124,61 @@ class TestBinCounts:
         # the returned length is authoritative rather than the request.
         assert len(counts) == 9
         assert counts[5] == 1
+
+
+class TestFeaturesInWindow:
+    @pytest.fixture
+    def gene_db(self, tmp_path):
+        """One gene with two exons, and an exon whose parent is absent."""
+        rows = [
+            _f("chr1", 1000, 2000, feature_id="g1"),
+            _f("chr1", 1000, 1200, ftype="exon", feature_id="e1", parent="g1"),
+            _f("chr1", 1800, 2000, ftype="exon", feature_id="e2", parent="g1"),
+            _f("chr1", 5000, 5100, ftype="exon", feature_id="orphan", parent="ghost"),
+        ]
+        path = tmp_path / "genes.db"
+        build_annotation_db(rows=iter(rows), db_path=path)
+        return path
+
+    def test_children_are_attached_to_their_parent(self, gene_db):
+        got = features_in_window(
+            db_path=gene_db, contig="chr1", start=0, end=3000
+        )
+        assert len(got) == 1
+        assert got[0]["feature_id"] == "g1"
+        assert [c["feature_id"] for c in got[0]["children"]] == ["e1", "e2"]
+
+    def test_orphaned_child_is_returned_detached(self, gene_db):
+        # Its parent does not exist. Dropping it would show empty sequence
+        # where a feature is, so it is drawn on its own.
+        got = features_in_window(
+            db_path=gene_db, contig="chr1", start=4000, end=6000
+        )
+        assert [f["feature_id"] for f in got] == ["orphan"]
+        assert got[0]["children"] == []
+
+    def test_child_whose_parent_is_offscreen_is_returned(self, gene_db):
+        # Window covers e2 but not g1's start. e2 is at this locus, so it
+        # appears rather than vanishing.
+        got = features_in_window(
+            db_path=gene_db, contig="chr1", start=1900, end=1950
+        )
+        assert [f["feature_id"] for f in got] == ["g1"]
+
+    def test_filters_by_type(self, gene_db):
+        got = features_in_window(
+            db_path=gene_db, contig="chr1", start=0, end=6000, feature_type="exon"
+        )
+        assert {f["feature_id"] for f in got} == {"e1", "e2", "orphan"}
+
+    def test_filters_by_strand(self, tmp_path):
+        rows = [
+            _f("chr1", 100, 200, feature_id="plus", strand="+"),
+            _f("chr1", 300, 400, feature_id="minus", strand="-"),
+        ]
+        path = tmp_path / "strand.db"
+        build_annotation_db(rows=iter(rows), db_path=path)
+        got = features_in_window(
+            db_path=path, contig="chr1", start=0, end=1000, strand="-"
+        )
+        assert [f["feature_id"] for f in got] == ["minus"]
