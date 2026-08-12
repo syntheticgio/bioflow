@@ -1623,6 +1623,36 @@ async def _apply_run_vcf_stats(result: dict, *, owner: str) -> None:
         log.warning("variant_summary_launch_failed", object_id=object_id, error=str(e))
 
 
+async def _apply_run_annotation_stats(result: dict, *, owner: str) -> None:
+    """Record an Annotation Results computation on the file it described.
+
+    Read-only like QC, BAM stats, and VCF stats: no files to ingest, just
+    facts merged onto the object.
+    """
+    object_id = result.get("object_id")
+    facts = result.get("facts") or {}
+    if not object_id or not facts:
+        return
+
+    obj = await DataObject.get(PydanticObjectId(object_id))
+    if obj is None:
+        log.warning("annotation_stats_object_missing", object_id=object_id)
+        return
+
+    await obj.set(
+        {
+            DataObject.facts: {**obj.facts, **facts},
+            DataObject.updated_at: datetime.now(UTC),
+        }
+    )
+
+    log.info(
+        "annotation_stats_applied",
+        object_id=object_id,
+        features=facts.get("annotation_feature_count"),
+    )
+
+
 async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     """Record compleasm's completeness scores on the assembly it described.
 
@@ -2601,6 +2631,7 @@ _APPLIERS = {
     "run_bam_stats": _apply_run_bam_stats,
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
+    "run_annotation_stats": _apply_run_annotation_stats,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,
