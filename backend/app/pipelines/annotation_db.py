@@ -335,3 +335,69 @@ def bin_counts(
         i = min(max(int(bin_index), 0), n_bins - 1)
         out[i] += count
     return out
+
+
+def features_in_window(
+    *,
+    db_path: Path,
+    contig: str,
+    start: int,
+    end: int,
+    feature_type: str | None = None,
+    biotype: str | None = None,
+    strand: str | None = None,
+) -> list[dict]:
+    """Drawable features overlapping the window, children attached.
+
+    Two queries rather than a join: the parents, then every child of those
+    parents via ix_features_parent. A join would repeat each parent's columns
+    once per child, which for a gene with fifty exons is fifty copies of the
+    same row to reassemble in Python anyway.
+
+    Unpaged, deliberately -- the window is bounded by coordinates and the
+    caller only reaches this below the density threshold, so the row count is
+    already small by construction.
+
+    A feature whose parent is not in the result (off-screen, or absent from a
+    malformed file) is returned as a top-level row of its own rather than
+    dropped: a viewer that claims to show a region must not silently omit
+    features in it.
+    """
+    filters = FeatureFilters(
+        contig=contig,
+        start_min=start,
+        start_max=end,
+        feature_type=feature_type,
+        biotype=biotype,
+        strand=strand,
+        # The window is the bound, not the hierarchy. An explicit type filter
+        # (`exon`) must reach children, and a child whose parent is off-screen
+        # still has to appear.
+        top_level_only=False,
+    )
+    where, args = _where(filters)
+
+    con = _connect(db_path)
+    try:
+        con.row_factory = sqlite3.Row
+        rows = [
+            dict(r)
+            for r in con.execute(
+                f"SELECT {_COLUMNS} FROM features{where} ORDER BY start", args
+            ).fetchall()
+        ]
+    finally:
+        con.close()
+
+    by_id = {r["feature_id"]: r for r in rows if r["feature_id"]}
+    out: list[dict] = []
+    for r in rows:
+        r["children"] = []
+        parent = by_id.get(r["parent"]) if r["parent"] else None
+        if parent is None:
+            out.append(r)
+    for r in rows:
+        parent = by_id.get(r["parent"]) if r["parent"] else None
+        if parent is not None:
+            parent["children"].append(r)
+    return out
