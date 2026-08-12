@@ -7,7 +7,13 @@ counts that must reconcile with the number of rows put in.
 
 import sqlite3
 
-from app.pipelines.annotation_hierarchy import DEPTH_CAP, resolve_hierarchy
+from app.pipelines.annotation_hierarchy import (
+    DEPTH_CAP,
+    build_gene_table,
+    gene_mode,
+    query_genes,
+    resolve_hierarchy,
+)
 
 
 def _build(tmp_path, rows):
@@ -138,3 +144,88 @@ def test_max_depth_ignores_unresolved_sentinels(tmp_path):
         ("chr1", 1, 50, "exon", "e1", "nosuchtranscript"),
     ])
     assert resolve_hierarchy(db_path=db)["max_depth"] == 1
+
+
+def _genes(db_path):
+    con = sqlite3.connect(db_path)
+    con.row_factory = sqlite3.Row
+    try:
+        return {r["feature_id"]: dict(r) for r in con.execute("SELECT * FROM genes")}
+    finally:
+        con.close()
+
+
+def _three_level(tmp_path):
+    """One gene, two transcripts, three exons -- one exon shared."""
+    return _build(tmp_path, [
+        ("chr1", 100, 900, "gene", "g1", None),
+        ("chr1", 100, 500, "mRNA", "t1", "g1"),
+        ("chr1", 400, 900, "mRNA", "t2", "g1"),
+        ("chr1", 100, 200, "exon", "e1", "t1"),
+        ("chr1", 400, 500, "exon", "shared", "t1"),
+        ("chr1", 400, 500, "exon", "shared", "t2"),
+        ("chr1", 800, 900, "exon", "e3", "t2"),
+    ])
+
+
+def test_typed_mode_stores_one_row_per_gene_typed_feature(tmp_path):
+    db = _three_level(tmp_path)
+    resolve_hierarchy(db_path=db)
+    result = build_gene_table(db_path=db)
+    assert result["mode"] == "typed"
+    assert list(_genes(db)) == ["g1"]
+
+
+def test_fallback_mode_stores_one_row_per_root(tmp_path):
+    """AH-19: a flat Bakta-shaped file has no gene rows to page over."""
+    db = _build(tmp_path, [
+        ("chr1", 1, 100, "CDS", "c1", None),
+        ("chr1", 200, 300, "CDS", "c2", None),
+    ])
+    resolve_hierarchy(db_path=db)
+    result = build_gene_table(db_path=db)
+    assert result["mode"] == "fallback"
+    assert sorted(_genes(db)) == ["c1", "c2"]
+
+
+def test_a_gene_carries_its_direct_child_count(tmp_path):
+    db = _three_level(tmp_path)
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    assert _genes(db)["g1"]["child_count"] == 2
+
+
+def test_a_shared_descendant_counts_once(tmp_path):
+    """AH-36: two paths to one exon is one exon."""
+    db = _three_level(tmp_path)
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    # t1, t2, e1, shared, e3 -- the shared exon reached twice, counted once.
+    assert _genes(db)["g1"]["descendant_count"] == 5
+
+
+def test_a_gene_span_covers_its_descendants(tmp_path):
+    db = _three_level(tmp_path)
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    gene = _genes(db)["g1"]
+    assert (gene["span_start"], gene["span_end"]) == (100, 900)
+
+
+def test_query_genes_pages_in_position_order(tmp_path):
+    db = _build(tmp_path, [
+        ("chr1", 500, 600, "gene", "g2", None),
+        ("chr1", 100, 200, "gene", "g1", None),
+    ])
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    rows = query_genes(db_path=db, offset=0, limit=10)
+    assert [r["feature_id"] for r in rows] == ["g1", "g2"]
+
+
+def test_the_gene_mode_is_recorded_at_build_time(tmp_path):
+    """The route reads this back rather than recomputing it per page."""
+    db = _three_level(tmp_path)
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    assert gene_mode(db_path=db) == "typed"
