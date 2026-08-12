@@ -44,7 +44,11 @@ _POLL_INTERVAL_SECONDS = 5
 
 async def run_update(task_id: str, node: Node, drain: bool) -> None:
     """Execute one node update, recording progress on the task document."""
-    task = await NodeUpdateTask.find_one(NodeUpdateTask.task_id == task_id)
+    try:
+        task = await NodeUpdateTask.find_one(NodeUpdateTask.task_id == task_id)
+    except Exception:
+        log.exception("update_task_load_failed", task_id=task_id)
+        return
     if task is None:
         log.warning("update_task_missing", task_id=task_id)
         return
@@ -61,7 +65,18 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
         task.error = reason
         task.message = reason
         task.finished_at = datetime.now(UTC)
-        await task.save()
+        try:
+            await task.save()
+        except Exception:
+            # A failed update must not raise a second time while recording
+            # the first failure -- this is the fire-and-forget background
+            # task's own last line of defense, so log-and-swallow here
+            # rather than let a Mongo hiccup during error handling become
+            # an unretrieved asyncio.Task exception.
+            log.exception(
+                "update_task_save_failed", task_id=task_id, phase=phase
+            )
+            return
         log.warning("node_update_failed", task_id=task_id, phase=phase, reason=reason)
 
     conn = None
@@ -166,6 +181,8 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
 
 async def _await_drained(node_id: str) -> bool:
     """Wait for the node's workers to stop reporting running jobs."""
+    # Deferred: nodes.py is expected to import run_update once an endpoint
+    # wires it up, which would make a module-level import here circular.
     from app.api.v1.nodes import enumerate_nodes
 
     deadline = asyncio.get_running_loop().time() + _DRAIN_TIMEOUT_SECONDS

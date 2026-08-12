@@ -153,3 +153,35 @@ async def test_unreachable_machine_reports_connect_failure():
     assert done.phase == "connect"
     await node.delete()
     await done.delete()
+
+
+async def test_task_lookup_failure_returns_without_raising():
+    """A transient Mongo error on the initial find_one must not escape
+    run_update -- it's a fire-and-forget background task with no caller to
+    catch it."""
+    node = await _node("un-lookup-fail")
+
+    with patch.object(
+        NodeUpdateTask, "find_one", AsyncMock(side_effect=RuntimeError("mongo down"))
+    ):
+        await svc.run_update("u6", node, drain=False)  # must not raise
+
+    await node.delete()
+
+
+async def test_fail_save_failure_is_swallowed_not_reraised():
+    """If _fail's own task.save() raises (Mongo unreachable mid-update), that
+    must not propagate out of run_update's outer exception handler."""
+    node = await _node("un-save-fail")
+    task = NodeUpdateTask(task_id="u7", node_id="un-save-fail")
+    await task.insert()
+    conn = _conn(pull_status=1)
+
+    with patch("app.services.ai.crypto.decrypt", return_value="PEM"), \
+         patch("asyncssh.import_private_key", MagicMock()), \
+         patch("asyncssh.connect", AsyncMock(return_value=conn)), \
+         patch.object(NodeUpdateTask, "save", AsyncMock(side_effect=RuntimeError("mongo down"))):
+        await svc.run_update("u7", node, drain=False)  # must not raise
+
+    await node.delete()
+    await task.delete()
