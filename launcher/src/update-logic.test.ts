@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateAffordance } from "./update-logic";
+import { shouldPollForUpdates, updateAffordance } from "./update-logic";
 
 describe("updateAffordance", () => {
   it("hides the button in release mode when nothing is newer", () => {
@@ -80,8 +80,7 @@ describe("updateAffordance", () => {
 });
 
 describe("shouldPollForUpdates", () => {
-  it("polls only in release mode", async () => {
-    const { shouldPollForUpdates } = await import("./update-logic");
+  it("polls only in release mode", () => {
     expect(shouldPollForUpdates("latest", null)).toBe(true);
     expect(shouldPollForUpdates("latest", "/home/me/bioflow")).toBe(false);
     expect(shouldPollForUpdates("0.3.0-alpha", null)).toBe(false);
