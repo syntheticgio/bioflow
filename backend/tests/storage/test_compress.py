@@ -37,6 +37,7 @@ class TestShouldCompress:
             (FormatKind.GTF, Compression.NONE, True),
             (FormatKind.BED, Compression.NONE, True),
             (FormatKind.GFA, Compression.NONE, True),
+            (FormatKind.GENBANK, Compression.NONE, True),
             # Never re-wrap something that already arrived compressed.
             (FormatKind.FASTQ, Compression.GZIP, False),
             (FormatKind.FASTQ, Compression.BGZF, False),
