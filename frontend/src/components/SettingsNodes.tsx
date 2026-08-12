@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { api } from "../api/client";
+import { ApiRequestError, api } from "../api/client";
 import type {
   NodeInfo,
   NodeProvisionRequest,
@@ -158,7 +158,10 @@ export function SettingsNodes() {
                   key={n.node_id}
                   node={n}
                   primaryDigest={currentVersion.data?.image_digest ?? null}
-                  onUpdateClick={setPendingUpdate}
+                  onUpdateClick={(n) => {
+                    setUpdateTaskId(null);
+                    setPendingUpdate(n);
+                  }}
                 />
               ))}
             </tbody>
@@ -169,6 +172,13 @@ export function SettingsNodes() {
           <UpdateConfirmDialog
             node={pendingUpdate}
             submitting={startUpdate.isPending}
+            error={
+              startUpdate.isError
+                ? startUpdate.error instanceof ApiRequestError
+                  ? startUpdate.error.message
+                  : "Could not start the update."
+                : null
+            }
             onConfirm={(drain) =>
               startUpdate.mutate({ nodeId: pendingUpdate.node_id, drain })
             }
@@ -545,11 +555,13 @@ function NodeRow({
 function UpdateConfirmDialog({
   node,
   submitting,
+  error,
   onConfirm,
   onCancel,
 }: {
   node: NodeInfo;
   submitting: boolean;
+  error: string | null;
   onConfirm: (drain: boolean) => void;
   onCancel: () => void;
 }) {
@@ -558,6 +570,7 @@ function UpdateConfirmDialog({
   return (
     <div className="provision-form">
       <div className="provision-form-title">Update {node.node_id}</div>
+      {error && <div className="provision-error">{error}</div>}
       {hasRunningJobs ? (
         <>
           <p className="provision-form-desc">
