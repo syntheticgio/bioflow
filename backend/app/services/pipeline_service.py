@@ -1914,8 +1914,12 @@ async def launch_alignment(
     run = await run_service.create_run(
         kind=RunKind.ALIGNMENT,
         project_id=primary_set.r1.project_id,
-        label=_alignment_label(primary_set.r1, primary_set.r2, reference),
-        inputs=_alignment_inputs(primary_set.r1, primary_set.r2, reference),
+        label=_alignment_label(
+            primary_set.r1, primary_set.r2, reference, extra_sets
+        ),
+        inputs=_alignment_inputs(
+            primary_set.r1, primary_set.r2, reference, extra_sets
+        ),
         params={**align_params.as_dict(), "read_group": rg.as_dict()},
         # The caller's profile. Reads and reference were both resolved under
         # it, and they are required to share a project, so all three agree --
@@ -2082,7 +2086,10 @@ async def launch_alignment(
 
 
 def _alignment_label(
-    reads: DataObject, mate: DataObject | None, reference: DataObject
+    reads: DataObject,
+    mate: DataObject | None,
+    reference: DataObject,
+    extra_sets: list[ReadSet] | None = None,
 ) -> str:
     """A one-line description of what this run does.
 
@@ -2094,15 +2101,39 @@ def _alignment_label(
         # The pair reads as one input, which is what it is to the aligner.
         stem = pairing.split_mate(reads.name)
         left = f"{stem[0]} (paired)" if stem and stem[0] else f"{reads.name} + {mate.name}"
+    if extra_sets:
+        left += f" +{len(extra_sets)} read set{'s' if len(extra_sets) != 1 else ''}"
     return f"{left} → {reference.name}"
 
 
 def _alignment_inputs(
-    reads: DataObject, mate: DataObject | None, reference: DataObject
+    reads: DataObject,
+    mate: DataObject | None,
+    reference: DataObject,
+    extra_sets: list[ReadSet] | None = None,
 ) -> list[RunInput]:
     inputs = [RunInput(object_id=reads.id, name=reads.name, role=RunInputRole.READS)]
     if mate is not None:
         inputs.append(RunInput(object_id=mate.id, name=mate.name, role=RunInputRole.MATE))
+    for extra in extra_sets or []:
+        # One entry per file, not per set: a set's R1 and mate are separate
+        # files feeding separate streams, and a run's `inputs` has always
+        # listed files. The roles say which stream each feeds.
+        inputs.append(
+            RunInput(
+                object_id=extra.r1.id,
+                name=extra.r1.name,
+                role=RunInputRole.EXTRA_READS,
+            )
+        )
+        if extra.r2 is not None:
+            inputs.append(
+                RunInput(
+                    object_id=extra.r2.id,
+                    name=extra.r2.name,
+                    role=RunInputRole.EXTRA_MATE,
+                )
+            )
     inputs.append(
         RunInput(
             object_id=reference.id, name=reference.name, role=RunInputRole.REFERENCE

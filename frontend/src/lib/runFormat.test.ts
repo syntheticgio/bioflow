@@ -106,4 +106,22 @@ describe("runFacts", () => {
     expect(aligned.find((f) => f.v === "bowtie2")?.k).toBe("Tool");
     expect(trimmed.find((f) => f.v === "fastp")?.k).toBe("Tool");
   });
+
+  it("lists additional read sets under their own row", () => {
+    const aligned = runFacts(
+      run({
+        inputs: [
+          { object_id: "a", name: "a_R1.fastq", role: "reads" },
+          { object_id: "b", name: "b_R1.fastq", role: "extra_reads" },
+          { object_id: "c", name: "c_R2.fastq", role: "extra_mate" },
+          { object_id: "ref", name: "ref.fna", role: "reference" },
+        ],
+      }),
+    );
+
+    expect(aligned.find((f) => f.k === "Reads")?.v).toBe("a_R1.fastq");
+    expect(aligned.find((f) => f.k === "Additional reads")?.v).toBe(
+      "b_R1.fastq + c_R2.fastq",
+    );
+  });
 });

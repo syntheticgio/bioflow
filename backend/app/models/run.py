@@ -96,6 +96,13 @@ class RunInputRole(StrEnum):
     # The assembly being annotated — distinct from DRAFT_ASSEMBLY, which is
     # for assemblies being improved or scaffolded.
     ASSEMBLY = "assembly"
+    # An additional read set's own file, concatenated into the alignment's R1
+    # stream. First appears alongside an alignment's READS; several of these
+    # ride on one run, one per additional set's R1.
+    EXTRA_READS = "extra_reads"
+    # An additional read set's mate, concatenated into the alignment's R2
+    # stream -- to EXTRA_READS what MATE is to READS.
+    EXTRA_MATE = "extra_mate"
 
 
 class RunInput(BaseModel):

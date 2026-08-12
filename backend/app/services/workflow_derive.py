@@ -86,6 +86,14 @@ def _node_type_for(kind: RunKind, tool: str | None = None) -> str | None:
 _ROLE_PORT_ALIASES: dict[str, str] = {
     "draft_assembly": "draft",
     "primers": "primer_bed",
+    # An additional read set is the dialog's name for what the workflow node's
+    # multi `reads` port carries -- chunked reads of the same library. A run
+    # derived from the workflow carries EXTRA_READS inputs for its chunks, and
+    # re-derivation must draw those wires back onto the port they came from.
+    "extra_reads": "reads",
+    # An additional set's mate feeds the run's R2 stream exactly as the
+    # primary's mate does, so re-derivation wires it to the same port.
+    "extra_mate": "mate",
 }
 
 
@@ -113,8 +121,8 @@ def _port_for_role(node_type: str, params: dict, role: str | None) -> str | None
     `RunInputRole`'s values were mostly chosen to read the same as the port
     names (`reads`, `mate`, `reference`, `alignment`, `annotation`), so the
     mapping is a name match against what the resolved port set declares
-    rather than a second table, with `_ROLE_PORT_ALIASES` covering the one
-    role where they diverge. A role with no matching port yields None and the
+    rather than a second table, with `_ROLE_PORT_ALIASES` covering the roles
+    where they diverge. A role with no matching port yields None and the
     edge is simply not drawn -- the node is still there for the user to wire
     by hand.
 
