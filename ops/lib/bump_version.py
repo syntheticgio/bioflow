@@ -62,6 +62,19 @@ def _replace_generated_module(path: Path, version: str) -> None:
     path.write_text(pattern.sub(f'__version__ = "{version}"', text, count=1))
 
 
+def _core_version(version: str) -> str:
+    """The version with any pre-release suffix removed.
+
+    tauri.conf.json feeds the macOS CFBundleShortVersionString, which must be
+    numeric-only -- a `-alpha` there risks a build failure or a bundle macOS
+    rejects. Every other declaration keeps the full string.
+    """
+    for suffix in ("-alpha", "-beta"):
+        if version.endswith(suffix):
+            return version[: -len(suffix)]
+    return version
+
+
 def bump_app(root: Path, version: str) -> list[Path]:
     version_file = root / "VERSION"
     if not version_file.exists():
@@ -84,13 +97,18 @@ def bump_app(root: Path, version: str) -> list[Path]:
 def bump_launcher(root: Path, version: str) -> list[Path]:
     cargo = root / "launcher" / "src-tauri" / "Cargo.toml"
     package = root / "launcher" / "package.json"
-    for p in (cargo, package):
+    tauri_conf = root / "launcher" / "src-tauri" / "tauri.conf.json"
+    for p in (cargo, package, tauri_conf):
         if not p.exists():
             fail(f"missing {p}")
 
     _replace_first_version(cargo, version)
     _replace_json_version(package, version)
-    return [cargo, package]
+    # Tauri reads this in preference to Cargo.toml for the bundle filename and
+    # the macOS Info.plist. It went unbumped until #335, which is why
+    # launcher-v0.1.0 and launcher-v0.2.0 both shipped bundles named 0.1.0.
+    _replace_json_version(tauri_conf, _core_version(version))
+    return [cargo, package, tauri_conf]
 
 
 LINES = {"app": bump_app, "launcher": bump_launcher}

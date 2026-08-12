@@ -44,6 +44,17 @@ def launcher_tree(tmp_path):
     (tmp_path / "launcher" / "package.json").write_text(
         json.dumps({"name": "bioflow-launcher", "version": "0.1.0"}, indent=2) + "\n"
     )
+    (tmp_path / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+        json.dumps(
+            {
+                "productName": "BioFlow Launcher",
+                "version": "0.1.0",
+                "identifier": "com.bioflow.launcher",
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     return tmp_path
 
 
@@ -111,6 +122,61 @@ class TestLauncherLine:
             json.loads((launcher_tree / "launcher" / "package.json").read_text())["version"]
             == "0.1.1"
         )
+
+    def test_writes_tauri_conf_json(self, launcher_tree):
+        """The file Tauri actually reads for the bundle filename.
+
+        Regression test for the defect where launcher-v0.2.0 shipped bundles
+        named 0.1.0: tauri.conf.json overrides Cargo.toml and was never bumped.
+        """
+        r = run_bump(launcher_tree, "launcher", "0.1.1")
+        assert r.returncode == 0, r.stderr
+
+        conf = json.loads(
+            (launcher_tree / "launcher" / "src-tauri" / "tauri.conf.json").read_text()
+        )
+        assert conf["version"] == "0.1.1"
+
+    def test_tauri_conf_keeps_its_other_keys(self, launcher_tree):
+        run_bump(launcher_tree, "launcher", "0.1.1")
+        conf = json.loads(
+            (launcher_tree / "launcher" / "src-tauri" / "tauri.conf.json").read_text()
+        )
+        assert conf["productName"] == "BioFlow Launcher"
+        assert conf["identifier"] == "com.bioflow.launcher"
+
+    def test_tauri_conf_gets_the_core_version_on_a_prerelease(self, launcher_tree):
+        """CR-4: the macOS CFBundleShortVersionString must stay numeric."""
+        r = run_bump(launcher_tree, "launcher", "0.5.0-alpha")
+        assert r.returncode == 0, r.stderr
+
+        conf = json.loads(
+            (launcher_tree / "launcher" / "src-tauri" / "tauri.conf.json").read_text()
+        )
+        assert conf["version"] == "0.5.0"
+        assert 'version = "0.5.0-alpha"' in (
+            launcher_tree / "launcher" / "src-tauri" / "Cargo.toml"
+        ).read_text()
+        assert (
+            json.loads((launcher_tree / "launcher" / "package.json").read_text())["version"]
+            == "0.5.0-alpha"
+        )
+
+    def test_reports_tauri_conf_as_written(self, launcher_tree):
+        """release.sh git-adds exactly what this prints, so an unlisted file
+        would be bumped but left out of the release commit."""
+        r = run_bump(launcher_tree, "launcher", "0.1.1")
+        assert "tauri.conf.json" in r.stdout
+
+    def test_missing_tauri_conf_is_an_error(self, tmp_path):
+        (tmp_path / "launcher" / "src-tauri").mkdir(parents=True)
+        (tmp_path / "launcher" / "src-tauri" / "Cargo.toml").write_text(
+            '[package]\nversion = "0.1.0"\n'
+        )
+        (tmp_path / "launcher" / "package.json").write_text('{\n  "version": "0.1.0"\n}\n')
+        r = run_bump(tmp_path, "launcher", "0.1.1")
+        assert r.returncode != 0
+        assert "tauri.conf.json" in r.stderr
 
 
 class TestValidation:
