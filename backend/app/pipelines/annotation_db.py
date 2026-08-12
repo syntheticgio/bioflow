@@ -268,3 +268,70 @@ def count_features(*, db_path: Path, filters: FeatureFilters) -> int:
         return con.execute(f"SELECT COUNT(*) FROM features{where}", args).fetchone()[0]
     finally:
         con.close()
+
+
+def count_in_window(*, db_path: Path, contig: str, start: int, end: int) -> int:
+    """How many top-level features overlap this window.
+
+    Top-level only, because that is what the viewer draws and therefore what
+    the density threshold has to be measured against -- counting every exon
+    would push a modest gene view over the threshold and show a density band
+    where individual genes would have fitted.
+    """
+    con = _connect(db_path)
+    try:
+        return con.execute(
+            "SELECT COUNT(*) FROM features "
+            "WHERE parent IS NULL AND contig = ? AND start <= ? AND end >= ?",
+            (contig, end, start),
+        ).fetchone()[0]
+    finally:
+        con.close()
+
+
+def bin_counts(
+    *, db_path: Path, contig: str, start: int, end: int, bins: int
+) -> list[int]:
+    """Feature counts per equal-width bin across the window.
+
+    Binned in SQL rather than in Python: the GROUP BY rides
+    ix_features_locus, so a full-contig query over 200k features returns in
+    ~82ms, where fetching every row to count it in Python would allocate all
+    of them.
+
+    Features are binned by `start`, so one straddling a bin edge is counted
+    once rather than in both. A bin with no features is 0 rather than absent
+    -- for feature counts, unlike GC content, "no features here" genuinely is
+    zero, and the caller draws a flat band rather than a gap.
+
+    The span is half-open (`end - start`) and `bin_bases` is a *ceiling*, so
+    the bin count never exceeds what was asked for and the last bin absorbs
+    the remainder. Deriving the width by flooring instead yields one bin more
+    than requested whenever the span does not divide evenly -- verified
+    against SQLite, where a 0-10000 window at 10 bins produced 11.
+    """
+    span = max(1, end - start)
+    requested = max(1, min(int(bins), span))
+    bin_bases = -(-span // requested)
+    # Re-derived from the width rather than reused, so width and count cannot
+    # disagree about which bin a coordinate falls in.
+    n_bins = -(-span // bin_bases)
+
+    con = _connect(db_path)
+    try:
+        rows = con.execute(
+            "SELECT (start - ?) / ? AS bin, COUNT(*) FROM features "
+            "WHERE parent IS NULL AND contig = ? AND start <= ? AND end >= ? "
+            "GROUP BY bin",
+            (start, bin_bases, contig, end, start),
+        ).fetchall()
+    finally:
+        con.close()
+
+    out = [0] * n_bins
+    for bin_index, count in rows:
+        # A feature starting before the window has a negative bin; it is
+        # visible but its start is off-screen, so it belongs to the first bin.
+        i = min(max(int(bin_index), 0), n_bins - 1)
+        out[i] += count
+    return out
