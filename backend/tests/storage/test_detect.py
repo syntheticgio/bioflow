@@ -261,3 +261,46 @@ class TestMagicDirect:
         kind, comp = detect_from_magic(FASTQ)
         assert kind is FormatKind.FASTQ
         assert comp is Compression.NONE
+
+
+class TestGenBankDetection:
+    def test_extension_variants(self):
+        for name in ("a.gb", "a.gbk", "a.gbff", "a.genbank"):
+            assert detect_from_extension(name) is FormatKind.GENBANK
+
+    def test_compressed_extension(self):
+        # The compression suffix is skipped before the kind is read.
+        assert detect_from_extension("a.gbff.gz") is FormatKind.GENBANK
+
+    def test_locus_line_is_recognized(self, tmp_path):
+        path = tmp_path / "x.txt"
+        path.write_text(
+            "LOCUS       NC_000913    4641652 bp    DNA     circular CON\n"
+            "VERSION     NC_000913.3\n"
+        )
+        # Named .txt on purpose: content alone must carry the answer.
+        assert detect(path).kind is FormatKind.GENBANK
+
+    def test_locus_as_a_bare_word_is_not_genbank(self, tmp_path):
+        # "LOCUS" must be followed by whitespace and a name. A prose file
+        # opening with the word alone is not a GenBank record.
+        path = tmp_path / "x.txt"
+        path.write_text("LOCUSTS are a kind of insect\n")
+        assert detect(path).kind is not FormatKind.GENBANK
+
+    def test_gff_still_detects_as_gff(self, tmp_path):
+        # The regression direction. Asserting only that GenBank works would
+        # pass whether or not this change broke the other formats.
+        path = tmp_path / "x.gff"
+        path.write_text("##gff-version 3\nchr1\t.\tgene\t1\t100\t.\t+\t.\tID=g1\n")
+        assert detect(path).kind is FormatKind.GFF
+
+    def test_bed_still_detects_as_bed(self, tmp_path):
+        path = tmp_path / "x.bed"
+        path.write_text("chr1\t100\t200\tfeature1\n")
+        assert detect(path).kind is FormatKind.BED
+
+    def test_fasta_still_detects_as_fasta(self, tmp_path):
+        path = tmp_path / "x.fa"
+        path.write_text(">chr1\nACGTACGT\n")
+        assert detect(path).kind is FormatKind.FASTA
