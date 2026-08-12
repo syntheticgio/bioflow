@@ -35,7 +35,7 @@ async def snapshot() -> dict:
     ]
     by_class = {
         row["_id"]: row["count"]
-        async for row in get_db().jobs.aggregate(
+        async for row in await get_db().jobs.aggregate(
             [
                 {"$match": {"state": {"$in": active}}},
                 {"$group": {"_id": "$job_class", "count": {"$sum": 1}}},

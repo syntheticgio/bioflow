@@ -3,31 +3,32 @@
 import asyncio
 
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.config import settings
 from app.logging import get_logger
 
 log = get_logger(__name__)
 
-_client: AsyncIOMotorClient | None = None
-# The event loop `connect_to_mongo` ran on -- the one Motor's internals are
-# bound to. A `HandlerMode.THREAD` handler runs in a worker-pool thread with no
-# loop of its own; calling `asyncio.run()` there spins up a *new* loop, and
-# Motor's client raises "attached to a different loop" the moment it touches
-# that new loop's futures. `run_coroutine_threadsafe` against this stored loop
-# is the fix -- the same pattern `queue/executor.py`'s
+_client: AsyncMongoClient | None = None
+# The event loop `connect_to_mongo` ran on -- the one the Mongo client's
+# internals are bound to. A `HandlerMode.THREAD` handler runs in a worker-pool
+# thread with no loop of its own; calling `asyncio.run()` there spins up a
+# *new* loop, and the client raises "attached to a different loop" the moment
+# it touches that new loop's futures. `run_coroutine_threadsafe` against this
+# stored loop is the fix -- the same pattern `queue/executor.py`'s
 # `_schedule_lease_extension` already uses for the identical problem.
 _loop: asyncio.AbstractEventLoop | None = None
 
 
-def get_client() -> AsyncIOMotorClient:
+def get_client() -> AsyncMongoClient:
     if _client is None:
         raise RuntimeError("Mongo client not initialized; call connect_to_mongo() first")
     return _client
 
 
-def get_db() -> AsyncIOMotorDatabase:
+def get_db() -> AsyncDatabase:
     return get_client()[settings.mongo_db]
 
 
@@ -46,19 +47,19 @@ def run_from_thread(coro):
     return asyncio.run_coroutine_threadsafe(coro, _loop).result()
 
 
-async def connect_to_mongo() -> AsyncIOMotorClient:
+async def connect_to_mongo() -> AsyncMongoClient:
     global _client, _loop
     if _client is not None:
         return _client
     _loop = asyncio.get_running_loop()
-    _client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    _client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     await _assert_replica_set(_client)
     await _init_models(_client)
     log.info("mongo_connected", db=settings.mongo_db)
     return _client
 
 
-async def _assert_replica_set(client: AsyncIOMotorClient) -> None:
+async def _assert_replica_set(client: AsyncMongoClient) -> None:
     """Refuse to start against a standalone mongod.
 
     Without a replica set, multi-document transactions do not merely fail --
@@ -78,7 +79,7 @@ async def _assert_replica_set(client: AsyncIOMotorClient) -> None:
     log.info("mongo_replica_set_ok", set_name=set_name)
 
 
-async def _init_models(client: AsyncIOMotorClient) -> None:
+async def _init_models(client: AsyncMongoClient) -> None:
     from app.db.index_reconcile import reconcile_indexes
     from app.models import ALL_MODELS
 
@@ -96,7 +97,7 @@ async def _init_models(client: AsyncIOMotorClient) -> None:
 async def close_mongo() -> None:
     global _client, _loop
     if _client is not None:
-        _client.close()
+        await _client.close()
         _client = None
         _loop = None
         log.info("mongo_closed")

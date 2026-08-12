@@ -12,8 +12,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from beanie import init_beanie, PydanticObjectId
-from motor.motor_asyncio import AsyncIOMotorClient
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS, Blob, BlobState, BlobStorage, DataObject, ObjectStatus
@@ -30,13 +30,13 @@ async def _init_beanie_models():
     a module-scoped Motor client mixed with per-test cleanup binds to the wrong
     event loop under pytest-asyncio's per-test loops.
     """
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await db[Blob.Settings.name].drop()
     await db[DataObject.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield
-    client.close()
+    await client.close()
 
 
 def make_ctx(**kw) -> JobContext:

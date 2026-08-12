@@ -2,7 +2,7 @@
 
 import pytest
 from beanie import PydanticObjectId, init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.api.v1.schemas import ObjectOut, PairRequest
 from app.config import settings
@@ -27,7 +27,7 @@ async def _init_beanie_models():
     """
     from app.db.index_reconcile import reconcile_indexes
 
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     for model in ALL_MODELS:
         model_settings = model.Settings
@@ -39,7 +39,7 @@ async def _init_beanie_models():
     await DataObject.delete_all()
     yield
     await DataObject.delete_all()
-    client.close()
+    await client.close()
 
 
 def _obj(**kw) -> DataObject:

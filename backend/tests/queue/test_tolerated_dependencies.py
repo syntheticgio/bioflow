@@ -16,7 +16,7 @@ silent, which is exactly the kind that survives a green suite.
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS, JobState
@@ -30,12 +30,12 @@ async def _init_beanie_models(monkeypatch):
     so both are pointed at one throwaway database. Function-scoped because
     these tests perform real I/O and pytest-asyncio gives each async test its
     own event loop."""
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
-    client.close()
+    await client.close()
 
 
 @pytest.fixture(autouse=True)

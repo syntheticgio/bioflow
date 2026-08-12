@@ -8,18 +8,17 @@ those conflicts and drops the stale index first.
 """
 
 import pytest
-from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
-from pymongo import ASCENDING, IndexModel
+from pymongo import ASCENDING, AsyncMongoClient, IndexModel
 
 from app.config import settings
-from app.db.index_reconcile import reconcile_indexes, _index_def
+from app.db.index_reconcile import _index_def, reconcile_indexes
 
 
 @pytest.fixture
 async def _db():
     """Connect to the throwaway test database, same as the storage tests."""
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     # Clean slate: drop any test collection that might carry a stale index.
     for name in await db.list_collection_names():
@@ -27,11 +26,11 @@ async def _db():
     yield db
     for name in await db.list_collection_names():
         await db.drop_collection(name)
-    client.close()
+    await client.close()
 
 
 async def _create_indexes(db, coll_name: str, indexes: list[IndexModel]):
-    """Create indexes directly on the motor collection."""
+    """Create indexes directly on the collection."""
     coll = db[coll_name]
     for im in indexes:
         await coll.create_indexes([im])
@@ -216,8 +215,9 @@ class TestInitModelsIntegration:
         """The exact scenario: an index with an old partialFilterExpression
         exists, and the model declares a new one. _init_models must drop the
         stale one and let init_beanie create the new one — no crash."""
-        from app.models import ALL_MODELS
         from beanie import init_beanie
+
+        from app.models import ALL_MODELS
 
         # Create a stale index directly on the test DB's jobs collection
         coll = _db["jobs"]

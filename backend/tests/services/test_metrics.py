@@ -75,17 +75,17 @@ async def _fresh_job_timings():
     exact counts, so leftover rows from a sibling test would corrupt them.
     """
     from beanie import init_beanie
-    from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo import AsyncMongoClient
 
     from app.config import settings
     from app.models import ALL_MODELS
 
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield
-    client.close()
+    await client.close()
 
 
 async def _record(

@@ -12,7 +12,7 @@ launcher to test the engine's logic; this one is about the seam to the queue.
 
 import pytest
 from beanie import PydanticObjectId, init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS, JobState
@@ -68,12 +68,12 @@ async def redis(monkeypatch):
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models(monkeypatch):
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
-    client.close()
+    await client.close()
 
 
 async def _node_run(state: NodeRunState, job: Job) -> tuple[WorkflowRun, WorkflowNodeRun]:
