@@ -175,6 +175,7 @@ def build_gene_table(*, db_path: Path) -> dict:
     con = sqlite3.connect(db_path)
     try:
         con.execute("DROP TABLE IF EXISTS genes")
+        con.execute("DROP TABLE IF EXISTS gene_meta")
         con.execute(
             """
             CREATE TABLE genes (
@@ -283,19 +284,22 @@ def _fill_gene_counts(con: sqlite3.Connection) -> None:
                 break
             placeholders = ",".join("?" for _ in frontier)
             children = con.execute(
-                f"SELECT feature_id, start, end FROM features "
+                f"SELECT feature_id, start, end, type FROM features "
                 f"WHERE parent IN ({placeholders})",
                 frontier,
             ).fetchall()
 
             next_frontier: list[str] = []
-            for child_id, c_start, c_end in children:
+            for child_id, c_start, c_end, c_type in children:
                 span_start = min(span_start, c_start)
                 span_end = max(span_end, c_end)
                 # A child with no ID of its own (GTF exons) is a leaf: it
                 # counts, but nothing can hang off it. Keyed by identity so
-                # two such rows are two descendants.
-                key = child_id or f"\x00leaf:{c_start}:{c_end}"
+                # two such rows are two descendants. `type` is part of the
+                # key because a single-exon CDS spans exactly its exon --
+                # two genuinely distinct leaf features at the same
+                # coordinates, which the position alone cannot tell apart.
+                key = child_id or f"\x00leaf:{c_start}:{c_end}:{c_type}"
                 if key in seen:
                     continue
                 seen.add(key)

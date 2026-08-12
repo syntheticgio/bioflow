@@ -220,6 +220,35 @@ def test_a_duplicated_direct_child_counts_once(tmp_path):
     assert gene["descendant_count"] == 1
 
 
+def test_build_gene_table_can_be_called_twice(tmp_path):
+    """The user-clicks-recompute scenario: rebuilding must not crash on the
+    second call, and must leave genes/gene_meta consistent, not partial."""
+    db = _three_level(tmp_path)
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    result = build_gene_table(db_path=db)
+    assert result["mode"] == "typed"
+    assert list(_genes(db)) == ["g1"]
+    assert gene_mode(db_path=db) == "typed"
+
+
+def test_two_leaves_at_the_same_coordinates_but_different_types_both_count(tmp_path):
+    """A single-exon CDS spans exactly its exon -- two distinct leaf
+    features at identical (start, end), which the leaf key must not
+    collapse into one. Made direct children of the gene so the collision
+    (if unfixed) shows up in child_count, not just descendant_count."""
+    db = _build(tmp_path, [
+        ("chr1", 100, 500, "gene", "g1", None),
+        ("chr1", 100, 500, "exon", None, "g1"),
+        ("chr1", 100, 500, "CDS", None, "g1"),
+    ])
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    gene = _genes(db)["g1"]
+    assert gene["child_count"] == 2
+    assert gene["descendant_count"] == 2
+
+
 def test_a_gene_span_covers_its_descendants(tmp_path):
     db = _three_level(tmp_path)
     resolve_hierarchy(db_path=db)
