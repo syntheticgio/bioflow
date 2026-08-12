@@ -45,11 +45,16 @@ def test_genbank_is_annotation_stats_callable():
     _check_annotation_stats_callable(obj)
 
 
-def test_genbank_counts_as_an_annotation():
+def test_genbank_does_not_count_as_a_featurecounts_annotation():
+    # _is_annotation gates resolve_annotation/launch_quantify, not just
+    # annotation Results eligibility. featureCounts cannot read a GenBank
+    # flat file and attributes_for_format has no GenBank case, so unlike
+    # _check_annotation_stats_callable above, GenBank must NOT qualify here
+    # -- see _is_annotation's docstring.
     from app.services.pipeline_service import _is_annotation
 
     obj = SimpleNamespace(
         status=ObjectStatus.READY,
         format=SimpleNamespace(kind=FormatKind.GENBANK),
     )
-    assert _is_annotation(obj) is True
+    assert _is_annotation(obj) is False

@@ -3182,14 +3182,21 @@ def _is_annotation(obj: DataObject) -> bool:
 
     Checked against the live database rather than reasoned about: of 29
     objects there, 4 were GFF/GTF and 0 carried the annotation role.
+
+    GenBank does not qualify despite being eligible for annotation Results
+    (`_ANNOTATION_STATS_FORMATS`) -- this predicate also gates
+    `annotations_for_project`/`resolve_annotation`, which feed
+    `launch_quantify`. featureCounts cannot parse a GenBank flat file, and
+    `counts_runner.attributes_for_format` has no GenBank case: a raw `.gbff`
+    reaching it would silently fall through to GTF's `-g gene_id`, the same
+    "near zero rather than an error" trap that function's own docstring
+    documents for a different mismatch. Broadening this later needs an
+    `attributes_for_format` case and a real featureCounts-readable input, not
+    just an enum member here.
     """
     if obj.status is not ObjectStatus.READY:
         return False
-    return obj.format.kind in (
-        FormatKind.GFF,
-        FormatKind.GTF,
-        FormatKind.GENBANK,
-    )
+    return obj.format.kind in (FormatKind.GFF, FormatKind.GTF)
 
 
 async def annotations_for_project(
