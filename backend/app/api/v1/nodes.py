@@ -89,6 +89,9 @@ async def enumerate_nodes() -> dict[str, dict]:
                 "registered_at": doc.registered_at.isoformat() if doc.registered_at else None,
                 "enrollment": doc.status,
                 "last_seen": doc.last_seen.isoformat() if doc.last_seen else None,
+                "image_digest": doc.image_digest,
+                "version": doc.version,
+                "updatable": doc.ssh_key_enc is not None,
             }
     except Exception:
         log.warning("node_mongo_read_failed")
@@ -141,6 +144,9 @@ async def enumerate_nodes() -> dict[str, dict]:
         entry["registered_at"] = mongo_info.get("registered_at")
         entry["enrollment"] = mongo_info.get("enrollment", "unknown")
         entry["last_seen_mongo"] = mongo_info.get("last_seen")
+        entry["image_digest"] = mongo_info.get("image_digest")
+        entry["version"] = mongo_info.get("version")
+        entry["updatable"] = mongo_info.get("updatable", False)
 
     return by_node
 
@@ -171,6 +177,9 @@ async def list_nodes() -> list[dict]:
             "registered_at": None,
             "enrollment": "unknown",
             "last_seen_mongo": None,
+            "image_digest": None,
+            "version": None,
+            "updatable": False,
         }
 
     stats = await node_stats_mod.node_stats(by_node)
@@ -476,6 +485,8 @@ async def enroll_node(payload: dict) -> dict:
     node_id = str(payload.get("node_id", "")).strip()
     hostname = str(payload.get("hostname", "")).strip()
     key = str(payload.get("enrollment_key", "")).strip()
+    image_digest = str(payload.get("image_digest") or "").strip() or None
+    version = str(payload.get("version") or "").strip() or None
 
     if not node_id:
         raise HTTPException(422, "node_id is required")
@@ -496,6 +507,12 @@ async def enroll_node(payload: dict) -> dict:
     if existing:
         existing.hostname = hostname
         existing.last_seen = now
+        # Only overwrite when reported: a node that cannot read its digest
+        # must not erase the version it last reported.
+        if image_digest:
+            existing.image_digest = image_digest
+        if version:
+            existing.version = version
         await existing.save()
     else:
         node = Node(
@@ -503,6 +520,8 @@ async def enroll_node(payload: dict) -> dict:
             hostname=hostname,
             last_seen=now,
             status="active",
+            image_digest=image_digest,
+            version=version,
         )
         await node.insert()
 
