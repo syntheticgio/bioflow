@@ -209,12 +209,12 @@ def _sniff_text(payload: bytes) -> FormatKind | None:
     if first.startswith(">"):
         return FormatKind.FASTA
 
-    # A GenBank record must open with LOCUS in column 1 -- the format's own
-    # spec fixes that, which makes this a real positive signal rather than a
-    # shape heuristic like the tabular sniffing below. The trailing
-    # whitespace check matters: a prose file starting "LOCUSTS ..." is not a
-    # GenBank record.
-    if first.startswith("LOCUS") and first[5:6].isspace():
+    # A GenBank record must open with LOCUS in column 1, keyword and value
+    # separated by literal spaces -- the format's own spec fixes both, which
+    # makes this a real positive signal rather than a shape heuristic like the
+    # tabular sniffing below. The space check matters: a prose file starting
+    # "LOCUSTS ..." is not a GenBank record.
+    if first.startswith("LOCUS "):
         return FormatKind.GENBANK
 
     # FASTQ: '@' header, then sequence, '+' separator, then equal-length quality.
