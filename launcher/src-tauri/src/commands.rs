@@ -552,17 +552,42 @@ pub async fn apply_settings(app: State<'_, LauncherApp>, args: ApplySettingsArgs
 /// because the machine is offline or because there is genuinely nothing
 /// newer -- per the spec, the UI is not supposed to be able to tell those
 /// apart.
+///
+/// Outside Release mode there is nothing to check: `checkable_tag` returns
+/// `None` for a developer build (locally-built `:local` images with no
+/// registry counterpart) and for a pinned alpha/beta stage tag, and this
+/// returns `false` without making any network call at all. The frontend
+/// stops polling in those modes too (see `update-logic.ts`), so this is the
+/// backstop rather than the only guard.
 #[tauri::command]
-pub async fn check_for_update() -> bool {
-    tauri::async_runtime::spawn_blocking(|| {
+pub async fn check_for_update(app: State<'_, LauncherApp>) -> Result<bool, ()> {
+    // .env is the source of truth for which mode the stack runs in, exactly
+    // as it is for current_settings -- no separate stored flag that could
+    // disagree with what the stack is actually running.
+    let Some(install_dir) = install_dir_str(&app) else {
+        return Ok(false);
+    };
+    let env_contents =
+        std::fs::read_to_string(Path::new(&install_dir).join(".env")).unwrap_or_default();
+    let bioflow_tag =
+        parse_bioflow_tag(&env_contents).unwrap_or_else(|| DEFAULT_BIOFLOW_TAG.to_string());
+    let developer_repo = parse_developer_repo(&env_contents);
+
+    let Some(tag) = update_check::checkable_tag(&bioflow_tag, developer_repo.as_deref()) else {
+        return Ok(false);
+    };
+
+    let available = tauri::async_runtime::spawn_blocking(move || {
         let registry = GhcrClient::default();
         let local = DockerImageInspector;
         CHECKABLE_IMAGES.iter().any(|image| {
-            update_check::update_available(&registry, &local, image, "latest") == Some(true)
+            update_check::update_available(&registry, &local, image, &tag) == Some(true)
         })
     })
     .await
-    .unwrap_or(false)
+    .unwrap_or(false);
+
+    Ok(available)
 }
 
 /// The optional-tool list for the first-run prefetch screen (task 9,
