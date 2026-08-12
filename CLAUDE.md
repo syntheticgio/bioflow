@@ -373,6 +373,30 @@ pinned in `docker-compose.yml`, so the worktree stack gets its own containers,
 network, and mongo/redis volumes; `ops/docker-compose.worktree.yml` moves the
 published ports. The main instance on 5173 keeps serving main throughout.
 
+**A stack you brought up for testing is yours to bring back down when the
+testing is done.** `./ops/worktree-up.sh --down` before you finish the task, in
+the same way you would close a file you opened. This applies to anything *you*
+started for your own verification -- a worktree stack, a throwaway container.
+It explicitly does *not* apply to the shared main stack on 5173, which is meant
+to stay up: leave that one running.
+
+The cost of skipping it is not tidiness, it is other people's test runs. On
+2026-08-12 a full-suite run hung twice at ~10% with mass errors, on code that
+was fine; four *other* worktree stacks were still up from earlier tasks, three
+with live Mongos and one with workers in a restart loop. Since `conftest.py`
+drops every collection in `biopipe_test` at session start, each run was wiping
+the others' data mid-test. That reads as flakiness in the code -- a rotating
+handful of DB-touching tests failing, different ones each run, all passing in
+isolation -- and it costs an afternoon to trace back to a container nobody
+remembered starting. The same trap is described from the other direction under
+[Verifying changes](#verifying-changes).
+
+Worth knowing when you clean up: `docker stop` is enough and is not
+destructive. It leaves the containers and their volumes intact, so a stack can
+be brought straight back up with its database. `worktree-up.sh --down` goes
+further and deletes that stack's volumes, which is the right call for a
+worktree you are finished with.
+
 **If the running instance ever does get pointed at a worktree, point it back
 when you are done.** This is the one piece of state in this workflow that
 outlives the task that changed it. `worktree-up.sh` avoids the problem by
