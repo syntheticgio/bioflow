@@ -67,3 +67,77 @@ class TestProvenanceTier:
     async def test_returns_none_with_no_provenance(self, objects):
         ann = _Obj("ann", kind=FormatKind.GFF, derived_from=[])
         assert await pipeline_service._reference_for_annotation(ann) is None
+
+
+class TestAccessionTier:
+    @pytest.fixture
+    def project(self, monkeypatch, objects):
+        """A project whose object list the accession tier scans."""
+        listed: list = []
+
+        async def fake_list(project_id, *, owner, limit=500, status=None):
+            return listed
+
+        monkeypatch.setattr(
+            pipeline_service.object_service, "list_objects", fake_list
+        )
+        return listed
+
+    async def test_matches_a_reference_with_the_same_accession(self, objects, project):
+        genome = _Obj("gen", role=ObjectRole.REFERENCE,
+                      facts={"ncbi_assembly_accession": "GCF_000001405.39"})
+        project.append(genome)
+        ann = _Obj("ann", kind=FormatKind.GFF,
+                   facts={"ncbi_assembly_accession": "GCF_000001405.39"})
+
+        got = await pipeline_service.resolve_annotation_reference(ann)
+        assert got.reference is genome
+        assert got.reason is None
+
+    async def test_version_suffixes_do_not_match(self, objects, project):
+        # .39 and .40 are different assemblies with different coordinates.
+        project.append(_Obj("gen", role=ObjectRole.REFERENCE,
+                            facts={"ncbi_assembly_accession": "GCF_000001405.40"}))
+        ann = _Obj("ann", kind=FormatKind.GFF,
+                   facts={"ncbi_assembly_accession": "GCF_000001405.39"})
+
+        got = await pipeline_service.resolve_annotation_reference(ann)
+        assert got.reference is None
+        assert "no reference" in got.reason.lower()
+
+    async def test_gca_and_gcf_counterparts_do_not_match(self, objects, project):
+        project.append(_Obj("gen", role=ObjectRole.REFERENCE,
+                            facts={"ncbi_assembly_accession": "GCA_000001405.39"}))
+        ann = _Obj("ann", kind=FormatKind.GFF,
+                   facts={"ncbi_assembly_accession": "GCF_000001405.39"})
+
+        assert (await pipeline_service.resolve_annotation_reference(ann)).reference is None
+
+    async def test_provenance_wins_over_accession(self, objects, project):
+        provenance = _Obj("gen", role=ObjectRole.REFERENCE)
+        objects["gen"] = provenance
+        project.append(_Obj("other", role=ObjectRole.REFERENCE,
+                            facts={"ncbi_assembly_accession": "GCF_9.1"}))
+        ann = _Obj("ann", kind=FormatKind.GFF, derived_from=["gen"],
+                   facts={"ncbi_assembly_accession": "GCF_9.1"})
+
+        got = await pipeline_service.resolve_annotation_reference(ann)
+        assert got.reference is provenance
+
+    async def test_non_fasta_candidates_are_ignored(self, objects, project):
+        # A VCF carrying the same accession is not a coordinate axis.
+        project.append(_Obj("vcf", kind=FormatKind.VCF,
+                            facts={"ncbi_assembly_accession": "GCF_9.1"}))
+        ann = _Obj("ann", kind=FormatKind.GFF,
+                   facts={"ncbi_assembly_accession": "GCF_9.1"})
+
+        assert (await pipeline_service.resolve_annotation_reference(ann)).reference is None
+
+    async def test_refuses_when_the_annotation_has_no_accession(self, objects, project):
+        project.append(_Obj("gen", role=ObjectRole.REFERENCE,
+                            facts={"ncbi_assembly_accession": "GCF_9.1"}))
+        ann = _Obj("ann", kind=FormatKind.GFF, facts={})
+
+        got = await pipeline_service.resolve_annotation_reference(ann)
+        assert got.reference is None
+        assert got.reason
