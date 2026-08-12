@@ -106,9 +106,11 @@ export function TranscriptQc({
   }
 
   return (
+    // Cards in a shared row carry no .section: its margin-top would offset
+    // the second card and break the aligned title baseline.
     <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
       {geneBody && f.gene_body_coverage && f.gene_body_coverage.length > 0 && (
-        <div className="section" style={{ flex: "1 1 300px" }}>
+        <div style={{ flex: "1 1 300px" }}>
           <div className="section-title">Gene body coverage</div>
           <GeneBodyChart curve={f.gene_body_coverage} />
           <Provenance
@@ -118,7 +120,7 @@ export function TranscriptQc({
         </div>
       )}
       {featureDistribution && f.feature_distribution && (
-        <div className="section" style={{ flex: "1 1 300px" }}>
+        <div style={{ flex: "1 1 300px" }}>
           <div className="section-title">Read distribution</div>
           <FeatureBar counts={f.feature_distribution} />
           <Provenance
