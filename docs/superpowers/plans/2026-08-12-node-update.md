@@ -341,17 +341,30 @@ Implements NU-1, NU-2, NU-3.
 
 Create `backend/tests/queue/test_worker_version_report.py`:
 
+**Correction made during execution:** the plan originally called `docker inspect --format {{.Image}}` against the worker's own container. That returns the container's *image ID* (a local config hash) — not the registry-manifest digest under `RepoDigests`, which is what the launcher's own update check (`launcher/src-tauri/src/update_check.rs`, `DockerImageInspector::local_digest`) already compares against GHCR for the primary's own update button. The two would never be comparable: a node and the primary would each report a plausible-looking `sha256:...` string that can never equal the other's, breaking staleness detection silently. The test and implementation below use `docker image inspect` against the known image reference and `RepoDigests`, mirroring the launcher's proven pattern exactly.
+
 ```python
 """The worker reports what image it is running, so the primary can tell a
-current node from a stale one."""
+current node from a stale one.
+
+Mirrors launcher/src-tauri/src/update_check.rs's DockerImageInspector: reads
+the digest Docker already recorded against the image reference, the same
+RepoDigests field the launcher's own update check compares to GHCR. Reading
+`docker inspect <container>` instead would return the container's image ID,
+a different value that can never equal a registry digest -- the two sides of
+a staleness comparison would silently never agree.
+"""
 
 from unittest.mock import patch
 
 from app.queue.worker import _own_image_digest
 
 
-def test_own_image_digest_reads_docker_inspect():
-    completed = type("R", (), {"returncode": 0, "stdout": "sha256:deadbeef\n"})()
+def test_own_image_digest_reads_repo_digest():
+    completed = type("R", (), {
+        "returncode": 0,
+        "stdout": "ghcr.io/syntheticgio/bioflow-backend@sha256:deadbeef\n",
+    })()
     with patch("app.queue.worker.subprocess.run", return_value=completed):
         assert _own_image_digest() == "sha256:deadbeef"
 
@@ -371,6 +384,15 @@ def test_own_image_digest_returns_none_when_inspect_fails():
 
 def test_own_image_digest_returns_none_on_exception():
     with patch("app.queue.worker.subprocess.run", side_effect=OSError("boom")):
+        assert _own_image_digest() is None
+
+
+def test_own_image_digest_returns_none_on_malformed_output():
+    """RepoDigests can be empty (locally built image, never pushed/pulled) --
+    docker then prints the template literal '<no value>' or an empty line,
+    neither of which contains '@'."""
+    completed = type("R", (), {"returncode": 0, "stdout": "<no value>\n"})()
+    with patch("app.queue.worker.subprocess.run", return_value=completed):
         assert _own_image_digest() is None
 ```
 
@@ -394,20 +416,35 @@ import subprocess
 Add this module-level function after the imports and before `class Worker`:
 
 ```python
-def _own_image_digest() -> str | None:
-    """The digest of the image this worker is running, or None.
+# The reference every node and the primary pull. Matches IMAGE in
+# node_update_service.py and docker-compose.child-node.yml's `image:` line --
+# all three must agree, since this is the value docker image inspect resolves
+# to a RepoDigests entry.
+_IMAGE_REF = "ghcr.io/syntheticgio/bioflow-backend:latest"
 
-    Read via the mounted Docker socket: a container knows its own id from
-    the hostname, and `docker inspect` resolves that to an image digest.
-    None on any failure -- a node whose socket is not mounted must still
-    heartbeat, it simply reports no version (NU-3).
+
+def _own_image_digest() -> str | None:
+    """The registry digest of the image this process is running, or None.
+
+    Reads the digest Docker already recorded for the local image cache entry
+    -- the same RepoDigests field the launcher's own update check
+    (update_check.rs's DockerImageInspector) compares against GHCR for the
+    primary. `docker inspect <container-id>` would return the container's
+    image ID instead, a different value that can never equal a registry
+    digest -- the two sides of any staleness comparison would silently never
+    agree. None on any failure -- a node whose socket is not mounted, or
+    whose image was built locally and never pushed (so RepoDigests is empty),
+    must still heartbeat; it simply reports no version (NU-3).
     """
     client = shutil.which("docker")
     if client is None:
         return None
     try:
         result = subprocess.run(  # noqa: S603
-            [client, "inspect", "--format", "{{.Image}}", socket.gethostname()],
+            [
+                client, "image", "inspect", _IMAGE_REF,
+                "--format", "{{index .RepoDigests 0}}",
+            ],
             capture_output=True,
             text=True,
             timeout=10,
@@ -416,8 +453,14 @@ def _own_image_digest() -> str | None:
         return None
     if result.returncode != 0:
         return None
-    digest = result.stdout.strip()
-    return digest or None
+    # RepoDigests entries look like "ghcr.io/org/name@sha256:...";
+    # only the part after '@' is the digest. No '@' (e.g. docker's
+    # "<no value>" template literal for an empty RepoDigests) means no
+    # digest to report.
+    text = result.stdout.strip()
+    if "@" not in text:
+        return None
+    return text.rsplit("@", maxsplit=1)[-1] or None
 ```
 
 In `Worker.__init__`, after `self.node_id`:
