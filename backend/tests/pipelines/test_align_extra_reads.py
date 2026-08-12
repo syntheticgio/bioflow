@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from beanie import PydanticObjectId
 
-from app.errors import ValidationError
+from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectStatus
-from app.queue.align_handlers import _concatenate_reads
+from app.queue.align_handlers import _concatenate_reads, _extra_reads_paths
 from app.services import memory_estimate, pipeline_service
 
 
@@ -392,6 +392,66 @@ class TestConcatenateReads:
         assert out.read_bytes() == b"@r1\nACGT\n+\nIIII\n"
 
 
+class TestExtraReadsPaths:
+    """The payload-to-stream split: every set's own file feeds the R1 stream
+    and, in a paired run, every set's mate feeds the R2 stream -- a mateless
+    set in a paired run is a launch that slipped past validation, refused
+    rather than silently misaligning."""
+
+    def _entry(self, tmp_path, name, with_mate=False):
+        path = tmp_path / name
+        path.write_bytes(b"reads")
+        entry = {"name": name, "path": str(path)}
+        if with_mate:
+            mate = tmp_path / f"{name}.mate"
+            mate.write_bytes(b"mate")
+            entry["mate_path"] = str(mate)
+            entry["mate_name"] = f"{name}.mate"
+        return entry
+
+    def test_single_end_run_collects_only_the_r1s(self, tmp_path):
+        entries = [
+            self._entry(tmp_path, "b.fastq"),
+            self._entry(tmp_path, "c.fastq"),
+        ]
+
+        r1_paths, r2_paths = _extra_reads_paths(entries, paired=False)
+
+        assert [p.name for p in r1_paths] == ["b.fastq", "c.fastq"]
+        assert r2_paths == []
+
+    def test_paired_run_collects_r1s_and_mates_separately(self, tmp_path):
+        entries = [
+            self._entry(tmp_path, "b_R1.fastq", with_mate=True),
+            self._entry(tmp_path, "c_R1.fastq", with_mate=True),
+        ]
+
+        r1_paths, r2_paths = _extra_reads_paths(entries, paired=True)
+
+        assert [p.name for p in r1_paths] == ["b_R1.fastq", "c_R1.fastq"]
+        assert [p.name for p in r2_paths] == ["b_R1.fastq.mate", "c_R1.fastq.mate"]
+
+    def test_paired_run_refuses_a_mateless_set(self, tmp_path):
+        entries = [
+            self._entry(tmp_path, "b_R1.fastq", with_mate=True),
+            self._entry(tmp_path, "c_R1.fastq"),
+        ]
+
+        with pytest.raises(PermanentError, match="c_R1.fastq.*no mate"):
+            _extra_reads_paths(entries, paired=True)
+
+    def test_paired_run_ignores_a_mate_carried_by_a_single_end_entry(self, tmp_path):
+        """The mate keys ride along on the entry, so they are only read when
+        the run is paired -- a launch that validated as single-end must not
+        suddenly treat the same entry as paired at dispatch."""
+        entries = [self._entry(tmp_path, "b.fastq", with_mate=True)]
+
+        r1_paths, r2_paths = _extra_reads_paths(entries, paired=False)
+
+        assert [p.name for p in r1_paths] == ["b.fastq"]
+        assert r2_paths == []
+
+
 class TestResolveAdditionalReadSets:
     """The pairing rule and whole-request uniqueness, tested against the
     resolver itself rather than through a full launch: pairing is a property
@@ -477,6 +537,46 @@ class TestResolveAdditionalReadSets:
                 mate=primary_mate,
                 sets=[(extra, None)],
             )
+
+    async def test_the_workflow_nodes_chunks_are_exempt_from_the_rule(self):
+        """The workflow align node's `reads` port is multi for chunked/split
+        reads of the primary's own library -- pieces, not libraries -- so its
+        sets carry the non-strict flag and a paired run accepts them mateless,
+        concatenated into the run's R1 stream as they always were."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        chunk = _fastq_object(PydanticObjectId(), "a_chunk2.fastq", project_id=pid)
+
+        objects = {primary.id: primary, primary_mate.id: primary_mate, chunk.id: chunk}
+
+        async def _get_object(object_id, owner):
+            return objects[object_id]
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=_get_object),
+            ),
+            # A chunk name carries no pairing scheme, so the real suggest_mate
+            # would return None for it anyway; stubbing keeps the test off the
+            # mate_object_id attribute the production objects carry.
+            patch(
+                "app.services.pipeline_service.suggest_mate",
+                AsyncMock(return_value=None),
+            ),
+        ):
+            sets = await pipeline_service._resolve_alignment_read_sets(
+                primary=primary,
+                mate_object_id=primary_mate.id,
+                additional_sets=[(chunk.id, None, False)],
+                owner="local",
+                paired=True,
+            )
+
+        assert len(sets) == 2
+        assert sets[1].r1.id == chunk.id
+        assert sets[1].r2 is None
 
     async def test_a_single_end_run_rejects_a_set_that_declares_a_mate(self):
         """R-4: the reverse direction -- a set carrying a mate in a

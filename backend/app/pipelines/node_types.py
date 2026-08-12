@@ -116,7 +116,10 @@ async def _launch_align(*, inputs: dict, params: dict, owner: str):
     # takes one object_id: the extra files are additional read sets, which is
     # what "they all go in together" means -- one alignment over every chunk,
     # not one run per file. The port documents chunks/split reads, never
-    # mates, so each extra set is single-end by construction.
+    # mates, so each extra set is single-end by construction; the third tuple
+    # element opts them out of the strict pairing rule, so a paired run (mate
+    # port wired) with chunked reads still concatenates the chunks into the
+    # run's R1 stream rather than failing for want of mates.
     reads = inputs["reads"]
     if isinstance(reads, list):
         primary, extra = reads[0], reads[1:]
@@ -127,7 +130,7 @@ async def _launch_align(*, inputs: dict, params: dict, owner: str):
         reference_id=inputs["reference"],
         owner=owner,
         mate_object_id=inputs.get("mate"),
-        additional_read_sets=[(PydanticObjectId(o), None) for o in extra],
+        additional_read_sets=[(PydanticObjectId(o), None, False) for o in extra],
         params=params,
     )
 
