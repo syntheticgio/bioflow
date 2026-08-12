@@ -6,7 +6,7 @@
 
 use std::cell::{Cell, RefCell};
 
-use super::{ActionResult, DockerBackend, DockerPresence, ServiceStatus};
+use super::{ActionResult, DockerBackend, DockerPresence, OtherStack, ServiceStatus};
 
 pub struct FakeDocker {
     pub presence: Cell<DockerPresence>,
@@ -31,6 +31,9 @@ pub struct FakeDocker {
     /// What `discover_running_project_dir` returns for any project name,
     /// or `None` to model "nothing found."
     pub discovered_project_dir: RefCell<Option<String>>,
+    /// What `other_stacks` returns -- the worktree stacks running alongside
+    /// the launcher's own. Empty models the ordinary single-stack machine.
+    pub other_stacks: RefCell<Vec<OtherStack>>,
 }
 
 impl Default for FakeDocker {
@@ -50,6 +53,7 @@ impl Default for FakeDocker {
             daemon_start_calls: Cell::new(0),
             probe_after_start_sequence: RefCell::new(Vec::new()),
             discovered_project_dir: RefCell::new(None),
+            other_stacks: RefCell::new(Vec::new()),
         }
     }
 }
@@ -135,5 +139,9 @@ impl DockerBackend for FakeDocker {
 
     fn discover_running_project_dir(&self, _project_name: &str) -> Option<String> {
         self.discovered_project_dir.borrow().clone()
+    }
+
+    fn other_stacks(&self) -> Vec<OtherStack> {
+        self.other_stacks.borrow().clone()
     }
 }

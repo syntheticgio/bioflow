@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use super::{ActionResult, DockerBackend, DockerPresence, ServiceStatus};
+use super::{ActionResult, DockerBackend, DockerPresence, OtherStack, ServiceStatus};
 
 /// Explicit locations a GUI-launched app cannot reach through PATH. These
 /// are the two places a Docker CLI actually lives on most machines, plus
@@ -110,6 +110,79 @@ fn classify_checkout(toplevel: Option<&str>, git_common_dir: Option<&str>) -> Gi
     }
 }
 
+/// The Compose project name the launcher itself manages. Anything else
+/// beginning `biopipe-wt-` is a worktree stack (#320).
+const WORKTREE_PROJECT_PREFIX: &str = "biopipe-wt-";
+
+/// Turns `docker ps` label output into the set of other running stacks.
+///
+/// Pure, so tests can exercise the parsing and de-duplication against
+/// fixtures without a Docker daemon -- the same split `resolve_docker` and
+/// `classify_checkout` above already use.
+///
+/// `rows` is one entry per running container: `(project, service, port)`,
+/// where `port` is the host port that container publishes, if any.
+///
+/// A stack has several containers, so rows collapse by project. The `web`
+/// container is the one whose port matters (it is what a human opens), and
+/// the others contribute nothing but their existence.
+fn collect_other_stacks(rows: &[(String, String, Option<u16>)]) -> Vec<OtherStack> {
+    let mut stacks: Vec<OtherStack> = Vec::new();
+
+    for (project, service, port) in rows {
+        let Some(slug) = project.strip_prefix(WORKTREE_PROJECT_PREFIX) else {
+            // The launcher's own `biopipe`, or something unrelated that
+            // happens to be running. Neither belongs in this list.
+            continue;
+        };
+        if slug.is_empty() {
+            continue;
+        }
+
+        let existing = stacks.iter_mut().find(|s| &s.project == project);
+        let entry = match existing {
+            Some(entry) => entry,
+            None => {
+                stacks.push(OtherStack {
+                    project: project.clone(),
+                    slug: slug.to_string(),
+                    web_port: None,
+                });
+                stacks.last_mut().expect("just pushed")
+            }
+        };
+
+        // Only `web`'s port is meaningful here. Taking any service's port
+        // would show the user an api or mongo port and invite them to open
+        // it in a browser.
+        if service == "web" && entry.web_port.is_none() {
+            entry.web_port = *port;
+        }
+    }
+
+    // Stable, predictable ordering. The list is read at a glance and its
+    // order should not shuffle between polls as Docker reorders containers.
+    stacks.sort_by(|a, b| a.project.cmp(&b.project));
+    stacks
+}
+
+/// Extracts the host port from a `HostConfig.PortBindings` JSON blob.
+///
+/// Read from `HostConfig` rather than the runtime `NetworkSettings.Ports` or
+/// `docker ps`'s `{{.Ports}}`, because those are empty for any container that
+/// is not currently running -- including one in a restart loop, which is
+/// exactly the state a stack the user most needs to know about can be in.
+fn host_port_from_bindings(json: &str) -> Option<u16> {
+    let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+    parsed
+        .as_object()?
+        .values()
+        .filter_map(|bindings| bindings.as_array())
+        .flatten()
+        .filter_map(|b| b.get("HostPort")?.as_str()?.parse::<u16>().ok())
+        .next()
+}
+
 pub struct ShellDocker;
 
 impl ShellDocker {
@@ -144,6 +217,23 @@ impl ShellDocker {
         let toplevel = rev_parse(&["rev-parse", "--show-toplevel"]);
         let common = rev_parse(&["rev-parse", "--path-format=absolute", "--git-common-dir"]);
         classify_checkout(toplevel.as_deref(), common.as_deref())
+    }
+
+    /// The host port a container publishes, read from `HostConfig` so that a
+    /// container which is not currently running (or is restart-looping) still
+    /// reports the port it is configured for.
+    fn web_host_port(&self, container: &str) -> Option<u16> {
+        let output = Command::new(docker_binary())
+            .arg("inspect")
+            .arg("--format")
+            .arg("{{json .HostConfig.PortBindings}}")
+            .arg(container)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        host_port_from_bindings(String::from_utf8_lossy(&output.stdout).trim())
     }
 
     fn run_action(mut cmd: Command) -> ActionResult {
@@ -384,6 +474,57 @@ impl DockerBackend for ShellDocker {
         }
     }
 
+    fn other_stacks(&self) -> Vec<OtherStack> {
+        // One row per running container, carrying its Compose project and
+        // service labels. `docker ps` rather than `docker compose ls`: the
+        // project listing gives a name and a status but no service breakdown
+        // and no ports, and the port is the part that makes an entry
+        // actionable.
+        //
+        // No `-a`: a stopped worktree stack costs nothing and is not what the
+        // user needs warning about.
+        let output = Command::new(docker_binary())
+            .arg("ps")
+            .arg("--filter")
+            .arg("label=com.docker.compose.project")
+            .arg("--format")
+            .arg("{{.Names}}\t{{.Label \"com.docker.compose.project\"}}\t{{.Label \"com.docker.compose.service\"}}")
+            .output();
+
+        let Ok(output) = output else {
+            return Vec::new();
+        };
+        if !output.status.success() {
+            return Vec::new();
+        }
+
+        let text = String::from_utf8_lossy(&output.stdout);
+        let rows: Vec<(String, String, Option<u16>)> = text
+            .lines()
+            .filter_map(|line| {
+                let mut parts = line.split('\t');
+                let name = parts.next()?.trim().to_string();
+                let project = parts.next()?.trim().to_string();
+                let service = parts.next()?.trim().to_string();
+                if project.is_empty() {
+                    return None;
+                }
+
+                // Only `web` needs a port lookup, and each one is a separate
+                // `docker inspect`; skipping the rest keeps this to one extra
+                // call per stack rather than one per container.
+                let port = if service == "web" {
+                    self.web_host_port(&name)
+                } else {
+                    None
+                };
+                Some((project, service, port))
+            })
+            .collect();
+
+        collect_other_stacks(&rows)
+    }
+
     fn attempt_daemon_start(&self) {
         #[cfg(target_os = "macos")]
         {
@@ -512,6 +653,135 @@ mod tests {
         assert_eq!(
             classify_checkout(None, Some("/repo/.git")),
             GitCheckout::NotAGitRepository
+        );
+    }
+
+    // `collect_other_stacks` -- turning docker ps rows into the read-only
+    // inventory of worktree stacks (#320).
+
+    fn row(project: &str, service: &str, port: Option<u16>) -> (String, String, Option<u16>) {
+        (project.to_string(), service.to_string(), port)
+    }
+
+    #[test]
+    fn the_launchers_own_project_is_never_listed() {
+        // The whole point is *other* stacks. Listing `biopipe` would be
+        // telling the user about the stack they are already looking at.
+        let rows = vec![
+            row("biopipe", "web", Some(5173)),
+            row("biopipe", "api", None),
+        ];
+        assert_eq!(collect_other_stacks(&rows), Vec::new());
+    }
+
+    #[test]
+    fn unrelated_compose_projects_are_never_listed() {
+        // Someone else's postgres is not a BioFlow stack.
+        let rows = vec![row("some-other-app", "web", Some(3000))];
+        assert_eq!(collect_other_stacks(&rows), Vec::new());
+    }
+
+    #[test]
+    fn a_worktree_stacks_containers_collapse_into_one_entry() {
+        // A stack is five-plus containers; the user wants one line per stack.
+        let rows = vec![
+            row("biopipe-wt-feat-x", "mongo", None),
+            row("biopipe-wt-feat-x", "web", Some(5273)),
+            row("biopipe-wt-feat-x", "api", None),
+            row("biopipe-wt-feat-x", "worker", None),
+        ];
+        assert_eq!(
+            collect_other_stacks(&rows),
+            vec![OtherStack {
+                project: "biopipe-wt-feat-x".to_string(),
+                slug: "feat-x".to_string(),
+                web_port: Some(5273),
+            }]
+        );
+    }
+
+    #[test]
+    fn only_the_web_services_port_is_reported() {
+        // Taking any service's port would show an api or mongo port and
+        // invite the user to open it in a browser.
+        let rows = vec![
+            row("biopipe-wt-feat-x", "api", Some(8100)),
+            row("biopipe-wt-feat-x", "web", Some(5273)),
+        ];
+        assert_eq!(collect_other_stacks(&rows)[0].web_port, Some(5273));
+    }
+
+    #[test]
+    fn a_stack_with_no_readable_web_port_still_appears() {
+        // Knowing a stack is up matters more than knowing its port; dropping
+        // it for a missing port would hide exactly the broken stack (no web
+        // container, or a restart loop) most worth surfacing.
+        let rows = vec![row("biopipe-wt-feat-x", "mongo", None)];
+        assert_eq!(
+            collect_other_stacks(&rows),
+            vec![OtherStack {
+                project: "biopipe-wt-feat-x".to_string(),
+                slug: "feat-x".to_string(),
+                web_port: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn several_stacks_are_listed_in_a_stable_order() {
+        // The list is read at a glance; its order must not shuffle between
+        // polls as Docker reorders containers.
+        let rows = vec![
+            row("biopipe-wt-zebra", "web", Some(5290)),
+            row("biopipe-wt-alpha", "web", Some(5210)),
+            row("biopipe", "web", Some(5173)),
+        ];
+        let stacks = collect_other_stacks(&rows);
+        assert_eq!(
+            stacks.iter().map(|s| s.slug.as_str()).collect::<Vec<_>>(),
+            vec!["alpha", "zebra"]
+        );
+    }
+
+    #[test]
+    fn a_bare_prefix_with_no_slug_is_not_a_stack() {
+        // `biopipe-wt-` alone encodes no branch; treating it as a stack would
+        // put a nameless row in front of the user.
+        let rows = vec![row("biopipe-wt-", "web", Some(5273))];
+        assert_eq!(collect_other_stacks(&rows), Vec::new());
+    }
+
+    // `host_port_from_bindings` -- reading the port out of docker inspect.
+
+    #[test]
+    fn a_published_port_is_read_from_host_config() {
+        // Real shape, copied from `docker inspect` on this machine.
+        let json = r#"{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"5173"}]}"#;
+        assert_eq!(host_port_from_bindings(json), Some(5173));
+    }
+
+    #[test]
+    fn an_empty_host_ip_still_yields_the_port() {
+        // How a worktree stack's binding actually looks, since
+        // ops/docker-compose.worktree.yml publishes on ${BIND_ADDRESS:-127.0.0.1}.
+        let json = r#"{"80/tcp":[{"HostIp":"","HostPort":"5273"}]}"#;
+        assert_eq!(host_port_from_bindings(json), Some(5273));
+    }
+
+    #[test]
+    fn a_container_publishing_nothing_has_no_port() {
+        assert_eq!(host_port_from_bindings("{}"), None);
+        assert_eq!(host_port_from_bindings("null"), None);
+    }
+
+    #[test]
+    fn malformed_inspect_output_is_not_a_port() {
+        // `docker inspect` failing or changing shape must not panic a poll.
+        assert_eq!(host_port_from_bindings(""), None);
+        assert_eq!(host_port_from_bindings("not json"), None);
+        assert_eq!(
+            host_port_from_bindings(r#"{"80/tcp":[{"HostPort":"not-a-number"}]}"#),
+            None
         );
     }
 

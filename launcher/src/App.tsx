@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
-import { checkForUpdate, currentSettings, openBioFlow, runStack, status, stopStack, updateStack } from "./commands";
+import { checkForUpdate, currentSettings, openBioFlow, otherStacks, runStack, status, stopStack, updateStack } from "./commands";
 import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
 import { NodeScreen } from "./NodeScreen";
-import type { LauncherState, Settings as SettingsValues } from "./types";
+import type { LauncherState, OtherStack, Settings as SettingsValues } from "./types";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
 // The manifest check is a network call (bounded by GhcrClient's own
@@ -14,6 +14,10 @@ const STATUS_POLL_INTERVAL_MS = 3000;
 // hit the registry every 3 seconds for a button that changes at most a few
 // times a year.
 const UPDATE_CHECK_POLL_INTERVAL_MS = 5 * 60 * 1000;
+// Worktree stacks come and go on the timescale of a developer starting one,
+// not a status flip, so this polls far less often than status. It is two
+// `docker` calls per poll and the answer is empty on most machines.
+const OTHER_STACKS_POLL_INTERVAL_MS = 30 * 1000;
 
 export function App() {
   const [state, setState] = useState<LauncherState>({ kind: "NotInstalled" });
@@ -22,6 +26,9 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMigrateStorage, setShowMigrateStorage] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  // Worktree stacks running alongside this one (#320). Empty on an ordinary
+  // single-stack machine, in which case nothing renders.
+  const [stacks, setStacks] = useState<OtherStack[]>([]);
   // Set only on the transition out of SetupWizard, never on an ordinary
   // Stop -> Run click -- the prefetch offer is a first-run thing, asked
   // once, not something to show every time the stack starts. Cleared the
@@ -85,6 +92,29 @@ export function App() {
       clearInterval(id);
     };
   }, []);
+
+  // Polled regardless of state.kind: forgotten worktree stacks are exactly
+  // as worth surfacing when this launcher's own stack is stopped -- arguably
+  // more so, since "Stopped" plus a busy machine is the confusing case.
+  // Skipped only when Docker itself is unreachable, when the answer would be
+  // an empty list for a reason that has nothing to do with worktrees.
+  useEffect(() => {
+    if (state.kind === "DockerUnavailable" || state.kind === "NotInstalled") {
+      setStacks([]);
+      return;
+    }
+    let cancelled = false;
+    async function poll() {
+      const next = await otherStacks();
+      if (!cancelled) setStacks(next);
+    }
+    poll();
+    const id = setInterval(poll, OTHER_STACKS_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [state.kind]);
 
   useEffect(() => {
     if (state.kind !== "Running") {
@@ -334,6 +364,42 @@ export function App() {
             <div className="sidebar">
               <span className="sidebar-aside-label">Storage location</span>
               <span className="sidebar-path">{settings.storageLocation}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Worktree stacks running alongside this one (#320). Read-only on
+            purpose -- this launcher owns the `biopipe` project and nothing
+            else; a worktree stack is brought down with
+            `ops/worktree-up.sh --down` from the worktree that started it.
+            Renders nothing at all when the list is empty, which is the
+            ordinary single-stack case. */}
+        {stacks.length > 0 && (
+          <div className="other-stacks">
+            <div className="other-stacks-label">
+              {stacks.length === 1
+                ? "1 other BioFlow stack is running"
+                : `${stacks.length} other BioFlow stacks are running`}
+            </div>
+            <ul className="other-stacks-list">
+              {stacks.map((s) => (
+                <li key={s.project} className="other-stacks-item">
+                  <span className="other-stacks-slug">{s.slug}</span>
+                  {s.webPort != null && (
+                    <button
+                      type="button"
+                      className="other-stacks-port"
+                      onClick={() => openBioFlow(s.webPort as number)}
+                    >
+                      localhost:{s.webPort}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="other-stacks-note">
+              Started from a git worktree. Stop one with{" "}
+              <code>./ops/worktree-up.sh --down</code> in that worktree.
             </div>
           </div>
         )}

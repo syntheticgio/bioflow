@@ -26,6 +26,35 @@ pub struct ServiceStatus {
     pub running: bool,
 }
 
+/// A BioFlow stack running on this machine that is *not* the one this
+/// launcher manages -- in practice a worktree stack started by
+/// `ops/worktree-up.sh`, which names its project `biopipe-wt-<slug>`.
+///
+/// Surfaced read-only (#320). The launcher owns the `biopipe` project and has
+/// no authority over these: a worktree stack belongs to whoever started it,
+/// and `ops/worktree-up.sh --down` from that worktree is how it comes down.
+/// The failure this exists to prevent was a *visibility* failure -- four
+/// forgotten stacks wiping each other's test database and reading as flaky
+/// code -- so showing them is the whole deliverable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OtherStack {
+    /// The Compose project name, e.g. `biopipe-wt-feat-my-branch`.
+    pub project: String,
+    /// The branch slug the project name encodes, i.e. `project` with the
+    /// `biopipe-wt-` prefix removed. This is what tells the user *which*
+    /// branch a stack is serving.
+    pub slug: String,
+    /// The host port its `web` service publishes, when one can be read.
+    ///
+    /// `None` rather than a guess when the stack has no `web` container or it
+    /// declares no binding. The port is what makes an entry actionable -- the
+    /// user opens it to see which branch it is -- but a wrong port is worse
+    /// than an absent one, and `ops/worktree-up.sh` assigns these from a
+    /// branch-slug hash probed for a free pair, so there is no port this code
+    /// could correctly infer without reading it.
+    pub web_port: Option<u16>,
+}
+
 /// Outcome of a `docker compose` action the launcher shells out for. Actions
 /// never panic on failure -- a failed `up` or `pull` is still information the
 /// state machine and the UI need to show, not something to unwrap away.
@@ -126,4 +155,17 @@ pub trait DockerBackend {
     /// it reports NotInstalled, which is this method's existing answer when
     /// discovery finds nothing.
     fn discover_running_project_dir(&self, project_name: &str) -> Option<String>;
+
+    /// Every *running* BioFlow stack on this machine other than the one the
+    /// launcher manages -- i.e. Compose projects named `biopipe-wt-<slug>`,
+    /// which is what `ops/worktree-up.sh` names a worktree stack (#320).
+    ///
+    /// Read-only by design: the launcher owns the `biopipe` project and
+    /// nothing more. This grants visibility, not authority -- see
+    /// `OtherStack`.
+    ///
+    /// Running only. A stopped worktree stack costs nothing and is not what
+    /// the user needs warning about; the ones that wipe each other's test
+    /// database and eat memory are the live ones.
+    fn other_stacks(&self) -> Vec<OtherStack>;
 }
