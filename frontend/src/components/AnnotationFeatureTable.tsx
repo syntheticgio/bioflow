@@ -67,9 +67,19 @@ export function parseLocus(
 export function AnnotationFeatureTable({
   objectId,
   facts,
+  forcedView,
+  onViewChange,
 }: {
   objectId: string;
   facts: AnnotationStatsFacts;
+  /** Set by a parent (e.g. a click on an integrity summary count) to force
+   *  the table into a specific view. Currently only "unresolved" is
+   *  meaningful. Purely a one-shot nudge -- see the effect below -- not a
+   *  controlled value the table stays synced to. */
+  forcedView?: string | null;
+  /** Fired when the user manually switches tabs, so the parent can clear
+   *  its own forcedView and stop re-forcing the view on the next render. */
+  onViewChange?: () => void;
 }) {
   const [view, setView] = useState<View>("genes");
   const [page, setPage] = useState(0);
@@ -111,6 +121,16 @@ export function AnnotationFeatureTable({
     setPage(0);
     setExpanded(new Set());
   }, [view, contig, featureType, biotype, strand, nameQuery, locus]);
+
+  // A forced view is a one-shot nudge, not a controlled prop: applying it
+  // once per change (keyed on forcedView itself, not on every render) lets
+  // the user freely switch tabs afterward without the table snapping back.
+  // Going from "unresolved" back to null (after onViewChange clears it in
+  // the parent) does not re-trigger this effect's body, since the condition
+  // below is false for null -- so a manual tab pick made in between sticks.
+  useEffect(() => {
+    if (forcedView === "unresolved") setView("unresolved");
+  }, [forcedView]);
 
   // Effective contig: an active locus jump overrides the contig dropdown.
   const effectiveContig = locus?.contig || contig || undefined;
@@ -199,7 +219,10 @@ export function AnnotationFeatureTable({
       <Tabs
         idPrefix="annotation-view"
         active={view}
-        onChange={(id) => setView(id as View)}
+        onChange={(id) => {
+          setView(id as View);
+          onViewChange?.();
+        }}
         tabs={[
           { id: "genes", label: "Genes" },
           { id: "all", label: "All records" },
