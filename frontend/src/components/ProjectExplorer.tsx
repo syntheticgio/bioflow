@@ -8,7 +8,7 @@ import { recordProjectVisit } from "../lib/recentProjects";
 import { notify } from "../stores/messageStore";
 import { useUploads } from "../hooks/useUploads";
 import { QualityBadge } from "./QualityBadge";
-import { BioIcon, FileIcon } from "../icons/BioIcon";
+import { BioIcon, FileIcon, readPlatformFor } from "../icons/BioIcon";
 import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
@@ -561,6 +561,10 @@ function FileRow({
 }) {
   const quality = readQuality(object);
   const badge = readBadge !== undefined ? readBadge : object.read_number;
+  const readPlatform = readPlatformFor(
+    object.facts?.qc_read_chemistry,
+    object.metadata?.platform,
+  );
 
   return (
     <div
@@ -575,6 +579,7 @@ function FileRow({
           role={object.role}
           size={30}
           readsStage={readsStage}
+          readPlatform={readPlatform}
         />
         {quality && <QualityBadge quality={quality} />}
       </span>
