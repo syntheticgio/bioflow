@@ -253,16 +253,6 @@ class Settings(BaseSettings):
     # and a summary cut off mid-sentence reads worse than a slightly long one.
     llm_max_tokens: int = 400
 
-    # --- Project Q&A chat ---
-    # Fraction of the routed provider's context window a live conversation
-    # tail may occupy before older turns are folded into a summary. Not
-    # aiming for exactness -- the token estimate feeding this is a coarse
-    # heuristic -- just "don't wait until the request 400s."
-    qa_compaction_threshold: float = 0.75
-    # Assumed context length when a provider's /v1/models response does not
-    # report one (confirmed not universal -- OpenAI's endpoint omits it).
-    qa_default_context_tokens: int = 8000
-
     # --- AI agent (in-app Pi harness) ---
     # Path to the pi CLI binary. The api image installs it (and its
     # pi-mcp-adapter extension) at build time -- see backend/Dockerfile.
