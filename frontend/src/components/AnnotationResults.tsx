@@ -27,6 +27,7 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
   const qc = useQueryClient();
   const f = obj.facts as AnnotationStatsFacts;
   const [targetNode, setTargetNode] = useState("");
+  const [forcedView, setForcedView] = useState<string | null>(null);
 
   const compute = useMutation({
     mutationFn: () => api.launchAnnotationStats(obj.id, targetNode || undefined),
@@ -94,6 +95,33 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
         </button>
       </div>
 
+      {!!f.annotation_unresolved_count && (
+        <div className="qc-provenance">
+          <button
+            type="button"
+            onClick={() => setForcedView("unresolved")}
+            style={{
+              color: "var(--accent)",
+              fontSize: 11,
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+          >
+            {f.annotation_unresolved_count.toLocaleString()}{" "}
+            {f.annotation_unresolved_count === 1 ? "record" : "records"} with unresolved
+            parentage
+          </button>
+          {f.annotation_parent_status_counts &&
+            (() => {
+              const breakdown = Object.entries(f.annotation_parent_status_counts)
+                .filter(([status]) => status !== "root" && status !== "resolved")
+                .map(([status, count]) => `${count.toLocaleString()} ${status}`)
+                .join(", ");
+              return breakdown ? ` (${breakdown})` : null;
+            })()}
+        </div>
+      )}
+
       {f.annotation_type_counts && (
         <div className="section">
           <div className="section-title">Features by type</div>
@@ -132,7 +160,12 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
         </div>
       )}
 
-      <AnnotationFeatureTable objectId={obj.id} facts={f} />
+      <AnnotationFeatureTable
+        objectId={obj.id}
+        facts={f}
+        forcedView={forcedView}
+        onViewChange={() => setForcedView(null)}
+      />
     </>
   );
 }
