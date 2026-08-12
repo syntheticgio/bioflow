@@ -1,0 +1,27 @@
+LOCUS       NC_000001               2000 bp    DNA     circular CON 09-MAR-2022
+ACCESSION   NC_000001
+VERSION     NC_000001.3
+SOURCE      Escherichia coli str. K-12 substr. MG1655
+FEATURES             Location/Qualifiers
+     source          1..2000
+                     /organism="Escherichia coli"
+                     /mol_type="genomic DNA"
+     gene            100..400
+                     /gene="thrA"
+                     /locus_tag="b0001"
+     CDS             join(100..200,300..400)
+                     /gene="thrA"
+                     /product="aspartokinase"
+ORIGIN
+        1 agcttttcat tctgactgca acgggcaata tgtctctgtg tggattaaaa aaagagtgtc
+       61 tgatagcagc ttctgaactg gttacctgcc gtgagtaaat taaaatttta ttgacttagg
+//
+LOCUS       NC_000002                900 bp    DNA     linear   CON 09-MAR-2022
+ACCESSION   NC_000002
+VERSION     NC_000002.1
+FEATURES             Location/Qualifiers
+     gene            complement(50..250)
+                     /gene="dnaK"
+     tRNA            <1..72
+                     /product="tRNA-Ala"
+//
