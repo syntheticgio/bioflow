@@ -59,7 +59,7 @@ def launcher_tree(tmp_path):
 
 
 class TestAppLine:
-    def test_writes_every_app_declaration(self, app_tree):
+    def test_writes_every_app_declaration(self, app_tree, launcher_tree):
         r = run_bump(app_tree, "app", "0.2.0")
         assert r.returncode == 0, r.stderr
 
@@ -77,11 +77,56 @@ class TestAppLine:
         assert pkg["name"] == "biopipe-frontend"
         assert pkg["private"] is True
 
-    def test_does_not_touch_the_launcher_line(self, app_tree, launcher_tree):
-        # Both fixtures use tmp_path, so this reads the same tree.
-        run_bump(app_tree, "app", "0.2.0")
-        cargo = (app_tree / "launcher" / "src-tauri" / "Cargo.toml").read_text()
-        assert 'version = "0.1.0"' in cargo
+    def test_bumps_the_launcher_line_too(self, app_tree, launcher_tree):
+        """#335: one version for both lines. Both fixtures use tmp_path, so
+        this reads the same tree."""
+        r = run_bump(app_tree, "app", "0.2.0")
+        assert r.returncode == 0, r.stderr
+
+        assert 'version = "0.2.0"' in (
+            app_tree / "launcher" / "src-tauri" / "Cargo.toml"
+        ).read_text()
+        assert (
+            json.loads((app_tree / "launcher" / "package.json").read_text())["version"]
+            == "0.2.0"
+        )
+        assert (
+            json.loads(
+                (app_tree / "launcher" / "src-tauri" / "tauri.conf.json").read_text()
+            )["version"]
+            == "0.2.0"
+        )
+
+    def test_overwrites_a_launcher_version_that_is_ahead(self, app_tree, launcher_tree):
+        """CR-7: a launcher-only release leaves the launcher ahead; the next
+        combined cut reclaims the number rather than preserving the drift."""
+        run_bump(app_tree, "launcher", "0.9.0")
+        r = run_bump(app_tree, "app", "0.2.0")
+        assert r.returncode == 0, r.stderr
+
+        assert 'version = "0.2.0"' in (
+            app_tree / "launcher" / "src-tauri" / "Cargo.toml"
+        ).read_text()
+
+    def test_app_bump_reports_all_seven_files(self, app_tree, launcher_tree):
+        r = run_bump(app_tree, "app", "0.2.0")
+        written = [line for line in r.stdout.splitlines() if line.strip()]
+        assert len(written) == 7, written
+
+    def test_app_prerelease_gives_tauri_conf_the_core_version(self, app_tree, launcher_tree):
+        r = run_bump(app_tree, "app", "0.3.0-alpha")
+        assert r.returncode == 0, r.stderr
+
+        assert (app_tree / "VERSION").read_text() == "0.3.0-alpha\n"
+        assert 'version = "0.3.0-alpha"' in (
+            app_tree / "launcher" / "src-tauri" / "Cargo.toml"
+        ).read_text()
+        assert (
+            json.loads(
+                (app_tree / "launcher" / "src-tauri" / "tauri.conf.json").read_text()
+            )["version"]
+            == "0.3.0"
+        )
 
     def test_only_the_first_version_key_in_cargo_style_toml(self, app_tree):
         """A dependency's `version = ` must never be mistaken for the package's."""
@@ -93,7 +138,7 @@ class TestAppLine:
         assert 'version = "0.2.0"' in text
         assert 'version = "9.9.9"' in text
 
-    def test_writes_a_prerelease_version(self, app_tree):
+    def test_writes_a_prerelease_version(self, app_tree, launcher_tree):
         r = run_bump(app_tree, "app", "0.3.0-alpha")
         assert r.returncode == 0, r.stderr
 

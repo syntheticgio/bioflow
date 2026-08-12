@@ -91,7 +91,10 @@ def bump_app(root: Path, version: str) -> list[Path]:
     _replace_generated_module(module, version)
     _replace_first_version(pyproject, version)
     _replace_json_version(package, version)
-    return [version_file, module, pyproject, package]
+    # #335: one release, one version. The launcher line has no independent
+    # number any more -- a combined cut overwrites whatever it declared, which
+    # is what keeps a launcher-only release's drift from surviving.
+    return [version_file, module, pyproject, package] + bump_launcher(root, version)
 
 
 def bump_launcher(root: Path, version: str) -> list[Path]:
