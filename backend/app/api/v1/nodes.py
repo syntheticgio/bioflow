@@ -19,7 +19,8 @@ from app.db.redis_client import get_redis
 from app.logging import get_logger
 from app.models.node import Node
 from app.models.node_provision import NodeProvisionTask
-from app.queue import keys, node_stats as node_stats_mod
+from app.queue import keys
+from app.queue import node_stats as node_stats_mod
 
 log = get_logger(__name__)
 
