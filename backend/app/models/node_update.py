@@ -5,12 +5,16 @@ vocabularies differ, and a shared collection would make "when was this node
 last updated" filter on a discriminator forever.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from beanie import Document
 from beanie.odm.fields import Indexed
 from pydantic import Field
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
 class NodeUpdateTask(Document):
@@ -28,7 +32,7 @@ class NodeUpdateTask(Document):
     from_digest: str | None = None
     to_digest: str | None = None
     drain: bool = True
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=utcnow)
     finished_at: datetime | None = None
     error: str | None = None
 
