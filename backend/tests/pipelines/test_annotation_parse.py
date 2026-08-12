@@ -71,7 +71,7 @@ class TestGffLine:
             score=None,
             name="BRCA1",
             feature_id="gene1",
-            parent=None,
+            parents=(),
             biotype="protein_coding",
             attributes="ID=gene1;Name=BRCA1;gene_biotype=protein_coding",
         )
@@ -79,15 +79,8 @@ class TestGffLine:
     def test_child_records_its_parent(self):
         line = "chr1\tHAVANA\texon\t1000\t1100\t.\t+\t.\tID=exon1;Parent=gene1"
         f = parse_gff_line(line)
-        assert f.parent == "gene1"
+        assert f.parents == ("gene1",)
         assert f.type == "exon"
-
-    def test_multiple_parents_keeps_the_first(self):
-        # GFF3 permits Parent=a,b for a feature shared by two transcripts.
-        # The table's tree is single-parent, so the first wins; the raw
-        # attribute column still carries both.
-        line = "chr1\t.\texon\t10\t20\t.\t+\t.\tID=e1;Parent=t1,t2"
-        assert parse_gff_line(line).parent == "t1"
 
     def test_score_parsed_when_numeric(self):
         line = "chr1\t.\tgene\t1\t9\t42.5\t+\t.\tID=g1"
@@ -124,7 +117,7 @@ class TestGtfLine:
         )
         f = parse_gtf_line(line)
         assert f.feature_id == "ENST01"
-        assert f.parent == "ENSG01"
+        assert f.parents == ("ENSG01",)
 
     def test_exon_parent_is_its_transcript(self):
         line = (
@@ -132,20 +125,28 @@ class TestGtfLine:
             'gene_id "ENSG01"; transcript_id "ENST01"; exon_number "1";'
         )
         f = parse_gtf_line(line)
-        assert f.parent == "ENST01"
+        assert f.parents == ("ENST01",)
 
     def test_gene_row_is_top_level(self):
         line = 'chr1\tENSEMBL\tgene\t1000\t2000\t.\t+\t.\tgene_id "ENSG01";'
         f = parse_gtf_line(line)
         assert f.feature_id == "ENSG01"
-        assert f.parent is None
+        assert f.parents == ()
 
     def test_cds_without_transcript_id_falls_back_to_gene(self):
         # Some GTFs omit transcript_id on CDS rows. Attaching to the gene
         # keeps the row in the tree rather than orphaning it at top level,
         # where it would inflate the parent count.
         line = 'chr1\tX\tCDS\t1000\t1100\t.\t+\t0\tgene_id "ENSG01";'
-        assert parse_gtf_line(line).parent == "ENSG01"
+        assert parse_gtf_line(line).parents == ("ENSG01",)
+
+    def test_gtf_transcript_parent_is_its_gene(self):
+        line = 'chr1\t.\ttranscript\t100\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t1";'
+        assert parse_gtf_line(line).parents == ("g1",)
+
+    def test_gtf_exon_falls_back_to_gene_without_transcript_id(self):
+        line = 'chr1\t.\texon\t100\t200\t.\t+\t.\tgene_id "g1";'
+        assert parse_gtf_line(line).parents == ("g1",)
 
     def test_sibling_exons_do_not_collide_on_feature_id(self):
         # children_of(parent_id) is a string-equality lookup on feature_id,
@@ -161,9 +162,9 @@ class TestGtfLine:
             'chr1\tX\texon\t1200\t1300\t.\t+\t.\t'
             'gene_id "ENSG01"; transcript_id "ENST01"; exon_number "2";'
         )
-        assert exon1.parent == exon2.parent == "ENST01"
-        assert exon1.feature_id != exon1.parent
-        assert exon2.feature_id != exon2.parent
+        assert exon1.parents == exon2.parents == ("ENST01",)
+        assert exon1.feature_id not in exon1.parents
+        assert exon2.feature_id not in exon2.parents
         # Neither exon usurps the transcript's own identifier.
         assert exon1.feature_id != "ENST01"
         assert exon2.feature_id != "ENST01"
@@ -184,7 +185,7 @@ class TestBedLine:
         f = parse_bed_line("chr1\t0\t100")
         assert f.contig == "chr1"
         assert f.type is None
-        assert f.parent is None
+        assert f.parents == ()
         assert f.name is None
 
     def test_converts_to_one_based_inclusive(self):
@@ -203,6 +204,9 @@ class TestBedLine:
     def test_bed_score_dot_is_none(self):
         f = parse_bed_line("chr1\t0\t100\tpeak1\t.\t+")
         assert f.score is None
+
+    def test_bed_has_no_parents(self):
+        assert parse_bed_line("chr1\t99\t200\tpeak1").parents == ()
 
     @pytest.mark.parametrize(
         "line",
