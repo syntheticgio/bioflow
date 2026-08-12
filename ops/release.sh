@@ -140,6 +140,13 @@ if [ "$LINE" = "app" ]; then
 else
   [ "$BRANCH" = "main" ] \
     || die "launcher releases are cut from main, not '$BRANCH'"
+  # The escape hatch ships a launcher fix without rebuilding images (#335).
+  # It is production-only: staging a component through alpha/beta branches
+  # when it has no images to be tested against is ceremony with no payoff.
+  case "$VERSION" in
+    *-alpha|*-beta)
+      die "a launcher-only release cannot be a pre-release -- cut it as a production version, or use 'make release' to include the launcher in a staged app release" ;;
+  esac
 fi
 
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null \
@@ -148,14 +155,12 @@ if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; the
   die "tag $TAG already exists on origin"
 fi
 
-# The current version, read from the line's own source of truth.
-if [ "$LINE" = "app" ]; then
-  CURRENT="$(tr -d '[:space:]' < VERSION)"
-else
-  CURRENT="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
-    launcher/src-tauri/Cargo.toml | head -n1)"
-fi
-[ -n "$CURRENT" ] || die "could not read the current $LINE version"
+# Both lines compare against VERSION (#335). For the launcher that enforces
+# the invariant "launcher version >= app version", which is what lets a
+# combined cut overwrite the launcher version unconditionally without ever
+# rewinding a number that has already shipped in a bundle filename.
+CURRENT="$(tr -d '[:space:]' < VERSION)"
+[ -n "$CURRENT" ] || die "could not read the current version from VERSION"
 
 # Versions compared by a normalized key: CORE + stage rank (alpha=1, beta=2,
 # production=3), so 0.3.0-alpha < 0.3.0-beta < 0.3.0 under any sort -V, not

@@ -92,6 +92,9 @@ def repo(tmp_path):
         '[package]\nversion = "0.1.0"\n'
     )
     (work / "launcher" / "package.json").write_text('{\n  "version": "0.1.0"\n}\n')
+    (work / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+        '{\n  "version": "0.1.0"\n}\n'
+    )
 
     # The script resolves its own directory, so ops/ must exist in the fake repo.
     (work / "ops" / "lib").mkdir(parents=True)
@@ -208,14 +211,17 @@ class TestSuccessfulRelease:
         subject = git(repo, "log", "-1", "--format=%s").stdout.strip()
         assert subject == "release: v0.2.0"
 
-        # The release commit touches the version declarations plus the
-        # regenerated changelog.
+        # The release commit touches every version declaration -- app and
+        # launcher alike, since #335 -- plus the regenerated changelog.
         files = set(git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split())
         assert files == {
             "VERSION",
             "backend/app/version.py",
             "backend/pyproject.toml",
             "frontend/package.json",
+            "launcher/src-tauri/Cargo.toml",
+            "launcher/package.json",
+            "launcher/src-tauri/tauri.conf.json",
             "CHANGELOG.md",
         }
 
@@ -234,17 +240,21 @@ class TestSuccessfulRelease:
         assert "v0.2.0" in remote_tags
 
     def test_launcher_line_uses_its_own_tag_prefix(self, repo):
-        r = run_release(repo, "launcher", "0.1.1")
+        r = run_release(repo, "launcher", "0.2.1")
         assert r.returncode == 0, r.stderr
 
         tags = git(repo, "tag", "-l").stdout.split()
-        assert "launcher-v0.1.1" in tags
+        assert "launcher-v0.2.1" in tags
         assert git(repo, "log", "-1", "--format=%s").stdout.strip() == (
-            "release: launcher-v0.1.1"
+            "release: launcher-v0.2.1"
         )
 
         files = set(git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split())
-        assert files == {"launcher/src-tauri/Cargo.toml", "launcher/package.json"}
+        assert files == {
+            "launcher/src-tauri/Cargo.toml",
+            "launcher/package.json",
+            "launcher/src-tauri/tauri.conf.json",
+        }
 
         # The launcher line has no stage machinery: the operator stays on
         # main, the bump commit lands on main, and no release/ branch appears
@@ -252,14 +262,64 @@ class TestSuccessfulRelease:
         assert git(repo, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() == "main"
         remote = git(repo, "ls-remote", "--heads", "origin").stdout
         assert "refs/heads/main" in remote
-        assert "refs/heads/release/0.1.1" not in remote
+        assert "refs/heads/release/0.2.1" not in remote
         local_heads = git(repo, "for-each-ref", "--format=%(refname)", "refs/heads").stdout
-        assert "refs/heads/release/0.1.1" not in local_heads
+        assert "refs/heads/release/0.2.1" not in local_heads
 
-    def test_app_release_leaves_the_launcher_version_alone(self, repo):
-        run_release(repo, "app", "0.2.0")
+    def test_app_release_bumps_the_launcher_version(self, repo):
+        """#335: one commit carries all seven declarations (CR-5)."""
+        r = run_release(repo, "app", "0.2.0")
+        assert r.returncode == 0, r.stderr
+
         cargo = (repo / "launcher" / "src-tauri" / "Cargo.toml").read_text()
-        assert 'version = "0.1.0"' in cargo
+        assert 'version = "0.2.0"' in cargo
+
+        files = set(git(repo, "show", "--name-only", "--format=", "HEAD").stdout.split())
+        assert files == {
+            "VERSION",
+            "backend/app/version.py",
+            "backend/pyproject.toml",
+            "frontend/package.json",
+            "launcher/src-tauri/Cargo.toml",
+            "launcher/package.json",
+            "launcher/src-tauri/tauri.conf.json",
+            "CHANGELOG.md",
+        }
+
+
+class TestLauncherOnlyConstraints:
+    """The escape hatch is constrained so the launcher version never sits
+    below the app's -- see the invariant in the #335 design."""
+
+    def test_refuses_a_version_at_or_below_the_app_version(self, repo):
+        # VERSION is 0.1.0 in the fixture; the launcher declares 0.1.0 too.
+        r = run_release(repo, "launcher", "0.1.0")
+        assert r.returncode != 0
+        assert "0.1.0" in (r.stdout + r.stderr)
+
+    def test_refuses_a_version_below_the_app_version(self, repo):
+        (repo / "VERSION").write_text("0.5.0\n")
+        git(repo, "commit", "-am", "bump app")
+        r = run_release(repo, "launcher", "0.4.0")
+        assert r.returncode != 0
+        assert "0.5.0" in (r.stdout + r.stderr)
+
+    def test_accepts_a_version_above_the_app_version(self, repo):
+        (repo / "VERSION").write_text("0.5.0\n")
+        git(repo, "commit", "-am", "bump app")
+        r = run_release(repo, "launcher", "0.5.1")
+        assert r.returncode == 0, r.stderr
+        assert "launcher-v0.5.1" in git(repo, "tag", "-l").stdout.split()
+
+    def test_refuses_an_alpha_suffix(self, repo):
+        r = run_release(repo, "launcher", "0.2.0-alpha")
+        assert r.returncode != 0
+        assert "pre-release" in (r.stdout + r.stderr).lower()
+
+    def test_refuses_a_beta_suffix(self, repo):
+        r = run_release(repo, "launcher", "0.2.0-beta")
+        assert r.returncode != 0
+        assert "pre-release" in (r.stdout + r.stderr).lower()
 
 
 class TestBumpFailurePartway:
