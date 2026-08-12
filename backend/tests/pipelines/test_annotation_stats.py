@@ -132,6 +132,17 @@ class TestCoverage:
         assert per["scaffold_99"]["count"] == 1
         assert per["scaffold_99"]["covered_fraction"] is None
 
+    def test_adjacent_intervals_merge_into_one_interval(self):
+        """Distinguishes 'merged into one interval' from 'covered_bases
+        happens to sum the same' -- covered_bases alone can't tell them
+        apart."""
+        acc = AnnotationAccumulator(contig_lengths={"chr1": 1000})
+        acc.add(_feature(start=1, end=100))
+        acc.add(_feature(start=101, end=200))  # adjacent, not overlapping
+        cov = acc._coverage["chr1"]
+        assert len(cov.intervals) == 1
+        assert cov.intervals[0] == [1, 200]
+
 
 class TestLengthHistogram:
     def test_bins_feature_lengths(self):
