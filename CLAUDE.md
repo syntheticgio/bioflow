@@ -270,6 +270,13 @@ Which number to bump, from `BioFlowReleaseSemantics.svg`:
 - **Patch** (`1.0.X`) -- bug fixes, typos, unexpected behaviour. 100%
   compatible, no new features.
 
+**One release covers both the app and the launcher** since
+[#335](https://github.com/syntheticgio/bioflow/issues/335). `make release
+VERSION=X.Y.Z` bumps and publishes both; the launcher rides along even when
+nothing in it changed. `make release-launcher` still exists for a launcher-only
+fix, constrained to production versions above the current `VERSION`. See
+[VERSION.md](VERSION.md).
+
 `ops/release.sh` now accepts `-alpha` and `-beta` pre-release suffixes and
 cuts onto the appropriate stage branches (`alpha/X.Y.Z` / `beta/X.Y.Z` /
 `release/X.Y.Z`). See [VERSION.md](VERSION.md) for the cut commands and stage
@@ -284,7 +291,7 @@ underneath it. Write it the way it should read in a changelog.
 Two generators, two inputs, deliberately different:
 
 - **GitHub release body** -- merged PR titles, categorized by PR label via
-  `.github/release.yml`. Assembled by `publish-images.yml`'s `release` job.
+  `.github/release.yml`. Assembled by `release.yml`'s `release` job.
 - **`CHANGELOG.md`** -- the `feat`/`fix` subjects and their bodies, generated
   from commit history by git-cliff inside `ops/release.sh` at cut time
   ([#106](https://github.com/syntheticgio/bioflow/issues/106)). The changelog

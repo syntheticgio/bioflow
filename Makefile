@@ -62,10 +62,10 @@ check-home: ## Verify BIOINFO_HOME exists and is writable on the host
 	  echo "ERROR: $$PARENT is not writable."; exit 1; fi; \
 	echo "BIOINFO_HOME parent OK: $$PARENT"
 
-release: ## Cut an app release: make release VERSION=0.2.0 (also 0.3.0-alpha, 0.3.0-beta)
+release: ## Cut a release (images + launcher): make release VERSION=0.2.0 (also -alpha, -beta)
 	@test -n "$(VERSION)" || (echo "usage: make release VERSION=0.2.0"; exit 2)
 	./ops/release.sh app $(VERSION)
 
-release-launcher: ## Cut a launcher release: make release-launcher VERSION=0.1.1
+release-launcher: ## Launcher-only release; must exceed VERSION and be a production version
 	@test -n "$(VERSION)" || (echo "usage: make release-launcher VERSION=0.1.1"; exit 2)
 	./ops/release.sh launcher $(VERSION)
