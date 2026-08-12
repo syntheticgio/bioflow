@@ -47,6 +47,11 @@ class FormatKind(StrEnum):
     # `_sniff_tabular`. A wrong-file primer-BED picker is exactly the failure
     # that mistake enabled (#48).
     FAI = "fai"
+    # GenBank flat file. Its own kind rather than TEXT because it is an
+    # annotation with a feature table -- it reaches the same Results view as
+    # GFF3 -- and because its LOCUS line states contig lengths, which no
+    # other annotation format carries.
+    GENBANK = "genbank"
     TEXT = "text"
     UNKNOWN = "unknown"
 
