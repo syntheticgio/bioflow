@@ -108,14 +108,17 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             <SummaryRow summary={f.bam_stats_summary} />
           </div>
 
+          {/* Cards in a shared row carry no .section: its margin-top would
+              offset every card after the first and break the aligned title
+              baseline. The row's gap owns the spacing. */}
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
             {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
-              <div className="section" style={{ flex: "1 1 300px" }}>
+              <div style={{ flex: "1 1 300px" }}>
                 <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
               </div>
             )}
             {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
-              <div className="section" style={{ flex: "1 1 300px" }}>
+              <div style={{ flex: "1 1 300px" }}>
                 <ContigDepthChart
                   contigs={f.bam_stats_contigs_top}
                   meanDepth={f.bam_stats_summary?.mean_depth}
@@ -126,7 +129,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             {f.bam_stats_depth_histogram &&
               f.bam_stats_depth_histogram.length > 0 &&
               f.bam_stats_depth_bucket_width != null && (
-                <div className="section" style={{ flex: "1 1 300px" }}>
+                <div style={{ flex: "1 1 300px" }}>
                   <DepthHistogramChart
                     buckets={f.bam_stats_depth_histogram}
                     bucketWidth={f.bam_stats_depth_bucket_width}
@@ -144,9 +147,11 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             />
           )}
 
+          {/* Same rule as the coverage row above: no .section on the cards,
+              so Insert size and Mapping quality sit on one baseline. */}
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
             {f.insert_size_histogram && f.insert_size_histogram.length > 0 && (
-              <div className="section" style={{ flex: "1 1 300px" }}>
+              <div style={{ flex: "1 1 300px" }}>
                 <div className="section-title">Insert size</div>
                 <Histogram
                   data={f.insert_size_histogram}
@@ -157,7 +162,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               </div>
             )}
             {f.mapq_histogram && f.mapq_histogram.length > 0 && (
-              <div className="section" style={{ flex: "1 1 300px" }}>
+              <div style={{ flex: "1 1 300px" }}>
                 <div className="section-title">
                   Mapping quality{starScale ? " (STAR scale)" : ""}
                 </div>
