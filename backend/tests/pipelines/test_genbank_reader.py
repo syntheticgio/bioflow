@@ -79,3 +79,44 @@ class TestIterRecords:
         assert len(records) == 1
         assert records[0].length == 500
         assert records[0].feature_lines == []
+
+
+class TestRealNcbiFile:
+    """Against a real NCBI record, not a hand-built one.
+
+    A fixture written by the parser's own author tends to look the way the
+    parser expects. This one was not.
+    """
+
+    def test_parses_without_error(self):
+        records = list(iter_records(FIXTURES / "ecoli_slice.gbff"))
+        assert len(records) == 1
+        assert records[0].accession.startswith("NC_000913")
+
+    def test_finds_features(self):
+        from app.pipelines.genbank_parse import iter_features
+
+        record = next(iter(iter_records(FIXTURES / "ecoli_slice.gbff")))
+        rows = list(iter_features(record.feature_lines, accession=record.accession))
+        # The first 40kb of K-12 holds dozens of genes and CDSs.
+        assert len(rows) > 20
+        assert any(r.type == "CDS" for r in rows)
+        assert any(r.name == "thrA" for r in rows)
+
+    def test_every_feature_id_is_unique(self):
+        # The property the whole parent/child scheme rests on. A collision
+        # would attach children to the wrong parent silently.
+        from app.pipelines.genbank_parse import iter_features
+
+        record = next(iter(iter_records(FIXTURES / "ecoli_slice.gbff")))
+        ids = [
+            r.feature_id
+            for r in iter_features(record.feature_lines, accession=record.accession)
+        ]
+        assert len(ids) == len(set(ids))
+
+    def test_gzipped_fixture_matches_plain(self):
+        plain = list(iter_records(FIXTURES / "two_records.gbff"))
+        gzipped = list(iter_records(FIXTURES / "two_records.gbff.gz"))
+        assert [r.accession for r in plain] == [r.accession for r in gzipped]
+        assert [r.length for r in plain] == [r.length for r in gzipped]
