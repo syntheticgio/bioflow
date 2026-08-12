@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AnnotationFeature, AnnotationGene, AnnotationStatsFacts } from "../api/types";
 import { useDebounced } from "../lib/useDebounced";
-import { Tabs } from "./Tabs";
+import { TabPanel, Tabs } from "./Tabs";
 
 const PAGE_SIZE = 100;
 
@@ -211,224 +211,227 @@ export function AnnotationFeatureTable({
         ]}
       />
 
-      {view !== "genes" && (
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            alignItems: "flex-end",
-            margin: "10px 0",
-            fontSize: 12,
-          }}
-        >
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: "var(--text-faint)" }}>Contig</span>
-            <select
-              value={contig}
-              onChange={(e) => {
-                setContig(e.target.value);
-                setLocus(null);
-                setLocusInput("");
-              }}
-            >
-              <option value="">All contigs</option>
-              {contigOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          {featureTypeOptions.length > 0 && (
+      <TabPanel id={view} idPrefix="annotation-view">
+        {view !== "genes" && (
+          <div
+            style={{
+              display: "flex",
+              gap: 12,
+              flexWrap: "wrap",
+              alignItems: "flex-end",
+              margin: "10px 0",
+              fontSize: 12,
+            }}
+          >
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ color: "var(--text-faint)" }}>Type</span>
-              <select value={featureType} onChange={(e) => setFeatureType(e.target.value)}>
-                <option value="">All</option>
-                {featureTypeOptions.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
+              <span style={{ color: "var(--text-faint)" }}>Contig</span>
+              <select
+                value={contig}
+                onChange={(e) => {
+                  setContig(e.target.value);
+                  setLocus(null);
+                  setLocusInput("");
+                }}
+              >
+                <option value="">All contigs</option>
+                {contigOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
                   </option>
                 ))}
               </select>
             </label>
-          )}
 
-          {biotypeOptions.length > 0 && (
+            {featureTypeOptions.length > 0 && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <span style={{ color: "var(--text-faint)" }}>Type</span>
+                <select value={featureType} onChange={(e) => setFeatureType(e.target.value)}>
+                  <option value="">All</option>
+                  {featureTypeOptions.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            {biotypeOptions.length > 0 && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <span style={{ color: "var(--text-faint)" }}>Biotype</span>
+                <select value={biotype} onChange={(e) => setBiotype(e.target.value)}>
+                  <option value="">All</option>
+                  {biotypeOptions.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ color: "var(--text-faint)" }}>Biotype</span>
-              <select value={biotype} onChange={(e) => setBiotype(e.target.value)}>
+              <span style={{ color: "var(--text-faint)" }}>Strand</span>
+              <select value={strand} onChange={(e) => setStrand(e.target.value)}>
                 <option value="">All</option>
-                {biotypeOptions.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
+                <option value="+">Forward (+)</option>
+                <option value="-">Reverse (−)</option>
               </select>
             </label>
-          )}
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: "var(--text-faint)" }}>Strand</span>
-            <select value={strand} onChange={(e) => setStrand(e.target.value)}>
-              <option value="">All</option>
-              <option value="+">Forward (+)</option>
-              <option value="-">Reverse (−)</option>
-            </select>
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: "var(--text-faint)" }}>Name</span>
-            <input
-              type="search"
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              placeholder="search"
-              style={{ width: 120 }}
-            />
-          </label>
-
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ color: "var(--text-faint)" }}>Locus</span>
-            <input
-              type="text"
-              value={locusInput}
-              onChange={(e) => setLocusInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyLocus();
-              }}
-              onBlur={applyLocus}
-              placeholder="chr1:1,000-2,000"
-              style={{ width: 160 }}
-            />
-          </label>
-
-          {locus && (
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: "1px 8px", fontSize: 11 }}
-              onClick={clearLocus}
-            >
-              Clear locus
-            </button>
-          )}
-        </div>
-      )}
-
-      {view !== "genes" && featureType && (
-        <div style={{ color: "var(--text-faint)", fontSize: 11, marginBottom: 6 }}>
-          Showing every {featureType} feature, including those nested under a parent.
-        </div>
-      )}
-
-      {isGenesView && genesQuery.data?.mode === "fallback" && (
-        <div style={{ color: "var(--warn)", fontSize: 11, marginBottom: 6 }}>
-          No gene records in this file; showing top-level features.
-        </div>
-      )}
-
-      {isLoading && !data ? (
-        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Loading…</div>
-      ) : rowCount === 0 ? (
-        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
-          {isGenesView ? "No genes found." : "No features match these filters."}
-        </div>
-      ) : isGenesView ? (
-        <table className="trim-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Contig</th>
-              <th style={{ textAlign: "right" }}>Start</th>
-              <th style={{ textAlign: "right" }}>End</th>
-              <th style={{ textAlign: "right" }}>Span</th>
-              <th style={{ textAlign: "right" }}>Children</th>
-              <th style={{ textAlign: "right" }}>Descendants</th>
-              <th>Strand</th>
-              <th>Biotype</th>
-            </tr>
-          </thead>
-          <tbody>
-            {geneRows.map((gene, i) => (
-              <GeneRow
-                key={gene.feature_id ?? `${gene.contig}:${gene.start}:${gene.end}:${i}`}
-                gene={gene}
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ color: "var(--text-faint)" }}>Name</span>
+              <input
+                type="search"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="search"
+                style={{ width: 120 }}
               />
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <table className="trim-table">
-          <thead>
-            <tr>
-              <th />
-              <th>Name</th>
-              <th>Type</th>
-              <th>Contig</th>
-              <th style={{ textAlign: "right" }}>Start</th>
-              <th style={{ textAlign: "right" }}>End</th>
-              <th style={{ textAlign: "right" }}>Length</th>
-              <th>Strand</th>
-              <th>Biotype</th>
-            </tr>
-          </thead>
-          <tbody>
-            {featureRows.map((row, i) => (
-              <FeatureRow
-                key={row.feature_id ?? `${row.contig}:${row.start}:${row.end}:${i}`}
-                objectId={objectId}
-                row={row}
-                expandedIds={expanded}
-                onToggle={toggleExpanded}
-                depth={0}
-              />
-            ))}
-          </tbody>
-        </table>
-      )}
+            </label>
 
-      {rowCount > 0 && (
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginTop: 8,
-            fontSize: 11,
-            color: "var(--text-faint)",
-          }}
-        >
-          <span>
-            {total != null
-              ? `${total.toLocaleString()} ${isGenesView ? "gene" : "feature"}${total === 1 ? "" : "s"}`
-              : `Showing ${rowCount}`}
-          </span>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: "1px 8px", fontSize: 11 }}
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-            >
-              Prev
-            </button>
-            <span>Page {page + 1}</span>
-            <button
-              type="button"
-              className="btn"
-              style={{ padding: "1px 8px", fontSize: 11 }}
-              onClick={() => setPage((p) => p + 1)}
-              disabled={!hasNext}
-            >
-              Next
-            </button>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ color: "var(--text-faint)" }}>Locus</span>
+              <input
+                type="text"
+                value={locusInput}
+                onChange={(e) => setLocusInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applyLocus();
+                }}
+                onBlur={applyLocus}
+                placeholder="chr1:1,000-2,000"
+                style={{ width: 160 }}
+              />
+            </label>
+
+            {locus && (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "1px 8px", fontSize: 11 }}
+                onClick={clearLocus}
+              >
+                Clear locus
+              </button>
+            )}
           </div>
-        </div>
-      )}
+        )}
+
+        {view !== "genes" && featureType && (
+          <div style={{ color: "var(--text-faint)", fontSize: 11, marginBottom: 6 }}>
+            Showing every {featureType} feature, including those nested under a parent.
+          </div>
+        )}
+
+        {isGenesView && genesQuery.data?.mode === "fallback" && (
+          <div style={{ color: "var(--warn)", fontSize: 11, marginBottom: 6 }}>
+            No gene records in this file; showing top-level features.
+          </div>
+        )}
+
+        {isLoading && !data ? (
+          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Loading…</div>
+        ) : rowCount === 0 ? (
+          <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+            {isGenesView ? "No genes found." : "No features match these filters."}
+          </div>
+        ) : isGenesView ? (
+          <table className="trim-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Contig</th>
+                <th style={{ textAlign: "right" }}>Start</th>
+                <th style={{ textAlign: "right" }}>End</th>
+                <th style={{ textAlign: "right" }}>Span</th>
+                <th style={{ textAlign: "right" }}>Children</th>
+                <th style={{ textAlign: "right" }}>Descendants</th>
+                <th>Strand</th>
+                <th>Biotype</th>
+              </tr>
+            </thead>
+            <tbody>
+              {geneRows.map((gene, i) => (
+                <GeneRow
+                  key={gene.feature_id ?? `${gene.contig}:${gene.start}:${gene.end}:${i}`}
+                  gene={gene}
+                />
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="trim-table">
+            <thead>
+              <tr>
+                <th />
+                <th>Name</th>
+                <th>Type</th>
+                <th>Contig</th>
+                <th style={{ textAlign: "right" }}>Start</th>
+                <th style={{ textAlign: "right" }}>End</th>
+                <th style={{ textAlign: "right" }}>Length</th>
+                <th>Strand</th>
+                <th>Biotype</th>
+              </tr>
+            </thead>
+            <tbody>
+              {featureRows.map((row, i) => (
+                <FeatureRow
+                  key={row.feature_id ?? `${row.contig}:${row.start}:${row.end}:${i}`}
+                  objectId={objectId}
+                  row={row}
+                  expandedIds={expanded}
+                  onToggle={toggleExpanded}
+                  depth={0}
+                  depthCap={DEPTH_CAP}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {rowCount > 0 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginTop: 8,
+              fontSize: 11,
+              color: "var(--text-faint)",
+            }}
+          >
+            <span>
+              {total != null
+                ? `${total.toLocaleString()} ${isGenesView ? "gene" : "feature"}${total === 1 ? "" : "s"}`
+                : `Showing ${rowCount}`}
+            </span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "1px 8px", fontSize: 11 }}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={page === 0}
+              >
+                Prev
+              </button>
+              <span>Page {page + 1}</span>
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "1px 8px", fontSize: 11 }}
+                onClick={() => setPage((p) => p + 1)}
+                disabled={!hasNext}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </TabPanel>
     </div>
   );
 }
@@ -464,32 +467,40 @@ function GeneRow({ gene }: { gene: AnnotationGene }) {
  *  deeper than one level (e.g. gene -> mRNA -> exon).
  *
  *  `depth` doubles as a recursion guard: once a row's own depth reaches
- *  DEPTH_CAP (mirroring the backend's cap), it renders as a leaf -- no
- *  expand chevron, no children query -- regardless of has_children. Past
- *  that point the backend itself no longer trusts the parent chain (cyclic
- *  or otherwise unresolved), so recursing further client-side would just
- *  be following data the server has already given up on. */
+ *  `depthCap`, it renders as a leaf -- no expand chevron, no children query
+ *  -- regardless of has_children. Past that point the backend itself no
+ *  longer trusts the parent chain (cyclic or otherwise unresolved), so
+ *  recursing further client-side would just be following data the server
+ *  has already given up on. `depthCap` starts at the module's own DEPTH_CAP
+ *  for the top-level rows, then each row passes its children the cap its
+ *  own children query actually echoed back (falling back to the constant
+ *  while that query hasn't resolved yet) -- so the client tracks the
+ *  server's real bound rather than hardcoding a second copy of it. */
 function FeatureRow({
   objectId,
   row,
   expandedIds,
   onToggle,
   depth,
+  depthCap,
 }: {
   objectId: string;
   row: AnnotationFeature;
   expandedIds: Set<string>;
   onToggle: (featureId: string) => void;
   depth: number;
+  depthCap: number;
 }) {
   const expanded = !!row.feature_id && expandedIds.has(row.feature_id);
-  const expandable = row.has_children && depth < DEPTH_CAP;
+  const expandable = row.has_children && depth < depthCap;
 
   const { data: childData } = useQuery({
     queryKey: ["annotationstats", "children", objectId, row.feature_id],
     queryFn: () => api.annotationChildren(objectId, row.feature_id as string),
-    enabled: expanded && !!row.feature_id && depth < DEPTH_CAP,
+    enabled: expanded && !!row.feature_id && depth < depthCap,
   });
+
+  const childDepthCap = childData?.depth_cap ?? DEPTH_CAP;
 
   const length = row.end - row.start + 1;
   const indent = 8 + depth * 16;
@@ -541,6 +552,7 @@ function FeatureRow({
             expandedIds={expandedIds}
             onToggle={onToggle}
             depth={depth + 1}
+            depthCap={childDepthCap}
           />
         ))}
     </>
