@@ -4,10 +4,17 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.models.node_provision import NodeProvisionTask
+
+# The autouse cleanup fixture below queries NodeProvisionTask after every test
+# in this module, including the pure-function ones, so beanie must be
+# initialized for all of them -- without this the teardown raises
+# CollectionWasNotInitialized and every test errors.
+pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 
 # ---- helpers ----
 
@@ -31,10 +38,16 @@ async def client(app):
         yield ac
 
 
-@pytest.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True, loop_scope="module")
 async def _clean_node_provisions():
-    """Remove any NodeProvisionTask docs after each test."""
-    yield
+    """Each test starts with no provisioning tasks.
+
+    `loop_scope="module"` must match `beanie_models`: a plain
+    `@pytest.fixture` runs on a fresh per-function loop, and the module-scoped
+    Mongo client refuses to be used from it ("Cannot use AsyncMongoClient in
+    different event loop"). Cleaning on entry rather than exit also leaves a
+    failed run's documents behind for inspection, as `beanie_models` does.
+    """
     await NodeProvisionTask.find_all().delete()
 
 
@@ -211,13 +224,16 @@ def test_rewrite_host_replaces_docker_names():
     """_rewrite_host replaces 'mongo' and 'redis' with the given host."""
     from app.api.v1.nodes import _rewrite_host
 
-    result = _rewrite_host("mongodb://mongo:27017/db", "10.0.0.1")
-    assert "10.0.0.1" in result
-    assert "mongo" not in result
+    # The *host* is replaced, not every occurrence of the name: "mongo" and
+    # "redis" survive in the scheme ("mongodb://", "redis://"), which is why
+    # this asserts on the full rewritten URL rather than `name not in result`.
+    assert _rewrite_host("mongodb://mongo:27017/db", "10.0.0.1") == "mongodb://10.0.0.1:27017/db"
+    assert _rewrite_host("redis://redis:6379/0", "10.0.0.1") == "redis://10.0.0.1:6379/0"
 
-    result = _rewrite_host("redis://redis:6379/0", "10.0.0.1")
-    assert "10.0.0.1" in result
-    assert "redis" not in result
+    # A real address already in the URL passes through untouched.
+    unchanged = "mongodb://192.168.1.5:27017/db"
+    assert _rewrite_host(unchanged, "10.0.0.1") == unchanged
+    assert _rewrite_host("", "10.0.0.1") == ""
 
 
 def test_provision_request_model_rejects_empty_creds():
