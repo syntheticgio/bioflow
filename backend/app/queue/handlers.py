@@ -962,6 +962,7 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
 # registry.load_handlers() imports only this one.
 from app.queue import (  # noqa: E402, F401
     align_handlers,
+    annotation_handlers,
     assembly_handlers,
     assembly_qc_handlers,
     chunked_align_handlers,
