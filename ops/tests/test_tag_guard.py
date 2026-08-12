@@ -26,6 +26,9 @@ def tree(tmp_path):
     (tmp_path / "launcher" / "src-tauri" / "Cargo.toml").write_text(
         '[package]\nname = "bioflow-launcher"\nversion = "0.1.1"\nedition = "2021"\n'
     )
+    (tmp_path / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+        '{\n  "version": "0.1.1"\n}\n'
+    )
     return tmp_path
 
 
@@ -72,3 +75,52 @@ class TestUnrecognisedTags:
     def test_rejects_a_tag_with_no_known_prefix(self, tree):
         r = run_guard(tree, "release-2026-08-07")
         assert r.returncode != 0
+
+
+class TestLauncherFilesAgree:
+    """TG-5. The regression test for the defect where tauri.conf.json sat at
+    0.1.0 while Cargo.toml tracked the tag: bundles were named 0.1.0 and
+    nothing failed, because the guard only ever read Cargo.toml."""
+
+    def test_rejects_a_v_tag_when_tauri_conf_was_not_bumped(self, tree):
+        (tree / "VERSION").write_text("0.5.0\n")
+        (tree / "launcher" / "src-tauri" / "Cargo.toml").write_text(
+            '[package]\nversion = "0.5.0"\n'
+        )
+        (tree / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+            '{\n  "version": "0.1.0"\n}\n'
+        )
+        r = run_guard(tree, "v0.5.0")
+        assert r.returncode != 0
+        assert "tauri.conf.json" in (r.stdout + r.stderr)
+
+    def test_accepts_a_v_tag_when_both_launcher_files_agree(self, tree):
+        (tree / "VERSION").write_text("0.5.0\n")
+        (tree / "launcher" / "src-tauri" / "Cargo.toml").write_text(
+            '[package]\nversion = "0.5.0"\n'
+        )
+        (tree / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+            '{\n  "version": "0.5.0"\n}\n'
+        )
+        r = run_guard(tree, "v0.5.0")
+        assert r.returncode == 0, r.stderr
+
+    def test_accepts_a_prerelease_where_tauri_conf_holds_the_core_version(self, tree):
+        """CR-4 makes this the correct state, not a mismatch."""
+        (tree / "VERSION").write_text("0.5.0-alpha\n")
+        (tree / "launcher" / "src-tauri" / "Cargo.toml").write_text(
+            '[package]\nversion = "0.5.0-alpha"\n'
+        )
+        (tree / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+            '{\n  "version": "0.5.0"\n}\n'
+        )
+        r = run_guard(tree, "v0.5.0-alpha")
+        assert r.returncode == 0, r.stderr
+
+    def test_rejects_a_launcher_tag_when_tauri_conf_disagrees(self, tree):
+        (tree / "launcher" / "src-tauri" / "tauri.conf.json").write_text(
+            '{\n  "version": "0.9.9"\n}\n'
+        )
+        r = run_guard(tree, "launcher-v0.1.1")
+        assert r.returncode != 0
+        assert "tauri.conf.json" in (r.stdout + r.stderr)

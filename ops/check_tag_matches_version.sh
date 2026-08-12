@@ -16,13 +16,29 @@ die() { echo "::error::$*"; exit 1; }
 [ $# -eq 1 ] || { echo "usage: $0 <tag>" >&2; exit 2; }
 TAG="$1"
 
+# The version the two launcher files must agree on, suffix-stripped: CR-4
+# gives tauri.conf.json the core version while Cargo.toml keeps the full one.
+core_of() {
+  local v="$1"
+  v="${v%-alpha}"
+  printf '%s\n' "${v%-beta}"
+}
+
+read_toml_version() {
+  # First `version = "..."` only: [package] is the first table, so a
+  # dependency's version further down must not be read instead.
+  sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$1" | head -n1
+}
+
+read_json_version() {
+  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | head -n1
+}
+
 case "$TAG" in
   launcher-v*)
     EXPECTED="${TAG#launcher-v}"
     SOURCE="launcher/src-tauri/Cargo.toml"
-    # First `version = "..."` only: [package] is the first table, so a
-    # dependency's version further down must not be read instead.
-    ACTUAL="$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' "$SOURCE" | head -n1)"
+    ACTUAL="$(read_toml_version "$SOURCE")"
     ;;
   v*)
     EXPECTED="${TAG#v}"
@@ -40,4 +56,23 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
   die "tag $TAG expects version $EXPECTED but $SOURCE says $ACTUAL -- the tag was probably created by hand instead of by ops/release.sh"
 fi
 
-echo "$TAG matches $SOURCE ($ACTUAL)"
+# TG-5: the two launcher declarations must agree with each other, whichever
+# tag prefix brought us here. Tauri reads tauri.conf.json in preference to
+# Cargo.toml, so a stale one there publishes mislabelled bundles while every
+# other check passes -- which is exactly what shipped as launcher-v0.2.0.
+# Prefix-independent, so it is checked separately from the tag comparison
+# above rather than folded into it.
+CARGO="launcher/src-tauri/Cargo.toml"
+TAURI_CONF="launcher/src-tauri/tauri.conf.json"
+[ -f "$TAURI_CONF" ] || die "missing $TAURI_CONF"
+
+CARGO_VERSION="$(read_toml_version "$CARGO")"
+TAURI_VERSION="$(read_json_version "$TAURI_CONF")"
+[ -n "$TAURI_VERSION" ] || die "could not read a version from $TAURI_CONF"
+
+CARGO_CORE="$(core_of "$CARGO_VERSION")"
+if [ "$CARGO_CORE" != "$TAURI_VERSION" ]; then
+  die "$TAURI_CONF says $TAURI_VERSION but $CARGO says $CARGO_VERSION (core $CARGO_CORE) -- Tauri reads tauri.conf.json, so the bundles would be named $TAURI_VERSION"
+fi
+
+echo "$TAG matches $SOURCE ($ACTUAL); launcher files agree at $TAURI_VERSION"
