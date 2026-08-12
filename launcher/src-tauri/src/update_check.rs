@@ -58,6 +58,35 @@ pub fn update_available<R: RegistryClient, L: LocalImageInspector>(
     Some(remote != local_digest)
 }
 
+/// Which tag, if any, an update check should compare against -- the single
+/// rule behind "Release tracks a moving `latest` and gets an update check;
+/// every other mode is pinned or local and does not."
+///
+/// `None` means no check is meaningful for this mode, and the caller must
+/// skip the registry call entirely rather than falling back to `"latest"`:
+///
+/// - **Developer** (`developer_repo` set): the stack runs locally-built
+///   `:local` images. There is no registry counterpart, so any comparison is
+///   against an unrelated image. Checked first, so a hand-edited `.env`
+///   carrying both lines resolves the same way `current_settings` does.
+/// - **Alpha/Beta** (a pinned stage tag): stage tags are immutable --
+///   `classify_version_options` picks the highest `X.Y.Z-alpha` published --
+///   so a digest check against the user's own pinned tag can only fire if a
+///   tag were re-published under the same name, which the release process
+///   does not do. Noticing that a *newer* stage tag exists is a different
+///   mechanism (tag-list comparison) and a separate feature; see #324.
+/// - **Release** (`latest`): the only moving target, and the only mode where
+///   a digest check answers a real question.
+pub fn checkable_tag(bioflow_tag: &str, developer_repo: Option<&str>) -> Option<String> {
+    if developer_repo.is_some() {
+        return None;
+    }
+    if bioflow_tag == "latest" {
+        return Some("latest".to_string());
+    }
+    None
+}
+
 /// The version choices the Settings dialog offers for `BIOFLOW_TAG`.
 ///
 /// `release` is always present (resolves to the `:latest` tag the published
@@ -426,5 +455,37 @@ mod tests {
             digest.as_deref().is_some_and(|d| d.starts_with("sha256:")),
             "expected a sha256 digest from a real public GHCR image, got {digest:?}"
         );
+    }
+
+    #[test]
+    fn release_is_the_only_mode_that_checks() {
+        assert_eq!(checkable_tag("latest", None), Some("latest".to_string()));
+    }
+
+    #[test]
+    fn developer_mode_never_checks() {
+        // A local :local build has no registry counterpart to compare against.
+        assert_eq!(checkable_tag("latest", Some("/home/me/bioflow")), None);
+    }
+
+    #[test]
+    fn a_pinned_alpha_never_checks() {
+        // Stage tags are immutable, so a digest check against the pinned tag
+        // would be near-permanently silent even after 0.4.0-alpha publishes.
+        assert_eq!(checkable_tag("0.3.0-alpha", None), None);
+    }
+
+    #[test]
+    fn a_pinned_beta_never_checks() {
+        assert_eq!(checkable_tag("0.4.0-beta", None), None);
+    }
+
+    #[test]
+    fn developer_mode_wins_when_env_somehow_carries_both() {
+        // .env is hand-editable (see parse_bioflow_tag's docstring), so both
+        // lines can coexist. current_settings already resolves the pair with
+        // developer taking precedence; match it rather than inventing a
+        // second answer.
+        assert_eq!(checkable_tag("0.3.0-alpha", Some("/home/me/bioflow")), None);
     }
 }
