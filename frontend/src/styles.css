@@ -1618,6 +1618,51 @@ a.btn {
   width: auto;
 }
 
+.extra-read-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+
+.extra-read-names {
+  word-break: break-all;
+}
+
+.extra-read-mate {
+  color: var(--text-faint);
+}
+
+.extra-read-remove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-faint);
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.extra-read-remove:hover {
+  color: var(--text);
+}
+
+.extra-read-add {
+  margin-top: 8px;
+}
+
+.extra-read-add select {
+  font: inherit;
+  color: var(--text);
+  width: 100%;
+}
+
 .trim-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;

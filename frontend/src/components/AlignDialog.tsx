@@ -6,6 +6,7 @@ import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
+import { isReads } from "./PairEditor";
 import { classify, estimateMb, explain } from "../lib/estimate";
 import { notify } from "../stores/messageStore";
 import type {
@@ -55,6 +56,14 @@ export function AlignDialog({
     queryFn: () => api.references(object.project_id),
   });
 
+  // The whole project's object list, so the additional-reads picker can offer
+  // every FASTQ that is not already in this launch. `references` above is a
+  // curated subset; a read file is not a reference and must come from here.
+  const { data: objects, isLoading: objectsLoading } = useQuery({
+    queryKey: ["projects", object.project_id, "objects"],
+    queryFn: () => api.listObjects(object.project_id),
+  });
+
   const { data: mate, isLoading: mateLoading } = useQuery({
     queryKey: ["pipelines", "mate", object.id],
     queryFn: () => api.detectMate(object.id),
@@ -76,6 +85,19 @@ export function AlignDialog({
   const [cardDismissed, setCardDismissed] = useState(false);
   const [targetNode, setTargetNode] = useState("");
 
+  // One additional read set: the file itself and, when the run is paired and
+  // a mate was found, the mate that rides along with it. The mate is stored
+  // next to its R1 so the pair cannot drift apart as sets are reordered.
+  interface AdditionalSetState {
+    objectId: string;
+    mateObjectId: string | null;
+  }
+  const [additionalSets, setAdditionalSets] = useState<AdditionalSetState[]>(
+    [],
+  );
+  const [addingSet, setAddingSet] = useState(false);
+  const [setError, setSetError] = useState<string | null>(null);
+
   // `selectedTool` wins over both the server default and the advanced
   // override, and does so on every render rather than via an effect that
   // seeds `overrides` once: `alignerInfo` and `needsIndex` below are derived
@@ -91,6 +113,8 @@ export function AlignDialog({
   const readGroup = { ...defaults?.read_group, ...rgOverrides } as ReadGroup;
 
   const references = refs?.references ?? [];
+  const allObjects = objects ?? [];
+
   // Prefer a file explicitly marked as a reference; otherwise the first FASTA.
   const chosenId =
     referenceId ??
@@ -100,6 +124,31 @@ export function AlignDialog({
   const chosen = references.find((r) => r.object_id === chosenId) ?? null;
 
   const usePair = paired && mate != null;
+
+  // Every file already spoken for in this launch: the primary, its mate when
+  // the run is paired, and each set's members. The picker must not offer any
+  // of them, and an auto-resolved mate must not collide with one.
+  const usedIds = new Set<string>([
+    object.id,
+    ...(usePair && mate ? [mate.object_id] : []),
+    ...additionalSets.flatMap((s) => [
+      s.objectId,
+      ...(s.mateObjectId ? [s.mateObjectId] : []),
+    ]),
+  ]);
+  const namesById = new Map(allObjects.map((o) => [o.id, o.name]));
+  const eligible = allObjects.filter(
+    (o) =>
+      o.format.kind === "fastq" &&
+      o.status === "ready" &&
+      isReads(o) &&
+      !usedIds.has(o.id),
+  );
+  // A paired run needs every set to have a mate; the backend refuses a
+  // mateless set at launch. Surfaced here so the Launch button is not what
+  // reveals it.
+  const matelessSets = additionalSets.filter((s) => s.mateObjectId == null);
+  const setPairingBlocked = usePair && matelessSets.length > 0;
   const aligner = params?.aligner;
   const alignerInfo = defaults?.aligners.find((a) => a.name === aligner);
 
@@ -180,6 +229,44 @@ export function AlignDialog({
     if (band !== "block") setCardDismissed(false);
   }, [band]);
 
+  // A single-end run must not send mates: the backend rejects a set that
+  // declares a mate in a single-end alignment. Stripping them on the toggle
+  // keeps the state honest with the run's mode.
+  useEffect(() => {
+    if (!usePair) {
+      setAdditionalSets((sets) =>
+        sets.map((s) =>
+          s.mateObjectId == null ? s : { ...s, mateObjectId: null },
+        ),
+      );
+    }
+  }, [usePair]);
+
+  // The other direction of the same rule: a set added while the run was
+  // single-end has no mate, and turning pairing on makes it invalid. Try to
+  // resolve one now, exactly as adding it under a paired run would have. The
+  // functional update guards against racing the user removing or replacing
+  // the set mid-resolve, and the backend is still authoritative at launch.
+  useEffect(() => {
+    if (!usePair) return;
+    for (const s of additionalSets) {
+      if (s.mateObjectId != null) continue;
+      api
+        .detectMate(s.objectId)
+        .then((suggested) => {
+          if (!suggested) return;
+          setAdditionalSets((cur) =>
+            cur.map((x) =>
+              x.objectId === s.objectId && x.mateObjectId == null
+                ? { ...x, mateObjectId: suggested.object_id }
+                : x,
+            ),
+          );
+        })
+        .catch(() => undefined);
+    }
+  }, [usePair]);
+
   // The banner below tells the user to change threads/sort_memory_mb, both of
   // which live in the "performance" disclosure -- so once the resource band
   // is anything but "ok", that disclosure must be visible or the fix it's
@@ -198,6 +285,10 @@ export function AlignDialog({
         reference_id: chosenId!,
         mate_object_id: usePair ? mate!.object_id : null,
         paired: usePair,
+        additional_read_sets: additionalSets.map((s) => ({
+          object_id: s.objectId,
+          mate_object_id: s.mateObjectId,
+        })),
         read_group: readGroup,
         // `overrides` alone omits `selectedTool` -- that's merged into the
         // *display* `params` above (line ~75) but never written back into
@@ -225,6 +316,10 @@ export function AlignDialog({
         reference_id: chosenId!,
         mate_object_id: usePair ? mate!.object_id : null,
         paired: usePair,
+        additional_read_sets: additionalSets.map((s) => ({
+          object_id: s.objectId,
+          mate_object_id: s.mateObjectId,
+        })),
         read_group: readGroup,
         params: { ...params, chunked },
         resource_override: true,
@@ -244,6 +339,47 @@ export function AlignDialog({
   const setRg = <K extends keyof ReadGroup>(key: K, value: ReadGroup[K]) =>
     setRgOverrides((o) => ({ ...o, [key]: value }));
 
+  const removeSet = (index: number) =>
+    setAdditionalSets((sets) => sets.filter((_, i) => i !== index));
+
+  const addSet = async (objectId: string) => {
+    if (!objectId || addingSet) return;
+    setSetError(null);
+    setAddingSet(true);
+    try {
+      if (usedIds.has(objectId)) {
+        setSetError("That file is already in this launch.");
+        return;
+      }
+      // Resolve the set's mate up front, like the primary's is resolved, so
+      // the chip shows the pair together. The backend re-suggests and
+      // re-validates authoritatively at launch; this is for display and for
+      // refusing the obvious no-mate-in-a-paired-run mistake early.
+      const suggested = usePair ? await api.detectMate(objectId) : null;
+      const mateId = suggested?.object_id ?? null;
+      if (usePair && mateId == null) {
+        setSetError(
+          `${namesById.get(objectId) ?? objectId} has no detected mate, and ` +
+            "this alignment is paired. Uncheck the mate pairing or pair the " +
+            "files first.",
+        );
+        return;
+      }
+      if (mateId && usedIds.has(mateId)) {
+        setSetError(
+          `${namesById.get(mateId) ?? mateId} is already used in this launch.`,
+        );
+        return;
+      }
+      setAdditionalSets((sets) => [...sets, { objectId, mateObjectId: mateId }]);
+    } catch {
+      setSetError("Could not look up a mate for that file.");
+    } finally {
+      setAddingSet(false);
+    }
+  };
+
+
   const rgComplete =
     // Platform is deliberately not required: the SAM spec says to omit @RG PL
     // when the technology is unknown, so a file whose instrument model is not
@@ -256,7 +392,8 @@ export function AlignDialog({
     chosenId != null &&
     rgComplete &&
     alignerInfo?.available === true &&
-    band !== "block";
+    band !== "block" &&
+    !setPairingBlocked;
 
   return (
     <ModalBackdrop onClick={onClose}>
@@ -298,6 +435,63 @@ export function AlignDialog({
               No paired mate found — aligning as single-end.
             </div>
           )}
+
+          {additionalSets.map((s, i) => {
+            const r1Name = namesById.get(s.objectId) ?? s.objectId;
+            const mateName = s.mateObjectId
+              ? namesById.get(s.mateObjectId) ?? s.mateObjectId
+              : null;
+            return (
+              <div className="extra-read-row" key={s.objectId}>
+                <span className="extra-read-names">
+                  {r1Name}
+                  {mateName && (
+                    <span className="extra-read-mate"> + {mateName}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="extra-read-remove"
+                  onClick={() => removeSet(i)}
+                  aria-label={`Remove ${r1Name}`}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+
+          {setPairingBlocked && matelessSets[0] && (
+            <div className="error-box" style={{ marginTop: 8 }}>
+              {namesById.get(matelessSets[0].objectId) ?? matelessSets[0].objectId}{" "}
+              has no mate, and this alignment is paired. Remove it or pair the
+              files first.
+            </div>
+          )}
+
+          <div className="extra-read-add">
+            {objectsLoading ? (
+              <div className="trim-mate-note">Looking for other read files…</div>
+            ) : (
+              <select
+                value=""
+                disabled={addingSet}
+                onChange={(e) => void addSet(e.target.value)}
+              >
+                <option value="">Add another read file…</option>
+                {eligible.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {setError && (
+              <div className="error-box" style={{ marginTop: 8 }}>
+                {setError}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="trim-fields">
