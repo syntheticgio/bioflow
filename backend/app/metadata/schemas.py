@@ -144,8 +144,17 @@ COMMON_FIELDS: tuple[FieldDef, ...] = (
         "library_source",
         "Library source",
         type=FieldType.ENUM,
-        options=("Genomic", "Transcriptomic", "Metagenomic",
-                 "Metatranscriptomic", "Synthetic", "Viral RNA", "Other"),
+        # SRA's vocabulary includes OTHER, dropped here on purpose: the field
+        # is open, so a value outside this list is typed in as itself rather
+        # than flattened to a sentinel that records nothing.
+        options=(
+            "Genomic",
+            "Transcriptomic",
+            "Metagenomic",
+            "Metatranscriptomic",
+            "Synthetic",
+            "Viral RNA",
+        ),
         group="Experiment",
         open_vocabulary=True,
         help="SRA's own library source classification, where available.",

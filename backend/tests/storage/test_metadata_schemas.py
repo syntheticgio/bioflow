@@ -26,9 +26,12 @@ class TestFieldResolution:
     def test_library_source_is_open_vocabulary(self):
         field = next(f for f in schemas.COMMON_FIELDS if f.key == "library_source")
         assert field.type == FieldType.ENUM
+        # No "Other": the field is open, so an unlisted source is stored as
+        # itself rather than flattened to a sentinel. Enforced for every open
+        # field by test_schemas_open_vocabulary.TestOtherSentinelIsGone.
         assert field.options == (
             "Genomic", "Transcriptomic", "Metagenomic",
-            "Metatranscriptomic", "Synthetic", "Viral RNA", "Other",
+            "Metatranscriptomic", "Synthetic", "Viral RNA",
         )
         assert field.open_vocabulary is True
 
