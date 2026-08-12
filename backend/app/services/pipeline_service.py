@@ -2588,11 +2588,21 @@ async def resolve_annotation_reference(ann) -> AnnotationReference:
 
     Tier 1 is explicit provenance. Tier 2 matches `ncbi_assembly_accession`,
     the fact NCBI lookups write on both the genome and the annotation
-    downloaded with it -- the same match `resolve_annotation_inputs` makes
-    for the consequence-annotation card, and for the same reason.
+    downloaded with it.
 
     Accessions compare by exact string equality: GCF_000001405.39 and .40 are
     different assemblies, and a GCA counterpart is a different record.
+
+    Tier 2 requires `ObjectRole.REFERENCE`, not just `FormatKind.FASTA`. An
+    NCBI genome download brings `protein.faa` and `cds_from_genomic.fna`
+    alongside the genome FASTA, and all three carry the same accession --
+    verified against this machine's real database, where filtering on format
+    alone resolved 3 of 5 real annotations to `protein.faa` instead of the
+    genome, because `list_objects`'s newest-first order has no reason to
+    prefer one FASTA role over another. This is the same class of bug
+    CLAUDE.md documents for `suggestion_service.py` counting `protein.faa`
+    as an alignable reference -- and it was invisible to every unit test here
+    because no fixture provided more than one same-accession FASTA candidate.
     """
     reference = await _reference_for_annotation(ann)
     if reference is not None:
@@ -2605,6 +2615,8 @@ async def resolve_annotation_reference(ann) -> AnnotationReference:
         )
         for obj in candidates:
             if obj.format.kind is not FormatKind.FASTA:
+                continue
+            if obj.role is not ObjectRole.REFERENCE:
                 continue
             if obj.facts.get("ncbi_assembly_accession") == accession:
                 return AnnotationReference(reference=obj)

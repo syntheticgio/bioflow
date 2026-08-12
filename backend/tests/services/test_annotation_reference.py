@@ -105,6 +105,25 @@ class TestAccessionTier:
         assert got.reference is genome
         assert got.reason is None
 
+    async def test_ignores_a_protein_fasta_with_the_same_accession(self, objects, project):
+        # An NCBI genome download brings protein.faa and
+        # cds_from_genomic.fna alongside the genome FASTA, and all three
+        # carry the same accession. Filtering on FormatKind.FASTA alone
+        # resolved 3 of 5 real annotations to protein.faa on this machine's
+        # database -- list_objects's newest-first order has no reason to
+        # prefer the genome. Listed first here so a role check regression
+        # cannot pass by accident of iteration order.
+        protein = _Obj("prot", kind=FormatKind.FASTA, role=ObjectRole.PROTEIN,
+                       facts={"ncbi_assembly_accession": "GCF_9.1"})
+        genome = _Obj("gen", role=ObjectRole.REFERENCE,
+                      facts={"ncbi_assembly_accession": "GCF_9.1"})
+        project.extend([protein, genome])
+        ann = _Obj("ann", kind=FormatKind.GFF,
+                   facts={"ncbi_assembly_accession": "GCF_9.1"})
+
+        got = await pipeline_service.resolve_annotation_reference(ann)
+        assert got.reference is genome
+
     async def test_version_suffixes_do_not_match(self, objects, project):
         # .39 and .40 are different assemblies with different coordinates.
         project.append(_Obj("gen", role=ObjectRole.REFERENCE,
