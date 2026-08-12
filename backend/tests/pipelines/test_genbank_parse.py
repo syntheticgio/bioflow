@@ -4,7 +4,7 @@ Kept free of I/O so every case is a plain function call: this is where the
 format edge cases live, and they are the part most likely to be wrong.
 """
 
-from app.pipelines.genbank_parse import Location, parse_location, parse_qualifiers
+from app.pipelines.genbank_parse import Location, iter_features, parse_location, parse_qualifiers
 
 
 class TestSimpleLocations:
@@ -136,3 +136,80 @@ class TestQualifiers:
         # A line that is not a qualifier is skipped, not raised -- the same
         # posture parse_gff_attributes documents.
         assert parse_qualifiers(["junk", '/gene="thrA"']) == {"gene": "thrA"}
+
+
+FEATURE_LINES = [
+    "     gene            337..2799",
+    '                     /gene="thrA"',
+    '                     /locus_tag="b0002"',
+    "     CDS             join(complement(337..600),700..2799)",
+    '                     /gene="thrA"',
+    '                     /product="aspartokinase"',
+]
+
+
+class TestIterFeatures:
+    def test_simple_feature_is_one_row(self):
+        rows = list(iter_features(FEATURE_LINES[:3], accession="NC_1"))
+        assert len(rows) == 1
+        row = rows[0]
+        assert row.contig == "NC_1"
+        assert (row.start, row.end) == (337, 2799)
+        assert row.type == "gene"
+        assert row.name == "thrA"
+        assert row.parent is None
+        assert row.feature_id == "gb:NC_1:0"
+
+    def test_join_emits_parent_then_segments(self):
+        rows = list(iter_features(FEATURE_LINES[3:], accession="NC_1"))
+        assert len(rows) == 3
+
+        parent, seg1, seg2 = rows
+        # The parent spans the outer bounds, honestly -- the children below
+        # state the real extent, the same way a GFF3 gene spans its introns.
+        assert (parent.start, parent.end) == (337, 2799)
+        assert parent.type == "CDS"
+        assert parent.parent is None
+        assert parent.feature_id == "gb:NC_1:0"
+
+        assert (seg1.start, seg1.end) == (337, 600)
+        assert (seg2.start, seg2.end) == (700, 2799)
+        assert seg1.type == "CDS_segment"
+        assert seg1.parent == "gb:NC_1:0"
+        assert seg2.parent == "gb:NC_1:0"
+        assert seg1.feature_id == "gb:NC_1:0:seg1"
+        assert seg2.feature_id == "gb:NC_1:0:seg2"
+
+    def test_strand_from_complement(self):
+        rows = list(iter_features(FEATURE_LINES[3:], accession="NC_1"))
+        assert all(r.strand == "-" for r in rows)
+
+    def test_ids_are_unique_across_features(self):
+        rows = list(iter_features(FEATURE_LINES, accession="NC_1"))
+        ids = [r.feature_id for r in rows]
+        assert len(ids) == len(set(ids))
+
+    def test_name_falls_back_through_qualifiers(self):
+        # /gene wins; then /locus_tag; then /product.
+        lines = ["     CDS             1..9", '                     /locus_tag="b1"']
+        assert list(iter_features(lines, accession="X"))[0].name == "b1"
+
+        lines = ["     CDS             1..9", '                     /product="widget"']
+        assert list(iter_features(lines, accession="X"))[0].name == "widget"
+
+    def test_attributes_preserve_every_qualifier(self):
+        # The issue's constraint: a qualifier nothing promotes to a column
+        # must still survive. /product is not a column, so it has to be here.
+        row = list(iter_features(FEATURE_LINES[3:], accession="NC_1"))[0]
+        assert "product=aspartokinase" in row.attributes
+        assert "gene=thrA" in row.attributes
+
+    def test_score_is_always_none(self):
+        # GenBank has no score column. None, not 0.0 -- the reasoning
+        # annotation_parse._score documents.
+        row = list(iter_features(FEATURE_LINES[:3], accession="NC_1"))[0]
+        assert row.score is None
+
+    def test_malformed_location_is_skipped(self):
+        lines = ["     CDS             not-a-location", '                     /gene="x"']
+        assert list(iter_features(lines, accession="X")) == []
