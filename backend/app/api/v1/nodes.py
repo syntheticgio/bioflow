@@ -94,6 +94,13 @@ async def enumerate_nodes() -> dict[str, dict]:
                 "updatable": doc.ssh_key_enc is not None,
             }
     except Exception:
+        # Any error here -- including an AttributeError from a Node field this
+        # loop reads but a caller's mock/fixture doesn't have -- discards all
+        # mongo_nodes accumulated so far for this call, not just the doc that
+        # triggered it, and logs no doc id or traceback. This already happened
+        # once: a stale test fixture silently emptied mongo_nodes in two
+        # pre-existing tests. Don't widen this catch or add a field read here
+        # without checking every caller's mocks/fixtures first.
         log.warning("node_mongo_read_failed")
 
     try:
