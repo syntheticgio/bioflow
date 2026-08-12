@@ -33,5 +33,21 @@ class Node(Document):
     registered_at: datetime = Field(default_factory=utcnow)
     status: str = "active"  # "active" | "revoked"
 
+    # How to reach this node over SSH for updates. Null on nodes that
+    # enrolled themselves rather than being provisioned from the UI --
+    # those report a version but cannot be updated from here.
+    ssh_host: str | None = None
+    ssh_port: int = 22
+    ssh_username: str | None = None
+    ssh_key_enc: bytes | None = None  # Fernet; the managed key's private half
+    ssh_key_installed_at: datetime | None = None
+
+    # What this node is running, from the worker heartbeat. Persisted here
+    # rather than only in Redis because Redis entries expire with the worker,
+    # and an offline node's last-known version is exactly what someone
+    # deciding whether to bring it up wants to see.
+    image_digest: str | None = None
+    version: str | None = None
+
     class Settings:
         name = "nodes"
