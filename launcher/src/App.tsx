@@ -7,6 +7,7 @@ import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
 import { NodeScreen } from "./NodeScreen";
 import type { LauncherState, OtherStack, Settings as SettingsValues } from "./types";
+import { shouldPollForUpdates, updateAffordance } from "./update-logic";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
 // The manifest check is a network call (bounded by GhcrClient's own
@@ -116,8 +117,12 @@ export function App() {
     };
   }, [state.kind]);
 
+  // Only Release mode has a moving target to poll for. Developer builds and
+  // pinned alpha/beta stages skip the interval entirely -- the backend
+  // already returns false for them without a network call, so this is about
+  // not making a pointless IPC round-trip every five minutes.
   useEffect(() => {
-    if (state.kind !== "Running") {
+    if (state.kind !== "Running" || !shouldPollForUpdates(settings.bioflowTag, settings.developerRepo)) {
       setUpdateAvailable(false);
       return;
     }
@@ -132,7 +137,7 @@ export function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [state.kind]);
+  }, [state.kind, settings.bioflowTag, settings.developerRepo]);
 
   async function handleRun() {
     setBusy(true);
@@ -354,11 +359,36 @@ export function App() {
                 <button className="btn btn-secondary" onClick={handleStop} disabled={busy}>
                   {busy ? "Stopping…" : "Stop"}
                 </button>
-                {updateAvailable && (
-                  <button className="btn btn-warn" onClick={handleUpdate} disabled={busy}>
-                    {busy ? "Updating…" : "Update available"}
-                  </button>
-                )}
+                {(() => {
+                  const affordance = updateAffordance({
+                    bioflowTag: settings.bioflowTag,
+                    developerRepo: settings.developerRepo,
+                    updateAvailable,
+                  });
+                  if (affordance.kind === "hidden") return null;
+                  if (affordance.kind === "available") {
+                    return (
+                      <button className="btn btn-warn" onClick={handleUpdate} disabled={busy}>
+                        {busy ? "Updating…" : "Update available"}
+                      </button>
+                    );
+                  }
+                  // Suppressed: disabled rather than absent, following the
+                  // same "explain why this control is inert" treatment
+                  // Settings.tsx gives storage location and port while
+                  // running. A control that vanishes silently leaves a user
+                  // who forgot their mode with no explanation.
+                  return (
+                    <span className="update-suppressed">
+                      <button className="btn btn-secondary" disabled>
+                        Update
+                      </button>
+                      <span className="field-hint" role="note">
+                        {affordance.reason}
+                      </span>
+                    </span>
+                  );
+                })()}
               </div>
             </div>
             <div className="sidebar">
