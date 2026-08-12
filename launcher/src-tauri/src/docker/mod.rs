@@ -102,7 +102,8 @@ pub trait DockerBackend {
 
     /// Finds the working directory of a running Compose project by name,
     /// regardless of where it lives on disk. `None` if no project with
-    /// that name is currently running.
+    /// that name is currently running, or if the one that is turns out to
+    /// be a git worktree (see below).
     ///
     /// Exists for the debug/dev case: a `biopipe` stack started by hand
     /// with plain `docker compose up` from a repo checkout (this repo's
@@ -115,5 +116,14 @@ pub trait DockerBackend {
     /// exists for) but are not expected to necessarily work correctly
     /// against an install the launcher did not create; this method only
     /// grants Run/Stop/status recognition, which is the actual ask.
+    ///
+    /// A **git worktree is never returned**, however (#319). The tolerance
+    /// above is for a main checkout, where the launcher's own Settings and
+    /// migration code at least has an `.env` to read. A worktree has none
+    /// -- `.env` is gitignored, which is why `ops/worktree-up.sh` passes
+    /// `--env-file <main checkout>/.env` -- so adopting one points those
+    /// code paths at a directory that is not an install at all. Rejecting
+    /// it reports NotInstalled, which is this method's existing answer when
+    /// discovery finds nothing.
     fn discover_running_project_dir(&self, project_name: &str) -> Option<String>;
 }
