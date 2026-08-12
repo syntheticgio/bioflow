@@ -456,7 +456,7 @@ async def count_by_kind(project_id: PydanticObjectId, *, owner: str) -> dict[str
         {"$group": {"_id": "$format.kind", "count": {"$sum": 1}}},
     ]
     result: dict[str, int] = {}
-    async for row in db.objects.aggregate(pipeline):
+    async for row in await db.objects.aggregate(pipeline):
         kind = row["_id"]
         if kind:
             result[kind] = row["count"]

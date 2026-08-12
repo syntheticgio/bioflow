@@ -64,15 +64,20 @@ class AgentAskResponse(BaseModel):
     status: str
 
 
-def _build_project_context(project) -> str:
+async def _build_project_context(project) -> str:
     """Generate a compact summary of the project for the agent's context.
 
     Called once per process spawn (lazy, on first /ask). The summary is injected
     into the system prompt so the agent can answer the first question without
     burning a tool call on discovery.
+
+    Async because both services below are: called synchronously they return
+    coroutines that are never awaited, and the first attribute access on one
+    ("'coroutine' object has no attribute 'values'") turns every /ask and
+    /restart into a 500.
     """
-    kinds = search_service.count_by_kind(project.id, owner=project.owner)
-    recent = project_service.recent_jobs(project.id, limit=5)
+    kinds = await search_service.count_by_kind(project.id, owner=project.owner)
+    recent = await project_service.recent_jobs(project.id, limit=5)
 
     lines = [
         f"Project: {project.name} (id: {project.id})",
@@ -84,7 +89,7 @@ def _build_project_context(project) -> str:
     return "\n".join(lines)
 
 
-def _system_prompt(project) -> str:
+async def _system_prompt(project) -> str:
     """Project context for the agent, set at spawn time only.
 
     The default block is infrastructure grounding -- which project this is and
@@ -105,7 +110,7 @@ def _system_prompt(project) -> str:
         "jobs. Prefer running a tool over describing what you would do, and "
         "keep answers concrete and short."
     )
-    context = _build_project_context(project)
+    context = await _build_project_context(project)
     custom = (project.agent_system_prompt or "").strip()
 
     parts = [base, f"Project snapshot:\n{context}"]
@@ -131,7 +136,7 @@ async def ask_agent(
     agent = await agent_service.get_or_create(
         profile_id,
         str(project_id),
-        system_prompt=_system_prompt(project),
+        system_prompt=await _system_prompt(project),
     )
     await agent.send_prompt(body.message)
     return AgentAskResponse(status="accepted")
@@ -215,7 +220,7 @@ async def restart_agent(
     """
     project = await project_service.get_project(project_id, owner=owner)
     await agent_service.restart_agent(
-        profile_id, str(project_id), system_prompt=_system_prompt(project)
+        profile_id, str(project_id), system_prompt=await _system_prompt(project)
     )
     return AgentAskResponse(status="restarting")
 
