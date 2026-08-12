@@ -1,6 +1,6 @@
 # CI runners
 
-`.github/workflows/publish-images.yml` builds the BioFlow container images and
+`.github/workflows/release.yml` builds the BioFlow container images and
 publishes them to GHCR. It runs entirely on **GitHub-hosted runners**.
 
 That was not always true. This repository used to be private and owned by a
