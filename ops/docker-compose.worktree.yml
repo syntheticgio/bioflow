@@ -33,12 +33,38 @@ services:
   # overrides restore the isolated, project-namespaced named volumes that
   # worktree stacks relied on before that change. See
   # docs/superpowers/specs/2026-08-07-mongo-redis-bioflow-home-design.md.
+  #
+  # A worktree stack publishes no mongo/redis host ports at all. The api/web
+  # ports above are remapped because a human opens those in a browser; nothing
+  # opens mongo or redis from the host. Every consumer reaches them by Docker
+  # DNS on the stack's own network -- MONGO_URL is `mongodb://mongo:27017`,
+  # REDIS_URL is `redis://redis:6379`, worktree-up.sh seeds through
+  # `docker exec ... | docker exec -i` rather than a host connection, and
+  # run-worktree-tests.sh joins `biopipe_default` and dials its throwaway mongo
+  # by container name.
+  #
+  # Left inherited, `${MONGO_PORT:-27017}` and `${REDIS_PORT:-6379}` are fixed
+  # values with nothing per-project about them, so *every* worktree stack tried
+  # to bind 27017 and 6379 on the host -- colliding with the main stack and with
+  # each other, and failing at `docker compose up` with "port is already
+  # allocated". That defeated the one thing this file exists to prevent, and it
+  # made worktree stacks and the main stack mutually exclusive -- which in turn
+  # broke run-worktree-tests.sh, since that script requires the main stack's
+  # biopipe-api-1 to be running. Publishing a derived free port per stack would
+  # also work, but not publishing is simpler and strictly safer: it removes host
+  # exposure rather than widening it to two more ports per worktree.
+  #
+  # To reach a worktree stack's database by hand, go through the container
+  # rather than the host:
+  #   docker exec -it <project>-mongo-1 mongosh biopipe
   mongo:
+    ports: !override []
     volumes: !override
       - mongo-data:/data/db
       - ./ops/mongo-init:/docker-entrypoint-initdb.d:ro
 
   redis:
+    ports: !override []
     volumes: !override
       - redis-data:/data
       - ./ops/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
