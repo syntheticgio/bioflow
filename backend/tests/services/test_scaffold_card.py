@@ -87,7 +87,7 @@ class TestReferenceGating:
         with _patched():
             card = build_scaffold_card(_draft(), [])
         assert card.status is CardStatus.UNAVAILABLE
-        assert "reference assembly" in card.reason
+        assert "reference genome" in card.reason
 
     def test_unavailable_with_two_candidate_references(self):
         """The ordinary case in a real project, not the edge case -- this
