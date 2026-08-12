@@ -1,0 +1,217 @@
+# The launcher bundle build, as a reusable workflow.
+#
+# Two callers since #335: release.yml builds the bundles for a combined `v*`
+# release, and release-launcher.yml builds them for a launcher-only
+# `launcher-v*` release. It was extracted rather than copied because a
+# duplicated signing-and-notarization sequence drifts the first time the
+# certificate story changes -- and that sequence is the fiddliest thing in
+# this repo's CI (see docs/macos-signing.md).
+#
+# It builds and uploads artifacts. It never creates or edits a GitHub
+# release: the caller owns that, so there is exactly one job in any run that
+# can publish.
+name: Build launcher bundles
+
+on:
+  workflow_call:
+    inputs:
+      notarize:
+        description: 'Notarize the macOS bundle (slow; needs Apple credentials)'
+        type: boolean
+        default: true
+      apple_team_id:
+        description: 'Apple Developer Team ID (a repo var at the caller)'
+        type: string
+        required: true
+    secrets:
+      CI_SIGNING_P12_BASE64:
+        required: true
+      CI_SIGNING_P12_PASSWORD:
+        required: true
+      CI_KEYCHAIN_PASSWORD:
+        required: true
+      APPLE_API_KEY_P8_BASE64:
+        required: true
+      APPLE_API_KEY_ID:
+        required: true
+      APPLE_API_ISSUER_ID:
+        required: true
+
+jobs:
+  macos:
+    name: macOS bundle (arm64)
+    # GitHub-hosted macos-latest is Apple Silicon. This runner is a fresh VM
+    # every job with no keychain already holding the Developer ID
+    # certificate -- so signing needs the standard CI pattern of shipping
+    # the cert as a base64 .p12 secret and importing it into a temporary,
+    # per-job keychain. See docs/macos-signing.md for how to export
+    # CI_SIGNING_P12_BASE64 / CI_SIGNING_P12_PASSWORD from the certificate.
+    #
+    # Notarization is secret-based (APPLE_API_KEY_P8_BASE64, decoded to a
+    # per-job temp file and removed in an `if: always()` step).
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Import the signing certificate into a temporary keychain
+        # A fresh, job-local keychain rather than the runner's login
+        # keychain: this VM is destroyed after the job, so there is no
+        # standing-state benefit to reusing the login keychain, and a
+        # dedicated keychain keeps the imported private key out of anything
+        # else running in the same job. Removed unconditionally at the end
+        # regardless of outcome -- though the VM's teardown would also
+        # discard it, doing so explicitly doesn't depend on that.
+        id: keychain
+        env:
+          CI_SIGNING_P12_BASE64: ${{ secrets.CI_SIGNING_P12_BASE64 }}
+          CI_SIGNING_P12_PASSWORD: ${{ secrets.CI_SIGNING_P12_PASSWORD }}
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keychain_path="$RUNNER_TEMP/ci-signing.keychain-db"
+          p12_path="$RUNNER_TEMP/ci-signing.p12"
+          echo "path=$keychain_path" >> "$GITHUB_OUTPUT"
+
+          echo "$CI_SIGNING_P12_BASE64" | base64 --decode > "$p12_path"
+
+          security create-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$p12_path" -k "$keychain_path" -P "$CI_SIGNING_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" \
+            $(security list-keychains -d user | sed s/\"//g)
+
+          rm -f "$p12_path"
+
+      - name: Verify the signing identity is present
+        # Fail in five seconds rather than after the full release build. The
+        # certificate expires yearly, and the failure mode when it lapses is a
+        # build that succeeds and produces an unsignable bundle.
+        env:
+          CI_KEYCHAIN_PATH: ${{ steps.keychain.outputs.path }}
+        run: |
+          set -euo pipefail
+          if ! security find-identity -v -p codesigning "$CI_KEYCHAIN_PATH" | grep -q "Developer ID Application"; then
+            echo "::error::No Developer ID Application identity in the CI signing keychain."
+            exit 1
+          fi
+          security find-identity -v -p codesigning "$CI_KEYCHAIN_PATH" | grep "Developer ID Application"
+
+      - name: Write the notarization API key
+        # RUNNER_TEMP is per-job, not shared with other concurrent jobs, and
+        # is discarded with the VM at job end -- the explicit cleanup step
+        # below is belt-and-suspenders rather than load-bearing here.
+        id: apikey
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          key_path="${RUNNER_TEMP}/AuthKey.p8"
+          echo "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$key_path"
+          chmod 600 "$key_path"
+          echo "path=$key_path" >> "$GITHUB_OUTPUT"
+
+      - name: Install frontend dependencies
+        working-directory: launcher
+        run: npm ci
+
+      - name: Build, sign, and notarize
+        working-directory: launcher
+        env:
+          APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+          # build-macos.sh notarizes via these three (Tauri's own build-time
+          # notarization step reads them directly; it does not read a
+          # notarytool keychain profile) -- see docs/macos-signing.md.
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ steps.apikey.outputs.path }}
+          # Re-unlocking here (build-macos.sh does this itself when
+          # CI_KEYCHAIN_PATH is set) because `tauri build`'s codesign call
+          # happens well after the previous step, and a keychain's unlock
+          # only lasts until its own timeout regardless of which step
+          # unlocked it.
+          CI_KEYCHAIN_PATH: ${{ steps.keychain.outputs.path }}
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.notarize == false }}" = "true" ]; then
+            ./build-macos.sh --no-notarize
+          else
+            ./build-macos.sh
+          fi
+
+      - name: Confirm the bundle is actually notarized
+        # The build script prints spctl output but does not fail on it, so the
+        # gate lives here. `codesign --verify` passing is not evidence of
+        # notarization -- a signed, un-notarized DMG passes it and is still
+        # blocked on every machine that downloads it. Nor is spctl on the
+        # .app enough on its own -- Tauri notarizes the .app but not the .dmg
+        # container by itself (see docs/macos-signing.md); build-macos.sh
+        # handles that as a second notarize+staple pass, and this check is
+        # against the .dmg specifically to confirm that pass actually ran.
+        if: ${{ inputs.notarize }}
+        working-directory: launcher
+        run: |
+          set -euo pipefail
+          dmg="$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -maxdepth 1 | head -n1)"
+          [ -n "$dmg" ] || { echo "::error::No .dmg was produced"; exit 1; }
+          if ! spctl -a -vvv -t install "$dmg" 2>&1 | tee /dev/stderr | grep -q "source=Notarized Developer ID"; then
+            echo "::error::${dmg} is not notarized -- a download of it will be blocked by Gatekeeper."
+            exit 1
+          fi
+
+      - name: Remove the decoded API key
+        if: always()
+        run: rm -f "${{ steps.apikey.outputs.path }}"
+
+      - name: Delete the temporary signing keychain
+        if: always()
+        run: security delete-keychain "${{ steps.keychain.outputs.path }}" || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: launcher-macos-arm64
+          path: launcher/src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+  linux:
+    name: Linux bundle (amd64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        # Tauri v2 needs the -dev packages, not just the runtime libraries --
+        # see launcher/README.md.
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev build-essential
+
+      - name: Install frontend dependencies
+        working-directory: launcher
+        run: npm ci
+
+      - name: Build
+        # tauri.linux.conf.json restricts targets to deb and rpm; AppImage
+        # bundling hangs on any machine with AppImageLauncher installed. That
+        # overlay is auto-merged, so no --config flag is needed here.
+        working-directory: launcher
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: launcher-linux-amd64
+          path: |
+            launcher/src-tauri/target/release/bundle/deb/*.deb
+            launcher/src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
