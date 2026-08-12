@@ -82,6 +82,19 @@ class TestGffLine:
         assert f.parents == ("gene1",)
         assert f.type == "exon"
 
+    def test_gff_multi_parent_keeps_every_parent(self):
+        # GFF3 permits Parent=a,b for a feature shared by two transcripts.
+        # Every named parent must be kept -- storage writes one row per
+        # relationship, so dropping any here would silently lose a
+        # gene/transcript link for later tasks to reconstruct.
+        line = "chr1\t.\texon\t100\t200\t.\t+\t.\tID=e1;Parent=t1,t2"
+        feature = parse_gff_line(line)
+        assert feature.parents == ("t1", "t2")
+
+    def test_gff_multi_parent_strips_whitespace(self):
+        line = "chr1\t.\texon\t100\t200\t.\t+\t.\tID=e1;Parent=t1, t2"
+        assert parse_gff_line(line).parents == ("t1", "t2")
+
     def test_score_parsed_when_numeric(self):
         line = "chr1\t.\tgene\t1\t9\t42.5\t+\t.\tID=g1"
         assert parse_gff_line(line).score == 42.5
