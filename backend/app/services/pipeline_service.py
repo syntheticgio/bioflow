@@ -2542,14 +2542,23 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
 async def _reference_for_annotation(ann) -> DataObject | None:
     """The reference this annotation describes, from its provenance.
 
-    Best-effort: an annotation with no recorded reference still computes,
-    reporting per-contig counts without coverage fractions.
+    Prefers an explicit REFERENCE role over bare FASTA format, matching
+    `reference_for_bam` below: an annotation's parents may include a protein
+    or CDS FASTA downloaded alongside the genome, and returning one of those
+    gives the track viewer a coordinate axis for the wrong sequence.
+
+    Best-effort: an annotation with no recorded reference still computes
+    #257's stats, reporting per-contig counts without coverage fractions.
     """
+    fallback: DataObject | None = None
     for parent_id in (ann.derived_from or []):
         parent = await DataObject.get(parent_id)
-        if parent is not None and parent.format.kind == FormatKind.FASTA:
+        if parent is None or parent.format.kind is not FormatKind.FASTA:
+            continue
+        if parent.role is ObjectRole.REFERENCE:
             return parent
-    return None
+        fallback = fallback or parent
+    return fallback
 
 
 def _variant_dedup_key(*, bam_id, params: dict) -> str:
