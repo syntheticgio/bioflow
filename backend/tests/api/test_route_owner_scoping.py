@@ -439,7 +439,7 @@ class TestPipelinesRouter:
                         score=None,
                         name="g1",
                         feature_id="g1",
-                        parent=None,
+                        parents=(),
                         biotype="protein_coding",
                         attributes="ID=g1",
                     )
