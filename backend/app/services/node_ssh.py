@@ -58,6 +58,12 @@ async def install_public_key(conn, public_line: str) -> None:
     for command in commands:
         result = await asyncio.wait_for(conn.run(command, check=False), timeout=15)
         if result.exit_status != 0:
+            log.warning(
+                "node_ssh_install_command_failed",
+                command=command,
+                exit_status=result.exit_status,
+                error=result.stderr or result.stdout or "no output",
+            )
             raise KeyInstallError(
                 f"Could not install the BioFlow key on this node: {command!r} "
                 f"failed ({result.stderr or result.stdout or 'no output'})."
@@ -85,6 +91,13 @@ async def verify_key(host: str, port: int, username: str, private_pem: str) -> N
             timeout=_VERIFY_TIMEOUT_SECONDS,
         )
     except (TimeoutError, asyncssh.Error, ValueError) as e:
+        log.warning(
+            "node_ssh_verify_auth_failed",
+            host=host,
+            port=port,
+            username=username,
+            error=str(e),
+        )
         raise KeyInstallError(
             "The BioFlow key was written to this node but does not "
             f"authenticate: {e}. Check that sshd allows public-key login."
@@ -93,6 +106,14 @@ async def verify_key(host: str, port: int, username: str, private_pem: str) -> N
     try:
         result = await asyncio.wait_for(conn.run("true", check=False), timeout=15)
         if result.exit_status != 0:
+            log.warning(
+                "node_ssh_verify_command_failed",
+                host=host,
+                port=port,
+                username=username,
+                exit_status=result.exit_status,
+                error=result.stderr or result.stdout or "no output",
+            )
             raise KeyInstallError("The BioFlow key authenticated but no command ran.")
     finally:
         conn.close()
