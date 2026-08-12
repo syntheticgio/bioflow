@@ -10,6 +10,9 @@ BED there is no coordinate conversion here.
 
 import re
 from dataclasses import dataclass
+from urllib.parse import quote
+
+from app.pipelines.annotation_parse import Feature
 
 # A single position (`467`) or a range (`100..200`), any bound optionally
 # fuzzy (`<1`, `>200`).
@@ -166,3 +169,133 @@ def parse_qualifiers(lines: list[str]) -> dict[str, str]:
 
     flush()
     return out
+
+
+# The feature key starts at column 6 and the location at column 22. A line
+# with content before column 6 is a section keyword, not a feature.
+_KEY_COLUMN = 5
+_LOCATION_COLUMN = 21
+
+# RNA feature types whose kind is itself the useful biotype -- GenBank has no
+# /biotype qualifier, and "tRNA" is exactly what a biotype filter wants.
+_RNA_TYPES = frozenset(
+    {"tRNA", "rRNA", "ncRNA", "mRNA", "misc_RNA", "tmRNA", "precursor_RNA"}
+)
+
+
+def _serialize(qualifiers: dict[str, str]) -> str:
+    """Qualifiers as a GFF3-style `key=value;` string.
+
+    Percent-encoded exactly as GFF3 column 9 is, so the existing detail-row
+    renderer and `parse_gff_attributes` read a GenBank feature's attributes
+    without knowing it came from GenBank. This is what preserves qualifiers
+    that no column promotes.
+    """
+    return ";".join(
+        f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in qualifiers.items()
+    )
+
+
+def iter_features(lines, *, accession: str):
+    """Every feature in one record's FEATURES block, as Feature rows.
+
+    A multi-segment location yields a parent row spanning the outer bounds
+    followed by one child row per segment, so nothing downstream ever sees a
+    single interval that covers a gap the feature does not occupy (#294).
+
+    Feature IDs are synthetic and positional. GenBank features have no
+    identifier, and /locus_tag is shared between a gene and its CDS -- using
+    it would repeat the collision `parse_gtf_line` documents.
+    """
+    index = 0
+    key: str | None = None
+    location_parts: list[str] = []
+    qualifier_lines: list[str] = []
+
+    def build():
+        nonlocal index
+        if key is None:
+            return []
+        location = parse_location("".join(location_parts))
+        if location is None:
+            # Counted as malformed by the caller; one bad location must not
+            # cost the rest of the record.
+            index += 1
+            return []
+
+        quals = parse_qualifiers(qualifier_lines)
+        feature_id = f"gb:{accession}:{index}"
+        index += 1
+
+        name = quals.get("gene") or quals.get("locus_tag") or quals.get("product")
+        biotype = key if key in _RNA_TYPES else quals.get("mol_type")
+        attributes = _serialize(quals)
+        starts = [s for s, _ in location.segments]
+        ends = [e for _, e in location.segments]
+
+        parent = Feature(
+            contig=accession,
+            start=min(starts),
+            end=max(ends),
+            type=key,
+            strand=location.strand,
+            score=None,
+            name=name,
+            feature_id=feature_id,
+            parent=None,
+            biotype=biotype,
+            attributes=attributes,
+        )
+        if len(location.segments) == 1:
+            return [parent]
+
+        rows = [parent]
+        for n, (start, end) in enumerate(location.segments, start=1):
+            rows.append(
+                Feature(
+                    contig=accession,
+                    start=start,
+                    end=end,
+                    type=f"{key}_segment",
+                    strand=location.strand,
+                    score=None,
+                    name=name,
+                    feature_id=f"{feature_id}:seg{n}",
+                    parent=feature_id,
+                    biotype=biotype,
+                    attributes=attributes,
+                )
+            )
+        return rows
+
+    for raw in lines:
+        line = raw.rstrip("\n")
+        if not line.strip():
+            continue
+        stripped = line.strip()
+
+        # A new feature key: content at column 6 that is not a qualifier.
+        if (
+            len(line) > _KEY_COLUMN
+            and line[:_KEY_COLUMN].isspace()
+            and not stripped.startswith("/")
+            and not line[_LOCATION_COLUMN:_LOCATION_COLUMN + 1].isspace()
+            and line[_KEY_COLUMN:_LOCATION_COLUMN].strip()
+        ):
+            yield from build()
+            parts = stripped.split(None, 1)
+            key = parts[0]
+            location_parts = [parts[1].strip()] if len(parts) > 1 else []
+            qualifier_lines = []
+            continue
+
+        if stripped.startswith("/"):
+            qualifier_lines.append(stripped)
+        elif qualifier_lines:
+            # Continuation of a wrapped qualifier value.
+            qualifier_lines.append(stripped)
+        elif key is not None:
+            # Continuation of a wrapped location.
+            location_parts.append(stripped)
+
+    yield from build()
