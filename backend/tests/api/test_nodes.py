@@ -182,3 +182,47 @@ class TestNodeQueueStats:
         assert orphan["online"] is False
         assert orphan["workers"] == 0
         assert orphan["enrollment"] == "unknown"
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_node_stores_ssh_and_version_fields():
+    from app.models.node import Node
+
+    node = Node(
+        node_id="n1",
+        ssh_host="10.0.0.5",
+        ssh_port=2222,
+        ssh_username="ops",
+        ssh_key_enc=b"ciphertext",
+        image_digest="sha256:abc",
+        version="0.4.0",
+    )
+    await node.insert()
+
+    loaded = await Node.find_one(Node.node_id == "n1")
+    assert loaded.ssh_host == "10.0.0.5"
+    assert loaded.ssh_port == 2222
+    assert loaded.ssh_username == "ops"
+    assert loaded.ssh_key_enc == b"ciphertext"
+    assert loaded.image_digest == "sha256:abc"
+    assert loaded.version == "0.4.0"
+    await loaded.delete()
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_node_ssh_fields_default_to_none():
+    """A hand-provisioned node has no stored key -- that is what makes it
+    non-updatable, so the null must survive a round trip."""
+    from app.models.node import Node
+
+    node = Node(node_id="n2")
+    await node.insert()
+
+    loaded = await Node.find_one(Node.node_id == "n2")
+    assert loaded.ssh_key_enc is None
+    assert loaded.ssh_host is None
+    assert loaded.ssh_port == 22
+    assert loaded.image_digest is None
+    await loaded.delete()
