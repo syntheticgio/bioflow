@@ -1,5 +1,7 @@
 """The feedback HTTP surface: submit and list."""
 
+import asyncio
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 from unittest.mock import patch
@@ -77,12 +79,23 @@ class TestWebhookNotificationResilience:
         the notification never executes and we can't assert on its side
         effects. We replace it with a synchronous stub that captures the
         coroutine so we can verify it was scheduled.
+
+        The patch is global, so it also intercepts callers that have nothing to
+        do with this endpoint: pymongo's ``network_layer`` starts a
+        ``_poll_cancellation`` task -- passing ``name=`` -- on every wire
+        operation, and this request performs several. Those must be forwarded
+        to the real ``create_task`` and genuinely scheduled; swallowing them
+        hangs the driver, and a stub that only accepts ``(coro)`` raises
+        TypeError inside pymongo before the endpoint is ever reached.
         """
         self._captured: list = []
+        real_create_task = asyncio.create_task
 
-        def _capture(coro):
-            self._captured.append(coro)
-            return None  # create_task normally returns a Task; tests don't need it
+        def _capture(coro, **kwargs):
+            if getattr(coro, "__name__", "") == "notify_feedback_created":
+                self._captured.append(coro)
+                return None  # create_task returns a Task; tests don't need it
+            return real_create_task(coro, **kwargs)
 
         monkeypatch.setattr("asyncio.create_task", _capture)
 
