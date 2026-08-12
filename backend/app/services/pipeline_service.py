@@ -2572,6 +2572,11 @@ class AnnotationReference:
     reference: DataObject | None = None
     reason: str | None = None
 
+    def __post_init__(self) -> None:
+        assert (self.reference is None) != (self.reason is None), (
+            "AnnotationReference must set exactly one of reference/reason"
+        )
+
 
 async def resolve_annotation_reference(ann) -> AnnotationReference:
     """The reference whose coordinates this annotation is drawn against.

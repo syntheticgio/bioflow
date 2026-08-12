@@ -39,6 +39,17 @@ def objects(monkeypatch):
     return store
 
 
+class TestAnnotationReferenceInvariant:
+    def test_rejects_both_reference_and_reason_set(self):
+        obj = _Obj("gen", role=ObjectRole.REFERENCE)
+        with pytest.raises(AssertionError):
+            pipeline_service.AnnotationReference(reference=obj, reason="some text")
+
+    def test_rejects_neither_reference_nor_reason_set(self):
+        with pytest.raises(AssertionError):
+            pipeline_service.AnnotationReference()
+
+
 class TestProvenanceTier:
     async def test_prefers_the_reference_role_over_a_bare_fasta(self, objects):
         # The bug: a protein FASTA listed first was returned as the reference.
