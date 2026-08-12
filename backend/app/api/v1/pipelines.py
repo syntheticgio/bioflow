@@ -1016,10 +1016,26 @@ async def get_annotation_children(
     return {"rows": annotation_db.children_of(db_path=db_path, parent_id=parent_id)}
 
 
+class AdditionalReadSetIn(BaseModel):
+    """One additional read set: an R1 and, when paired, its mate.
+
+    A set's pairing is decided by the run's primary pair: in a paired run
+    every set must carry a mate (or have one resolvable by the service), and
+    in a single-end run no set may declare one. See launch_alignment.
+    """
+
+    object_id: PydanticObjectId
+    mate_object_id: PydanticObjectId | None = None
+
+
 class AlignRequest(BaseModel):
     object_id: PydanticObjectId
     reference_id: PydanticObjectId
     mate_object_id: PydanticObjectId | None = None
+    # Ordered additional read sets, each a sibling of the primary pair rather
+    # than a flat list: a set is an R1 and optionally its mate, and the whole
+    # run shares one pairing mode.
+    additional_read_sets: list[AdditionalReadSetIn] = Field(default_factory=list)
     paired: bool = True
     read_group: dict = Field(default_factory=dict)
     params: dict = Field(default_factory=dict)
@@ -1570,6 +1586,7 @@ async def launch_alignment(body: AlignRequest, owner: OwnerDep) -> JobOut:
         reference_id=body.reference_id,
         owner=owner,
         mate_object_id=body.mate_object_id,
+        additional_read_sets=body.additional_read_sets,
         read_group=body.read_group,
         params=body.params,
         paired=body.paired,
