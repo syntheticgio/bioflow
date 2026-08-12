@@ -390,6 +390,12 @@ function ProvisionForm({
         />
       </label>
 
+      <p className="muted provision-key-notice">
+        BioFlow will install its own SSH key on this machine and keep it, so it can
+        update the node later. Your password is used once and is not stored. The
+        key is encrypted on this machine; anyone with shell access here can read it.
+      </p>
+
       <div className="provision-form-actions">
         <button
           type="submit"
