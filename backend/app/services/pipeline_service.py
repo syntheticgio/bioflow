@@ -2292,7 +2292,12 @@ async def launch_vcf_stats(*, object_id: PydanticObjectId, owner: str):
     )
 
 
-_ANNOTATION_STATS_FORMATS = (FormatKind.GFF, FormatKind.GTF, FormatKind.BED)
+_ANNOTATION_STATS_FORMATS = (
+    FormatKind.GFF,
+    FormatKind.GTF,
+    FormatKind.BED,
+    FormatKind.GENBANK,
+)
 
 
 def _check_annotation_stats_callable(obj) -> None:
@@ -2309,7 +2314,7 @@ def _check_annotation_stats_callable(obj) -> None:
     if obj.format.kind not in _ANNOTATION_STATS_FORMATS:
         raise ValidationError(
             f"{obj.name!r} is {obj.format.kind.value}, not an annotation file "
-            f"(GFF, GTF, or BED)",
+            f"(GFF, GTF, BED, or GenBank)",
             details={"object_id": str(obj.id), "kind": obj.format.kind.value},
         )
 
@@ -3014,7 +3019,11 @@ def _is_annotation(obj: DataObject) -> bool:
     """
     if obj.status is not ObjectStatus.READY:
         return False
-    return obj.format.kind in (FormatKind.GFF, FormatKind.GTF)
+    return obj.format.kind in (
+        FormatKind.GFF,
+        FormatKind.GTF,
+        FormatKind.GENBANK,
+    )
 
 
 async def annotations_for_project(
