@@ -147,6 +147,27 @@ class TestGtfLine:
         line = 'chr1\tX\tCDS\t1000\t1100\t.\t+\t0\tgene_id "ENSG01";'
         assert parse_gtf_line(line).parent == "ENSG01"
 
+    def test_sibling_exons_do_not_collide_on_feature_id(self):
+        # children_of(parent_id) is a string-equality lookup on feature_id,
+        # so two exons under one transcript must not both claim the
+        # transcript's own feature_id -- that would make them
+        # indistinguishable from each other and from the transcript itself,
+        # and would make the transcript appear to parent itself.
+        exon1 = parse_gtf_line(
+            'chr1\tX\texon\t1000\t1100\t.\t+\t.\t'
+            'gene_id "ENSG01"; transcript_id "ENST01"; exon_number "1";'
+        )
+        exon2 = parse_gtf_line(
+            'chr1\tX\texon\t1200\t1300\t.\t+\t.\t'
+            'gene_id "ENSG01"; transcript_id "ENST01"; exon_number "2";'
+        )
+        assert exon1.parent == exon2.parent == "ENST01"
+        assert exon1.feature_id != exon1.parent
+        assert exon2.feature_id != exon2.parent
+        # Neither exon usurps the transcript's own identifier.
+        assert exon1.feature_id != "ENST01"
+        assert exon2.feature_id != "ENST01"
+
     def test_biotype_from_gene_biotype(self):
         line = (
             'chr1\tX\tgene\t1\t9\t.\t+\t.\t'

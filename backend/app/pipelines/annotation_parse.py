@@ -172,12 +172,17 @@ def parse_gtf_line(line: str) -> Feature | None:
     elif ftype == "transcript":
         feature_id, parent = transcript_id, gene_id
     else:
-        # exon/CDS/UTR rows: GTF gives them no identifier of their own.
-        # parent is the transcript when one is named, else the gene
-        # directly -- a CDS row missing transcript_id still attaches to
-        # something rather than becoming a top-level, parentless row.
+        # exon/CDS/UTR rows: GTF gives them no identifier of their own, so
+        # feature_id stays None -- reusing the transcript_id here, as an
+        # earlier version of this function did, made every exon under one
+        # transcript collide on the same feature_id (indistinguishable from
+        # each other and from the transcript itself), and made a row with no
+        # transcript_id its own parent. parent is the transcript when one is
+        # named, else the gene directly -- a CDS row missing transcript_id
+        # still attaches to something rather than becoming a top-level,
+        # parentless row.
         parent = transcript_id or gene_id
-        feature_id = transcript_id or gene_id
+        feature_id = None
 
     return Feature(
         contig=fields[0],
