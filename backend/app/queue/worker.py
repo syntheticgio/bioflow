@@ -37,33 +37,61 @@ LOOP_STALL_WARN_SECONDS = 0.25
 # than two, so this is a throughput cap as much as a safety valve.
 IO_HEAVY_LIMIT = 2
 
-# The reference every node and the primary pull. Matches IMAGE in
-# node_update_service.py and docker-compose.child-node.yml's `image:` line --
-# all three must agree, since this is the value docker image inspect resolves
-# to a RepoDigests entry.
-_IMAGE_REF = "ghcr.io/syntheticgio/bioflow-backend:latest"
-
-
-def _own_image_digest() -> str | None:
-    """The registry digest of the image this process is running, or None.
-
-    Reads the digest Docker already recorded for the local image cache entry
-    -- the same RepoDigests field the launcher's own update check
-    (update_check.rs's DockerImageInspector) compares against GHCR for the
-    primary. `docker inspect <container-id>` would return the container's
-    image ID instead, a different value that can never equal a registry
-    digest -- the two sides of any staleness comparison would silently never
-    agree. None on any failure -- a node whose socket is not mounted, or
-    whose image was built locally and never pushed (so RepoDigests is empty),
-    must still heartbeat; it simply reports no version (NU-3).
+def _own_image_id() -> str | None:
+    """This container's own image id (a local content hash, not a registry
+    digest), by asking Docker about the container Docker itself thinks this
+    process is running in. The hostname is the container id in Docker's
+    default network mode.
     """
     client = shutil.which("docker")
     if client is None:
         return None
     try:
         result = subprocess.run(  # noqa: S603
+            [client, "inspect", socket.gethostname(), "--format", "{{.Image}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _own_image_digest() -> str | None:
+    """The registry digest of the image this process is running, or None.
+
+    Two docker calls, not one, and deliberately not keyed by an image tag.
+    An earlier version of this function inspected a hardcoded
+    "...:latest" reference directly -- which silently reports the wrong
+    digest, or none, on any node whose deployment pins BIOFLOW_TAG to a real
+    version, since BIOFLOW_TAG is a docker-compose-time image reference
+    substitution with no equivalent inside the running container (nothing
+    passes it through as an environment variable). Resolving through this
+    container's own image id sidesteps the whole problem: whatever image the
+    container actually is, is exactly the image whose RepoDigests this reads,
+    regardless of what tag was used to pull it or whether BIOFLOW_TAG is set
+    at all.
+
+    RepoDigests is the same field the launcher's own update check
+    (update_check.rs's DockerImageInspector) compares against GHCR for the
+    primary, so a node's reported digest and the primary's are genuinely
+    comparable. None on any failure -- a node whose socket is not mounted, or
+    whose image was built locally and never pushed (so RepoDigests is empty),
+    must still heartbeat; it simply reports no version (NU-3).
+    """
+    image_id = _own_image_id()
+    if image_id is None:
+        return None
+    client = shutil.which("docker")
+    if client is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603
             [
-                client, "image", "inspect", _IMAGE_REF,
+                client, "image", "inspect", image_id,
                 "--format", "{{index .RepoDigests 0}}",
             ],
             capture_output=True,
@@ -74,10 +102,6 @@ def _own_image_digest() -> str | None:
         return None
     if result.returncode != 0:
         return None
-    # RepoDigests entries look like "ghcr.io/org/name@sha256:...";
-    # only the part after '@' is the digest. No '@' (e.g. docker's
-    # "<no value>" template literal for an empty RepoDigests) means no
-    # digest to report.
     text = result.stdout.strip()
     if "@" not in text:
         return None
