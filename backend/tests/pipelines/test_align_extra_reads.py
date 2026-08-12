@@ -806,3 +806,72 @@ class TestLaunchDistinguishesReadSets:
                 owner="local",
                 params={"extra_reads": ["some-object-id"]},
             )
+
+    async def test_run_records_every_set_member_under_its_own_role(self):
+        """R-15: the run's provenance lists each additional set as one input
+        per file -- EXTRA_READS for the set's own file, EXTRA_MATE for its
+        mate -- so a run stays describable after its inputs are deleted and
+        the roles say which stream each file fed. The label counts the sets."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        extra = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+        extra_mate = _fastq_object(PydanticObjectId(), "b_R2.fastq", project_id=pid)
+        reference = self._reference(pid)
+
+        create_run = AsyncMock(return_value=SimpleNamespace(id="run1", owner="local"))
+
+        async def _enqueue(job_type, **kwargs):
+            return SimpleNamespace(id=PydanticObjectId())
+
+        async def _get_object(object_id, owner):
+            for obj in (primary, primary_mate, extra, extra_mate, reference):
+                if obj.id == object_id:
+                    return obj
+            raise AssertionError(f"unexpected object id {object_id}")
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=_get_object),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                AsyncMock(return_value={"minimap2": True, "fai": True}),
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(1024)),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service.sidecar_payload",
+                AsyncMock(return_value={}),
+            ),
+            patch("app.services.run_service.create_run", create_run),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            await pipeline_service.launch_alignment(
+                object_id=primary.id,
+                reference_id=reference.id,
+                owner="local",
+                mate_object_id=primary_mate.id,
+                paired=True,
+                additional_read_sets=[(extra.id, extra_mate.id)],
+            )
+
+        inputs = create_run.call_args.kwargs["inputs"]
+        assert [(i.role, i.name) for i in inputs] == [
+            ("reads", "a_R1.fastq"),
+            ("mate", "a_R2.fastq"),
+            ("extra_reads", "b_R1.fastq"),
+            ("extra_mate", "b_R2.fastq"),
+            ("reference", "ref.fasta"),
+        ]
+        assert create_run.call_args.kwargs["label"] == (
+            "a (paired) +1 read set → ref.fasta"
+        )

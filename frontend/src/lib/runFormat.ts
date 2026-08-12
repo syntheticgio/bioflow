@@ -129,6 +129,16 @@ export function runFacts(run: RunSummary): RunFact[] {
     facts.push({ k: "Reads", v: reads.map((i) => i.name).join(" + ") });
   }
 
+  const extraReads = run.inputs.filter(
+    (i) => i.role === "extra_reads" || i.role === "extra_mate",
+  );
+  if (extraReads.length > 0) {
+    facts.push({
+      k: "Additional reads",
+      v: extraReads.map((i) => i.name).join(" + "),
+    });
+  }
+
   const reference = run.inputs.find((i) => i.role === "reference");
   if (reference) facts.push({ k: "Reference", v: reference.name });
 

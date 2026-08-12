@@ -829,7 +829,11 @@ export type RunInputRole =
   | "primers"
   | "annotation"
   /** Appears many times in one run's inputs -- a DE run has one per sample. */
-  | "counts";
+  | "counts"
+  /** An additional read set's R1, concatenated into the alignment's R1 stream. */
+  | "extra_reads"
+  /** An additional read set's mate, concatenated into the alignment's R2 stream. */
+  | "extra_mate";
 
 export type RunJobRole =
   | "index"
