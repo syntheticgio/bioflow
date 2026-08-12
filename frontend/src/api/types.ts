@@ -1970,6 +1970,8 @@ export interface AnnotationFeature {
   name: string | null;
   feature_id: string | null;
   parent: string | null;
+  parent_status: string;
+  depth: number;
   biotype: string | null;
   attributes: string | null;
   has_children: boolean;
@@ -1979,6 +1981,33 @@ export interface AnnotationFeature {
 export interface AnnotationFeaturePage {
   total: number | null;
   rows: AnnotationFeature[];
+}
+
+/** One row of the Genes view -- a per-gene summary, not a flat feature row.
+ *  Stored at compute time rather than derived on read: see
+ *  AnnotationFeatureTable's genes query. */
+export interface AnnotationGene {
+  feature_id: string | null;
+  contig: string;
+  start: number;
+  end: number;
+  type: string | null;
+  strand: string | null;
+  name: string | null;
+  biotype: string | null;
+  child_count: number;
+  descendant_count: number;
+  span_start: number;
+  span_end: number;
+}
+
+/** A page of the Genes view. `mode` says which rule built the table --
+ *  "fallback" means the file had no gene-typed records, so these are
+ *  top-level features instead, and the UI must say so. */
+export interface AnnotationGenePage {
+  total: number | null;
+  rows: AnnotationGene[];
+  mode: "typed" | "fallback";
 }
 
 export interface AnnotationContigStat {
@@ -2015,6 +2044,11 @@ export interface AnnotationStatsFacts extends Record<string, unknown> {
   genome_build?: string;
   annotation_source?: string;
   source_version?: string;
+  annotation_parent_status_counts?: Record<string, number>;
+  annotation_unresolved_count?: number;
+  annotation_max_depth?: number;
+  annotation_gene_mode?: "typed" | "fallback";
+  annotation_gene_count?: number;
 }
 
 export interface FeatureQuery {
@@ -2028,6 +2062,7 @@ export interface FeatureQuery {
   nameQuery?: string;
   strand?: string;
   skipCount?: boolean;
+  view?: "all" | "unresolved";
 }
 
 /**
