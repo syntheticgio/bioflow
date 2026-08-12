@@ -17,8 +17,10 @@ from urllib.parse import unquote
 class Feature:
     """One row of the features table.
 
-    `parent` being None is what makes a feature top-level, which is the
-    property the table pages over -- see the spec's paging decision.
+    `parents` is a tuple because GFF3 allows `Parent=a,b` for an exon shared
+    between two transcripts. An empty tuple means the record declares no
+    parent, which is what makes it a candidate root -- whether it *is* a root
+    is decided by resolution, not here.
     """
 
     contig: str
@@ -29,7 +31,7 @@ class Feature:
     score: float | None
     name: str | None
     feature_id: str | None
-    parent: str | None
+    parents: tuple[str, ...]
     biotype: str | None
     attributes: str | None
 
@@ -119,12 +121,10 @@ def parse_gff_line(line: str) -> Feature | None:
 
     attrs = parse_gff_attributes(fields[8])
 
-    # GFF3 allows Parent=a,b for an exon shared by two transcripts. The
-    # table's tree is single-parent, so the first wins; the raw attribute
-    # column preserves both for the expanded detail row.
-    parent = attrs.get("Parent")
-    if parent:
-        parent = parent.split(",")[0]
+    # GFF3 allows Parent=a,b for an exon shared by two transcripts. Every
+    # named parent is kept; storage writes one row per relationship.
+    raw_parent = attrs.get("Parent", "")
+    parents = tuple(p.strip() for p in raw_parent.split(",") if p.strip())
 
     return Feature(
         contig=fields[0],
@@ -135,7 +135,7 @@ def parse_gff_line(line: str) -> Feature | None:
         score=_score(fields[5]),
         name=attrs.get("Name") or attrs.get("gene") or attrs.get("ID"),
         feature_id=attrs.get("ID"),
-        parent=parent or None,
+        parents=parents,
         biotype=attrs.get("gene_biotype") or attrs.get("biotype"),
         attributes=fields[8],
     )
@@ -173,14 +173,9 @@ def parse_gtf_line(line: str) -> Feature | None:
         feature_id, parent = transcript_id, gene_id
     else:
         # exon/CDS/UTR rows: GTF gives them no identifier of their own, so
-        # feature_id stays None -- reusing the transcript_id here, as an
-        # earlier version of this function did, made every exon under one
-        # transcript collide on the same feature_id (indistinguishable from
-        # each other and from the transcript itself), and made a row with no
-        # transcript_id its own parent. parent is the transcript when one is
-        # named, else the gene directly -- a CDS row missing transcript_id
-        # still attaches to something rather than becoming a top-level,
-        # parentless row.
+        # feature_id stays None. parent is the transcript when one is named,
+        # else the gene directly -- a CDS row missing transcript_id still
+        # attaches to something rather than becoming a parentless row.
         parent = transcript_id or gene_id
         feature_id = None
 
@@ -193,7 +188,7 @@ def parse_gtf_line(line: str) -> Feature | None:
         score=_score(fields[5]),
         name=attrs.get("gene_name") or attrs.get("gene_id"),
         feature_id=feature_id,
-        parent=parent,
+        parents=(parent,) if parent else (),
         biotype=attrs.get("gene_biotype") or attrs.get("gene_type"),
         attributes=fields[8],
     )
@@ -224,7 +219,7 @@ def parse_bed_line(line: str) -> Feature | None:
         score=_score(fields[4]) if len(fields) > 4 else None,
         name=fields[3] if len(fields) > 3 and fields[3] != "." else None,
         feature_id=None,
-        parent=None,
+        parents=(),
         biotype=None,
         attributes=None,
     )
