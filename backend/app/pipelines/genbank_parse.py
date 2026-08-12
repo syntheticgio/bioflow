@@ -9,6 +9,7 @@ BED there is no coordinate conversion here.
 """
 
 import re
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from urllib.parse import quote
 
@@ -196,7 +197,7 @@ def _serialize(qualifiers: dict[str, str]) -> str:
     )
 
 
-def iter_features(lines, *, accession: str):
+def iter_features(lines: Iterable[str], *, accession: str) -> Iterator[Feature]:
     """Every feature in one record's FEATURES block, as Feature rows.
 
     A multi-segment location yields a parent row spanning the outer bounds
@@ -275,8 +276,13 @@ def iter_features(lines, *, accession: str):
         stripped = line.strip()
 
         # A new feature key: content at column 6 that is not a qualifier.
+        # The line must actually reach the location column -- a short
+        # continuation line (e.g. the tail end of a wrapped qualifier value,
+        # trimmed by a hand-edited file or an rstripping tool) is shorter
+        # than that and must fall through to the continuation handling
+        # below, not be misread as a new feature's key.
         if (
-            len(line) > _KEY_COLUMN
+            len(line) > _LOCATION_COLUMN
             and line[:_KEY_COLUMN].isspace()
             and not stripped.startswith("/")
             and not line[_LOCATION_COLUMN:_LOCATION_COLUMN + 1].isspace()
@@ -289,10 +295,8 @@ def iter_features(lines, *, accession: str):
             qualifier_lines = []
             continue
 
-        if stripped.startswith("/"):
-            qualifier_lines.append(stripped)
-        elif qualifier_lines:
-            # Continuation of a wrapped qualifier value.
+        if stripped.startswith("/") or qualifier_lines:
+            # Either a new qualifier, or the continuation of a wrapped one.
             qualifier_lines.append(stripped)
         elif key is not None:
             # Continuation of a wrapped location.

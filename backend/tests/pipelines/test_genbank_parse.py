@@ -213,3 +213,37 @@ class TestIterFeatures:
     def test_malformed_location_is_skipped(self):
         lines = ["     CDS             not-a-location", '                     /gene="x"']
         assert list(iter_features(lines, accession="X")) == []
+
+    def test_short_continuation_line_is_not_mistaken_for_a_new_feature(self):
+        # A wrapped qualifier's tail line can be shorter than column 22 --
+        # e.g. trimmed by a hand-edited file or a tool that rstrips trailing
+        # whitespace. It must still be read as a continuation of the open
+        # qualifier, not misclassified as a new feature key: the old
+        # boundary check only required reaching column 6, and a short line
+        # like "      short" has content there but never reaches column 22,
+        # so line[21:22] was "" -- and "".isspace() is False, which made the
+        # key-detection branch fire by mistake.
+        lines = [
+            "     CDS             1..9",
+            '                     /note="wraps',
+            "      short",
+        ]
+        rows = list(iter_features(lines, accession="X"))
+        assert len(rows) == 1
+        assert "note=wraps%20short" in rows[0].attributes
+
+    def test_blank_line_inside_qualifier_block_does_not_break_accumulation(self):
+        # A blank line between two features is ordinary. A blank line in the
+        # middle of one feature's qualifier block -- a stray newline from a
+        # hand-edited file -- must be skipped without ending the feature or
+        # losing the qualifiers on either side of it.
+        lines = [
+            "     CDS             1..9",
+            '                     /gene="thrA"',
+            "",
+            '                     /product="aspartokinase"',
+        ]
+        rows = list(iter_features(lines, accession="X"))
+        assert len(rows) == 1
+        assert "gene=thrA" in rows[0].attributes
+        assert "product=aspartokinase" in rows[0].attributes
