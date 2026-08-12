@@ -893,7 +893,12 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
 
     removed = 0
     reclaimed = 0
-    for root in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
+    for root in (
+        settings.qc_reports_dir,
+        settings.bam_stats_dir,
+        settings.vcf_stats_dir,
+        settings.annotation_stats_dir,
+    ):
         if not root.exists():
             continue
         for entry in await asyncio.to_thread(lambda r=root: list(r.iterdir())):
