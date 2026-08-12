@@ -193,6 +193,10 @@ class TestUnresolvedView:
         statuses = {row["parent_status"] for row in r.json()["rows"]}
         assert "root" in statuses
 
+    def test_invalid_view_value_returns_422(self, hierarchy_client):
+        r = get_features(hierarchy_client, view="bogus")
+        assert r.status_code == 422
+
 
 class TestGenesRoute:
     def test_genes_route_returns_gene_rows(self, hierarchy_client):
