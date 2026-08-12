@@ -2292,6 +2292,95 @@ async def launch_vcf_stats(*, object_id: PydanticObjectId, owner: str):
     )
 
 
+_ANNOTATION_STATS_FORMATS = (FormatKind.GFF, FormatKind.GTF, FormatKind.BED)
+
+
+def _check_annotation_stats_callable(obj) -> None:
+    """Whether an Annotation Results computation can run against this object.
+
+    Refuse early and with a reason a person can act on, the same posture
+    `_check_vcf_stats_callable` documents.
+    """
+    if obj.status is not ObjectStatus.READY:
+        raise ValidationError(
+            f"{obj.name!r} is not ready for results (status={obj.status.value})",
+            details={"object_id": str(obj.id), "status": obj.status.value},
+        )
+    if obj.format.kind not in _ANNOTATION_STATS_FORMATS:
+        raise ValidationError(
+            f"{obj.name!r} is {obj.format.kind.value}, not an annotation file "
+            f"(GFF, GTF, or BED)",
+            details={"object_id": str(obj.id), "kind": obj.format.kind.value},
+        )
+
+
+async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
+    """Queue the Results computation for a GFF/GTF/BED.
+
+    Read-only, like launch_vcf_stats: no derived objects, just facts merged
+    onto the object plus a SQLite database on disk.
+
+    Requires no external tool -- the parse is pure Python -- so unlike the
+    variant path there is no `tools.require` here.
+    """
+    from app.queue import queue
+    from app.services import object_service
+
+    ann = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(ann)
+
+    digest, path = await _resolve_readable(ann)
+    # run_annotation_stats (HandlerMode.THREAD) reads ctx.payload["annotation_path"]
+    # directly -- unlike the SUBPROCESS handlers, it has no digest-based blob
+    # resolution of its own, so the launcher must always hand it a real path.
+    path = path or str(blob_path(digest))
+
+    # Contig lengths for the coverage denominators. Taken from the
+    # annotation's own facts when ingest recorded them, else from the
+    # reference it is attached to. Absent is fine: coverage is reported as
+    # null rather than zero for a contig of unknown length.
+    lengths = ann.facts.get("reference_lengths") or {}
+    if not lengths:
+        reference = await _reference_for_annotation(ann)
+        if reference is not None:
+            lengths = reference.facts.get("sequence_lengths") or {}
+
+    payload: dict = {
+        "object_id": str(ann.id),
+        "project_id": str(ann.project_id),
+        "format_kind": str(ann.format.kind.value),
+        "contig_lengths": [[name, length] for name, length in lengths.items()],
+        "annotation_path": path,
+    }
+    if digest:
+        payload["annotation_sha256"] = digest
+
+    return await queue.enqueue(
+        "run_annotation_stats",
+        owner=owner,
+        payload=payload,
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"annotation_stats:{ann.id}",
+        project_id=ann.project_id,
+        object_id=ann.id,
+    )
+
+
+async def _reference_for_annotation(ann) -> DataObject | None:
+    """The reference this annotation describes, from its provenance.
+
+    Best-effort: an annotation with no recorded reference still computes,
+    reporting per-contig counts without coverage fractions.
+    """
+    for parent_id in (ann.derived_from or []):
+        parent = await DataObject.get(parent_id)
+        if parent is not None and parent.format.kind == FormatKind.FASTA:
+            return parent
+    return None
+
+
 def _variant_dedup_key(*, bam_id, params: dict) -> str:
     """Identity of a variant calling request.
 
