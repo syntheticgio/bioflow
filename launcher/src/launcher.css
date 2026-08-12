@@ -134,6 +134,15 @@ a:hover { color: var(--color-accent-2); }
 }
 .state-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
+/* The disabled Update button and its "why" note, stacked so the hint sits
+   under the button rather than stretching the .state-actions flex row. */
+.update-suppressed {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+
 .sidebar { display: flex; flex-direction: column; gap: 7px; padding-top: 4px; }
 .sidebar-row { display: flex; align-items: baseline; gap: 10px; }
 .sidebar-label {
