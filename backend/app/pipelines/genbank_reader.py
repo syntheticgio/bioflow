@@ -12,8 +12,10 @@ therefore costs no more than one whose bulk is features, which is what keeps
 """
 
 import gzip
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TextIO
 
 
 @dataclass
@@ -27,7 +29,7 @@ class GenBankRecord:
     feature_lines: list[str] = field(default_factory=list)
 
 
-def _open_text(path: Path):
+def _open_text(path: Path) -> TextIO:
     """Gzip-aware line reader.
 
     Sniffed by magic bytes rather than extension, matching
@@ -41,7 +43,7 @@ def _open_text(path: Path):
     return open(path, errors="replace")
 
 
-def iter_records(path: Path):
+def iter_records(path: Path) -> Iterator[GenBankRecord]:
     """Yield one GenBankRecord at a time.
 
     Never holds more than one record's feature lines in memory, and never
