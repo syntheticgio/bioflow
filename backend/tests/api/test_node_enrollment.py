@@ -44,6 +44,9 @@ def _node_doc(node_id="child-1", hostname="child-laptop", status="active"):
             "status": status,
             "last_seen": datetime.now(UTC),
             "registered_at": datetime.now(UTC),
+            "image_digest": None,
+            "version": None,
+            "ssh_key_enc": None,
             "save": AsyncMock(),
             "insert": AsyncMock(),
         },
@@ -420,3 +423,43 @@ class TestListNodesWithEnrollment:
             redis_patch.stop()
             mongo_patch.stop()
             await redis.aclose()
+
+
+# ---- persisted version reporting ----
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_enroll_persists_reported_version(client):
+    from app.models.node import Node
+
+    res = await client.post("/api/v1/nodes/enroll", json={
+        "node_id": "vnode",
+        "hostname": "box",
+        "image_digest": "sha256:aaa",
+        "version": "0.4.0",
+    })
+    assert res.status_code == 200
+
+    node = await Node.find_one(Node.node_id == "vnode")
+    assert node.image_digest == "sha256:aaa"
+    assert node.version == "0.4.0"
+    await node.delete()
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+async def test_enroll_without_version_leaves_existing_value(client):
+    """A node that cannot read its digest must not erase what it last
+    reported (NU-3, NU-5)."""
+    from app.models.node import Node
+
+    await Node(node_id="vnode2", image_digest="sha256:old", version="0.3.0").insert()
+
+    res = await client.post("/api/v1/nodes/enroll", json={"node_id": "vnode2"})
+    assert res.status_code == 200
+
+    node = await Node.find_one(Node.node_id == "vnode2")
+    assert node.image_digest == "sha256:old"
+    assert node.version == "0.3.0"
+    await node.delete()

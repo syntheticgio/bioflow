@@ -611,6 +611,8 @@ class Worker:
             "node_id": self.node_id,
             "hostname": socket.gethostname(),
             "enrollment_key": settings.enrollment_key,
+            "image_digest": self.image_digest,
+            "version": self.version,
         }
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
