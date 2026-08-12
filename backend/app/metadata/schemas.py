@@ -382,6 +382,7 @@ FORMAT_FIELDS: dict[FormatKind, tuple[FieldDef, ...]] = {
     FormatKind.BED: INTERVAL_FIELDS,
     FormatKind.GFF: INTERVAL_FIELDS,
     FormatKind.GTF: INTERVAL_FIELDS,
+    FormatKind.GENBANK: INTERVAL_FIELDS,
 }
 
 # Formats whose questions are entirely the common ones -- listed explicitly
