@@ -61,7 +61,7 @@ from app.pipelines import (
     assembly_params as assembly_params_module,
 )
 from app.pipelines.aligners import Aligner
-from app.services import blob_service, memory_estimate, run_service
+from app.services import blob_service, memory_estimate, object_service, run_service
 from app.storage.paths import blob_path
 
 log = get_logger(__name__)
@@ -2559,6 +2559,59 @@ async def _reference_for_annotation(ann) -> DataObject | None:
             return parent
         fallback = fallback or parent
     return fallback
+
+
+@dataclass(frozen=True)
+class AnnotationReference:
+    """Which reference supplies an annotation's axis, or why none does.
+
+    A reason rather than a bare None: the viewer tells the user what would
+    fix it, since "no reference" is actionable and a blank panel is not.
+    """
+
+    reference: DataObject | None = None
+    reason: str | None = None
+
+
+async def resolve_annotation_reference(ann) -> AnnotationReference:
+    """The reference whose coordinates this annotation is drawn against.
+
+    Two tiers, then refusal. The axis is a claim about what the coordinates
+    mean, so a guess is worse than nothing: a wrong reference draws a ruler
+    of the wrong length with features positioned against it, which looks
+    authoritative and is false.
+
+    Tier 1 is explicit provenance. Tier 2 matches `ncbi_assembly_accession`,
+    the fact NCBI lookups write on both the genome and the annotation
+    downloaded with it -- the same match `resolve_annotation_inputs` makes
+    for the consequence-annotation card, and for the same reason.
+
+    Accessions compare by exact string equality: GCF_000001405.39 and .40 are
+    different assemblies, and a GCA counterpart is a different record.
+    """
+    reference = await _reference_for_annotation(ann)
+    if reference is not None:
+        return AnnotationReference(reference=reference)
+
+    accession = (ann.facts or {}).get("ncbi_assembly_accession")
+    if accession:
+        candidates = await object_service.list_objects(
+            ann.project_id, owner=ann.owner, limit=500, status=ObjectStatus.READY
+        )
+        for obj in candidates:
+            if obj.format.kind is not FormatKind.FASTA:
+                continue
+            if obj.facts.get("ncbi_assembly_accession") == accession:
+                return AnnotationReference(reference=obj)
+
+    return AnnotationReference(
+        reason=(
+            f"No reference resolved for {ann.name}. Its provenance records no "
+            "genome, and no reference in this project carries a matching NCBI "
+            "assembly accession. The feature table and summary charts are "
+            "still available."
+        )
+    )
 
 
 def _variant_dedup_key(*, bam_id, params: dict) -> str:
