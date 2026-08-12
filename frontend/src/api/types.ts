@@ -491,6 +491,27 @@ export interface NodeInfo {
   hostname?: string;
   registered_at?: string | null;
   enrollment?: string;
+  image_digest: string | null;
+  version: string | null;
+  updatable: boolean;
+}
+
+export interface NodeUpdateStatus {
+  task_id: string;
+  status: "updating" | "success" | "failed";
+  phase: string;
+  message: string;
+  pct: number | null;
+  node_id: string;
+  host: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+}
+
+export interface CurrentVersion {
+  image_digest: string | null;
+  version: string;
 }
 
 export interface NodeProvisionRequest {

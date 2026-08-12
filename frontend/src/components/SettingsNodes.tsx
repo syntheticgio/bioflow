@@ -6,7 +6,9 @@ import type {
   NodeInfo,
   NodeProvisionRequest,
   NodeProvisionStatus,
+  NodeUpdateStatus,
 } from "../api/types";
+import { updateAffordance, versionLabel } from "../lib/nodeStaleness";
 import { SettingsNav } from "./SettingsNav";
 
 export function SettingsNodes() {
@@ -38,6 +40,35 @@ export function SettingsNodes() {
 
   const status = provisionStatus.data;
   const isDone = status && status.status !== "provisioning";
+
+  /* ── Update control (singleton dialog + progress panel, shared by every row) ── */
+
+  const currentVersion = useQuery({
+    queryKey: ["nodes", "current-version"],
+    queryFn: api.currentVersion,
+  });
+
+  const [pendingUpdate, setPendingUpdate] = useState<NodeInfo | null>(null);
+  const [updateTaskId, setUpdateTaskId] = useState<string | null>(null);
+
+  const updateStatus = useQuery({
+    queryKey: ["node-update", updateTaskId],
+    queryFn: () => api.getUpdateStatus(updateTaskId!),
+    enabled: !!updateTaskId,
+    refetchInterval: (query) => {
+      const data = query.state.data as NodeUpdateStatus | undefined;
+      return data?.status === "updating" ? 3000 : false;
+    },
+  });
+
+  const startUpdate = useMutation({
+    mutationFn: ({ nodeId, drain }: { nodeId: string; drain: boolean }) =>
+      api.updateNode(nodeId, drain),
+    onSuccess: (data) => {
+      setUpdateTaskId(data.task_id);
+      setPendingUpdate(null);
+    },
+  });
 
   if (nodes.isLoading) {
     return (
@@ -112,19 +143,44 @@ export function SettingsNodes() {
               <tr>
                 <th>Node</th>
                 <th>Status</th>
+                <th>Version</th>
                 <th>Workers</th>
                 <th>Running</th>
                 <th>Queued</th>
                 <th>Reserved CPU</th>
                 <th>Reserved RAM</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {list.map((n) => (
-                <NodeRow key={n.node_id} node={n} />
+                <NodeRow
+                  key={n.node_id}
+                  node={n}
+                  primaryDigest={currentVersion.data?.image_digest ?? null}
+                  onUpdateClick={setPendingUpdate}
+                />
               ))}
             </tbody>
           </table>
+        )}
+
+        {pendingUpdate && (
+          <UpdateConfirmDialog
+            node={pendingUpdate}
+            submitting={startUpdate.isPending}
+            onConfirm={(drain) =>
+              startUpdate.mutate({ nodeId: pendingUpdate.node_id, drain })
+            }
+            onCancel={() => setPendingUpdate(null)}
+          />
+        )}
+
+        {updateTaskId && updateStatus.data && (
+          <UpdateProgress
+            status={updateStatus.data}
+            onClose={() => setUpdateTaskId(null)}
+          />
         )}
       </div>
     </div>
@@ -415,12 +471,26 @@ function ProvisionResult({
 
 /* ── Node row ── */
 
-function NodeRow({ node }: { node: NodeInfo }) {
+function NodeRow({
+  node,
+  primaryDigest,
+  onUpdateClick,
+}: {
+  node: NodeInfo;
+  primaryDigest: string | null;
+  onUpdateClick: (node: NodeInfo) => void;
+}) {
   const memMb = node.reserved.mem_mb;
   const memLabel =
     memMb >= 1024
       ? `${(memMb / 1024).toFixed(1)} GB`
       : `${memMb} MB`;
+
+  const affordance = updateAffordance({
+    imageDigest: node.image_digest,
+    updatable: node.updatable,
+    primaryDigest,
+  });
 
   return (
     <tr className={node.online ? "" : "offline"}>
@@ -439,11 +509,156 @@ function NodeRow({ node }: { node: NodeInfo }) {
           </span>
         )}
       </td>
+      <td>{versionLabel(node.version)}</td>
       <td>{node.online_workers}/{node.workers}</td>
       <td>{node.running_jobs}</td>
       <td>{node.queued_jobs}</td>
       <td>{node.reserved.cpu} CPU</td>
       <td>{memLabel}</td>
+      <td>
+        {affordance.kind === "available" && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onUpdateClick(node)}
+          >
+            Update
+          </button>
+        )}
+        {affordance.kind === "unavailable" && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled
+            title={affordance.reason}
+          >
+            Update
+          </button>
+        )}
+      </td>
     </tr>
+  );
+}
+
+/* ── Update confirmation dialog ── */
+
+function UpdateConfirmDialog({
+  node,
+  submitting,
+  onConfirm,
+  onCancel,
+}: {
+  node: NodeInfo;
+  submitting: boolean;
+  onConfirm: (drain: boolean) => void;
+  onCancel: () => void;
+}) {
+  const hasRunningJobs = node.running_jobs > 0;
+
+  return (
+    <div className="provision-form">
+      <div className="provision-form-title">Update {node.node_id}</div>
+      {hasRunningJobs ? (
+        <>
+          <p className="provision-form-desc">
+            {node.node_id} has {node.running_jobs} job
+            {node.running_jobs === 1 ? "" : "s"} running. Finish them first, or
+            update now and let them requeue elsewhere.
+          </p>
+          <div className="provision-form-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={submitting}
+              onClick={() => onConfirm(true)}
+            >
+              Finish jobs first
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={submitting}
+              onClick={() => onConfirm(false)}
+            >
+              Update now (jobs requeue)
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={submitting}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="provision-form-desc">
+            Update {node.node_id} to the primary&apos;s current version.
+          </p>
+          <div className="provision-form-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={submitting}
+              onClick={() => onConfirm(true)}
+            >
+              {submitting ? "Starting…" : "Update"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={submitting}
+              onClick={onCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── Update progress panel ── */
+
+function UpdateProgress({
+  status,
+  onClose,
+}: {
+  status: NodeUpdateStatus;
+  onClose: () => void;
+}) {
+  const isUpdating = status.status === "updating";
+  const isSuccess = status.status === "success";
+
+  return (
+    <div
+      className={`provision-result${
+        isUpdating ? "" : isSuccess ? " success" : " failure"
+      }`}
+    >
+      <div className="provision-result-icon">
+        {isUpdating ? "…" : isSuccess ? "✓" : "✕"}
+      </div>
+      <div className="provision-result-text">
+        <strong>
+          {isUpdating
+            ? `Updating ${status.host}`
+            : isSuccess
+              ? "Update complete"
+              : "Update failed"}
+        </strong>
+        <p>{status.error ?? status.message}</p>
+      </div>
+      <div className="provision-result-actions">
+        {!isUpdating && (
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            Close
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

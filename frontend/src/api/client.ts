@@ -40,9 +40,11 @@ import type {
   MateSuggestion,
   MetadataSchema,
   NcbiResolveResponse,
+  CurrentVersion,
   NodeInfo,
   NodeProvisionRequest,
   NodeProvisionStatus,
+  NodeUpdateStatus,
   ObjectComputations,
   ObjectDetail,
   ObjectRole,
@@ -456,6 +458,19 @@ export const api = {
 
   getProvisionStatus: (taskId: string) =>
     request<NodeProvisionStatus>(`/nodes/provision/${encodeURIComponent(taskId)}`),
+
+  /** The primary's own image digest and version, to compare each node's
+   *  reported digest against. */
+  currentVersion: () => request<CurrentVersion>("/nodes/current-version"),
+
+  updateNode: (nodeId: string, drain: boolean) =>
+    request<{ task_id: string; status: string }>(
+      `/nodes/${encodeURIComponent(nodeId)}/update`,
+      { method: "POST", body: JSON.stringify({ drain }) },
+    ),
+
+  getUpdateStatus: (taskId: string) =>
+    request<NodeUpdateStatus>(`/nodes/update/${encodeURIComponent(taskId)}`),
 
   getVersion: () => request<VersionInfo>("/version"),
 
