@@ -1,12 +1,13 @@
-"""Extra read files threaded from launch_alignment through to the aligner.
+"""Additional read sets threaded from launch_alignment through to the aligner.
 
-Task 2 got extra reads as far as params["extra_reads"] (a list of stringified
-object ids) on the launch call. This is the last mile: the launcher must
-resolve each id and put it in the job payload, and the queue-side handler
-must concatenate every extra read's bytes into the primary read file before
-the aligner runs -- since none of the six aligners align_runner drives take
-several read files positionally or share one multi-file convention. See
-align_handlers._concatenate_reads for the full reasoning.
+A file-level launch can carry additional read sets alongside the primary
+pair: the launcher resolves each set's members, validates them, and puts them
+in the job payload, and the queue-side handler concatenates every set's R1
+bytes into the primary R1 stream (and every set's R2 bytes into the R2
+stream) before the aligner runs -- since none of the six aligners
+align_runner drives take several read files positionally or share one
+multi-file convention. See align_handlers._concatenate_reads for the full
+reasoning.
 """
 
 import gzip
@@ -46,7 +47,7 @@ def _fastq_object(object_id, name, *, project_id):
 
 
 class TestLaunchAlignmentCarriesExtraReads:
-    """launch_alignment must resolve params["extra_reads"] the same way it
+    """launch_alignment must resolve additional_read_sets the same way it
     resolves the primary read, and place the result on the job payload --
     following the same override-skips-the-refusal mocking pattern as
     test_launch_resource_refusal.py's TestAlignmentRefusal."""
@@ -119,7 +120,7 @@ class TestLaunchAlignmentCarriesExtraReads:
                 reference_id=reference.id,
                 owner="local",
                 paired=False,
-                params={"extra_reads": [str(extra.id)]},
+                additional_read_sets=[(extra.id, None)],
             )
 
         payload = enqueued["payload"]
@@ -234,7 +235,7 @@ class TestLaunchAlignmentCarriesExtraReads:
                     reference_id=reference.id,
                     owner="local",
                     paired=False,
-                    params={"extra_reads": [str(primary.id)]},
+                    additional_read_sets=[(primary.id, None)],
                 )
 
     async def test_extra_read_id_equal_to_mate_is_rejected(self):
@@ -270,7 +271,7 @@ class TestLaunchAlignmentCarriesExtraReads:
                     owner="local",
                     mate_object_id=mate.id,
                     paired=True,
-                    params={"extra_reads": [str(mate.id)]},
+                    additional_read_sets=[(mate.id, None)],
                 )
 
     async def test_duplicate_extra_read_ids_are_rejected(self):
@@ -305,7 +306,7 @@ class TestLaunchAlignmentCarriesExtraReads:
                     reference_id=reference.id,
                     owner="local",
                     paired=False,
-                    params={"extra_reads": [str(extra.id), str(extra.id)]},
+                    additional_read_sets=[(extra.id, None), (extra.id, None)],
                 )
 
 
@@ -389,3 +390,319 @@ class TestConcatenateReads:
         out = _concatenate_reads(primary, [], dest)
 
         assert out.read_bytes() == b"@r1\nACGT\n+\nIIII\n"
+
+
+class TestResolveAdditionalReadSets:
+    """The pairing rule and whole-request uniqueness, tested against the
+    resolver itself rather than through a full launch: pairing is a property
+    of the run, decided by the primary pair -- so a paired run requires every
+    additional set to have a mate (suggested like the primary's, or the
+    launch fails), a single-end run forbids any set from declaring one, and
+    no file may appear twice anywhere in the launch."""
+
+    async def _resolve(
+        self,
+        *,
+        primary,
+        mate=None,
+        sets=(),
+        paired=True,
+        suggested=None,
+    ):
+        objects = {primary.id: primary}
+        if mate is not None:
+            objects[mate.id] = mate
+        for r1, r2 in sets:
+            objects[r1.id] = r1
+            if r2 is not None:
+                objects[r2.id] = r2
+
+        async def _get_object(object_id, owner):
+            return objects[object_id]
+
+        async def _suggest(obj):
+            return (suggested or {}).get(obj.id)
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=_get_object),
+            ),
+            patch(
+                "app.services.pipeline_service.suggest_mate",
+                AsyncMock(side_effect=_suggest),
+            ),
+        ):
+            return await pipeline_service._resolve_alignment_read_sets(
+                primary=primary,
+                mate_object_id=mate.id if mate is not None else None,
+                additional_sets=[
+                    (r1.id, r2.id if r2 is not None else None) for r1, r2 in sets
+                ],
+                owner="local",
+                paired=paired,
+            )
+
+    async def test_a_paired_run_suggests_a_mate_for_each_set(self):
+        """R-3: an additional set resolves its mate exactly like the primary
+        -- explicit link, else suggest_mate -- so the set is a pair."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        extra = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+        extra_mate = _fastq_object(PydanticObjectId(), "b_R2.fastq", project_id=pid)
+
+        sets = await self._resolve(
+            primary=primary,
+            mate=primary_mate,
+            sets=[(extra, None)],
+            suggested={extra.id: extra_mate},
+        )
+
+        assert len(sets) == 2
+        assert sets[1].r1.id == extra.id
+        assert sets[1].r2.id == extra_mate.id
+
+    async def test_a_paired_run_rejects_a_set_with_no_mate(self):
+        """R-4: a paired run with a mateless additional set fails naming the
+        set, rather than silently concatenating it into a run it breaks."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        extra = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+
+        with pytest.raises(ValidationError, match="no mate"):
+            await self._resolve(
+                primary=primary,
+                mate=primary_mate,
+                sets=[(extra, None)],
+            )
+
+    async def test_a_single_end_run_rejects_a_set_that_declares_a_mate(self):
+        """R-4: the reverse direction -- a set carrying a mate in a
+        single-end run is refused rather than silently dropped."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        extra = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+        extra_mate = _fastq_object(PydanticObjectId(), "b_R2.fastq", project_id=pid)
+
+        with pytest.raises(ValidationError, match="single-end"):
+            await self._resolve(
+                primary=primary,
+                sets=[(extra, extra_mate)],
+                paired=False,
+            )
+
+    async def test_no_file_may_appear_twice_in_a_launch(self):
+        """R-5: whole-request uniqueness -- a set member that is the primary's
+        mate (or the primary, or another set's member) is refused."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+
+        with pytest.raises(ValidationError, match="used twice"):
+            await self._resolve(
+                primary=primary,
+                mate=primary_mate,
+                sets=[(primary_mate, None)],
+            )
+
+    async def test_the_r1_leads_swap_applies_per_set(self):
+        """A set added R2-first normalizes to R1-first like the primary pair,
+        so its R1 leads in the concatenated stream."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        r2_first = _fastq_object(PydanticObjectId(), "b_R2.fastq", project_id=pid)
+        r1_file = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+
+        sets = await self._resolve(
+            primary=primary,
+            mate=primary_mate,
+            sets=[(r2_first, r1_file)],
+        )
+
+        assert sets[1].r1.id == r1_file.id
+        assert sets[1].r2.id == r2_first.id
+
+
+class TestLaunchDistinguishesReadSets:
+    """R-8/R-9/R-14: additional sets are real inputs of a launch -- they
+    count toward the memory estimate, they make two otherwise-identical
+    launches distinct jobs, and the flat params channel is dead."""
+
+    def _reference(self, project_id):
+        return SimpleNamespace(
+            id=PydanticObjectId(),
+            name="ref.fasta",
+            format=SimpleNamespace(kind=FormatKind.FASTA),
+            role=None,
+            facts={},
+            status=ObjectStatus.READY,
+            project_id=project_id,
+            owner="local",
+            size=3_000_000_000,
+        )
+
+    async def test_dedup_key_covers_every_set_member_in_order(self):
+        """R-9: two launches that differ only in their additional sets must be
+        distinct jobs -- the key carries every set's R1 then R2 id in order."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        extra = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+        extra_mate = _fastq_object(PydanticObjectId(), "b_R2.fastq", project_id=pid)
+        reference = self._reference(pid)
+
+        keys: list[str] = []
+
+        async def _enqueue(job_type, **kwargs):
+            # The default aligner (bwa-mem2 when installed) has no index on
+            # the patched status, so a build_index job is enqueued before the
+            # alignment; only the align jobs carry the reads in their key.
+            if job_type == "align_reads":
+                keys.append(kwargs.get("dedup_key") or "")
+            return SimpleNamespace(id=PydanticObjectId())
+
+        async def _get_object(object_id, owner):
+            for obj in (primary, primary_mate, extra, extra_mate, reference):
+                if obj.id == object_id:
+                    return obj
+            raise AssertionError(f"unexpected object id {object_id}")
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=_get_object),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                AsyncMock(return_value={"minimap2": True, "fai": True}),
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(1024)),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service.sidecar_payload",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            await pipeline_service.launch_alignment(
+                object_id=primary.id,
+                reference_id=reference.id,
+                owner="local",
+                mate_object_id=primary_mate.id,
+                paired=True,
+                additional_read_sets=[(extra.id, extra_mate.id)],
+            )
+            await pipeline_service.launch_alignment(
+                object_id=primary.id,
+                reference_id=reference.id,
+                owner="local",
+                mate_object_id=primary_mate.id,
+                paired=True,
+            )
+
+        assert len(keys) == 2
+        assert keys[0] != keys[1]
+        assert keys[0].startswith(
+            "align:"
+            + ":".join(
+                [
+                    str(primary.id),
+                    str(extra.id),
+                    str(primary_mate.id),
+                    str(extra_mate.id),
+                    str(reference.id),
+                ]
+            )
+        )
+
+    async def test_memory_estimate_sums_every_set_member(self):
+        """R-8: the estimate sees every R1 and R2 byte in the launch, not
+        just the primary's."""
+        pid = PydanticObjectId()
+        primary = _fastq_object(PydanticObjectId(), "a_R1.fastq", project_id=pid)
+        primary_mate = _fastq_object(PydanticObjectId(), "a_R2.fastq", project_id=pid)
+        extra = _fastq_object(PydanticObjectId(), "b_R1.fastq", project_id=pid)
+        extra_mate = _fastq_object(PydanticObjectId(), "b_R2.fastq", project_id=pid)
+        reference = self._reference(pid)
+
+        resolve_mock = AsyncMock(return_value=_memory_estimate(1024))
+
+        async def _enqueue(job_type, **kwargs):
+            return SimpleNamespace(id=PydanticObjectId())
+
+        async def _get_object(object_id, owner):
+            for obj in (primary, primary_mate, extra, extra_mate, reference):
+                if obj.id == object_id:
+                    return obj
+            raise AssertionError(f"unexpected object id {object_id}")
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=_get_object),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                AsyncMock(return_value={"minimap2": True, "fai": True}),
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                resolve_mock,
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service.sidecar_payload",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            await pipeline_service.launch_alignment(
+                object_id=primary.id,
+                reference_id=reference.id,
+                owner="local",
+                mate_object_id=primary_mate.id,
+                paired=True,
+                additional_read_sets=[(extra.id, extra_mate.id)],
+            )
+
+        resolve_mock.assert_called()
+        # The first resolve is the launch-time estimate (the index build and
+        # the declared reservation call it again with the same reads); the
+        # estimate must see every set member's bytes.
+        assert (
+            resolve_mock.call_args_list[0].kwargs["input_bytes"]
+            == primary.size + primary_mate.size + extra.size + extra_mate.size
+        )
+
+    async def test_stale_params_extra_reads_is_rejected(self):
+        """R-14: the flat params channel is dead -- a caller still sending it
+        hears about the replacement field instead of silently losing files."""
+        with pytest.raises(ValidationError, match="additional_read_sets"):
+            await pipeline_service.launch_alignment(
+                object_id=PydanticObjectId(),
+                reference_id=PydanticObjectId(),
+                owner="local",
+                params={"extra_reads": ["some-object-id"]},
+            )
