@@ -95,6 +95,10 @@ class TestGffLine:
         line = "chr1\t.\texon\t100\t200\t.\t+\t.\tID=e1;Parent=t1, t2"
         assert parse_gff_line(line).parents == ("t1", "t2")
 
+    def test_gff_multi_parent_drops_empty_tokens_from_malformed_commas(self):
+        line = "chr1\t.\texon\t100\t200\t.\t+\t.\tID=e1;Parent=t1,,t2,"
+        assert parse_gff_line(line).parents == ("t1", "t2")
+
     def test_score_parsed_when_numeric(self):
         line = "chr1\t.\tgene\t1\t9\t42.5\t+\t.\tID=g1"
         assert parse_gff_line(line).score == 42.5
