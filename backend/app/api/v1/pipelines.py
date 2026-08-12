@@ -19,6 +19,7 @@ from app.pipelines import (
     aligner_registry,
     annotation_db,
     annotation_hierarchy,
+    annotation_window,
     assembler_registry,
     assembly_qc_registry,
     bam_stats_runner,
@@ -1079,6 +1080,103 @@ class AdditionalReadSetIn(BaseModel):
 
     object_id: PydanticObjectId
     mate_object_id: PydanticObjectId | None = None
+
+
+# Top-level features in a window above which the viewer draws a density band
+# instead of individual features. A legibility judgement, not a performance
+# limit: at a typical section width this is ~2px per feature, below which
+# boxes stop being separable. Expected to be tuned against a real GFF3.
+ANNOTATION_DENSITY_THRESHOLD = 500
+
+# A client asking for a million bins must not make the server build a million
+# rows; 10 is below any width worth drawing.
+_MIN_BINS, _MAX_BINS = 10, 1000
+
+
+@router.get("/annotationstats/window/{object_id}")
+async def get_annotation_window(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    contig: str,
+    start: int,
+    end: int,
+    bins: int = 600,
+    feature_type: str | None = None,
+    biotype: str | None = None,
+    strand: str | None = None,
+) -> dict:
+    """Features overlapping a coordinate window, or their density.
+
+    Two response shapes behind one route, chosen server-side by a count: a
+    client cannot know how dense a region is before asking, and making it
+    ask twice would double the round trips on every pan.
+
+    `mode` distinguishes them rather than which key is present, so an empty
+    region cannot be mistaken for a dense one. The window is echoed back
+    because panning issues overlapping requests that can return out of
+    order -- a response with no record of what it answers cannot be matched
+    to the current viewport.
+
+    Ownership is checked before the path is built, for the same reason the
+    sibling routes do it: annotation_stats_dir is laid out by object id
+    alone, so this lookup is the only thing separating one profile's
+    annotations from another's.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    if end < start:
+        raise ValidationError(
+            "end must not be before start",
+            details={"start": start, "end": end},
+        )
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    common = {"contig": contig, "start": start, "end": end}
+    total = annotation_db.count_in_window(db_path=db_path, **common)
+
+    if total >= ANNOTATION_DENSITY_THRESHOLD:
+        counts = annotation_db.bin_counts(
+            db_path=db_path,
+            bins=max(_MIN_BINS, min(int(bins), _MAX_BINS)),
+            **common,
+        )
+        # Derived from the returned array rather than recomputed, so the
+        # width reported to the client cannot disagree with the binning that
+        # actually happened.
+        span = max(1, end - start)
+        return {
+            "mode": "binned",
+            **common,
+            "bin_bases": -(-span // max(1, len(counts))),
+            "counts": counts,
+            "total": total,
+        }
+
+    features = annotation_db.features_in_window(
+        db_path=db_path,
+        feature_type=feature_type,
+        biotype=biotype,
+        strand=strand,
+        **common,
+    )
+    rows = annotation_window.pack_rows(
+        [(f["start"], f["end"]) for f in features]
+    )
+    for feature, row in zip(features, rows):
+        feature["row"] = row
+
+    return {
+        "mode": "features",
+        **common,
+        "features": [f for f in features if f["row"] is not None],
+        "truncated_rows": sum(1 for r in rows if r is None),
+        "total": total,
+    }
 
 
 class AlignRequest(BaseModel):
