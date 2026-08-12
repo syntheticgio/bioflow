@@ -165,6 +165,22 @@ class TestFeaturesInWindow:
         )
         assert [f["feature_id"] for f in got] == ["g1"]
 
+    def test_self_referencing_parent_is_returned_not_dropped(self, tmp_path):
+        # parent == feature_id resolves to itself in by_id.get(), so the
+        # naive "parent is None" check is false and the row never lands in
+        # out -- it must be treated like a missing parent, not silently
+        # dropped from the window.
+        rows = [
+            _f("chr1", 100, 200, feature_id="self", parent="self"),
+        ]
+        path = tmp_path / "self_parent.db"
+        build_annotation_db(rows=iter(rows), db_path=path)
+        got = features_in_window(
+            db_path=path, contig="chr1", start=0, end=1000
+        )
+        assert [f["feature_id"] for f in got] == ["self"]
+        assert got[0]["children"] == []
+
     def test_filters_by_type(self, gene_db):
         got = features_in_window(
             db_path=gene_db, contig="chr1", start=0, end=6000, feature_type="exon"
