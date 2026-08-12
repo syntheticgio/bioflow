@@ -287,8 +287,6 @@ def _fill_gene_counts(con: sqlite3.Connection) -> None:
                 f"WHERE parent IN ({placeholders})",
                 frontier,
             ).fetchall()
-            if level == 0:
-                child_count = len(children)
 
             next_frontier: list[str] = []
             for child_id, c_start, c_end in children:
@@ -304,6 +302,15 @@ def _fill_gene_counts(con: sqlite3.Connection) -> None:
                 if child_id:
                     next_frontier.append(child_id)
             frontier = next_frontier
+
+            # Read after the dedup loop, not from the raw row count: a
+            # feature listed twice as a direct child (a malformed
+            # `Parent=G,G` produces two stored relationship rows for one
+            # feature_id, per Task 3's one-row-per-relationship storage)
+            # must count as one child, the same way descendant_count already
+            # collapses it via `seen`.
+            if level == 0:
+                child_count = len(seen)
 
         con.execute(
             "UPDATE genes SET child_count = ?, descendant_count = ?, "
