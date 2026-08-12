@@ -205,11 +205,17 @@ def run_annotation_stats(ctx: JobContext) -> dict:
     # This must run after build_annotation_db above: _genbank_rows is a
     # generator, and extra_facts["_contig_lengths"] is only populated once
     # the generator has been fully consumed (the assignment is the last thing
-    # that happens after its `for record in ...` loop completes). By the time
-    # rows is exhausted here, extra_facts already has the real dict in place.
-    parsed_lengths = extra_facts.pop("_contig_lengths", None)
-    if parsed_lengths:
-        acc._contig_lengths = parsed_lengths
+    # that happens after its `for record in ...` loop completes). The assert
+    # is the tripwire for that ordering: if build_annotation_db ever stops
+    # draining `rows` to completion before returning, this must fail loudly
+    # here rather than let every GenBank contig's length silently go missing.
+    if fmt == "genbank":
+        parsed_lengths = extra_facts.pop("_contig_lengths", None)
+        assert parsed_lengths is not None, (
+            "_genbank_rows must be fully consumed before this point"
+        )
+        if parsed_lengths:
+            acc.set_contig_lengths(parsed_lengths)
 
     ctx.progress(phase="summarize", pct=0.9, message="summarizing")
 

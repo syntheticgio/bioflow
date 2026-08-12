@@ -117,9 +117,22 @@ class AnnotationAccumulator:
         since `_ContigCoverage` merges rather than raising.
         """
         self._count(f)
-        # The contig must still be known even if nothing covers it yet, or a
-        # record of only join features would report zero contigs.
+        # The contig must still be known even if nothing covers it yet: a
+        # record of only join-feature parents would otherwise never create a
+        # _ContigCoverage entry, and finish() indexes self._coverage[name]
+        # directly (not .get) for every contig _count already saw -- a
+        # missing entry is a KeyError there, not a silent zero.
         self._coverage.setdefault(f.contig, _ContigCoverage())
+
+    def set_contig_lengths(self, contig_lengths: dict[str, int]) -> None:
+        """Replace the reference-derived lengths with ones read from the file.
+
+        GenBank states each contig's length on its own LOCUS line, so unlike
+        GFF/GTF/BED it needs no paired reference. The caller only knows these
+        once its own per-record pass has finished, which is necessarily after
+        construction -- see `queue.annotation_handlers._genbank_rows`.
+        """
+        self._contig_lengths = contig_lengths
 
     def _count(self, f: Feature) -> None:
         self._total += 1
