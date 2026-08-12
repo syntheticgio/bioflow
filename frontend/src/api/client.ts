@@ -9,7 +9,6 @@ import type {
   AlignerSchema,
   AnnotationFeature,
   AnnotationFeaturePage,
-  AskQuestionResponse,
   AssembleRequest,
   AssemblerSchema,
   AssemblyParams,
