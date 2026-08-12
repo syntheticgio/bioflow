@@ -4,7 +4,9 @@ import asyncio
 import contextlib
 import json
 import os
+import shutil
 import socket
+import subprocess
 from datetime import UTC, datetime, timedelta
 
 import httpx
@@ -20,6 +22,7 @@ from app.queue import governor, keys, queue
 from app.queue.executor import JobExecutor
 from app.queue.registry import JobContext, get_handler, load_handlers
 from app.services import resource_limit_service, run_service
+from app.version import __version__
 
 log = get_logger(__name__)
 
@@ -33,6 +36,52 @@ LOOP_STALL_WARN_SECONDS = 0.25
 # More than two concurrent heavy readers on a FUSE mount is slower in aggregate
 # than two, so this is a throughput cap as much as a safety valve.
 IO_HEAVY_LIMIT = 2
+
+# The reference every node and the primary pull. Matches IMAGE in
+# node_update_service.py and docker-compose.child-node.yml's `image:` line --
+# all three must agree, since this is the value docker image inspect resolves
+# to a RepoDigests entry.
+_IMAGE_REF = "ghcr.io/syntheticgio/bioflow-backend:latest"
+
+
+def _own_image_digest() -> str | None:
+    """The registry digest of the image this process is running, or None.
+
+    Reads the digest Docker already recorded for the local image cache entry
+    -- the same RepoDigests field the launcher's own update check
+    (update_check.rs's DockerImageInspector) compares against GHCR for the
+    primary. `docker inspect <container-id>` would return the container's
+    image ID instead, a different value that can never equal a registry
+    digest -- the two sides of any staleness comparison would silently never
+    agree. None on any failure -- a node whose socket is not mounted, or
+    whose image was built locally and never pushed (so RepoDigests is empty),
+    must still heartbeat; it simply reports no version (NU-3).
+    """
+    client = shutil.which("docker")
+    if client is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                client, "image", "inspect", _IMAGE_REF,
+                "--format", "{{index .RepoDigests 0}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    # RepoDigests entries look like "ghcr.io/org/name@sha256:...";
+    # only the part after '@' is the digest. No '@' (e.g. docker's
+    # "<no value>" template literal for an empty RepoDigests) means no
+    # digest to report.
+    text = result.stdout.strip()
+    if "@" not in text:
+        return None
+    return text.rsplit("@", maxsplit=1)[-1] or None
 
 
 def _as_int(value) -> int:
@@ -99,6 +148,9 @@ class Worker:
     def __init__(self, worker_id: str | None = None):
         self.worker_id = worker_id or settings.worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self.node_id: str = settings.worker_node_id
+        # Read once: it cannot change while this process lives.
+        self.image_digest: str | None = _own_image_digest()
+        self.version: str = __version__
         self.max_concurrent = settings.worker_max_concurrent
         self.shutdown = asyncio.Event()
         self.executor = JobExecutor(self.worker_id)
@@ -515,6 +567,8 @@ class Worker:
                     "running": list(self._running),
                     "draining": self.shutdown.is_set(),
                     "node_id": self.node_id,
+                    "image_digest": self.image_digest,
+                    "version": self.version,
                 }
             ),
         )
