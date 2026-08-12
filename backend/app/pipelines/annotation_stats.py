@@ -101,6 +101,27 @@ class AnnotationAccumulator:
         self._length_counts = [0] * (len(_LENGTH_BINS) + 1)
 
     def add(self, f: Feature) -> None:
+        """Count a feature and let it contribute to coverage."""
+        self._count(f)
+        cov = self._coverage.get(f.contig)
+        if cov is None:
+            cov = self._coverage[f.contig] = _ContigCoverage()
+        cov.add(f.start, f.end)
+
+    def add_without_coverage(self, f: Feature) -> None:
+        """Count a feature whose span must not contribute to coverage.
+
+        A GenBank join feature's parent row spans its introns. Its segment
+        children carry the real intervals, so feeding the parent here too
+        would merge those introns back into the covered total -- silently,
+        since `_ContigCoverage` merges rather than raising.
+        """
+        self._count(f)
+        # The contig must still be known even if nothing covers it yet, or a
+        # record of only join features would report zero contigs.
+        self._coverage.setdefault(f.contig, _ContigCoverage())
+
+    def _count(self, f: Feature) -> None:
         self._total += 1
         if f.parent is None:
             self._top_level += 1
@@ -110,10 +131,6 @@ class AnnotationAccumulator:
             self._biotypes[f.biotype] = self._biotypes.get(f.biotype, 0) + 1
 
         self._per_contig_count[f.contig] = self._per_contig_count.get(f.contig, 0) + 1
-        cov = self._coverage.get(f.contig)
-        if cov is None:
-            cov = self._coverage[f.contig] = _ContigCoverage()
-        cov.add(f.start, f.end)
 
         length = f.end - f.start + 1
         for i, edge in enumerate(_LENGTH_BINS):
