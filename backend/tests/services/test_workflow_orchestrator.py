@@ -14,7 +14,7 @@ import time and patching the module attribute never reached them.
 
 import pytest
 from beanie import PydanticObjectId, init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS, JobState
@@ -37,12 +37,12 @@ OWNER = "tester"
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models(monkeypatch):
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
-    client.close()
+    await client.close()
 
 
 @pytest.fixture

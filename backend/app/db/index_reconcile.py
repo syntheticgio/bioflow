@@ -14,8 +14,8 @@ Orphaned indexes (in the DB but not in the model) are left alone. Dropping an
 index is destructive; the safe default is to log and let a human decide.
 """
 
-from motor.motor_asyncio import AsyncIOMotorCollection
 from pymongo import IndexModel
+from pymongo.asynchronous.collection import AsyncCollection
 
 from app.logging import get_logger
 
@@ -51,7 +51,7 @@ def _index_def(doc: dict) -> tuple:
     function, which is the right place for it.
     """
     # The key pattern.  IndexModel.document returns a dict
-    # ({"foo": 1}); motor's index_information() returns a list of
+    # ({"foo": 1}); index_information() returns a list of
     # tuples ([("foo", 1)]).  Normalize both to a tuple of (field,
     # direction) pairs so the comparison is format-independent.
     raw_key = doc.get("key", [])
@@ -78,7 +78,7 @@ def _index_def(doc: dict) -> tuple:
 
 
 async def reconcile_indexes(
-    collection: AsyncIOMotorCollection,
+    collection: AsyncCollection,
     declared: list[IndexModel],
 ) -> list[str]:
     """Drop indexes whose definition conflicts with what the model declares.

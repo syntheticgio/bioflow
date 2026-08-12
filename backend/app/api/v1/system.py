@@ -50,7 +50,7 @@ async def system_stats() -> dict:
     # deduplicated, so summing blob sizes is the true on-disk cost -- summing
     # object sizes would double-count shared content.
     library_bytes = 0
-    async for row in get_db().blobs.aggregate(
+    async for row in await get_db().blobs.aggregate(
         [{"$group": {"_id": None, "total": {"$sum": "$size"}}}]
     ):
         library_bytes = row.get("total") or 0

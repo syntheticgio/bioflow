@@ -696,9 +696,6 @@ async def _outcome_counts() -> dict[str, dict[str, int]]:
     # their own client to a private database instead), while this collection
     # is exactly the store `_modelled` queries -- so an outcome count and a
     # duration summary can never disagree about which database they read.
-    # Beanie’s aggregate() is avoided on purpose: this Motor version’s latent
-    # cursors are not awaitable, and AggregationQuery.to_list() awaits one.
-    # The async-for form works on both. See queue/stats.py.
     # `$ifNull` is not defensive padding: the real collection holds rows
     # recorded before the outcome field existed (2026-08-03), which carry no
     # `outcome` at all. Per the computation-records design, those were
@@ -716,7 +713,7 @@ async def _outcome_counts() -> dict[str, dict[str, int]]:
         }
     ]
     out: dict[str, dict[str, int]] = {}
-    async for row in JobRunTiming.get_pymongo_collection().aggregate(pipeline):
+    async for row in await JobRunTiming.get_pymongo_collection().aggregate(pipeline):
         key = row["_id"]
         out.setdefault(key["job_type"], {})[key["outcome"]] = row["n"]
     return out

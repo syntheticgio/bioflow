@@ -9,7 +9,7 @@ here is the one that pins that invariant.
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models.object import DataObject, ObjectStatus
@@ -19,13 +19,13 @@ from app.queue.results import _link_mate
 @pytest.fixture
 async def _db():
     """Throwaway test database, same pattern as tests/db/test_index_reconcile."""
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=[DataObject])
     await DataObject.delete_all()
     yield db
     await DataObject.delete_all()
-    client.close()
+    await client.close()
 
 
 async def _obj(

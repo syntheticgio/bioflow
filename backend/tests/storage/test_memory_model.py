@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
@@ -42,12 +42,12 @@ async def _init_beanie_models():
     sample counts per job type, and leftover rows from an earlier test would
     corrupt those counts without per-test isolation.
     """
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield
-    client.close()
+    await client.close()
 
 
 class TestInsufficientData:

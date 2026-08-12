@@ -362,8 +362,8 @@ async def accept_share(
     # id within the group -- not just the source's.
     source_id_to_copy = {src.id: copy for src, copy in zip(group, copies, strict=True)}
 
-    async with await get_client().start_session() as session:
-        async with session.start_transaction():
+    async with get_client().start_session() as session:
+        async with await session.start_transaction():
             for copy in copies:
                 await copy.insert(session=session)
 

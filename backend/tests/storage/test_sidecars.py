@@ -8,7 +8,7 @@ and, more consequentially, what deletion destroys.
 
 import pytest
 from beanie import PydanticObjectId, init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS, ObjectRole, SidecarRole
@@ -27,7 +27,7 @@ async def beanie_models():
     """
     from app.db.index_reconcile import reconcile_indexes
 
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     for model in ALL_MODELS:
         model_settings = model.Settings
@@ -37,7 +37,7 @@ async def beanie_models():
             await reconcile_indexes(db[coll_name], indexes)
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield
-    client.close()
+    await client.close()
 
 
 class TestSidecarRole:

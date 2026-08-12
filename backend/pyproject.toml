@@ -6,9 +6,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "beanie>=2.0,<2.3",
-    "motor>=3.6",
-    "pymongo>=4.9",
+    "beanie>=2.0,<3.0",
+    "pymongo>=4.11,<5.0",
     "redis>=5.2,<9",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

@@ -7,7 +7,7 @@ the flag on its drop path; these are the routes that bypass it.
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS, JobState
@@ -31,12 +31,12 @@ async def _init_beanie_models(monkeypatch):
     `update_one`), so that is patched to the same throwaway database rather
     than standing up the app's real connection singleton in a test.
     """
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
-    client.close()
+    await client.close()
 
 
 class TestReaperClearsCancel:

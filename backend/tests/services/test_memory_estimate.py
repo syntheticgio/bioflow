@@ -8,7 +8,7 @@ estimate" passes whether or not the guard it claims to test is wired up.
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
@@ -28,12 +28,12 @@ async def _init_beanie_models():
     resolution outcomes, which leftover rows from an earlier test would
     corrupt.
     """
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield
-    client.close()
+    await client.close()
 
 
 class TestUnknown:

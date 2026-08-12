@@ -6,7 +6,7 @@ both directions -- too low over-admits, too high starves the queue.
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
@@ -18,12 +18,12 @@ from app.services.pipeline_service import MIN_DECLARED_MEM_MB
 
 @pytest.fixture(autouse=True)
 async def _init_beanie_models():
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await db[JobRunTiming.Settings.name].drop()
     await init_beanie(database=db, document_models=ALL_MODELS)
     yield
-    client.close()
+    await client.close()
 
 
 class TestDeclaredAlignMem:

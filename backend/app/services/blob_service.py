@@ -65,8 +65,8 @@ async def attach_blob_to_object(
         set_on_insert["rel_path"] = None
         set_on_insert["external_path"] = external_path
 
-    async with await get_client().start_session() as session:
-        async with session.start_transaction():
+    async with get_client().start_session() as session:
+        async with await session.start_transaction():
             await db.blobs.update_one(
                 {"_id": digest},
                 {
@@ -180,8 +180,8 @@ async def attach_existing_blob_to_object(
     if session is not None:
         await _apply(session)
     else:
-        async with await get_client().start_session() as s:
-            async with s.start_transaction():
+        async with get_client().start_session() as s:
+            async with await s.start_transaction():
                 await _apply(s)
 
     # Built from the blob already fetched above rather than re-read: inside a
@@ -204,8 +204,8 @@ async def detach_blob_from_object(object_id: PydanticObjectId) -> None:
 
     now = datetime.now(UTC)
     db = get_db()
-    async with await get_client().start_session() as session:
-        async with session.start_transaction():
+    async with get_client().start_session() as session:
+        async with await session.start_transaction():
             await db.objects.delete_one({"_id": object_id}, session=session)
             if obj.blob_sha256:
                 await db.blobs.update_one(

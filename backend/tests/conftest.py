@@ -10,7 +10,7 @@ import importlib
 import pytest
 import pytest_asyncio
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
@@ -52,7 +52,7 @@ async def beanie_models():
     """
     from app.db.index_reconcile import reconcile_indexes
 
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
 
     for model in ALL_MODELS:
@@ -101,4 +101,4 @@ async def beanie_models():
                 mp.setattr(module, "get_client", lambda: client)
         yield
 
-    client.close()
+    await client.close()

@@ -7,7 +7,7 @@ independently, which is the half that would be easy to lose.
 
 import pytest
 from beanie import PydanticObjectId, init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
@@ -42,12 +42,12 @@ async def _fresh_beanie(monkeypatch):
     exact trap CLAUDE.md's AI-feature section describes for the same reason).
     A dedicated per-test connection avoids the mismatch entirely.
     """
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
-    client.close()
+    await client.close()
 
 # WorkflowDefinition is a Beanie Document; instantiating one (even without
 # saving it) requires init_beanie to have run first, same reason every other

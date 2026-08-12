@@ -187,7 +187,7 @@ async def facets(project_id: PydanticObjectId | None = None, *, owner: str) -> d
         ]
         return [
             {"value": r["_id"], "count": r["count"]}
-            async for r in db.objects.aggregate(pipeline)
+            async for r in await db.objects.aggregate(pipeline)
         ]
 
     async def unwound(field_name: str, limit: int = MAX_FACET_VALUES) -> list[dict]:
@@ -200,7 +200,7 @@ async def facets(project_id: PydanticObjectId | None = None, *, owner: str) -> d
         ]
         return [
             {"value": r["_id"], "count": r["count"]}
-            async for r in db.objects.aggregate(pipeline)
+            async for r in await db.objects.aggregate(pipeline)
         ]
 
     # Which metadata keys exist at all, and how often -- this is what makes an
@@ -215,7 +215,7 @@ async def facets(project_id: PydanticObjectId | None = None, *, owner: str) -> d
     ]
     metadata_keys = [
         {"key": r["_id"], "count": r["count"]}
-        async for r in db.objects.aggregate(key_pipeline)
+        async for r in await db.objects.aggregate(key_pipeline)
     ]
 
     return {
@@ -248,7 +248,7 @@ async def metadata_values(
     ]
     return [
         {"value": r["_id"], "count": r["count"]}
-        async for r in db.objects.aggregate(pipeline)
+        async for r in await db.objects.aggregate(pipeline)
     ]
 
 

@@ -8,7 +8,7 @@ under contention is what fails if `sole` is computed wrongly.
 
 import pytest
 from beanie import init_beanie
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.models import ALL_MODELS
@@ -22,12 +22,12 @@ async def _init_beanie_models(monkeypatch):
     this suite performs I/O and pytest-asyncio hands each async test its own
     event loop by default.
     """
-    client = AsyncIOMotorClient(settings.mongo_url, tz_aware=True)
+    client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
     await init_beanie(database=db, document_models=ALL_MODELS)
     monkeypatch.setattr("app.db.client.get_db", lambda: db)
     yield
-    client.close()
+    await client.close()
 
 
 @pytest.mark.asyncio
