@@ -24,7 +24,7 @@ export function ContigTable({
 }) {
   const [page, setPage] = useState(0);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["bamstats", "contigs", objectId, reportPath, page],
     queryFn: () => api.bamStatsContigs(objectId, reportPath, page * PAGE_SIZE, PAGE_SIZE),
   });
@@ -47,8 +47,14 @@ export function ContigTable({
         </a>
       </div>
 
-      {isLoading || !data ? (
-        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>Loading…</div>
+      {isLoading ? (
+        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+          Loading per-contig coverage…
+        </div>
+      ) : isError || !data ? (
+        <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
+          Couldn't load the per-contig table.
+        </div>
       ) : (
         <>
           <table className="trim-table">
