@@ -235,7 +235,9 @@ def children_of(*, db_path: Path, parent_id: str) -> list[dict]:
 
 def count_features(*, db_path: Path, filters: FeatureFilters) -> int:
     """How many rows match. See the route: this is not recomputed on every
-    page turn, because a combined predicate cannot use a single index."""
+    page turn -- a combined predicate is not guaranteed to use a single
+    index, the same reasoning variant_db.count_variants documents (there,
+    benchmarked at ~400ms/5M rows; not separately benchmarked here)."""
     where, args = _where(filters)
     con = _connect(db_path)
     try:
