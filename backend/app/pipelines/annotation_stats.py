@@ -136,7 +136,7 @@ class AnnotationAccumulator:
 
     def _count(self, f: Feature) -> None:
         self._total += 1
-        if f.parent is None:
+        if not f.parents:
             self._top_level += 1
         if f.type:
             self._types[f.type] = self._types.get(f.type, 0) + 1
