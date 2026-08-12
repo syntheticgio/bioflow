@@ -42,6 +42,7 @@ COMPRESSIBLE_KINDS = frozenset(
         FormatKind.SAM,
         FormatKind.GFF,
         FormatKind.GTF,
+        FormatKind.GENBANK,
         FormatKind.BED,
         FormatKind.GFA,
     }

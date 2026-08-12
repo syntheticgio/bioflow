@@ -42,6 +42,10 @@ EXTENSION_MAP: dict[str, FormatKind] = {
     "gff": FormatKind.GFF,
     "gff3": FormatKind.GFF,
     "gtf": FormatKind.GTF,
+    "gb": FormatKind.GENBANK,
+    "gbk": FormatKind.GENBANK,
+    "gbff": FormatKind.GENBANK,
+    "genbank": FormatKind.GENBANK,
     "gfa": FormatKind.GFA,
     "fai": FormatKind.FAI,
     "txt": FormatKind.TEXT,
@@ -204,6 +208,14 @@ def _sniff_text(payload: bytes) -> FormatKind | None:
         return FormatKind.SAM
     if first.startswith(">"):
         return FormatKind.FASTA
+
+    # A GenBank record must open with LOCUS in column 1 -- the format's own
+    # spec fixes that, which makes this a real positive signal rather than a
+    # shape heuristic like the tabular sniffing below. The trailing
+    # whitespace check matters: a prose file starting "LOCUSTS ..." is not a
+    # GenBank record.
+    if first.startswith("LOCUS") and first[5:6].isspace():
+        return FormatKind.GENBANK
 
     # FASTQ: '@' header, then sequence, '+' separator, then equal-length quality.
     # The '+' at line 3 is what separates it from a '@'-prefixed SAM header.
