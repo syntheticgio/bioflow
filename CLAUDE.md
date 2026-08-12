@@ -85,6 +85,58 @@ already written at the right level of detail. That is usually the right call;
 write the body explicitly when the branch's commits individually undersell
 what the branch does as a whole.
 
+## Writing the specification
+
+The design-spec step in the workflow produces requirements that an implementer
+(agent or human) can build from without guessing. A well-written requirement
+states one thing that someone can check. Use these six quality criteria on
+every sentence:
+
+- **Testable** — you can describe how to demonstrate it is met. This is the
+  gate that catches everything else: if you cannot, it is a preference, not a
+  requirement.
+- **Unambiguous** — two people reading it separately build the same thing.
+- **Necessary** — delete it and something a user needs stops working.
+- **Feasible** — it can be built inside the constraints you have.
+- **Complete** — it does not rely on a fact that exists only in someone's head.
+- **Consistent** — it does not contradict another requirement in the same set.
+
+Practical rules that follow from these:
+
+1. **One obligation per statement.** If a sentence contains "and", split it —
+   two things that can pass and fail independently are two requirements.
+2. **Name the actor.** "Reports must be approved" → "A finance manager must
+   approve a report before it can be published." Anonymous requirements get
+   built for a user nobody has met.
+3. **Specify the what, not the how.** "A user uploading a file larger than 5 MB
+   can tell that the upload is progressing" is a requirement. "Show a progress
+   bar with percentage complete" is a design decision disguised as one. State
+   the constraint and leave the solution to the person who knows the system
+   best, unless a regulation, contract, or design system mandates the how.
+4. **Give every requirement a permanent identifier** and never reuse it, even
+   after deletion. Reused IDs make old review comments lie.
+5. **Check the set for contradictions.** Two well-written requirements can be
+   impossible together (e.g. "records retained 7 years" and "user data removed
+   within 30 days of account closure").
+6. **Record the source and the decision.** Who asked, what problem it serves,
+   and what you chose where there was a choice. That is what lets the document
+   survive its author leaving.
+
+Non-functional requirements are where most teams are weakest — they surface in
+the last week when a load test fails or a security questionnaire arrives. Five
+categories cover most of what goes missing:
+
+| Category | What to specify |
+|---|---|
+| **Performance** | An operation, a target, a load, and a percentile. |
+| **Availability** | Uptime target, measurement window, and what happens to in-flight work during failure. |
+| **Security** | Authentication, authorisation rules, data at rest and in transit, retention and deletion. |
+| **Accessibility** | A named conformance level (e.g. WCAG 2.2 AA), not "should be accessible". |
+| **Capacity** | Expected volumes, growth rate, maximum file/record sizes, behaviour at the limit. |
+
+For a deeper treatment, see
+[projan.ai/blog/what-good-requirements-look-like-and-how-to-write-them](https://projan.ai/blog/what-good-requirements-look-like-and-how-to-write-them).
+
 ## Branch naming
 
 Branches are named for what they do, prefixed by type:
