@@ -1,13 +1,11 @@
-# Builds the BioFlow container images and publishes them to GHCR, so the
-# native launcher (#28) can start a stack on a machine with no source tree.
-# Replaces the by-hand publish of #37: see docs/superpowers/plans/2026-08-04-ghcr-image-publishing.md
-# for what that did manually.
+# Builds and publishes the BioFlow container images, builds the native launcher
+# bundles, and creates the one GitHub release that carries both (#335).
 #
 # Two images, not three. `api` and `worker` are the same image with different
 # `command:` values (see docker-compose.yml), so they share one published
 # `bioflow-backend`. Building them separately would push ~8GB of identical
 # layers twice.
-name: Publish container images
+name: Release
 
 on:
   push:
@@ -25,7 +23,7 @@ on:
 # Never cancel in flight: these pushes move gigabytes, and a half-pushed image
 # is worse than a queued one.
 concurrency:
-  group: publish-images-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -241,18 +239,53 @@ jobs:
           done
           echo "${tag} serves linux/amd64 and linux/arm64"
 
+  # The launcher half of a combined release (#335). Tag-gated: a push to main
+  # must never start a slow, notarized desktop build.
+  launcher:
+    name: Launcher bundles
+    needs: [version-guard]
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/launcher-build.yml
+    permissions:
+      contents: read
+    with:
+      apple_team_id: ${{ vars.APPLE_TEAM_ID }}
+    secrets:
+      CI_SIGNING_P12_BASE64: ${{ secrets.CI_SIGNING_P12_BASE64 }}
+      CI_SIGNING_P12_PASSWORD: ${{ secrets.CI_SIGNING_P12_PASSWORD }}
+      CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+      APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+
   # A v* tag publishes images but, before #53, created nothing a person could
   # link to. This is the half that makes a tag a release rather than just a
   # registry push.
   release:
     name: Create the GitHub release
-    needs: manifest
-    # Tag-only: this workflow also runs on every push to main.
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [manifest, launcher]
+    # `always()` is what lets this run when `launcher` failed -- PB-5: the
+    # images are already public in GHCR by then, so withholding the release
+    # page only hides what has already shipped. The explicit manifest check
+    # still withholds it when the images failed (PB-6), and the startsWith
+    # clause is load-bearing under always(): without it a push to main --
+    # where manifest and launcher both skip -- would reach this job.
+    if: always() && needs.manifest.result == 'success' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Download the launcher bundles
+        # continue-on-error, not `if: needs.launcher.result == 'success'`: a
+        # launcher build that failed after the macOS leg uploaded still has
+        # artifacts worth attaching, and a run with none must not fail here.
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          path: bundles
+          pattern: launcher-*
+          merge-multiple: true
+
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -287,6 +320,21 @@ jobs:
             echo '```'
           } > "$notes_file"
 
+          # The linux artifact keeps its bundle/deb, bundle/rpm subpaths
+          # (merge-multiple flattens artifact *names*, not the directories
+          # inside them), so find files rather than globbing bundles/*,
+          # which would hand `gh` a directory to upload and fail.
+          assets=()
+          if [ -d bundles ]; then
+            mapfile -t assets < <(find bundles -type f)
+          fi
+          if [ "${#assets[@]}" -gt 0 ]; then
+            {
+              echo
+              echo "Native launcher bundles are attached to this release."
+            } >> "$notes_file"
+          fi
+
           # Append GitHub's generated "What's Changed" list to the blurb above.
           #
           # This used to be `--generate-notes` alongside `--notes-file`, which
@@ -316,6 +364,9 @@ jobs:
             *-alpha|*-beta) prerelease="--prerelease" ;;
           esac
 
+          # PB-11: idempotent, because the recovery path after a launcher
+          # failure is "Re-run failed jobs" on the whole run, which re-runs
+          # this job against a release that already exists.
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "BioFlow ${version}" \
@@ -326,3 +377,13 @@ jobs:
             --title "BioFlow ${version}" \
             --notes-file "$notes_file" \
             $prerelease
+
+          if [ "${#assets[@]}" -gt 0 ]; then
+            printf '%s\n' "${assets[@]}"
+            gh release upload "$TAG" \
+              --repo "${{ github.repository }}" \
+              --clobber \
+              "${assets[@]}"
+          else
+            echo "::warning::No launcher bundles were attached to ${TAG}. Re-run the failed jobs on this run to build and attach them."
+          fi

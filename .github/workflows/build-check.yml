@@ -121,7 +121,7 @@ jobs:
 
       # The ops tests are self-contained (subprocess + tmp_path fixtures,
       # no backend imports) and validate the release-version guard and
-      # version-bump scripts that publish-images.yml and release-launcher.yml
+      # version-bump scripts that release.yml and release-launcher.yml
       # depend on.
       - name: Ops script tests
         run: pytest ops/tests/ -v
