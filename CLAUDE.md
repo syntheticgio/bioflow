@@ -31,8 +31,22 @@ git push -u origin HEAD
 gh pr create --base main --fill
 ```
 
-Then report the PR URL and stop. Do not `gh pr merge`, and do not push to
-`main` directly.
+**Opening the PR is not the end of the task -- watch CI and fix what it
+finds.** `gh pr create` returns before any check has run. Poll
+`gh pr checks <N>` (and `gh pr view <N> --json mergeable,mergeStateStatus`
+for conflicts) until every check reports pass/fail, not just until the
+command returns -- a "pending" read seconds after creation is the run not
+having started yet, not a signal to stop watching. This caught a real bug on
+#217/#314: the local suite was green, but CI's `ruff check` failed on an
+import-order rule (`I001`) the local run never invoked, and the fix was a
+one-line split of a combined import. Read the job log, apply the minimal fix
+ruff itself suggests (or the equivalent for whatever check failed), push, and
+re-poll -- don't leave a red check for the user to notice and report back to
+you. Same for `mergeStateStatus`: if it comes back `UNSTABLE` (checks still
+running) that's fine and you keep waiting, but if it's a real conflict,
+rebase your branch on `origin/main` and push again -- that is ordinary work
+on your own branch, not a history rewrite of a shared one. Only once checks
+are green and `mergeable` is clean do you report the PR URL and stop.
 
 What still earns a pause before you push:
 
@@ -41,12 +55,6 @@ What still earns a pause before you push:
 - **Anything genuinely destructive** -- history rewrites, force pushes,
   deleting branches that hold unmerged work. Committing is cheap and
   reversible; those are not.
-
-`main` being dirty or diverged is no longer your problem to solve by hand: a
-PR that cannot merge cleanly says so in the GitHub UI, which is a better place
-to discover it than mid-merge on the user's checkout. If GitHub reports a
-conflict, rebase your branch on `origin/main` and push again -- that is
-ordinary work on your own branch, not a history rewrite of a shared one.
 
 Keep commits separable: a mechanical rename and a behaviour change in one
 commit is a commit nobody can review or revert, whatever the test count says.
