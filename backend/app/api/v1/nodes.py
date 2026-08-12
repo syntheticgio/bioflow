@@ -242,7 +242,7 @@ def _rewrite_host(url: str, host: str) -> str:
         # Match the service name as a hostname — preceded by :// or @
         # and followed by :port or / or end-of-string.
         result = re.sub(
-            rf"(?P<before>(://|@)){re.escape(name)}(?P<after>(:\\d+|/|$))",
+            rf"(?P<before>(://|@)){re.escape(name)}(?P<after>(:\d+|/|$))",
             rf"\g<before>{host}\g<after>",
             result,
             count=1,
