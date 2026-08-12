@@ -2124,13 +2124,20 @@ export function FileIcon({
         ? (`reads_${stageSuffix}_${readPlatform}` as BioIconName)
         : (`reads_${stageSuffix}` as BioIconName)
       : concept;
+  const platformLabel = readPlatform
+    ? { illumina: "Illumina", pacbio: "PacBio", nanopore: "Nanopore" }[readPlatform]
+    : null;
   return (
     <BioIcon
       name={name}
       variant={variant}
       size={size}
       className={className}
-      title={`${formatKind} file`}
+      title={
+        concept === "reads" && platformLabel
+          ? `${formatKind} file (${platformLabel})`
+          : `${formatKind} file`
+      }
     />
   );
 }
