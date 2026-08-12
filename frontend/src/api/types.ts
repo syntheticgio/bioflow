@@ -1925,6 +1925,77 @@ export interface VariantQuery {
   skipCount?: boolean;
 }
 
+/** One row of the annotation feature table. */
+export interface AnnotationFeature {
+  contig: string;
+  start: number;
+  end: number;
+  type: string | null;
+  strand: string | null;
+  score: number | null;
+  name: string | null;
+  feature_id: string | null;
+  parent: string | null;
+  biotype: string | null;
+  attributes: string | null;
+  has_children: boolean;
+}
+
+/** A page of the feature table. `total` is null when skip_count was set. */
+export interface AnnotationFeaturePage {
+  total: number | null;
+  rows: AnnotationFeature[];
+}
+
+export interface AnnotationContigStat {
+  name: string;
+  length: number | null;
+  count: number;
+  covered_bases: number;
+  /** Null when the contig's length is unknown -- not zero coverage. */
+  covered_fraction: number | null;
+  per_mb: number | null;
+}
+
+export interface AnnotationLengthBin {
+  min: number;
+  max: number | null;
+  count: number;
+}
+
+/** Facts written by run_annotation_stats. Every optional field is absent
+ *  rather than empty when it has nothing to say, so a block renders only
+ *  when there is something in it. */
+export interface AnnotationStatsFacts extends Record<string, unknown> {
+  annotation_stats_status?: "ok";
+  annotation_feature_count?: number;
+  annotation_top_level_count?: number;
+  annotation_contig_count?: number;
+  annotation_per_contig?: AnnotationContigStat[];
+  annotation_length_histogram?: AnnotationLengthBin[];
+  annotation_type_counts?: Record<string, number>;
+  annotation_biotype_counts?: Record<string, number>;
+  annotation_attribute_keys?: Record<string, number>;
+  annotation_malformed_lines?: number;
+  gff_version?: string;
+  genome_build?: string;
+  annotation_source?: string;
+  source_version?: string;
+}
+
+export interface FeatureQuery {
+  offset: number;
+  limit: number;
+  contig?: string;
+  startMin?: number;
+  startMax?: number;
+  featureType?: string;
+  biotype?: string;
+  nameQuery?: string;
+  strand?: string;
+  skipCount?: boolean;
+}
+
 /**
  * The profile shape is declared in `stores/profileStore.ts` and re-exported
  * here so `api/client.ts` can name a response type without a second copy
