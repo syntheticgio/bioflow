@@ -167,6 +167,9 @@ class TestGtfLine:
         # Neither exon usurps the transcript's own identifier.
         assert exon1.feature_id != "ENST01"
         assert exon2.feature_id != "ENST01"
+        # GTF gives exon/CDS/UTR rows no identifier of their own.
+        assert exon1.feature_id is None
+        assert exon2.feature_id is None
 
     def test_biotype_from_gene_biotype(self):
         line = (
