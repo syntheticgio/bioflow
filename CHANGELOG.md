@@ -5,6 +5,505 @@ All notable changes to BioFlow, generated from Conventional Commits by
 the first paragraph of the body where one exists; only `feat` and `fix`
 reach the notes. See AGENTS.md "Release notes" for the contract.
 
+## [0.4.0] - 2026-08-12
+
+
+
+
+### 🚀 Features
+
+- *(ui)* tooltip on reads icons shows the platform (PacBio, Nanopore, Illumina)
+When hovering over a reads file icon in the project explorer, the
+tooltip now includes the platform name alongside the format — e.g.
+'fastq file (PacBio)' instead of just 'fastq file'. Falls back to t…
+
+- *(launcher)* add the Update button's affordance rule
+Three states rather than a boolean: hidden, available, and suppressed
+with a reason. Suppressed carries its own explanation so the button can
+say why it is inert instead of vanishing.
+
+- *(launcher)* add the rule for which modes have a checkable tag
+Release tracks a moving latest and is the only mode where a digest
+check answers a real question. Developer builds :local images with no
+registry counterpart, and alpha/beta pin an immutable stage tag…
+
+- *(ops)* list and prune orphaned worktree stacks
+`worktree-up.sh --down` only works from inside the worktree that owns the
+stack, which is the structural reason orphans accumulate: a worktree gets
+deleted when its branch merges, and once the directo…
+
+- *(agent)* merge ASK and Agent into unified AI Agent panel
+Merge the Project Q&A (ASK) and AI Agent features into a single unified
+Agent panel. Remove all ASK-specific backend infrastructure.
+
+- *(launcher)* show which other BioFlow stacks are running
+The launcher sees only its own Compose project, since every action runs
+`--project-directory <install_dir>`. That is correct -- `biopipe` is its
+boundary -- but it meant a machine with four orphaned w…
+
+- *(icons)* draw per-platform reads marks for Illumina, PacBio and Nanopore
+Adds six reads_{raw,trimmed}_{illumina,pacbio,nanopore} glyphs to the icon
+set -- the same reads_raw/reads_trimmed mark with one added ink cue per
+instrument (staggered mates, looped CCS gap, threaded…
+
+- *(launcher)* add version mode selector to Settings dialog (#288)
+Adds a version dropdown to the Settings dialog with four modes:
+Release (stable, :latest tag), Alpha, Beta (pre-release tags from
+GHCR), and Developer (local build). Selecting a mode and clicking
+Appl…
+
+- *(ui)* show per-node queue depth in the nodes table
+
+- *(frontend)* type per-node queue statistics
+
+- *(api)* break system load down by node on /system/load
+
+- *(api)* report per-node queue depth and stale reservations on /nodes
+
+- *(queue)* surface ready queues belonging to no enrolled node
+
+- *(queue)* read per-node queue depth and reservations in one pipeline
+
+- *(quality)* show the summary at the top of the Quality tab (#292)
+The AI summary rendered below the charts and fact tables, so the overall
+verdict on a file came only after the detail that justifies it. Move it
+above the charts: the summary is the high-level answer,…
+
+- *(ui)* add node provisioning form with progress and result display
+
+- *(main)* register orphan provisioning cleanup on startup
+
+- *(nodes)* add SSH provisioning endpoints and asyncssh executor
+
+- *(api)* add TypeScript types and client methods for node provisioning
+
+- *(config)* add PRIMARY_HOSTNAME setting for node provisioning
+
+- *(history)* style the summary rail from the reference
+
+- *(history)* structure the summary rail as citable prose
+
+- *(nodes)* add child-node enrollment with shared-secret auth (#245)
+
+- *(pipelines)* add blob-transfer endpoints between primary and child nodes
+Adds GET /objects/blob/{digest} and PUT /objects/blob/{digest} endpoints
+so compute nodes can pull/push content-addressed blobs to the primary.
+
+- *(api)* add /nodes/connection-details endpoint for launcher auto-discovery
+Returns externally-routable Mongo/Redis URLs (Docker service names
+rewritten to the request host) plus a suggested node name.
+
+- *(launcher)* add compute-node install mode with SSH remote support
+Adds a mode choice on first launch: full stack install (existing) or
+compute-node install (new). The node flow:
+
+- *(ci)* build the frontend prod image on every PR into main
+No workflow verified that the container images actually build before
+landing on main -- publish-images.yml builds the same targets but
+only on push to main/tags, by which point a broken build has alre…
+
+- *(frontend)* add repeat-density and gene-density rings to Circos plot
+The meryl pipeline (#213/#220) now produces repeat_density facts and the
+Bakta pipeline (#214) produces gene_density facts, both in the same
+per-window shape as gc_tracks. This adds the frontend rende…
+
+- *(frontend)* wire node selector into non-dialog launch sites
+Add NodeSelector to inline action buttons that PR #211 missed:
+- DetailPanel: Run QC button
+- BamResults: Compute results
+- VariantResults: VCF Stats + Variant Summary (via AiSummary)
+- ExpressionResu…
+
+- *(pipelines)* add Bakta bacterial genome annotation
+Adds a Bakta-powered genome annotation pipeline for bacterial and archaeal
+assemblies. The pipeline:
+
+- *(pipelines)* add meryl k-mer spectra and repeat density analysis (#220)
+* docs(spec): meryl-based k-mer repeat density and frequency spectra design
+
+- *(frontend)* add node selector to all launch dialogs
+Wire NodeSelector into AlignDialog, AssembleDialog, VariantDialog,
+QuantifyDialog, ScaffoldDialog, CompletenessDialog, and
+DifferentialExpressionDialog. Every dialog that launches a pipeline
+job now s…
+
+- *(frontend)* add node selector to job launch dialogs
+Adds a NodeSelector dropdown to PipelineSuggestions and TrimDialog
+that lets the user target a job to a specific worker node. Selecting
+a node appends ?target_node=xxx to the launch endpoint URL.
+
+- *(frontend)* add nodes settings page and child-node compose file
+- SettingsNodes.tsx: table showing connected nodes with status, worker
+  count, running jobs, and per-node resource reservations. Fetches
+  from GET /api/v1/nodes every 10s.
+- SettingsNav: new "Nodes"…
+
+- *(frontend)* plot gene body coverage and read distribution
+
+- *(api)* launch RNA-seq transcript QC against a chosen annotation, gated by applicability
+Also excludes pipeline_service.launch_transcript_qc from the pipeline
+canvas's launch-function exhaustiveness check: it's an on-demand analysis
+action over an existing BAM, not a graph-wireable step, …
+
+- *(queue)* compute RNA-seq gene body coverage and feature distribution
+Adds the run_transcript_qc handler, wiring Tasks 1-2's pure GTF-parsing
+and BAM-classification functions into a real queue job that merges gene
+body coverage and feature distribution facts onto the de…
+
+- *(services)* infer whether RNA-seq QC applies to a BAM
+
+- *(pipelines)* accumulate gene body coverage and feature distribution
+
+- *(pipelines)* parse a GTF into per-gene representative transcripts
+
+- *(pipelines)* compare an assembly to a reference as a synteny dot plot
+* feat(pipelines): add minimap2 synteny alignment runner
+
+- *(queue)* add per-node queues and worker node identity
+Adds WORKER_NODE_ID config, per-node Redis ready queues
+(bp:q:ready:{node}), and per-node concurrency counters
+(bp:conc:*:{node}) so a second machine running BioFlow's worker
+can claim and run jobs ag…
+
+- *(pipelines)* add GC content and GC skew rings for finished genomes
+A new Circos-style circular visualization for polished reference genomes:
+contigs around the perimeter, GC content and GC skew as concentric rings,
+so compositional anomalies and a bacterial chromosom…
+
+- *(frontend)* plot the depth distribution and per-contig depth
+
+- *(frontend)* type the depth histogram facts
+
+- *(pipelines)* record the depth histogram alongside the coverage bins
+
+- *(pipelines)* accumulate the depth histogram during bin_depth's existing pass
+
+- *(pipelines)* count reference positions by depth into an adaptive histogram
+
+- *(frontend)* show the assembly graph on a GFA object
+Above the fact table: the shape is the finding, and the segment and link
+counts only quantify it.
+
+- *(frontend)* add assembly graph viewer component
+Node area scales with segment length (square-root, so a 10x longer contig
+does not swamp the canvas). Layout is capped at 400 cose iterations: the
+shape a reader needs is legible well before convergen…
+
+- *(backend)* retain assembly graph topology, not just counts
+_parse_gfa already walked S and L lines and kept only the counts. It now
+also emits gfa_segments and gfa_links, which is what the graph viewer
+draws. Link orientation is kept: it says which end of a s…
+
+- *(frontend)* show the Nx/NGx curve on the Reference Quality tab
+NGx appears only when an expected genome size exists, which is only for
+assemblies BioFlow built from reads with one supplied. Uploaded and
+NCBI-downloaded assemblies get the Nx curve alone, with no e…
+
+- *(frontend)* add Nx/NGx contiguity curve component
+Log Y axis: contig lengths span orders of magnitude, and on a linear axis
+every real assembly is a cliff against the axis.
+
+- *(backend)* store the Nx contiguity curve alongside N50
+A hundred (percent, length) points computed in the same walk that already
+produces N50 and N90, so the three cannot disagree. Downsampled rather
+than raw: a fragmented draft is hundreds of thousands o…
+
+- *(pipelines)* add bwa-mem2 organism-type presets with advanced mode
+feat(pipelines): add bwa-mem2 organism-type presets with advanced mode
+
+- *(metrics)* list each job type's recent runs beside the summary
+The Metrics page showed BioFlow's splash screen down its right side:
+/metrics was missing from App.tsx's singleColumn list, so the shared
+DetailPanel mounted alongside it and, with no ?sel= param ever…
+
+- *(metrics)* expose individual job runs, failures included
+GET /metrics returns one aggregate row per job type, so the Metrics page
+had no way to show what any individual run did. Adds runs_for_type() and
+recent_runs_by_type() behind GET /jobs/metrics/runs, w…
+
+- add chunked launch branch and AlignDialog toggle
+- launch_alignment now detects chunked=true in params, invokes bucket
+  planner, writes per-bucket FASTAs, and enqueues align_reads_chunked
+- AlignDialog shows Chunked toggle when envelope reports chu…
+
+- add chunked alignment API integration points
+- Align-envelope endpoint accepts chunked=true query param
+- Returns chunking.supported and total_sequences from .fai
+- Added _parse_fai helper for reading FASTA index files
+- Core modules: bucket pla…
+
+- add chunked alignment orchestrator, merge handler, and applier
+- align_reads_chunked (ASYNC): dispatches per-bucket sub-jobs, polls completion
+- merge_chunked_buckets (SUBPROCESS): samtools merge + sort + flagstat
+- apply_chunked_alignment: creates BAM DataObject…
+
+- add memory-aware bucket planner with FASTA writer and tests
+
+- add chunking_supported field to AlignerSpec
+STAR and Winnowmap are gated out — STAR's index is tied to the exact
+reference FASTA, Winnowmap requires whole-reference meryl prep.
+
+- *(pipelines)* add bwa-mem2 organism-type presets with advanced mode
+Introduce a preset system for bwa-mem2 that bundles biology-tuning
+parameters by organism class (Bacteria/Virus/Yeast, Large/Repetitive,
+Human/Eukaryote), plus an advanced mode for full manual control…
+
+
+
+
+
+### 🐛 Bug Fixes
+
+- *(launcher)* explain the inert Update button instead of nagging in dev mode
+Developer and pinned alpha/beta modes now render Update disabled with
+the reason underneath -- 'use Rebuild in Settings' for a local build,
+the pinned tag for a stage -- rather than showing a live Upd…
+
+- *(launcher)* stop checking for updates against a tag the stack is not on
+check_for_update read no settings and hard-coded latest, so developer
+mode compared GHCR's published latest against locally built :local
+images and pinned alpha/beta stages were compared against a tag…
+
+- remove unused publish_event import and fix import sorting
+
+- *(ops)* move the latest image tag on every release, not never
+
+- *(launcher)* refuse to adopt a git worktree as the install directory
+`discover_running_project_dir` returned a running `biopipe` project's
+`com.docker.compose.project.working_dir` label with no check on what that
+directory was, and `install_dir_str_blocking` cached it …
+
+- *(frontend)* restore the version key dropped from package.json
+`make release` aborted with:
+
+- *(ops)* stop worktree stacks publishing mongo and redis on the host
+A worktree stack could not run alongside the main stack. `docker compose up`
+failed with "Bind for 0.0.0.0:27017 failed: port is already allocated", which
+also broke run-worktree-tests.sh -- that scri…
+
+- *(api)* replace deprecated Motor with the pymongo async driver
+The API could not start: init_beanie raised "MotorDatabase object is not
+callable" and the container never became healthy, so every service that
+depends on it refused to come up.
+
+- *(settings)* use standard styling for Save buttons (#305)
+The Settings Save buttons (Resources, General, provider form) rendered as
+bare browser-default buttons while the established Settings controls use
+the .btn treatment -- MCP Copy Configuration is the r…
+
+- *(actions)* render the trimmed-file warning without HTML entities (#304)
+The trimmed-read suggestion card hardcoded '&amp;' in its title. The
+frontend renders card titles as JSX text, which escapes entities again --
+so users saw the literal '&amp;' instead of '&'. Return t…
+
+- *(quality)* remove target-node selection from AI summaries (#303)
+The Quality tab showed a target-node dropdown when generating a summary,
+but summaries are produced by the configured AI provider, not executed on
+a compute node -- the launch endpoints (summary, de-s…
+
+- *(actions)* show Paired-end controls only for read files (#302)
+The shared isReads conditional excluded only reference and alignment
+roles, so every other non-read object type -- de_results, counts,
+variants, protein, transcript, annotation, assembly_graph -- stil…
+
+- *(actions)* make Differential expression the primary expression action (#301)
+For expression files, Differential expression is the first action in the
+sequence, but it rendered as a plain btn while the leading action in
+comparable groups (Preprocess for reads) carries the blue …
+
+- *(alignment)* match the Download TSV button to result actions (#300)
+The alignment results tab's Download TSV was a bare text link
+(btn-text), while every other action on the page -- Compute results /
+Recompute results -- is a bordered btn. Switch it to btn, which the …
+
+- *(alignment)* place coverage graphs side by side (#293)
+The Fraction-of-reference cumulative coverage chart sat in the
+side-by-side flex row with the depth histogram, but Mean depth per contig
+was stacked in its own full-width section below. Move ContigDep…
+
+- *(settings)* recover storage and exposure before Apply can wipe them (#287)
+* fix(settings): recover storage and exposure before Apply can wipe them
+
+- *(lint)* resolve ruff errors in provisioning code
+
+- *(actions)* hide the target-node dropdown when only one node exists (#286)
+Workers that heartbeat without a node_id are grouped by the backend into
+a catch-all bucket named 'unknown'. That pseudo-node inflated the node
+count, so a single real node plus the bucket (2 entries)…
+
+- *(actions)* size the target-node dropdown to its contents (#283)
+The NodeSelector renders with the 'settings-field inline' modifier, but no
+CSS rule existed for it, so the select inherited width:100% and stretched
+across the full page width. Add the missing rule so…
+
+- *(suggestions)* restore trimmed-read card syntax
+The main-side conflict resolution contained literal newline escapes in the card description, making the module invalid Python. Restore the intended implicit string concatenation while rebasing the CI …
+
+- *(ci)* make backend smoke lint baseline clean
+The new backend-smoke job checks all backend application sources, exposing existing style violations before the smoke tests could run. Clean the remaining Ruff findings so the workflow can enforce the…
+
+- *(frontend)* pad the alignment preset select on Safari
+The native select was excluded from the shared field styling, leaving Safari's focus treatment tight against the control edge. Match the dialog input padding and use the existing in-field accent focus…
+
+- *(history)* always show the Provenance hint on the History tab
+The hint was gated on obj.facts.sra_accession being a string, a field
+that has nothing to do with whether provenance data exists. This caused
+the Provenance hint to appear only for objects with an SRA…
+
+- *(frontend)* retain sequence chart hover outside plots
+
+- *(frontend)* render the missing node selector on DE results
+ExpressionResults.tsx declared targetNode/setTargetNode and read
+targetNode when launching the DE AI summary, but never rendered a
+<NodeSelector> to let the user set it -- the setter was unreachable,
+…
+
+- *(frontend)* remove stray tokens breaking the web container build
+client.ts, DifferentialExpressionDialog.tsx, VariantDialog.tsx,
+QuantifyDialog.tsx, and ScaffoldDialog.tsx each carried a leftover
+fragment from a partial targetNode/NodeSelector merge: stray
+`useStat…
+
+- *(pipelines)* pass threads= through governor pre-flight memory estimate calls (#234)
+Thread-count segmentation (#8) wired threads through worker.py:_eta_model_ms
+and jobs.py:get_job, but the three memory_estimate.resolve() calls inside
+pipeline_service.py (declared_align_mem_mb, launc…
+
+- *(frontend)* add missing gtf entry to ACCEPT_CHOICES (#233)
+ACCEPT_CHOICES had a gff:annotation entry but no gtf:annotation entry.
+FormatKind.GTF is a distinct enum value from FormatKind.GFF on the backend,
+and portAccepts matches on format exactly, so a gff-t…
+
+- *(pipelines)* orchestrator port checks use ports_for(node) instead of static spec (#232)
+_is_multi_port and _advance both read spec.inputs directly instead of
+calling ports_for(node), the tool-aware resolver added for STAR's annotation
+port. Safe today only because the single tool-added p…
+
+- *(pipelines)* alignment memory estimate sums extra_reads bytes (#231)
+The pre-flight memory check and the queue reservation in launch_alignment
+both used only obj.size to estimate input bytes, ignoring any extra_reads
+files. Since the align_reads handler concatenates ev…
+
+- *(queue)* harden gc_blobs, verify_files, and reap_uploads (#210)
+Six hardening fixes from a second-pass code audit:
+
+- *(pipelines)* drop launch_completeness from EXCLUDED_LAUNCHES
+It was already registered in NODE_TYPES (95b2b61) as a canvas node
+with outputs=() and run_kind=None, deliberately modeling "facts
+merged onto an existing assembly, no output port to wire." A later
+co…
+
+- *(queue)* reap transcript_qc/bam_stats scratch dirs, fix inaccurate index error, test _is_gzip
+Three follow-ups from reviewing the gzip/BAM-index fix:
+
+- *(queue)* read gzip-compressed GTFs and symlink the BAM index for transcript QC
+Two bugs found only by running run_transcript_qc against a real indexed BAM
+with a real GTF -- neither is reachable from a unit test, since every
+fixture feeds pre-parsed strings or a bare in-memory B…
+
+- *(frontend)* render transcript QC independent of bam_stats
+TranscriptQc was nested inside the hasResults conditional block, which is
+gated on bam_stats_status -- an unrelated computation. A user with a bare,
+unindexed RNA-seq BAM who hadn't yet run "Compute r…
+
+- *(frontend)* default the GTF selection reactively, reuse BamStatsFacts instead of a local copy
+
+- *(queue)* use thread mode for the in-process handler, floor per-contig sampling at one read
+
+- *(pipelines)* make interval coverage lookup correct for any span, not just short ones
+
+- *(pipelines)* match GTF attributes by exact key, sort exons on construction
+
+- *(backend)* strided sampling in alignment stats for indexed BAMs
+Previously `alignment_stats` capped sampling at the first 200,000 reads,
+which for coordinate-sorted BAMs all come from the beginning of the first
+contig. Every library-wide statistic (GC content, MAP…
+
+- *(pipelines)* fail loudly on missing bucket sequences and malformed .fai lines (#200)
+1. write_bucket_fastas silently skipped sequences not found in the
+   reference FASTA. A .fai/FASTA mismatch produced an incomplete per-bucket
+   file, the alignment ran against a subset of the refere…
+
+- *(pipelines)* refuse chunked plans that exceed the memory budget (#199)
+pack_buckets had two defects that produced plans it knew would OOM:
+
+- *(pipelines)* make chunked alignment run end to end (#198)
+Seven defects, each independently fatal on the first real run:
+
+- *(frontend)* label History tab paragraph section "Summarize" before generating
+The pre-generation state kept the "Methods paragraph" header even though no
+paragraph existed yet, which read oddly next to the invite text and button.
+Match the mockup: "Summarize" until a paragraph …
+
+- *(frontend)* fix bwa-mem2 preset selector type errors on main
+Two independent bugs, both pre-existing on main and unrelated to this
+branch, surfaced by rebasing onto its latest bwa-mem2 organism-preset
+commit:
+
+- *(frontend)* add missing chunked-alignment fields to API types
+AlignDialog.tsx references AlignParams.chunked and
+AlignEnvelope.chunking, but neither was ever added to types.ts when the
+chunked-alignment feature landed -- npm run build (tsc -b && vite build)
+has …
+
+- *(frontend)* wrap AssemblyGraph in .section for column-break protection
+facts-columns uses CSS multi-column layout, and only children rooted in
+.section get break-inside: avoid. Every other child of this container
+(FactsTable's groups, QcReport, TrimReport) already has th…
+
+- *(frontend)* guard AssemblyGraph's layout effect against array-identity churn
+useEffect was keyed on the segments/links arrays themselves. A caller that
+constructs them fresh each render (e.g. mapping over fetched data inline
+rather than memoizing) would trigger a full cytoscap…
+
+- *(backend)* restore TestFastaContiguity class boundary
+TestGfaParsing's class body ran on past its own 8 tests and absorbed 16
+FASTA-contiguity tests that belong to TestFastaContiguity, which lost
+them via a missing class header. Restored as one merged
+Te…
+
+- *(frontend)* stop NGx curve from truncating when assembly exceeds expected genome size
+ngxPoints() dropped every point past gx=100, which happens whenever the
+assembly is larger than the expected genome (a plausible case: retained
+duplicated haplotypes, or an underestimated genome size)…
+
+- *(frontend)* align two-column fact group headers instead of balancing by height
+column-fill's default "balance" mode splits total content evenly between
+the two columns and starts column two wherever that height lands, not at
+the top of a group. A short group landing first in col…
+
+- *(metrics)* key run rows by position, not job_id or timestamp
+Neither candidate is unique in a real library: job_id is null on rows
+recorded before it was stored, and batch-recorded runs share a finished_at
+to the second -- eight ingest_headers rows sit on one t…
+
+- *(backend)* import field so ToolMeta can construct, unbreaking the API
+`ToolMeta.recommendations` used `field(default_factory=dict, repr=False)`
+but `dataclasses.field` was never imported, so importing `tools` raised
+NameError at module load -- the API container failed t…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.3.1-alpha] - 2026-08-12
 
 
