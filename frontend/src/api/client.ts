@@ -7,6 +7,9 @@ import type {
   AlignDefaults,
   AlignEnvelope,
   AlignerSchema,
+  AnnotationFeature,
+  AnnotationFeaturePage,
+  AskQuestionResponse,
   AssembleRequest,
   AssemblerSchema,
   AssemblyParams,
@@ -25,6 +28,7 @@ import type {
   DeResultsPage,
   FacetValue,
   Facets,
+  FeatureQuery,
   Feedback,
   FeedbackSubmission,
   GeneralSettings,
@@ -1076,6 +1080,42 @@ export const api = {
   /** URL for downloading the complete variants TSV. */
   vcfStatsDownloadUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/vcfstats/report/${objectId}/${reportPath}?${profileQuery()}`,
+
+  /** Queue the Results computation for a GFF/GTF/BED. Read-only: produces
+   * facts and a SQLite feature index, no derived objects. */
+  launchAnnotationStats: (objectId: string, targetNode?: string) =>
+    request<JobSummary>(
+      `/pipelines/annotationstats${targetNode ? `?target_node=${encodeURIComponent(targetNode)}` : ""}`,
+      {
+        method: "POST",
+        body: JSON.stringify({ object_id: objectId }),
+      }),
+
+  /** A page of the feature table. Rows are top-level features unless a type
+   *  filter is set, in which case the server searches children too. */
+  annotationFeatures: (objectId: string, q: FeatureQuery) => {
+    const p = new URLSearchParams({
+      offset: String(q.offset),
+      limit: String(q.limit),
+    });
+    if (q.contig) p.set("contig", q.contig);
+    if (q.startMin != null) p.set("start_min", String(q.startMin));
+    if (q.startMax != null) p.set("start_max", String(q.startMax));
+    if (q.featureType) p.set("feature_type", q.featureType);
+    if (q.biotype) p.set("biotype", q.biotype);
+    if (q.nameQuery) p.set("name_query", q.nameQuery);
+    if (q.strand) p.set("strand", q.strand);
+    if (q.skipCount) p.set("skip_count", "true");
+    return request<AnnotationFeaturePage>(
+      `/pipelines/annotationstats/features/${objectId}?${p.toString()}`,
+    );
+  },
+
+  /** Every child of one feature, for an expanded row. */
+  annotationChildren: (objectId: string, parentId: string) =>
+    request<{ rows: AnnotationFeature[] }>(
+      `/pipelines/annotationstats/children/${objectId}?parent_id=${encodeURIComponent(parentId)}`,
+    ),
 
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,
