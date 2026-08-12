@@ -78,11 +78,6 @@ export function useEvents() {
         if (key === "stats") qc.invalidateQueries({ queryKey: ["system", "stats"] });
         if (key === "shares") qc.invalidateQueries({ queryKey: ["shares"] });
         if (key === "projects") qc.invalidateQueries({ queryKey: ["projects"] });
-        // Not keyed to one project id: this is a low-frequency event, and a
-        // wasted refetch of a conversation the user is not looking at costs
-        // nothing visible.
-        if (key === "project-conversation")
-          qc.invalidateQueries({ queryKey: ["project-conversation"] });
       }
     };
 
@@ -133,8 +128,6 @@ export function useEvents() {
       schedule("objects");
       schedule("projects");
     });
-
-    source.addEventListener("qa.answered", () => schedule("project-conversation"));
 
     return () => {
       if (timer.current !== null) window.clearTimeout(timer.current);

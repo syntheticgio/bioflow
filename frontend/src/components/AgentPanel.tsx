@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { AgentConversationTurn } from "../api/types";
 import { useAgentSSE } from "../hooks/useAgentSSE";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentPanelInput } from "./AgentPanelInput";
@@ -22,24 +21,6 @@ interface Message {
   toolCalls?: ToolCallInfo[];
 }
 
-/** Map a saved API turn into the panel's internal Message type. */
-function _mapTurn(t: AgentConversationTurn): Message {
-  return {
-    id: crypto.randomUUID(),
-    role: t.role,
-    content: t.content,
-    toolCalls: t.tool_calls
-      ? t.tool_calls.map((tc) => ({
-          id: tc.id,
-          name: tc.name,
-          args: tc.args,
-          result: tc.result ?? undefined,
-          ok: tc.ok ?? undefined,
-        }))
-      : undefined,
-  };
-}
-
 export function AgentPanel({
   projectId,
   onClose,
@@ -51,26 +32,13 @@ export function AgentPanel({
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initialized, setInitialized] = useState(false);
   const [resumed, setResumed] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  // Load saved conversation on mount (issue #97). The query is keyed by
-  // projectId, so TanStack Query caches it across close/reopen cycles --
-  // a quick reopen reads from cache instantly, a slower one refetches.
-  const { data: savedConversation } = useQuery({
-    queryKey: ["agent-conversation", projectId],
-    queryFn: () => api.getAgentConversation(projectId),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  // Initialize messages from the saved conversation once, on first load.
-  useEffect(() => {
-    if (!initialized && savedConversation?.turns) {
-      setMessages(savedConversation.turns.map(_mapTurn));
-      setInitialized(true);
-    }
-  }, [savedConversation, initialized]);
+  // No saved conversation loading — Pi's session layer is the source of truth
+  // for agent memory. The visible transcript is held in-memory only; on reopen
+  // the panel shows "Resuming an earlier conversation" if the agent process is
+  // still running (detected via SSE agent_status event).
 
   const [showSettings, setShowSettings] = useState(false);
   const [draftPrompt, setDraftPrompt] = useState("");
@@ -244,31 +212,23 @@ export function AgentPanel({
       setMessages([]);
       setError(null);
       setIsStreaming(false);
-      setInitialized(false);
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
     },
   });
 
-  // "New session"/"Clear" needs to forget the conversation on both sides:
-  // the pi process's own session file (issue #99 -- otherwise the agent
-  // still remembers everything the button claims to have cleared) and the
-  // saved transcript (issue #97 -- otherwise a reopen repopulates the
-  // "cleared" conversation from what's still in ProjectConversation).
-  // Neither alone is a real clear.
+  // "New session" clears the pi process's session file (issue #99) and the
+  // in-memory transcript. No Mongo persistence to clear — Pi's session layer
+  // is the source of truth.
   const newSession = useMutation({
-    mutationFn: () =>
-      Promise.all([api.newAgentSession(projectId), api.clearAgentConversation(projectId)]),
+    mutationFn: () => api.newAgentSession(projectId),
     onSuccess: () => {
       setMessages([]);
       setError(null);
       setIsStreaming(false);
-      setInitialized(false);
       setResumed(false);
       streamingContentRef.current = "";
       currentToolCallsRef.current = [];
-      // Invalidate so a reopen re-fetches the now-empty conversation.
-      qc.invalidateQueries({ queryKey: ["agent-conversation", projectId] });
       // Deleting the pi session means any agent_status the SSE hook's next
       // (near-immediate) reconnect reports is describing the fresh, empty
       // session we just created, not an old one -- suppress relabeling it

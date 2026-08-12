@@ -38,6 +38,24 @@ export function useAgentSSE({
   const reconnectAttempts = useRef(0);
   const maxReconnectDelay = 30000; // 30 seconds max
 
+  // Store callbacks in refs so the EventSource event handlers always read the
+  // latest version without the connect() function changing on every render.
+  const onMessageDeltaRef = useRef(onMessageDelta);
+  const onToolCallRef = useRef(onToolCall);
+  const onToolResultRef = useRef(onToolResult);
+  const onDoneRef = useRef(onDone);
+  const onErrorRef = useRef(onError);
+  const onConnectionChangeRef = useRef(onConnectionChange);
+  const onAgentStatusRef = useRef(onAgentStatus);
+
+  useEffect(() => { onMessageDeltaRef.current = onMessageDelta; });
+  useEffect(() => { onToolCallRef.current = onToolCall; });
+  useEffect(() => { onToolResultRef.current = onToolResult; });
+  useEffect(() => { onDoneRef.current = onDone; });
+  useEffect(() => { onErrorRef.current = onError; });
+  useEffect(() => { onConnectionChangeRef.current = onConnectionChange; });
+  useEffect(() => { onAgentStatusRef.current = onAgentStatus; });
+
   const disconnect = useCallback(() => {
     if (reconnectTimerRef.current !== null) {
       window.clearTimeout(reconnectTimerRef.current);
@@ -49,8 +67,8 @@ export function useAgentSSE({
       sourceRef.current = null;
     }
     setConnected(false);
-    onConnectionChange(false);
-  }, [onConnectionChange]);
+    onConnectionChangeRef.current(false);
+  }, []);
 
   const connect = useCallback(() => {
     if (!profileId) return;
@@ -62,13 +80,13 @@ export function useAgentSSE({
 
     source.onopen = () => {
       setConnected(true);
-      onConnectionChange(true);
+      onConnectionChangeRef.current(true);
       reconnectAttempts.current = 0;
     };
 
     source.onerror = () => {
       setConnected(false);
-      onConnectionChange(false);
+      onConnectionChangeRef.current(false);
       source.close();
       sourceRef.current = null;
 
@@ -85,8 +103,8 @@ export function useAgentSSE({
         const msgEvent = event as MessageEvent;
         const data = JSON.parse(msgEvent.data);
         setConnected(data.running);
-        onConnectionChange(data.running);
-        onAgentStatus?.(data.running);
+        onConnectionChangeRef.current(data.running);
+        onAgentStatusRef.current?.(data.running);
       } catch {
         // Ignore malformed data
       }
@@ -96,7 +114,7 @@ export function useAgentSSE({
       try {
         const msgEvent = event as MessageEvent;
         const data = JSON.parse(msgEvent.data);
-        onMessageDelta(data.kind, data.contentIndex, data.delta);
+        onMessageDeltaRef.current(data.kind, data.contentIndex, data.delta);
       } catch {
         // Ignore malformed data
       }
@@ -106,7 +124,7 @@ export function useAgentSSE({
       try {
         const msgEvent = event as MessageEvent;
         const data = JSON.parse(msgEvent.data);
-        onToolCall(data.id, data.name, data.args);
+        onToolCallRef.current(data.id, data.name, data.args);
       } catch {
         // Ignore malformed data
       }
@@ -116,23 +134,23 @@ export function useAgentSSE({
       try {
         const msgEvent = event as MessageEvent;
         const data = JSON.parse(msgEvent.data);
-        onToolResult(data.id, data.name, data.ok, data.summary);
+        onToolResultRef.current(data.id, data.name, data.ok, data.summary);
       } catch {
         // Ignore malformed data
       }
     });
 
     source.addEventListener("done", () => {
-      onDone();
+      onDoneRef.current();
     });
 
     source.addEventListener("error", (event: Event) => {
       try {
         const msgEvent = event as MessageEvent;
         const data = JSON.parse(msgEvent.data);
-        onError(data.message);
+        onErrorRef.current(data.message);
       } catch {
-        onError("An unknown error occurred");
+        onErrorRef.current("An unknown error occurred");
       }
     });
 
@@ -140,13 +158,6 @@ export function useAgentSSE({
   }, [
     profileId,
     projectId,
-    onMessageDelta,
-    onToolCall,
-    onToolResult,
-    onDone,
-    onError,
-    onConnectionChange,
-    onAgentStatus,
   ]);
 
   useEffect(() => {
