@@ -204,6 +204,22 @@ def test_a_shared_descendant_counts_once(tmp_path):
     assert _genes(db)["g1"]["descendant_count"] == 5
 
 
+def test_a_duplicated_direct_child_counts_once(tmp_path):
+    """A malformed Parent=G,G stores two relationship rows for one child
+    (Task 1's parser, Task 3's one-row-per-relationship storage); child_count
+    must dedupe the same way descendant_count already does."""
+    db = _build(tmp_path, [
+        ("chr1", 100, 900, "gene", "g1", None),
+        ("chr1", 100, 500, "mRNA", "t1", "g1"),
+        ("chr1", 100, 500, "mRNA", "t1", "g1"),
+    ])
+    resolve_hierarchy(db_path=db)
+    build_gene_table(db_path=db)
+    gene = _genes(db)["g1"]
+    assert gene["child_count"] == 1
+    assert gene["descendant_count"] == 1
+
+
 def test_a_gene_span_covers_its_descendants(tmp_path):
     db = _three_level(tmp_path)
     resolve_hierarchy(db_path=db)
