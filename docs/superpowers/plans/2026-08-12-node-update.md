@@ -341,32 +341,50 @@ Implements NU-1, NU-2, NU-3.
 
 Create `backend/tests/queue/test_worker_version_report.py`:
 
-**Correction made during execution:** the plan originally called `docker inspect --format {{.Image}}` against the worker's own container. That returns the container's *image ID* (a local config hash) — not the registry-manifest digest under `RepoDigests`, which is what the launcher's own update check (`launcher/src-tauri/src/update_check.rs`, `DockerImageInspector::local_digest`) already compares against GHCR for the primary's own update button. The two would never be comparable: a node and the primary would each report a plausible-looking `sha256:...` string that can never equal the other's, breaking staleness detection silently. The test and implementation below use `docker image inspect` against the known image reference and `RepoDigests`, mirroring the launcher's proven pattern exactly.
+**Correction made during execution (round 1):** the plan originally called `docker inspect --format {{.Image}}` against the worker's own container and used the result directly as the digest. That value is the container's *image ID* (a local config hash), not a registry digest — comparing it to the primary's own digest would silently never match.
+
+**Correction made during execution (round 2):** the round-1 fix over-corrected the other way — it inspected a hardcoded `ghcr.io/syntheticgio/bioflow-backend:latest` reference directly. That silently reports the wrong digest, or none, on any node whose deployment pins `BIOFLOW_TAG` to a real version: `BIOFLOW_TAG` is a `docker-compose.yml`-time substitution into the `image:` line (`ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}`), with no equivalent passed through as an environment variable inside the running container, so there is no way for the process to know its own tag. The final version below resolves the digest in two steps instead: read the running container's own image id (round 1's approach, but used correctly this time — as an id to look up, not as the digest itself), then resolve *that* id's `RepoDigests`. This is immune to `BIOFLOW_TAG` by construction: whatever image the container actually is, is exactly the image whose digest gets reported, regardless of which tag pulled it.
 
 ```python
 """The worker reports what image it is running, so the primary can tell a
 current node from a stale one.
 
-Mirrors launcher/src-tauri/src/update_check.rs's DockerImageInspector: reads
-the digest Docker already recorded against the image reference, the same
-RepoDigests field the launcher's own update check compares to GHCR. Reading
-`docker inspect <container>` instead would return the container's image ID,
-a different value that can never equal a registry digest -- the two sides of
-a staleness comparison would silently never agree.
+Two docker calls: this container's own image id, then that id's
+RepoDigests. Not a single call against a hardcoded tag reference -- a node
+whose deployment pins BIOFLOW_TAG has no way to expose that tag to the
+process (compose substitutes it into `image:` at parse time, nothing passes
+it through as an environment variable), so inspecting a fixed "...:latest"
+reference would silently report the wrong image on any pinned node.
+Resolving through the container's own image id sidesteps that: whatever
+image the container is, is exactly what gets inspected.
 """
 
 from unittest.mock import patch
 
-from app.queue.worker import _own_image_digest
+from app.queue.worker import _own_image_digest, _own_image_id
 
 
-def test_own_image_digest_reads_repo_digest():
+def test_own_image_id_reads_docker_inspect():
+    completed = type("R", (), {"returncode": 0, "stdout": "sha256:localid\n"})()
+    with patch("app.queue.worker.subprocess.run", return_value=completed):
+        assert _own_image_id() == "sha256:localid"
+
+
+def test_own_image_id_returns_none_without_docker_client():
+    with patch("app.queue.worker.shutil.which", return_value=None):
+        assert _own_image_id() is None
+
+
+def test_own_image_digest_resolves_through_own_image_id():
     completed = type("R", (), {
         "returncode": 0,
         "stdout": "ghcr.io/syntheticgio/bioflow-backend@sha256:deadbeef\n",
     })()
-    with patch("app.queue.worker.subprocess.run", return_value=completed):
+    with patch("app.queue.worker._own_image_id", return_value="sha256:localid"), \
+         patch("app.queue.worker.subprocess.run", return_value=completed) as run:
         assert _own_image_digest() == "sha256:deadbeef"
+    # The id from the first call is what gets inspected in the second.
+    assert "sha256:localid" in run.call_args.args[0]
 
 
 def test_own_image_digest_returns_none_without_docker_client():
@@ -374,16 +392,23 @@ def test_own_image_digest_returns_none_without_docker_client():
         assert _own_image_digest() is None
 
 
-def test_own_image_digest_returns_none_when_inspect_fails():
+def test_own_image_digest_returns_none_when_own_id_unavailable():
     """A node whose socket is not mounted reports no digest rather than
     failing to heartbeat (NU-3)."""
-    completed = type("R", (), {"returncode": 1, "stdout": ""})()
-    with patch("app.queue.worker.subprocess.run", return_value=completed):
+    with patch("app.queue.worker._own_image_id", return_value=None):
+        assert _own_image_digest() is None
+
+
+def test_own_image_digest_returns_none_when_inspect_fails():
+    with patch("app.queue.worker._own_image_id", return_value="sha256:localid"), \
+         patch("app.queue.worker.subprocess.run",
+               return_value=type("R", (), {"returncode": 1, "stdout": ""})()):
         assert _own_image_digest() is None
 
 
 def test_own_image_digest_returns_none_on_exception():
-    with patch("app.queue.worker.subprocess.run", side_effect=OSError("boom")):
+    with patch("app.queue.worker._own_image_id", return_value="sha256:localid"), \
+         patch("app.queue.worker.subprocess.run", side_effect=OSError("boom")):
         assert _own_image_digest() is None
 
 
@@ -392,7 +417,8 @@ def test_own_image_digest_returns_none_on_malformed_output():
     docker then prints the template literal '<no value>' or an empty line,
     neither of which contains '@'."""
     completed = type("R", (), {"returncode": 0, "stdout": "<no value>\n"})()
-    with patch("app.queue.worker.subprocess.run", return_value=completed):
+    with patch("app.queue.worker._own_image_id", return_value="sha256:localid"), \
+         patch("app.queue.worker.subprocess.run", return_value=completed):
         assert _own_image_digest() is None
 ```
 
@@ -416,33 +442,61 @@ import subprocess
 Add this module-level function after the imports and before `class Worker`:
 
 ```python
-# The reference every node and the primary pull. Matches IMAGE in
-# node_update_service.py and docker-compose.child-node.yml's `image:` line --
-# all three must agree, since this is the value docker image inspect resolves
-# to a RepoDigests entry.
-_IMAGE_REF = "ghcr.io/syntheticgio/bioflow-backend:latest"
-
-
-def _own_image_digest() -> str | None:
-    """The registry digest of the image this process is running, or None.
-
-    Reads the digest Docker already recorded for the local image cache entry
-    -- the same RepoDigests field the launcher's own update check
-    (update_check.rs's DockerImageInspector) compares against GHCR for the
-    primary. `docker inspect <container-id>` would return the container's
-    image ID instead, a different value that can never equal a registry
-    digest -- the two sides of any staleness comparison would silently never
-    agree. None on any failure -- a node whose socket is not mounted, or
-    whose image was built locally and never pushed (so RepoDigests is empty),
-    must still heartbeat; it simply reports no version (NU-3).
+def _own_image_id() -> str | None:
+    """This container's own image id (a local content hash, not a registry
+    digest), by asking Docker about the container Docker itself thinks this
+    process is running in. The hostname is the container id in Docker's
+    default network mode.
     """
     client = shutil.which("docker")
     if client is None:
         return None
     try:
         result = subprocess.run(  # noqa: S603
+            [client, "inspect", socket.gethostname(), "--format", "{{.Image}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _own_image_digest() -> str | None:
+    """The registry digest of the image this process is running, or None.
+
+    Two docker calls, not one, and deliberately not keyed by an image tag.
+    An earlier version of this function inspected a hardcoded
+    "...:latest" reference directly -- which silently reports the wrong
+    digest, or none, on any node whose deployment pins BIOFLOW_TAG to a real
+    version, since BIOFLOW_TAG is a docker-compose-time image reference
+    substitution with no equivalent inside the running container (nothing
+    passes it through as an environment variable). Resolving through this
+    container's own image id sidesteps the whole problem: whatever image the
+    container actually is, is exactly the image whose RepoDigests this reads,
+    regardless of what tag was used to pull it or whether BIOFLOW_TAG is set
+    at all.
+
+    RepoDigests is the same field the launcher's own update check
+    (update_check.rs's DockerImageInspector) compares against GHCR for the
+    primary, so a node's reported digest and the primary's are genuinely
+    comparable. None on any failure -- a node whose socket is not mounted, or
+    whose image was built locally and never pushed (so RepoDigests is empty),
+    must still heartbeat; it simply reports no version (NU-3).
+    """
+    image_id = _own_image_id()
+    if image_id is None:
+        return None
+    client = shutil.which("docker")
+    if client is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603
             [
-                client, "image", "inspect", _IMAGE_REF,
+                client, "image", "inspect", image_id,
                 "--format", "{{index .RepoDigests 0}}",
             ],
             capture_output=True,
@@ -455,8 +509,8 @@ def _own_image_digest() -> str | None:
         return None
     # RepoDigests entries look like "ghcr.io/org/name@sha256:...";
     # only the part after '@' is the digest. No '@' (e.g. docker's
-    # "<no value>" template literal for an empty RepoDigests) means no
-    # digest to report.
+    # "<no value>" template literal for an empty RepoDigests -- a locally
+    # built image, never pushed or pulled) means no digest to report.
     text = result.stdout.strip()
     if "@" not in text:
         return None
