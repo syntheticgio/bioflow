@@ -119,3 +119,50 @@ def parse_location(text: str) -> Location | None:
         strand="+",
         fuzzy="<" in text or ">" in text,
     )
+
+
+def parse_qualifiers(lines: list[str]) -> dict[str, str]:
+    """The `/key="value"` block beneath a feature's location.
+
+    Values wrap across lines; a continuation is any line not starting with
+    `/`. Malformed lines are skipped rather than raised, the posture
+    `parse_gff_attributes` documents for the same kind of data.
+
+    A repeated key keeps the first occurrence. `/db_xref` legitimately
+    repeats, but the caller preserves the raw block separately, so the
+    dropped values remain visible in the feature's attributes column.
+    """
+    out: dict[str, str] = {}
+    key: str | None = None
+    parts: list[str] = []
+
+    def flush() -> None:
+        if key is None:
+            return
+        # /translation is a protein sequence: GenBank wraps it mid-residue,
+        # not on word boundaries, so its parts must join with no separator.
+        # Every other qualifier wraps prose on word boundaries and rejoins
+        # with a space.
+        value = "".join(parts) if key == "translation" else " ".join(parts)
+        out.setdefault(key, value.strip().strip('"'))
+
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("/"):
+            flush()
+            body = line[1:]
+            if "=" in body:
+                k, _, v = body.partition("=")
+                key, parts = k.strip(), [v.strip()]
+            else:
+                # A valueless qualifier such as /pseudo. Its presence is the
+                # information, so the key is stored with an empty value.
+                key, parts = body.strip(), [""]
+        elif key is not None:
+            parts.append(line)
+        # A continuation with no open key is malformed; skipped silently.
+
+    flush()
+    return out
