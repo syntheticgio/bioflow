@@ -357,6 +357,7 @@ function tabsFor(obj: DataObject): TabDef[] {
     obj.format.kind === "gff" ||
     obj.format.kind === "gtf" ||
     obj.format.kind === "bed" ||
+    obj.format.kind === "genbank" ||
     obj.role === "de_results";
   if (hasResults) {
     tabs.push({ id: "results", label: "Results" });
@@ -812,7 +813,8 @@ function ObjectDetail({ id }: { id: string }) {
               <BamResults obj={obj} />
             ) : obj.format.kind === "gff" ||
               obj.format.kind === "gtf" ||
-              obj.format.kind === "bed" ? (
+              obj.format.kind === "bed" ||
+              obj.format.kind === "genbank" ? (
               <AnnotationResults obj={obj} />
             ) : (
               <VariantResults obj={obj} />
