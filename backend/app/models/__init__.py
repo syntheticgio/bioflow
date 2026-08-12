@@ -7,11 +7,7 @@ its indexes.
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.models.app_settings import AppSettings
 from app.models.blob import Blob, BlobState, BlobStorage
-from app.models.conversation import (
-    ConversationTurn,
-    ProjectConversation,
-    ToolCallTurn,
-)
+
 from app.models.failure_explanation import FailureExplanation, normalize_failure
 from app.models.feedback import Feedback
 from app.models.job import (
@@ -92,7 +88,6 @@ ALL_MODELS = [
     LocalDatabase,
     Node,
     Share,
-    ProjectConversation,
     ResourceLimits,
     WorkflowDefinition,
     WorkflowRun,
@@ -111,8 +106,6 @@ __all__ = [
     "BlobState",
     "BlobStorage",
     "Compression",
-    "ConversationTurn",
-    "ToolCallTurn",
     "DataObject",
     "FailureExplanation",
     "FailureReason",
@@ -141,7 +134,6 @@ __all__ = [
     "PipelineRun",
     "Profile",
     "ProfileDisplay",
-    "ProjectConversation",
     "Project",
     "ProjectCounters",
     "ProviderKind",

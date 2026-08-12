@@ -2,15 +2,11 @@ import type {
   AiFetchModelsResult,
   AiPreset,
   AiProvider,
-  AgentConversation,
-  ConversationTurnIn,
-  ConversationTurnOut,
   AiProviderInput,
   AiRouting,
   AlignDefaults,
   AlignEnvelope,
   AlignerSchema,
-  AskQuestionResponse,
   AssembleRequest,
   AssemblerSchema,
   AssemblyParams,
@@ -55,7 +51,6 @@ import type {
   PipelineTools,
   Profile,
   Project,
-  ProjectConversation,
   ProjectDetail,
   ProvenanceNarrative,
   ProvenanceProse,
@@ -301,19 +296,6 @@ export const api = {
   declineShare: (id: string) => request<Share>(`/shares/${id}/decline`, { method: "POST" }),
 
   revokeShare: (id: string) => request<Share>(`/shares/${id}`, { method: "DELETE" }),
-
-  // --- Project Q&A chat ---
-  getProjectConversation: (projectId: string) =>
-    request<ProjectConversation>(`/projects/${projectId}/qa/conversation`),
-
-  askProjectQuestion: (projectId: string, question: string) =>
-    request<AskQuestionResponse>(`/projects/${projectId}/qa/ask`, {
-      method: "POST",
-      body: JSON.stringify({ question }),
-    }),
-
-  clearProjectConversation: (projectId: string) =>
-    request<void>(`/projects/${projectId}/qa/conversation`, { method: "DELETE" }),
 
   reingestObject: (id: string) =>
     request<{ object_id: string; job_id: string }>(`/objects/${id}/reingest`, {
@@ -1232,19 +1214,6 @@ export const api = {
 
   stopAgent: (projectId: string) =>
     request<void>(`/projects/${projectId}/agent`, { method: "DELETE" }),
-
-  // --- Agent conversation persistence (issue #97) ---
-  getAgentConversation: (projectId: string) =>
-    request<AgentConversation>(`/projects/${projectId}/agent/conversation`),
-
-  saveAgentTurn: (projectId: string, turn: ConversationTurnIn) =>
-    request<ConversationTurnOut>(`/projects/${projectId}/agent/conversation/turns`, {
-      method: "POST",
-      body: JSON.stringify(turn),
-    }),
-
-  clearAgentConversation: (projectId: string) =>
-    request<void>(`/projects/${projectId}/agent/conversation`, { method: "DELETE" }),
 
   newAgentSession: (projectId: string) =>
     request<{ status: string }>(`/projects/${projectId}/agent/new-session`, {

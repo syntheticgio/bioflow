@@ -441,3 +441,23 @@ def valid_kinds() -> list[str]:
 
 def valid_statuses() -> list[str]:
     return [s.value for s in ObjectStatus]
+
+
+async def count_by_kind(project_id: PydanticObjectId, *, owner: str) -> dict[str, int]:
+    """Count objects grouped by format kind for a project.
+
+    Returns a dict like {"fastq": 12, "bam": 3, "reference": 7}. Used by the
+    agent's project context injection to give the agent a picture of the project
+    without a discovery tool call.
+    """
+    db = get_db()
+    pipeline: list[dict] = [
+        {"$match": {"owner": owner, "project_id": project_id}},
+        {"$group": {"_id": "$format.kind", "count": {"$sum": 1}}},
+    ]
+    result: dict[str, int] = {}
+    async for row in db.objects.aggregate(pipeline):
+        kind = row["_id"]
+        if kind:
+            result[kind] = row["count"]
+    return result

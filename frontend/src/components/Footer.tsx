@@ -4,7 +4,6 @@ import { api } from "../api/client";
 import { BioIcon } from "../icons/BioIcon";
 import { useMessageStore } from "../stores/messageStore";
 import { AgentPanel } from "./AgentPanel";
-import { ProjectQaDrawer } from "./ProjectQaDrawer";
 import { QueuePanel } from "./QueuePanel";
 
 export function Footer({
@@ -16,7 +15,6 @@ export function Footer({
 }) {
   const latest = useMessageStore((s) => s.latest);
   const [queueOpen, setQueueOpen] = useState(false);
-  const [qaOpen, setQaOpen] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
 
   const { data, isError } = useQuery({
@@ -32,9 +30,6 @@ export function Footer({
   return (
     <>
       {queueOpen && <QueuePanel onClose={() => setQueueOpen(false)} />}
-      {qaOpen && projectId && (
-        <ProjectQaDrawer projectId={projectId} onClose={() => setQaOpen(false)} />
-      )}
       {agentOpen && projectId && (
         <AgentPanel projectId={projectId} onClose={() => setAgentOpen(false)} />
       )}
@@ -60,17 +55,6 @@ export function Footer({
           <span aria-hidden="true"> · </span>
           {data.counts.objects} <BioIcon name="files" size={14} />
         </span>
-      )}
-
-      {projectId && (
-        <button
-          type="button"
-          className="footer-link"
-          title="Ask a question about this project"
-          onClick={() => setQaOpen((o) => !o)}
-        >
-          <BioIcon name="ask" size={14} /> Ask
-        </button>
       )}
 
       {projectId && (

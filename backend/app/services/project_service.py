@@ -9,7 +9,7 @@ from slugify import slugify
 from app.db.client import get_db
 from app.errors import ConflictError, NotFoundError, ValidationError
 from app.logging import get_logger
-from app.models import DataObject, Project
+from app.models import DataObject, Job, Project
 
 log = get_logger(__name__)
 
@@ -359,3 +359,28 @@ async def bump_counters(project_id: PydanticObjectId, *, objects: int, total_byt
             "$set": {"updated_at": datetime.now(UTC)},
         },
     )
+
+
+async def recent_jobs(project_id: PydanticObjectId, *, limit: int = 5) -> list[dict]:
+    """Fetch the most recent completed jobs for a project.
+
+    Returns a list of job summaries (type, state, progress, timing). Used by the
+    agent's project context injection.
+    """
+    jobs = (
+        await Job.find(
+            {"project_id": project_id, "state": {"$in": ["succeeded", "failed"]}}
+        )
+        .sort("-updated_at")
+        .limit(limit)
+        .to_list()
+    )
+    return [
+        {
+            "type": j.job_type,
+            "state": j.state,
+            "progress": j.progress,
+            "created_at": j.created_at.isoformat() if j.created_at else None,
+        }
+        for j in jobs
+    ]

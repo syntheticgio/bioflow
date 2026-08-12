@@ -1980,12 +1980,6 @@ export interface ProjectConversation {
   compacted_summary: string | null;
 }
 
-export interface AskQuestionResponse {
-  job_id: string;
-}
-
-// --- Agent conversation persistence (issue #97) ---
-
 export interface AgentToolCall {
   id: string;
   name: string;
@@ -1993,24 +1987,6 @@ export interface AgentToolCall {
   result: string | null;
   ok: boolean | null;
 }
-
-export interface AgentConversationTurn {
-  role: "user" | "assistant";
-  content: string;
-  tool_calls: AgentToolCall[] | null;
-}
-
-export interface AgentConversation {
-  turns: AgentConversationTurn[];
-  compacted_summary: string | null;
-}
-
-export type ConversationTurnIn =
-  Omit<AgentConversationTurn, "tool_calls"> & {
-    tool_calls?: AgentToolCall[] | null;
-  };
-
-export type ConversationTurnOut = AgentConversationTurn;
 
 // --- UniProt ---
 
