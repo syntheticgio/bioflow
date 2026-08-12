@@ -206,17 +206,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # `latest` on a push to main; on a `v*` tag, the bare version plus
-      # `latest` again (metadata-action's default `latest=auto` flavor moves it
-      # for semver tags but skips pre-release versions like `0.3.0-alpha`).
+      # Every release moves `latest`, pre-releases included, because the
+      # launcher pulls `:latest` and does no version negotiation (VERSION.md).
       # `type=sha` gives every build a permanent handle even after `latest`
       # moves off it.
+      #
+      # `latest` is set with an explicit `type=raw` on tag refs rather than
+      # metadata-action's `latest=auto` flavor, which only moves `latest` for
+      # *stable* semver and skips pre-releases like `0.3.1-alpha`. Every
+      # release this project has cut so far is a pre-release, so `auto` would
+      # leave `latest` unmoved on all of them.
+      #
+      # It used to read `enable={{is_default_branch}}`, which could never fire:
+      # this job only runs on `v*` tags (the build chain hangs off
+      # version-guard, which is itself gated on `refs/tags/v`), and a tag ref is
+      # never the default branch. So `latest` was published exactly once, by
+      # hand, and then sat five days stale while three releases came and went --
+      # silently serving the pre-fix image to every launcher on the default tag,
+      # with the semver tags beside it perfectly correct. VERSION.md described
+      # the intended behaviour ("publishes `<version>` and moves `latest`")
+      # correctly the whole time; only this expression was wrong.
       - id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE_NAMESPACE }}/bioflow-${{ matrix.image }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}
             type=sha,format=short
 
