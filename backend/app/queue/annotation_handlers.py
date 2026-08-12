@@ -19,6 +19,7 @@ from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import (
     annotation_db,
+    annotation_hierarchy,
     annotation_parse,
     annotation_stats,
     genbank_parse,
@@ -122,8 +123,7 @@ def _genbank_rows(source: Path, ctx, acc, facts: dict):
             genbank_parse.iter_features(record.feature_lines, accession=record.accession)
         )
         for feature in rows_this_record:
-            if feature.parent is not None:
-                seen_parents.add(feature.parent)
+            seen_parents.update(feature.parents)
             yield feature
 
         for feature in rows_this_record:
@@ -198,6 +198,16 @@ def run_annotation_stats(ctx: JobContext) -> dict:
     # table would query.
     tmp_db = report_dir / "features.db.tmp"
     total = annotation_db.build_annotation_db(rows=rows, db_path=tmp_db)
+
+    # Resolution and the gene table run against the temporary path, before
+    # the rename: a database is published only once it is fully classified,
+    # so the table never queries rows whose parent_status is still the
+    # insert-time default.
+    ctx.progress(phase="resolve", pct=0.7, message="resolving hierarchy")
+    resolution = annotation_hierarchy.resolve_hierarchy(db_path=tmp_db)
+    status_counts = resolution["counts"]
+    gene_result = annotation_hierarchy.build_gene_table(db_path=tmp_db)
+
     tmp_db.replace(report_dir / "features.db")
 
     # GenBank states each contig's length on its own LOCUS line, so it needs
@@ -219,12 +229,26 @@ def run_annotation_stats(ctx: JobContext) -> dict:
 
     ctx.progress(phase="summarize", pct=0.9, message="summarizing")
 
+    unresolved = sum(
+        status_counts.get(s, 0) for s in annotation_hierarchy.UNRESOLVED_STATUSES
+    )
+
     facts = {
         "annotation_stats_status": "ok",
         **acc.finish(),
         **annotation_stats.parse_header_directives(header),
         **extra_facts,
+        "annotation_parent_status_counts": status_counts,
+        "annotation_unresolved_count": unresolved,
+        "annotation_max_depth": resolution["max_depth"],
+        "annotation_gene_mode": gene_result["mode"],
+        "annotation_gene_count": gene_result["count"],
     }
 
-    log.info("annotation_stats_built", object_id=str(object_id), features=total)
+    log.info(
+        "annotation_stats_built",
+        object_id=str(object_id),
+        features=total,
+        unresolved=unresolved,
+    )
     return {"object_id": str(object_id), "facts": facts}

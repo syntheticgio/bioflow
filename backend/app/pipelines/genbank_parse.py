@@ -243,7 +243,7 @@ def iter_features(lines: Iterable[str], *, accession: str) -> Iterator[Feature]:
             score=None,
             name=name,
             feature_id=feature_id,
-            parent=None,
+            parents=(),
             biotype=biotype,
             attributes=attributes,
         )
@@ -262,7 +262,7 @@ def iter_features(lines: Iterable[str], *, accession: str) -> Iterator[Feature]:
                     score=None,
                     name=name,
                     feature_id=f"{feature_id}:seg{n}",
-                    parent=feature_id,
+                    parents=(feature_id,),
                     biotype=biotype,
                     attributes=attributes,
                 )

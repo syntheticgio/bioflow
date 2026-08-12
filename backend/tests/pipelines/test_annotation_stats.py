@@ -19,7 +19,7 @@ def _feature(contig="chr1", start=1, end=100, type="gene", parent=None, biotype=
         score=None,
         name="x",
         feature_id="x1",
-        parent=parent,
+        parents=(parent,) if parent is not None else (),
         biotype=biotype,
         attributes="ID=x1",
     )
