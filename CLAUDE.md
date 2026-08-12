@@ -405,6 +405,26 @@ be brought straight back up with its database. `worktree-up.sh --down` goes
 further and deletes that stack's volumes, which is the right call for a
 worktree you are finished with.
 
+**`--down` only works from inside the worktree that owns the stack**, which is
+the reason orphans accumulate: a worktree gets deleted when its branch merges,
+and once the directory is gone there is nowhere left to run `--down` from. Two
+machine-wide subcommands cover that, and unlike everything else in this script
+they run from anywhere, including the main checkout:
+
+```bash
+./ops/worktree-up.sh --list              # every worktree stack, and whether its worktree still exists
+./ops/worktree-up.sh --prune --dry-run   # show which ones would be removed
+./ops/worktree-up.sh --prune             # tear down the orphaned ones
+```
+
+`--prune` only removes stacks whose worktree is gone -- a stack whose worktree
+still exists is somebody's live test run, and `--list` shows it without
+touching it. It prints what it will remove and asks first, and declines
+outright when there is no terminal to ask at. `git worktree list` is the
+authority for what still exists; note that a **detached-HEAD** worktree is
+matched by its directory name rather than a branch, because that is the slug
+`worktree-up.sh` itself falls back to when there is no current branch.
+
 **If the running instance ever does get pointed at a worktree, point it back
 when you are done.** This is the one piece of state in this workflow that
 outlives the task that changed it. `worktree-up.sh` avoids the problem by

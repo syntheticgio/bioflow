@@ -29,6 +29,16 @@
 #         ./ops/worktree-up.sh --reseed    # re-copy the main stack's database
 #         ./ops/worktree-up.sh --down      # stop it and delete its volumes
 #
+#         ./ops/worktree-up.sh --list      # every worktree stack on this machine
+#         ./ops/worktree-up.sh --prune     # tear down the orphaned ones
+#         ./ops/worktree-up.sh --prune --dry-run   # show what --prune would do
+#
+# --list and --prune are machine-wide rather than about *this* worktree, and
+# unlike everything else here they run from anywhere -- including the main
+# checkout. They have to: the case they exist for is a stack whose worktree
+# directory has already been deleted, which leaves no worktree to run --down
+# from and no obvious way to name the stack. See #321.
+#
 # Ports are chosen per worktree: derived from the branch name so a given
 # worktree keeps the same URL run to run, then probed upward for a free pair so
 # concurrent stacks never collide. The script prints the ones it picked. Set
@@ -45,6 +55,208 @@ WT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # even when this script runs from a worktree (whose own .git is a file).
 GIT_COMMON="$(git -C "$WT_ROOT" rev-parse --path-format=absolute --git-common-dir)"
 MAIN_ROOT="$(dirname "$GIT_COMMON")"
+
+# The project-name prefix every worktree stack shares. `--list` and `--prune`
+# below identify stacks by this rather than by anything about the directory
+# they are run from.
+WT_PREFIX="${MAIN_PROJECT}-wt-"
+
+# Every worktree stack that exists on this machine, one project name per line.
+#
+# Reads container labels rather than `docker compose ls`, because a stack whose
+# containers are all stopped does not appear in `compose ls` without `-a`, and a
+# stopped orphan is exactly what this is looking for -- it still holds volumes
+# and still confuses the next person who finds it.
+all_wt_projects() {
+  docker ps -a \
+    --filter "label=com.docker.compose.project" \
+    --format '{{.Label "com.docker.compose.project"}}' 2>/dev/null \
+    | grep "^${WT_PREFIX}" \
+    | sort -u
+}
+
+# Every slug a live worktree currently occupies.
+#
+# `git worktree list` is the authority for what still exists. Slugs are derived
+# the same way the `up` path derives its own above, so the comparison is
+# slug-to-slug rather than path-to-path -- a worktree can be moved on disk
+# without changing which stack it owns.
+#
+# Both of the up path's slug sources are covered, and the second one matters:
+# `up` uses the branch name, but falls back to `basename "$WT_ROOT"` when
+# `git branch --show-current` is empty, which is exactly what a **detached
+# HEAD** worktree produces. Such a worktree emits no `branch` line in
+# `--porcelain` output at all, so deriving slugs from branches alone would make
+# every live detached worktree look orphaned -- and --prune would delete a
+# stack somebody is actively using. Real case, not hypothetical: two of the
+# worktrees on the machine this was written on are detached.
+#
+# Emitting both candidate slugs per worktree is deliberate. They are only ever
+# used to *spare* a stack from pruning, so an extra slug can at worst leave an
+# orphan behind for the next run -- while a missing one deletes live work.
+#
+# `git worktree list` also reports the main checkout itself, which is harmless:
+# neither of its slugs can produce a `biopipe-wt-` project to match against.
+# Note the trailing newline: callers below consume this as a line-per-slug
+# stream and match it with `grep -qxF`. Without it every slug would run
+# together into one unmatchable line -- which fails toward "everything looks
+# orphaned", i.e. toward deleting live stacks.
+normalize_slug() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr -c 'a-z0-9_-' '-' \
+    | sed 's/^-*//; s/-*$//'
+  printf '\n'
+}
+
+live_slugs() {
+  local line path branch
+  path=""
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*)
+        path="${line#worktree }"
+        # The basename slug, i.e. what `up` falls back to for a detached HEAD.
+        normalize_slug "$(basename "$path")"
+        ;;
+      "branch "*)
+        branch="${line#branch }"
+        normalize_slug "${branch#refs/heads/}"
+        ;;
+    esac
+  done < <(git -C "$MAIN_ROOT" worktree list --porcelain 2>/dev/null)
+}
+
+# Prints one line per worktree stack: project, slug, ports, and whether its
+# worktree still exists. Used by --list, and by --prune to show its plan.
+report_stacks() {
+  local live
+  live="$(live_slugs)"
+
+  local project slug status web api
+  while IFS= read -r project; do
+    [ -n "$project" ] || continue
+    slug="${project#"$WT_PREFIX"}"
+
+    if printf '%s\n' "$live" | grep -qxF "$slug"; then
+      status="worktree present"
+    else
+      status="ORPHANED (no worktree)"
+    fi
+
+    # Ports come from HostConfig rather than the runtime port list, which is
+    # empty for any container that is not currently running -- and a stopped
+    # stack is precisely what this command is for.
+    web="$(docker inspect "${project}-web-1" \
+      --format '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}}{{end}}{{end}}' \
+      2>/dev/null || true)"
+    api="$(docker inspect "${project}-api-1" \
+      --format '{{range $p, $b := .HostConfig.PortBindings}}{{range $b}}{{.HostPort}}{{end}}{{end}}' \
+      2>/dev/null || true)"
+
+    printf '  %-46s %-22s UI:%-6s API:%-6s\n' \
+      "$project" "$status" "${web:-?}" "${api:-?}"
+  done <<< "$(all_wt_projects)"
+}
+
+# Tear down one stack by project name, from wherever this is running.
+#
+# `down -v` needs a compose file to resolve services, but not *this* worktree's
+# -- the main checkout's copy describes the same services, and the project name
+# is what actually selects which containers and volumes are removed. That is
+# what makes this work for a stack whose own worktree is gone.
+down_project() {
+  local project="$1"
+
+  # The guard that matters most here. --prune acts on a set rather than one
+  # named stack, so a bug in the filter could otherwise reach the main stack.
+  if [ "$project" = "$MAIN_PROJECT" ] || [ "${project#"$WT_PREFIX"}" = "$project" ]; then
+    echo "Refusing to act on '$project': not a worktree stack." >&2
+    return 1
+  fi
+
+  COMPOSE_PROJECT_NAME="$project" docker compose \
+    --project-directory "$MAIN_ROOT" \
+    -f "$MAIN_ROOT/docker-compose.yml" \
+    -f "$MAIN_ROOT/ops/docker-compose.worktree.yml" \
+    down -v
+}
+
+# --list and --prune are dispatched here, before the worktree-specific setup
+# below (branch slug, .env, port probing) that neither needs and that would
+# refuse to run in the main checkout.
+case "${1:-}" in
+  --list)
+    if [ -z "$(all_wt_projects)" ]; then
+      echo "No worktree stacks on this machine."
+      exit 0
+    fi
+    echo "Worktree stacks:"
+    report_stacks
+    echo ""
+    echo "Orphaned stacks can be removed with: ./ops/worktree-up.sh --prune"
+    exit 0
+    ;;
+  --prune)
+    DRY_RUN="no"
+    case "${2:-}" in
+      --dry-run) DRY_RUN="yes" ;;
+      "")        ;;
+      *)         echo "Unknown option: $2 (expected --dry-run)" >&2; exit 1 ;;
+    esac
+
+    LIVE="$(live_slugs)"
+    ORPHANS=""
+    while IFS= read -r project; do
+      [ -n "$project" ] || continue
+      slug="${project#"$WT_PREFIX"}"
+      printf '%s\n' "$LIVE" | grep -qxF "$slug" && continue
+      ORPHANS="${ORPHANS}${project}"$'\n'
+    done <<< "$(all_wt_projects)"
+
+    ORPHANS="$(printf '%s' "$ORPHANS" | sed '/^$/d')"
+    if [ -z "$ORPHANS" ]; then
+      echo "No orphaned worktree stacks; nothing to prune."
+      exit 0
+    fi
+
+    echo "Orphaned worktree stacks (no worktree directory):"
+    printf '%s\n' "$ORPHANS" | sed 's/^/  /'
+    echo ""
+
+    if [ "$DRY_RUN" = "yes" ]; then
+      echo "--dry-run: nothing removed."
+      exit 0
+    fi
+
+    # `down -v` deletes each stack's volumes. Bounded -- a worktree stack's
+    # database is a snapshot of the main stack's, not unique data -- but it is
+    # a set-valued destructive operation, so it says what it will do and asks
+    # first. A non-interactive run (no TTY, e.g. CI) declines rather than
+    # assuming yes.
+    if [ -t 0 ]; then
+      printf 'Remove these stacks and their volumes? [y/N] '
+      read -r reply
+    else
+      reply="n"
+      echo "Not an interactive terminal; declining. Re-run from a terminal to confirm."
+    fi
+
+    case "$reply" in
+      [yY]|[yY][eE][sS]) ;;
+      *) echo "Nothing removed."; exit 0 ;;
+    esac
+
+    while IFS= read -r project; do
+      [ -n "$project" ] || continue
+      echo "Removing $project..."
+      down_project "$project" || echo "  failed; continuing" >&2
+    done <<< "$ORPHANS"
+
+    echo "Done."
+    exit 0
+    ;;
+esac
 
 if [ "$WT_ROOT" = "$MAIN_ROOT" ]; then
   echo "This is the main checkout, not a worktree. Use the normal command:" >&2
@@ -182,7 +394,9 @@ case "${1:-}" in
   --down)   MODE="down" ;;
   --reseed) MODE="reseed" ;;
   "")       ;;
-  *)        echo "Unknown option: $1 (expected --down or --reseed)" >&2; exit 1 ;;
+  # --list and --prune never reach here; they are dispatched above, before the
+  # worktree-specific setup they do not need.
+  *)        echo "Unknown option: $1 (expected --down, --reseed, --list or --prune)" >&2; exit 1 ;;
 esac
 
 if [ "$MODE" = "down" ]; then
