@@ -1485,11 +1485,19 @@ class ReadSet:
         self.r2 = r2
 
 
+# One additional read set at the launch boundary: (r1_id, r2_id) from the API
+# route, or (r1_id, r2_id, strict) from the workflow node, whose chunked reads
+# are single-end by construction and opt out of the strict pairing rule.
+ReadSetSpec = tuple[
+    PydanticObjectId, PydanticObjectId | None
+] | tuple[PydanticObjectId, PydanticObjectId | None, bool]
+
+
 async def _resolve_alignment_read_sets(
     *,
     primary: DataObject,
     mate_object_id: PydanticObjectId | None,
-    additional_sets: list[tuple[PydanticObjectId, PydanticObjectId | None]],
+    additional_sets: list[ReadSetSpec],
     owner: str,
     paired: bool,
 ) -> list[ReadSet]:
@@ -1637,7 +1645,7 @@ async def launch_alignment(
     reference_id: PydanticObjectId,
     owner: str,
     mate_object_id: PydanticObjectId | None = None,
-    additional_read_sets: list[tuple[PydanticObjectId, PydanticObjectId | None]] | None = None,
+    additional_read_sets: list[ReadSetSpec] | None = None,
     read_group: dict | None = None,
     params: dict | None = None,
     paired: bool = True,
