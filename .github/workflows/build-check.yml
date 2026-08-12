@@ -84,9 +84,6 @@ jobs:
   backend-smoke:
     name: Backend smoke (ruff + import + ops tests)
     if: ${{ !inputs.skip_backend }}
-    # Runs on GitHub-hosted runners. The self-hosted-only constraint
-    # (see docs/ci-runners.md) applies to publishing arm64 images, not to
-    # test/lint jobs.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

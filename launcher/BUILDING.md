@@ -116,8 +116,9 @@ No signing story exists for Linux bundles today.
 ## CI
 
 `.github/workflows/release-launcher.yml` builds both platforms on
-self-hosted runners and attaches bundles to a release on a `launcher-v*` tag.
-`workflow_dispatch` runs the build without releasing.
+GitHub-hosted runners (`macos-latest`, `ubuntu-latest`) and attaches bundles
+to a release on a `launcher-v*` tag. `workflow_dispatch` runs the build
+without releasing.
 
 CI notarization needs three GitHub Actions **secrets**
 (`APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8_BASE64`) and

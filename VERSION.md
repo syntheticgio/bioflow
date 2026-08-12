@@ -136,16 +136,20 @@ A failed version-guard means the tag was created by hand rather than by
 
 ### If `docker/login-action` fails on the arm64 build with `-25308`
 
-`error saving credentials ... User interaction is not allowed. (-25308)` on
-the self-hosted macOS runner. Both self-hosted runners here are launchd
-LaunchAgents with `SessionCreate: true`, which puts every job in its own
-macOS security session rather than the interactive login session — and
-`docker login`'s default credential store on macOS is `osxkeychain`,
-compiled in as the unconditional platform default. An unset, empty, or
-bogus `credsStore` in `config.json` does not avoid it, and `login-action`
-has no silent plaintext fallback: a helper it can't exec is a fatal error,
-not a degrade. Keychain refuses a cross-session credential write without an
-interactive prompt, which a background session can never answer.
+This applied when the arm64 leg of `publish-images.yml` ran on a self-hosted
+macOS runner (before [#338](https://github.com/syntheticgio/bioflow/issues/338)
+moved it to hosted `ubuntu-24.04-arm`, which has no keychain and doesn't hit
+this). Kept here in case a future self-hosted macOS job needs it again.
+
+`error saving credentials ... User interaction is not allowed. (-25308)` shows
+up when a job runs as a launchd LaunchAgent with `SessionCreate: true`, which
+puts the job in its own macOS security session rather than the interactive
+login session — and `docker login`'s default credential store on macOS is
+`osxkeychain`, compiled in as the unconditional platform default. An unset,
+empty, or bogus `credsStore` in `config.json` does not avoid it, and
+`login-action` has no silent plaintext fallback: a helper it can't exec is a
+fatal error, not a degrade. Keychain refuses a cross-session credential write
+without an interactive prompt, which a background session can never answer.
 
 The fix ([docker/login-action#566](https://github.com/docker/login-action/issues/566)):
 unlock the login keychain with the real password immediately before
@@ -153,7 +157,6 @@ unlock the login keychain with the real password immediately before
 
 ```yaml
 - name: Unlock the login keychain
-  if: matrix.arch == 'arm64'
   env:
     KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
   run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db

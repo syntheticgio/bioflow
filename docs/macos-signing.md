@@ -226,82 +226,60 @@ swap is the prerequisite, and it is not currently tracked by an issue.
 `.github/workflows/release-launcher.yml` builds both platforms and attaches
 the bundles to a release on a `launcher-v*` tag.
 
-The macOS job runs on the **self-hosted Apple Silicon runner**, which is also
-the machine holding the certificate (see [`ci-runners.md`](ci-runners.md) for
-why this repo has no GitHub-hosted jobs). That is why the workflow does *not*
-export a base64 `.p12` into a GitHub secret the way most macOS signing
-pipelines do — the keychain is already there. The tradeoff is that the signing
-key lives on a dev machine rather than in GitHub's secret store, which for a
-single-maintainer project is the simpler and less leaky of the two.
+The macOS job runs on GitHub-hosted `macos-latest` (Apple Silicon). Before
+[#338](https://github.com/syntheticgio/bioflow/issues/338) moved this repo's
+workflows off self-hosted runners, this job ran on a dev machine whose
+keychain already held the Developer ID certificate, so the workflow never
+needed to ship a `.p12` through a secret. A hosted runner is a fresh VM per
+job with no such standing state, so signing now uses the standard CI pattern:
+export the certificate as a base64 `.p12`, ship it as a GitHub secret, and
+import it into a temporary, job-local keychain that's created, used, and
+deleted within the same run.
 
-### Signing keychain: dedicated, not the login keychain
+### One-time: export the certificate as a `.p12`
 
-The Developer ID identity lives in **`~/Library/Keychains/ci-signing.keychain-db`**,
-a keychain created specifically for CI signing — not the login keychain.
-
-That split exists because of a real failure, not caution for its own sake:
-`codesign` invoked from the runner's LaunchAgent job context failed with
-`errSecInternalComponent` against the login keychain, reproducibly, even with
-all of the following true at once — the machine actively logged in and
-unlocked, the LaunchAgent's `SessionCreate` set to `true`, the plist bootstrapped
-into the `gui/<uid>` domain (confirmed via `launchctl print`), and the private
-key's ACL explicitly granted to `codesign`/`apple-tool`/`apple` via
-`security set-key-partition-list`. A manual `codesign` against the same
-identity, in an interactive Terminal on the same machine at the same time,
-succeeded every time. Only the LaunchAgent-spawned job process failed —
-something about that process's security session, not the keychain's lock
-state or ACLs, made Developer ID signing (which touches the Secure Enclave)
-reject it. A dedicated keychain that the job unlocks explicitly and owns
-outright sidesteps the question entirely, rather than depending on session
-state the job doesn't fully control.
-
-Setup (one-time, on the runner):
+From the machine that currently holds the Developer ID Application
+certificate (Keychain Access.app → **My Certificates** → find the cert →
+right-click → **Export...** → format `.p12`). Keychain Access prompts for an
+export password — that password becomes `CI_SIGNING_P12_PASSWORD` below, not
+the same thing as the CI keychain's own password.
 
 ```bash
-security create-keychain -p "<ci-keychain-password>" ~/Library/Keychains/ci-signing.keychain-db
-security set-keychain-settings -lut 21600 ~/Library/Keychains/ci-signing.keychain-db
-security unlock-keychain -p "<ci-keychain-password>" ~/Library/Keychains/ci-signing.keychain-db
-
-# Export the Developer ID cert+key from the login keychain via Keychain
-# Access.app first (My Certificates → right-click → Export), then:
-security import ~/Desktop/bioflow-ci-signing.p12 \
-  -k ~/Library/Keychains/ci-signing.keychain-db \
-  -P "<p12-export-password>" \
-  -T /usr/bin/codesign -T /usr/bin/security
-
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
-  -k "<ci-keychain-password>" ~/Library/Keychains/ci-signing.keychain-db
-
-# Add it to the search list so codesign/security find it without an explicit path.
-security list-keychains -d user -s ~/Library/Keychains/ci-signing.keychain-db \
-  $(security list-keychains -d user | sed s/\"//g)
+base64 -i bioflow-ci-signing.p12 | pbcopy   # -> CI_SIGNING_P12_BASE64
 ```
 
+### Signing keychain: created fresh per job, deleted at the end
+
+The workflow's "Import the signing certificate into a temporary keychain"
+step creates `$RUNNER_TEMP/ci-signing.keychain-db`, imports the `.p12` into
+it, grants `codesign`/`security` access via
+`security set-key-partition-list`, and adds it to the runner's keychain
+search list — the same sequence a persistent self-hosted keychain needed
+one-time, just run every job instead of once. A "Delete the temporary signing
+keychain" step at the end removes it regardless of outcome (`if: always()`);
+the VM's teardown would discard it anyway, but doing so explicitly doesn't
+depend on that.
+
 `build-macos.sh` unlocks this keychain itself when `CI_KEYCHAIN_PATH` and
-`CI_KEYCHAIN_PASSWORD` are set in its environment; the workflow sets both
-(the password from a new `CI_KEYCHAIN_PASSWORD` secret, see the table below)
-and unlocks it a second time in its own step before the build, since a
-keychain's unlock only lasts until its own timeout regardless of which
-process unlocked it first.
+`CI_KEYCHAIN_PASSWORD` are set in its environment; the workflow sets both and
+unlocks it a second time in its own build step, since a keychain's unlock
+only lasts until its own timeout regardless of which process unlocked it
+first. `CI_KEYCHAIN_PATH` is the temp path from the import step's output, not
+a fixed location — see the workflow for the exact wiring.
 
-### Notarization secrets
-
-Unlike the signing certificate (which stays in the runner's own keychain —
-see above), the App Store Connect API key is passed in as three **GitHub
-Actions repository secrets** rather than left on the runner's disk, so that a
-compromised runner doesn't carry a standing plaintext copy of it. The
-workflow decodes it to a per-job temp file (`$RUNNER_TEMP`) and deletes it in
-an `if: always()` step regardless of build outcome.
+### Secrets
 
 Add these under **Settings → Secrets and variables → Actions → Secrets** (not
 Variables — these are credentials, not configuration):
 
 | Secret name | Value | Where it comes from |
 | --- | --- | --- |
+| `CI_SIGNING_P12_BASE64` | the exported `.p12`, base64-encoded, single line | `base64 -i bioflow-ci-signing.p12` (macOS), from the export above |
+| `CI_SIGNING_P12_PASSWORD` | the `.p12` export password | Chosen when exporting from Keychain Access.app above |
+| `CI_KEYCHAIN_PASSWORD` | password for the temporary per-job keychain | Any value you choose — this keychain exists only for the duration of one job, so its password just needs to be present, not memorable or reused |
 | `APPLE_API_KEY_ID` | the Key ID | Filename of the `.p8`, e.g. `AuthKey_G3RTU78U5S.p8` → `G3RTU78U5S` |
 | `APPLE_API_ISSUER_ID` | the Issuer ID | The UUID shown above the key list at [appstoreconnect.apple.com/access/integrations/api](https://appstoreconnect.apple.com/access/integrations/api) |
 | `APPLE_API_KEY_P8_BASE64` | the `.p8` file, base64-encoded, single line | `base64 -i AuthKey_XXXXXXXX.p8` (macOS) |
-| `CI_KEYCHAIN_PASSWORD` | the CI signing keychain's password | Chosen when running `security create-keychain -p ...` above |
 
 The workflow also reads `APPLE_TEAM_ID` as a repository **variable** (not a
 secret — it's not sensitive on its own) under the same Settings page's
@@ -312,11 +290,18 @@ secrets on their own — neither grants access without the `.p8` — but they si
 alongside it as GitHub secrets anyway so the credential lives in one place
 rather than being split across Secrets and Variables.
 
+The notarization secrets (`APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`,
+`APPLE_API_KEY_P8_BASE64`) are unaffected by the runner change — they were
+already GitHub secrets, decoded to a per-job temp file and removed in an
+`if: always()` step, because leaving a standing plaintext copy of the App
+Store Connect key on a persistent machine was needlessly exposed even when
+the signing cert itself lived there.
+
 ## Troubleshooting
 
 | Symptom | Cause |
 | --- | --- |
-| `errSecInternalComponent` at signing | Keychain locked, private key missing for the certificate, or (self-hosted runner specifically) codesign running from the LaunchAgent job context against the *login* keychain rather than the dedicated `ci-signing.keychain-db` — see the "Signing keychain" section above |
+| `errSecInternalComponent` at signing | The temporary CI keychain wasn't created, unlocked, or added to the search list before `tauri build` ran — check the "Import the signing certificate" and "Build, sign, and notarize" steps' logs |
 | App crashes immediately after a successful notarization | Missing JIT entitlements — see above |
 | Build log says `skipping app notarization, no APPLE_ID & ...` | `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` not all set — this is a silent skip, not a build failure, so the build otherwise looks successful |
 | `.app` shows `Notarized`, `.dmg` right next to it shows `Unnotarized` | The Tauri gap described above — the `.dmg` needs its own notarize+staple pass, which `build-macos.sh` now does automatically |

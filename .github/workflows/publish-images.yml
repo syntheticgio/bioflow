@@ -40,7 +40,7 @@ jobs:
   version-guard:
     name: Tag matches VERSION
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
@@ -55,7 +55,7 @@ jobs:
   build:
     name: Build ${{ matrix.image }} (${{ matrix.arch }})
     needs: [version-guard]
-    runs-on: [self-hosted, "${{ matrix.runner_arch }}"]
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -74,54 +74,22 @@ jobs:
             # docker-compose.override.yml). The published image must be `prod`,
             # the nginx static build -- omitting this ships a Vite dev server.
             target: prod
+          # GitHub-hosted, native per architecture: emulation was measured in
+          # #46 as hours long and liable to fail partway, because
+          # backend/Dockerfile compiles bwa-mem2 from source, installs
+          # Clair3, and builds compleasm. ubuntu-24.04-arm gives a native
+          # arm64 Linux runner without emulation or a self-hosted machine.
           - arch: amd64
-            runner_arch: X64
+            runner: ubuntu-latest
           - arch: arm64
-            runner_arch: ARM64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
 
-      # These self-hosted runners are launchd LaunchAgents with SessionCreate:
-      # true, which puts every job in its own macOS security session rather
-      # than the interactive login session. `docker login`'s default
-      # credsStore (osxkeychain -- compiled in as the unconditional macOS
-      # default, so an unset/empty/bogus credsStore in config.json doesn't
-      # avoid it) then fails to save the ghcr.io login with "error saving
-      # credentials ... User interaction is not allowed. (-25308)": Keychain
-      # refuses a cross-session credential write without a prompt, and a
-      # background session can't answer one. Neither can it be avoided by
-      # steering Docker away from a helper -- login-action's write still
-      # errors if no working helper is on PATH at all (confirmed: pointing
-      # credsStore at a nonexistent helper name produces a different, but
-      # still fatal, "executable file not found" error instead).
-      #
-      # The fix that actually works (docker/login-action#566): explicitly
-      # unlock the login keychain right before logging in. A SessionCreate
-      # session can still unlock a keychain given the real password -- it
-      # just can't get an *interactive* unlock prompt answered, which is
-      # what -25308 is actually complaining about.
-      #
-      # arm64-only: this job's amd64 leg runs on MainLinux (X64), where
-      # there is no `security` command and no keychain to unlock -- running
-      # this unconditionally there fails with "security: command not
-      # found" (exit 127), a regression this run introduced and this
-      # matrix.arch gate fixes.
-      - name: Unlock the login keychain
-        if: matrix.arch == 'arm64'
-        env:
-          KEYCHAIN_PASSWORD: ${{ secrets.MACOS_LOGIN_KEYCHAIN_PASSWORD }}
-        run: security unlock-keychain -p "$KEYCHAIN_PASSWORD" ~/Library/Keychains/login.keychain-db
-
-      # A fixed builder name plus keep-state is what makes layer caching work
-      # on self-hosted runners: the BuildKit state volume survives the job, so
-      # the next run reattaches to a warm cache. Without it every run starts
-      # cold, which for the backend image means recompiling bwa-mem2 each time.
-      # GitHub Actions cache (`type=gha`) is not an option -- the repo-wide
-      # limit is 10GB and the backend image alone is ~7.9GB.
+      # No builder state to keep warm across runs: GitHub-hosted runners are
+      # fresh VMs every job, so `keep-state` (only useful on a persistent
+      # self-hosted runner) and a fixed builder name buy nothing here.
       - uses: docker/setup-buildx-action@v4
-        with:
-          name: bioflow
-          keep-state: true
 
       - uses: docker/login-action@v4
         with:
@@ -177,7 +145,7 @@ jobs:
   manifest:
     name: Publish ${{ matrix.image }} manifest
     needs: build
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -192,12 +160,6 @@ jobs:
           pattern: digests-${{ matrix.image }}-*
           merge-multiple: true
 
-      # No keychain unlock needed here, unlike the build job: this job
-      # always runs on MainLinux (X64), never on the macOS arm64 runner, so
-      # docker/login-action never hits osxkeychain's -25308 in the first
-      # place. (v0.2.5's run confirmed this the hard way: an unconditional
-      # `security unlock-keychain` here fails with "security: command not
-      # found" on Linux, exit 127 -- security(1) doesn't exist off macOS.)
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
@@ -243,8 +205,8 @@ jobs:
         run: |
           set -euo pipefail
           # Built from the metadata-action output rather than piping its JSON
-          # through jq, which is not guaranteed to be installed on a
-          # self-hosted runner.
+          # through jq -- avoids the extra dependency even though hosted
+          # ubuntu-latest ships jq anyway.
           args=()
           while IFS= read -r tag; do
             [ -n "$tag" ] && args+=(--tag "$tag")
@@ -287,7 +249,7 @@ jobs:
     needs: manifest
     # Tag-only: this workflow also runs on every push to main.
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
