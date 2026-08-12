@@ -7,7 +7,6 @@ its indexes.
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.models.app_settings import AppSettings
 from app.models.blob import Blob, BlobState, BlobStorage
-
 from app.models.failure_explanation import FailureExplanation, normalize_failure
 from app.models.feedback import Feedback
 from app.models.job import (

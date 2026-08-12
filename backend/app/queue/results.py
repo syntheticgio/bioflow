@@ -28,7 +28,6 @@ from app.models import (
 from app.models.job import Job
 from app.pipelines.aligners import Aligner
 from app.queue.chunked_align_results import apply_chunked_alignment as _apply_chunked_alignment
-from app.queue.queue import publish_event
 
 log = get_logger(__name__)
 
