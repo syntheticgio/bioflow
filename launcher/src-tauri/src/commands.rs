@@ -166,6 +166,45 @@ pub async fn status(app: State<'_, LauncherApp>) -> Result<LauncherStateDto, ()>
     Ok(state.into())
 }
 
+/// One entry per running BioFlow stack that is not the one this launcher
+/// manages. Mirrors `docker::OtherStack` at the IPC edge.
+#[derive(Serialize)]
+pub struct OtherStackDto {
+    pub project: String,
+    pub slug: String,
+    #[serde(rename = "webPort")]
+    pub web_port: Option<u16>,
+}
+
+/// The worktree stacks running alongside the launcher's own (#320).
+///
+/// Read-only: this command reports, and offers no way to act. The launcher
+/// owns the `biopipe` project; a worktree stack belongs to whoever started
+/// it, and `ops/worktree-up.sh --down` from that worktree is how it comes
+/// down. What this fixes is that four forgotten stacks wiping each other's
+/// test database used to be completely invisible.
+///
+/// An empty list is the ordinary answer on a machine with one stack, so the
+/// UI shows nothing at all in that case rather than an empty section.
+/// `async`/`spawn_blocking` for the same reason as every other
+/// Docker-touching command.
+#[tauri::command]
+pub async fn other_stacks() -> Vec<OtherStackDto> {
+    tauri::async_runtime::spawn_blocking(|| {
+        ShellDocker::new()
+            .other_stacks()
+            .into_iter()
+            .map(|s| OtherStackDto {
+                project: s.project,
+                slug: s.slug,
+                web_port: s.web_port,
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 /// Whether Docker is installed and its daemon reachable, independent of
 /// whether the stack is installed. `status`'s underlying `state::evaluate`
 /// short-circuits to `NotInstalled` without ever probing Docker when there

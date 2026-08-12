@@ -18,6 +18,7 @@ pub fn run() {
     .manage(LauncherApp::default())
     .invoke_handler(tauri::generate_handler![
       commands::status,
+      commands::other_stacks,
       commands::docker_ready,
       commands::run_stack,
       commands::stop_stack,

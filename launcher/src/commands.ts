@@ -1,10 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { LauncherState } from "./types";
+import type { LauncherState, OtherStack } from "./types";
 import { parseHardMemGb } from "./settings-logic";
 
 export function status(): Promise<LauncherState> {
   return invoke("status");
+}
+
+// The worktree stacks running alongside this launcher's own (#320). Empty
+// on an ordinary single-stack machine, which is the common case -- the UI
+// renders nothing at all rather than an empty section.
+export function otherStacks(): Promise<OtherStack[]> {
+  return invoke("other_stacks");
 }
 
 // Direct Docker probe, independent of whether the stack is installed --
