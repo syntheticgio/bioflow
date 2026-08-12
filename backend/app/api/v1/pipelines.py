@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from beanie import PydanticObjectId
 from fastapi import APIRouter, status
@@ -17,6 +18,7 @@ from app.pipelines import (
     align_runner,
     aligner_registry,
     annotation_db,
+    annotation_hierarchy,
     assembler_registry,
     assembly_qc_registry,
     bam_stats_runner,
@@ -951,6 +953,7 @@ async def get_annotation_features(
     name_query: str | None = None,
     strand: str | None = None,
     skip_count: bool = False,
+    view: Literal["all", "unresolved"] = "all",
 ) -> dict:
     """A page of the feature table, filtered.
 
@@ -976,8 +979,10 @@ async def get_annotation_features(
             "No computed results for this file. Compute results first."
         )
 
-    # A type filter must search the whole file: every exon has a parent, so
-    # leaving top_level_only set would return an empty table on a valid GFF3.
+    # The Unresolved view is the one place a record whose Parent named
+    # nothing is reachable -- it is excluded from the default page by
+    # definition, since its parent is not NULL.
+    unresolved = view == "unresolved"
     filters = annotation_db.FeatureFilters(
         contig=contig,
         start_min=start_min,
@@ -986,7 +991,13 @@ async def get_annotation_features(
         biotype=biotype,
         name_query=name_query,
         strand=strand,
-        top_level_only=feature_type is None,
+        # A type filter must search the whole file: every exon has a parent,
+        # so leaving top_level_only set would return an empty table on a
+        # valid GFF3. The Unresolved view clears it for the same reason.
+        top_level_only=feature_type is None and not unresolved,
+        parent_status=(
+            annotation_hierarchy.UNRESOLVED_STATUSES if unresolved else None
+        ),
     )
 
     rows = annotation_db.query_features(
@@ -998,6 +1009,45 @@ async def get_annotation_features(
         else annotation_db.count_features(db_path=db_path, filters=filters)
     )
     return {"total": total, "rows": rows}
+
+
+@router.get("/annotationstats/genes/{object_id}")
+async def get_annotation_genes(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    offset: int = 0,
+    limit: int = 100,
+    skip_count: bool = False,
+) -> dict:
+    """A page of the Genes view.
+
+    Its own route rather than a third `view` value: genes page over a
+    different table with a different row shape (child and descendant counts,
+    a span), so folding it into the features route would mean one endpoint
+    returning two row types.
+
+    `mode` tells the client whether these are gene-typed features or the
+    root fallback, which the UI states rather than leaving implied.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    rows = annotation_hierarchy.query_genes(
+        db_path=db_path, offset=offset, limit=limit
+    )
+    total = (
+        None if skip_count else annotation_hierarchy.count_genes(db_path=db_path)
+    )
+    return {
+        "total": total,
+        "rows": rows,
+        "mode": annotation_hierarchy.gene_mode(db_path=db_path),
+    }
 
 
 @router.get("/annotationstats/children/{object_id}")
@@ -1013,7 +1063,10 @@ async def get_annotation_children(
             "No computed results for this file. Compute results first."
         )
 
-    return {"rows": annotation_db.children_of(db_path=db_path, parent_id=parent_id)}
+    return {
+        "rows": annotation_db.children_of(db_path=db_path, parent_id=parent_id),
+        "depth_cap": annotation_hierarchy.DEPTH_CAP,
+    }
 
 
 class AdditionalReadSetIn(BaseModel):
