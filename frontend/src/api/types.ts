@@ -1133,10 +1133,19 @@ export interface ReferenceOption {
   index_ids: Record<string, string>;  // aligner name → sidecar object id, for download links
 }
 
+/** One additional read set for an alignment launch: an R1 and, when paired,
+ * its mate. The set's pairing follows the run's primary pair. */
+export interface AdditionalReadSet {
+  object_id: string;
+  mate_object_id?: string | null;
+}
+
 export interface AlignRequest {
   object_id: string;
   reference_id: string;
   mate_object_id?: string | null;
+  /** Ordered additional read sets, aligned alongside the primary pair. */
+  additional_read_sets?: AdditionalReadSet[];
   paired: boolean;
   read_group: ReadGroup;
   params: Partial<AlignParams>;
