@@ -156,7 +156,10 @@ _SOURCE_MAP = {
     "METATRANSCRIPTOMIC": "Metatranscriptomic",
     "SYNTHETIC": "Synthetic",
     "VIRAL RNA": "Viral RNA",
-    "OTHER": "Other",
+    # No "OTHER" entry: library_source is an open vocabulary, so SRA's OTHER
+    # falls through the pass-through above and is stored as the record's own
+    # literal value. Mapping it to the sentinel "Other" recorded strictly less
+    # than the source already said.
 }
 
 # Coarse DNA/RNA bucket derived from library source. Not a judgment call SRA
