@@ -1586,7 +1586,11 @@ async def launch_alignment(body: AlignRequest, owner: OwnerDep) -> JobOut:
         reference_id=body.reference_id,
         owner=owner,
         mate_object_id=body.mate_object_id,
-        additional_read_sets=body.additional_read_sets,
+        # Services don't import API models; the route converts its validated
+        # entries into the service's tuple contract.
+        additional_read_sets=[
+            (s.object_id, s.mate_object_id) for s in body.additional_read_sets
+        ],
         read_group=body.read_group,
         params=body.params,
         paired=body.paired,

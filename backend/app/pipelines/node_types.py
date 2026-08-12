@@ -39,6 +39,8 @@ when workflow_derive turns a run back into a node. See NodeTypeSpec.run_tool.
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from beanie import PydanticObjectId
+
 from app.models.object import FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.models.workflow import PortType
@@ -111,9 +113,10 @@ async def _launch_trim(*, inputs: dict, params: dict, owner: str):
 
 async def _launch_align(*, inputs: dict, params: dict, owner: str):
     # `reads` is a multi port, so it arrives as a list. The launcher itself
-    # takes one object_id: extra read files are passed through params for the
-    # runner to concatenate, which is what "they all go in together" means --
-    # one alignment over every chunk, not one run per file.
+    # takes one object_id: the extra files are additional read sets, which is
+    # what "they all go in together" means -- one alignment over every chunk,
+    # not one run per file. The port documents chunks/split reads, never
+    # mates, so each extra set is single-end by construction.
     reads = inputs["reads"]
     if isinstance(reads, list):
         primary, extra = reads[0], reads[1:]
@@ -124,7 +127,8 @@ async def _launch_align(*, inputs: dict, params: dict, owner: str):
         reference_id=inputs["reference"],
         owner=owner,
         mate_object_id=inputs.get("mate"),
-        params={**params, "extra_reads": [str(o) for o in extra]} if extra else params,
+        additional_read_sets=[(PydanticObjectId(o), None) for o in extra],
+        params=params,
     )
 
 

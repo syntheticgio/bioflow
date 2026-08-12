@@ -1469,12 +1469,167 @@ def active_index_job_query(reference_id: PydanticObjectId) -> dict:
     }
 
 
+class ReadSet:
+    """One resolved read set in an alignment launch.
+
+    `r1` is the file the run's read group, output name, and label are built
+    from, always R1-first after the same swap the single-shot path applied to
+    the primary pair. `r2` is None for a single-end set. Set 0 of a launch is
+    the primary pair; the rest are the additional sets, in request order.
+    """
+
+    __slots__ = ("r1", "r2")
+
+    def __init__(self, r1: DataObject, r2: DataObject | None = None):
+        self.r1 = r1
+        self.r2 = r2
+
+
+async def _resolve_alignment_read_sets(
+    *,
+    primary: DataObject,
+    mate_object_id: PydanticObjectId | None,
+    additional_sets: list[tuple[PydanticObjectId, PydanticObjectId | None]],
+    owner: str,
+    paired: bool,
+) -> list[ReadSet]:
+    """Resolve and validate every read set in a launch.
+
+    Pairing is a property of the run, decided by the primary pair exactly as
+    before: `paired` asks, an explicit mate or `suggest_mate` answers, and a
+    primary with no discoverable mate degrades to single-end. Every additional
+    set must then match that outcome -- a paired run requires each set to have
+    a mate (explicit, else suggested, else the launch fails), and a single-end
+    run forbids any set from declaring one.
+
+    Every member is owner-scoped, READY, FASTQ, in the primary's project, and
+    unique across the whole request; the R1-leads swap is applied per set. The
+    checks here are the authoritative ones -- the dialog mirrors them for
+    immediacy but can be bypassed.
+    """
+    from app.services import object_service
+
+    # One deliberate asymmetry: the primary's `mate_object_id` in a single-end
+    # launch is ignored, because that is what the field has always meant and
+    # the frontend has always sent null. The additional sets are new surface,
+    # so they get the strict reading of the rule from day one.
+    seen: dict[str, str] = {}
+
+    def _claim(obj: DataObject, where: str) -> None:
+        key = str(obj.id)
+        if key in seen:
+            raise ValidationError(
+                f"{obj.name!r} is used twice in this alignment: as {seen[key]} "
+                f"and as {where}"
+            )
+        seen[key] = where
+
+    async def _resolve_one(
+        r1_id: PydanticObjectId,
+        r2_id: PydanticObjectId | None,
+        *,
+        set_label: str,
+        require_mate: bool,
+        strict: bool,
+        r1: DataObject | None = None,
+    ) -> ReadSet:
+        # The primary arrives already fetched and checked by the caller;
+        # additional sets are fetched by id here, so their objects are
+        # scoped and validated the same way the primary's was.
+        if r1 is None:
+            r1 = await object_service.get_object(r1_id, owner=owner)
+            _check_alignable(r1)
+            if r1.project_id != primary.project_id:
+                raise ValidationError("Reads must be in the same project")
+        _claim(r1, f"{set_label} reads")
+
+        r2: DataObject | None = None
+        if r2_id is not None:
+            if not require_mate:
+                raise ValidationError(
+                    f"{r1.name!r} declares a mate, but this alignment is "
+                    "single-end; remove the mate or launch paired"
+                )
+            r2 = await object_service.get_object(r2_id, owner=owner)
+        elif require_mate:
+            r2 = await suggest_mate(r1)
+        if r2 is not None:
+            if r2.id == r1.id:
+                raise ValidationError("A file cannot be its own mate")
+            if r2.project_id != primary.project_id:
+                raise ValidationError("Reads must be in the same project")
+            _check_alignable(r2)
+            _claim(r2, f"{set_label} mate")
+            # R1 leads, so the mates reach the aligner in the order it expects.
+            if pairing.mate_of(r1.name) == "R2" and pairing.mate_of(r2.name) == "R1":
+                r1, r2 = r2, r1
+        elif require_mate and strict:
+            raise ValidationError(
+                f"{r1.name!r} is in a paired alignment but has no mate; "
+                "pair it with a mate or launch single-end"
+            )
+        return ReadSet(r1, r2)
+
+    primary_set = await _resolve_one(
+        primary.id,
+        mate_object_id if paired else None,
+        set_label="the primary",
+        # The primary degrades to single-end when no mate is found, exactly as
+        # the launch path always did; the additional sets are strict because
+        # their pairing must match the run's.
+        require_mate=paired,
+        strict=False,
+        r1=primary,
+    )
+    run_paired = primary_set.r2 is not None
+
+    sets = [primary_set]
+    for index, (r1_id, r2_id) in enumerate(additional_sets, start=1):
+        label = f"additional read set {index}"
+        # The declared mate is passed through untouched: _resolve_one rejects
+        # it when the run is single-end rather than silently dropping it.
+        sets.append(
+            await _resolve_one(
+                r1_id,
+                r2_id,
+                set_label=label,
+                require_mate=run_paired,
+                strict=True,
+            )
+        )
+    return sets
+
+
+async def _extra_set_payload(set_: ReadSet) -> dict:
+    """One payload entry for an additional read set.
+
+    Carries the set's R1 and, when paired, its mate -- both content-addressed
+    so the handler can resolve them from the store and concatenate the R1s
+    and R2s into their own streams.
+    """
+    r1_digest, r1_path = await _resolve_readable(set_.r1)
+    entry: dict = {"name": set_.r1.name}
+    if r1_digest:
+        entry["sha256"] = r1_digest
+    if r1_path:
+        entry["path"] = r1_path
+    if set_.r2 is not None:
+        r2_digest, r2_path = await _resolve_readable(set_.r2)
+        entry["mate_name"] = set_.r2.name
+        if r2_digest:
+            entry["mate_sha256"] = r2_digest
+        if r2_path:
+            entry["mate_path"] = r2_path
+    return entry
+
+
 async def launch_alignment(
     *,
     object_id: PydanticObjectId,
     reference_id: PydanticObjectId,
     owner: str,
     mate_object_id: PydanticObjectId | None = None,
+    additional_read_sets: list[tuple[PydanticObjectId, PydanticObjectId | None]] | None = None,
     read_group: dict | None = None,
     params: dict | None = None,
     paired: bool = True,
@@ -1492,10 +1647,15 @@ async def launch_alignment(
     from app.services import object_service
 
     merged_params = {**default_align_params(), **(params or {})}
-    # Not an AlignParams field -- from_dict/as_dict would silently drop it on
-    # the round trip below -- so it is pulled out of the raw dict here and
-    # carried to the payload separately, the same way mate_object_id is.
-    extra_read_ids = merged_params.pop("extra_reads", None) or []
+    # The workflow node used to carry additional reads through params as a
+    # flat id list, which cannot express pairs; they are a typed request
+    # field now, so a caller still sending this key is running stale code and
+    # must hear about it rather than silently lose files.
+    if "extra_reads" in merged_params:
+        raise ValidationError(
+            "params['extra_reads'] is no longer read; send additional reads "
+            "as additional_read_sets"
+        )
     align_params = align_params_module.from_dict(merged_params)
     aligner = align_params.aligner
     tools.require(_aligner_tool(aligner))
@@ -1509,28 +1669,18 @@ async def launch_alignment(
     obj = await object_service.get_object(object_id, owner=owner)
     _check_alignable(obj)
 
-    # Extra read files (chunked/split reads bound to the same multi port as
-    # the primary) are validated and resolved the same way the primary read
-    # is -- same project, same alignability check -- since the runner will
-    # concatenate their bytes into what the aligner treats as one file.
-    extra_reads: list[DataObject] = []
-    seen_extra_ids: set[str] = set()
-    for extra_id in extra_read_ids:
-        if extra_id == str(object_id):
-            raise ValidationError("A file cannot be listed as its own extra read")
-        if mate_object_id is not None and extra_id == str(mate_object_id):
-            raise ValidationError("A file cannot be both the mate and an extra read")
-        if extra_id in seen_extra_ids:
-            raise ValidationError(f"Duplicate extra read id: {extra_id}")
-        seen_extra_ids.add(extra_id)
-
-        extra_obj = await object_service.get_object(
-            PydanticObjectId(extra_id), owner=owner
-        )
-        _check_alignable(extra_obj)
-        if extra_obj.project_id != obj.project_id:
-            raise ValidationError("Reads must be in the same project")
-        extra_reads.append(extra_obj)
+    # Every read set in the launch -- the primary pair first, then the
+    # additional sets in request order -- is resolved and validated once,
+    # before either path branches below.
+    read_sets = await _resolve_alignment_read_sets(
+        primary=obj,
+        mate_object_id=mate_object_id,
+        additional_sets=additional_read_sets or [],
+        owner=owner,
+        paired=paired,
+    )
+    primary_set = read_sets[0]
+    extra_sets = read_sets[1:]
 
     reference = await object_service.get_object(reference_id, owner=owner)
     _check_reference(reference)
@@ -1583,48 +1733,34 @@ async def launch_alignment(
             cache_dir = settings.tmp_dir / "chunked-refs"
             buckets = write_bucket_fastas(fasta_path, buckets, cache_dir)
 
-            # Resolve mate (same logic as the single-shot path below,
-            # but the chunked path returns before that code runs).
-            if paired and mate_object_id is not None:
-                mate_obj = await object_service.get_object(
-                    mate_object_id, owner=owner
-                )
-            elif paired:
-                mate_obj = await suggest_mate(obj)
-            else:
-                mate_obj = None
-
-            if mate_obj is not None:
-                if mate_obj.id == obj.id:
-                    raise ValidationError("A file cannot be its own mate")
-                if mate_obj.project_id != obj.project_id:
-                    raise ValidationError("Paired reads must be in the same project")
-                _check_alignable(mate_obj)
-                if pairing.mate_of(obj.name) == "R2" and pairing.mate_of(mate_obj.name) == "R1":
-                    obj, mate_obj = mate_obj, obj
+            # The primary pair and every additional set were resolved and
+            # validated once above, before either path branched -- the chunked
+            # path returns before the single-shot code that used to redo the
+            # primary mate resolution itself.
+            mate_obj = primary_set.r2
 
             rg = align_runner.ReadGroup.from_dict(
-                {**default_read_group(obj), **(read_group or {})}
+                {**default_read_group(primary_set.r1), **(read_group or {})}
             )
 
             # Build the reads payload the same way the single-shot path
-            # assembles it (lines ~1749–1793), so every field the align_reads
-            # handler expects is present in the per-bucket sub-job.
-            r1_digest, r1_path = await _resolve_readable(obj)
+            # assembles it, so every field the align_reads handler expects is
+            # present in the per-bucket sub-job.
+            r1_digest, r1_path = await _resolve_readable(primary_set.r1)
             ref_digest, ref_path = await _resolve_readable(reference)
 
             reads_payload: dict = {
-                "object_id": str(obj.id),
-                "project_id": str(obj.project_id),
+                "object_id": str(primary_set.r1.id),
+                "project_id": str(primary_set.r1.project_id),
                 "reference_object_id": str(reference.id),
                 "reference_name": reference.name,
-                "r1_name": obj.name,
+                "r1_name": primary_set.r1.name,
                 "aligner": aligner.value,
                 "params": align_params.as_dict(),
                 "read_group": rg.as_dict(),
                 "paired": paired,
-                "output_name": _bam_name(obj.name, rg.sample),
-                "reads_object_id": str(obj.id),
+                "output_name": _bam_name(primary_set.r1.name, rg.sample),
+                "reads_object_id": str(primary_set.r1.id),
                 "reference_id": str(reference.id),
                 "reference_path": ref_path or str(fasta_path),
             }
@@ -1635,20 +1771,17 @@ async def launch_alignment(
             if r1_path:
                 reads_payload["r1_path"] = r1_path
 
-            # Extra read files (same as single-shot path, lines 1770-1780).
-            if extra_reads:
+            # Additional read sets (same as single-shot path below): each set
+            # is one entry carrying its R1 and, when paired, its mate, so the
+            # handler can concatenate the R1s and R2s into their own streams.
+            if extra_sets:
                 extra_payload = []
-                for extra_obj in extra_reads:
-                    extra_digest, extra_path = await _resolve_readable(extra_obj)
-                    entry: dict = {"name": extra_obj.name}
-                    if extra_digest:
-                        entry["sha256"] = extra_digest
-                    if extra_path:
-                        entry["path"] = extra_path
+                for extra_set in extra_sets:
+                    entry = await _extra_set_payload(extra_set)
                     extra_payload.append(entry)
                 reads_payload["extra_reads"] = extra_payload
 
-            # Mate / R2 (same as single-shot path, lines 1786-1793).
+            # Mate / R2 (same as single-shot path below).
             if mate_obj is not None:
                 r2_digest, r2_path = await _resolve_readable(mate_obj)
                 reads_payload["mate_object_id"] = str(mate_obj.id)
@@ -1695,9 +1828,14 @@ async def launch_alignment(
         sort_memory_mb=align_params.sort_memory_mb,
         building_index=building,
     )
-    # Extra reads are concatenated into the primary by the runner, so the
-    # real input is the sum of all of them -- not just obj.size.
-    total_input_bytes = (obj.size or 0) + sum(e.size or 0 for e in extra_reads) or None
+    # Every set's R1 and R2 is concatenated into the streams the aligner
+    # reads, so the real input is the sum of all of them -- not just the
+    # primary's size.
+    total_input_bytes = (
+        sum(
+            (s.r1.size or 0) + ((s.r2.size or 0) if s.r2 else 0) for s in read_sets
+        )
+    ) or None
     resolved = await memory_estimate.resolve(
         job_type=JOB_TYPE_ALIGN_READS,
         input_bytes=total_input_bytes,
@@ -1754,37 +1892,22 @@ async def launch_alignment(
                 },
             )
 
-    mate: DataObject | None = None
-    if paired:
-        # An explicit mate is scoped like the primary read; a suggested one is
-        # already same-project, hence same-profile, by construction.
-        mate = (
-            await object_service.get_object(mate_object_id, owner=owner)
-            if mate_object_id is not None
-            else await suggest_mate(obj)
-        )
-
-    if mate is not None:
-        if mate.id == obj.id:
-            raise ValidationError("A file cannot be its own mate")
-        if mate.project_id != obj.project_id:
-            raise ValidationError("Paired reads must be in the same project")
-        _check_alignable(mate)
-        # R1 leads, so the mates reach the aligner in the order it expects.
-        if pairing.mate_of(obj.name) == "R2" and pairing.mate_of(mate.name) == "R1":
-            obj, mate = mate, obj
+    # The primary pair -- and with it the run's pairing mode -- was resolved
+    # and validated above, before either path branched; the chunked path
+    # returns before this code runs.
+    mate = primary_set.r2
 
     rg = align_runner.ReadGroup.from_dict(
-        {**default_read_group(obj), **(read_group or {})}
+        {**default_read_group(primary_set.r1), **(read_group or {})}
     )
 
     # The record of what was asked for, created before anything is enqueued so
     # every job the launch produces can be linked to it as it is created.
     run = await run_service.create_run(
         kind=RunKind.ALIGNMENT,
-        project_id=obj.project_id,
-        label=_alignment_label(obj, mate, reference),
-        inputs=_alignment_inputs(obj, mate, reference),
+        project_id=primary_set.r1.project_id,
+        label=_alignment_label(primary_set.r1, primary_set.r2, reference),
+        inputs=_alignment_inputs(primary_set.r1, primary_set.r2, reference),
         params={**align_params.as_dict(), "read_group": rg.as_dict()},
         # The caller's profile. Reads and reference were both resolved under
         # it, and they are required to share a project, so all three agree --
@@ -1829,17 +1952,17 @@ async def launch_alignment(
                     run.id, existing.id, RunJobRole.INDEX, shared=True
                 )
 
-    r1_digest, r1_path = await _resolve_readable(obj)
+    r1_digest, r1_path = await _resolve_readable(primary_set.r1)
     payload: dict = {
-        "object_id": str(obj.id),
-        "project_id": str(obj.project_id),
+        "object_id": str(primary_set.r1.id),
+        "project_id": str(primary_set.r1.project_id),
         "reference_object_id": str(reference.id),
         "reference_name": reference.name,
-        "r1_name": obj.name,
+        "r1_name": primary_set.r1.name,
         "aligner": aligner.value,
         "params": align_params.as_dict(),
         "read_group": rg.as_dict(),
-        "output_name": _bam_name(obj.name, rg.sample),
+        "output_name": _bam_name(primary_set.r1.name, rg.sample),
     }
     ref_digest, ref_path = await _resolve_readable(reference)
     if ref_digest:
@@ -1851,19 +1974,13 @@ async def launch_alignment(
     if r1_path:
         payload["r1_path"] = r1_path
 
-    if extra_reads:
+    if extra_sets:
         extra_payload = []
-        for extra_obj in extra_reads:
-            extra_digest, extra_path = await _resolve_readable(extra_obj)
-            entry: dict = {"name": extra_obj.name}
-            if extra_digest:
-                entry["sha256"] = extra_digest
-            if extra_path:
-                entry["path"] = extra_path
-            extra_payload.append(entry)
+        for extra_set in extra_sets:
+            extra_payload.append(await _extra_set_payload(extra_set))
         payload["extra_reads"] = extra_payload
 
-    expected = obj.facts.get("read_count_estimate")
+    expected = primary_set.r1.facts.get("read_count_estimate")
     if isinstance(expected, int) and expected > 0:
         payload["expected_reads"] = expected
 
@@ -1883,10 +2000,12 @@ async def launch_alignment(
     if not needs_index:
         payload["sidecars"] = await sidecar_payload(reference, aligner)
 
+    # Every set member id, R1s then R2s, in order -- so two launches that
+    # differ only in their additional sets are distinct jobs.
     dedup_key = "align:" + ":".join(
         [
-            str(obj.id),
-            str(mate.id) if mate else "-",
+            *(str(s.r1.id) for s in read_sets),
+            *(str(s.r2.id) if s.r2 else "-" for s in read_sets),
             str(reference.id),
             _params_fingerprint(payload["params"]),
         ]
@@ -1924,8 +2043,8 @@ async def launch_alignment(
         ),
         max_attempts=2,
         dedup_key=dedup_key,
-        project_id=obj.project_id,
-        object_id=obj.id,
+        project_id=primary_set.r1.project_id,
+        object_id=primary_set.r1.id,
         depends_on=depends_on,
         resource_override=resource_override,
     )
@@ -1936,7 +2055,7 @@ async def launch_alignment(
         await run_service.discard_run(run.id, owner=run.owner)
         raise ConflictError(
             "An identical alignment is already queued or running",
-            details={"object_id": str(obj.id)},
+            details={"object_id": str(primary_set.r1.id)},
         )
 
     await run_service.link_job(run.id, job.id, RunJobRole.ALIGN)
@@ -1945,7 +2064,7 @@ async def launch_alignment(
         "align_launched",
         job_id=str(job.id),
         run_id=str(run.id),
-        object_id=str(obj.id),
+        object_id=str(primary_set.r1.id),
         reference_id=str(reference.id),
         aligner=aligner.value,
         index_job_id=str(index_job.id) if index_job else None,
