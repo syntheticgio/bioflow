@@ -150,3 +150,190 @@ def _assign_depths(con: sqlite3.Connection) -> None:
         "UPDATE features SET parent_status = 'cyclic' "
         f"WHERE parent_status = 'resolved' AND depth = {DEPTH_CAP}"
     )
+
+
+# What counts as a gene when the file says so. Kept small and explicit: a
+# type not in here is not silently treated as a gene, because a view labelled
+# Genes that lists something else is the failure this feature exists to
+# prevent. Extend deliberately, not by pattern-matching on substrings.
+GENE_TYPES = ("gene", "pseudogene", "ncRNA_gene")
+
+
+def build_gene_table(*, db_path: Path) -> dict:
+    """One row per gene, with the counts the Genes view shows.
+
+    Stored rather than computed on expand: per-row subtree counts mean
+    walking two levels down for every visible row on every page turn, which
+    degrades exactly on the large files where the view earns its place. The
+    table is O(genes), not O(features).
+
+    Returns the mode and the row count. `mode` is `typed` when the file has
+    gene-typed features and `fallback` when it has none -- the frontend says
+    which, so a file whose roots are NCBI `region` records does not present
+    a list of contigs under a heading that says Genes.
+    """
+    con = sqlite3.connect(db_path)
+    try:
+        con.execute("DROP TABLE IF EXISTS genes")
+        con.execute(
+            """
+            CREATE TABLE genes (
+              feature_id TEXT,
+              contig     TEXT NOT NULL,
+              start      INTEGER NOT NULL,
+              end        INTEGER NOT NULL,
+              type       TEXT,
+              strand     TEXT,
+              name       TEXT,
+              biotype    TEXT,
+              child_count      INTEGER NOT NULL DEFAULT 0,
+              descendant_count INTEGER NOT NULL DEFAULT 0,
+              span_start INTEGER NOT NULL,
+              span_end   INTEGER NOT NULL
+            )
+            """
+        )
+
+        placeholders = ",".join("?" for _ in GENE_TYPES)
+        typed = con.execute(
+            f"SELECT COUNT(*) FROM features WHERE type IN ({placeholders})",
+            GENE_TYPES,
+        ).fetchone()[0]
+
+        if typed:
+            mode = "typed"
+            where, args = f"type IN ({placeholders})", list(GENE_TYPES)
+        else:
+            mode = "fallback"
+            where, args = "parent_status = 'root'", []
+
+        con.execute(
+            f"""
+            INSERT INTO genes (feature_id, contig, start, end, type, strand,
+                               name, biotype, span_start, span_end)
+            SELECT feature_id, contig, start, end, type, strand, name, biotype,
+                   start, end
+            FROM features WHERE {where}
+            """,
+            args,
+        )
+        con.execute("CREATE INDEX ix_genes_locus ON genes(contig, start)")
+        con.commit()
+
+        # The mode is stored, not recomputed. The route needs it on every
+        # page request, and re-running the type count there would scan
+        # `features` to answer a question already settled at build time.
+        con.execute(
+            "CREATE TABLE gene_meta (mode TEXT NOT NULL, gene_count INTEGER NOT NULL)"
+        )
+        con.commit()
+
+        count = con.execute("SELECT COUNT(*) FROM genes").fetchone()[0]
+        con.execute("INSERT INTO gene_meta VALUES (?, ?)", (mode, count))
+        _fill_gene_counts(con)
+        con.commit()
+    finally:
+        con.close()
+
+    log.info("annotation_gene_table_built", mode=mode, genes=count)
+    return {"mode": mode, "count": count}
+
+
+def gene_mode(*, db_path: Path) -> str:
+    """Which rule built the genes table, as recorded at build time.
+
+    Falls back to `typed` when the meta table is missing, which is the shape
+    of a database built before this feature -- the route stays serving
+    rather than 500ing on a stale artifact the user has not recomputed.
+    """
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        row = con.execute("SELECT mode FROM gene_meta").fetchone()
+        return row[0] if row else "typed"
+    except sqlite3.OperationalError:
+        return "typed"
+    finally:
+        con.close()
+
+
+def _fill_gene_counts(con: sqlite3.Connection) -> None:
+    """Descendant counts and spans, one gene at a time.
+
+    The walk keeps a `seen` set per gene, which is what makes a descendant
+    reached by two paths count once (AH-36) -- a shared exon under two
+    transcripts of the same gene is one exon. Bounded by DEPTH_CAP so a cycle
+    that survived resolution cannot spin here.
+
+    Per-gene rather than one sweeping query because the de-duplication is not
+    expressible as a GROUP BY over a join: the same row reached twice has to
+    be recognised as the same row, not counted twice.
+    """
+    genes = con.execute(
+        "SELECT rowid, feature_id, start, end FROM genes WHERE feature_id IS NOT NULL"
+    ).fetchall()
+
+    for rowid, feature_id, start, end in genes:
+        seen: set[str] = set()
+        span_start, span_end = start, end
+        frontier = [feature_id]
+        child_count = 0
+
+        for level in range(DEPTH_CAP):
+            if not frontier:
+                break
+            placeholders = ",".join("?" for _ in frontier)
+            children = con.execute(
+                f"SELECT feature_id, start, end FROM features "
+                f"WHERE parent IN ({placeholders})",
+                frontier,
+            ).fetchall()
+            if level == 0:
+                child_count = len(children)
+
+            next_frontier: list[str] = []
+            for child_id, c_start, c_end in children:
+                span_start = min(span_start, c_start)
+                span_end = max(span_end, c_end)
+                # A child with no ID of its own (GTF exons) is a leaf: it
+                # counts, but nothing can hang off it. Keyed by identity so
+                # two such rows are two descendants.
+                key = child_id or f"\x00leaf:{c_start}:{c_end}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                if child_id:
+                    next_frontier.append(child_id)
+            frontier = next_frontier
+
+        con.execute(
+            "UPDATE genes SET child_count = ?, descendant_count = ?, "
+            "span_start = ?, span_end = ? WHERE rowid = ?",
+            (child_count, len(seen), span_start, span_end, rowid),
+        )
+
+
+def query_genes(*, db_path: Path, offset: int, limit: int) -> list[dict]:
+    """One page of the Genes view, in position order.
+
+    Ordered explicitly, unlike `query_features`: the genes table is built by
+    a SELECT whose order is not guaranteed to be file order, and it is small
+    enough (O(genes)) that the sort is cheap.
+    """
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        con.row_factory = sqlite3.Row
+        cur = con.execute(
+            "SELECT * FROM genes ORDER BY contig, start LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        con.close()
+
+
+def count_genes(*, db_path: Path) -> int:
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        return con.execute("SELECT COUNT(*) FROM genes").fetchone()[0]
+    finally:
+        con.close()
