@@ -26,7 +26,7 @@ _INSERT_BATCH = 10_000
 # children query cannot drift apart about the row shape the client parses.
 _COLUMNS = (
     "contig, start, end, type, strand, score, name, feature_id, "
-    "parent, biotype, attributes"
+    "parent, biotype, attributes, parent_status, depth"
 )
 
 
@@ -42,6 +42,10 @@ class FeatureFilters:
     a field rather than a hardcoded clause because the type filter has to
     clear it: every exon has a parent, so filtering to `exon` with the flag
     set returns an empty table on a perfectly good GFF3.
+
+    `parent_status` is how the Unresolved view expresses itself -- the rows
+    whose parent reference resolved to nothing. It is a tuple rather than a
+    single value because that view shows four statuses at once.
     """
 
     contig: str | None = None
@@ -52,6 +56,7 @@ class FeatureFilters:
     name_query: str | None = None
     strand: str | None = None
     top_level_only: bool = True
+    parent_status: tuple[str, ...] | None = None
 
 
 def build_annotation_db(*, rows, db_path: Path) -> int:
@@ -87,44 +92,60 @@ def build_annotation_db(*, rows, db_path: Path) -> int:
               feature_id TEXT,
               parent     TEXT,
               biotype    TEXT,
-              attributes TEXT
+              attributes TEXT,
+              parent_status TEXT NOT NULL DEFAULT 'root',
+              depth      INTEGER NOT NULL DEFAULT 0
             )
             """
         )
 
-        inserted = 0
+        # Counts source features, not stored rows. A multi-parent GFF3 exon
+        # writes one row per relationship so expanding either parent finds
+        # it, but it is one feature -- returning the row count here would
+        # inflate the summary's feature total (AH-12).
+        features = 0
         batch: list[tuple] = []
         for f in rows:
-            batch.append(
-                (
-                    f.contig, f.start, f.end, f.type, f.strand, f.score,
-                    f.name, f.feature_id, f.parent, f.biotype, f.attributes,
+            features += 1
+            # An empty `parents` writes a single row with a NULL parent,
+            # which is what makes the row a candidate root.
+            for parent in f.parents or (None,):
+                batch.append(
+                    (
+                        f.contig, f.start, f.end, f.type, f.strand, f.score,
+                        f.name, f.feature_id, parent, f.biotype, f.attributes,
+                    )
                 )
-            )
             if len(batch) >= _INSERT_BATCH:
                 con.executemany(
-                    "INSERT INTO features VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
+                    "INSERT INTO features (contig, start, end, type, strand, "
+                    "score, name, feature_id, parent, biotype, attributes) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
                 )
-                inserted += len(batch)
                 batch = []
 
         if batch:
             con.executemany(
-                "INSERT INTO features VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
+                "INSERT INTO features (contig, start, end, type, strand, "
+                "score, name, feature_id, parent, biotype, attributes) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
             )
-            inserted += len(batch)
 
         con.execute("CREATE INDEX ix_features_locus ON features(contig, start)")
         # The index the whole paging design rests on: expanding a gene must
         # be a seek, not a scan of three million rows.
         con.execute("CREATE INDEX ix_features_parent ON features(parent)")
+        # Resolution's every UPDATE looks parents up by this column; without
+        # it each pass is a full scan.
+        con.execute("CREATE INDEX ix_features_feature_id ON features(feature_id)")
         con.execute("CREATE INDEX ix_features_type ON features(type)")
         con.execute("CREATE INDEX ix_features_name ON features(name)")
+        con.execute("CREATE INDEX ix_features_status ON features(parent_status)")
         con.commit()
     finally:
         con.close()
 
-    return inserted
+    return features
 
 
 def _where(filters: FeatureFilters) -> tuple[str, list]:
@@ -138,6 +159,10 @@ def _where(filters: FeatureFilters) -> tuple[str, list]:
 
     if filters.top_level_only:
         clauses.append("parent IS NULL")
+    if filters.parent_status:
+        placeholders = ",".join("?" for _ in filters.parent_status)
+        clauses.append(f"parent_status IN ({placeholders})")
+        args.extend(filters.parent_status)
     if filters.contig:
         clauses.append("contig = ?")
         args.append(filters.contig)

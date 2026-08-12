@@ -14,6 +14,7 @@ from app.pipelines.annotation_db import (
     count_features,
     query_features,
 )
+from app.pipelines.annotation_hierarchy import resolve_hierarchy
 
 
 def _f(contig, start, end, type, feature_id, parent=None, name=None, biotype=None):
@@ -26,9 +27,17 @@ def _f(contig, start, end, type, feature_id, parent=None, name=None, biotype=Non
         score=None,
         name=name or feature_id,
         feature_id=feature_id,
-        parent=parent,
+        parents=(parent,) if parent else (),
         biotype=biotype,
         attributes=f"ID={feature_id}",
+    )
+
+
+def _multi(contig, start, end, type, feature_id, parents):
+    return Feature(
+        contig=contig, start=start, end=end, type=type, strand="+", score=None,
+        name=feature_id, feature_id=feature_id, parents=parents,
+        biotype=None, attributes=f"ID={feature_id}",
     )
 
 
@@ -162,3 +171,63 @@ class TestLocusJump:
     def test_excludes_features_outside_the_window(self, db):
         filters = FeatureFilters(contig="chr1", start_min=3000, start_max=4000)
         assert count_features(db_path=db, filters=filters) == 0
+
+
+def test_a_multi_parent_feature_is_stored_once_per_relationship(tmp_path):
+    """AH-11: expanding either transcript must show the shared exon."""
+    db_path = tmp_path / "f.db"
+    build_annotation_db(
+        rows=iter([
+            _f("chr1", 1, 500, "mRNA", "t1"),
+            _f("chr1", 1, 500, "mRNA", "t2"),
+            _multi("chr1", 10, 50, "exon", "e1", ("t1", "t2")),
+        ]),
+        db_path=db_path,
+    )
+    assert len(children_of(db_path=db_path, parent_id="t1")) == 1
+    assert len(children_of(db_path=db_path, parent_id="t2")) == 1
+
+
+def test_build_returns_source_feature_count_not_row_count(tmp_path):
+    """AH-12: the summary total must not inflate with relationship count."""
+    db_path = tmp_path / "f.db"
+    total = build_annotation_db(
+        rows=iter([
+            _f("chr1", 1, 500, "mRNA", "t1"),
+            _multi("chr1", 10, 50, "exon", "e1", ("t1", "t2")),
+        ]),
+        db_path=db_path,
+    )
+    assert total == 2
+
+
+def test_a_feature_with_no_parents_stores_one_row(tmp_path):
+    db_path = tmp_path / "f.db"
+    build_annotation_db(rows=iter([_f("chr1", 1, 500, "gene", "g1")]), db_path=db_path)
+    assert count_features(db_path=db_path, filters=FeatureFilters()) == 1
+
+
+def test_parent_status_filter_selects_only_those_statuses(tmp_path):
+    db_path = tmp_path / "f.db"
+    build_annotation_db(
+        rows=iter([
+            _f("chr1", 1, 500, "gene", "g1"),
+            _f("chr1", 10, 50, "exon", "e1", parent="nosuchgene"),
+        ]),
+        db_path=db_path,
+    )
+    resolve_hierarchy(db_path=db_path)
+    filters = FeatureFilters(top_level_only=False, parent_status=("dangling",))
+    rows = query_features(db_path=db_path, filters=filters, offset=0, limit=10)
+    assert [r["feature_id"] for r in rows] == ["e1"]
+
+
+def test_rows_carry_their_status_and_depth(tmp_path):
+    db_path = tmp_path / "f.db"
+    build_annotation_db(rows=iter([_f("chr1", 1, 500, "gene", "g1")]), db_path=db_path)
+    resolve_hierarchy(db_path=db_path)
+    row = query_features(
+        db_path=db_path, filters=FeatureFilters(), offset=0, limit=1
+    )[0]
+    assert row["parent_status"] == "root"
+    assert row["depth"] == 0
