@@ -28,72 +28,82 @@ jobs:
   version-guard:
     name: Tag matches Cargo.toml
     if: startsWith(github.ref, 'refs/tags/launcher-v')
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
 
-  # Both jobs run on self-hosted runners: this repo has no GitHub-hosted ones.
-  # See docs/ci-runners.md -- the repo is private under a personal account, so
-  # hosted macOS and arm64 Linux runners are not on the plan.
   macos:
     name: macOS bundle (arm64)
     needs: [version-guard]
-    # The same Apple Silicon machine that builds linux/arm64 images in
-    # publish-images.yml. It also holds the Developer ID certificate in its
-    # login keychain -- so unlike a hosted runner, there is no need to ship a
-    # base64 .p12 through a secret and import it into a temporary keychain
-    # for *signing*. The tradeoff is that the signing key lives on a dev
-    # machine rather than in GitHub's secret store; for a single-maintainer
-    # project that is the simpler and less leaky option.
+    # GitHub-hosted macos-latest is Apple Silicon. Unlike the old self-hosted
+    # dev machine, this runner is a fresh VM every job with no keychain
+    # already holding the Developer ID certificate -- so signing now needs
+    # the standard CI pattern of shipping the cert as a base64 .p12 secret
+    # and importing it into a temporary, per-job keychain. See
+    # docs/macos-signing.md for how to export CI_SIGNING_P12_BASE64 /
+    # CI_SIGNING_P12_PASSWORD from the certificate.
     #
-    # Notarization is different: the App Store Connect API key (.p8) is
-    # shipped as a base64 secret (APPLE_API_KEY_P8_BASE64) and decoded to a
-    # per-job temp file, then removed in an `if: always()` step regardless of
-    # build outcome. Unlike the signing cert, this key isn't tied to Keychain
-    # access control, so leaving a plaintext copy on disk between runs would
-    # be needlessly exposed -- decoding it fresh per job and deleting it
-    # after keeps the same "runner already has what it needs" simplicity the
-    # signing cert gets, without a standing secret file on the machine.
-    runs-on: [self-hosted, macOS, ARM64]
+    # Notarization was already secret-based (APPLE_API_KEY_P8_BASE64,
+    # decoded to a per-job temp file and removed in an `if: always()` step),
+    # so that part is unchanged by the runner move.
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
 
-      - name: Unlock the CI signing keychain
-        # The Developer ID identity lives in a dedicated ci-signing.keychain-db,
-        # not the login keychain. codesign run from this LaunchAgent's job
-        # context fails with errSecInternalComponent against the login
-        # keychain regardless of ACLs or session state -- see
-        # docs/macos-signing.md. The CI keychain sidesteps that by being a
-        # keychain this job unlocks and owns outright, added to the runner
-        # user's search list once during setup (not per-job, since the search
-        # list itself is host state, not job state).
+      - name: Import the signing certificate into a temporary keychain
+        # A fresh, job-local keychain rather than the runner's login
+        # keychain: this VM is destroyed after the job, so there is no
+        # standing-state benefit to reusing the login keychain, and a
+        # dedicated keychain keeps the imported private key out of anything
+        # else running in the same job. Removed unconditionally at the end
+        # regardless of outcome -- though the VM's teardown would also
+        # discard it, doing so explicitly doesn't depend on that.
+        id: keychain
         env:
+          CI_SIGNING_P12_BASE64: ${{ secrets.CI_SIGNING_P12_BASE64 }}
+          CI_SIGNING_P12_PASSWORD: ${{ secrets.CI_SIGNING_P12_PASSWORD }}
           CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
-          security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$HOME/Library/Keychains/ci-signing.keychain-db"
-          security set-keychain-settings -lut 21600 "$HOME/Library/Keychains/ci-signing.keychain-db"
+          keychain_path="$RUNNER_TEMP/ci-signing.keychain-db"
+          p12_path="$RUNNER_TEMP/ci-signing.p12"
+          echo "path=$keychain_path" >> "$GITHUB_OUTPUT"
+
+          echo "$CI_SIGNING_P12_BASE64" | base64 --decode > "$p12_path"
+
+          security create-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$p12_path" -k "$keychain_path" -P "$CI_SIGNING_P12_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path" \
+            $(security list-keychains -d user | sed s/\"//g)
+
+          rm -f "$p12_path"
 
       - name: Verify the signing identity is present
         # Fail in five seconds rather than after the full release build. The
         # certificate expires yearly, and the failure mode when it lapses is a
         # build that succeeds and produces an unsignable bundle.
+        env:
+          CI_KEYCHAIN_PATH: ${{ steps.keychain.outputs.path }}
         run: |
           set -euo pipefail
-          if ! security find-identity -v -p codesigning "$HOME/Library/Keychains/ci-signing.keychain-db" | grep -q "Developer ID Application"; then
+          if ! security find-identity -v -p codesigning "$CI_KEYCHAIN_PATH" | grep -q "Developer ID Application"; then
             echo "::error::No Developer ID Application identity in the CI signing keychain."
             exit 1
           fi
-          security find-identity -v -p codesigning "$HOME/Library/Keychains/ci-signing.keychain-db" | grep "Developer ID Application"
+          security find-identity -v -p codesigning "$CI_KEYCHAIN_PATH" | grep "Developer ID Application"
 
       - name: Write the notarization API key
-        # RUNNER_TEMP is per-job and self-hosted-runner-local, not shared
-        # with other concurrent jobs, but is not automatically wiped the way
-        # a hosted runner's workspace is -- hence the explicit cleanup step
-        # below rather than relying on that.
+        # RUNNER_TEMP is per-job, not shared with other concurrent jobs, and
+        # is discarded with the VM at job end -- the explicit cleanup step
+        # below is belt-and-suspenders rather than load-bearing here.
         id: apikey
         env:
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
@@ -123,7 +133,7 @@ jobs:
           # happens well after the previous step, and a keychain's unlock
           # only lasts until its own timeout regardless of which step
           # unlocked it.
-          CI_KEYCHAIN_PATH: /Users/syntheticgio/Library/Keychains/ci-signing.keychain-db
+          CI_KEYCHAIN_PATH: ${{ steps.keychain.outputs.path }}
           CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
         run: |
           set -euo pipefail
@@ -157,6 +167,10 @@ jobs:
         if: always()
         run: rm -f "${{ steps.apikey.outputs.path }}"
 
+      - name: Delete the temporary signing keychain
+        if: always()
+        run: security delete-keychain "${{ steps.keychain.outputs.path }}" || true
+
       - uses: actions/upload-artifact@v7
         with:
           name: launcher-macos-arm64
@@ -166,7 +180,7 @@ jobs:
   linux:
     name: Linux bundle (amd64)
     needs: [version-guard]
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
@@ -174,7 +188,7 @@ jobs:
 
       - name: Install build dependencies
         # Tauri v2 needs the -dev packages, not just the runtime libraries --
-        # see launcher/README.md. Kept idempotent so a warm runner skips fast.
+        # see launcher/README.md.
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -208,7 +222,7 @@ jobs:
     # leaves the artifacts on the run, which is what makes it usable as a
     # "does this still build" check without creating a release.
     if: startsWith(github.ref, 'refs/tags/launcher-v')
-    runs-on: [self-hosted, X64]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:

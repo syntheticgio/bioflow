@@ -143,18 +143,20 @@ Full setup (certificate, App Store Connect API key, entitlements, and the
 verification that actually proves a download will work) is in
 [`docs/macos-signing.md`](../docs/macos-signing.md).
 
-**Release bundles are arm64-only.** The macOS CI job runs on the self-hosted
-Apple Silicon runner, so the `.dmg` will not run on an Intel Mac. A universal
-binary needs a rustup-managed toolchain; see the signing doc.
+**Release bundles are arm64-only.** The macOS CI job runs on GitHub-hosted
+`macos-latest`, which is Apple Silicon, so the `.dmg` will not run on an
+Intel Mac. A universal binary needs a rustup-managed toolchain; see the
+signing doc.
 
 ## CI
 
 `.github/workflows/release-launcher.yml` builds macOS and Linux bundles and
 attaches them to a GitHub release on a `launcher-v*` tag. `workflow_dispatch`
 runs build without releasing, which makes it usable as a "does this still
-build" check. Both jobs are self-hosted — see
-[`docs/ci-runners.md`](../docs/ci-runners.md) for why this repo has no
-GitHub-hosted runners.
+build" check. Both jobs run on GitHub-hosted runners (`macos-latest` and
+`ubuntu-latest`) — see [`docs/ci-runners.md`](../docs/ci-runners.md) and
+[`docs/macos-signing.md`](../docs/macos-signing.md) for how signing works
+without a persistent machine.
 
 A hand-built bundle only reaches as far as its own OS and CPU architecture.
 It bundles `docker-compose.yml` verbatim (see above), so it needs the
