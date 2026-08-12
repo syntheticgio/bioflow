@@ -1584,7 +1584,15 @@ async def _resolve_alignment_read_sets(
     run_paired = primary_set.r2 is not None
 
     sets = [primary_set]
-    for index, (r1_id, r2_id) in enumerate(additional_sets, start=1):
+    for index, item in enumerate(additional_sets, start=1):
+        # A set is (r1_id, r2_id) plus an optional strictness flag. The dialog
+        # transport never sets it: its sets are whole libraries, so pairing
+        # must match the run exactly. The workflow node sets it False for its
+        # chunked reads -- pieces of the primary's own library, deliberately
+        # single-end, concatenated into the run's R1 stream the way they
+        # always were before the strict rule existed.
+        r1_id, r2_id = item[0], item[1]
+        strict = item[2] if len(item) > 2 else True
         label = f"additional read set {index}"
         # The declared mate is passed through untouched: _resolve_one rejects
         # it when the run is single-end rather than silently dropping it.
@@ -1594,7 +1602,7 @@ async def _resolve_alignment_read_sets(
                 r2_id,
                 set_label=label,
                 require_mate=run_paired,
-                strict=True,
+                strict=strict,
             )
         )
     return sets

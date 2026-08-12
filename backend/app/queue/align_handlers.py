@@ -73,7 +73,8 @@ def _resolve_digest_or_path(
     """Locate a file by content digest or explicit path, and confirm it exists.
 
     Shared by `_resolve_blob` (payload keys named `{key}_sha256`/`{key}_path`)
-    and the `extra_reads` loop (entries keyed `sha256`/`path`) so the two
+    and the `extra_reads` loops -- each entry's own file under `sha256`/`path`
+    and, in a paired run, its mate under `mate_sha256`/`mate_path` -- so the
     naming conventions can each supply their own already-known keys without
     duplicating the resolve-then-verify logic itself.
     """
@@ -478,23 +479,23 @@ def align_reads(ctx: JobContext) -> dict:
 
     extra_reads_payload = ctx.payload.get("extra_reads") or []
     if extra_reads_payload:
-        # Several read files bound to the same multi port -- chunked/split
-        # reads, not a mate -- get concatenated into r1 before the aligner
+        # Every set's R1 concatenates into the primary R1 stream and, in a
+        # paired run, every set's mate into the R2 stream, before the aligner
         # ever sees them. See _concatenate_reads for why concatenation is the
         # only approach that works across all six aligners this handler
-        # drives.
-        extra_paths = [
-            _resolve_digest_or_path(
-                entry.get("sha256"),
-                entry.get("path"),
-                missing_message="extra_reads entry requires 'sha256' or 'path'",
-            )
-            for entry in extra_reads_payload
-        ]
-
+        # drives; the R1s and R2s are concatenated separately so the mate
+        # streams stay symmetric with the reads streams.
+        extra_r1_paths, extra_r2_paths = _extra_reads_paths(
+            extra_reads_payload, paired=r2 is not None
+        )
         r1_name = ctx.payload.get("r1_name") or "reads.fastq"
         combined = work / f"combined_{Path(r1_name).name}"
-        r1 = _concatenate_reads(r1, extra_paths, combined)
+        r1 = _concatenate_reads(r1, extra_r1_paths, combined)
+
+        if r2 is not None and extra_r2_paths:
+            r2_name = ctx.payload.get("r2_name") or "mate.fastq"
+            combined_r2 = work / f"combined_{Path(r2_name).name}"
+            r2 = _concatenate_reads(r2, extra_r2_paths, combined_r2)
 
     out_dir = work / "out"
     out_dir.mkdir(exist_ok=True)
@@ -647,6 +648,46 @@ def _concatenate_reads(primary: Path, extras: list[Path], destination: Path) -> 
                 with open(src, "rb") as fh:
                     shutil.copyfileobj(fh, dst)
     return destination
+
+
+def _extra_reads_paths(entries: list[dict], *, paired: bool) -> tuple[list[Path], list[Path]]:
+    """Resolve an additional read sets payload to the R1 and R2 path lists.
+
+    Every set contributes its own file to the R1 stream. In a paired run
+    every set must also carry a mate, which contributes to the R2 stream -- a
+    set without one is a launch that slipped past validation, and refusing it
+    beats concatenating a shorter R2 stream that would misalign every read in
+    the set.
+    """
+    extra_r1_paths = [
+        _resolve_digest_or_path(
+            entry.get("sha256"),
+            entry.get("path"),
+            missing_message="extra_reads entry requires 'sha256' or 'path'",
+        )
+        for entry in entries
+    ]
+    if not paired:
+        return extra_r1_paths, []
+
+    extra_r2_paths = []
+    for entry in entries:
+        mate_sha256 = entry.get("mate_sha256")
+        mate_path = entry.get("mate_path")
+        if not (mate_sha256 or mate_path):
+            raise PermanentError(
+                "extra_reads entry "
+                f"{entry.get('name') or '(unnamed)'} has no mate in a "
+                "paired run"
+            )
+        extra_r2_paths.append(
+            _resolve_digest_or_path(
+                mate_sha256,
+                mate_path,
+                missing_message="extra_reads mate requires 'mate_sha256' or 'mate_path'",
+            )
+        )
+    return extra_r1_paths, extra_r2_paths
 
 
 def _named_read_link(work: Path, target: Path, name: str | None) -> Path:
