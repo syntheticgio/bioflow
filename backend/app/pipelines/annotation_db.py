@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.logging import get_logger
-from app.pipelines.annotation_parse import Feature
 
 log = get_logger(__name__)
 
