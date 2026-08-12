@@ -1,0 +1,117 @@
+# Rejects a PR whose commit subjects git-cliff cannot parse.
+#
+# CHANGELOG.md is generated from commit subjects by git-cliff at release time
+# (#106), and a subject without a Conventional Commits `type:` prefix is
+# silently dropped -- `filter_unconventional = true` in cliff.toml, with
+# `fail_on_unmatched_commit = false` so the release does not fail. That
+# combination is deliberate: a release must not abort over a commit message.
+# The cost is that the loss is invisible until someone reads the notes and a
+# change is simply absent.
+#
+# It has already happened. Cutting v0.3.2-alpha warned "7 commit(s) were
+# skipped due to parse error(s)", and one of the seven was
+# `Fix launcher open website bug` -- a real user-facing fix across six files
+# that should have been `fix(launcher):` and reached the changelog. The others
+# were docs, lint, a merge and a revert, which the template filters anyway.
+# By then nothing could be done: a merged subject is immutable short of
+# rewriting published history.
+#
+# So the check belongs before the merge, which is the last moment the subject
+# can still be edited (`git commit --amend`, or a reword during rebase).
+#
+# Deliberately its own workflow rather than a job in build-check.yml: that
+# one carries `paths-ignore: '**/*.md'`, so a docs-only PR skips it entirely
+# -- and a docs-only PR is exactly where an off-hand subject like "Linting
+# issues" tends to appear.
+name: Commit check
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  conventional-commits:
+    name: Commit subjects are Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      # The full PR range is needed, not just the tip: every commit that lands
+      # on main is a commit git-cliff will read.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check each commit subject
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # workflow_dispatch has no PR context; check the last commit instead
+          # so a manual run is a smoke test rather than an error.
+          if [ -z "${BASE_SHA:-}" ]; then
+            RANGE="HEAD~1..HEAD"
+          else
+            RANGE="$BASE_SHA..$HEAD_SHA"
+          fi
+
+          # Conventional Commits: `type(optional-scope)!: description`.
+          #
+          # The type list is intentionally not enumerated. git-cliff's embedded
+          # default parsers -- which cliff.toml relies on rather than replacing
+          # (see its header) -- accept any lowercase type and sort unknown ones
+          # into groups the template drops. Enumerating types here would add a
+          # second, separate list that drifts from the one that actually
+          # decides what reaches the changelog. What matters, and all that is
+          # checked, is that the *shape* parses at all.
+          PATTERN='^[a-z]+(\([a-z0-9 ._/-]+\))?!?: .+'
+
+          # A merge commit has no authored subject and is not something a
+          # contributor writes, so it is exempt: `git log --no-merges`.
+          FAILED=0
+          while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            sha="${line%% *}"
+            subject="${line#* }"
+            if printf '%s' "$subject" | grep -qE "$PATTERN"; then
+              printf '  ok    %s  %s\n' "$sha" "$subject"
+            else
+              printf '  FAIL  %s  %s\n' "$sha" "$subject"
+              FAILED=1
+            fi
+          done < <(git log --no-merges --format='%h %s' "$RANGE")
+
+          if [ "$FAILED" -ne 0 ]; then
+            cat >&2 <<'MSG'
+
+          At least one commit subject is not a Conventional Commit, so
+          git-cliff will drop it from CHANGELOG.md without failing the
+          release. Expected:
+
+              type(optional-scope): description
+
+          for example:
+
+              fix(launcher): open the website in the default browser
+              feat(queue): report per-node queue depth
+              docs: record the polling-cost tradeoff
+
+          `feat` and `fix` are the types that reach users and therefore the
+          changelog; `docs`, `test`, `refactor`, `chore`, `style` are real and
+          correct types that are filtered out of the user-facing notes. A
+          user-visible change committed as `chore` disappears from them.
+
+          See AGENTS.md, "Commit messages are Conventional Commits".
+
+          To fix, reword the offending commits and force-push the branch:
+
+              git rebase -i $BASE_SHA     # mark them `reword`
+              git push --force-with-lease
+
+          For a single-commit branch, `git commit --amend` is enough.
+          MSG
+            exit 1
+          fi
+
+          echo "All commit subjects parse."
