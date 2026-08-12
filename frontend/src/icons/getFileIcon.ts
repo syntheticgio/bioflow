@@ -26,6 +26,7 @@ const FORMAT_ICONS: Record<string, string> = {
   cram,
   bed,
   gff,
+  genbank: gff,
   gtf,
   vcf,
   wig,

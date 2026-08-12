@@ -71,6 +71,7 @@ const FORMAT_LABELS: Record<string, string> = {
   bcf: "BCF",
   bed: "BED",
   gff: "GFF",
+  genbank: "GenBank",
   gtf: "GTF",
   gfa: "GFA",
   text: "Text",
