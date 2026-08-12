@@ -20,10 +20,11 @@ from app.db.redis_client import get_redis
 from app.logging import get_logger
 from app.models.node import Node
 from app.models.node_provision import NodeProvisionTask
+from app.models.node_update import NodeUpdateTask
 from app.queue import keys
 from app.queue import node_stats as node_stats_mod
 from app.queue.worker import _own_image_digest
-from app.services import node_ssh
+from app.services import node_ssh, node_update_service
 from app.services.ai import crypto
 from app.version import __version__
 
@@ -54,6 +55,12 @@ class ProvisionRequest(BaseModel):
         if self.password and self.private_key:
             raise ValueError("Provide exactly one of password or private_key, not both")
         return self
+
+
+class UpdateRequest(BaseModel):
+    """Whether to let running jobs finish before swapping the image."""
+
+    drain: bool = True
 
 
 class ProvisionStatusOut(BaseModel):
@@ -582,6 +589,67 @@ async def current_version() -> dict:
     return {"image_digest": digest, "version": __version__}
 
 
+_active_updates: dict[str, asyncio.Task] = {}
+
+
+@router.post("/{node_id}/update", status_code=201)
+async def update_node(node_id: str, req: UpdateRequest) -> dict:
+    """Pull the current backend image on a node and restart its worker."""
+    node = await Node.find_one(Node.node_id == node_id)
+    if node is None:
+        raise HTTPException(404, f"Node {node_id!r} not found")
+    if node.ssh_key_enc is None:
+        raise HTTPException(
+            409,
+            f"Node {node_id!r} was not provisioned from BioFlow, so there is no "
+            "stored key to reach it with. Re-provision it to enable updates.",
+        )
+
+    running = await NodeUpdateTask.find_one(
+        NodeUpdateTask.node_id == node_id,
+        NodeUpdateTask.status == "updating",
+    )
+    if running is not None:
+        raise HTTPException(409, f"Node {node_id!r} is already being updated.")
+
+    task_doc = NodeUpdateTask(
+        node_id=node_id,
+        host=node.ssh_host or "",
+        from_digest=node.image_digest,
+        drain=req.drain,
+        message="Queued…",
+    )
+    await task_doc.insert()
+
+    bg = asyncio.create_task(
+        node_update_service.run_update(task_doc.task_id, node, drain=req.drain)
+    )
+    _active_updates[task_doc.task_id] = bg
+    bg.add_done_callback(lambda _: _active_updates.pop(task_doc.task_id, None))
+
+    return {"task_id": task_doc.task_id, "status": "updating"}
+
+
+@router.get("/update/{task_id}")
+async def update_status(task_id: str) -> dict:
+    """Poll the status of an update task."""
+    task = await NodeUpdateTask.find_one(NodeUpdateTask.task_id == task_id)
+    if task is None:
+        raise HTTPException(404, f"Update task {task_id!r} not found")
+    return {
+        "task_id": task.task_id,
+        "status": task.status,
+        "phase": task.phase,
+        "message": task.message,
+        "pct": task.pct,
+        "node_id": task.node_id,
+        "host": task.host,
+        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "finished_at": task.finished_at.isoformat() if task.finished_at else None,
+        "error": task.error,
+    }
+
+
 @router.get("/{node_id}/status")
 async def node_status(node_id: str) -> dict:
     """Check whether a node is still active.
@@ -669,5 +737,16 @@ async def _clean_orphaned_provisions() -> None:
                 t.finished_at = datetime.now(UTC)
                 await t.save()
                 log.info("orphaned_provision_cleaned", task_id=t.task_id)
+
+        orphaned_updates = await NodeUpdateTask.find(
+            NodeUpdateTask.status == "updating",
+        ).to_list()
+        for t in orphaned_updates:
+            if t.task_id not in _active_updates:
+                t.status = "failed"
+                t.error = "API restart interrupted the update"
+                t.finished_at = datetime.now(UTC)
+                await t.save()
+                log.info("orphaned_update_cleaned", task_id=t.task_id)
     except Exception:
         log.warning("provision_cleanup_failed")
