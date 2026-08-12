@@ -21,6 +21,8 @@ from app.models.node import Node
 from app.models.node_provision import NodeProvisionTask
 from app.queue import keys
 from app.queue import node_stats as node_stats_mod
+from app.queue.worker import _own_image_digest
+from app.version import __version__
 
 log = get_logger(__name__)
 
@@ -537,6 +539,17 @@ async def enroll_node(payload: dict) -> dict:
         "status": "active",
         "message": "enrolled",
     }
+
+
+@router.get("/current-version")
+async def current_version() -> dict:
+    """The image the primary is running, as the reference for staleness.
+
+    Nodes are compared against this rather than against a registry tag: the
+    digest is what actually differs when an image is republished under the
+    same tag.
+    """
+    return {"image_digest": _own_image_digest(), "version": __version__}
 
 
 @router.get("/{node_id}/status")
