@@ -399,6 +399,73 @@ class TestPipelinesRouter:
         # got past the ownership check to learn whether any exist.
         assert "Compute results first" not in theirs.text
 
+    async def test_another_profile_cannot_read_computed_annotation_features(
+        self, client, two_profiles, tmp_path, monkeypatch
+    ):
+        """Same shape as the variant table above: `annotation_stats_dir` is a
+        SQLite file in a directory named by object id and nothing else, so
+        this lookup is the only thing standing between one profile and
+        another's feature table.
+
+        A real features.db is built so A's "no results yet" 404 and B's
+        ownership 404 are distinguishable by message, not just status code --
+        A gets past the ownership check and hits a real, computed database; B
+        never learns whether one exists.
+        """
+        from app.config import settings
+        from app.pipelines.annotation_db import build_annotation_db
+        from app.pipelines.annotation_parse import Feature
+
+        project = await _project(two_profiles["a"].owner_id(), "a-annotation-features")
+        ann = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "genes.gff3",
+            fmt_kind=FormatKind.GFF,
+            status=ObjectStatus.READY,
+        )
+
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
+        db_path = tmp_path / "annotation_stats" / str(ann.id) / "features.db"
+        build_annotation_db(
+            rows=iter(
+                [
+                    Feature(
+                        contig="chr1",
+                        start=100,
+                        end=150,
+                        type="gene",
+                        strand="+",
+                        score=None,
+                        name="g1",
+                        feature_id="g1",
+                        parent=None,
+                        biotype="protein_coding",
+                        attributes="ID=g1",
+                    )
+                ]
+            ),
+            db_path=db_path,
+        )
+
+        mine = await client.get(
+            f"/api/v1/pipelines/annotationstats/features/{ann.id}",
+            headers=two_profiles["a_headers"],
+        )
+        theirs = await client.get(
+            f"/api/v1/pipelines/annotationstats/features/{ann.id}",
+            headers=two_profiles["b_headers"],
+        )
+
+        assert mine.status_code == 200
+        assert mine.json()["total"] == 1
+        assert theirs.status_code == 404
+        # B never reaches the "compute results first" message either -- B is
+        # stopped by ownership before the database path is even built, so its
+        # 404 body is distinct from the "object exists but has no computed
+        # results" 404 A would get on an object with no features.db.
+        assert "Compute results first" not in theirs.text
+
     async def test_another_profile_cannot_read_a_qc_report(
         self, client, two_profiles, tmp_path, monkeypatch
     ):
@@ -651,6 +718,24 @@ class TestPipelineLaunchesAreScoped:
             monkeypatch,
             path="/api/v1/pipelines/vcfstats",
             body={"object_id": str(vcf.id)},
+        )
+
+    async def test_annotation_stats_is_scoped(self, client, two_profiles, monkeypatch):
+        project = await _project(two_profiles["a"].owner_id(), "a-annotationstats")
+        ann = await _object(
+            two_profiles["a"].owner_id(),
+            project.id,
+            "genes.gff3",
+            fmt_kind=FormatKind.GFF,
+            status=ObjectStatus.READY,
+            digest="9" * 64,
+        )
+        await self._assert_scoped_launch(
+            client,
+            two_profiles,
+            monkeypatch,
+            path="/api/v1/pipelines/annotationstats",
+            body={"object_id": str(ann.id)},
         )
 
     async def test_index_build_is_scoped(self, client, two_profiles, monkeypatch):
