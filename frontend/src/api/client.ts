@@ -9,6 +9,7 @@ import type {
   AlignerSchema,
   AnnotationFeature,
   AnnotationFeaturePage,
+  AnnotationGenePage,
   AssembleRequest,
   AssemblerSchema,
   AssemblyParams,
@@ -1149,16 +1150,28 @@ export const api = {
     if (q.nameQuery) p.set("name_query", q.nameQuery);
     if (q.strand) p.set("strand", q.strand);
     if (q.skipCount) p.set("skip_count", "true");
+    if (q.view) p.set("view", q.view);
     return request<AnnotationFeaturePage>(
       `/pipelines/annotationstats/features/${objectId}?${p.toString()}`,
     );
   },
 
-  /** Every child of one feature, for an expanded row. */
+  /** Every child of one feature, for an expanded row. `depth_cap` is the
+   *  server's recursion bound, echoed back so the client doesn't hardcode
+   *  a second copy of the same number. */
   annotationChildren: (objectId: string, parentId: string) =>
-    request<{ rows: AnnotationFeature[] }>(
+    request<{ rows: AnnotationFeature[]; depth_cap: number }>(
       `/pipelines/annotationstats/children/${objectId}?parent_id=${encodeURIComponent(parentId)}`,
     ),
+
+  /** A page of the Genes view -- see AnnotationGenePage. */
+  annotationGenes: (objectId: string, offset: number, limit: number, skipCount?: boolean) => {
+    const p = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (skipCount) p.set("skip_count", "true");
+    return request<AnnotationGenePage>(
+      `/pipelines/annotationstats/genes/${objectId}?${p.toString()}`,
+    );
+  },
 
   /**
    * Upload via XHR rather than fetch: fetch exposes no upload progress events,
