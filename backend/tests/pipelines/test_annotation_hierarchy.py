@@ -7,8 +7,6 @@ counts that must reconcile with the number of rows put in.
 
 import sqlite3
 
-import pytest
-
 from app.pipelines.annotation_hierarchy import DEPTH_CAP, resolve_hierarchy
 
 
