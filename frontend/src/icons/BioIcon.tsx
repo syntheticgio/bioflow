@@ -1662,6 +1662,180 @@ export const BIO_ICONS: Record<string, Glyph> = {
       </>
     ),
   },
+  // Platform variants of reads_raw/reads_trimmed.c. The platform is one
+  // added ink cue on top of that same mark, never a colour swap: Illumina
+  // staggers the mates onto two baselines, PacBio loops the gap (circular
+  // template read on both strands), Nanopore threads one strand through a
+  // pore. Cyan stays reserved for the trim cut, exactly as in the
+  // platform-less marks. Only variant `c` is meaningful here -- these are
+  // always rendered as the mark (see CHOSEN_VARIANT) -- but `a`/`b` are
+  // filled in with the same drawing so the Glyph type stays uniform and a
+  // future variant switch has something to fall back to.
+  reads_raw_illumina: {
+    label: "Reads (raw, Illumina)",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 100h84"></path><path d="M148 156h84"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 100h84"></path><path d="M148 156h84"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 100h84"></path><path d="M148 156h84"></path>
+        </g>
+      </>
+    ),
+  },
+  reads_trimmed_illumina: {
+    label: "Reads (trimmed, Illumina)",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 100h56"></path><path d="M148 156h56"></path>
+        <path d="M24 82v36" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 138v36" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 100h56"></path><path d="M148 156h56"></path>
+        <path d="M24 82v36" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 138v36" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 100h56"></path><path d="M148 156h56"></path>
+        <path d="M24 82v36" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 138v36" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+  },
+  reads_raw_pacbio: {
+    label: "Reads (raw, PacBio)",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 112h84"></path><path d="M148 112h84"></path>
+        <path d="M108 112q20 60 40 0"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 112h84"></path><path d="M148 112h84"></path>
+        <path d="M108 112q20 60 40 0"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 112h84"></path><path d="M148 112h84"></path>
+        <path d="M108 112q20 60 40 0"></path>
+        </g>
+      </>
+    ),
+  },
+  reads_trimmed_pacbio: {
+    label: "Reads (trimmed, PacBio)",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 112h56"></path><path d="M148 112h56"></path>
+        <path d="M108 112q20 60 40 0"></path>
+        <path d="M24 92v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 92v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 112h56"></path><path d="M148 112h56"></path>
+        <path d="M108 112q20 60 40 0"></path>
+        <path d="M24 92v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 92v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 112h56"></path><path d="M148 112h56"></path>
+        <path d="M108 112q20 60 40 0"></path>
+        <path d="M24 92v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 92v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+  },
+  reads_raw_nanopore: {
+    label: "Reads (raw, Oxford Nanopore)",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 128h72"></path><path d="M160 128h72"></path>
+        <path d="M112 96v64"></path><path d="M144 96v64"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 128h72"></path><path d="M160 128h72"></path>
+        <path d="M112 96v64"></path><path d="M144 96v64"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M24 128h72"></path><path d="M160 128h72"></path>
+        <path d="M112 96v64"></path><path d="M144 96v64"></path>
+        </g>
+      </>
+    ),
+  },
+  reads_trimmed_nanopore: {
+    label: "Reads (trimmed, Oxford Nanopore)",
+    a: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 128h44"></path><path d="M160 128h44"></path>
+        <path d="M112 96v64"></path><path d="M144 96v64"></path>
+        <path d="M24 108v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 108v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    b: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 128h44"></path><path d="M160 128h44"></path>
+        <path d="M112 96v64"></path><path d="M144 96v64"></path>
+        <path d="M24 108v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 108v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+    c: (
+      <>
+        <g transform="translate(4.92 4.92) scale(0.9615)" strokeWidth={16.64}>
+        <path d="M52 128h44"></path><path d="M160 128h44"></path>
+        <path d="M112 96v64"></path><path d="M144 96v64"></path>
+        <path d="M24 108v40" stroke="var(--bio-accent,#0088b0)"></path><path d="M232 108v40" stroke="var(--bio-accent,#0088b0)"></path>
+        </g>
+      </>
+    ),
+  },
   user: {
     label: "User",
     a: (
@@ -1763,6 +1937,15 @@ export const CHOSEN_VARIANT: Record<string, BioIconVariant> = {
   // as "a pile of reads", not a full enclosure.
   reads_raw: "c",
   reads_trimmed: "c",
+  // Platform variants carry the same reasoning as reads_raw/reads_trimmed
+  // above, plus one added ink cue for the instrument -- still the fewest
+  // strokes that read as "a pile of reads", not a full enclosure.
+  reads_raw_illumina: "c",
+  reads_trimmed_illumina: "c",
+  reads_raw_pacbio: "c",
+  reads_trimmed_pacbio: "c",
+  reads_raw_nanopore: "c",
+  reads_trimmed_nanopore: "c",
   // user keeps the house default (`a`) -- explicitly chosen in review as the
   // replacement for the 🧬 emoji beside the profile name.
 };
@@ -1868,6 +2051,41 @@ export function conceptFor(
   return FORMAT_CONCEPTS[formatKind?.toLowerCase()] ?? "unrecognized";
 }
 
+/** A read's originating instrument, so far as the icon set draws a
+ *  distinction. Anything else (or nothing) falls back to the platform-less
+ *  reads_raw/reads_trimmed mark. */
+export type ReadPlatform = "illumina" | "pacbio" | "nanopore";
+
+/**
+ * Coarse platform read from the same two sources TrimDialog's isLongRead()
+ * already checks, in the same priority order: qc_read_chemistry, when QC has
+ * inferred it, is the more specific fact and wins; a file nobody has QC'd yet
+ * falls back to the free-text instrument label, matched the way SRA and
+ * manual metadata entry both write it (e.g. "ILLUMINA", "OXFORD_NANOPORE",
+ * "Sequel II"). Not exhaustive -- this only needs to pick an icon, not be the
+ * source of truth an aligner preset relies on.
+ */
+export function readPlatformFor(
+  chemistry?: unknown,
+  platformLabel?: unknown,
+): ReadPlatform | null {
+  switch (chemistry) {
+    case "hifi":
+    case "clr":
+      return "pacbio";
+    case "ont_simplex":
+    case "ont_duplex":
+      return "nanopore";
+    case "short":
+      return "illumina";
+  }
+  const label = String(platformLabel ?? "").toLowerCase();
+  if (/nanopore|minion|gridion|promethion|flongle/.test(label)) return "nanopore";
+  if (/pacbio|sequel|revio/.test(label)) return "pacbio";
+  if (/illumina|hiseq|miseq|novaseq|nextseq/.test(label)) return "illumina";
+  return null;
+}
+
 /**
  * Drop-in replacement for the old PNG-backed FileIcon: same props, same
  * default box, no image requests. `getFileIcon.ts` and icons/*.png go with it.
@@ -1879,6 +2097,7 @@ export function FileIcon({
   variant,
   size = 32,
   readsStage,
+  readPlatform,
 }: {
   formatKind: string;
   role?: string | null;
@@ -1891,13 +2110,19 @@ export function FileIcon({
    *  icon, not just the label. Ignored for every other concept, since only
    *  FASTQ has a raw/trimmed distinction to draw. */
   readsStage?: "raw" | "trimmed";
+  /** When the resolved concept is "reads", add the instrument's ink cue to
+   *  the raw/trimmed mark -- see readPlatformFor(). Ignored for every other
+   *  concept, and ignored if the platform isn't one the icon set draws a
+   *  distinction for. */
+  readPlatform?: ReadPlatform | null;
 }) {
   const concept = conceptFor(formatKind, role);
+  const stageSuffix = readsStage === "trimmed" ? "trimmed" : "raw";
   const name =
     concept === "reads" && readsStage
-      ? readsStage === "trimmed"
-        ? "reads_trimmed"
-        : "reads_raw"
+      ? readPlatform
+        ? (`reads_${stageSuffix}_${readPlatform}` as BioIconName)
+        : (`reads_${stageSuffix}` as BioIconName)
       : concept;
   return (
     <BioIcon
