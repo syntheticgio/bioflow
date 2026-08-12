@@ -59,6 +59,57 @@ fn resolve_docker(candidates: &[&str], path_var: Option<&OsStr>) -> Option<PathB
         })
 }
 
+/// Whether a candidate install directory is a git worktree, and therefore
+/// must not be adopted as the launcher's install directory.
+///
+/// A worktree is where `--show-toplevel` differs from the parent of
+/// `--git-common-dir`: the common dir is the shared `.git` of the whole
+/// repository, so its parent is the main working tree even when the probe
+/// runs from a worktree (whose own `.git` is a file, not a directory). This
+/// is the same test `ops/worktree-up.sh` and
+/// `ops/hooks/block-compose-in-worktree.sh` already use.
+///
+/// `NotAGitRepository` is deliberately its own variant rather than folded in
+/// with the main checkout: it is the *shipped install* case (`~/.bioflow`
+/// holds a compose file and an `.env`, no git anywhere), which is the most
+/// common real answer and must stay discoverable.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum GitCheckout {
+    MainCheckout,
+    Worktree,
+    NotAGitRepository,
+}
+
+/// Pure classification, split out from the `git` invocations so tests can
+/// exercise it against fixtures without depending on the host machine's real
+/// git state -- the same split `resolve_docker` above already uses.
+///
+/// Both arguments are the raw stdout of the two `git rev-parse` calls, or
+/// `None` where the call failed (which is what a non-repository directory
+/// produces, since `rev-parse` exits non-zero outside a repository).
+fn classify_checkout(toplevel: Option<&str>, git_common_dir: Option<&str>) -> GitCheckout {
+    let (Some(toplevel), Some(common)) = (toplevel, git_common_dir) else {
+        return GitCheckout::NotAGitRepository;
+    };
+
+    let toplevel = Path::new(toplevel.trim());
+    let common = Path::new(common.trim());
+
+    // The parent of the shared `.git` is the main working tree. A bare
+    // repository has no parent to compare against; treat that as not-a-
+    // checkout rather than guessing, since nothing the launcher wants to
+    // adopt lives in one.
+    let Some(main_root) = common.parent() else {
+        return GitCheckout::NotAGitRepository;
+    };
+
+    if toplevel == main_root {
+        GitCheckout::MainCheckout
+    } else {
+        GitCheckout::Worktree
+    }
+}
+
 pub struct ShellDocker;
 
 impl ShellDocker {
@@ -70,6 +121,29 @@ impl ShellDocker {
         let mut cmd = Command::new(docker_binary());
         cmd.arg("compose").arg("--project-directory").arg(install_dir);
         cmd
+    }
+
+    /// Runs the two `git rev-parse` calls against `dir` and classifies the
+    /// result. A missing `git` binary, or any failure, reads as
+    /// `NotAGitRepository` -- which keeps a machine without git working
+    /// exactly as it did before this check existed.
+    fn classify_dir(dir: &str) -> GitCheckout {
+        let rev_parse = |args: &[&str]| -> Option<String> {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            Some(String::from_utf8_lossy(&output.stdout).into_owned())
+        };
+
+        let toplevel = rev_parse(&["rev-parse", "--show-toplevel"]);
+        let common = rev_parse(&["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+        classify_checkout(toplevel.as_deref(), common.as_deref())
     }
 
     fn run_action(mut cmd: Command) -> ActionResult {
@@ -253,21 +327,61 @@ impl DockerBackend for ShellDocker {
             .arg(format!("{project_name}-mongo-1"))
             .output()
             .ok()?;
-        if inspect_output.status.success() {
-            let working_dir = String::from_utf8_lossy(&inspect_output.stdout).trim().to_string();
-            if !working_dir.is_empty() {
-                return Some(working_dir);
+        let discovered = if inspect_output.status.success() {
+            let working_dir = String::from_utf8_lossy(&inspect_output.stdout)
+                .trim()
+                .to_string();
+            if working_dir.is_empty() {
+                None
+            } else {
+                Some(working_dir)
             }
-        }
+        } else {
+            None
+        };
 
         // Fall back to the directory containing the first compose file if
         // the label lookup above failed for any reason (e.g. no `mongo`
         // service, an unexpected container naming scheme) -- still better
         // than reporting nothing, since a discovered project with any
         // running container at all should be usable.
-        std::path::Path::new(first_compose_file)
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned())
+        let discovered = discovered.or_else(|| {
+            std::path::Path::new(first_compose_file)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+        })?;
+
+        // Refuse a git worktree, whichever of the two routes above produced
+        // it. `docker-compose.yml` pins `name: biopipe` and the override's
+        // bind mounts are relative, so `docker compose up` from a worktree
+        // recreates *the* stack pointing there -- at which point this
+        // discovery would hand the launcher a worktree as its install
+        // directory, and every later `--project-directory` call would
+        // address it. `ops/hooks/block-compose-in-worktree.sh` makes that
+        // repoint unlikely but does not seal it: the guard steps aside for
+        // an explicit `-p biopipe`, and it only hooks agent-issued Bash, not
+        // a human's own terminal.
+        //
+        // Adoption is worse than the stale-code problem the repoint already
+        // causes. A worktree has no `.env` at all -- `.env` is gitignored,
+        // which is exactly why `ops/worktree-up.sh` passes
+        // `--env-file <main checkout>/.env` -- so Settings and storage
+        // migration would be reading and writing against a directory that is
+        // not an install and has nothing for them to read.
+        //
+        // Returning `None` reports NotInstalled, which is already this
+        // method's answer when discovery finds nothing. That is confusing
+        // while a stack is visibly running, but silence beats adopting the
+        // wrong directory: the stack keeps running either way, and the fix
+        // (rebuild from the main checkout) is documented in CLAUDE.md.
+        match Self::classify_dir(&discovered) {
+            // The shipped-install case: `~/.bioflow` has no git anywhere.
+            // Must stay discoverable -- it is the common real answer.
+            GitCheckout::NotAGitRepository => Some(discovered),
+            // The documented debug/dev case this method exists for.
+            GitCheckout::MainCheckout => Some(discovered),
+            GitCheckout::Worktree => None,
+        }
     }
 
     fn attempt_daemon_start(&self) {
@@ -340,5 +454,131 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let resolved = resolve_docker(&[], Some(OsStr::new(tmp.path().to_str().unwrap())));
         assert_eq!(resolved, None);
+    }
+
+    // `classify_checkout` -- the guard that keeps a worktree from being
+    // adopted as the install directory (#319).
+
+    #[test]
+    fn a_main_checkout_is_a_main_checkout() {
+        // toplevel == the parent of the shared .git
+        assert_eq!(
+            classify_checkout(Some("/repo"), Some("/repo/.git")),
+            GitCheckout::MainCheckout
+        );
+    }
+
+    #[test]
+    fn a_worktree_is_recognized_by_its_shared_git_dir() {
+        // A worktree's --git-common-dir still points at the main checkout's
+        // .git, which is what makes the two disagree.
+        assert_eq!(
+            classify_checkout(Some("/repo/.claude/worktrees/feature-x"), Some("/repo/.git")),
+            GitCheckout::Worktree
+        );
+    }
+
+    #[test]
+    fn trailing_newlines_from_git_stdout_do_not_defeat_the_comparison() {
+        // `git rev-parse` output is newline-terminated; comparing unrimmed
+        // would classify every main checkout as a worktree, which would
+        // break the documented dev-trunk discovery case rather than the
+        // thing this guard is for.
+        assert_eq!(
+            classify_checkout(Some("/repo\n"), Some("/repo/.git\n")),
+            GitCheckout::MainCheckout
+        );
+    }
+
+    #[test]
+    fn a_directory_outside_git_is_not_a_repository() {
+        // The shipped-install case: ~/.bioflow has no git anywhere, and
+        // `rev-parse` exits non-zero there. Must stay discoverable.
+        assert_eq!(
+            classify_checkout(None, None),
+            GitCheckout::NotAGitRepository
+        );
+    }
+
+    #[test]
+    fn a_partial_git_answer_is_not_a_repository() {
+        // Neither call succeeding on its own is enough to classify; failing
+        // closed to NotAGitRepository keeps a machine without git working
+        // exactly as it did before this check existed.
+        assert_eq!(
+            classify_checkout(Some("/repo"), None),
+            GitCheckout::NotAGitRepository
+        );
+        assert_eq!(
+            classify_checkout(None, Some("/repo/.git")),
+            GitCheckout::NotAGitRepository
+        );
+    }
+
+    /// Exercises the real `git` invocations against a real repository and a
+    /// real worktree, not just the pure classifier.
+    ///
+    /// This is the direction that fails when the seam breaks: the fixture
+    /// tests above would still pass if `classify_dir` passed the wrong flags
+    /// (or none) to `git rev-parse`, since they never run git at all.
+    #[test]
+    fn classify_dir_tells_a_real_worktree_from_its_main_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
+        std::fs::create_dir_all(&main).unwrap();
+
+        let git = |args: &[&str], cwd: &std::path::Path| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(cwd)
+                .args(args)
+                .output()
+                .expect("git should be available in the test environment");
+            assert!(
+                status.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&status.stderr)
+            );
+        };
+
+        git(&["init", "-q"], &main);
+        git(&["config", "user.email", "test@example.com"], &main);
+        git(&["config", "user.name", "Test"], &main);
+        // A worktree cannot be added from a repository with no commits.
+        std::fs::write(main.join("README"), "x").unwrap();
+        git(&["add", "README"], &main);
+        git(&["commit", "-qm", "init"], &main);
+
+        let worktree = tmp.path().join("wt");
+        git(
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                worktree.to_str().unwrap(),
+            ],
+            &main,
+        );
+
+        assert_eq!(
+            ShellDocker::classify_dir(main.to_str().unwrap()),
+            GitCheckout::MainCheckout
+        );
+        assert_eq!(
+            ShellDocker::classify_dir(worktree.to_str().unwrap()),
+            GitCheckout::Worktree
+        );
+
+        // And a plain directory outside any repository -- the shipped
+        // install. Uses the tempdir's parent-level sibling so it is not
+        // inside the repo created above.
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(
+            ShellDocker::classify_dir(plain.to_str().unwrap()),
+            GitCheckout::NotAGitRepository
+        );
     }
 }
