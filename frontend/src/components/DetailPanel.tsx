@@ -52,6 +52,7 @@ import { AlignDialog } from "./AlignDialog";
 import { BamResults } from "./BamResults";
 import { ExpressionResults } from "./ExpressionResults";
 import { VariantResults } from "./VariantResults";
+import { AnnotationResults } from "./AnnotationResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
@@ -353,6 +354,9 @@ function tabsFor(obj: DataObject): TabDef[] {
     obj.format.kind === "bam" ||
     obj.format.kind === "vcf" ||
     obj.format.kind === "bcf" ||
+    obj.format.kind === "gff" ||
+    obj.format.kind === "gtf" ||
+    obj.format.kind === "bed" ||
     obj.role === "de_results";
   if (hasResults) {
     tabs.push({ id: "results", label: "Results" });
@@ -806,6 +810,10 @@ function ObjectDetail({ id }: { id: string }) {
               <ExpressionResults obj={obj} />
             ) : obj.format.kind === "bam" ? (
               <BamResults obj={obj} />
+            ) : obj.format.kind === "gff" ||
+              obj.format.kind === "gtf" ||
+              obj.format.kind === "bed" ? (
+              <AnnotationResults obj={obj} />
             ) : (
               <VariantResults obj={obj} />
             )}
