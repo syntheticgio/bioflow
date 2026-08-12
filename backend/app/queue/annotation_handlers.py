@@ -49,7 +49,9 @@ def _open_text(path: Path):
 
 @handler(
     "run_annotation_stats",
-    mode=HandlerMode.SUBPROCESS,
+    # THREAD, not SUBPROCESS: parsing and the SQLite write run in this
+    # process -- there is no binary to spawn or kill via process group.
+    mode=HandlerMode.THREAD,
     job_class=JobClass.COMPUTE,
     resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
 )
@@ -104,6 +106,17 @@ def run_annotation_stats(ctx: JobContext) -> dict:
                     continue
                 acc.add(feature)
                 if feature.attributes:
+                    # Re-parses the attribute column that parse_line already
+                    # parsed once internally -- parse_gff_line/parse_gtf_line
+                    # keep only the fields they extract (name, feature_id,
+                    # parent, biotype) and the raw string, not the full key
+                    # set. Cheap in-memory string work, not a second file
+                    # read, so it doesn't defeat this function's one-pass-
+                    # over-the-file claim; a known, minor duplication of
+                    # work rather than a bug. Fixing it cleanly would mean
+                    # having Feature retain the parsed dict/key list, which
+                    # touches Task 1's annotation_parse.py -- left as a
+                    # documented follow-up rather than reopening that file.
                     if fmt == "gff":
                         keys = annotation_parse.parse_gff_attributes(
                             feature.attributes
