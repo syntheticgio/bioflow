@@ -307,3 +307,80 @@ async def test_orphaned_provision_marked_failed(client):
     assert updated.status == "failed"
     assert updated.error is not None
     assert "restart" in updated.error.lower()
+
+
+# ---- managed SSH key installation (NU-14, NU-15) ----
+
+async def test_provision_stores_encrypted_key_not_the_password():
+    """The user's password is used once and never stored (NU-15)."""
+    from app.api.v1.nodes import ProvisionRequest, _provision_node
+    from app.models.node import Node
+
+    req = ProvisionRequest(
+        host="10.0.0.9", username="ops", password="hunter2", node_name="keynode",
+    )
+
+    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
+        conn = ssh.connect.return_value
+        conn.run = AsyncMock(return_value=type("R", (), {
+            "exit_status": 0, "stdout": "", "stderr": "",
+        })())
+        # `patch(module)` gives every attribute a plain MagicMock, including
+        # `connect` -- but `_provision_node` awaits `asyncssh.connect(...)`,
+        # which needs the call itself to return an awaitable, not just its
+        # `.return_value` to be pre-set. Without this, `asyncio.wait_for`
+        # raises on a non-awaitable MagicMock before any phase runs.
+        ssh.connect = AsyncMock(return_value=conn)
+        await _provision_node("t-key", req)
+
+    node = await Node.find_one(Node.node_id == "keynode")
+    assert node is not None
+    assert node.ssh_key_enc is not None
+    assert b"hunter2" not in node.ssh_key_enc
+    assert node.ssh_host == "10.0.0.9"
+    assert node.ssh_username == "ops"
+    assert node.ssh_key_installed_at is not None
+
+    from app.services.ai import crypto
+    assert "PRIVATE KEY" in crypto.decrypt(node.ssh_key_enc)
+    await node.delete()
+
+
+async def test_provision_fails_loudly_when_key_cannot_be_installed():
+    """No fallback to storing the user's credential (NU-14): a node that
+    cannot take a managed key is not provisioned at all."""
+    from app.api.v1.nodes import ProvisionRequest, _provision_node
+    from app.models.node import Node
+    from app.services.node_ssh import KeyInstallError
+
+    req = ProvisionRequest(
+        host="10.0.0.10", username="ops", password="pw", node_name="badkey",
+    )
+
+    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+         patch("app.services.node_ssh.install_public_key",
+               AsyncMock(side_effect=KeyInstallError("read-only home"))), \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
+        conn = ssh.connect.return_value
+        conn.run = AsyncMock(return_value=type("R", (), {
+            "exit_status": 0, "stdout": "", "stderr": "",
+        })())
+        # See the sibling test above for why `connect` itself must be an
+        # AsyncMock, not just its return_value.
+        ssh.connect = AsyncMock(return_value=conn)
+        await _provision_node("t-badkey", req)
+
+    task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == "t-badkey")
+    assert task.status == "failed"
+    assert "read-only home" in task.error
+    assert task.phase == "install_key"
+
+    # The image must not have been pulled: provisioning stopped first.
+    commands = " ".join(str(c) for c in conn.run.call_args_list)
+    assert "docker pull" not in commands
+
+    assert await Node.find_one(Node.node_id == "badkey") is None
