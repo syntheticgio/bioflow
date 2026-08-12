@@ -11,6 +11,7 @@ re-attaching stream loop, which only exists because the drawer opens
 import asyncio
 import json
 import socket
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -365,44 +366,60 @@ class TestLifecycle:
         assert response.status_code == 404
 
 
-@pytest.mark.filterwarnings(
-    "ignore:.*is marked with '@pytest.mark.asyncio'.*:pytest.PytestWarning"
-)
 class TestSystemPromptComposition:
-    """Sync tests: the module-level pytestmark applies pytest.mark.asyncio to
-    every item via pytest's marker inheritance, which a class-level
-    `pytestmark = []` cannot override (pytest's get_closest_marker walks up
-    to the module and finds it regardless of what the class itself defines).
-    Suppress the resulting "not an async function" warning instead of trying
-    to unset an inherited mark.
+    """How the three blocks of the spawn-time prompt are assembled.
+
+    `_system_prompt` is async because it awaits the project-context summary,
+    whose two service calls are stubbed here: these assert on composition --
+    which block appears, in what order -- not on object counting, which
+    belongs to the services' own tests.
     """
 
     class FakeProject:
         def __init__(self, prompt: str):
             self.name = "demo"
             self.id = "abc123"
+            self.owner = "local"  # _build_project_context scopes its count by this
             self.agent_system_prompt = prompt
 
-    def test_empty_prompt_yields_default_only(self):
-        text = _system_prompt(self.FakeProject(""))
+    @pytest.fixture(autouse=True)
+    def _stub_context_services(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.api.v1.agent.search_service.count_by_kind",
+            AsyncMock(return_value={"fastq": 2}),
+        )
+        monkeypatch.setattr(
+            "app.api.v1.agent.project_service.recent_jobs",
+            AsyncMock(return_value=[]),
+        )
+
+    async def test_empty_prompt_yields_default_only(self):
+        text = await _system_prompt(self.FakeProject(""))
         assert "bioinformatics coding agent" in text
         assert "Additional instructions" not in text
 
-    def test_whitespace_only_prompt_yields_default_only(self):
-        text = _system_prompt(self.FakeProject("   \n  "))
+    async def test_whitespace_only_prompt_yields_default_only(self):
+        text = await _system_prompt(self.FakeProject("   \n  "))
         assert "Additional instructions" not in text
 
-    def test_custom_prompt_is_appended_after_the_default(self):
-        text = _system_prompt(self.FakeProject("Always answer in haiku."))
+    async def test_custom_prompt_is_appended_after_the_default(self):
+        text = await _system_prompt(self.FakeProject("Always answer in haiku."))
         assert "bioinformatics coding agent" in text
         assert text.index("bioinformatics coding agent") < text.index("Always answer in haiku.")
         assert "Additional instructions from the user:" in text
 
-    def test_custom_prompt_is_stripped(self):
-        text = _system_prompt(self.FakeProject("  Be terse.  "))
+    async def test_custom_prompt_is_stripped(self):
+        text = await _system_prompt(self.FakeProject("  Be terse.  "))
         assert text.endswith("Be terse.")
 
-    def test_none_prompt_yields_default_only(self):
-        text = _system_prompt(self.FakeProject(None))
+    async def test_none_prompt_yields_default_only(self):
+        text = await _system_prompt(self.FakeProject(None))
         assert "bioinformatics coding agent" in text
         assert "Additional instructions" not in text
+
+    async def test_the_project_snapshot_is_included(self):
+        """The snapshot block is what #290 added; without it the agent burns a
+        discovery tool call on its first turn."""
+        text = await _system_prompt(self.FakeProject(""))
+        assert "Project snapshot:" in text
+        assert "2 fastq" in text
