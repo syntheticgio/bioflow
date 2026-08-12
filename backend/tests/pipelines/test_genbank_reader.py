@@ -98,8 +98,14 @@ class TestRealNcbiFile:
 
         record = next(iter(iter_records(FIXTURES / "ecoli_slice.gbff")))
         rows = list(iter_features(record.feature_lines, accession=record.accession))
-        # The first 40kb of K-12 holds dozens of genes and CDSs.
-        assert len(rows) > 20
+        # 83 rows (parents + segments) as of this fixture's annotation date
+        # (LOCUS line: 09-DEC-2025). A loose lower bound would still pass if
+        # the parser silently dropped half the real features on some
+        # real-world qualifier or location shape the hand-built fixtures
+        # never exercised -- exactly the failure this task exists to catch.
+        # Some headroom for benign RefSeq annotation-release drift, none for
+        # a parser regression.
+        assert len(rows) >= 75
         assert any(r.type == "CDS" for r in rows)
         assert any(r.name == "thrA" for r in rows)
 
