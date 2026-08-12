@@ -4,7 +4,7 @@ Kept free of I/O so every case is a plain function call: this is where the
 format edge cases live, and they are the part most likely to be wrong.
 """
 
-from app.pipelines.genbank_parse import Location, parse_location
+from app.pipelines.genbank_parse import Location, parse_location, parse_qualifiers
 
 
 class TestSimpleLocations:
@@ -89,3 +89,50 @@ class TestMalformedLocations:
 
     def test_reversed_bounds_returns_none(self):
         assert parse_location("500..100") is None
+
+
+class TestQualifiers:
+    def test_simple_key_value(self):
+        lines = ['/gene="thrA"', '/locus_tag="b0002"']
+        assert parse_qualifiers(lines) == {"gene": "thrA", "locus_tag": "b0002"}
+
+    def test_valueless_qualifier(self):
+        # `/pseudo` has no value. Stored as an empty string so the key is
+        # still present -- its presence is the information.
+        assert parse_qualifiers(["/pseudo"]) == {"pseudo": ""}
+
+    def test_unquoted_value(self):
+        # Numeric qualifiers are conventionally unquoted.
+        assert parse_qualifiers(["/codon_start=1"]) == {"codon_start": "1"}
+
+    def test_wrapped_value_joins_with_space(self):
+        # A /note wrapping across lines is one value. GenBank wraps on word
+        # boundaries, so the parts join with a space.
+        lines = [
+            '/note="bifunctional: aspartokinase I (N-terminal);',
+            'homoserine dehydrogenase I (C-terminal)"',
+        ]
+        assert parse_qualifiers(lines) == {
+            "note": "bifunctional: aspartokinase I (N-terminal); "
+                    "homoserine dehydrogenase I (C-terminal)"
+        }
+
+    def test_wrapped_translation_joins_without_space(self):
+        # /translation is a protein sequence -- joining its parts with a
+        # space would corrupt it. This is the one qualifier that wraps
+        # mid-token rather than on word boundaries.
+        lines = ['/translation="MRVLKFGGTSVAN', 'AERFLRVADILESNAR"']
+        assert parse_qualifiers(lines) == {
+            "translation": "MRVLKFGGTSVANAERFLRVADILESNAR"
+        }
+
+    def test_repeated_key_keeps_first(self):
+        # /db_xref repeats legitimately. The dict keeps the first; the raw
+        # block is preserved separately by the caller, so nothing is lost.
+        lines = ['/db_xref="GeneID:1"', '/db_xref="ASAP:2"']
+        assert parse_qualifiers(lines) == {"db_xref": "GeneID:1"}
+
+    def test_ignores_malformed_line(self):
+        # A line that is not a qualifier is skipped, not raised -- the same
+        # posture parse_gff_attributes documents.
+        assert parse_qualifiers(["junk", '/gene="thrA"']) == {"gene": "thrA"}
