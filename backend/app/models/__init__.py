@@ -25,6 +25,7 @@ from app.models.job import (
 )
 from app.models.local_database import LocalDatabase, LocalDatabaseCategory
 from app.models.node import Node
+from app.models.node_provision import NodeProvisionTask
 from app.models.object import (
     Compression,
     DataObject,
@@ -86,6 +87,7 @@ ALL_MODELS = [
     Feedback,
     LocalDatabase,
     Node,
+    NodeProvisionTask,
     Share,
     ResourceLimits,
     WorkflowDefinition,
@@ -125,6 +127,7 @@ __all__ = [
     "LocalDatabase",
     "LocalDatabaseCategory",
     "Node",
+    "NodeProvisionTask",
     "OPTIONAL_ROLES",
     "ObjectError",
     "ObjectRole",
