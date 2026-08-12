@@ -33,7 +33,7 @@ def _feature(feature_id, parent=None, start=100, ftype="gene"):
         score=None,
         name=feature_id,
         feature_id=feature_id,
-        parent=parent,
+        parents=(parent,) if parent is not None else (),
         biotype="protein_coding",
         attributes=f"ID={feature_id}",
     )
