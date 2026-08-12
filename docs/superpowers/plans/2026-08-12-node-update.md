@@ -1188,7 +1188,7 @@ def _conn(pull_status: int = 0, up_status: int = 0):
         result = MagicMock()
         result.stdout = ""
         result.stderr = "boom" if pull_status else ""
-        if "docker pull" in command:
+        if " pull " in command or command.endswith(" pull"):
             result.exit_status = pull_status
         elif "up -d" in command:
             result.exit_status = up_status
@@ -1290,7 +1290,7 @@ async def test_drain_stops_the_worker_before_restarting():
     assert "stop" in joined
     # The pull happens before the stop, so the download overlaps with jobs
     # finishing rather than running after them.
-    assert joined.index("docker pull") < joined.index("stop")
+    assert joined.index(" pull ") < joined.index("stop")
 
 
 async def test_unreachable_machine_reports_connect_failure():
@@ -1338,10 +1338,21 @@ download leaves the node running its current image. And success means a worker
 re-enrolled reporting the new digest -- `docker compose up -d` exits 0 for a
 container that immediately crash-loops, which is the failure this feature
 exists to fix.
+
+Pulls via `docker compose ... pull`, not `docker pull <hardcoded image:tag>`.
+A node's deployment can pin BIOFLOW_TAG to a real version -- provisioning's
+own `_render_node_env` writes BIOFLOW_TAG into the node's `.env` next to its
+docker-compose.yml -- and a tag hardcoded here would silently update a pinned
+node to the wrong image, the same bug already found and fixed for the
+worker's own digest probe (see worker.py's _own_image_digest). `docker
+compose pull` reads the compose file's `image: ...${BIOFLOW_TAG:-latest}`
+directive and resolves BIOFLOW_TAG from the node's own .env, exactly as
+`docker compose up -d` already does for the restart phase two lines below --
+so this needs no image reference of its own, and the primary never needs to
+know what tag any given node runs.
 """
 
 import asyncio
-import io
 from datetime import UTC, datetime
 
 import asyncssh
@@ -1354,7 +1365,6 @@ from app.services.ai import crypto
 log = get_logger(__name__)
 
 INSTALL_DIR = "~/.bioflow"
-IMAGE = "ghcr.io/syntheticgio/bioflow-backend:latest"
 
 _VERIFY_TIMEOUT_SECONDS = 120
 _DRAIN_TIMEOUT_SECONDS = 900
@@ -1394,7 +1404,7 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
                 "The stored update key could not be decrypted. Re-provision this node.",
             )
         try:
-            key = asyncssh.import_private_key(io.StringIO(private_pem))
+            key = asyncssh.import_private_key(private_pem)
             conn = await asyncio.wait_for(
                 asyncssh.connect(
                     node.ssh_host,
@@ -1415,7 +1425,11 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
         # ---- pull (before stopping anything) ----
         await _phase("pull_image", "Pulling the new image…", 20)
         result = await asyncio.wait_for(
-            conn.run(f"docker pull {IMAGE}", check=False), timeout=1800
+            conn.run(
+                f"docker compose -f {INSTALL_DIR}/docker-compose.yml pull worker",
+                check=False,
+            ),
+            timeout=1800,
         )
         if result.exit_status != 0:
             return await _fail(
