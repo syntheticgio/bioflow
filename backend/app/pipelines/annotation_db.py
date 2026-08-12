@@ -349,10 +349,11 @@ def features_in_window(
 ) -> list[dict]:
     """Drawable features overlapping the window, children attached.
 
-    Two queries rather than a join: the parents, then every child of those
-    parents via ix_features_parent. A join would repeat each parent's columns
-    once per child, which for a gene with fifty exons is fifty copies of the
-    same row to reassemble in Python anyway.
+    One query rather than a join: every row -- parents and children alike --
+    in a single SELECT, reassembled into a tree with two passes in Python. A
+    join would repeat each parent's columns once per child, which for a gene
+    with fifty exons is fifty copies of the same row to reassemble in Python
+    anyway.
 
     Unpaged, deliberately -- the window is bounded by coordinates and the
     caller only reaches this below the density threshold, so the row count is
@@ -393,11 +394,13 @@ def features_in_window(
     out: list[dict] = []
     for r in rows:
         r["children"] = []
-        parent = by_id.get(r["parent"]) if r["parent"] else None
+        is_self_parent = r["parent"] and r["parent"] == r["feature_id"]
+        parent = by_id.get(r["parent"]) if r["parent"] and not is_self_parent else None
         if parent is None:
             out.append(r)
     for r in rows:
-        parent = by_id.get(r["parent"]) if r["parent"] else None
+        is_self_parent = r["parent"] and r["parent"] == r["feature_id"]
+        parent = by_id.get(r["parent"]) if r["parent"] and not is_self_parent else None
         if parent is not None:
             parent["children"].append(r)
     return out
