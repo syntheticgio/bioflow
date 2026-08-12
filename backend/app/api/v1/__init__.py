@@ -11,6 +11,7 @@ from app.api.v1 import (
     ncbi,
     nodes,
     objects,
+    operations,
     pipelines,
     profiles,
     projects,
@@ -37,6 +38,7 @@ api_router.include_router(shares.router)
 api_router.include_router(projects.router)
 api_router.include_router(agent.router)
 api_router.include_router(objects.router)
+api_router.include_router(operations.router)
 api_router.include_router(uploads.router)
 api_router.include_router(jobs.router)
 api_router.include_router(pipelines.router)

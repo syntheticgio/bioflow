@@ -39,6 +39,7 @@ import { AdapterContentChart, DuplicationLevelsChart } from "./ContaminationChar
 import { TileQualityChart } from "./TileQualityChart";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
+import { OperationPanel } from "./operations/OperationPanel";
 import { OrganismBlurb } from "./OrganismBlurb";
 import { ComputationHistory } from "./ComputationHistory";
 import { Computations } from "./Computations";
@@ -86,6 +87,11 @@ export function DetailPanel() {
   const [kind, id] = sel.split(":");
   if (kind === "project") return <ProjectDetail id={id} />;
   if (kind === "object") return <ObjectDetail id={id} />;
+  if (kind === "operation") {
+    const projectMatch = pathname.match(/^\/p\/([^/]+)/);
+    const projectId = projectMatch ? projectMatch[1] : "";
+    return <OperationPanel name={id} projectId={projectId} />;
+  }
   return <EmptyDetail />;
 }
 

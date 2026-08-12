@@ -253,6 +253,7 @@ function ProjectView({ projectId }: { projectId: string }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [ncbiOpen, setNcbiOpen] = useState(false);
   const [uniprotOpen, setUniprotOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<FileCategory>>(
     new Set(["reads", "references", "alignments"])
   );
@@ -415,6 +416,58 @@ function ProjectView({ projectId }: { projectId: string }) {
           onClose={() => setUniprotOpen(false)}
         />
       )}
+
+      {/* Project actions accordion */}
+      <div className="panel-actions">
+        <button
+          type="button"
+          className="group-title"
+          aria-expanded={actionsOpen}
+          onClick={() => setActionsOpen((v) => !v)}
+        >
+          <span className="group-chevron">{actionsOpen ? "▼" : "▶"}</span>
+          <span>Project actions</span>
+        </button>
+        {actionsOpen && (
+          <div className="panel-actions-body">
+            <button
+              type="button"
+              className="action-item"
+              onClick={() => select("operation:merge_fastq")}
+            >
+              Merge FASTQ files
+            </button>
+            <button
+              type="button"
+              className="action-item"
+              onClick={() => select("operation:batch_rename")}
+            >
+              Batch rename files
+            </button>
+            <button
+              type="button"
+              className="action-item"
+              onClick={() => select("operation:batch_tags")}
+            >
+              Batch tag/metadata
+            </button>
+            <button
+              type="button"
+              className="action-item"
+              onClick={() => select("operation:export")}
+            >
+              Export project summary
+            </button>
+            <button
+              type="button"
+              className="action-item"
+              onClick={() => select("operation:qc_all")}
+            >
+              Run QC on all reads
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="panel-filter">
         <input

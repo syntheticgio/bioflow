@@ -371,6 +371,35 @@ export const api = {
       body: JSON.stringify({ path, name }),
     }),
 
+  // --- Project operations ---
+
+  mergeFastq: (projectId: string, objectIds: string[], outputName: string) =>
+    request<{ job_id: string }>(`/projects/${projectId}/operations/merge-fastq`, {
+      method: "POST",
+      body: JSON.stringify({ object_ids: objectIds, output_name: outputName }),
+    }),
+
+  batchRename: (projectId: string, renames: { id: string; name: string }[]) =>
+    request<{ updated: number }>(`/projects/${projectId}/operations/batch-rename`, {
+      method: "POST",
+      body: JSON.stringify({ renames }),
+    }),
+
+  batchTags: (projectId: string, objectIds: string[], add: string[], remove: string[]) =>
+    request<{ updated: number }>(`/projects/${projectId}/operations/batch-tags`, {
+      method: "POST",
+      body: JSON.stringify({ object_ids: objectIds, add, remove }),
+    }),
+
+  exportProject: (projectId: string) =>
+    `${BASE}/projects/${projectId}/operations/export?${profileQuery()}`,
+
+  qcAllReads: (projectId: string) =>
+    request<{ job_ids: string[] }>(`/projects/${projectId}/operations/qc-all`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+
   // --- Search and metadata ---
   searchObjects: (p: SearchParams) => {
     const params = new URLSearchParams();

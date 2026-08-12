@@ -2957,6 +2957,53 @@ a.btn {
 .db-tools input[type="search"]:focus {
   border-color: var(--accent);
 }
+
+/* --- Project actions accordion --- */
+.panel-actions {
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-actions .group-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.panel-actions .group-title:hover {
+  background: var(--hover-bg);
+}
+
+.panel-actions-body {
+  padding: 2px 0 6px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.action-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 5px 12px;
+  font-size: 13px;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.action-item:hover {
+  background: var(--hover-bg);
+  color: var(--accent);
+}
 .db-tools select {
   font: inherit;
   color: var(--text);
