@@ -8,6 +8,7 @@ import { SetupWizard } from "./SetupWizard";
 import { NodeScreen } from "./NodeScreen";
 import type { LauncherState, OtherStack, Settings as SettingsValues } from "./types";
 import { shouldPollForUpdates, updateAffordance } from "./update-logic";
+import type { UpdateInputs } from "./update-logic";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
 // The manifest check is a network call (bounded by GhcrClient's own
@@ -19,6 +20,42 @@ const UPDATE_CHECK_POLL_INTERVAL_MS = 5 * 60 * 1000;
 // not a status flip, so this polls far less often than status. It is two
 // `docker` calls per poll and the answer is empty on most machines.
 const OTHER_STACKS_POLL_INTERVAL_MS = 30 * 1000;
+
+interface UpdateButtonProps extends UpdateInputs {
+  busy: boolean;
+  onUpdate: () => void;
+}
+
+/** Renders `updateAffordance`'s three outcomes: nothing, a clickable
+ * btn-warn, or a disabled button paired with the reason it's inert -- the
+ * same "explain why this control is disabled" treatment Settings.tsx gives
+ * storage location and port while the stack is running. A control that
+ * vanishes silently leaves a user who forgot their mode with no
+ * explanation. */
+function UpdateButton({ bioflowTag, developerRepo, updateAvailable, busy, onUpdate }: UpdateButtonProps) {
+  const affordance = updateAffordance({ bioflowTag, developerRepo, updateAvailable });
+
+  if (affordance.kind === "hidden") return null;
+
+  if (affordance.kind === "available") {
+    return (
+      <button className="btn btn-warn" onClick={onUpdate} disabled={busy}>
+        {busy ? "Updating…" : "Update available"}
+      </button>
+    );
+  }
+
+  return (
+    <span className="update-suppressed">
+      <button className="btn btn-secondary" disabled>
+        Update
+      </button>
+      <span className="field-hint" role="note">
+        {affordance.reason}
+      </span>
+    </span>
+  );
+}
 
 export function App() {
   const [state, setState] = useState<LauncherState>({ kind: "NotInstalled" });
@@ -359,36 +396,13 @@ export function App() {
                 <button className="btn btn-secondary" onClick={handleStop} disabled={busy}>
                   {busy ? "Stopping…" : "Stop"}
                 </button>
-                {(() => {
-                  const affordance = updateAffordance({
-                    bioflowTag: settings.bioflowTag,
-                    developerRepo: settings.developerRepo,
-                    updateAvailable,
-                  });
-                  if (affordance.kind === "hidden") return null;
-                  if (affordance.kind === "available") {
-                    return (
-                      <button className="btn btn-warn" onClick={handleUpdate} disabled={busy}>
-                        {busy ? "Updating…" : "Update available"}
-                      </button>
-                    );
-                  }
-                  // Suppressed: disabled rather than absent, following the
-                  // same "explain why this control is inert" treatment
-                  // Settings.tsx gives storage location and port while
-                  // running. A control that vanishes silently leaves a user
-                  // who forgot their mode with no explanation.
-                  return (
-                    <span className="update-suppressed">
-                      <button className="btn btn-secondary" disabled>
-                        Update
-                      </button>
-                      <span className="field-hint" role="note">
-                        {affordance.reason}
-                      </span>
-                    </span>
-                  );
-                })()}
+                <UpdateButton
+                  bioflowTag={settings.bioflowTag}
+                  developerRepo={settings.developerRepo}
+                  updateAvailable={updateAvailable}
+                  busy={busy}
+                  onUpdate={handleUpdate}
+                />
               </div>
             </div>
             <div className="sidebar">
