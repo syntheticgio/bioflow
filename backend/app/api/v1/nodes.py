@@ -547,9 +547,13 @@ async def current_version() -> dict:
 
     Nodes are compared against this rather than against a registry tag: the
     digest is what actually differs when an image is republished under the
-    same tag.
+    same tag. Run off the event loop -- _own_image_digest shells out to
+    docker twice, up to ~20s worst case, which would otherwise stall every
+    other request this process is serving (node heartbeats, job claims, UI
+    polling) for the duration.
     """
-    return {"image_digest": _own_image_digest(), "version": __version__}
+    digest = await asyncio.to_thread(_own_image_digest)
+    return {"image_digest": digest, "version": __version__}
 
 
 @router.get("/{node_id}/status")
