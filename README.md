@@ -1,5 +1,6 @@
 <div align="center">
-
+<b>NOTE: This is under highly active development and should not be considered stable - even its 'releases', not just alpha and beta.  It is recommended to wait for version v1.0.0 or later before installing.  Once I'm confident that it's pretty stable and am finished making changes that completely break everything, I'll release a first version.  </b>
+  <br /><br /><br />
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/lockup-horizontal-reverse.png">
   <img src="assets/lockup-horizontal-color.png" alt="bioflow" width="420">
