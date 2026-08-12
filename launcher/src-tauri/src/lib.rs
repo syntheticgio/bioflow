@@ -34,6 +34,8 @@ pub fn run() {
       commands::migration_progress,
       commands::finish_storage_migration,
       commands::current_settings,
+      commands::list_version_options,
+      commands::rebuild_developer,
       commands::discover_node_connection,
       commands::install_node_local,
       commands::test_ssh_connection,

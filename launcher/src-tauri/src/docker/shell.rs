@@ -124,6 +124,16 @@ impl DockerBackend for ShellDocker {
         Self::run_action(cmd)
     }
 
+    fn build(&self, install_dir: &str) -> ActionResult {
+        // `docker compose build` builds every service that declares a `build:`
+        // stanza. The shipped docker-compose.yml declares none, so in normal
+        // operation this is a no-op; the developer-mode override
+        // (docker-compose.override.yml) is what adds `build:` to api/worker/web.
+        let mut cmd = Self::compose(install_dir);
+        cmd.arg("build");
+        Self::run_action(cmd)
+    }
+
     fn up_node(&self, install_dir: &str) -> ActionResult {
         let mut cmd = Self::compose(install_dir);
         cmd.arg("up").arg("-d").arg("--no-deps").arg("worker");

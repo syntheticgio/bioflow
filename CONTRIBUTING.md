@@ -96,4 +96,3 @@ A worktree stack left running is harmless but noisy: it keeps its own Mongo
 and Redis containers alive and consumes a port pair. The cleanup above is
 idempotent — running `--down` again or removing an already-removed worktree
 reports nothing to do rather than failing.
-

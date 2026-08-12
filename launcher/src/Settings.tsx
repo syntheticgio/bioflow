@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { applySettings } from "./commands";
-import type { Settings as SettingsValues } from "./types";
+import { useEffect, useState } from "react";
+import { applySettings, listVersionOptions, rebuildDeveloper } from "./commands";
+import type { Settings as SettingsValues, VersionOptions } from "./types";
 import { storageLocationChanged } from "./wizard-logic";
 import { parseHardMemGb } from "./settings-logic";
 
@@ -18,6 +18,8 @@ interface Props {
   onApplied: (settings: SettingsValues) => void;
 }
 
+type VersionMode = "release" | "alpha" | "beta" | "developer";
+
 export function Settings({ current, running, onClose, onApplied }: Props) {
   const [storageLocation, setStorageLocation] = useState(current.storageLocation);
   const [port, setPort] = useState(current.port);
@@ -25,6 +27,27 @@ export function Settings({ current, running, onClose, onApplied }: Props) {
   const [hardMemGb, setHardMemGb] = useState(current.hardMemGb);
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [versionOptions, setVersionOptions] = useState<VersionOptions | null>(null);
+
+  // Determine current version mode from the loaded settings
+  const [versionMode, setVersionMode] = useState<VersionMode>(() => {
+    if (current.developerRepo) return "developer";
+    if (current.bioflowTag === "latest") return "release";
+    if (current.bioflowTag.endsWith("-alpha")) return "alpha";
+    if (current.bioflowTag.endsWith("-beta")) return "beta";
+    return "release"; // fallback
+  });
+  const [developerRepo, setDeveloperRepo] = useState(current.developerRepo ?? "");
+
+  // Fetch available version options on mount
+  useEffect(() => {
+    listVersionOptions().then(setVersionOptions).catch(() => {
+      // Silently degrade to Release-only -- the dropdown must open without
+      // a network dependency.
+      setVersionOptions({ release: "latest", alpha: null, beta: null });
+    });
+  }, []);
 
   const storageChanged = !running && storageLocationChanged(current.storageLocation, storageLocation);
   const hardMem = parseHardMemGb(hardMemGb);
@@ -33,14 +56,68 @@ export function Settings({ current, running, onClose, onApplied }: Props) {
     setApplying(true);
     setError(null);
     try {
-      await applySettings({ storageLocation, port, networkExposed, hardMemGb });
-      onApplied({ storageLocation, port, networkExposed, hardMemGb });
+      // Compute the bioflowTag and developerRepo from the selected version mode
+      let bioflowTag: string;
+      let devRepo: string | null = null;
+      if (versionMode === "developer") {
+        bioflowTag = "latest"; // ignored when developerRepo is set
+        devRepo = developerRepo || null;
+      } else if (versionMode === "release") {
+        bioflowTag = "latest";
+      } else if (versionMode === "alpha") {
+        bioflowTag = versionOptions?.alpha ?? "latest";
+      } else {
+        // beta
+        bioflowTag = versionOptions?.beta ?? "latest";
+      }
+
+      await applySettings({
+        storageLocation,
+        port,
+        networkExposed,
+        hardMemGb,
+        bioflowTag,
+        developerRepo: devRepo,
+      });
+      onApplied({
+        storageLocation,
+        port,
+        networkExposed,
+        hardMemGb,
+        bioflowTag,
+        developerRepo: devRepo,
+      });
     } catch (e) {
       setError(String(e));
     } finally {
       setApplying(false);
     }
   }
+
+  async function handleRebuild() {
+    setRebuilding(true);
+    setError(null);
+    try {
+      await rebuildDeveloper();
+      // After rebuild, the stack is already re-upped, so fire onApplied
+      // with the same settings (version mode unchanged).
+      onApplied({
+        storageLocation,
+        port,
+        networkExposed,
+        hardMemGb,
+        bioflowTag: current.bioflowTag,
+        developerRepo: current.developerRepo,
+      });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
+  const alphaEnabled = versionOptions?.alpha != null;
+  const betaEnabled = versionOptions?.beta != null;
 
   return (
     <div className="dialog-backdrop">
@@ -74,7 +151,7 @@ export function Settings({ current, running, onClose, onApplied }: Props) {
             {storageChanged && (
               <span className="field-hint-warn" role="note">
                 Changing the storage location points BioFlow at a different folder.
-                Existing data does not move — copy it yourself first if you want it to
+                Existing data does not move -- copy it yourself first if you want it to
                 carry over.
               </span>
             )}
@@ -159,6 +236,62 @@ export function Settings({ current, running, onClose, onApplied }: Props) {
               </span>
             )}
           </div>
+
+          {/* ── Version mode ─────────────────────────────────── */}
+          <div className="field">
+            <span className="field-label">Version</span>
+            <div className="field-row">
+              <select
+                className="field-value-input"
+                value={versionMode}
+                onChange={(e) => setVersionMode(e.target.value as VersionMode)}
+                disabled={applying || rebuilding}
+                aria-label="BioFlow version"
+              >
+                <option value="release">Release</option>
+                <option value="alpha" disabled={!alphaEnabled}>
+                  {alphaEnabled ? `Alpha (${versionOptions?.alpha})` : "Alpha (unavailable)"}
+                </option>
+                <option value="beta" disabled={!betaEnabled}>
+                  {betaEnabled ? `Beta (${versionOptions?.beta})` : "Beta (unavailable)"}
+                </option>
+                <option value="developer">Developer (local build)</option>
+              </select>
+            </div>
+            <span className="field-hint" role="note">
+              Release is the latest stable version. Alpha and Beta are pre-release
+              stages published to GHCR. Developer builds and runs from a local checkout.
+            </span>
+          </div>
+
+          {versionMode === "developer" && (
+            <div className="field">
+              <span className="field-label">Local repo path</span>
+              <div className="field-row">
+                <input
+                  className="field-value-input"
+                  value={developerRepo}
+                  onChange={(e) => setDeveloperRepo(e.target.value)}
+                  disabled={applying || rebuilding}
+                  placeholder="/path/to/bioflow-checkout"
+                  aria-label="Local repository path"
+                />
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleRebuild}
+                  disabled={applying || rebuilding || !developerRepo.trim()}
+                  style={{ marginLeft: 8, whiteSpace: "nowrap" }}
+                >
+                  {rebuilding ? "Building…" : "Rebuild"}
+                </button>
+              </div>
+              <span className="field-hint" role="note">
+                Builds Docker images from this local checkout and restarts the stack
+                against them. Only needed after code changes; the initial build happens
+                when you Apply with Developer mode selected.
+              </span>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -168,13 +301,13 @@ export function Settings({ current, running, onClose, onApplied }: Props) {
         )}
 
         <div className="dialog-actions">
-          <button className="btn btn-secondary" onClick={onClose} disabled={applying}>
+          <button className="btn btn-secondary" onClick={onClose} disabled={applying || rebuilding}>
             Cancel
           </button>
           <button
             className="btn btn-primary"
             onClick={handleApply}
-            disabled={applying || hardMem.kind === "invalid"}
+            disabled={applying || rebuilding || hardMem.kind === "invalid"}
           >
             {applying ? "Applying…" : "Apply"}
           </button>

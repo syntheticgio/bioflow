@@ -50,6 +50,17 @@ pub trait DockerBackend {
     /// `docker compose up -d`.
     fn up(&self, install_dir: &str) -> ActionResult;
 
+    /// `docker compose build`. Builds the images this compose project declares
+    /// `build:` on -- only the developer-mode override
+    /// (`docker-compose.override.yml`, see `settings::render_developer_override`)
+    /// defines any, so in ordinary (registry-tagged) operation this is never
+    /// called: `up` only pulls when an image is absent, and the launcher never
+    /// ships a `build:` clause, so `build` has nothing to do there. Splitting it
+    /// from `up` lets developer mode surface a build failure distinctly -- so
+    /// a compile error in the user's local source is reported as one, not as
+    /// "the stack won't start".
+    fn build(&self, install_dir: &str) -> ActionResult;
+
     /// `docker compose up -d --no-deps worker`. Starts only the worker
     /// service (no mongo, redis, api, or web) — for compute-node installs
     /// where the database lives on a different machine.
