@@ -16,6 +16,7 @@ from app.models import BlobStorage, ObjectRole, ObjectStatus
 from app.pipelines import (
     align_runner,
     aligner_registry,
+    annotation_db,
     assembler_registry,
     assembly_qc_registry,
     bam_stats_runner,
@@ -916,6 +917,103 @@ async def get_vcf_stats_report(
         filename=Path(report_path).name,
         headers={"X-Content-Type-Options": "nosniff"},
     )
+
+
+class AnnotationStatsRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.post(
+    "/annotationstats", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_annotation_stats(
+    body: AnnotationStatsRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue the Results computation for a GFF/GTF/BED: feature summary and
+    the searchable feature table. Read-only."""
+    job = await pipeline_service.launch_annotation_stats(
+        object_id=body.object_id, owner=owner
+    )
+    return JobOut.of(job)
+
+
+@router.get("/annotationstats/features/{object_id}")
+async def get_annotation_features(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    offset: int = 0,
+    limit: int = 100,
+    contig: str | None = None,
+    start_min: int | None = None,
+    start_max: int | None = None,
+    feature_type: str | None = None,
+    biotype: str | None = None,
+    name_query: str | None = None,
+    strand: str | None = None,
+    skip_count: bool = False,
+) -> dict:
+    """A page of the feature table, filtered.
+
+    Rows are top-level features by default -- a GFF3's genes rather than its
+    three million exons -- and children are fetched per-parent by the sibling
+    route when a row is expanded.
+
+    `total` is the count *after* filtering, so pagination stays correct. It is
+    omitted when `skip_count` is set, the same trade the variant route
+    documents: a combined predicate cannot use a single index, so the client
+    sends this when only the page number changed.
+
+    The ownership check runs before the path is built, for the same reason the
+    variant routes do it: `annotation_stats_dir` is laid out by object id
+    alone, so the only thing standing between one profile and another
+    profile's annotations is this lookup.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    # A type filter must search the whole file: every exon has a parent, so
+    # leaving top_level_only set would return an empty table on a valid GFF3.
+    filters = annotation_db.FeatureFilters(
+        contig=contig,
+        start_min=start_min,
+        start_max=start_max,
+        feature_type=feature_type,
+        biotype=biotype,
+        name_query=name_query,
+        strand=strand,
+        top_level_only=feature_type is None,
+    )
+
+    rows = annotation_db.query_features(
+        db_path=db_path, filters=filters, offset=offset, limit=limit
+    )
+    total = (
+        None
+        if skip_count
+        else annotation_db.count_features(db_path=db_path, filters=filters)
+    )
+    return {"total": total, "rows": rows}
+
+
+@router.get("/annotationstats/children/{object_id}")
+async def get_annotation_children(
+    object_id: PydanticObjectId, parent_id: str, owner: OwnerDep
+) -> dict:
+    """Every child of one feature. Unpaged: a transcript has tens of exons."""
+    await object_service.get_object(object_id, owner=owner)
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    return {"rows": annotation_db.children_of(db_path=db_path, parent_id=parent_id)}
 
 
 class AlignRequest(BaseModel):
