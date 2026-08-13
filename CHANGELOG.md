@@ -5,6 +5,541 @@ All notable changes to BioFlow, generated from Conventional Commits by
 the first paragraph of the body where one exists; only `feat` and `fix`
 reach the notes. See AGENTS.md "Release notes" for the contract.
 
+## [0.5.0] - 2026-08-13
+
+
+
+
+### 🚀 Features
+
+- *(annotation)* edit and materialize annotation records
+
+- *(e2e)* add fixtures and starter tests
+
+- *(e2e)* add desktop plugin page
+
+- *(e2e)* add harness backend (clients, store, loader, runner, API)
+
+- *(e2e)* add install script
+
+- *(e2e)* add harness config loader
+
+- *(e2e)* scaffold harness directory and Python environment
+
+- *(icons)* add reads-type tooltips showing Illumina/PacBio/Nanopore/Unspecified
+The reads-type icons (reads_raw_illumina, reads_raw_pacbio,
+reads_raw_nanopore, and their trimmed variants) in the Project Explorer
+and other object surfaces had no hover tooltip — the SVG <title> chi…
+
+- *(ui)* export the annotation table's current filter
+Shows matched and exported counts together: the closure adds parents and
+children, so the exported number is routinely larger, and showing only one
+of the two reads as a bug.
+
+- *(api)* add annotation subset export routes
+The count route is separate from the export so the UI can show matched
+against exported before anything is queued: the closure is routinely larger
+than the matched count, and an unexplained difference…
+
+- *(queue)* register an exported annotation subset as a derived object
+derived_from the source annotation, so the subset's lineage is inspectable.
+Carries no annotation results facts: the subset opens to a Compute results
+button like any other annotation, leaving whether…
+
+- *(queue)* add the annotation subset export handler
+Receives the filter as it was applied in the table and passes it straight to
+closure_lines -- it never re-derives the filter, which is what keeps the
+exported subset and the displayed table from drift…
+
+- *(pipelines)* write a verified annotation subset
+Copies original source lines rather than serializing Feature, which keeps
+neither the GFF source column nor phase -- a reconstructed CDS line would
+silently lose its reading frame.
+
+- *(pipelines)* compute the closure of an annotation filter
+A filter matches rows, but a valid annotation needs whole trees: a gene
+without its exons leaves Parent= references dangling, and exons without
+their gene leave orphans. The closure is every match plu…
+
+- *(pipelines)* store each feature's source line in the annotation index
+No index on the column: subset export selects by filter and reads the line
+out, it never looks a feature up by line. Rows sharing one source line
+under multiple parents all record that line.
+
+- *(pipelines)* record the source line number on every parsed feature
+Set by the handler's read loop rather than the parse functions, which take
+one string and cannot know where it came from. None for GenBank, whose
+features span multiple lines and whose segment childre…
+
+- *(frontend)* pair RefSeq/GenBank twins with a namespace toggle
+A reference downloaded from NCBI arrives as either a GCA (GenBank) or GCF
+(RefSeq) accession, and a project that needs both currently shows them as
+two separate rows. They are one assembly in two name…
+
+- *(launcher)* stage update notification for alpha/beta users
+Adds a new stage-update affordance that detects when a newer alpha or beta
+tag is available and offers a one-click update with confirmation dialog.
+
+- *(launcher)* add update_to_stage Tauri command
+
+- *(launcher)* add update_to_stage action and tests for check_stage_update
+
+- *(launcher)* add check_stage_update and set_bioflow_tag helpers
+
+- *(ui)* say why annotation coverage is missing instead of drawing blank bars
+
+- *(pipelines)* backfill annotation analysis when a reference lands
+
+- *(pipelines)* analyze an annotation when it finishes ingesting
+
+- *(pipelines)* record whether an annotation analysis resolved a reference
+Adds contig_lengths_known to the launch_annotation_stats payload and
+annotation_contig_lengths_known to run_annotation_stats's facts, so the
+ingest backfill (a later task) can find annotations analyze…
+
+- *(pipelines)* add the auto-analysis eligibility rule for annotations
+
+- *(storage)* add resolve_report_file containment helper
+Both stats report endpoints hand-roll the same three-step guard with two
+different spellings of the containment check. Extract it so a third result
+type inherits the guard rather than re-deriving it -…
+
+- *(ui)* show the annotation track above the feature table
+
+- *(ui)* draw annotation features along a coordinate axis
+
+- *(frontend)* add the annotation window client and its types
+
+- *(api)* serve annotation features or their density for a window
+
+- *(pipelines)* resolve an annotation's reference by provenance or accession
+
+- *(pipelines)* assemble gene models for a coordinate window
+
+- *(pipelines)* count annotation features per coordinate bin
+
+- *(pipelines)* pack overlapping annotation features into rows
+
+- *(annotation)* report unresolved parentage on the results summary
+
+- *(annotation)* add a genes/all/unresolved view toggle to the feature table
+Adds the frontend half of the parent-resolution and gene-summary work
+from tasks 1-6: a three-tab toggle (Genes/All records/Unresolved) above
+the annotation feature table, backed by the new /genes rou…
+
+- *(annotation)* serve the genes view and reach unresolved records over the API
+The features route gains a `view=unresolved` parameter that clears
+top_level_only and filters to UNRESOLVED_STATUSES, making a dangling/
+ambiguous/self/cyclic record reachable for the first time. A ne…
+
+- *(annotation)* resolve hierarchy and build the gene table during the compute job
+run_annotation_stats now classifies every feature's parent reference and
+builds the genes table against the temporary database, before the atomic
+rename into place -- a database is only published once…
+
+- *(annotation)* build a per-gene summary table with de-duplicated descendant counts
+
+- *(annotation)* store one row per parent relationship and filter by resolution status
+Fixes build_annotation_db, which crashed after Feature.parent became
+Feature.parents (a tuple) in the previous commit: it now writes one
+row per declared parent relationship so a shared exon is reacha…
+
+- *(annotation)* classify every parent reference as resolved, dangling, ambiguous, self, or cyclic
+
+- *(ui)* label, icon, and results tab for GenBank files
+Adds the "GenBank" format label and maps it to the existing GFF
+annotation icon. DetailPanel also gated the Results tab and its
+AnnotationResults branch on format kind (gff/gtf/bed) -- without
+adding …
+
+- *(annotation)* make GenBank files eligible for annotation results
+
+- *(annotation)* build feature tables and stats from GenBank files
+
+- *(formats)* detect GenBank by extension and LOCUS header
+
+- *(pipelines)* stream GenBank records without loading sequence
+
+- *(pipelines)* emit GenBank features as parent rows plus segment children
+
+- *(pipelines)* parse GenBank qualifier blocks with wrapped values
+
+- *(pipelines)* parse GenBank locations without flattening joins
+
+- *(formats)* add GENBANK format kind
+Adds FormatKind.GENBANK and places it in FORMAT_FIELDS alongside the
+other interval/annotation formats (GFF, GTF, BED). First of an 11-task
+plan for GenBank annotation support (#294); every subsequent…
+
+- *(ui)* say what SSH key BioFlow installs and retains when provisioning
+
+- *(ui)* show each node's version and offer an update when it is behind
+
+- *(api)* endpoints to update a compute node and poll its progress
+
+- *(services)* update a node's image over SSH, verified by re-enrollment
+
+- *(api)* install a managed SSH key during node provisioning
+Adds an install_key phase between write_env and pull_image in
+_provision_node: generates a keypair, appends it to the node's
+authorized_keys over the existing connection, verifies it authenticates
+ind…
+
+- *(services)* generate and install a managed SSH key on compute nodes
+
+- *(api)* expose the primary's image digest as the staleness reference
+
+- *(api)* persist and expose the backend version each node reports
+Enrollment now writes image_digest/version onto the Node document
+instead of only Redis, which expires when a worker stops
+heartbeating, and enumerate_nodes/list_nodes surface those fields
+(plus an up…
+
+- *(queue)* worker reports its image digest and version in the heartbeat
+
+- *(models)* record SSH connection details and reported version on Node
+
+- *(models)* add NodeUpdateTask for tracking node image updates
+Mirrors NodeProvisionTask's structure but avoids the bare-string
+Settings.indexes bug found in that model: task_id and node_id are both
+declared via field-level Indexed(...) annotations only, with no
+…
+
+- add project-level operations with collapsible actions accordion
+Add a 'Project actions' accordion above the filter box in the left panel
+that lists project-scoped operations. Clicking an action opens its form
+in the right panel via the existing ?sel= URL param sys…
+
+- *(frontend)* add optional additional reads to the align dialog
+The dialog keeps the one-file default -- the primary reads row and the
+paired-end auto-mate are untouched -- and adds an "Add another read
+file" picker beneath them. Each added file resolves its own m…
+
+- *(pipelines)* record additional read sets in alignment provenance
+An alignment run's inputs now list every additional set member under its
+own role -- extra_reads for the set's own file, extra_mate for its mate
+-- instead of the set being invisible to the activity v…
+
+- *(pipelines)* concatenate additional read set mates into the R2 stream
+A paired alignment with additional read sets previously threaded every
+set's R1 into the combined R1 stream and dropped the mates entirely.
+Each set's mate now concatenates into the R2 stream alongsid…
+
+- *(pipelines)* resolve and validate paired additional read sets at launch
+Each additional set is now a typed pair (R1 plus optional mate) resolved
+the same way as the primary: explicit link, else suggest_mate. The set's
+mate is auto-included, so adding one file of a pair is…
+
+- *(api)* accept ordered additional alignment read sets
+A file-level alignment launch can now carry additional read sets as a typed
+top-level request field, a sibling of mate_object_id: each set is an R1 plus
+an optional mate, and the whole run shares one …
+
+- *(ci)* publish images and launcher bundles in one release
+A v* tag now builds the launcher alongside the images and attaches the
+bundles to the single GitHub release it creates (#335). A launcher failure
+leaves the release published with images and no bundle…
+
+- *(ops)* constrain launcher-only releases to exceed the app version
+Keeps the launcher-never-below-app invariant that lets a combined cut
+overwrite the launcher version safely (#335), and rejects pre-release
+launcher-only cuts, which have no images to be staged agains…
+
+- *(ops)* bump the launcher version as part of an app release
+One release, one version (#335). A combined cut overwrites whatever the
+launcher declared, so a launcher-only release's drift never survives the
+next app release.
+
+- *(docs)* update GitHub Pages landing page to v2
+Replaces docs/index.html with a redesigned version of the landing
+page (richer layout: numbered section nav, stats sidebar), still a
+self-contained static bundle with no build step.
+
+- *(ui)* give annotation files a results view
+
+- *(ui)* browse annotation features with filters and a locus jump
+
+- *(ui)* chart annotation feature types, density, and coverage
+
+- *(frontend)* add the annotation results client and its types
+
+- *(api)* serve the annotation feature table, filtered and paged
+Adds launch_annotation_stats + _check_annotation_stats_callable to
+pipeline_service.py, and three routes (POST /annotationstats, GET
+/annotationstats/features/{id}, GET /annotationstats/children/{id})…
+
+- *(pipelines)* compute annotation summaries and the feature index
+
+- *(ops)* keep annotation results artifacts in a reaped directory
+
+- *(pipelines)* store annotation features in a queryable SQLite index
+
+- *(pipelines)* accumulate annotation aggregates in one bounded pass
+
+- *(pipelines)* normalize GFF3, GTF, and BED lines to one feature shape
+
+- *(docs)* add GitHub Pages landing page
+Adds the project landing page as docs/index.html, a self-contained
+static bundle (fonts and assets inlined) with no build step. Once
+GitHub Pages is enabled to serve from main /docs, this becomes the
+…
+
+
+
+
+
+### 🐛 Bug Fixes
+
+- *(pipelines)* classify the annotation stats and export handlers for provenance
+Both were unclassified in _STEP_VERBS/_NO_NARRATIVE_STEP, the same
+exhaustiveness gap fixed for the canvas registry in the prior commit.
+run_annotation_stats writes facts onto the existing object with…
+
+- *(pipelines)* exclude the annotation launchers from the canvas registry
+launch_annotation_stats and launch_annotation_export both failed the
+exhaustiveness test that requires every launch_* to be classified as a
+canvas node type or explicitly excluded. Neither has a fixed…
+
+- *(ui)* stop firing the export-count query on the Genes tab
+The export control is only visible when view !== 'genes', but its backing
+count query's enabled condition didn't include that check -- so it kept
+refetching on every filter change while the user sat o…
+
+- *(pipelines)* honor a locus jump's coordinate window in annotation export
+The export preview and launch read the raw contig filter state and never
+saw the Locus jump input's min/max at all, so exporting after jumping to a
+specific region silently operated over the whole unb…
+
+- *(api)* remove a duplicated export precondition and close a traversal gap
+launch_annotation_export's own 'no computed results' check raised
+ValidationError (422) while the identical condition is NotFoundError (404)
+everywhere else, including the same route's own guard right…
+
+- *(queue)* attach an exported annotation subset to its run
+Every other ingest-creating applier in this file resolves the job's run and
+records the new object as one of its outputs, so it appears in the
+run/activity view. This applier ingested the subset but n…
+
+- *(pipelines)* fail verification on an unindexed line, not just a mismatched one
+write_subset's safety property -- verify every line against the index before
+writing it -- previously held only when every line number in the caller's
+set happened to already be a key the index record…
+
+- *(nodes)* use AppError hierarchy in /nodes router instead of bare HTTPException
+The /nodes router raised bare HTTPException at 11 call sites, producing
+{"detail": ...} bodies that the frontend's client.ts cannot read — it
+looks for body.message and falls back to a bare "409 Confl…
+
+- *(nodes)* pass PEM string to import_private_key instead of StringIO
+asyncssh.import_private_key expects a str or bytes, not a file-like
+object. The io.StringIO wrapper caused an AttributeError at runtime
+whenever key-based node provisioning was attempted, because
+impo…
+
+- *(pipelines)* classify annotation_stats only as an excluded launcher
+This reverts commit bdfec631, which added a NodeTypeSpec for
+annotation_stats. Two commits landed independently for #355, each a
+complete fix on its own: bdfec631 added the spec, and a3f54da0 added th…
+
+- *(pipelines)* classify launch_annotation_stats as an excluded launcher
+Exhaustiveness check in test_node_types.py flagged it as unclassified.
+It's a read-only Results computation over an existing GFF/GTF/BED/GenBank
+object, auto-triggered at ingest and callable on demand…
+
+- *(pipelines)* add a NodeTypeSpec for annotation_stats
+launch_annotation_stats had no entry in NODE_TYPES or EXCLUDED_LAUNCHES,
+failing test_every_launch_function_is_classified on every run. Its
+sibling bam_stats/vcf_stats already had entries; this one wa…
+
+- *(pipelines)* classify run_annotation_stats as a no-narrative-step handler
+Same shape as run_bam_stats and run_vcf_stats: it writes statistics back
+onto an existing object rather than producing a new one, so it belongs in
+_NO_NARRATIVE_STEP alongside them. #257 added the han…
+
+- *(ci)* allow workflow_dispatch to bypass the tag version-guard
+The version-guard job's if condition only matched tag pushes, so a
+workflow_dispatch (intended as a 'does this still build' smoke test)
+skipped the guard and cascaded to skip the entire workflow. Allo…
+
+- *(api)* add explicit strict= to the row-packing zip
+CI's ruff check (B905) flags zip() without strict= -- a rule the local
+worktree test run never invokes. features and rows are guaranteed the same
+length here (rows is built from a list comprehension o…
+
+- *(pipelines)* wire launch_annotation_stats to two-tier reference resolution
+Task 10's browser verification found the track's "no coordinate axis" refusal
+firing for every real annotation in the seeded dataset. Traced to
+launch_annotation_stats still calling _reference_for_ann…
+
+- *(pipelines)* require the reference role in accession-tier resolution
+Task 7's real-database check (docs/superpowers/plans/2026-08-12-annotation-track-viewer.md)
+found that resolve_annotation_reference's accession tier filtered candidates
+on FormatKind.FASTA alone, not …
+
+- *(pipelines)* enforce the reference-or-reason invariant on AnnotationReference
+
+- *(pipelines)* prefer the reference role when resolving an annotation's genome
+_reference_for_annotation took the first FASTA in derived_from with no role
+check, so an annotation downloaded alongside its protein.faa could resolve to
+the protein set. Matches reference_for_bam's p…
+
+- *(pipelines)* treat a self-referencing parent as absent, not a silent drop
+Correct the features_in_window docstring, which claimed two queries
+when the code issues one SELECT (parents and children together) then
+reassembles the tree in two Python passes.
+
+- *(annotation)* update genbank_parse tests for the Feature.parents rename
+The rebase onto main pulled in GenBank annotation support, which
+constructed Feature with the pre-Task-1 parent kwarg and asserted
+against the same singular field in its own tests. genbank_parse.py's
+…
+
+- *(annotation)* update owner-scoping test for Feature.parents rename
+test_route_owner_scoping.py still constructed Feature with the old
+`parent=None` kwarg, which Task 1 replaced with `parents: tuple[str, ...]`.
+The test was failing collection/setup with a TypeError, m…
+
+- *(annotation)* wrap views in TabPanel and use the server's echoed depth_cap
+
+- *(annotation)* fix the third parent= kwarg site broken by the Feature.parents rename
+
+- *(annotation)* make build_gene_table re-runnable and distinguish same-coordinate leaf types
+
+- *(annotation)* dedupe child_count the same way descendant_count already is
+
+- *(annotation)* keep every parent of a multi-parent GFF3 record, not just the first
+
+- *(annotation)* keep GenBank out of the featureCounts annotation pool
+_is_annotation gates more than annotation-Results eligibility -- it also
+backs annotations_for_project/resolve_annotation, which feed
+launch_quantify. Adding GENBANK there (Task 8's original change) m…
+
+- *(annotation)* harden the GenBank contig-lengths ordering dependency
+Two issues from Task 7's code-quality review, both about the same root
+cause: nothing enforced that _genbank_rows' generator was fully drained
+before the handler read its side-channel facts dict, so a…
+
+- *(formats)* tighten GenBank sniff to a literal space, cover compressibility
+
+- *(pipelines)* stop misreading a short continuation line as a new feature
+iter_features's key-detection check only required a line to reach column 6
+before testing whether column 22 held non-whitespace. A wrapped qualifier's
+tail line shorter than column 22 has an empty sli…
+
+- *(ui)* surface update-start failures and clear stale progress panels across nodes
+startUpdate had no onError handler, so a 409/404 from POST /nodes/{id}/update
+rejected silently with the confirmation dialog just re-enabling its button.
+Also, clicking Update on a new node left a pri…
+
+- *(services)* make run_update's own error handling failure-tolerant
+The initial task lookup and _fail's own task.save() were unguarded, so a
+transient Mongo hiccup during either could raise out of run_update -- a
+fire-and-forget background task with no caller to catch…
+
+- *(services)* log at node_ssh's failure points, not just raise
+
+- *(api)* run current-version's docker probe off the event loop
+_own_image_digest shells out to docker twice via subprocess.run, up to
+~20s worst case, blocking the single event loop thread and stalling
+every other request the primary serves (node heartbeats, job …
+
+- *(queue)* resolve image digest through the container's own image id, not a hardcoded tag
+
+- *(models)* use the repo's timezone-aware utcnow() in NodeUpdateTask
+datetime.utcnow() is deprecated and timezone-naive; match the local
+utcnow() pattern node.py already uses for this purpose.
+
+- *(api)* register NodeProvisionTask so provisioning can write its task document
+Registering the model in ALL_MODELS activated a previously dead code
+path in db.index_reconcile: NodeProvisionTask.Settings.indexes held a
+bare field-name string ("task_id") instead of an IndexModel, …
+
+- *(frontend)* clarify the per-contig coverage loading state
+The table showed a bare "Loading…" whenever the query had no data yet, so a
+failed request left "Loading…" on screen indefinitely. Show the pending
+state only while the request is in flight and a dist…
+
+- *(frontend)* align coverage-chart titles on a shared baseline
+The Insert size and Mapping quality cards sit in a flex row, but each still
+carried the .section class, whose margin-top offsets every card after the
+first. That pushed "Mapping quality" below and rig…
+
+- *(agent)* await the project-context services the system prompt depends on
+#290's project-context injection made _system_prompt and
+_build_project_context call two async services, search_service.count_by_kind
+and project_service.recent_jobs, without await. Every /ask and /re…
+
+- *(metadata)* classify molecule_type and library_source as open/closed
+Two new ENUM fields (2e073b8f) had no open/closed classification, tripping
+test_schemas_open_vocabulary's tripwire: 17 distinct ENUM FieldDefs, 15
+accounted for. molecule_type (DNA/RNA/Other) is a voc…
+
+- *(api)* rewrite Docker service hostnames in URLs handed to provisioned nodes
+_rewrite_host built its pattern with an f-string containing `:\\d+`, which in
+an f-string is a literal backslash followed by "d" rather than the digit class
+`\d`. So `mongodb://mongo:27017/db` never m…
+
+- *(models)* register NodeProvisionTask so node provisioning can write
+NodeProvisionTask was never added to ALL_MODELS, so init_beanie never
+created its collection. Node provisioning from Settings -> Nodes failed at
+runtime: _provision_node writes a NodeProvisionTask doc…
+
+- *(ops)* fail a release tag whose launcher version files disagree
+Tauri reads tauri.conf.json, not Cargo.toml, so a stale one publishes
+bundles labelled with the wrong version while every other check passes.
+That is what shipped as launcher-v0.2.0 (#335).
+
+- *(launcher)* bump tauri.conf.json so bundles carry the release version
+Tauri reads tauri.conf.json's version key in preference to Cargo.toml, and
+bump_version.py never wrote it -- so launcher-v0.1.0 and launcher-v0.2.0 both
+published bundles named 0.1.0. Pre-releases get…
+
+- *(pipelines)* drop an unused Feature import in annotation_db
+build_annotation_db's rows parameter is untyped, so Feature never
+appears as an annotation anywhere in this file -- caught by CI's
+ruff check, which flagged F401 on a pass the local pre-push check
+mis…
+
+- *(frontend)* drop a dead AskQuestionResponse import
+Left behind by rebasing onto main: the conflict in client.ts's import
+block had AskQuestionResponse on one side, and resolving it kept the
+name without checking it still exists on the branch being reb…
+
+- *(pipelines)* dispatch run_annotation_stats via THREAD, not SUBPROCESS
+Pure in-process parsing and SQLite writes, no binary to spawn or kill
+via process group -- same shape as run_transcript_qc, which already
+uses THREAD for the identical reason. Also documents the attri…
+
+- *(pipelines)* stop exon/CDS rows colliding with their transcript's feature_id
+parse_gtf_line's else-branch set feature_id equal to parent
+(transcript_id or gene_id) for every exon/CDS/UTR row, so siblings
+under the same transcript were indistinguishable from each other and
+from…
+
+- *(ci)* move workflows from self-hosted to GitHub-hosted runners
+The repo going public unlocks free hosted ubuntu-24.04-arm and macos-latest
+runners, removing the constraint that put arm64 Docker builds and macOS
+launcher signing on self-hosted machines. publish-im…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## [0.4.0] - 2026-08-12
 
 
