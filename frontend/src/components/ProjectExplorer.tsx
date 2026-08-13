@@ -13,10 +13,10 @@ import { NewProjectModal } from "./NewProjectModal";
 import { NcbiDownloadDialog } from "./NcbiDownloadDialog";
 import { UniProtDownloadDialog } from "./UniProtDownloadDialog";
 import {
+  buildReferenceRail,
   buildStageRail,
   groupPairs,
-  orderWithPairs,
-  type OrderedFile,
+  type ReferenceRailEntry,
   type StageRailEntry,
 } from "../lib/pairing";
 import type { DataObject } from "../api/types";
@@ -515,14 +515,16 @@ function ProjectView({ projectId }: { projectId: string }) {
 
             const isExpanded = expandedCategories.has(category.key);
 
-            // Only Reads carries mate pairs, and the reorder that draws the
-            // spine adjacently is a real change from the API's newest-first
-            // order -- confined to the one category it's meaningful for, so
-            // References/Alignments/Variants/etc. keep their existing order.
-            const displayFiles: OrderedFile[] =
-              category.key === "reads"
-                ? orderWithPairs(categoryFiles)
-                : categoryFiles.map((o) => ({ object: o, pair: null }));
+            // RefSeq (GCF) and GenBank (GCA) twins of one assembly collapse
+            // into a single card with a toggle; a lone namespace or an
+            // unrecognized reference stays a plain row. Computed once so the
+            // card list and the plain-row remainder agree on what is claimed.
+            const referenceRail =
+              category.key === "references" ? buildReferenceRail(categoryFiles) : null;
+            const claimedReferenceIds =
+              referenceRail === null
+                ? new Set<string>()
+                : new Set(referenceRail.flatMap((e) => [e.refseq.id, e.genbank.id]));
 
             return (
               <div key={category.key}>
@@ -550,36 +552,40 @@ function ProjectView({ projectId }: { projectId: string }) {
                     />
                   ))}
 
-                {isExpanded && category.key !== "reads" &&
-                  groupPairs(displayFiles).map((group) => {
-                    const rows = group.files.map((o) => (
-                      <FileRow
-                        key={o.id}
-                        object={o}
-                        selected={sel === `object:${o.id}`}
-                        inPair={group.pairLabel !== null}
-                        onSelect={() => select(`object:${o.id}`)}
-                        onDelete={() => {
-                          if (confirm(`Delete "${o.name}"?`)) delObject.mutate(o.id);
-                        }}
-                      />
-                    ));
+                {isExpanded && referenceRail !== null &&
+                  referenceRail.map((entry) => (
+                    <ReferenceRailCard
+                      key={entry.key}
+                      entry={entry}
+                      sel={sel}
+                      onSelect={select}
+                      onDelete={(id, name) => {
+                        if (confirm(`Delete "${name}"?`)) delObject.mutate(id);
+                      }}
+                    />
+                  ))}
 
-                    // An unpaired file is just its row. A pair is wrapped so
-                    // the label and the spine can span both halves, rather
-                    // than being stitched together from two adjacent rows.
-                    if (group.pairLabel === null) return rows;
+                {isExpanded && referenceRail !== null && (
+                  <PlainFileGroups
+                    files={categoryFiles.filter((o) => !claimedReferenceIds.has(o.id))}
+                    sel={sel}
+                    onSelect={select}
+                    onDelete={(id, name) => {
+                      if (confirm(`Delete "${name}"?`)) delObject.mutate(id);
+                    }}
+                  />
+                )}
 
-                    return (
-                      <div key={group.key} className="pair-group">
-                        <div className="pair-label">
-                          <span>Paired</span>
-                          <span className="pair-stem">{group.pairLabel}</span>
-                        </div>
-                        {rows}
-                      </div>
-                    );
-                  })}
+                {isExpanded && category.key !== "reads" && category.key !== "references" && (
+                  <PlainFileGroups
+                    files={categoryFiles}
+                    sel={sel}
+                    onSelect={select}
+                    onDelete={(id, name) => {
+                      if (confirm(`Delete "${name}"?`)) delObject.mutate(id);
+                    }}
+                  />
+                )}
               </div>
             );
           })}
@@ -787,5 +793,135 @@ function StageRailCard({
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * One assembly's card: a header naming the organism (or the shared accession
+ * core), and a REFSEQ/GENBANK toggle that swaps which namespace's file is
+ * shown.
+ *
+ * Defaults to REFSEQ (GCF), the curated set, the same way the reads rail
+ * defaults to its more-processed stage. Only rendered for a true pair, so no
+ * single-namespace fallback exists here.
+ */
+function ReferenceRailCard({
+  entry,
+  sel,
+  onSelect,
+  onDelete,
+}: {
+  entry: ReferenceRailEntry;
+  sel: string | null;
+  onSelect: (value: string) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  const [stage, setStage] = useState<"refseq" | "genbank">("refseq");
+  const displayed = stage === "refseq" ? entry.refseq : entry.genbank;
+
+  // Mirror the reads rail: when external navigation selects the hidden twin
+  // (e.g. a "Derived from" link from an alignment), flip the toggle so the
+  // selected row is actually visible in the list.
+  useEffect(() => {
+    if (sel === null || !sel.startsWith("object:")) return;
+    const targetId = sel.slice("object:".length);
+    if (stage === "refseq" && entry.genbank.id === targetId) {
+      setStage("genbank");
+    } else if (stage === "genbank" && entry.refseq.id === targetId) {
+      setStage("refseq");
+    }
+  }, [sel, entry.refseq, entry.genbank, stage]);
+
+  // Switching stage swaps which file is on screen, so a selected row's id
+  // goes stale -- follow the selection across, exactly as the reads rail's
+  // Raw/Trimmed buttons do.
+  const switchStage = (next: "refseq" | "genbank") => {
+    const currentFile = stage === "refseq" ? entry.refseq : entry.genbank;
+    const nextFile = next === "refseq" ? entry.refseq : entry.genbank;
+    setStage(next);
+    if (sel === `object:${currentFile.id}`) onSelect(`object:${nextFile.id}`);
+  };
+
+  return (
+    <div className="pair-group stage-rail-card">
+      <div className="pair-label stage-rail-header">
+        <span>Reference</span>
+        {entry.label && <span className="pair-stem">{entry.label}</span>}
+      </div>
+
+      <div className="stage-toggle" role="group" aria-label="Assembly namespace">
+        <button
+          type="button"
+          className={stage === "refseq" ? "active" : ""}
+          onClick={() => switchStage("refseq")}
+        >
+          RefSeq
+        </button>
+        <button
+          type="button"
+          className={stage === "genbank" ? "active" : ""}
+          onClick={() => switchStage("genbank")}
+        >
+          GenBank
+        </button>
+      </div>
+
+      <FileRow
+        object={displayed}
+        selected={sel === `object:${displayed.id}`}
+        inPair={false}
+        onSelect={() => onSelect(`object:${displayed.id}`)}
+        onDelete={() => onDelete(displayed.id, displayed.name)}
+      />
+    </div>
+  );
+}
+
+/** Non-reads rows rendered the old way: an unpaired file is a bare row, a
+ *  mate pair (which cannot occur outside reads, but the grouping API is
+ *  shared) is wrapped with a label and a spine. Extracted from the category
+ *  map so the reference remainder and every other category render through
+ *  one path. */
+function PlainFileGroups({
+  files,
+  sel,
+  onSelect,
+  onDelete,
+}: {
+  files: DataObject[];
+  sel: string | null;
+  onSelect: (value: string) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  return (
+    <>
+      {groupPairs(files.map((o) => ({ object: o, pair: null }))).map((group) => {
+        const rows = group.files.map((o) => (
+          <FileRow
+            key={o.id}
+            object={o}
+            selected={sel === `object:${o.id}`}
+            inPair={group.pairLabel !== null}
+            onSelect={() => onSelect(`object:${o.id}`)}
+            onDelete={() => onDelete(o.id, o.name)}
+          />
+        ));
+
+        // An unpaired file is just its row. A pair is wrapped so the label
+        // and the spine can span both halves, rather than being stitched
+        // together from two adjacent rows.
+        if (group.pairLabel === null) return rows;
+
+        return (
+          <div key={group.key} className="pair-group">
+            <div className="pair-label">
+              <span>Paired</span>
+              <span className="pair-stem">{group.pairLabel}</span>
+            </div>
+            {rows}
+          </div>
+        );
+      })}
+    </>
   );
 }
