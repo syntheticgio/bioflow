@@ -5585,10 +5585,15 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* --- Provisioning result --- */
 
+/* Wraps rather than letting the actions crowd the border: this banner sits in
+   a narrow settings column, and an unwrapped row squeezed the message to a few
+   words per line while the buttons overhung the rounded corner. Below the
+   breakpoint the actions drop onto their own row and align right. */
 .provision-result {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -5613,6 +5618,8 @@ table.software-matrix thead th.software-matrix-corner {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Track the heading rather than the centre of a wrapped message. */
+  align-self: flex-start;
 }
 
 .provision-result.success .provision-result-icon {
@@ -5623,8 +5630,12 @@ table.software-matrix thead th.software-matrix-corner {
   color: var(--danger, #c00);
 }
 
+/* A flex item's min-width is auto, so without this the message refuses to
+   shrink below its longest word and pushes the actions past the padding. The
+   basis is the width below which the actions wrap to their own row. */
 .provision-result-text {
-  flex: 1;
+  flex: 1 1 260px;
+  min-width: 0;
 }
 
 .provision-result-text strong {
@@ -5633,17 +5644,24 @@ table.software-matrix thead th.software-matrix-corner {
   margin-bottom: 2px;
 }
 
+/* Provisioning errors carry remote stderr -- paths and command strings with no
+   spaces to break at, which would otherwise overflow the banner. */
 .provision-result-text p {
   margin: 0;
   font-size: 12px;
   color: var(--text-dim);
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .provision-result-actions {
   display: flex;
   gap: 8px;
   flex-shrink: 0;
+  /* Sit against the trailing edge once wrapped onto their own row, and stay
+     clear of the border rather than butting against the corner radius. */
+  margin-left: auto;
+  align-self: center;
 }
 
 /* Settings section nav (AI / Tools), above the AI page's own rail-and-detail
