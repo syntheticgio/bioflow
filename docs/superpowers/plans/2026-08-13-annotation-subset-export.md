@@ -1328,9 +1328,20 @@ def run_annotation_subset_export(ctx: JobContext) -> dict:
     dest = out_dir / name
 
     verify = annotation_export.verification_map(db_path=db_path, lines=lines)
+    # write_subset defaults to the GFF3 parser when none is passed, which
+    # would spuriously fail every verification on a GTF or BED export -- the
+    # two formats structure column 9 differently, so a real caller must name
+    # its own format's parser explicitly. Fixed in the annotation_export.py
+    # commit that added GTF/BED verification support; do not omit this.
+    parse_line = {
+        "gff": annotation_parse.parse_gff_line,
+        "gtf": annotation_parse.parse_gtf_line,
+        "bed": annotation_parse.parse_bed_line,
+    }[payload["format_kind"]]
     try:
         exported = annotation_export.write_subset(
-            source=source, dest=dest, lines=lines, verify=verify
+            source=source, dest=dest, lines=lines, verify=verify,
+            parse_line=parse_line,
         )
     except annotation_export.ExportMismatch as e:
         dest.unlink(missing_ok=True)
