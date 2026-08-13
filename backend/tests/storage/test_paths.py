@@ -2,8 +2,13 @@
 
 import pytest
 
-from app.errors import ValidationError
-from app.storage.paths import blob_rel_path, resolve_registerable, validate_sha256
+from app.errors import NotFoundError, ValidationError
+from app.storage.paths import (
+    blob_rel_path,
+    resolve_registerable,
+    resolve_report_file,
+    validate_sha256,
+)
 
 VALID = "a" * 64
 
@@ -87,3 +92,68 @@ class TestResolveRegisterable:
         monkeypatch.setattr("app.config.settings.bioinfo_register_roots", str(tmp_path))
         with pytest.raises(ValidationError, match="absolute"):
             resolve_registerable("relative/path.fastq")
+
+
+class TestResolveReportFile:
+    """Containment for client-supplied report paths.
+
+    These are the cases neither report endpoint covers today. The endpoints'
+    own traversal suites cover the ordinary `../` attacks; what is pinned here
+    is the behavior that both call sites currently get only incidentally, via
+    an `.is_file()` that happens to be ANDed in.
+    """
+
+    @pytest.fixture
+    def root(self, tmp_path):
+        (tmp_path / "report.tsv").write_text("col\tval\n")
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "nested.tsv").write_text("col\tval\n")
+        return tmp_path
+
+    def test_returns_a_file_directly_under_the_root(self, root):
+        assert resolve_report_file(root, "report.tsv") == root / "report.tsv"
+
+    def test_returns_a_file_in_a_subdirectory(self, root):
+        assert resolve_report_file(root, "sub/nested.tsv") == root / "sub" / "nested.tsv"
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "",  # empty: resolves to the root directory itself
+            "..",
+            "../secret.tsv",
+            "sub/../../secret.tsv",
+            "/etc/passwd",
+        ],
+    )
+    def test_rejects_traversal_and_absolute_paths(self, root, bad):
+        with pytest.raises(NotFoundError):
+            resolve_report_file(root, bad)
+
+    def test_rejects_the_root_itself(self, root):
+        """A directory is not a report. Both call sites rely on this today."""
+        with pytest.raises(NotFoundError):
+            resolve_report_file(root, ".")
+
+    def test_rejects_a_directory(self, root):
+        with pytest.raises(NotFoundError):
+            resolve_report_file(root, "sub")
+
+    def test_rejects_a_missing_file(self, root):
+        with pytest.raises(NotFoundError):
+            resolve_report_file(root, "nope.tsv")
+
+    def test_rejects_a_symlink_escaping_the_root(self, root, tmp_path_factory):
+        """The one input the `..` prefilter does not catch.
+
+        Both endpoints reject this today only because `.is_file()` follows the
+        link to a path outside the root. Pinning it makes that explicit.
+        """
+        outside = tmp_path_factory.mktemp("outside")
+        secret = outside / "secret.tsv"
+        secret.write_text("private\n")
+        (root / "link.tsv").symlink_to(secret)
+
+        with pytest.raises(NotFoundError):
+            resolve_report_file(root, "link.tsv")

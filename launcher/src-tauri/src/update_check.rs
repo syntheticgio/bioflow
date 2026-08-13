@@ -87,6 +87,75 @@ pub fn checkable_tag(bioflow_tag: &str, developer_repo: Option<&str>) -> Option<
     None
 }
 
+/// Replaces the `BIOFLOW_TAG=` line in `.env` content with a new value,
+/// preserving all other lines and their ordering. Appends the line if not
+/// found as a safety net.
+pub(crate) fn set_bioflow_tag(contents: &str, new_tag: &str) -> String {
+    let ends_with_newline = contents.ends_with('\n');
+    let mut found = false;
+    let result: Vec<String> = contents
+        .lines()
+        .map(|line| {
+            if line.starts_with("BIOFLOW_TAG=") {
+                found = true;
+                format!("BIOFLOW_TAG={}", new_tag)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    let mut joined = if !found {
+        let mut result = result;
+        result.push(format!("BIOFLOW_TAG={}", new_tag));
+        result.join("\n")
+    } else {
+        result.join("\n")
+    };
+
+    if ends_with_newline {
+        joined.push('\n');
+    }
+    joined
+}
+
+/// Compares the user's current pinned tag against available version options
+/// and returns the best forward-compatible stage tag (if any).
+///
+/// "Forward" means a strictly greater (major, minor, patch, stage_rank) tuple,
+/// where stage rank is alpha=0, beta=1. Release mode ("latest") is excluded —
+/// it has its own digest-based update path.
+///
+/// Returns `None` when no forward-compatible tag exists or the current tag
+/// cannot be parsed as a stage tag.
+pub fn check_stage_update(current_tag: &str, options: &VersionOptions) -> Option<String> {
+    if current_tag == "latest" {
+        return None;
+    }
+
+    let current_ver = version_tuple(current_tag, "alpha")
+        .map(|v| (v, 0u8))
+        .or_else(|| version_tuple(current_tag, "beta").map(|v| (v, 1u8)))?;
+
+    let candidates = [options.alpha.as_deref(), options.beta.as_deref()];
+
+    candidates
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| {
+            let cv = version_tuple(candidate, "alpha")
+                .map(|v| (v, 0u8))
+                .or_else(|| version_tuple(candidate, "beta").map(|v| (v, 1u8)))?;
+            if (cv.0, cv.1) > current_ver {
+                Some((candidate.to_string(), cv))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(_, (v, rank))| (*v, *rank))
+        .map(|(tag, _)| tag)
+}
+
 /// The version choices the Settings dialog offers for `BIOFLOW_TAG`.
 ///
 /// `release` is always present (resolves to the `:latest` tag the published
@@ -487,5 +556,112 @@ mod tests {
         // developer taking precedence; match it rather than inventing a
         // second answer.
         assert_eq!(checkable_tag("0.3.0-alpha", Some("/home/me/bioflow")), None);
+    }
+
+    // ── set_bioflow_tag ──────────────────────────────────────────────────
+
+    #[test]
+    fn set_bioflow_tag_replaces_existing_tag() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIND_ADDRESS=127.0.0.1\nBIOFLOW_TAG=0.3.0-alpha\n";
+        let result = set_bioflow_tag(env, "0.4.0-alpha");
+        assert!(result.contains("BIOFLOW_TAG=0.4.0-alpha"));
+        assert!(!result.contains("BIOFLOW_TAG=0.3.0-alpha"));
+        assert!(result.contains("BIOINFO_HOME=/data"));
+        assert!(result.contains("WEB_PORT=5173"));
+    }
+
+    #[test]
+    fn set_bioflow_tag_appends_when_missing() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\n";
+        let result = set_bioflow_tag(env, "0.4.0-alpha");
+        assert!(result.contains("BIOFLOW_TAG=0.4.0-alpha"));
+    }
+
+    #[test]
+    fn set_bioflow_tag_preserves_trailing_newline_style() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIOFLOW_TAG=0.3.0-alpha\n";
+        let result = set_bioflow_tag(env, "0.4.0-beta");
+        assert_eq!(result, "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIOFLOW_TAG=0.4.0-beta\n");
+    }
+
+    // ── check_stage_update ───────────────────────────────────────────────
+
+    #[test]
+    fn stage_update_higher_version_wins_over_lower_version() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.4.0-alpha".to_string()),
+            beta: Some("0.3.0-beta".to_string()),
+        };
+        assert_eq!(
+            check_stage_update("0.3.0-alpha", &opts),
+            Some("0.4.0-alpha".to_string())
+        );
+    }
+
+    #[test]
+    fn stage_update_same_version_later_stage_wins() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.3.0-alpha".to_string()),
+            beta: Some("0.3.0-beta".to_string()),
+        };
+        assert_eq!(
+            check_stage_update("0.3.0-alpha", &opts),
+            Some("0.3.0-beta".to_string())
+        );
+    }
+
+    #[test]
+    fn stage_update_earlier_stage_is_not_forward() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.4.0-alpha".to_string()),
+            beta: Some("0.4.0-beta".to_string()),
+        };
+        assert_eq!(check_stage_update("0.4.0-beta", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_nothing_available_returns_none() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: None,
+            beta: None,
+        };
+        assert_eq!(check_stage_update("0.3.0-alpha", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_lower_version_is_not_forward() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.2.0-alpha".to_string()),
+            beta: None,
+        };
+        assert_eq!(check_stage_update("0.3.0-alpha", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_release_mode_returns_none() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.4.0-alpha".to_string()),
+            beta: None,
+        };
+        assert_eq!(check_stage_update("latest", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_picks_highest_available() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.5.0-alpha".to_string()),
+            beta: Some("0.4.0-beta".to_string()),
+        };
+        assert_eq!(
+            check_stage_update("0.3.0-alpha", &opts),
+            Some("0.5.0-alpha".to_string())
+        );
     }
 }

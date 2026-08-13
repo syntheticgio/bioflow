@@ -150,6 +150,7 @@ _STEP_VERBS: dict[str, str] = {
     "download_assembly": "downloaded from NCBI",
     "download_uniprot": "downloaded from UniProt",
     "download_lineage": "downloaded",
+    "export_annotation_subset": "filtered to a subset of",
 }
 
 # Registered handlers that legitimately produce no narrative step.
@@ -163,6 +164,7 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "run_bam_stats",
         "run_transcript_qc",
         "run_vcf_stats",
+        "run_annotation_stats",
         "ingest_headers",
         # Bookkeeping on bytes already ingested.
         "hash_blob",

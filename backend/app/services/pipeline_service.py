@@ -2485,6 +2485,33 @@ def _check_annotation_stats_callable(obj) -> None:
         )
 
 
+def should_auto_analyze_annotation(
+    *, kind: FormatKind, sidecar_of, facts: dict
+) -> bool:
+    """Whether ingest should analyze this object without being asked.
+
+    Public and parameter-wise rather than object-wise so both trigger sites
+    and their tests can call it without constructing a DataObject.
+
+    The sidecar exclusion is load-bearing, not defensive. Every object on
+    this machine's real database whose format.kind is BED is a `.fai` or a
+    STAR `.ann` index that the detector called BED -- 8 of them. A `.fai` is
+    not an annotation however it parses, and analyzing one writes a database
+    of garbage intervals under a name nobody will recognize.
+
+    A file already analyzed *with* a reference is skipped; one analyzed
+    without a reference is not, because that is exactly the result trigger 2
+    exists to repair.
+    """
+    if kind not in _ANNOTATION_STATS_FORMATS:
+        return False
+    if sidecar_of is not None:
+        return False
+    if not facts.get("annotation_stats_status"):
+        return True
+    return facts.get("annotation_contig_lengths_known") is not True
+
+
 async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
     """Queue the Results computation for a GFF/GTF/BED.
 
@@ -2527,6 +2554,11 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
         "project_id": str(ann.project_id),
         "format_kind": str(ann.format.kind.value),
         "contig_lengths": [[name, length] for name, length in lengths.items()],
+        # Recorded rather than re-derived from contig_lengths downstream:
+        # ingest's backfill queries this as a flat field, and an $elemMatch
+        # over annotation_per_contig could not tell "no reference resolved"
+        # apart from "reference resolved but missing this contig".
+        "contig_lengths_known": bool(lengths),
         "annotation_path": path,
     }
     if digest:
@@ -2540,6 +2572,45 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
         resources=JobResources(cpu=1, mem_mb=2048, io=IoClass.HEAVY),
         max_attempts=2,
         dedup_key=f"annotation_stats:{ann.id}",
+        project_id=ann.project_id,
+        object_id=ann.id,
+    )
+
+
+async def launch_annotation_export(
+    *, object_id: PydanticObjectId, owner: str, filters: dict, output_name: str
+):
+    """Queue a subset export for a GFF/GTF/BED annotation.
+
+    Unlike launch_annotation_stats this *does* derive an object, so the job's
+    result goes through _apply_export_annotation_subset.
+    """
+    from app.queue import queue
+
+    ann = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(ann)
+
+    digest, path = await _resolve_readable(ann)
+    # Same reasoning as launch_annotation_stats: the THREAD handler reads
+    # ctx.payload["annotation_path"] directly and does no blob resolution.
+    path = path or str(blob_path(digest))
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+
+    return await queue.enqueue(
+        "export_annotation_subset",
+        owner=owner,
+        payload={
+            "object_id": str(ann.id),
+            "annotation_path": path,
+            "db_path": str(db_path),
+            "format_kind": str(ann.format.kind.value),
+            "filters": filters,
+            "output_name": output_name,
+        },
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=2,
         project_id=ann.project_id,
         object_id=ann.id,
     )

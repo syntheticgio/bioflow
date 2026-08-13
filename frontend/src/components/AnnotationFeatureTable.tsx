@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AnnotationFeature, AnnotationGene, AnnotationStatsFacts } from "../api/types";
 import { useDebounced } from "../lib/useDebounced";
+import { notify } from "../stores/messageStore";
 import { TabPanel, Tabs } from "./Tabs";
 
 const PAGE_SIZE = 100;
@@ -189,6 +190,81 @@ export function AnnotationFeatureTable({
   const data = isGenesView ? genesQuery.data : featuresQuery.data;
   const isLoading = isGenesView ? genesQuery.isLoading : featuresQuery.isLoading;
 
+  // GenBank has no line-addressable features -- a record spans several
+  // lines, so the export applier (which writes a subset by line number)
+  // cannot re-emit one. The control is hidden entirely for these files, not
+  // merely disabled, since there is no filter combination that would work.
+  const isGenBank = facts.genbank_record_count != null;
+
+  const qc = useQueryClient();
+
+  // Mirrors the filters the table itself renders from -- effectiveContig/
+  // locus min-max/featureType/biotype/nameQuery/strand/view -- so the export
+  // always matches what the user is currently looking at (AE-22). This must
+  // stay the SAME state the table's own queries above read, not a parallel
+  // copy. In particular a locus jump clears `contig` and narrows the view via
+  // `locus.min`/`locus.max`, so those must be read here too, not just
+  // `effectiveContig`.
+  const exportCountQuery = useQuery({
+    queryKey: [
+      "annotationstats",
+      "export-count",
+      objectId,
+      effectiveContig,
+      locus?.min,
+      locus?.max,
+      featureType,
+      biotype,
+      nameQuery,
+      strand,
+      view,
+    ],
+    queryFn: () =>
+      api.annotationExportCount(objectId, {
+        offset: 0,
+        limit: 0,
+        contig: effectiveContig,
+        startMin: locus?.min,
+        startMax: locus?.max,
+        featureType: featureType || undefined,
+        biotype: biotype || undefined,
+        nameQuery: nameQuery || undefined,
+        strand: strand || undefined,
+        view: view === "unresolved" ? "unresolved" : undefined,
+      }),
+    enabled: view !== "genes" && !isGenBank,
+    placeholderData: keepPreviousData,
+  });
+
+  const exportMutation = useMutation({
+    mutationFn: () =>
+      api.launchAnnotationExport(objectId, {
+        contig: effectiveContig,
+        startMin: locus?.min,
+        startMax: locus?.max,
+        featureType: featureType || undefined,
+        biotype: biotype || undefined,
+        nameQuery: nameQuery || undefined,
+        strand: strand || undefined,
+        view: view === "unresolved" ? "unresolved" : undefined,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      // Broad, not project-scoped: this component only has objectId/facts,
+      // not the object's project_id, so the specific ["objects", projectId]
+      // key ProjectExplorer.tsx/RoleConverter.tsx invalidate isn't available
+      // here. Self-review note: consider threading project_id down (or
+      // having AnnotationResults own this invalidation) if the broad key
+      // ever proves too coarse.
+      qc.invalidateQueries({ queryKey: ["objects"] });
+      notify.info("Export queued");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const matched = exportCountQuery.data?.matched;
+  const exported = exportCountQuery.data?.exported;
+
   const [lastTotal, setLastTotal] = useState<number | null>(null);
   useEffect(() => {
     if (data?.total != null) setLastTotal(data.total);
@@ -354,6 +430,48 @@ export function AnnotationFeatureTable({
         {view !== "genes" && featureType && (
           <div style={{ color: "var(--text-faint)", fontSize: 11, marginBottom: 6 }}>
             Showing every {featureType} feature, including those nested under a parent.
+          </div>
+        )}
+
+        {/* Export applies the same contig/featureType/biotype/name/strand/view
+         *  filters the table above is already rendering from -- not a
+         *  separate set of export-only inputs (AE-22). Restricted to the
+         *  non-genes views, since those are the only ones this filter row
+         *  actually drives; the Genes view has no equivalent filtered query
+         *  to export a subset of. Hidden entirely, not just disabled, for
+         *  GenBank (AE-25). */}
+        {view !== "genes" && !isGenBank && (
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              margin: "0 0 10px",
+              fontSize: 11,
+              color: "var(--text-faint)",
+            }}
+          >
+            <button
+              type="button"
+              className="btn"
+              style={{ padding: "1px 8px", fontSize: 11 }}
+              onClick={() => exportMutation.mutate()}
+              disabled={
+                exportMutation.isPending ||
+                exportCountQuery.isLoading ||
+                !matched
+              }
+            >
+              {exportMutation.isPending ? "Queuing export…" : "Export this subset"}
+            </button>
+            {matched != null && exported != null && (
+              <span>
+                {matched.toLocaleString()} matched
+                {exported > matched
+                  ? ` → ${exported.toLocaleString()} exported, including parents and children`
+                  : ` → ${exported.toLocaleString()} exported`}
+              </span>
+            )}
           </div>
         )}
 

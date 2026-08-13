@@ -4,9 +4,10 @@ Separate from annotation_stats because this is the only stateful part of the
 feature and the only place SQL lives -- the same split variant_db documents.
 """
 
+import sqlite3
+
 import pytest
 
-from app.pipelines.annotation_parse import Feature
 from app.pipelines.annotation_db import (
     FeatureFilters,
     build_annotation_db,
@@ -15,6 +16,7 @@ from app.pipelines.annotation_db import (
     query_features,
 )
 from app.pipelines.annotation_hierarchy import resolve_hierarchy
+from app.pipelines.annotation_parse import Feature
 
 
 def _f(contig, start, end, type, feature_id, parent=None, name=None, biotype=None):
@@ -73,6 +75,46 @@ class TestBuild:
         build_annotation_db(rows=_features(), db_path=path)
         assert build_annotation_db(rows=_features(), db_path=path) == 7
         assert count_features(db_path=path, filters=FeatureFilters(top_level_only=False)) == 7
+
+    def test_stores_the_line_number(self, tmp_path):
+        """AE-3: the index records each feature's source line."""
+        db_path = tmp_path / "features.db"
+        rows = [
+            Feature(
+                contig="chr1", start=100, end=200, type="gene", strand="+",
+                score=None, name="g1", feature_id="g1", parents=(), biotype=None,
+                attributes="ID=g1", line=4,
+            ),
+        ]
+        build_annotation_db(rows=rows, db_path=db_path)
+
+        con = sqlite3.connect(db_path)
+        try:
+            stored = con.execute("SELECT line FROM features").fetchall()
+        finally:
+            con.close()
+        assert stored == [(4,)]
+
+    def test_multi_parent_rows_share_one_line_number(self, tmp_path):
+        """AE-4: one source line stored under two parents keeps one line number."""
+        db_path = tmp_path / "features.db"
+        rows = [
+            Feature(
+                contig="chr1", start=100, end=200, type="exon", strand="+",
+                score=None, name="e1", feature_id="e1", parents=("t1", "t2"),
+                biotype=None, attributes="ID=e1;Parent=t1,t2", line=9,
+            ),
+        ]
+        build_annotation_db(rows=rows, db_path=db_path)
+
+        con = sqlite3.connect(db_path)
+        try:
+            stored = con.execute(
+                "SELECT parent, line FROM features ORDER BY parent"
+            ).fetchall()
+        finally:
+            con.close()
+        assert stored == [("t1", 9), ("t2", 9)]
 
 
 class TestTopLevelPaging:

@@ -312,6 +312,23 @@ that the implementation plan needs to be written and status: ready means it
 is ready to implement.  The other labels are self explanatory and should be
 used when appropriate.
 
+## Filing out-of-scope issues you find along the way
+
+If you notice a problem that is outside the scope of the current ticket --
+unrelated dead code, a stale doc, a missing test, a bug in a different area --
+and it does not block finishing the current implementation, file it as a new
+GitHub issue yourself. Don't ask first; this is pre-authorized.
+
+Give the issue a clear title and description (what you saw, where, why it
+matters), and apply the same labels described above (`type:`, `area:`,
+`status:`, `priority:`, `difficulty:`) so it slots into the existing
+triage flow. Then keep working on the original task -- filing the issue is a
+side note, not a detour.
+
+If the problem *does* block the current implementation, that's not this case:
+fix it, or stop and explain why you can't, rather than filing an issue and
+moving on.
+
 ## Running the app: one instance, not dev/prod
 
 Don't build or reason about a dev vs. production split for this repo. `docker
@@ -727,6 +744,24 @@ splits three ways, which matters because only one of the three should be
 Before adding a case to a dict shaped like this, check which of the three it
 is. Forcing the middle case into the first case's pattern is not more
 correct, it's a detector that starts guessing.
+
+**A registry pair -- "classified" and "no double-classification" -- has to be
+run together, not read one test at a time.** `node_types.py`'s
+`NODE_TYPES`/`EXCLUDED_LAUNCHES` split is the "genuinely derivable" pattern
+above, but it's a partition, not just a covering: every launcher must be
+classified (`test_every_launch_function_is_classified`, `TestExhaustiveness`
+in `backend/tests/pipelines/test_node_types.py`) *and* not classified as both
+(`test_no_launcher_is_both_used_and_excluded`). #355 fixed the first test for
+`launch_annotation_stats` with two independent commits -- one added a
+`NodeTypeSpec`, the other added the exclusion -- and both landed, which
+satisfied the test named in the issue's own Verification block while
+silently failing the second one in the same class. It stayed red until
+someone ran the whole file (fixed in
+[#366](https://github.com/syntheticgio/bioflow/pull/366)). When closing an
+exhaustiveness gap like this, run the full `TestExhaustiveness` class, not
+just the one test the bug report names -- a fix that adds an entry can
+collide with a fix that excludes it, and only the partition-completeness test
+catches the collision.
 
 ## Adding an AI-using feature
 

@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import mastheadImg from "./assets/broadhead-masthead.png";
-import { checkForUpdate, currentSettings, openBioFlow, otherStacks, runStack, status, stopStack, updateStack } from "./commands";
+import { checkForUpdate, currentSettings, listVersionOptions, openBioFlow, otherStacks, runStack, status, stopStack, updateStack, updateToStage } from "./commands";
 import { MigrateStorage } from "./MigrateStorage";
 import { PrefetchStep } from "./PrefetchStep";
 import { Settings } from "./Settings";
 import { SetupWizard } from "./SetupWizard";
 import { NodeScreen } from "./NodeScreen";
-import type { LauncherState, OtherStack, Settings as SettingsValues } from "./types";
-import { shouldPollForUpdates, updateAffordance } from "./update-logic";
+import type { LauncherState, OtherStack, Settings as SettingsValues, VersionOptions } from "./types";
+import { updateAffordance } from "./update-logic";
 import type { UpdateInputs } from "./update-logic";
 
 const STATUS_POLL_INTERVAL_MS = 3000;
@@ -24,6 +24,15 @@ const OTHER_STACKS_POLL_INTERVAL_MS = 30 * 1000;
 interface UpdateButtonProps extends UpdateInputs {
   busy: boolean;
   onUpdate: () => void;
+  onStageUpdate: (targetTag: string) => void;
+}
+
+function deriveVersionMode(bioflowTag: string, developerRepo: string | null): "release" | "alpha" | "beta" | "developer" {
+  if (developerRepo != null) return "developer";
+  if (bioflowTag === "latest") return "release";
+  if (bioflowTag.endsWith("-alpha")) return "alpha";
+  if (bioflowTag.endsWith("-beta")) return "beta";
+  return "release";
 }
 
 /** Renders `updateAffordance`'s three outcomes: nothing, a clickable
@@ -32,8 +41,8 @@ interface UpdateButtonProps extends UpdateInputs {
  * storage location and port while the stack is running. A control that
  * vanishes silently leaves a user who forgot their mode with no
  * explanation. */
-function UpdateButton({ bioflowTag, developerRepo, updateAvailable, busy, onUpdate }: UpdateButtonProps) {
-  const affordance = updateAffordance({ bioflowTag, developerRepo, updateAvailable });
+function UpdateButton({ bioflowTag, developerRepo, updateAvailable, versionOptions, busy, onUpdate, onStageUpdate }: UpdateButtonProps) {
+  const affordance = updateAffordance({ bioflowTag, developerRepo, updateAvailable, versionOptions });
 
   if (affordance.kind === "hidden") return null;
 
@@ -41,6 +50,18 @@ function UpdateButton({ bioflowTag, developerRepo, updateAvailable, busy, onUpda
     return (
       <button className="btn btn-warn" onClick={onUpdate} disabled={busy}>
         {busy ? "Updating…" : "Update available"}
+      </button>
+    );
+  }
+
+  if (affordance.kind === "stage-update") {
+    return (
+      <button
+        className="btn btn-warn"
+        onClick={() => onStageUpdate(affordance.targetTag)}
+        disabled={busy}
+      >
+        {busy ? "Updating…" : `Update to ${affordance.targetTag}`}
       </button>
     );
   }
@@ -64,6 +85,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMigrateStorage, setShowMigrateStorage] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [versionOptions, setVersionOptions] = useState<VersionOptions | null>(null);
   // Worktree stacks running alongside this one (#320). Empty on an ordinary
   // single-stack machine, in which case nothing renders.
   const [stacks, setStacks] = useState<OtherStack[]>([]);
@@ -159,21 +181,40 @@ export function App() {
   // already returns false for them without a network call, so this is about
   // not making a pointless IPC round-trip every five minutes.
   useEffect(() => {
-    if (state.kind !== "Running" || !shouldPollForUpdates(settings.bioflowTag, settings.developerRepo)) {
+    if (state.kind !== "Running") {
       setUpdateAvailable(false);
+      setVersionOptions(null);
       return;
     }
+
+    const mode = deriveVersionMode(settings.bioflowTag, settings.developerRepo);
     let cancelled = false;
-    async function poll() {
-      const available = await checkForUpdate();
-      if (!cancelled) setUpdateAvailable(available);
+
+    if (mode === "release") {
+      async function poll() {
+        const available = await checkForUpdate();
+        if (!cancelled) setUpdateAvailable(available);
+      }
+      poll();
+      const id = setInterval(poll, UPDATE_CHECK_POLL_INTERVAL_MS);
+      return () => {
+        cancelled = true;
+        clearInterval(id);
+      };
+    } else if (mode === "alpha" || mode === "beta") {
+      async function poll() {
+        const opts = await listVersionOptions();
+        if (!cancelled) setVersionOptions(opts);
+      }
+      poll();
+      const id = setInterval(poll, UPDATE_CHECK_POLL_INTERVAL_MS);
+      return () => {
+        cancelled = true;
+        clearInterval(id);
+      };
     }
-    poll();
-    const id = setInterval(poll, UPDATE_CHECK_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
+    setUpdateAvailable(false);
+    setVersionOptions(null);
   }, [state.kind, settings.bioflowTag, settings.developerRepo]);
 
   async function handleRun() {
@@ -207,6 +248,22 @@ export function App() {
     setError(null);
     try {
       await updateStack();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleStageUpdate(targetTag: string) {
+    const ok = window.confirm(
+      `This will update BioFlow from ${settings.bioflowTag} to ${targetTag} and restart the stack. Continue?`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await updateToStage(targetTag);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -400,8 +457,10 @@ export function App() {
                   bioflowTag={settings.bioflowTag}
                   developerRepo={settings.developerRepo}
                   updateAvailable={updateAvailable}
+                  versionOptions={versionOptions}
                   busy={busy}
                   onUpdate={handleUpdate}
+                  onStageUpdate={handleStageUpdate}
                 />
               </div>
             </div>

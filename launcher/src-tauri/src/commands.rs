@@ -348,6 +348,24 @@ pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
     }
 }
 
+#[tauri::command]
+pub async fn update_to_stage(app: State<'_, LauncherApp>, tag: String) -> Result<(), String> {
+    let install_dir = install_dir_str_blocking(&app).await.ok_or("not installed")?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::update_to_stage(&docker, &install_dir, &tag)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
+        actions::UpdateToStageOutcome::Updated => Ok(()),
+        actions::UpdateToStageOutcome::PullFailed { output }
+        | actions::UpdateToStageOutcome::RecreateFailed { output } => Err(output),
+    }
+}
+
 /// Per-OS starting points for the wizard's two editable questions (storage
 /// location, port -- always overridable, never a forced choice) plus
 /// `install_dir`, which is informational only: the launcher always installs

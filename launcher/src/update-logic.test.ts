@@ -1,89 +1,50 @@
-import { describe, expect, it } from "vitest";
-import { shouldPollForUpdates, updateAffordance } from "./update-logic";
+import { checkStageUpdate } from "./update-logic";
+import type { VersionOptions } from "./types";
 
-describe("updateAffordance", () => {
-  it("hides the button in release mode when nothing is newer", () => {
-    expect(
-      updateAffordance({ bioflowTag: "latest", developerRepo: null, updateAvailable: false }),
-    ).toEqual({ kind: "hidden" });
+describe("checkStageUpdate", () => {
+  const makeOptions = (alpha: string | null, beta: string | null): VersionOptions => ({
+    release: "latest",
+    alpha,
+    beta,
   });
 
-  it("offers the update in release mode when something is newer", () => {
-    expect(
-      updateAffordance({ bioflowTag: "latest", developerRepo: null, updateAvailable: true }),
-    ).toEqual({ kind: "available" });
+  it("returns higher version when both are same stage", () => {
+    const result = checkStageUpdate("0.3.0-alpha", makeOptions("0.4.0-alpha", null));
+    expect(result).toBe("0.4.0-alpha");
   });
 
-  it("suppresses in developer mode and points at Rebuild", () => {
-    expect(
-      updateAffordance({
-        bioflowTag: "latest",
-        developerRepo: "/home/me/bioflow",
-        updateAvailable: false,
-      }),
-    ).toEqual({
-      kind: "suppressed",
-      reason: "Developer mode — use Rebuild in Settings.",
-    });
+  it("returns later stage when version is same", () => {
+    const result = checkStageUpdate("0.3.0-alpha", makeOptions("0.3.0-alpha", "0.3.0-beta"));
+    expect(result).toBe("0.3.0-beta");
   });
 
-  it("suppresses in developer mode even if a check somehow reported true", () => {
-    // The backend already returns false here, but the button must not depend
-    // on that: a stale poll result from before a mode switch must not flash
-    // an Update button at a local build.
-    expect(
-      updateAffordance({
-        bioflowTag: "latest",
-        developerRepo: "/home/me/bioflow",
-        updateAvailable: true,
-      }).kind,
-    ).toBe("suppressed");
+  it("returns null when only earlier stage is available", () => {
+    const result = checkStageUpdate("0.4.0-beta", makeOptions("0.4.0-alpha", "0.4.0-beta"));
+    expect(result).toBeNull();
   });
 
-  it("suppresses on a pinned alpha and names the tag", () => {
-    expect(
-      updateAffordance({ bioflowTag: "0.3.0-alpha", developerRepo: null, updateAvailable: false }),
-    ).toEqual({
-      kind: "suppressed",
-      reason: "Pinned to 0.3.0-alpha — change version in Settings.",
-    });
+  it("returns null when nothing is available", () => {
+    const result = checkStageUpdate("0.3.0-alpha", makeOptions(null, null));
+    expect(result).toBeNull();
   });
 
-  it("suppresses on a pinned beta and names the tag", () => {
-    expect(
-      updateAffordance({ bioflowTag: "0.4.0-beta", developerRepo: null, updateAvailable: false }),
-    ).toEqual({
-      kind: "suppressed",
-      reason: "Pinned to 0.4.0-beta — change version in Settings.",
-    });
+  it("returns null for lower version", () => {
+    const result = checkStageUpdate("0.3.0-alpha", makeOptions("0.2.0-alpha", null));
+    expect(result).toBeNull();
   });
 
-  it("developer mode wins over a pinned tag", () => {
-    expect(
-      updateAffordance({
-        bioflowTag: "0.3.0-alpha",
-        developerRepo: "/home/me/bioflow",
-        updateAvailable: false,
-      }).kind,
-    ).toBe("suppressed");
-    expect(
-      updateAffordance({
-        bioflowTag: "0.3.0-alpha",
-        developerRepo: "/home/me/bioflow",
-        updateAvailable: false,
-      }),
-    ).toEqual({
-      kind: "suppressed",
-      reason: "Developer mode — use Rebuild in Settings.",
-    });
+  it("returns null for release mode", () => {
+    const result = checkStageUpdate("latest", makeOptions("0.4.0-alpha", null));
+    expect(result).toBeNull();
   });
-});
 
-describe("shouldPollForUpdates", () => {
-  it("polls only in release mode", () => {
-    expect(shouldPollForUpdates("latest", null)).toBe(true);
-    expect(shouldPollForUpdates("latest", "/home/me/bioflow")).toBe(false);
-    expect(shouldPollForUpdates("0.3.0-alpha", null)).toBe(false);
-    expect(shouldPollForUpdates("0.4.0-beta", null)).toBe(false);
+  it("picks the highest version when multiple are forward", () => {
+    const result = checkStageUpdate("0.3.0-alpha", makeOptions("0.5.0-alpha", "0.4.0-beta"));
+    expect(result).toBe("0.5.0-alpha");
+  });
+
+  it("returns beta over alpha at same higher version", () => {
+    const result = checkStageUpdate("0.3.0-alpha", makeOptions("0.4.0-alpha", "0.4.0-beta"));
+    expect(result).toBe("0.4.0-beta");
   });
 });

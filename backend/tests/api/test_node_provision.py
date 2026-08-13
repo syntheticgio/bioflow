@@ -8,6 +8,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.errors import register_exception_handlers
 from app.models.node_provision import NodeProvisionTask
 
 # The autouse cleanup fixture below queries NodeProvisionTask after every test
@@ -22,6 +23,7 @@ def _app():
     """Bare FastAPI app with only the nodes router."""
     app = FastAPI()
     app.include_router(pytest.importorskip("app.api.v1.nodes").router)
+    register_exception_handlers(app)
     return app
 
 
@@ -384,3 +386,46 @@ async def test_provision_fails_loudly_when_key_cannot_be_installed():
     assert "docker pull" not in commands
 
     assert await Node.find_one(Node.node_id == "badkey") is None
+
+
+# ---- regression: import_private_key receives a PEM string, not a StringIO ----
+
+async def test_provision_private_key_uses_real_import_private_key():
+    """Regression guard for issue #352: `import_private_key` was called with
+    `io.StringIO(req.private_key)` instead of the PEM string directly.
+    Because every existing test mocked the entire `asyncssh` module, the
+    signature mismatch was invisible — `io.StringIO` has no `.startswith`,
+    which asyncssh relies on internally.
+
+    This test generates a real key pair (so `import_private_key` runs for
+    real) and only mocks `asyncssh.connect` and `asyncssh.scp`, not the
+    key-parsing path itself. If the StringIO misuse returns, the real
+    `import_private_key` will raise `AttributeError` before we ever reach
+    the mocked connect.
+    """
+    from app.api.v1.nodes import ProvisionRequest, _provision_node
+    from app.services.node_ssh import generate_keypair
+    from app.models.node import Node
+
+    private_pem, public_line = generate_keypair("regnode")
+
+    req = ProvisionRequest(
+        host="10.0.0.11", username="ops",
+        private_key=private_pem, node_name="regnode",
+    )
+
+    with patch("asyncssh.connect", AsyncMock()) as connect_mock, \
+         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("pathlib.Path.exists", return_value=True), \
+         patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
+        conn = connect_mock.return_value
+        conn.run = AsyncMock(return_value=type("R", (), {
+            "exit_status": 0, "stdout": "", "stderr": "",
+        })())
+        await _provision_node("t-reg-352", req)
+
+    # If we get here, import_private_key succeeded on the real PEM string.
+    node = await Node.find_one(Node.node_id == "regnode")
+    assert node is not None
+    assert node.ssh_host == "10.0.0.11"
+    await node.delete()

@@ -72,6 +72,13 @@ export interface OnDemandComputeProps {
  * `TranscriptQc`, `AnnotationResults`.  `DetailPanel`'s FASTQ QC is a
  * different seam (guards two job types, already has its own in-flight guard)
  * and does not use this component.
+ *
+ * Supersedes the `useComputeResults` hook from #299, which extracted the
+ * mutation alone (invalidate `["jobs"]` + toast) from the same three views.
+ * That hook is the mutation block below; this component adds the empty state,
+ * the recompute button, and the in-flight guard the hook could not provide,
+ * so all three of its consumers moved here and it was removed rather than
+ * left as a second way to do the same thing.
  */
 export function OnDemandCompute({
   objectId,

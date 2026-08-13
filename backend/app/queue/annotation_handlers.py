@@ -10,6 +10,7 @@ accumulator and the database builder, because a 3M-line GFF3 read twice is
 two minutes of I/O for numbers that could have been counted the first time.
 """
 
+import dataclasses
 import gzip
 from pathlib import Path
 
@@ -19,12 +20,14 @@ from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import (
     annotation_db,
+    annotation_export,
     annotation_hierarchy,
     annotation_parse,
     annotation_stats,
     genbank_parse,
     genbank_reader,
 )
+from app.queue.pipeline_handlers import _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
 
 log = get_logger(__name__)
@@ -74,6 +77,9 @@ def _line_rows(parse_line, source: Path, ctx, acc, header: list[str], fmt: str):
             if feature is None:
                 acc.add_malformed()
                 continue
+            # enumerate() is 0-based; source lines are 1-based, and the export
+            # re-scan counts the same way (AE-1).
+            feature = dataclasses.replace(feature, line=i + 1)
             acc.add(feature)
             if feature.attributes:
                 # Re-parses the attribute column that parse_line already
@@ -226,6 +232,9 @@ def run_annotation_stats(ctx: JobContext) -> dict:
         )
         if parsed_lengths:
             acc.set_contig_lengths(parsed_lengths)
+            # A GenBank file carries its own lengths, so it is not waiting on
+            # a reference and must not be re-analyzed by ingest's backfill.
+            extra_facts["annotation_contig_lengths_known"] = True
 
     ctx.progress(phase="summarize", pct=0.9, message="summarizing")
 
@@ -235,6 +244,14 @@ def run_annotation_stats(ctx: JobContext) -> dict:
 
     facts = {
         "annotation_stats_status": "ok",
+        # From the payload, not from `contig_lengths` being non-empty: a
+        # GenBank file states its own lengths on each LOCUS line and needs no
+        # reference, so emptiness of the payload's list is not the same
+        # question. The launcher is the only place that knows whether a
+        # reference was looked for and found.
+        "annotation_contig_lengths_known": bool(
+            ctx.payload.get("contig_lengths_known")
+        ),
         **acc.finish(),
         **annotation_stats.parse_header_directives(header),
         **extra_facts,
@@ -252,3 +269,102 @@ def run_annotation_stats(ctx: JobContext) -> dict:
         unresolved=unresolved,
     )
     return {"object_id": str(object_id), "facts": facts}
+
+
+@handler(
+    "export_annotation_subset",
+    # THREAD for the same reason run_annotation_stats is: the work is a
+    # SQLite read and a file copy in this process, with no binary to spawn.
+    mode=HandlerMode.THREAD,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+)
+def export_annotation_subset(ctx: JobContext) -> dict:
+    """Write the filtered subset of an annotation to a new file.
+
+    The filter arrives as it was applied in the table and is passed straight
+    through to `closure_lines`. This handler never re-derives it: that is
+    what keeps the exported subset and the displayed table from drifting.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("export_annotation_subset requires an 'object_id'")
+
+    fmt = ctx.payload.get("format_kind")
+    if fmt == "genbank":
+        raise PermanentError(
+            "cannot export a subset of a genbank annotation: its features span "
+            "several lines and its segment rows correspond to no single line"
+        )
+    if fmt not in ("gff", "gtf", "bed"):
+        raise PermanentError(f"export_annotation_subset cannot read format {fmt!r}")
+
+    source = Path(ctx.payload["annotation_path"])
+    if not source.exists():
+        raise PermanentError(f"annotation file is missing: {source}")
+
+    db_path = Path(ctx.payload["db_path"])
+    if not db_path.exists():
+        raise PermanentError(
+            "this annotation has no computed results; compute them before exporting"
+        )
+
+    raw_filters = ctx.payload.get("filters") or {}
+    status = raw_filters.get("parent_status")
+    filters = annotation_db.FeatureFilters(
+        contig=raw_filters.get("contig"),
+        start_min=raw_filters.get("start_min"),
+        start_max=raw_filters.get("start_max"),
+        feature_type=raw_filters.get("feature_type"),
+        biotype=raw_filters.get("biotype"),
+        name_query=raw_filters.get("name_query"),
+        strand=raw_filters.get("strand"),
+        top_level_only=False,
+        parent_status=tuple(status) if status else None,
+    )
+
+    ctx.progress(phase="closure", pct=0.2, message="selecting features")
+    lines = annotation_export.closure_lines(db_path=db_path, filters=filters)
+    if not lines:
+        raise PermanentError(
+            "no features matched the requested filters, so there is nothing to export"
+        )
+
+    ctx.progress(phase="write", pct=0.5, message="writing subset")
+    header: list[str] = []
+    with _open_text(source) as fh:
+        for i, raw in enumerate(fh):
+            if i >= _HEADER_SCAN_LINES:
+                break
+            stripped = raw.rstrip("\n")
+            if stripped.startswith("#"):
+                header.append(stripped)
+
+    # _prepare_workdir, not a bare tmp path: it puts the output under
+    # settings.tmp_dir, which shares a filesystem with objects/, so ingesting
+    # the finished file is an atomic rename rather than a copy. It also wipes
+    # the directory on entry, so a retry does not inherit a half-written file.
+    work = _prepare_workdir(ctx, "annotation_export")
+    dest = work / ctx.payload["output_name"]
+    try:
+        written = annotation_export.write_subset(
+            source=source, dest=dest, db_path=db_path, lines=lines,
+            header=header, fmt=fmt,
+        )
+    except annotation_export.StaleIndexError as e:
+        # Not retryable: the same job would read the same mismatched file.
+        # The index has to be recomputed first, which is a user action.
+        raise PermanentError(
+            f"{e} -- recompute this annotation's results and export again"
+        ) from e
+
+    log.info(
+        "annotation_subset_exported",
+        object_id=str(object_id),
+        features=written,
+    )
+    return {
+        "object_id": str(object_id),
+        "feature_count": written,
+        "output": {"tmp_path": str(dest), "name": ctx.payload["output_name"]},
+    }

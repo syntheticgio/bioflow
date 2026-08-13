@@ -1157,6 +1157,55 @@ export const api = {
     );
   },
 
+  /** Matched-vs-exported feature counts for the current filter, before
+   *  committing to an export -- the closure (exported) is routinely larger
+   *  than the raw filter match, since it pulls in ancestors and descendants
+   *  to keep the output structurally valid. */
+  annotationExportCount: (objectId: string, q: FeatureQuery) => {
+    const p = new URLSearchParams();
+    if (q.contig) p.set("contig", q.contig);
+    if (q.startMin != null) p.set("start_min", String(q.startMin));
+    if (q.startMax != null) p.set("start_max", String(q.startMax));
+    if (q.featureType) p.set("feature_type", q.featureType);
+    if (q.biotype) p.set("biotype", q.biotype);
+    if (q.nameQuery) p.set("name_query", q.nameQuery);
+    if (q.strand) p.set("strand", q.strand);
+    if (q.view === "unresolved") p.set("unresolved", "true");
+    return request<{ matched: number; exported: number }>(
+      `/pipelines/annotationstats/export-count/${objectId}?${p.toString()}`,
+    );
+  },
+
+  /** Queue a subset export using the filters currently applied in the
+   *  table. */
+  launchAnnotationExport: (
+    objectId: string,
+    q: {
+      contig?: string;
+      startMin?: number;
+      startMax?: number;
+      featureType?: string;
+      biotype?: string;
+      nameQuery?: string;
+      strand?: string;
+      view?: "all" | "unresolved";
+    },
+  ) =>
+    request<JobSummary>(`/pipelines/annotationstats/export`, {
+      method: "POST",
+      body: JSON.stringify({
+        object_id: objectId,
+        contig: q.contig || undefined,
+        start_min: q.startMin ?? undefined,
+        start_max: q.startMax ?? undefined,
+        feature_type: q.featureType || undefined,
+        biotype: q.biotype || undefined,
+        name_query: q.nameQuery || undefined,
+        strand: q.strand || undefined,
+        unresolved: q.view === "unresolved",
+      }),
+    }),
+
   /** Every child of one feature, for an expanded row. `depth_cap` is the
    *  server's recursion bound, echoed back so the client doesn't hardcode
    *  a second copy of the same number. */

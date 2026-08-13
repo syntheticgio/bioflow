@@ -16,6 +16,7 @@ from app.logging import get_logger
 from app.models import (
     DataObject,
     FormatInfo,
+    FormatKind,
     IoClass,
     JobClass,
     JobResources,
@@ -233,6 +234,82 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
         assembly=assembly_enrichment.get("accession"),
         assembly_fields=len(assembly_enrichment.get("values", {})),
     )
+
+    # After the log, so an annotation that cannot be queued still records a
+    # completed ingest. `obj` carries the pre-update snapshot, so re-read the
+    # fields the eligibility rule needs from what was actually written.
+    obj.format = update.get(DataObject.format, obj.format)
+    obj.facts = update.get(DataObject.facts, obj.facts)
+    await _auto_analyze_after_ingest(obj, owner=owner)
+
+
+async def _auto_analyze_after_ingest(obj: DataObject, *, owner: str) -> None:
+    """Analyze annotations without being asked, from either direction.
+
+    Two triggers, because one loses a race. Analyzing an annotation when it
+    finishes ingesting is right whenever its reference is already READY --
+    but `resolve_annotation_reference` filters candidates to
+    `status=READY, role=REFERENCE`, and an NCBI download stages a genome and
+    its GFF concurrently with the FASTA's role assigned only after a network
+    lookup. An annotation winning that race is analyzed with no contig
+    lengths: null coverage on every contig, no track axis, and nothing
+    saying why. So a reference landing also sweeps the project for
+    annotations that wanted one.
+
+    That sweep is deliberately not restricted to referenceless analyses --
+    it also picks up never-analyzed files, which backfills annotations
+    ingested before this feature existed. The dedup key makes the redundancy
+    free.
+
+    Never raises, and one failure never stops the rest. The object is
+    already READY by the time this runs and must stay that way: a malformed
+    annotation is a failed recoverable computation, not a failed ingest.
+    """
+    from app.errors import AppError
+    from app.services import pipeline_service
+
+    async def _launch(target: DataObject) -> None:
+        try:
+            await pipeline_service.launch_annotation_stats(
+                object_id=target.id, owner=owner
+            )
+        except AppError as e:
+            log.warning(
+                "annotation_autoanalysis_failed",
+                object_id=str(target.id),
+                error=str(e),
+            )
+
+    if pipeline_service.should_auto_analyze_annotation(
+        kind=obj.format.kind, sidecar_of=obj.sidecar_of, facts=obj.facts
+    ):
+        await _launch(obj)
+        return
+
+    # Trigger 2. Only a reference gives an annotation the coordinate axis it
+    # was missing, so a plain FASTA (protein.faa, cds_from_genomic.fna) is
+    # not a reason to re-analyze anything.
+    if obj.format.kind is not FormatKind.FASTA or obj.role is not ObjectRole.REFERENCE:
+        return
+
+    # One project-scoped query regardless of how many annotations it holds;
+    # the eligibility rule then filters in Python so both triggers share
+    # exactly one definition of who qualifies.
+    candidates = await DataObject.find(
+        DataObject.project_id == obj.project_id,
+        DataObject.status == ObjectStatus.READY,
+        {
+            "format.kind": {
+                "$in": [k.value for k in pipeline_service._ANNOTATION_STATS_FORMATS]
+            }
+        },
+    ).to_list()
+
+    for ann in candidates:
+        if pipeline_service.should_auto_analyze_annotation(
+            kind=ann.format.kind, sidecar_of=ann.sidecar_of, facts=ann.facts
+        ):
+            await _launch(ann)
 
 
 async def _link_mate(obj: DataObject) -> None:
@@ -1653,6 +1730,61 @@ async def _apply_run_annotation_stats(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_export_annotation_subset(result: dict, *, owner: str) -> None:
+    """Register an exported annotation subset as a new object.
+
+    `derived_from` the source annotation, so the subset's lineage is
+    inspectable and the explorer can relate the two (AE-19).
+
+    Deliberately carries no annotation results facts (AE-20): the new object
+    opens to a "Compute results" button like any other annotation. Whether
+    ingestion should trigger analysis automatically is #298's question, and
+    answering it here by side effect would pre-empt it.
+    """
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("annotation_export_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+
+    try:
+        subset = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ANNOTATION,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={"annotation_subset_feature_count": result.get("feature_count")},
+            # The subset describes the same biology as its source.
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "annotation_export_ingest_failed", object_id=object_id, error=str(e)
+        )
+        return
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [subset.id], owner=subset.owner)
+
+    log.info(
+        "annotation_export_applied",
+        object_id=object_id,
+        subset_id=str(subset.id),
+    )
+
+
 async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     """Record compleasm's completeness scores on the assembly it described.
 
@@ -2632,6 +2764,7 @@ _APPLIERS = {
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
+    "export_annotation_subset": _apply_export_annotation_subset,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,

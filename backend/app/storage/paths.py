@@ -1,10 +1,10 @@
 """Path construction and validation for the content-addressed store."""
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from app.config import settings
-from app.errors import ValidationError
+from app.errors import NotFoundError, ValidationError
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
@@ -65,3 +65,28 @@ def resolve_registerable(path_str: str) -> Path:
         f"Path is outside the allowed roots: {real}",
         details={"allowed_roots": [str(r) for r in roots]},
     )
+
+
+def resolve_report_file(root: Path, report_path: str) -> Path:
+    """Resolve a client-supplied report path inside `root`, or raise.
+
+    Three steps, in this order. Segments are rejected textually first, so a
+    crafted path never reaches the filesystem. The result is then resolved and
+    re-checked against the root, which is what catches a symlink whose target
+    escapes the tree -- the one case the textual pass cannot see. Finally the
+    target must be a regular file: that is what rejects the root directory
+    itself, and it is load-bearing rather than decorative.
+
+    Raises NotFoundError rather than a permission error for every rejection:
+    the caller has already proven it owns the object, so the only thing a
+    distinct status code would reveal is whether a given path exists.
+    """
+    parts = PurePosixPath(report_path).parts
+    if any(p in ("..", "") for p in parts) or PurePosixPath(report_path).is_absolute():
+        raise NotFoundError(f"No such report: {report_path}")
+
+    target = (root / report_path).resolve()
+    if not target.is_relative_to(root.resolve()) or not target.is_file():
+        raise NotFoundError(f"No such report: {report_path}")
+
+    return target

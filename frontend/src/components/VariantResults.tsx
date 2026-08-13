@@ -5,6 +5,7 @@ import { AiSummary } from "./AiSummary";
 import { FactsColumns } from "./FactsColumns";
 import { NodeSelector } from "./NodeSelector";
 import { OnDemandCompute } from "./OnDemandCompute";
+import { Stat } from "./Stat";
 import { DistributionChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
@@ -214,24 +215,6 @@ function SummaryRow({ summary }: { summary: NonNullable<VcfStatsFacts["vcf_stats
       {summary.multiallelic > 0 && (
         <Stat label="Multiallelic" value={summary.multiallelic.toLocaleString()} />
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div
-        style={{
-          textTransform: "uppercase",
-          fontSize: 11,
-          letterSpacing: "0.06em",
-          color: "var(--text-faint)",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 600 }}>{value}</div>
     </div>
   );
 }

@@ -834,6 +834,25 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only genome annotation — gene density facts on an existing
         # assembly, same class as gc_tracks and meryl.
         "pipeline_service.launch_annotate_genome",
+        # On-demand Results computation over an existing GFF/GTF/BED/GenBank
+        # annotation -- feature summary + searchable table as facts and a
+        # SQLite sidecar, no output object. Triggered automatically at
+        # ingest (queue/results.py) and on demand via the REST endpoint, same
+        # class as gc_tracks/meryl/annotate_genome. Also spans four input
+        # formats (_ANNOTATION_STATS_FORMATS), which a single PortSpec
+        # can't represent the way vcf_stats/bam_stats do for their one format.
+        # TODO(#371): a canvas node type may still be worth adding so a
+        # workflow can express "compute annotation stats" as a graph step.
+        "pipeline_service.launch_annotation_stats",
+        # User-triggered from the Results tab's feature table, with an
+        # arbitrary filter chosen interactively rather than wired from an
+        # upstream node's output — not a graph step in the sense the other
+        # entries here are. It does produce a derived object (unlike its
+        # siblings above), which is exactly why a real canvas node type is
+        # worth designing properly rather than shoehorning in now: filters
+        # have no fixed port shape to express as PortSpec inputs.
+        # TODO(#371): design and add a canvas node type.
+        "pipeline_service.launch_annotation_export",
     }
 )
 

@@ -7,6 +7,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.errors import register_exception_handlers
 from app.models.node import Node
 from app.models.node_update import NodeUpdateTask
 
@@ -17,6 +18,7 @@ pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop
 def app():
     app = FastAPI()
     app.include_router(pytest.importorskip("app.api.v1.nodes").router)
+    register_exception_handlers(app)
     return app
 
 
@@ -39,7 +41,7 @@ async def test_update_rejects_node_without_stored_key(client):
     await Node(node_id="manual").insert()
     res = await client.post("/nodes/manual/update", json={"drain": True})
     assert res.status_code == 409
-    assert "provision" in res.json()["detail"].lower()
+    assert "provision" in res.json()["message"].lower()
 
 
 async def test_update_rejects_unknown_node(client):
@@ -54,7 +56,7 @@ async def test_update_rejects_concurrent_update(client):
 
     res = await client.post("/nodes/busy/update", json={"drain": True})
     assert res.status_code == 409
-    assert "already" in res.json()["detail"].lower()
+    assert "already" in res.json()["message"].lower()
 
 
 async def test_update_starts_and_returns_task_id(client):
@@ -94,6 +96,7 @@ async def test_update_status_returns_progress(client):
 async def test_update_status_404_for_unknown_task(client):
     res = await client.get("/nodes/update/nope")
     assert res.status_code == 404
+    assert "not found" in res.json()["message"].lower()
 
 
 async def test_orphaned_updates_are_failed_on_startup():

@@ -17,6 +17,7 @@ from pydantic import BaseModel, model_validator
 
 from app.config import settings
 from app.db.redis_client import get_redis
+from app.errors import ConflictError, NotFoundError, ValidationError
 from app.logging import get_logger
 from app.models.node import Node
 from app.models.node_provision import NodeProvisionTask
@@ -362,8 +363,7 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
 
     try:
         if req.private_key:
-            import io
-            key = asyncssh.import_private_key(io.StringIO(req.private_key))
+            key = asyncssh.import_private_key(req.private_key)
             connect_kw = {"client_keys": [key]}
         else:
             connect_kw = {"password": req.password}
@@ -531,7 +531,7 @@ async def enroll_node(payload: dict) -> dict:
     version = str(payload.get("version") or "").strip() or None
 
     if not node_id:
-        raise HTTPException(422, "node_id is required")
+        raise ValidationError("node_id is required")
 
     # ---- verify enrollment key ----
     if settings.enrollment_key != _ENROLL_KEY_EMPTY_SENTINEL:
@@ -597,12 +597,11 @@ async def update_node(node_id: str, req: UpdateRequest) -> dict:
     """Pull the current backend image on a node and restart its worker."""
     node = await Node.find_one(Node.node_id == node_id)
     if node is None:
-        raise HTTPException(404, f"Node {node_id!r} not found")
+        raise NotFoundError(f"Node {node_id!r} not found")
     if node.ssh_key_enc is None:
-        raise HTTPException(
-            409,
+        raise ConflictError(
             f"Node {node_id!r} was not provisioned from BioFlow, so there is no "
-            "stored key to reach it with. Re-provision it to enable updates.",
+            "stored key to reach it with. Re-provision it to enable updates."
         )
 
     running = await NodeUpdateTask.find_one(
@@ -610,7 +609,7 @@ async def update_node(node_id: str, req: UpdateRequest) -> dict:
         NodeUpdateTask.status == "updating",
     )
     if running is not None:
-        raise HTTPException(409, f"Node {node_id!r} is already being updated.")
+        raise ConflictError(f"Node {node_id!r} is already being updated.")
 
     task_doc = NodeUpdateTask(
         node_id=node_id,
@@ -635,7 +634,7 @@ async def update_status(task_id: str) -> dict:
     """Poll the status of an update task."""
     task = await NodeUpdateTask.find_one(NodeUpdateTask.task_id == task_id)
     if task is None:
-        raise HTTPException(404, f"Update task {task_id!r} not found")
+        raise NotFoundError(f"Update task {task_id!r} not found")
     return {
         "task_id": task.task_id,
         "status": task.status,
@@ -660,7 +659,7 @@ async def node_status(node_id: str) -> dict:
     """
     node = await Node.find_one(Node.node_id == node_id)
     if not node:
-        raise HTTPException(404, f"Node {node_id!r} not found")
+        raise NotFoundError(f"Node {node_id!r} not found")
     return {
         "node_id": node.node_id,
         "status": node.status,
@@ -676,7 +675,7 @@ async def revoke_node(node_id: str) -> dict:
     """
     node = await Node.find_one(Node.node_id == node_id)
     if not node:
-        raise HTTPException(404, f"Node {node_id!r} not found")
+        raise NotFoundError(f"Node {node_id!r} not found")
     node.status = "revoked"
     await node.save()
     log.info("node_revoked", node_id=node_id)
@@ -705,7 +704,7 @@ async def provision_status(task_id: str):
         NodeProvisionTask.task_id == task_id
     )
     if not task_doc:
-        raise HTTPException(404, f"Provisioning task {task_id!r} not found")
+        raise NotFoundError(f"Provisioning task {task_id!r} not found")
     return {
         "task_id": task_doc.task_id,
         "status": task_doc.status,

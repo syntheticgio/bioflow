@@ -34,6 +34,16 @@ class Feature:
     parents: tuple[str, ...]
     biotype: str | None
     attributes: str | None
+    # The 1-based source line this feature was parsed from, or None when the
+    # feature does not correspond to a single line. Set by the handler's read
+    # loop, not by the parse functions -- they take one string and cannot know
+    # where it came from.
+    #
+    # None for GenBank: a GenBank feature spans a location line plus
+    # continuation-wrapped qualifiers, and its segment children are synthetic
+    # rows matching no line at all. Subset export refuses GenBank for exactly
+    # this reason (AE-2, AE-25).
+    line: int | None = None
 
 
 # Lines that are structural rather than data, in any of the three formats.

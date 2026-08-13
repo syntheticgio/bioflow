@@ -27,11 +27,12 @@ concurrency:
 jobs:
   version-guard:
     name: Tag matches Cargo.toml
-    if: startsWith(github.ref, 'refs/tags/launcher-v')
+    if: startsWith(github.ref, 'refs/tags/launcher-v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
+      - if: startsWith(github.ref, 'refs/tags/launcher-v')
+        run: ops/check_tag_matches_version.sh "${{ github.ref_name }}"
 
   # The build itself lives in launcher-build.yml, a reusable workflow shared
   # with release.yml's combined-release path (#335): two copies of a signing

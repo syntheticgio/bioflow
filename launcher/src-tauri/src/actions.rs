@@ -8,7 +8,10 @@
 //! error states the spec requires ("None of them is a generic failure
 //! dialog").
 
+use std::path::Path;
+
 use crate::docker::{ActionResult, DockerBackend};
+use crate::update_check;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
@@ -110,6 +113,45 @@ pub fn update<D: DockerBackend>(docker: &D, install_dir: &str) -> UpdateOutcome 
     match docker.up(install_dir) {
         ActionResult::Ok => UpdateOutcome::Updated,
         ActionResult::Failed { output } => UpdateOutcome::RecreateFailed { output },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UpdateToStageOutcome {
+    Updated,
+    PullFailed { output: String },
+    RecreateFailed { output: String },
+}
+
+/// Rewrites BIOFLOW_TAG in .env, pulls new images, then recreates the stack.
+/// Crossing a stage boundary is an explicit user action (confirmed in the UI),
+/// so this function only runs after the user clicked through a confirmation
+/// dialog — it never runs automatically.
+pub fn update_to_stage<D: DockerBackend>(
+    docker: &D,
+    install_dir: &str,
+    new_tag: &str,
+) -> UpdateToStageOutcome {
+    // 1. Rewrite BIOFLOW_TAG in .env
+    let env_path = Path::new(install_dir).join(".env");
+    let contents = std::fs::read_to_string(&env_path).unwrap_or_default();
+    let updated = update_check::set_bioflow_tag(&contents, new_tag);
+    if std::fs::write(&env_path, updated).is_err() {
+        return UpdateToStageOutcome::PullFailed {
+            output: "Failed to update .env".to_string(),
+        };
+    }
+
+    // 2. Pull new images
+    match docker.pull(install_dir) {
+        ActionResult::Ok => {}
+        ActionResult::Failed { output } => return UpdateToStageOutcome::PullFailed { output },
+    }
+
+    // 3. Recreate containers
+    match docker.up(install_dir) {
+        ActionResult::Ok => UpdateToStageOutcome::Updated,
+        ActionResult::Failed { output } => UpdateToStageOutcome::RecreateFailed { output },
     }
 }
 
@@ -215,5 +257,72 @@ mod tests {
                 output: "disk full".to_string()
             }
         );
+    }
+
+    #[test]
+    fn update_to_stage_success() {
+        let docker = FakeDocker::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let env_path = dir.path().join(".env");
+        std::fs::write(&env_path, "BIOINFO_HOME=/data\nBIOFLOW_TAG=0.3.0-alpha\n").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
+        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        assert_eq!(outcome, UpdateToStageOutcome::Updated);
+
+        let new_env = std::fs::read_to_string(&env_path).unwrap();
+        assert!(new_env.contains("BIOFLOW_TAG=0.4.0-alpha"));
+        assert!(!new_env.contains("BIOFLOW_TAG=0.3.0-alpha"));
+    }
+
+    #[test]
+    fn update_to_stage_reports_pull_failure() {
+        let docker = FakeDocker::new();
+        *docker.pull_result.borrow_mut() = ActionResult::Failed {
+            output: "registry unreachable".to_string(),
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(".env"), "BIOFLOW_TAG=0.3.0-alpha\n").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
+        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        assert_eq!(
+            outcome,
+            UpdateToStageOutcome::PullFailed {
+                output: "registry unreachable".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn update_to_stage_reports_recreate_failure() {
+        let docker = FakeDocker::new();
+        *docker.up_result.borrow_mut() = ActionResult::Failed {
+            output: "disk full".to_string(),
+        };
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join(".env"), "BIOFLOW_TAG=0.3.0-alpha\n").unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
+        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        assert_eq!(
+            outcome,
+            UpdateToStageOutcome::RecreateFailed {
+                output: "disk full".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn update_to_stage_rewrites_env_before_pull() {
+        let docker = FakeDocker::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let dir_str = dir.path().to_string_lossy().to_string();
+
+        let outcome = update_to_stage(&docker, &dir_str, "0.4.0-alpha");
+        assert_eq!(outcome, UpdateToStageOutcome::Updated);
+
+        let new_env = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert!(new_env.contains("BIOFLOW_TAG=0.4.0-alpha"));
     }
 }
