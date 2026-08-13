@@ -144,6 +144,7 @@ def write_subset(
     lines: set[int],
     verify: dict[int, dict] | None,
     parse_line=None,
+    check_cancel=None,
 ) -> int:
     """Copy `lines` from `source` to `dest`, header first, in file order.
 
@@ -163,6 +164,10 @@ def write_subset(
     every line -- the formats are structurally different, not just
     differently named.
 
+    `check_cancel` is called every 100,000 lines when provided, matching
+    `_line_rows`'s cadence -- the same checkpoint that lets a queued job
+    respond to cancellation during a multi-million-line scan.
+
     Headers are read from the file directly rather than through
     `run_annotation_stats`'s `_HEADER_SCAN_LINES`, which bounds what is
     *displayed* and would silently truncate a long ##sequence-region block.
@@ -175,6 +180,8 @@ def write_subset(
     with open(source, errors="replace") as fh, open(dest, "w") as out:
         in_header = True
         for i, line in enumerate(fh, start=1):
+            if check_cancel is not None and i % 100_000 == 0:
+                check_cancel()
             stripped = line.rstrip("\n")
             if in_header and stripped.startswith("#"):
                 out.write(line if line.endswith("\n") else line + "\n")

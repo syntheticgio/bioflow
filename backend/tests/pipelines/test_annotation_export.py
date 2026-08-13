@@ -202,6 +202,32 @@ class TestWriteSubset:
         )
         assert 'gene_id "g1"' in out.read_text()
 
+    def test_calls_check_cancel_periodically(self, tmp_path):
+        """A user who cancels an in-flight export must be able to stop it
+        before a multi-million-line file finishes its single sequential
+        pass -- matching the checkpoint _line_rows already has."""
+        src = tmp_path / "a.gff3"
+        # 250_001 lines so the loop crosses the 100_000 and 200_000 marks.
+        src.write_text(
+            "".join(f"chr1\tX\tgene\t{i}\t{i}\t.\t+\t.\tID=g{i}\n" for i in range(1, 250_002))
+        )
+        out = tmp_path / "out.gff3"
+        calls = []
+        write_subset(
+            source=src, dest=out, lines={1}, verify=None,
+            check_cancel=lambda: calls.append(1),
+        )
+        assert len(calls) == 2
+
+    def test_check_cancel_is_optional(self, tmp_path):
+        """Every existing caller that doesn't pass check_cancel must keep
+        working unchanged."""
+        src = tmp_path / "a.gff3"
+        src.write_text("chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1\n")
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines={1}, verify=None)
+        assert "ID=g1" in out.read_text()
+
 
 class TestSubsetName:
     def test_uses_a_single_filter(self):

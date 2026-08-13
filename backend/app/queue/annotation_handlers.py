@@ -348,7 +348,7 @@ def run_annotation_subset_export(ctx: JobContext) -> dict:
     try:
         exported = annotation_export.write_subset(
             source=source, dest=dest, lines=lines, verify=verify,
-            parse_line=parse_line,
+            parse_line=parse_line, check_cancel=ctx.check_cancel,
         )
     except annotation_export.ExportMismatch as e:
         dest.unlink(missing_ok=True)
