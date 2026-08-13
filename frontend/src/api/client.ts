@@ -1164,6 +1164,8 @@ export const api = {
   annotationExportCount: (objectId: string, q: FeatureQuery) => {
     const p = new URLSearchParams();
     if (q.contig) p.set("contig", q.contig);
+    if (q.startMin != null) p.set("start_min", String(q.startMin));
+    if (q.startMax != null) p.set("start_max", String(q.startMax));
     if (q.featureType) p.set("feature_type", q.featureType);
     if (q.biotype) p.set("biotype", q.biotype);
     if (q.nameQuery) p.set("name_query", q.nameQuery);
@@ -1180,6 +1182,8 @@ export const api = {
     objectId: string,
     q: {
       contig?: string;
+      startMin?: number;
+      startMax?: number;
       featureType?: string;
       biotype?: string;
       nameQuery?: string;
@@ -1192,6 +1196,8 @@ export const api = {
       body: JSON.stringify({
         object_id: objectId,
         contig: q.contig || undefined,
+        start_min: q.startMin ?? undefined,
+        start_max: q.startMax ?? undefined,
         feature_type: q.featureType || undefined,
         biotype: q.biotype || undefined,
         name_query: q.nameQuery || undefined,
