@@ -1989,6 +1989,7 @@ export function BioIcon({
       strokeLinejoin="round"
       style={{ display: "block", flexShrink: 0 }}
     >
+      {(title ?? glyph.label) ? <title>{title ?? glyph.label}</title> : null}
       {glyph[chosen]}
     </svg>
   );
@@ -2086,6 +2087,16 @@ export function readPlatformFor(
   return null;
 }
 
+/** Human-readable platform label, or "Unspecified" when unknown. */
+function readPlatformLabel(platformLabel: string | null): string {
+  return platformLabel ?? "Unspecified";
+}
+
+/** Human-readable stage label for the reads raw/trimmed distinction. */
+function stageLabel(readsStage: "raw" | "trimmed"): string {
+  return readsStage === "trimmed" ? "Trimmed" : "Raw";
+}
+
 /**
  * Drop-in replacement for the old PNG-backed FileIcon: same props, same
  * default box, no image requests. `getFileIcon.ts` and icons/*.png go with it.
@@ -2134,8 +2145,8 @@ export function FileIcon({
       size={size}
       className={className}
       title={
-        concept === "reads" && platformLabel
-          ? `${formatKind} file (${platformLabel})`
+        concept === "reads"
+          ? `${readPlatformLabel(platformLabel)} ${readsStage ? `(${stageLabel(readsStage)})` : ""} ${formatKind} file`.trim()
           : `${formatKind} file`
       }
     />
