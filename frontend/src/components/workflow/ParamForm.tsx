@@ -73,10 +73,25 @@ export function ParamForm({ fields, values, onChange }: Props) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const biology = fields.filter((f) => f.group === "biology");
   const performance = fields.filter((f) => f.group === "performance");
+  // Everything else, rather than nothing. A field in an unrecognized group
+  // used to disappear with no error -- which would have swallowed the
+  // annotation export node's seven filters in full. Rendering it in the
+  // wrong place is a bug someone can see; omitting it is one nobody can.
+  const other = fields.filter(
+    (f) => f.group !== "biology" && f.group !== "performance",
+  );
 
   return (
     <div className="param-form">
       {biology.map((field) => (
+        <Field
+          key={field.key}
+          field={field}
+          value={values[field.key]}
+          onChange={(value) => onChange(field.key, value)}
+        />
+      ))}
+      {other.map((field) => (
         <Field
           key={field.key}
           field={field}
