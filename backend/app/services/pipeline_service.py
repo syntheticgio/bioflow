@@ -2485,6 +2485,33 @@ def _check_annotation_stats_callable(obj) -> None:
         )
 
 
+def should_auto_analyze_annotation(
+    *, kind: FormatKind, sidecar_of, facts: dict
+) -> bool:
+    """Whether ingest should analyze this object without being asked.
+
+    Public and parameter-wise rather than object-wise so both trigger sites
+    and their tests can call it without constructing a DataObject.
+
+    The sidecar exclusion is load-bearing, not defensive. Every object on
+    this machine's real database whose format.kind is BED is a `.fai` or a
+    STAR `.ann` index that the detector called BED -- 8 of them. A `.fai` is
+    not an annotation however it parses, and analyzing one writes a database
+    of garbage intervals under a name nobody will recognize.
+
+    A file already analyzed *with* a reference is skipped; one analyzed
+    without a reference is not, because that is exactly the result trigger 2
+    exists to repair.
+    """
+    if kind not in _ANNOTATION_STATS_FORMATS:
+        return False
+    if sidecar_of is not None:
+        return False
+    if not facts.get("annotation_stats_status"):
+        return True
+    return facts.get("annotation_contig_lengths_known") is not True
+
+
 async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
     """Queue the Results computation for a GFF/GTF/BED.
 
