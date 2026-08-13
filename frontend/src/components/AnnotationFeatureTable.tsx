@@ -198,16 +198,21 @@ export function AnnotationFeatureTable({
 
   const qc = useQueryClient();
 
-  // Mirrors the filters the table itself renders from -- contig/featureType/
-  // biotype/nameQuery/strand/view -- so the export always matches what the
-  // user is currently looking at (AE-22). This must stay the SAME state the
-  // table's own queries above read, not a parallel copy.
+  // Mirrors the filters the table itself renders from -- effectiveContig/
+  // locus min-max/featureType/biotype/nameQuery/strand/view -- so the export
+  // always matches what the user is currently looking at (AE-22). This must
+  // stay the SAME state the table's own queries above read, not a parallel
+  // copy. In particular a locus jump clears `contig` and narrows the view via
+  // `locus.min`/`locus.max`, so those must be read here too, not just
+  // `effectiveContig`.
   const exportCountQuery = useQuery({
     queryKey: [
       "annotationstats",
       "export-count",
       objectId,
-      contig,
+      effectiveContig,
+      locus?.min,
+      locus?.max,
       featureType,
       biotype,
       nameQuery,
@@ -218,7 +223,9 @@ export function AnnotationFeatureTable({
       api.annotationExportCount(objectId, {
         offset: 0,
         limit: 0,
-        contig: contig || undefined,
+        contig: effectiveContig,
+        startMin: locus?.min,
+        startMax: locus?.max,
         featureType: featureType || undefined,
         biotype: biotype || undefined,
         nameQuery: nameQuery || undefined,
@@ -232,7 +239,9 @@ export function AnnotationFeatureTable({
   const exportMutation = useMutation({
     mutationFn: () =>
       api.launchAnnotationExport(objectId, {
-        contig: contig || undefined,
+        contig: effectiveContig,
+        startMin: locus?.min,
+        startMax: locus?.max,
         featureType: featureType || undefined,
         biotype: biotype || undefined,
         nameQuery: nameQuery || undefined,

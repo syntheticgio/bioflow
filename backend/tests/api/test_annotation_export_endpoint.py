@@ -60,6 +60,16 @@ class TestExportCountRoute:
         assert r.status_code == 404
         assert "Compute results first" in r.json()["message"]
 
+    def test_accepts_start_min_and_start_max(self, client):
+        # No features.db either way, so this still 404s -- the point is that
+        # start_min/start_max pass FastAPI's query-param validation and reach
+        # the same "no computed results" branch as a request without them,
+        # proving the route declares them rather than rejecting them as
+        # unknown params.
+        r = get_export_count(client, contig="chr1", start_min=1000, start_max=2000)
+        assert r.status_code == 404
+        assert "Compute results first" in r.json()["message"]
+
 
 class TestExportRoute:
     def test_404_when_not_computed(self, client):
@@ -88,5 +98,19 @@ class TestExportRoute:
         # "no computed results" branch -- proving a plain filename isn't
         # rejected by the path-traversal guard.
         r = post_export(client, object_id=OBJECT_ID, output_name="chr1.subset.gff3")
+        assert r.status_code == 404
+        assert "Compute results first" in r.json()["message"]
+
+    def test_accepts_start_min_and_start_max(self, client):
+        # Same reasoning as the export-count case: no features.db, so this
+        # still 404s, but start_min/start_max must pass Pydantic body
+        # validation on AnnotationExportRequest to reach that branch at all.
+        r = post_export(
+            client,
+            object_id=OBJECT_ID,
+            contig="chr1",
+            start_min=1000,
+            start_max=2000,
+        )
         assert r.status_code == 404
         assert "Compute results first" in r.json()["message"]

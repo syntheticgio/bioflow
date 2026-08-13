@@ -933,6 +933,8 @@ async def launch_annotation_stats(
 class AnnotationExportRequest(BaseModel):
     object_id: PydanticObjectId
     contig: str | None = None
+    start_min: int | None = None
+    start_max: int | None = None
     feature_type: str | None = None
     biotype: str | None = None
     name_query: str | None = None
@@ -946,6 +948,8 @@ async def get_annotation_export_count(
     object_id: PydanticObjectId,
     owner: OwnerDep,
     contig: str | None = None,
+    start_min: int | None = None,
+    start_max: int | None = None,
     feature_type: str | None = None,
     biotype: str | None = None,
     name_query: str | None = None,
@@ -968,6 +972,8 @@ async def get_annotation_export_count(
 
     filters = annotation_db.FeatureFilters(
         contig=contig,
+        start_min=start_min,
+        start_max=start_max,
         feature_type=feature_type,
         biotype=biotype,
         name_query=name_query,
@@ -1009,6 +1015,8 @@ async def launch_annotation_export(
 
     filters = {
         "contig": body.contig,
+        "start_min": body.start_min,
+        "start_max": body.start_max,
         "feature_type": body.feature_type,
         "biotype": body.biotype,
         "name_query": body.name_query,
