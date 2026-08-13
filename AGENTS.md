@@ -295,6 +295,22 @@ subject and a PR title and description that explain the why. A `chore:`-typed
 feature or a `--fill`ed PR whose commits never said why is data that no
 generator can recover.
 
+## Filing out-of-scope issues you find along the way
+
+If you notice a problem that is outside the scope of the current ticket --
+unrelated dead code, a stale doc, a missing test, a bug in a different area --
+and it does not block finishing the current implementation, file it as a new
+GitHub issue yourself. Don't ask first; this is pre-authorized.
+
+Give the issue a clear title and description (what you saw, where, why it
+matters), and label it (`type:`, `area:`, `status:`, `priority:`,
+`difficulty:`) so it slots into the existing triage flow. Then keep working
+on the original task -- filing the issue is a side note, not a detour.
+
+If the problem *does* block the current implementation, that's not this case:
+fix it, or stop and explain why you can't, rather than filing an issue and
+moving on.
+
 ## Running the app: one instance, not dev/prod
 
 Don't build or reason about a dev vs. production split for this repo. `docker
