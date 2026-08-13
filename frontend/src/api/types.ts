@@ -2074,6 +2074,8 @@ export interface AnnotationStatsFacts extends Record<string, unknown> {
   annotation_biotype_counts?: Record<string, number>;
   annotation_attribute_keys?: Record<string, number>;
   annotation_malformed_lines?: number;
+  /** False when no reference resolved, so per-contig coverage is unavailable. */
+  annotation_contig_lengths_known?: boolean;
   gff_version?: string;
   genome_build?: string;
   annotation_source?: string;
