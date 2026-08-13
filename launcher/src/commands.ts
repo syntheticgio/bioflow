@@ -195,6 +195,13 @@ export function listVersionOptions(): Promise<VersionOptions> {
   return invoke("list_version_options");
 }
 
+/** Switches the stack to a specific stage tag (e.g. a new alpha or beta) and
+ *  restarts it. Only called from the stage-update button branch in App.tsx;
+ *  the normal update flow goes through update_stack. */
+export function updateToStage(tag: string): Promise<void> {
+  return invoke("update_to_stage", { tag });
+}
+
 /** Rebuilds locally-built images and restarts the stack against them, without
  *  changing any settings. Only meaningful when developer mode is active
  *  (developerRepo is set). The button is shown/hidden by Settings.tsx based on
