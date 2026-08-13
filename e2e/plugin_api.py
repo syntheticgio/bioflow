@@ -1,30 +1,36 @@
-"""FastAPI router for the BioFlow e2e harness backend.
+"""FastAPI router for the BioFlow e2e harness backend (thin shim).
 
-Mounted by Hermes at ``/api/plugins/bioflow-e2e/``. Exports ``router``.
+Hermes imports this file as a flat module (``spec_from_file_location``, no
+package), so it MUST NOT use relative imports. It locates the copied
+``e2e_backend`` package alongside it and mounts the routes. Tests and
+fixtures live next to the plugin (copied by install.sh).
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from . import config as config_mod
-from .config import Config
-from .loader import discover_tests
-from .runner import run_batch
-from .store import ResultStore
+_DASHBOARD = Path(__file__).resolve().parent
+if str(_DASHBOARD) not in sys.path:
+    sys.path.insert(0, str(_DASHBOARD))
+
+from e2e_backend import config as config_mod  # noqa: E402
+from e2e_backend.config import Config  # noqa: E402
+from e2e_backend.loader import discover_tests  # noqa: E402
+from e2e_backend.runner import run_batch  # noqa: E402
+from e2e_backend.store import ResultStore  # noqa: E402
 
 router = APIRouter()
 
-# Harness root = e2e/ (this file is e2e/backend/plugin_api.py, resolved through
-# any install symlink).
-_ROOT = Path(__file__).resolve().parent.parent
-_TESTS_DIR = _ROOT / "tests"
-_FIXTURES_DIR = _ROOT / "fixtures"
+_PLUGIN_ROOT = _DASHBOARD.parent
+_TESTS_DIR = _PLUGIN_ROOT / "tests"
+_FIXTURES_DIR = _PLUGIN_ROOT / "fixtures"
 
 _store: ResultStore | None = None
 _running: dict[str, asyncio.Task] = {}
