@@ -244,3 +244,24 @@ class TestCoordinateAgreement:
         bed = parse_bed_line("chr1\t999\t2000")
         gff = parse_gff_line("chr1\t.\tgene\t1000\t2000\t.\t+\t.\tID=g1")
         assert (bed.start, bed.end) == (gff.start, gff.end) == (1000, 2000)
+
+
+class TestFeatureLine:
+    def test_feature_defaults_to_no_line_number(self):
+        """The parsers are pure functions of one string and cannot know the line.
+
+        The handler's loop sets it. AE-1/AE-2.
+        """
+        line = "chr1\t.\tgene\t100\t200\t.\t+\t.\tID=g1"
+        feature = parse_gff_line(line)
+        assert feature.line is None
+
+    def test_feature_line_is_settable_via_replace(self):
+        """The handler sets the line with dataclasses.replace on a frozen Feature."""
+        import dataclasses
+
+        line = "chr1\t.\tgene\t100\t200\t.\t+\t.\tID=g1"
+        feature = parse_gff_line(line)
+        numbered = dataclasses.replace(feature, line=7)
+        assert numbered.line == 7
+        assert numbered.feature_id == "g1"
