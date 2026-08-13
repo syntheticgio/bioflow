@@ -1,7 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
-import { notify } from "../stores/messageStore";
+import { useComputeResults } from "../hooks/useComputeResults";
 import { NodeSelector } from "./NodeSelector";
 import type {
   BamStatsFacts,
@@ -27,18 +26,10 @@ import { TranscriptQc } from "./TranscriptQc";
  * AlignmentReport's fallback to bam_stats_summary.
  */
 export function BamResults({ obj }: { obj: ObjectDetailData }) {
-  const qc = useQueryClient();
   const f = obj.facts as BamStatsFacts;
   const [targetNode, setTargetNode] = useState("");
 
-  const compute = useMutation({
-    mutationFn: () => api.launchBamStats(obj.id, targetNode || undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing results");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
+  const compute = useComputeResults(obj.id, targetNode, api.launchBamStats);
 
   const starScale = isStarMapqScale(obj.facts);
   const hasResults = f.bam_stats_status === "ok";

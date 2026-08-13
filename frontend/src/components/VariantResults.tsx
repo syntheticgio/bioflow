@@ -1,7 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
-import { notify } from "../stores/messageStore";
+import { useComputeResults } from "../hooks/useComputeResults";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { FactsColumns } from "./FactsColumns";
@@ -15,18 +14,10 @@ import { VariantTable } from "./VariantTable";
  * and the complete filterable variant table.
  */
 export function VariantResults({ obj }: { obj: ObjectDetailData }) {
-  const qc = useQueryClient();
   const f = obj.facts as VcfStatsFacts;
   const [targetNode, setTargetNode] = useState("");
 
-  const compute = useMutation({
-    mutationFn: () => api.launchVcfStats(obj.id, targetNode || undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing results");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
+  const compute = useComputeResults(obj.id, targetNode, api.launchVcfStats);
 
   const hasResults = f.vcf_stats_status === "ok";
 
