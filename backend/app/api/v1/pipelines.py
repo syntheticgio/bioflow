@@ -18,6 +18,7 @@ from app.pipelines import (
     align_runner,
     aligner_registry,
     annotation_db,
+    annotation_export,
     annotation_hierarchy,
     annotation_window,
     assembler_registry,
@@ -925,6 +926,99 @@ async def launch_annotation_stats(
     the searchable feature table. Read-only."""
     job = await pipeline_service.launch_annotation_stats(
         object_id=body.object_id, owner=owner
+    )
+    return JobOut.of(job)
+
+
+class AnnotationExportRequest(BaseModel):
+    object_id: PydanticObjectId
+    contig: str | None = None
+    feature_type: str | None = None
+    biotype: str | None = None
+    name_query: str | None = None
+    strand: str | None = None
+    unresolved: bool = False
+    output_name: str | None = None
+
+
+@router.get("/annotationstats/export-count/{object_id}")
+async def get_annotation_export_count(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    contig: str | None = None,
+    feature_type: str | None = None,
+    biotype: str | None = None,
+    name_query: str | None = None,
+    strand: str | None = None,
+    unresolved: bool = False,
+) -> dict:
+    """How many features a subset export would contain.
+
+    Separate from the export itself so the UI can show matched-vs-exported
+    before anything is queued -- the closure is routinely larger than the
+    matched count, and an unexplained difference reads as a bug.
+    """
+    await object_service.get_object(object_id, owner=owner)
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    filters = annotation_db.FeatureFilters(
+        contig=contig,
+        feature_type=feature_type,
+        biotype=biotype,
+        name_query=name_query,
+        strand=strand,
+        top_level_only=False,
+        parent_status=(
+            annotation_hierarchy.UNRESOLVED_STATUSES if unresolved else None
+        ),
+    )
+    return {
+        "matched": annotation_db.count_features(db_path=db_path, filters=filters),
+        "exported": len(
+            annotation_export.closure_lines(db_path=db_path, filters=filters)
+        ),
+    }
+
+
+@router.post(
+    "/annotationstats/export", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_annotation_export(
+    body: AnnotationExportRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a subset export using the filters the table is displaying."""
+    if body.output_name and ("/" in body.output_name or ".." in body.output_name):
+        raise ValidationError(
+            "output_name must not contain a path separator or '..'",
+            details={"output_name": body.output_name},
+        )
+
+    db_path = settings.annotation_stats_dir / str(body.object_id) / "features.db"
+    if not db_path.exists():
+        raise NotFoundError(
+            "No computed results for this file. Compute results first."
+        )
+
+    filters = {
+        "contig": body.contig,
+        "feature_type": body.feature_type,
+        "biotype": body.biotype,
+        "name_query": body.name_query,
+        "strand": body.strand,
+    }
+    if body.unresolved:
+        filters["parent_status"] = list(annotation_hierarchy.UNRESOLVED_STATUSES)
+
+    job = await pipeline_service.launch_annotation_export(
+        object_id=body.object_id,
+        owner=owner,
+        filters=filters,
+        output_name=body.output_name or f"{body.object_id}.subset.gff3",
     )
     return JobOut.of(job)
 

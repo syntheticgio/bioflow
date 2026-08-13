@@ -2577,6 +2577,49 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
     )
 
 
+async def launch_annotation_export(
+    *, object_id: PydanticObjectId, owner: str, filters: dict, output_name: str
+):
+    """Queue a subset export for a GFF/GTF/BED annotation.
+
+    Unlike launch_annotation_stats this *does* derive an object, so the job's
+    result goes through _apply_export_annotation_subset.
+    """
+    from app.queue import queue
+
+    ann = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(ann)
+
+    digest, path = await _resolve_readable(ann)
+    # Same reasoning as launch_annotation_stats: the THREAD handler reads
+    # ctx.payload["annotation_path"] directly and does no blob resolution.
+    path = path or str(blob_path(digest))
+
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if not db_path.exists():
+        raise ValidationError(
+            "this annotation has no computed results; compute them before exporting"
+        )
+
+    return await queue.enqueue(
+        "export_annotation_subset",
+        owner=owner,
+        payload={
+            "object_id": str(ann.id),
+            "annotation_path": path,
+            "db_path": str(db_path),
+            "format_kind": str(ann.format.kind.value),
+            "filters": filters,
+            "output_name": output_name,
+        },
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=2,
+        project_id=ann.project_id,
+        object_id=ann.id,
+    )
+
+
 async def _reference_for_annotation(ann) -> DataObject | None:
     """The reference this annotation describes, from its provenance.
 
