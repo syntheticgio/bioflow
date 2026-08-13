@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { useComputeResults } from "../hooks/useComputeResults";
 import { NodeSelector } from "./NodeSelector";
+import { Stat } from "./Stat";
 import type {
   BamStatsFacts,
   InsertSizeHistogramBucket,
@@ -280,15 +281,6 @@ function transcriptQcApplicability(obj: ObjectDetailData) {
     return { geneBody: true, featureDistribution: true };
 
   return { geneBody: false, featureDistribution: false };
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div style={{ color: "var(--text-faint)", fontSize: 10 }}>{label}</div>
-      <div style={{ fontWeight: 600 }}>{value}</div>
-    </div>
-  );
 }
 
 /** A small inline bar histogram. Single-use and simple enough not to share
