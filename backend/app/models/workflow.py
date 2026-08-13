@@ -19,7 +19,7 @@ Design note: docs/superpowers/specs/2026-08-07-workflow-dag-design.md
 from enum import StrEnum
 
 from beanie import PydanticObjectId
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 from app.models.base import TimestampedDocument
@@ -40,10 +40,34 @@ class PortType(BaseModel):
     Reuses the two enums that already describe a file rather than inventing a
     parallel vocabulary. `role=None` means "any role for this format", which is
     the honest type for a port like QC's that genuinely does not care.
+
+    A port names either one format (`format`, how nearly every port is
+    declared) or several (`formats`). The pair exists because annotation
+    export accepts GFF/GTF/BED while refusing GenBank, whose features span
+    several lines -- a refusal worth making at design time on the canvas
+    rather than at runtime in the handler. Read `accepted_formats`, never
+    either field directly: it is the one place that knows both spellings.
     """
 
-    format: FormatKind
+    format: FormatKind | None = None
+    formats: tuple[FormatKind, ...] | None = None
     role: ObjectRole | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_spelling(self) -> "PortType":
+        if (self.format is None) == (self.formats is None):
+            raise ValueError("PortType needs exactly one of `format` or `formats`")
+        if self.formats is not None and not self.formats:
+            raise ValueError("PortType `formats` cannot be empty")
+        return self
+
+    @property
+    def accepted_formats(self) -> tuple[FormatKind, ...]:
+        """Every format this port accepts, however it was declared."""
+        if self.formats is not None:
+            return self.formats
+        assert self.format is not None  # guaranteed by _exactly_one_spelling
+        return (self.format,)
 
     def accepts(self, format: FormatKind, role: ObjectRole | None) -> bool:
         """Whether an object of this format/role may connect here.
@@ -53,7 +77,7 @@ class PortType(BaseModel):
         exactly the guess `ObjectRole` exists to prevent -- it is how a
         protein FASTA reaches an aligner's reference port.
         """
-        if self.format != format:
+        if format not in self.accepted_formats:
             return False
         if self.role is None:
             return True
