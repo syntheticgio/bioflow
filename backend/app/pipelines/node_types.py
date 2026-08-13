@@ -834,6 +834,14 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only genome annotation — gene density facts on an existing
         # assembly, same class as gc_tracks and meryl.
         "pipeline_service.launch_annotate_genome",
+        # On-demand Results computation over an existing GFF/GTF/BED/GenBank
+        # annotation -- feature summary + searchable table as facts and a
+        # SQLite sidecar, no output object. Triggered automatically at
+        # ingest (queue/results.py) and on demand via the REST endpoint, same
+        # class as gc_tracks/meryl/annotate_genome. Also spans four input
+        # formats (_ANNOTATION_STATS_FORMATS), which a single PortSpec
+        # can't represent the way vcf_stats/bam_stats do for their one format.
+        "pipeline_service.launch_annotation_stats",
     }
 )
 
