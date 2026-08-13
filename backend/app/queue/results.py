@@ -234,6 +234,43 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
         assembly_fields=len(assembly_enrichment.get("values", {})),
     )
 
+    # After the log, so an annotation that cannot be queued still records a
+    # completed ingest. `obj` carries the pre-update snapshot, so re-read the
+    # fields the eligibility rule needs from what was actually written.
+    obj.format = update.get(DataObject.format, obj.format)
+    obj.facts = update.get(DataObject.facts, obj.facts)
+    await _auto_analyze_after_ingest(obj, owner=owner)
+
+
+async def _auto_analyze_after_ingest(obj: DataObject, *, owner: str) -> None:
+    """Analyze a freshly ingested annotation without being asked.
+
+    #257 made annotation results an on-demand computation, which left every
+    newly ingested annotation opening to a button. This closes that, at a
+    measured 0.83s for a 12.5MB GFF -- queued, so the object is READY long
+    before the job runs.
+
+    Never raises. The object is already READY by the time this is called and
+    must stay that way: a malformed annotation is a failed recoverable
+    computation, not a failed ingest. The Results tab falls back to its
+    "Compute results" button and the failure shows in the Computations
+    panel like any other job.
+    """
+    from app.errors import AppError
+    from app.services import pipeline_service
+
+    if not pipeline_service.should_auto_analyze_annotation(
+        kind=obj.format.kind, sidecar_of=obj.sidecar_of, facts=obj.facts
+    ):
+        return
+
+    try:
+        await pipeline_service.launch_annotation_stats(object_id=obj.id, owner=owner)
+    except AppError as e:
+        log.warning(
+            "annotation_autoanalysis_failed", object_id=str(obj.id), error=str(e)
+        )
+
 
 async def _link_mate(obj: DataObject) -> None:
     """Find this file's paired-end partner and link them to each other.
