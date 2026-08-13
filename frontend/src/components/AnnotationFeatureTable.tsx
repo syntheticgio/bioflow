@@ -210,6 +210,16 @@ export function AnnotationFeatureTable({
 
   const qc = useQueryClient();
 
+  // Only for GenBank files that actually carry sequence. The same query the
+  // launcher's guard runs, so the button and the server cannot disagree
+  // about whether extraction has already happened.
+  const hasSequence = isGenBank && facts.genbank_has_sequence === true;
+  const extractedQuery = useQuery({
+    queryKey: ["genbanksequence", objectId],
+    queryFn: () => api.extractedGenBankSequence(objectId),
+    enabled: hasSequence,
+  });
+
   // Mirrors the filters the table itself renders from -- effectiveContig/
   // locus min-max/featureType/biotype/nameQuery/strand/view -- so the export
   // always matches what the user is currently looking at (AE-22). This must
@@ -270,6 +280,18 @@ export function AnnotationFeatureTable({
       // ever proves too coarse.
       qc.invalidateQueries({ queryKey: ["objects"] });
       notify.info("Export queued");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const extractMutation = useMutation({
+    mutationFn: () => api.launchExtractGenBankSequence(objectId),
+    onSuccess: () => {
+      // The job is queued, not finished; the object appears when the applier
+      // runs, so both this query and the project's object list must refetch.
+      qc.invalidateQueries({ queryKey: ["genbanksequence", objectId] });
+      qc.invalidateQueries({ queryKey: ["objects"] });
+      notify.info("Extraction queued");
     },
     onError: (e: Error) => notify.error(e.message),
   });
@@ -487,6 +509,37 @@ export function AnnotationFeatureTable({
                   ? ` → ${exported.toLocaleString()} exported, including parents and children`
                   : ` → ${exported.toLocaleString()} exported`}
               </span>
+            )}
+          </div>
+        )}
+
+        {/* GenBank counterpart to the export block above: features aren't
+         *  line-addressable for GenBank (AE-25), but the ORIGIN sequence
+         *  itself can still be pulled out into a FASTA reference. Renders
+         *  nothing when there's no sequence to extract at all. */}
+        {hasSequence && (
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              margin: "0 0 10px",
+              fontSize: 11,
+              color: "var(--text-faint)",
+            }}
+          >
+            {extractedQuery.data?.reference_id ? (
+              <span>Sequence extracted → {extractedQuery.data.reference_name}</span>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "1px 8px", fontSize: 11 }}
+                onClick={() => extractMutation.mutate()}
+                disabled={extractMutation.isPending || extractedQuery.isLoading}
+              >
+                {extractMutation.isPending ? "Queuing extraction…" : "Extract sequence"}
+              </button>
             )}
           </div>
         )}
