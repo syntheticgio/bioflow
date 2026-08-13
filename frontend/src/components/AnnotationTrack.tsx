@@ -34,7 +34,13 @@ export function AnnotationTrack({
 }: {
   obj: ObjectDetailData;
   /** Per-contig stats from #257. Only entries with a known length are usable
-   *  as an axis; the caller filters, and reports what it dropped. */
+   *  as an axis; the caller filters, and reports what it dropped.
+   *
+   *  Sourced from `obj.facts.annotation_per_contig`, which arrives whole with
+   *  the rest of `ObjectDetail` -- never populated by a separate async fetch
+   *  after this component mounts. `contig`/`view`'s initial state below is
+   *  seeded once on mount rather than re-derived via effect because `drawable`
+   *  cannot transition from empty to populated later. */
   contigs: AnnotationContigStat[];
   onPickFeature?: (name: string) => void;
 }) {
@@ -49,11 +55,15 @@ export function AnnotationTrack({
   const contigLength = current?.length ?? 0;
 
   const [view, setView] = useState({ start: 0, end: contigLength });
+  // Not reset on contig change: a feature-type preference is track-wide, not
+  // scoped to one contig, so switching contigs keeps it applied.
   const [typeFilter, setTypeFilter] = useState<string | undefined>();
 
   const win = useQuery({
     queryKey: ["annotationWindow", obj.id, contig, view.start, view.end, typeFilter],
     queryFn: () =>
+      // biotype/strand filtering is deliberately out of scope here -- the API
+      // supports both, but this track has no UI control for either yet.
       api.annotationWindow(obj.id, {
         contig,
         start: view.start,
