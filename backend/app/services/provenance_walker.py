@@ -150,6 +150,10 @@ _STEP_VERBS: dict[str, str] = {
     "download_assembly": "downloaded from NCBI",
     "download_uniprot": "downloaded from UniProt",
     "download_lineage": "downloaded",
+    # Unlike run_annotation_stats (in _NO_NARRATIVE_STEP below), this
+    # produces a new derived object -- the exported subset -- so it earns a
+    # narrative step the way align_reads/assemble_reads do.
+    "annotation_subset_export": "exported a subset of",
 }
 
 # Registered handlers that legitimately produce no narrative step.
