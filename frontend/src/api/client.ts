@@ -10,6 +10,7 @@ import type {
   AnnotationFeature,
   AnnotationFeaturePage,
   AnnotationGenePage,
+  AnnotationWindow,
   AssembleRequest,
   AssemblerSchema,
   AssemblyParams,
@@ -1170,6 +1171,33 @@ export const api = {
     if (skipCount) p.set("skip_count", "true");
     return request<AnnotationGenePage>(
       `/pipelines/annotationstats/genes/${objectId}?${p.toString()}`,
+    );
+  },
+
+  /** Features overlapping a window, or their density when too dense to draw.
+   *  The response echoes the window back so an out-of-order reply can be
+   *  matched to the current viewport. */
+  annotationWindow: (
+    objectId: string,
+    q: {
+      contig: string;
+      start: number;
+      end: number;
+      bins?: number;
+      feature_type?: string;
+      strand?: string;
+    },
+  ) => {
+    const p = new URLSearchParams({
+      contig: q.contig,
+      start: String(Math.max(0, Math.floor(q.start))),
+      end: String(Math.floor(q.end)),
+    });
+    if (q.bins) p.set("bins", String(q.bins));
+    if (q.feature_type) p.set("feature_type", q.feature_type);
+    if (q.strand) p.set("strand", q.strand);
+    return request<AnnotationWindow>(
+      `/pipelines/annotationstats/window/${objectId}?${p.toString()}`,
     );
   },
 
