@@ -2292,6 +2292,16 @@ a.btn {
   border-bottom: none;
 }
 
+/* The global `input, textarea` rule (border, radius, padding) applies to
+   checkboxes too, which squashes them into small rounded dots instead of a
+   normal checkbox. Row-selection checkboxes need the native appearance. */
+.sra-table input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+}
+
 .sra-sortable {
   cursor: pointer;
   user-select: none;

@@ -45,10 +45,7 @@ export function UniProtDownloadDialog({
     onSuccess: (data) => {
       setResolved(data);
       setChosenProteome(data.proteome);
-      // Everything found, pre-selected. The common case for a pasted set of
-      // accessions is "give me these"; a free-text search is the case where
-      // choosing matters, and there the count in the button shows the scale.
-      setSelected(new Set(data.proteins.map((p) => p.accession)));
+      setSelected(new Set());
     },
     onError: (e: Error) => notify.error(e.message),
   });
@@ -84,6 +81,18 @@ export function UniProtDownloadDialog({
       else next.add(accession);
       return next;
     });
+
+  const allSelected =
+    resolved != null &&
+    resolved.proteins.length > 0 &&
+    resolved.proteins.every((p) => selected.has(p.accession));
+
+  const toggleAll = () =>
+    setSelected(
+      allSelected
+        ? new Set()
+        : new Set((resolved?.proteins ?? []).map((p) => p.accession)),
+    );
 
   const count = chosenProteome
     ? reviewedOnly
@@ -157,7 +166,14 @@ export function UniProtDownloadDialog({
             <table className="sra-table">
               <thead>
                 <tr>
-                  <th style={{ width: 28 }} />
+                  <th style={{ width: 28 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      title={allSelected ? "Deselect all" : "Select all"}
+                    />
+                  </th>
                   <th>Accession</th>
                   <th>Protein</th>
                   <th>Organism</th>
