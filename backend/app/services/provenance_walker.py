@@ -163,6 +163,7 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "run_bam_stats",
         "run_transcript_qc",
         "run_vcf_stats",
+        "run_annotation_stats",
         "ingest_headers",
         # Bookkeeping on bytes already ingested.
         "hash_blob",
