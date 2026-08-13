@@ -87,6 +87,69 @@ pub fn checkable_tag(bioflow_tag: &str, developer_repo: Option<&str>) -> Option<
     None
 }
 
+/// Replaces the `BIOFLOW_TAG=` line in `.env` content with a new value,
+/// preserving all other lines and their ordering. Appends the line if not
+/// found as a safety net.
+fn set_bioflow_tag(contents: &str, new_tag: &str) -> String {
+    let mut found = false;
+    let result: Vec<String> = contents
+        .lines()
+        .map(|line| {
+            if line.starts_with("BIOFLOW_TAG=") {
+                found = true;
+                format!("BIOFLOW_TAG={}", new_tag)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    if !found {
+        let mut result = result;
+        result.push(format!("BIOFLOW_TAG={}", new_tag));
+        result.join("\n")
+    } else {
+        result.join("\n")
+    }
+}
+
+/// Compares the user's current pinned tag against available version options
+/// and returns the best forward-compatible stage tag (if any).
+///
+/// "Forward" means a strictly greater (major, minor, patch, stage_rank) tuple,
+/// where stage rank is alpha=0, beta=1. Release mode ("latest") is excluded —
+/// it has its own digest-based update path.
+///
+/// Returns `None` when no forward-compatible tag exists or the current tag
+/// cannot be parsed as a stage tag.
+pub fn check_stage_update(current_tag: &str, options: &VersionOptions) -> Option<String> {
+    if current_tag == "latest" {
+        return None;
+    }
+
+    let current_ver = version_tuple(current_tag, "alpha")
+        .map(|v| (v, 0u8))
+        .or_else(|| version_tuple(current_tag, "beta").map(|v| (v, 1u8)))?;
+
+    let candidates = [options.alpha.as_deref(), options.beta.as_deref()];
+
+    candidates
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| {
+            let cv = version_tuple(candidate, "alpha")
+                .map(|v| (v, 0u8))
+                .or_else(|| version_tuple(candidate, "beta").map(|v| (v, 1u8)))?;
+            if (cv.0, cv.1) > current_ver {
+                Some((candidate.to_string(), cv))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(_, (v, rank))| (*v, *rank))
+        .map(|(tag, _)| tag)
+}
+
 /// The version choices the Settings dialog offers for `BIOFLOW_TAG`.
 ///
 /// `release` is always present (resolves to the `:latest` tag the published
