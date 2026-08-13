@@ -2506,15 +2506,21 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
     # resolution of its own, so the launcher must always hand it a real path.
     path = path or str(blob_path(digest))
 
-    # Contig lengths for the coverage denominators. Taken from the
-    # annotation's own facts when ingest recorded them, else from the
-    # reference it is attached to. Absent is fine: coverage is reported as
-    # null rather than zero for a contig of unknown length.
+    # Contig lengths for the coverage denominators AND the track viewer's
+    # axis. Taken from the annotation's own facts when ingest recorded them,
+    # else from `resolve_annotation_reference`'s two tiers (provenance, then
+    # matching NCBI assembly accession) -- not `_reference_for_annotation`
+    # alone, which only covers the first tier. An annotation downloaded from
+    # NCBI with no `derived_from` (the common case: nothing in-app derived
+    # it) would otherwise never resolve a reference here even though the
+    # accession match succeeds everywhere else this resolver is used. Absent
+    # is fine: coverage is reported as null rather than zero for a contig of
+    # unknown length, and the track viewer shows its own refusal reason.
     lengths = ann.facts.get("reference_lengths") or {}
     if not lengths:
-        reference = await _reference_for_annotation(ann)
-        if reference is not None:
-            lengths = reference.facts.get("sequence_lengths") or {}
+        resolved = await resolve_annotation_reference(ann)
+        if resolved.reference is not None:
+            lengths = resolved.reference.facts.get("sequence_lengths") or {}
 
     payload: dict = {
         "object_id": str(ann.id),
