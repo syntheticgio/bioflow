@@ -441,7 +441,11 @@ def materialize_annotation_edits(ctx: JobContext) -> dict:
     }[fmt]
 
     work = _prepare_workdir(ctx, "annotation_materialize")
-    out_name = ann_name if ann_name.endswith((".gff3", ".gtf", ".gff", ".gtf")) else f"{ann_name}.gff3"
+    out_name = (
+        ann_name
+        if ann_name.endswith((".gff3", ".gtf", ".gff", ".gtf"))
+        else f"{ann_name}.gff3"
+    )
     dest = work / out_name
 
     changed = 0
@@ -494,8 +498,9 @@ def materialize_annotation_edits(ctx: JobContext) -> dict:
 async def _load_edits(object_id: str):
     """Load pending edits for the source object. Coroutine so it can be
     scheduled via run_from_thread from the THREAD-mode handler."""
-    from app.models.annotation_edit import AnnotationEdit
     from beanie import PydanticObjectId
+
+    from app.models.annotation_edit import AnnotationEdit
 
     return await AnnotationEdit.find(
         AnnotationEdit.object_id == PydanticObjectId(object_id)

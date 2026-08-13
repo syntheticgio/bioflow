@@ -1,7 +1,7 @@
 """Pipeline endpoints: launching runs and reporting tool availability."""
 
 import json
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -2294,7 +2294,9 @@ class AnnotationMaterializeRequest(BaseModel):
 
 
 @router.get("/annotationstats/edits/{object_id}")
-async def get_annotation_edits(object_id: PydanticObjectId, owner: OwnerDep) -> list[AnnotationEditOut]:
+async def get_annotation_edits(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> list[AnnotationEditOut]:
     """List pending edits for an annotation object."""
     await object_service.get_object(object_id, owner=owner)
 
