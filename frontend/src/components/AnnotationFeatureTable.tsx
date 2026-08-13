@@ -69,6 +69,8 @@ export function AnnotationFeatureTable({
   facts,
   forcedView,
   onViewChange,
+  nameQuery: controlledNameQuery,
+  onNameQueryChange,
 }: {
   objectId: string;
   facts: AnnotationStatsFacts;
@@ -80,6 +82,12 @@ export function AnnotationFeatureTable({
   /** Fired when the user manually switches tabs, so the parent can clear
    *  its own forcedView and stop re-forcing the view on the next render. */
   onViewChange?: () => void;
+  /** Optional controlled name filter -- lets a parent (e.g. AnnotationResults,
+   *  wiring up AnnotationTrack's onPickFeature) drive the Name box directly.
+   *  Falls back to local state when not provided, preserving today's
+   *  behavior for any other caller. */
+  nameQuery?: string;
+  onNameQueryChange?: (value: string) => void;
 }) {
   const [view, setView] = useState<View>("genes");
   const [page, setPage] = useState(0);
@@ -87,7 +95,9 @@ export function AnnotationFeatureTable({
   const [featureType, setFeatureType] = useState("");
   const [biotype, setBiotype] = useState("");
   const [strand, setStrand] = useState("");
-  const [nameInput, setNameInput] = useState("");
+  const [localNameInput, setLocalNameInput] = useState("");
+  const nameInput = controlledNameQuery ?? localNameInput;
+  const setNameInput = onNameQueryChange ?? setLocalNameInput;
   const [locusInput, setLocusInput] = useState("");
   const [locus, setLocus] = useState<{ contig: string; min?: number; max?: number } | null>(
     null,

@@ -11,6 +11,7 @@ import {
   LengthHistogram,
 } from "./AnnotationCharts";
 import { AnnotationFeatureTable } from "./AnnotationFeatureTable";
+import { AnnotationTrack } from "./AnnotationTrack";
 import { NodeSelector } from "./NodeSelector";
 
 /**
@@ -28,6 +29,7 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
   const f = obj.facts as AnnotationStatsFacts;
   const [targetNode, setTargetNode] = useState("");
   const [forcedView, setForcedView] = useState<string | null>(null);
+  const [nameQuery, setNameQuery] = useState("");
 
   const compute = useMutation({
     mutationFn: () => api.launchAnnotationStats(obj.id, targetNode || undefined),
@@ -160,11 +162,15 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
         </div>
       )}
 
+      <AnnotationTrack obj={obj} contigs={contigs} onPickFeature={setNameQuery} />
+
       <AnnotationFeatureTable
         objectId={obj.id}
         facts={f}
         forcedView={forcedView}
         onViewChange={() => setForcedView(null)}
+        nameQuery={nameQuery}
+        onNameQueryChange={setNameQuery}
       />
     </>
   );
