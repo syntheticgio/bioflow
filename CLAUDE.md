@@ -21,6 +21,47 @@ PR*, not a merged one. The user reviews and merges. This is the one part of
 the old workflow that inverted: committing and pushing are still yours to do
 without asking, and merging is now the user's.
 
+**Before opening the PR, catch up to `main` yourself rather than letting
+GitHub discover the conflict.** `main` moves while a task is in progress, and
+a PR opened against a stale base either merges something it was never tested
+against or sits there reporting `mergeStateStatus: DIRTY` until someone
+notices. Doing this before `gh pr create` rather than after means the PR is
+mergeable the moment it exists, not eventually:
+
+```bash
+git fetch origin main
+git rebase origin/main
+```
+
+Rebase is the default because it keeps history linear and each commit's
+subject reviewable on its own, matching how this repo already handles a
+conflict discovered *after* the PR is open (see below). If the rebase itself
+conflicts in a way that isn't a quick per-commit fix -- large divergence,
+conflicts repeating across several commits -- fall back to a merge instead of
+fighting it commit-by-commit:
+
+```bash
+git rebase --abort
+git merge origin/main
+```
+
+Either way, resolve conflicts the same way you would resolve them mid-task:
+read both sides, keep what's correct, don't take a side blindly because it's
+"theirs" or "ours."
+
+**Then verify your changes actually survived.** A rebase or merge can resolve
+a conflict by silently dropping a hunk if a resolution was accepted too
+quickly. Before pushing, confirm the diff against `origin/main` still
+contains the work the task set out to do:
+
+```bash
+git diff origin/main...HEAD --stat
+```
+
+Check the file list matches what you intended to touch, and skim the diff
+itself for anything that looks reverted or missing -- not just that the
+command ran without error.
+
 Once the suite is green:
 
 ```bash
@@ -176,6 +217,24 @@ are filtered *out* of user-facing notes. Two consequences:
 
 Use `tweak` and `style` sparingly; both appear in the history and neither is
 a standard Conventional Commits type.
+
+### Catching a bad subject before it reaches CI
+
+`commit-check.yml` rejects a PR whose commit subjects don't parse as
+Conventional Commits, and the easiest way to hit that check is to not have
+written the commit yet when you find out. `ops/hooks/commit-msg` runs the
+same regex locally, at `git commit` time, and prints the same fix-it message
+CI does. It is not installed by default -- git does not auto-run hooks from a
+clone -- so opt in once per checkout (main checkout or worktree alike):
+
+```bash
+git config core.hooksPath ops/hooks
+```
+
+If a commit is rejected, the message names the exact problem; usually the
+fix is `git commit --amend` with a corrected subject, or (mid-rebase)
+`reword`ing the offending commit. This is the same fix CI's own error output
+walks through, so there is no second thing to learn.
 
 ### Writing the subject line
 
