@@ -34,7 +34,9 @@ class ParamField:
     `group` is what keeps a generated form from becoming an undifferentiated
     pile of inputs: biology fields render in the dialog body, performance
     fields under the advanced disclosure -- which is roughly how AlignDialog
-    was already organized by hand.
+    was already organized by hand. `filters` will be the annotation-export
+    node's group, meant to render always-visible like biology once the form
+    supports it.
     """
 
     key: str
@@ -42,7 +44,11 @@ class ParamField:
     kind: Literal["int", "bool", "select", "text"]
     default: Any
     help: str
-    group: Literal["biology", "performance"] = "biology"
+    # "filters" is the annotation-export node's group -- fields that select
+    # which features to export, which are neither biology knobs nor
+    # performance tuning. ParamForm still only renders biology/performance
+    # today; rendering "filters" is a separate change.
+    group: Literal["biology", "performance", "filters"] = "biology"
     min: int | None = None
     max: int | None = None
     choices: tuple[Choice, ...] = ()
