@@ -86,6 +86,79 @@ class TestTypeRules:
         definition = WorkflowDefinition(name="bad", nodes=[_action("x", "no_such_tool")])
         assert any(e.code == "unknown_node_type" for e in validate_definition(definition))
 
+    def test_a_multi_format_output_wired_into_a_compatible_multi_format_input_validates(self):
+        """annotation_export's `subset` output (GFF/GTF/BED) into a second
+        annotation_export's `annotation` input (same set) -- both ports are
+        declared with `formats=`, so `port.type.format` is None on both
+        sides. This must validate cleanly, not crash."""
+        definition = WorkflowDefinition(
+            name="ok",
+            nodes=[
+                _action("export1", "annotation_export"),
+                _action("export2", "annotation_export"),
+            ],
+            edges=[
+                WorkflowEdge(
+                    from_node="export1", from_port="subset", to_node="export2", to_port="annotation"
+                )
+            ],
+        )
+        errors = validate_definition(definition)
+        assert not any(e.code == "type_mismatch" for e in errors)
+
+    def test_a_multi_format_output_wired_into_an_incompatible_input_is_rejected(self):
+        """annotation_export's `subset` (GFF/GTF/BED) has no overlap with
+        quantify's `alignment` port (BAM only) -- must report a clear
+        type_mismatch, not crash, and must name all three producer formats
+        rather than "None"."""
+        definition = WorkflowDefinition(
+            name="bad",
+            nodes=[
+                _action("export1", "annotation_export"),
+                _action("q", "quantify"),
+            ],
+            edges=[
+                WorkflowEdge(
+                    from_node="export1", from_port="subset", to_node="q", to_port="alignment"
+                )
+            ],
+        )
+        errors = validate_definition(definition)
+        mismatches = [e for e in errors if e.code == "type_mismatch" and e.node_id == "q"]
+        assert len(mismatches) == 1
+        message = mismatches[0].message
+        assert "None" not in message
+        assert "gff" in message and "gtf" in message and "bed" in message
+
+    def test_an_input_node_with_multiple_accepted_formats_feeds_a_multi_format_port(self):
+        """The real crash scenario: an INPUT node's `accepts` field is a
+        multi-format PortType (formats=[gff, gtf, bed]), wired into
+        annotation_export's `annotation` port. _output_type returns
+        node.accepts directly for an INPUT node, so this exercises the exact
+        code path that raised AttributeError in production."""
+        definition = WorkflowDefinition(
+            name="ok",
+            nodes=[
+                WorkflowNode(
+                    node_id="ann",
+                    kind=WorkflowNodeKind.INPUT,
+                    label="ann",
+                    accepts=PortType(
+                        formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED),
+                        role=ObjectRole.ANNOTATION,
+                    ),
+                ),
+                _action("export1", "annotation_export"),
+            ],
+            edges=[
+                WorkflowEdge(
+                    from_node="ann", from_port="object", to_node="export1", to_port="annotation"
+                )
+            ],
+        )
+        errors = validate_definition(definition)
+        assert not any(e.code == "type_mismatch" for e in errors)
+
 
 class TestStructuralRules:
     def test_a_cycle_is_rejected(self):

@@ -83,6 +83,27 @@ class PortType(BaseModel):
             return True
         return self.role == role
 
+    def accepts_any(self, produced: "PortType") -> bool:
+        """Whether an object produced by `produced` may connect here.
+
+        `produced` is itself a port-shaped type -- the output side of an
+        edge, not a single stored object -- and may name several formats
+        (`formats=`) rather than one. There is no single "the format" to
+        check in that case, so this accepts when at least one of
+        `produced`'s possible formats is accepted here, matching the role
+        that format would carry. Mirrors the frontend's `portAccepts` in
+        `frontend/src/lib/workflowGraph.ts`, which independently arrived at
+        the same two-PortType comparison for the canvas's own wiring check.
+
+        Not symmetric -- only `self.role` gates the match, and only
+        `produced`'s formats are enumerated -- so call it as the accepting
+        (input) port's method: `input_port.accepts_any(output_port)`, not
+        the reverse. Both arguments share the same `PortType` type, so a
+        swapped call order type-checks fine while asking a different
+        question.
+        """
+        return any(self.accepts(fmt, produced.role) for fmt in produced.accepted_formats)
+
 
 class NodePosition(BaseModel):
     """Canvas coordinates. Presentation only -- never read by execution."""

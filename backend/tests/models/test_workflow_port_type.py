@@ -50,3 +50,42 @@ class TestMultiFormat:
         it must be populated for single-format ports too."""
         port = PortType(format=FormatKind.BAM)
         assert port.accepted_formats == (FormatKind.BAM,)
+
+
+class TestAcceptsAny:
+    """`accepts_any` compares two PortTypes -- the shape validate_definition
+    needs when a producing port is itself multi-format, so there is no
+    single concrete format to hand to `accepts`."""
+
+    def test_accepts_when_one_of_several_produced_formats_overlaps(self):
+        port = PortType(formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED))
+        produced = PortType(formats=(FormatKind.BED, FormatKind.GENBANK))
+        assert port.accepts_any(produced)
+
+    def test_rejects_when_there_is_no_overlap(self):
+        port = PortType(format=FormatKind.BAM, role=ObjectRole.ALIGNMENT)
+        produced = PortType(formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED))
+        assert not port.accepts_any(produced)
+
+    def test_required_role_on_the_accepting_port_is_not_satisfied_by_an_absent_one(self):
+        """Mirrors test_required_role_is_not_satisfied_by_an_absent_one above,
+        but with the producer itself multi-format and roleless."""
+        port = PortType(
+            formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED),
+            role=ObjectRole.ANNOTATION,
+        )
+        roleless = PortType(formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED))
+        assert not port.accepts_any(roleless)
+
+        matching_role = PortType(
+            formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED),
+            role=ObjectRole.ANNOTATION,
+        )
+        assert port.accepts_any(matching_role)
+
+    def test_a_single_format_producer_is_accepted_like_a_bare_format(self):
+        """The common case -- most ports are still single-format -- must keep
+        behaving exactly like `accepts` did before this method existed."""
+        port = PortType(formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED))
+        produced = PortType(format=FormatKind.GTF)
+        assert port.accepts_any(produced)
