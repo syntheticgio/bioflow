@@ -1730,6 +1730,58 @@ async def _apply_run_annotation_stats(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_annotation_subset_export(result: dict, *, owner: str) -> None:
+    """Turn an exported subset into a derived ANNOTATION object.
+
+    `derived_from` the source annotation rather than a sidecar: a subset is
+    a file in its own right that the user downloads or feeds to another
+    pipeline, not an index hanging off its parent.
+    """
+    from app.services import object_service
+
+    output = result.get("output")
+    object_id = result.get("object_id")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("annotation_subset_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+    try:
+        subset = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ANNOTATION,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts=dict(result.get("facts") or {}),
+            # The subset describes the same biology as its source.
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "annotation_subset_ingest_failed", object_id=object_id, error=str(e)
+        )
+        return
+
+    log.info(
+        "annotation_subset_applied",
+        object_id=object_id,
+        subset_id=str(subset.id),
+    )
+
+    from app.services import run_service
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [subset.id], owner=subset.owner)
+
+
 async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     """Record compleasm's completeness scores on the assembly it described.
 
@@ -2709,6 +2761,7 @@ _APPLIERS = {
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
+    "annotation_subset_export": _apply_annotation_subset_export,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,
