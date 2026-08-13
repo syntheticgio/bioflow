@@ -2094,6 +2094,7 @@ export interface AnnotationStatsFacts extends Record<string, unknown> {
    *  several lines and cannot be re-emitted by line number, so the export
    *  control hides entirely rather than offering a launch that can't work. */
   genbank_record_count?: number;
+  genbank_has_sequence?: boolean;
   gff_version?: string;
   genome_build?: string;
   annotation_source?: string;
@@ -2103,6 +2104,11 @@ export interface AnnotationStatsFacts extends Record<string, unknown> {
   annotation_max_depth?: number;
   annotation_gene_mode?: "typed" | "fallback";
   annotation_gene_count?: number;
+}
+
+export interface ExtractedSequence {
+  reference_id: string | null;
+  reference_name: string | null;
 }
 
 export interface FeatureQuery {
