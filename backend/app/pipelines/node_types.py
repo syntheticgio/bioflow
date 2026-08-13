@@ -44,6 +44,7 @@ from beanie import PydanticObjectId
 from app.models.object import FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.models.workflow import PortType
+from app.pipelines.aligner_registry import ParamField
 from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ToolChoice
 from app.services import (
     ncbi_assembly_service,
@@ -100,6 +101,12 @@ class NodeTypeSpec:
     # `ports_for` rather than read off `spec.inputs` directly. Every read of
     # `.inputs`/`.outputs` outside this module should go through `ports_for`.
     tool_choice: "ToolChoice | None" = None
+    # Parameter fields shown on the node itself, declared statically because
+    # they do not vary by a chosen tool -- unlike an aligner's knobs, which
+    # are fetched per-tool from aligner_registry. A node type may have these,
+    # a tool_choice, both, or neither; the detail panel renders whichever it
+    # finds.
+    param_fields: tuple["ParamField", ...] = ()
 
 
 async def _launch_trim(*, inputs: dict, params: dict, owner: str):
