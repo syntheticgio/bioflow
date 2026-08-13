@@ -44,7 +44,7 @@ from beanie import PydanticObjectId
 from app.models.object import FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.models.workflow import PortType
-from app.pipelines.aligner_registry import ParamField
+from app.pipelines.aligner_registry import Choice, ParamField
 from app.pipelines.tool_choice import ALIGN_TOOL_CHOICE, ToolChoice
 from app.services import (
     ncbi_assembly_service,
@@ -174,6 +174,38 @@ async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
 async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_annotation(
         object_id=inputs["variants"], owner=owner
+    )
+
+
+async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
+    """Export a filtered subset of an annotation.
+
+    Filters are collected from params, dropping anything unset -- an empty
+    box means "no bound", not a filter matching the empty string. This
+    launcher does not ensure the results sidecar exists first; that is a
+    separate concern layered on afterward (see the design doc for #371).
+    """
+    object_id = inputs["annotation"]
+
+    filters = {
+        key: params.get(key)
+        for key in (
+            "contig",
+            "start_min",
+            "start_max",
+            "feature_type",
+            "biotype",
+            "name_query",
+            "strand",
+        )
+        if params.get(key) not in (None, "")
+    }
+
+    return await pipeline_service.launch_annotation_export(
+        object_id=object_id,
+        owner=owner,
+        filters=filters,
+        output_name=params.get("output_name") or "",
     )
 
 
@@ -465,6 +497,102 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
             PortSpec(
                 "annotated",
                 PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
+            ),
+        ),
+    ),
+    "annotation_export": NodeTypeSpec(
+        label="Export annotation subset",
+        launch_name="pipeline_service.launch_annotation_export",
+        run_kind=None,  # Derives an object but records no PipelineRun.
+        launch=_launch_annotation_export,
+        inputs=(
+            PortSpec(
+                "annotation",
+                # GenBank is excluded deliberately -- see the port test.
+                PortType(
+                    formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED),
+                    role=ObjectRole.ANNOTATION,
+                ),
+            ),
+        ),
+        outputs=(
+            PortSpec(
+                "subset",
+                PortType(
+                    formats=(FormatKind.GFF, FormatKind.GTF, FormatKind.BED),
+                    role=ObjectRole.ANNOTATION,
+                ),
+            ),
+        ),
+        param_fields=(
+            ParamField(
+                key="contig",
+                label="Contig",
+                kind="text",
+                default=None,
+                help="Only features on this sequence. Blank means every contig.",
+                group="filters",
+            ),
+            ParamField(
+                key="start_min",
+                label="Start at",
+                kind="int",
+                default=None,
+                help="Only features starting at or after this coordinate.",
+                group="filters",
+            ),
+            ParamField(
+                key="start_max",
+                label="End before",
+                kind="int",
+                default=None,
+                help="Only features starting at or before this coordinate.",
+                group="filters",
+            ),
+            ParamField(
+                key="feature_type",
+                label="Feature type",
+                kind="text",
+                default=None,
+                help="gene, exon, CDS, and so on. Blank means every type.",
+                group="filters",
+            ),
+            ParamField(
+                key="biotype",
+                label="Biotype",
+                kind="text",
+                default=None,
+                help="protein_coding, rRNA, and so on.",
+                group="filters",
+            ),
+            ParamField(
+                key="name_query",
+                label="Name contains",
+                kind="text",
+                default=None,
+                help="Substring match against the feature's name.",
+                group="filters",
+            ),
+            ParamField(
+                key="strand",
+                label="Strand",
+                kind="select",
+                default=None,
+                help="Blank means both strands.",
+                group="filters",
+                choices=(
+                    Choice(value="", label="Both"),
+                    Choice(value="+", label="Forward (+)"),
+                    Choice(value="-", label="Reverse (-)"),
+                ),
+            ),
+            ParamField(
+                key="output_name",
+                label="Name the result",
+                kind="text",
+                default=None,
+                help="Blank names it after the source annotation.",
+                group="filters",
             ),
         ),
     ),
@@ -848,18 +976,12 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # class as gc_tracks/meryl/annotate_genome. Also spans four input
         # formats (_ANNOTATION_STATS_FORMATS), which a single PortSpec
         # can't represent the way vcf_stats/bam_stats do for their one format.
-        # TODO(#371): a canvas node type may still be worth adding so a
-        # workflow can express "compute annotation stats" as a graph step.
+        # Settled in #371: no node type. Beyond producing no object, it
+        # accepts four formats where a PortSpec names one set, and it already
+        # runs at ingest -- a node would be a second trigger for something
+        # that has usually happened. The export node will ensure it on
+        # demand once its adapter is layered with that logic (see #371).
         "pipeline_service.launch_annotation_stats",
-        # User-triggered from the Results tab's feature table, with an
-        # arbitrary filter chosen interactively rather than wired from an
-        # upstream node's output — not a graph step in the sense the other
-        # entries here are. It does produce a derived object (unlike its
-        # siblings above), which is exactly why a real canvas node type is
-        # worth designing properly rather than shoehorning in now: filters
-        # have no fixed port shape to express as PortSpec inputs.
-        # TODO(#371): design and add a canvas node type.
-        "pipeline_service.launch_annotation_export",
     }
 )
 

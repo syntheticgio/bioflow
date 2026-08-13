@@ -70,6 +70,59 @@ class TestSpecs:
         out = spec.outputs[0]
         assert out.type.role is ObjectRole.TRIMMED_READS
 
+    def test_annotation_export_port_accepts_gff_gtf_bed_and_rejects_genbank(self):
+        """The concrete rule this port's multi-format type exists for.
+
+        GenBank is refused because its features span several lines and its
+        segment rows correspond to no single line, so the export handler
+        cannot subset it. Refusing on the canvas beats failing in the job.
+        """
+        spec = NODE_TYPES["annotation_export"]
+        port = next(p for p in spec.inputs if p.name == "annotation")
+        assert port.type.accepts(FormatKind.GFF, ObjectRole.ANNOTATION)
+        assert port.type.accepts(FormatKind.GTF, ObjectRole.ANNOTATION)
+        assert port.type.accepts(FormatKind.BED, ObjectRole.ANNOTATION)
+        assert not port.type.accepts(FormatKind.GENBANK, ObjectRole.ANNOTATION)
+
+    def test_annotation_export_declares_an_annotation_output(self):
+        spec = NODE_TYPES["annotation_export"]
+        assert [p.name for p in spec.outputs] == ["subset"]
+        assert spec.outputs[0].type.role is ObjectRole.ANNOTATION
+
+    def test_annotation_export_output_matches_its_input_formats(self):
+        """The subset is written in the source file's own syntax, so the
+        output is the same three-format set rather than one fixed format."""
+        spec = NODE_TYPES["annotation_export"]
+        source = next(p for p in spec.inputs if p.name == "annotation")
+        assert spec.outputs[0].type.accepted_formats == source.type.accepted_formats
+
+    def test_annotation_export_creates_no_pipeline_run(self):
+        assert NODE_TYPES["annotation_export"].run_kind is None
+
+    def test_annotation_export_declares_its_filter_fields(self):
+        """Seven filters plus output_name. top_level_only and parent_status
+        are deliberately absent: the handler force-sets the first, and the
+        second is an artifact of the Results table's Unresolved view."""
+        spec = NODE_TYPES["annotation_export"]
+        keys = [f.key for f in spec.param_fields]
+        assert keys == [
+            "contig",
+            "start_min",
+            "start_max",
+            "feature_type",
+            "biotype",
+            "name_query",
+            "strand",
+            "output_name",
+        ]
+        assert "top_level_only" not in keys
+        assert "parent_status" not in keys
+
+    def test_annotation_export_filter_fields_are_grouped_as_filters(self):
+        spec = NODE_TYPES["annotation_export"]
+        filters = [f for f in spec.param_fields if f.key != "output_name"]
+        assert all(f.group == "filters" for f in filters)
+
 
 class TestRunKindResolution:
     """(run_kind, run_tool) is what workflow_derive matches a run against.
