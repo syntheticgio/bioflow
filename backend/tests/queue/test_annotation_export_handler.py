@@ -1,12 +1,19 @@
 """The export_annotation_subset handler."""
 
 import dataclasses
+import uuid
+from unittest.mock import AsyncMock
 
 import pytest
+from beanie import PydanticObjectId
 
+from app.config import settings
 from app.errors import PermanentError
+from app.models import ObjectRole
 from app.pipelines import annotation_db, annotation_hierarchy, annotation_parse
+from app.queue import results
 from app.queue.annotation_handlers import export_annotation_subset
+from app.services import object_service, project_service, run_service
 
 
 @pytest.fixture(autouse=True)
@@ -146,3 +153,126 @@ def test_export_applier_is_registered():
     from app.queue.results import _APPLIERS
 
     assert "export_annotation_subset" in _APPLIERS
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+class TestApplierRecordsRunOutputs:
+    """_apply_export_annotation_subset must attach the ingested subset to
+    its run, matching every other ingest-creating applier in results.py
+    (_apply_sra_download, _apply_uniprot_download, etc.) -- otherwise the
+    export never shows up in the run/activity view even though the run
+    itself completes normally.
+
+    job_id currently never reaches result in production (a separate,
+    already-tracked issue with how the executor passes results to
+    appliers), so run_for_job resolving to None is the real-world case --
+    but that just means run_id stays None and record_outputs is skipped by
+    the existing guard. This test supplies a job_id explicitly to prove the
+    wiring is correct and ready for when that gets fixed.
+    """
+
+    async def test_record_outputs_called_when_job_id_present(self, tmp_path, monkeypatch):
+        settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+        settings.sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        settings.sentinel_path.write_text("biopipe-home-v1\n")
+        owner = "annotation-export-run-owner"
+
+        async def _skip_ingest(obj, **kwargs):
+            return ""
+
+        async def _skip_enqueue(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(object_service, "enqueue_ingest", _skip_ingest)
+        monkeypatch.setattr("app.queue.queue.enqueue", _skip_enqueue)
+
+        project = await project_service.create_project(
+            name=f"{owner}-project", owner=owner
+        )
+        source_path = tmp_path / f"source-{uuid.uuid4().hex}.gff3"
+        source_path.write_bytes(uuid.uuid4().bytes)
+        source = await object_service.ingest_local_file(
+            owner=owner,
+            project_id=project.id,
+            path=source_path,
+            name="source.gff3",
+            role=ObjectRole.ANNOTATION,
+        )
+
+        output_path = tmp_path / f"subset-{uuid.uuid4().hex}.gff3"
+        output_path.write_bytes(uuid.uuid4().bytes)
+
+        run_id = PydanticObjectId()
+        run_for_job = AsyncMock(return_value=run_id)
+        record_outputs = AsyncMock()
+        monkeypatch.setattr(run_service, "run_for_job", run_for_job)
+        monkeypatch.setattr(run_service, "record_outputs", record_outputs)
+
+        job_id = str(PydanticObjectId())
+
+        await results._apply_export_annotation_subset(
+            {
+                "object_id": str(source.id),
+                "job_id": job_id,
+                "output": {"tmp_path": str(output_path), "name": "subset.gff3"},
+                "feature_count": 2,
+            },
+            owner=owner,
+        )
+
+        run_for_job.assert_awaited_once_with(PydanticObjectId(job_id))
+        assert record_outputs.await_count == 1
+        args, kwargs = record_outputs.await_args
+        assert args[0] == run_id
+        assert kwargs["owner"] == owner
+
+    async def test_record_outputs_skipped_when_job_id_absent(self, tmp_path, monkeypatch):
+        """The common case today: the executor never injects job_id, so
+        run_for_job is never even called and no run is touched."""
+        settings.tmp_dir.mkdir(parents=True, exist_ok=True)
+        settings.sentinel_path.parent.mkdir(parents=True, exist_ok=True)
+        settings.sentinel_path.write_text("biopipe-home-v1\n")
+        owner = "annotation-export-run-owner-2"
+
+        async def _skip_ingest(obj, **kwargs):
+            return ""
+
+        async def _skip_enqueue(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(object_service, "enqueue_ingest", _skip_ingest)
+        monkeypatch.setattr("app.queue.queue.enqueue", _skip_enqueue)
+
+        project = await project_service.create_project(
+            name=f"{owner}-project", owner=owner
+        )
+        source_path = tmp_path / f"source-{uuid.uuid4().hex}.gff3"
+        source_path.write_bytes(uuid.uuid4().bytes)
+        source = await object_service.ingest_local_file(
+            owner=owner,
+            project_id=project.id,
+            path=source_path,
+            name="source.gff3",
+            role=ObjectRole.ANNOTATION,
+        )
+
+        output_path = tmp_path / f"subset-{uuid.uuid4().hex}.gff3"
+        output_path.write_bytes(uuid.uuid4().bytes)
+
+        run_for_job = AsyncMock()
+        record_outputs = AsyncMock()
+        monkeypatch.setattr(run_service, "run_for_job", run_for_job)
+        monkeypatch.setattr(run_service, "record_outputs", record_outputs)
+
+        await results._apply_export_annotation_subset(
+            {
+                "object_id": str(source.id),
+                "output": {"tmp_path": str(output_path), "name": "subset.gff3"},
+                "feature_count": 2,
+            },
+            owner=owner,
+        )
+
+        run_for_job.assert_not_awaited()
+        record_outputs.assert_not_awaited()

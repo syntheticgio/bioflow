@@ -1741,7 +1741,7 @@ async def _apply_export_annotation_subset(result: dict, *, owner: str) -> None:
     ingestion should trigger analysis automatically is #298's question, and
     answering it here by side effect would pre-empt it.
     """
-    from app.services import object_service
+    from app.services import object_service, run_service
 
     object_id = result.get("object_id")
     output = result.get("output")
@@ -1773,6 +1773,10 @@ async def _apply_export_annotation_subset(result: dict, *, owner: str) -> None:
             "annotation_export_ingest_failed", object_id=object_id, error=str(e)
         )
         return
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [subset.id], owner=subset.owner)
 
     log.info(
         "annotation_export_applied",
