@@ -143,6 +143,7 @@ def write_subset(
     dest: Path,
     lines: set[int],
     verify: dict[int, dict] | None,
+    parse_line=None,
 ) -> int:
     """Copy `lines` from `source` to `dest`, header first, in file order.
 
@@ -153,6 +154,14 @@ def write_subset(
     `verify` maps a line number to the contig/start/end the index recorded
     for it. Each selected line is re-parsed and compared; a disagreement
     raises. Pass None only in tests that are exercising emission itself.
+
+    `parse_line` is the format-appropriate parser (parse_gff_line,
+    parse_gtf_line, or parse_bed_line) used to re-parse each selected line
+    for verification. Defaults to parse_gff_line for backward compatibility
+    with callers that don't yet pass it explicitly; a caller handling GTF or
+    BED must pass the matching parser, or verification will spuriously fail
+    every line -- the formats are structurally different, not just
+    differently named.
 
     Headers are read from the file directly rather than through
     `run_annotation_stats`'s `_HEADER_SCAN_LINES`, which bounds what is
@@ -176,7 +185,8 @@ def write_subset(
                 continue
             if verify is not None:
                 expected = verify.get(i)
-                parsed = annotation_parse.parse_gff_line(stripped, i)
+                parser = parse_line or annotation_parse.parse_gff_line
+                parsed = parser(stripped, i)
                 if expected is not None and (
                     parsed is None
                     or parsed.contig != expected["contig"]

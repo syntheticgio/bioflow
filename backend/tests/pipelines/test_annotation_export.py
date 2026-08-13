@@ -184,6 +184,22 @@ class TestWriteSubset:
         )
         assert "ID=g1" in out.read_text()
 
+    def test_verifies_gtf_lines_with_the_gtf_parser(self, tmp_path):
+        """write_subset must not hardcode the GFF3 parser for verification --
+        a GTF export re-parsed as GFF3 would spuriously fail on every line,
+        since the two formats structure their 9th column differently."""
+        from app.pipelines.annotation_parse import parse_gtf_line
+
+        src = tmp_path / "a.gtf"
+        src.write_text('chr1\tX\tgene\t1\t100\t.\t+\t.\tgene_id "g1";\n')
+        out = tmp_path / "out.gtf"
+        write_subset(
+            source=src, dest=out, lines={1},
+            verify={1: {"contig": "chr1", "start": 1, "end": 100}},
+            parse_line=parse_gtf_line,
+        )
+        assert 'gene_id "g1"' in out.read_text()
+
 
 class TestSubsetName:
     def test_uses_a_single_filter(self):
