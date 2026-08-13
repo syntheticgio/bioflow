@@ -93,6 +93,10 @@ def build_annotation_db(*, rows, db_path: Path) -> int:
               parent     TEXT,
               biotype    TEXT,
               attributes TEXT,
+              -- The 1-based source line, for subset export's verbatim
+              -- re-emission. Nullable: GenBank features span several lines
+              -- and record none.
+              line       INTEGER,
               parent_status TEXT NOT NULL DEFAULT 'root',
               depth      INTEGER NOT NULL DEFAULT 0
             )
@@ -114,21 +118,24 @@ def build_annotation_db(*, rows, db_path: Path) -> int:
                     (
                         f.contig, f.start, f.end, f.type, f.strand, f.score,
                         f.name, f.feature_id, parent, f.biotype, f.attributes,
+                        f.line,
                     )
                 )
             if len(batch) >= _INSERT_BATCH:
                 con.executemany(
                     "INSERT INTO features (contig, start, end, type, strand, "
-                    "score, name, feature_id, parent, biotype, attributes) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
+                    "score, name, feature_id, parent, biotype, attributes, "
+                    "line) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
                 )
                 batch = []
 
         if batch:
             con.executemany(
                 "INSERT INTO features (contig, start, end, type, strand, "
-                "score, name, feature_id, parent, biotype, attributes) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
+                "score, name, feature_id, parent, biotype, attributes, "
+                "line) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
             )
 
         con.execute("CREATE INDEX ix_features_locus ON features(contig, start)")
