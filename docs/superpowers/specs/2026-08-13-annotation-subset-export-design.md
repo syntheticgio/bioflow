@@ -1,6 +1,7 @@
 # Annotation subset export
 
-Design for [#297](https://github.com/syntheticgio/bioflow/issues/297).
+Design for [#358](https://github.com/syntheticgio/bioflow/issues/358), split
+out of [#297](https://github.com/syntheticgio/bioflow/issues/297).
 
 [#257](https://github.com/syntheticgio/bioflow/issues/257) shipped an
 annotation Results view that is inspectable but read-only. #297 asks for
@@ -319,7 +320,8 @@ boundary against #298.
 
 - **Field editing** — coordinates, types, names, attributes. Needs
   per-feature identity, a store surviving index recompute, and a full
-  serializer. #297 remains open for it after this lands.
+  serializer. [#297](https://github.com/syntheticgio/bioflow/issues/297)
+  remains open for it after this lands.
 - **GenBank export**, and annotation format conversion generally.
 - **Adding features** not present in the source.
 - **Automatic results computation** on the exported object —
