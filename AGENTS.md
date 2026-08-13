@@ -21,7 +21,31 @@ PR*, not a merged one. The user reviews and merges. This is the one part of
 the old workflow that inverted: committing and pushing are still yours to do
 without asking, and merging is now the user's.
 
-Once the suite is green:
+**Before opening the PR, catch up to `main` yourself.** `main` moves while a
+task is in progress; rebasing before you push is what makes the PR mergeable
+the moment it exists, instead of leaving GitHub to discover a conflict later:
+
+```bash
+git fetch origin main
+git rebase origin/main
+```
+
+If the rebase conflicts badly enough that per-commit resolution isn't
+practical, fall back to a merge instead:
+
+```bash
+git rebase --abort
+git merge origin/main
+```
+
+Then confirm the work survived the rebase/merge before pushing -- a conflict
+resolution can silently drop a hunk:
+
+```bash
+git diff origin/main...HEAD --stat
+```
+
+Once that's checked and the suite is green:
 
 ```bash
 git push -u origin HEAD
@@ -42,10 +66,8 @@ What still earns a pause before you push:
   deleting branches that hold unmerged work. Committing is cheap and
   reversible; those are not.
 
-`main` being dirty or diverged is no longer your problem to solve by hand: a
-PR that cannot merge cleanly says so in the GitHub UI, which is a better place
-to discover it than mid-merge on the user's checkout. If GitHub reports a
-conflict, rebase your branch on `origin/main` and push again -- that is
+If GitHub still reports a conflict after all this (`main` moved again while
+CI ran), rebase your branch on `origin/main` and push again -- that is
 ordinary work on your own branch, not a history rewrite of a shared one.
 
 Keep commits separable: a mechanical rename and a behaviour change in one
@@ -168,6 +190,24 @@ are filtered *out* of user-facing notes. Two consequences:
 
 Use `tweak` and `style` sparingly; both appear in the history and neither is
 a standard Conventional Commits type.
+
+### Catching a bad subject before it reaches CI
+
+`commit-check.yml` rejects a PR whose commit subjects don't parse as
+Conventional Commits, and the easiest way to hit that check is to not have
+written the commit yet when you find out. `ops/hooks/commit-msg` runs the
+same regex locally, at `git commit` time, and prints the same fix-it message
+CI does. It is not installed by default -- git does not auto-run hooks from a
+clone -- so opt in once per checkout (main checkout or worktree alike):
+
+```bash
+git config core.hooksPath ops/hooks
+```
+
+If a commit is rejected, the message names the exact problem; usually the
+fix is `git commit --amend` with a corrected subject, or (mid-rebase)
+`reword`ing the offending commit. This is the same fix CI's own error output
+walks through, so there is no second thing to learn.
 
 ### Writing the subject line
 
