@@ -1,5 +1,6 @@
 """Pipeline endpoints: launching runs and reporting tool availability."""
 
+import dataclasses
 import json
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -929,6 +930,47 @@ async def launch_annotation_stats(
     return JobOut.of(job)
 
 
+def build_feature_filters(
+    *,
+    contig: str | None = None,
+    start_min: int | None = None,
+    start_max: int | None = None,
+    feature_type: str | None = None,
+    biotype: str | None = None,
+    name_query: str | None = None,
+    strand: str | None = None,
+    view: str = "all",
+) -> annotation_db.FeatureFilters:
+    """The one definition of what the table's filter arguments mean.
+
+    Shared by the page route and the export route: the two must agree about
+    `top_level_only`, because it decides whether "matched" counts genes or
+    exons, and the export dialog reports that count next to the exported
+    one.
+
+    `features_in_window` deliberately does not come through here -- it sets
+    top_level_only=False unconditionally for the track viewer, which is a
+    different rule about a coordinate window rather than a filter.
+    """
+    unresolved = view == "unresolved"
+    return annotation_db.FeatureFilters(
+        contig=contig,
+        start_min=start_min,
+        start_max=start_max,
+        feature_type=feature_type,
+        biotype=biotype,
+        name_query=name_query,
+        strand=strand,
+        # A type filter must search the whole file: every exon has a parent,
+        # so leaving top_level_only set would return an empty table on a
+        # valid GFF3. The Unresolved view clears it for the same reason.
+        top_level_only=feature_type is None and not unresolved,
+        parent_status=(
+            annotation_hierarchy.UNRESOLVED_STATUSES if unresolved else None
+        ),
+    )
+
+
 @router.get("/annotationstats/features/{object_id}")
 async def get_annotation_features(
     object_id: PydanticObjectId,
@@ -972,8 +1014,7 @@ async def get_annotation_features(
     # The Unresolved view is the one place a record whose Parent named
     # nothing is reachable -- it is excluded from the default page by
     # definition, since its parent is not NULL.
-    unresolved = view == "unresolved"
-    filters = annotation_db.FeatureFilters(
+    filters = build_feature_filters(
         contig=contig,
         start_min=start_min,
         start_max=start_max,
@@ -981,13 +1022,7 @@ async def get_annotation_features(
         biotype=biotype,
         name_query=name_query,
         strand=strand,
-        # A type filter must search the whole file: every exon has a parent,
-        # so leaving top_level_only set would return an empty table on a
-        # valid GFF3. The Unresolved view clears it for the same reason.
-        top_level_only=feature_type is None and not unresolved,
-        parent_status=(
-            annotation_hierarchy.UNRESOLVED_STATUSES if unresolved else None
-        ),
+        view=view,
     )
 
     rows = annotation_db.query_features(
@@ -999,6 +1034,42 @@ async def get_annotation_features(
         else annotation_db.count_features(db_path=db_path, filters=filters)
     )
     return {"total": total, "rows": rows}
+
+
+class AnnotationSubsetExportRequest(BaseModel):
+    object_id: PydanticObjectId
+    contig: str | None = None
+    start_min: int | None = None
+    start_max: int | None = None
+    feature_type: str | None = None
+    biotype: str | None = None
+    name_query: str | None = None
+    strand: str | None = None
+    view: Literal["all", "unresolved"] = "all"
+
+
+@router.post("/annotationstats/export")
+async def export_annotation_subset(
+    body: AnnotationSubsetExportRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue the export of the feature table's current filter as a new
+    ANNOTATION object, derived from the source."""
+    filters = build_feature_filters(
+        contig=body.contig,
+        start_min=body.start_min,
+        start_max=body.start_max,
+        feature_type=body.feature_type,
+        biotype=body.biotype,
+        name_query=body.name_query,
+        strand=body.strand,
+        view=body.view,
+    )
+    job = await pipeline_service.launch_annotation_subset_export(
+        object_id=body.object_id,
+        filters=dataclasses.asdict(filters),
+        owner=owner,
+    )
+    return JobOut.of(job)
 
 
 @router.get("/annotationstats/genes/{object_id}")
