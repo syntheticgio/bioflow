@@ -11,7 +11,7 @@ use tauri::path::BaseDirectory;
 use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome, UpdateToStageOutcome};
+use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome};
 use crate::docker::{ActionResult, DockerBackend, DockerPresence, ShellDocker};
 use crate::optional_tools::{OptionalTool, StackToolsClient, ToolsClient};
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
@@ -345,6 +345,24 @@ pub async fn update_stack(app: State<'_, LauncherApp>) -> Result<(), String> {
         UpdateOutcome::PullFailed { output } | UpdateOutcome::RecreateFailed { output } => {
             Err(output)
         }
+    }
+}
+
+#[tauri::command]
+pub async fn update_to_stage(app: State<'_, LauncherApp>, tag: String) -> Result<(), String> {
+    let install_dir = install_dir_str_blocking(&app).await.ok_or("not installed")?;
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let docker = ShellDocker::new();
+        actions::update_to_stage(&docker, &install_dir, &tag)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match outcome {
+        actions::UpdateToStageOutcome::Updated => Ok(()),
+        actions::UpdateToStageOutcome::PullFailed { output }
+        | actions::UpdateToStageOutcome::RecreateFailed { output } => Err(output),
     }
 }
 
