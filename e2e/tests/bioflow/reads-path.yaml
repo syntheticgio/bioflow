@@ -1,0 +1,19 @@
+# DRAFT — reads path test. Finalize against a live stack (Task 8.5).
+#
+# The QC/trim/align launch flow is not a single MCP tool: `suggest_next`
+# returns cards whose `launch` is `{"endpoint", "body"}` meant to be POSTed
+# to the HTTP API (see this dir's README). Until the harness grows an
+# HTTP-launch step, the reads path is sketched below with the correct handler
+# kinds (`run_qc`, `trim_reads`, `align_reads`) and placeholder params.
+name: reads-path
+description: "DRAFT: upload FASTQ -> QC -> trim -> align -> assert BAM (params TBD)"
+steps:
+  - create_project: { name: "e2e-reads-{{run_id}}" }
+  - upload: { file: "reads_R1.fastq.gz", as: r1 }
+  - upload: { file: "reads_R2.fastq.gz", as: r2 }
+  # The following steps are placeholders: run_pipeline needs the full handler
+  # payload (object_id, project_id, name, platform, ...) that the launch
+  # endpoints build server-side. See README.md for the discovered flow.
+  - mcp: { tool: run_pipeline, as: qc, args: { kind: "run_qc", params: { object_id: "$.r1.id" } } }
+  - wait: { tool: get_job, as: qcjob, args: { job_id: "$.qc.job_id" }, timeout: 900 }
+  - assert: { fact: "$.qcjob.state", equals: "succeeded" }
