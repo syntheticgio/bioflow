@@ -244,3 +244,36 @@ class TestCoordinateAgreement:
         bed = parse_bed_line("chr1\t999\t2000")
         gff = parse_gff_line("chr1\t.\tgene\t1000\t2000\t.\t+\t.\tID=g1")
         assert (bed.start, bed.end) == (gff.start, gff.end) == (1000, 2000)
+
+
+class TestLineNumbers:
+    """The line number is what makes a feature addressable back to its
+    source line, which is the whole basis of subset export: the parser
+    stores neither the GFF `source` column nor `phase`, so a reconstructed
+    line would lose reading frame."""
+
+    def test_gff_records_the_line_it_came_from(self):
+        line = "chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1"
+        assert parse_gff_line(line, line_no=42).line_no == 42
+
+    def test_gtf_records_the_line_it_came_from(self):
+        line = 'chr1\tX\tgene\t1\t100\t.\t+\t.\tgene_id "g1";'
+        assert parse_gtf_line(line, line_no=7).line_no == 7
+
+    def test_bed_records_the_line_it_came_from(self):
+        assert parse_bed_line("chr1\t0\t100", line_no=3).line_no == 3
+
+    def test_line_number_is_optional(self):
+        """The three parsers are dispatched through one dict in _line_rows
+        and called with a single positional argument, so their signatures
+        must stay interchangeable."""
+        assert parse_gff_line("chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1").line_no is None
+        assert parse_bed_line("chr1\t0\t100").line_no is None
+
+    def test_multi_parent_rows_share_one_line_number(self):
+        """Parent=a,b writes one row per relationship; all came from the
+        same source line."""
+        line = "chr1\tX\texon\t1\t100\t.\t+\t.\tID=e1;Parent=t1,t2"
+        f = parse_gff_line(line, line_no=9)
+        assert len(f.parents) == 2
+        assert f.line_no == 9

@@ -35,6 +35,14 @@ class Feature:
     biotype: str | None
     attributes: str | None
 
+    # The 1-based line of the source file this feature was parsed from, or
+    # None when it has no single line (GenBank's multi-line and synthetic
+    # records). This is what subset export selects on: it re-emits original
+    # source lines rather than reconstructing them, because `source` and
+    # `phase` are not stored above and a rebuilt CDS line would carry a `.`
+    # where a reading frame belongs.
+    line_no: int | None = None
+
 
 # Lines that are structural rather than data, in any of the three formats.
 _SKIP_PREFIXES = ("#", "track", "browser")
@@ -108,7 +116,7 @@ def _tabular_fields(line: str, minimum: int) -> list[str] | None:
     return fields
 
 
-def parse_gff_line(line: str) -> Feature | None:
+def parse_gff_line(line: str, line_no: int | None = None) -> Feature | None:
     """One GFF3 data line. None for comments, blanks, and malformed rows."""
     fields = _tabular_fields(line, 9)
     if fields is None:
@@ -138,10 +146,11 @@ def parse_gff_line(line: str) -> Feature | None:
         parents=parents,
         biotype=attrs.get("gene_biotype") or attrs.get("biotype"),
         attributes=fields[8],
+        line_no=line_no,
     )
 
 
-def parse_gtf_line(line: str) -> Feature | None:
+def parse_gtf_line(line: str, line_no: int | None = None) -> Feature | None:
     """One GTF data line.
 
     GTF has no ID/Parent. Hierarchy is inferred from the identifier columns:
@@ -191,10 +200,11 @@ def parse_gtf_line(line: str) -> Feature | None:
         parents=(parent,) if parent else (),
         biotype=attrs.get("gene_biotype") or attrs.get("gene_type"),
         attributes=fields[8],
+        line_no=line_no,
     )
 
 
-def parse_bed_line(line: str) -> Feature | None:
+def parse_bed_line(line: str, line_no: int | None = None) -> Feature | None:
     """One BED data line, converted to one-based inclusive coordinates.
 
     BED's [start, end) with a zero-based start is the same interval as GFF's
@@ -222,4 +232,5 @@ def parse_bed_line(line: str) -> Feature | None:
         parents=(),
         biotype=None,
         attributes=None,
+        line_no=line_no,
     )
