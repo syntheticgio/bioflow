@@ -137,11 +137,25 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
           </div>
           <div className="section">
             <div className="section-title">Annotated coverage</div>
-            <div className="section-note">
-              Fraction of each sequence covered by at least one feature.
-              Overlapping features are counted once.
-            </div>
-            <AnnotationCoverageChart contigs={contigs} />
+            {f.annotation_contig_lengths_known === false ? (
+              // Blank bars with no explanation read as a broken chart. The
+              // sequence lengths coverage divides by come from the reference,
+              // and none was resolved for this annotation.
+              <div className="section-note">
+                Coverage needs the sequence lengths from this annotation's
+                reference, and no matching reference was found in this
+                project. Add the reference genome and the coverage will be
+                computed automatically.
+              </div>
+            ) : (
+              <>
+                <div className="section-note">
+                  Fraction of each sequence covered by at least one feature.
+                  Overlapping features are counted once.
+                </div>
+                <AnnotationCoverageChart contigs={contigs} />
+              </>
+            )}
           </div>
         </>
       )}
