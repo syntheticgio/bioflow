@@ -24,8 +24,9 @@ MISSING_ID = "507f191e810c19729de860ea"
 def _f(start, end, feature_id, ftype="gene", parent=None):
     return Feature(
         contig="chr1", start=start, end=end, type=ftype, strand="+", score=None,
-        name=feature_id, feature_id=feature_id, parent=parent, biotype=None,
-        attributes=f"ID={feature_id}",
+        name=feature_id, feature_id=feature_id,
+        parents=(parent,) if parent else (),
+        biotype=None, attributes=f"ID={feature_id}",
     )
 
 
