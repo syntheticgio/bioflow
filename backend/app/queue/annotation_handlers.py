@@ -70,7 +70,10 @@ def _line_rows(parse_line, source: Path, ctx, acc, header: list[str], fmt: str):
                 if len(header) < _HEADER_SCAN_LINES:
                     header.append(stripped)
                 continue
-            feature = parse_line(stripped)
+            # i is 0-based and counts every line including comments and
+            # blanks, which is what makes this address the file rather than
+            # the features in it -- export re-reads exactly this line.
+            feature = parse_line(stripped, i + 1)
             if feature is None:
                 acc.add_malformed()
                 continue
