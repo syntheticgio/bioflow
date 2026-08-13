@@ -150,6 +150,7 @@ _STEP_VERBS: dict[str, str] = {
     "download_assembly": "downloaded from NCBI",
     "download_uniprot": "downloaded from UniProt",
     "download_lineage": "downloaded",
+    "export_annotation_subset": "filtered to a subset of",
 }
 
 # Registered handlers that legitimately produce no narrative step.
