@@ -11,7 +11,7 @@ use tauri::path::BaseDirectory;
 use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome};
+use crate::actions::{self, RunOutcome, StopOutcome, UpdateOutcome, UpdateToStageOutcome};
 use crate::docker::{ActionResult, DockerBackend, DockerPresence, ShellDocker};
 use crate::optional_tools::{OptionalTool, StackToolsClient, ToolsClient};
 use crate::settings::{self, CurrentSettings, SettingsUpdateError};
