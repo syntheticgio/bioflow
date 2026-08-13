@@ -1,0 +1,11 @@
+# Reference smoke test: create a project, download a reference genome from
+# NCBI via the MCP server, and verify the FASTA object lands in the project.
+name: reference-smoke
+description: "create project -> download_reference -> poll job -> assert FASTA present"
+steps:
+  - create_project: { name: "e2e-smoke-{{run_id}}" }
+  - mcp: { tool: download_reference, as: dl, args: { accession: "GCF_000005845.2", project_id: "$.project_id" } }
+  - wait: { tool: get_job, as: job, args: { job_id: "$.dl.job_id" }, timeout: 900 }
+  - assert: { fact: "$.job.state", equals: "succeeded" }
+  - mcp: { tool: list_objects, as: objs, args: { project_id: "$.project_id" } }
+  - assert: { fact: "$.objs.objects", contains_format: "fasta" }

@@ -18,7 +18,7 @@ backend/.venv/
 # Superpowers brainstorming scratch (mockups, session state)
 .superpowers/
 skills-lock.json
-
+.obsidian/
 .mcp.json
 
 # Isolated feature worktrees

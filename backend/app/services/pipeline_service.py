@@ -2681,6 +2681,130 @@ async def launch_annotation_export(
     )
 
 
+async def launch_materialize_annotation_edits(
+    *, object_id: PydanticObjectId, owner: str
+):
+    """Queue materialization of pending annotation edits into a derived object.
+
+    Issue #297. The handler reads all AnnotationEdit documents for the source
+    object, rewrites the edited columns in each tagged source line, and writes
+    a derived annotation object.
+    """
+    from app.models.annotation_edit import AnnotationEdit
+    from app.queue import queue
+
+    ann = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(ann)
+
+    digest, path = await _resolve_readable(ann)
+    path = path or str(blob_path(digest))
+
+    edits = await AnnotationEdit.find(
+        AnnotationEdit.object_id == ann.id
+    ).to_list()
+    if not edits:
+        raise ValidationError("No pending edits to materialize")
+
+    return await queue.enqueue(
+        "materialize_annotation_edits",
+        owner=owner,
+        payload={
+            "object_id": str(ann.id),
+            "annotation_path": path,
+            "annotation_name": ann.name,
+            "format_kind": str(ann.format.kind.value),
+            "project_id": str(ann.project_id),
+        },
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=2,
+        project_id=ann.project_id,
+        object_id=ann.id,
+    )
+
+
+async def existing_extracted_sequence(
+    object_id: PydanticObjectId,
+) -> DataObject | None:
+    """The FASTA reference already extracted from this GenBank, if any.
+
+    The whole of #348's idempotency guard. Deliberately a query rather than a
+    fact on the GenBank: a stored "already extracted" flag would go stale the
+    moment the user deleted the reference, and deletion here is hard, not
+    soft (`object_service.delete_object`), so asking the database is both
+    simpler and self-healing. Keyed on derived_from and role, never on name,
+    so renaming the reference does not produce a second extraction.
+
+    Filtered by role because an exported annotation subset is also
+    `derived_from` the same GenBank; only a REFERENCE is this file's
+    extracted sequence.
+    """
+    return await DataObject.find(
+        DataObject.derived_from == object_id,
+        DataObject.role == ObjectRole.REFERENCE,
+    ).first_or_none()
+
+
+async def launch_extract_genbank_sequence(
+    *, object_id: PydanticObjectId, owner: str
+):
+    """Queue extraction of a GenBank's ORIGIN sequence into a FASTA reference.
+
+    Derives an object, so the job's result goes through
+    `_apply_extract_genbank_sequence`. Refuses rather than queueing when one
+    already exists: extraction takes no parameters, so a second run would
+    write a byte-identical duplicate of a possibly very large reference and
+    put two indistinguishable entries in every picker.
+    """
+    from app.queue import queue
+
+    gb = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(gb)
+
+    if gb.format.kind is not FormatKind.GENBANK:
+        raise ValidationError(
+            f"{gb.name!r} is {gb.format.kind.value}, not a GenBank file",
+            details={"object_id": str(gb.id), "kind": gb.format.kind.value},
+        )
+
+    existing = await existing_extracted_sequence(gb.id)
+    if existing is not None:
+        raise ConflictError(
+            f"{gb.name!r} already has an extracted sequence: {existing.name!r}",
+            details={
+                "object_id": str(gb.id),
+                "reference_id": str(existing.id),
+                "reference_name": existing.name,
+            },
+        )
+
+    digest, path = await _resolve_readable(gb)
+    # Same reasoning as launch_annotation_stats: the THREAD handler reads
+    # ctx.payload["genbank_path"] directly and does no blob resolution.
+    path = path or str(blob_path(digest))
+
+    stem = Path(gb.name).stem
+    # A .gbff.gz leaves a .gbff behind after one stem strip.
+    if stem.endswith(".gbff") or stem.endswith(".gb"):
+        stem = Path(stem).stem
+
+    return await queue.enqueue(
+        "extract_genbank_sequence",
+        owner=owner,
+        payload={
+            "object_id": str(gb.id),
+            "genbank_path": path,
+            "output_name": f"{stem}.fna",
+        },
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=2,
+        dedup_key=f"genbank_sequence:{gb.id}",
+        project_id=gb.project_id,
+        object_id=gb.id,
+    )
+
+
 async def _reference_for_annotation(ann) -> DataObject | None:
     """The reference this annotation describes, from its provenance.
 

@@ -5,6 +5,8 @@ import type { AnnotationFeature, AnnotationGene, AnnotationStatsFacts } from "..
 import { useDebounced } from "../lib/useDebounced";
 import { notify } from "../stores/messageStore";
 import { TabPanel, Tabs } from "./Tabs";
+import { AnnotationEditModal } from "./AnnotationEditModal";
+import { AnnotationPendingEdits } from "./AnnotationPendingEdits";
 
 const PAGE_SIZE = 100;
 
@@ -105,6 +107,10 @@ export function AnnotationFeatureTable({
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // Row currently open in the edit modal (feature editing, #297). Null when
+  // no edit modal is open.
+  const [editingRow, setEditingRow] = useState<AnnotationFeature | null>(null);
+
   const nameQuery = useDebounced(nameInput, 300);
 
   const contigOptions = useMemo(
@@ -196,7 +202,23 @@ export function AnnotationFeatureTable({
   // merely disabled, since there is no filter combination that would work.
   const isGenBank = facts.genbank_record_count != null;
 
+  // Editing (#297) is only meaningful for line-addressable GFF/GTF -- same
+  // gate as export, minus the GenBank exclusion. The edit button is hidden
+  // (not disabled) for BED and GenBank, since neither has an editable
+  // GFF-style column to address.
+  const canEdit = facts.gff_version != null;
+
   const qc = useQueryClient();
+
+  // Only for GenBank files that actually carry sequence. The same query the
+  // launcher's guard runs, so the button and the server cannot disagree
+  // about whether extraction has already happened.
+  const hasSequence = isGenBank && facts.genbank_has_sequence === true;
+  const extractedQuery = useQuery({
+    queryKey: ["genbanksequence", objectId],
+    queryFn: () => api.extractedGenBankSequence(objectId),
+    enabled: hasSequence,
+  });
 
   // Mirrors the filters the table itself renders from -- effectiveContig/
   // locus min-max/featureType/biotype/nameQuery/strand/view -- so the export
@@ -262,6 +284,34 @@ export function AnnotationFeatureTable({
     onError: (e: Error) => notify.error(e.message),
   });
 
+  // Tracks the window between "job queued" and "reference confirmed to
+  // exist" -- extractMutation.isPending goes false the instant the POST
+  // returns, well before the applier has actually created the reference,
+  // and the invalidate-triggered refetch below only sets isFetching, not
+  // isLoading, and only for its one pass. Without this the button re-enables
+  // and reads "Extract sequence" again for however long the applier takes.
+  const [justQueued, setJustQueued] = useState(false);
+
+  const extractMutation = useMutation({
+    mutationFn: () => api.launchExtractGenBankSequence(objectId),
+    onSuccess: () => {
+      // The job is queued, not finished; the object appears when the applier
+      // runs, so both this query and the project's object list must refetch.
+      qc.invalidateQueries({ queryKey: ["genbanksequence", objectId] });
+      qc.invalidateQueries({ queryKey: ["objects"] });
+      setJustQueued(true);
+      notify.info("Extraction queued");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  // Clears once the query actually confirms a reference exists. If the
+  // applier never completes (a real backend failure), this stays true and
+  // the button stays disabled -- acceptable, matches other stuck-job UX.
+  useEffect(() => {
+    if (extractedQuery.data?.reference_id) setJustQueued(false);
+  }, [extractedQuery.data?.reference_id]);
+
   const matched = exportCountQuery.data?.matched;
   const exported = exportCountQuery.data?.exported;
 
@@ -321,6 +371,10 @@ export function AnnotationFeatureTable({
       />
 
       <TabPanel id={view} idPrefix="annotation-view">
+        {view !== "genes" && canEdit && (
+          <AnnotationPendingEdits objectId={objectId} facts={facts} />
+        )}
+
         {view !== "genes" && (
           <div
             style={{
@@ -475,6 +529,37 @@ export function AnnotationFeatureTable({
           </div>
         )}
 
+        {/* GenBank counterpart to the export block above: features aren't
+         *  line-addressable for GenBank (AE-25), but the ORIGIN sequence
+         *  itself can still be pulled out into a FASTA reference. Renders
+         *  nothing when there's no sequence to extract at all. */}
+        {hasSequence && (
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              margin: "0 0 10px",
+              fontSize: 11,
+              color: "var(--text-faint)",
+            }}
+          >
+            {extractedQuery.data?.reference_id ? (
+              <span>Sequence extracted → {extractedQuery.data.reference_name}</span>
+            ) : (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "1px 8px", fontSize: 11 }}
+                onClick={() => extractMutation.mutate()}
+                disabled={extractMutation.isPending || extractedQuery.isFetching || justQueued}
+              >
+                {extractMutation.isPending || justQueued ? "Extracting…" : "Extract sequence"}
+              </button>
+            )}
+          </div>
+        )}
+
         {isGenesView && genesQuery.data?.mode === "fallback" && (
           <div style={{ color: "var(--warn)", fontSize: 11, marginBottom: 6 }}>
             No gene records in this file; showing top-level features.
@@ -525,6 +610,7 @@ export function AnnotationFeatureTable({
                 <th style={{ textAlign: "right" }}>Length</th>
                 <th>Strand</th>
                 <th>Biotype</th>
+                {canEdit && <th />}
               </tr>
             </thead>
             <tbody>
@@ -537,6 +623,8 @@ export function AnnotationFeatureTable({
                   onToggle={toggleExpanded}
                   depth={0}
                   depthCap={DEPTH_CAP}
+                  canEdit={canEdit}
+                  onEdit={setEditingRow}
                 />
               ))}
             </tbody>
@@ -583,6 +671,14 @@ export function AnnotationFeatureTable({
           </div>
         )}
       </TabPanel>
+
+      {editingRow && (
+        <AnnotationEditModal
+          objectId={objectId}
+          row={editingRow}
+          onClose={() => setEditingRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -634,6 +730,8 @@ function FeatureRow({
   onToggle,
   depth,
   depthCap,
+  canEdit,
+  onEdit,
 }: {
   objectId: string;
   row: AnnotationFeature;
@@ -641,6 +739,8 @@ function FeatureRow({
   onToggle: (featureId: string) => void;
   depth: number;
   depthCap: number;
+  canEdit: boolean;
+  onEdit: (row: AnnotationFeature) => void;
 }) {
   const expanded = !!row.feature_id && expandedIds.has(row.feature_id);
   const expandable = row.has_children && depth < depthCap;
@@ -693,6 +793,22 @@ function FeatureRow({
         <td style={{ textAlign: "right" }}>{length.toLocaleString()}</td>
         <td>{row.strand ?? "—"}</td>
         <td>{row.biotype ?? "—"}</td>
+        {canEdit && (
+          <td style={{ textAlign: "right" }}>
+            {row.line != null && (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "0 6px", fontSize: 11 }}
+                onClick={() => onEdit(row)}
+                aria-label="Edit feature"
+                title={`Edit line ${row.line}`}
+              >
+                ✏️
+              </button>
+            )}
+          </td>
+        )}
       </tr>
       {expanded &&
         (childData?.rows ?? []).map((child, i) => (
@@ -704,6 +820,8 @@ function FeatureRow({
             onToggle={onToggle}
             depth={depth + 1}
             depthCap={childDepthCap}
+            canEdit={canEdit}
+            onEdit={onEdit}
           />
         ))}
     </>

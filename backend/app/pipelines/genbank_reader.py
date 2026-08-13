@@ -43,6 +43,19 @@ def _open_text(path: Path) -> TextIO:
     return open(path, errors="replace")
 
 
+def accession_for(*, version: str, accession: str, locus_name: str) -> str:
+    """Name a contig: VERSION, then ACCESSION, then the LOCUS name.
+
+    Shared with `genbank_sequence` rather than duplicated there. The versioned
+    accession is what NCBI's paired FASTA uses in its deflines, so a GenBank
+    and its sibling FASTA agree on contig names -- which they must, because
+    contig lengths may arrive from a reference's facts and are matched by
+    name. Two copies of this fallback would drift, and the drift would be
+    silent: lengths would simply stop matching.
+    """
+    return version or accession or locus_name or "unknown"
+
+
 def iter_records(path: Path) -> Iterator[GenBankRecord]:
     """Yield one GenBankRecord at a time.
 
@@ -57,17 +70,13 @@ def iter_records(path: Path) -> Iterator[GenBankRecord]:
     in_origin = False
 
     def flush():
-        """Close the current record, naming its contig.
-
-        VERSION, then ACCESSION, then the LOCUS name. The versioned accession
-        is what NCBI's paired FASTA uses in its deflines, so a GenBank and its
-        sibling FASTA agree on contig names -- which they must, because contig
-        lengths may arrive from a reference's facts and are matched by name.
-        """
+        """Close the current record, naming its contig via `accession_for`."""
         nonlocal record
         if record is None:
             return None
-        record.accession = version or accession or locus_name or "unknown"
+        record.accession = accession_for(
+            version=version, accession=accession, locus_name=locus_name
+        )
         out = record
         record = None
         return out

@@ -997,6 +997,30 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # that has usually happened. The export node will ensure it on
         # demand once its adapter is layered with that logic (see #371).
         "pipeline_service.launch_annotation_stats",
+        # User-triggered from the Results tab's feature table, with an
+        # arbitrary filter chosen interactively rather than wired from an
+        # upstream node's output — not a graph step in the sense the other
+        # entries here are. It does produce a derived object (unlike its
+        # siblings above), which is exactly why a real canvas node type is
+        # worth designing properly rather than shoehorning in now: filters
+        # have no fixed port shape to express as PortSpec inputs.
+        # TODO(#371): design and add a canvas node type.
+        "pipeline_service.launch_annotation_export",
+        # User-triggered from the annotation editor's Materialize button, like
+        # the export above: it produces a derived annotation object from
+        # interactive edits rather than from a wired upstream node.
+        # TODO(#297): may be registerable as a canvas node after the editing
+        # workflow stabilizes.
+        "pipeline_service.launch_materialize_annotation_edits",
+        # User-triggered from the Results tab of a GenBank annotation, with no
+        # parameters at all -- the same class as launch_annotation_export
+        # above, and like it, it derives an object. Not a graph step: the
+        # input is one specific GenBank the user is looking at, and the
+        # output is a reference that any downstream node picks up by role
+        # rather than by wiring.
+        # TODO(#371): revisit alongside its siblings if a canvas node type
+        # for on-demand annotation work is designed.
+        "pipeline_service.launch_extract_genbank_sequence",
     }
 )
 

@@ -1785,6 +1785,131 @@ async def _apply_export_annotation_subset(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_materialize_annotation_edits(result: dict, *, owner: str) -> None:
+    """Register a materialized annotation edit as a derived object and clear
+    the pending edits.
+
+    Same pattern as _apply_export_annotation_subset: the derived object is
+    ANNOTATION-role, derived_from the source, and carries no pre-computed
+    annotation results (ED-8).
+
+    Clears the source object's pending edits on success — they have been
+    consumed into the derived object (ED-6).
+    """
+    from app.models.annotation_edit import AnnotationEdit
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("annotation_materialize_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+    edit_summary = result.get("edit_summary", [])
+    edit_count = result.get("edit_count", len(edit_summary))
+
+    try:
+        derived = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ANNOTATION,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={
+                "annotation_edit_count": edit_count,
+                "annotation_edit_summary": edit_summary,
+            },
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "annotation_materialize_ingest_failed", object_id=object_id, error=str(e)
+        )
+        return
+
+    # Clear the consumed edits (ED-6: delete on success).
+    delete_result = await AnnotationEdit.find(
+        AnnotationEdit.object_id == PydanticObjectId(object_id)
+    ).delete()
+    log.info(
+        "annotation_materialize_cleared_edits",
+        object_id=object_id,
+        deleted=delete_result.deleted_count,
+    )
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [derived.id], owner=derived.owner)
+
+    log.info(
+        "annotation_materialize_applied",
+        object_id=object_id,
+        derived_id=str(derived.id),
+        edits=edit_count,
+    )
+
+
+async def _apply_extract_genbank_sequence(result: dict, *, owner: str) -> None:
+    """Register a GenBank's extracted sequence as a new reference.
+
+    The same shape as `_apply_export_annotation_subset` above, with one
+    material difference: `role=ObjectRole.REFERENCE`, not ANNOTATION. That
+    role is the whole point -- it is what puts the extracted FASTA in every
+    reference picker, which is what makes the GenBank's sequence usable for
+    alignment (#348). No sidecar role: this is a first-class object a person
+    chooses, not scaffolding the explorer hides.
+    """
+    from app.services import object_service, run_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("genbank_sequence_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+
+    try:
+        reference = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.REFERENCE,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={"genbank_source_record_count": result.get("record_count")},
+            # The extracted sequence describes the same biology as its source.
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "genbank_sequence_ingest_failed", object_id=object_id, error=str(e)
+        )
+        return
+
+    run_id = await run_service.run_for_job(PydanticObjectId(job_id)) if job_id else None
+    if run_id is not None:
+        await run_service.record_outputs(run_id, [reference.id], owner=reference.owner)
+
+    log.info(
+        "genbank_sequence_applied",
+        object_id=object_id,
+        reference_id=str(reference.id),
+    )
+
+
 async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     """Record compleasm's completeness scores on the assembly it described.
 
@@ -2765,6 +2890,8 @@ _APPLIERS = {
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
     "export_annotation_subset": _apply_export_annotation_subset,
+    "materialize_annotation_edits": _apply_materialize_annotation_edits,
+    "extract_genbank_sequence": _apply_extract_genbank_sequence,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,

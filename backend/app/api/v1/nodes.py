@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import pathlib
 import platform
 import re
@@ -402,12 +401,25 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 )
 
             # Phase 3: setup_install
+            #
+            # INSTALL_DIR stays unexpanded on purpose: `~` must be resolved by
+            # the *remote* user's shell, not this container's. Expanding it
+            # here with os.path.expanduser() read the API container's own HOME
+            # -- it runs as root -- and sent `mkdir -p /root/.bioflow` to the
+            # node, which fails for any non-root SSH user. It is shared with
+            # node_update_service so provisioning and updates cannot drift
+            # onto different directories.
             await _update("setup_install", "Preparing install directory…")
-            install_dir = os.path.expanduser("~/.bioflow")  # noqa: ASYNC240
-            await asyncio.wait_for(
-                conn.run(f"mkdir -p {install_dir}", check=True),
+            install_dir = node_update_service.INSTALL_DIR
+            mkdir_result = await asyncio.wait_for(
+                conn.run(f"mkdir -p {install_dir}", check=False),
                 timeout=15,
             )
+            if mkdir_result.exit_status != 0:
+                return await _fail(
+                    f"Could not create {install_dir} on {req.host}: "
+                    f"{mkdir_result.stderr or mkdir_result.stdout or 'no output'}"
+                )
 
             compose_src = pathlib.Path("/srv/docker-compose.yml")  # noqa: ASYNC240
             if compose_src.exists():  # noqa: ASYNC240
@@ -433,13 +445,18 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 storage_location=req.storage_location,
                 worker_replicas=req.worker_replicas,
             )
-            await asyncio.wait_for(
+            env_result = await asyncio.wait_for(
                 conn.run(
                     f"cat > {install_dir}/.env << 'HERMESEOF'\n{env_contents}\nHERMESEOF",
-                    check=True,
+                    check=False,
                 ),
                 timeout=15,
             )
+            if env_result.exit_status != 0:
+                return await _fail(
+                    f"Could not write {install_dir}/.env on {req.host}: "
+                    f"{env_result.stderr or env_result.stdout or 'no output'}"
+                )
 
             # Phase 5: install_key
             #

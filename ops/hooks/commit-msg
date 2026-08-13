@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# git commit-msg hook: reject a commit subject that is not a Conventional
+# Commit, before it is ever made, instead of leaving it for CI to catch.
+#
+# This is the same check as the "Commit subjects are Conventional Commits"
+# job in .github/workflows/commit-check.yml -- same regex, same reasoning
+# (CHANGELOG.md is generated from these subjects by git-cliff, and a subject
+# that doesn't parse is silently dropped, not failed). See that file and
+# AGENTS.md/CLAUDE.md, "Commit messages are Conventional Commits", for the
+# full story. Keep the PATTERN below in sync with commit-check.yml's copy if
+# either one changes.
+#
+# Not installed by default -- git does not auto-run hooks from a cloned repo.
+# Opt in once per clone:
+#
+#   git config core.hooksPath ops/hooks
+set -euo pipefail
+
+msg_file="$1"
+
+# First non-comment, non-blank line only -- the subject. Body lines (which
+# may legitimately start with anything, including a bare word before a
+# colon in a footer like "Co-Authored-By:") are not checked.
+subject="$(grep -vE '^\s*#' "$msg_file" | grep -vE '^\s*$' | head -n1 || true)"
+
+# Nothing to check: empty message, or git will already refuse it.
+[ -n "$subject" ] || exit 0
+
+# A merge commit's default subject ("Merge branch ...") has no authored
+# subject and is exempt, matching commit-check.yml's `--no-merges`.
+[[ "$subject" == Merge\ * ]] && exit 0
+
+PATTERN='^[a-z]+(\([a-z0-9 ._/-]+\))?!?: .+'
+
+if printf '%s' "$subject" | grep -qE "$PATTERN"; then
+  exit 0
+fi
+
+cat >&2 <<MSG
+
+Blocked: commit subject is not a Conventional Commit, so git-cliff will
+drop it from CHANGELOG.md without failing the release, and CI's commit-check
+workflow will reject the PR. Expected:
+
+    type(optional-scope): description
+
+for example:
+
+    fix(launcher): open the website in the default browser
+    feat(queue): report per-node queue depth
+    docs: record the polling-cost tradeoff
+
+'feat' and 'fix' are the types that reach users and therefore the changelog;
+'docs', 'test', 'refactor', 'chore', 'style' are real and correct types that
+are filtered out of the user-facing notes. A user-visible change committed
+as 'chore' disappears from them.
+
+Got:
+
+    $subject
+
+See AGENTS.md / CLAUDE.md, "Commit messages are Conventional Commits".
+
+To fix, edit the message now (this commit has not been made yet) -- your
+editor should still be open, or rerun:
+
+    git commit --amend
+
+if you got here from an amend or a rebase reword.
+
+MSG
+exit 1

@@ -1,4 +1,5 @@
 import type {
+  AnnotationEditRow,
   AiFetchModelsResult,
   AiPreset,
   AiProvider,
@@ -27,6 +28,7 @@ import type {
   DeletionPreview,
   DeRequest,
   DeResultsPage,
+  ExtractedSequence,
   FacetValue,
   Facets,
   FeatureQuery,
@@ -1206,6 +1208,19 @@ export const api = {
       }),
     }),
 
+  /** The reference already extracted from this GenBank, if any. The same
+   *  query the launcher's guard runs, so the button and the launcher cannot
+   *  disagree about whether extraction has already happened. */
+  extractedGenBankSequence: (objectId: string) =>
+    request<ExtractedSequence>(`/pipelines/genbanksequence/${objectId}`),
+
+  /** Queue extraction of a GenBank's ORIGIN sequence into a FASTA reference. */
+  launchExtractGenBankSequence: (objectId: string) =>
+    request<JobSummary>(`/pipelines/genbanksequence`, {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
+
   /** Every child of one feature, for an expanded row. `depth_cap` is the
    *  server's recursion bound, echoed back so the client doesn't hardcode
    *  a second copy of the same number. */
@@ -1213,6 +1228,40 @@ export const api = {
     request<{ rows: AnnotationFeature[]; depth_cap: number }>(
       `/pipelines/annotationstats/children/${objectId}?parent_id=${encodeURIComponent(parentId)}`,
     ),
+
+  /** Pending annotation edits for one object (issue #297). */
+  annotationEdits: (objectId: string) =>
+    request<AnnotationEditRow[]>(
+      `/pipelines/annotationstats/edits/${objectId}`,
+    ),
+
+  /** Save or update one column edit. */
+  saveAnnotationEdit: (
+    objectId: string,
+    edit: { line: number; field: string; new_value: string },
+  ) =>
+    request<AnnotationEditRow>(`/pipelines/annotationstats/edits/${objectId}`, {
+      method: "PUT",
+      body: JSON.stringify(edit),
+    }),
+
+  /** Remove one pending edit. */
+  deleteAnnotationEdit: (
+    objectId: string,
+    line: number,
+    field: string,
+  ) =>
+    request<{ deleted: boolean }>(
+      `/pipelines/annotationstats/edits/${objectId}?line=${line}&field=${encodeURIComponent(field)}`,
+      { method: "DELETE" },
+    ),
+
+  /** Materialize pending edits into a derived annotation object. */
+  materializeAnnotationEdits: (objectId: string) =>
+    request<JobSummary>("/pipelines/annotationstats/materialize", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /** A page of the Genes view -- see AnnotationGenePage. */
   annotationGenes: (objectId: string, offset: number, limit: number, skipCount?: boolean) => {
