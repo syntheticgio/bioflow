@@ -100,7 +100,7 @@ export function SettingsNodes() {
       <SettingsNav />
       <h1>Settings · Nodes</h1>
 
-      <div className="settings-body">
+      <div className="settings-body settings-body-stacked">
         {/* Provisioning area */}
         {!taskId && !showForm && (
           <button
