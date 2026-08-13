@@ -1730,6 +1730,57 @@ async def _apply_run_annotation_stats(result: dict, *, owner: str) -> None:
     )
 
 
+async def _apply_export_annotation_subset(result: dict, *, owner: str) -> None:
+    """Register an exported annotation subset as a new object.
+
+    `derived_from` the source annotation, so the subset's lineage is
+    inspectable and the explorer can relate the two (AE-19).
+
+    Deliberately carries no annotation results facts (AE-20): the new object
+    opens to a "Compute results" button like any other annotation. Whether
+    ingestion should trigger analysis automatically is #298's question, and
+    answering it here by side effect would pre-empt it.
+    """
+    from app.services import object_service
+
+    object_id = result.get("object_id")
+    output = result.get("output")
+    if not output or not object_id:
+        return
+
+    source = await DataObject.get(PydanticObjectId(object_id))
+    if source is None:
+        log.warning("annotation_export_parent_missing", object_id=object_id)
+        return
+
+    job_id = result.get("job_id")
+
+    try:
+        subset = await object_service.ingest_local_file(
+            owner=source.owner,
+            project_id=source.project_id,
+            path=Path(output["tmp_path"]),
+            name=output["name"],
+            role=ObjectRole.ANNOTATION,
+            derived_from=[source.id],
+            produced_by_job=PydanticObjectId(job_id) if job_id else None,
+            facts={"annotation_subset_feature_count": result.get("feature_count")},
+            # The subset describes the same biology as its source.
+            metadata=dict(source.metadata),
+        )
+    except Exception as e:  # noqa: BLE001
+        log.error(
+            "annotation_export_ingest_failed", object_id=object_id, error=str(e)
+        )
+        return
+
+    log.info(
+        "annotation_export_applied",
+        object_id=object_id,
+        subset_id=str(subset.id),
+    )
+
+
 async def _apply_assess_completeness(result: dict, *, owner: str) -> None:
     """Record compleasm's completeness scores on the assembly it described.
 
@@ -2709,6 +2760,7 @@ _APPLIERS = {
     "run_transcript_qc": _apply_run_transcript_qc,
     "run_vcf_stats": _apply_run_vcf_stats,
     "run_annotation_stats": _apply_run_annotation_stats,
+    "export_annotation_subset": _apply_export_annotation_subset,
     "annotate_variants": _apply_annotate_variants,
     "quantify": _apply_quantify,
     "differential_expression": _apply_differential_expression,
