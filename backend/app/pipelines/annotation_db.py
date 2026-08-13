@@ -26,7 +26,7 @@ _INSERT_BATCH = 10_000
 # children query cannot drift apart about the row shape the client parses.
 _COLUMNS = (
     "contig, start, end, type, strand, score, name, feature_id, "
-    "parent, biotype, attributes, parent_status, depth"
+    "parent, biotype, attributes, parent_status, depth, line_no"
 )
 
 
@@ -94,7 +94,8 @@ def build_annotation_db(*, rows, db_path: Path) -> int:
               biotype    TEXT,
               attributes TEXT,
               parent_status TEXT NOT NULL DEFAULT 'root',
-              depth      INTEGER NOT NULL DEFAULT 0
+              depth      INTEGER NOT NULL DEFAULT 0,
+              line_no    INTEGER
             )
             """
         )
@@ -114,21 +115,24 @@ def build_annotation_db(*, rows, db_path: Path) -> int:
                     (
                         f.contig, f.start, f.end, f.type, f.strand, f.score,
                         f.name, f.feature_id, parent, f.biotype, f.attributes,
+                        f.line_no,
                     )
                 )
             if len(batch) >= _INSERT_BATCH:
                 con.executemany(
                     "INSERT INTO features (contig, start, end, type, strand, "
-                    "score, name, feature_id, parent, biotype, attributes) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
+                    "score, name, feature_id, parent, biotype, attributes, "
+                    "line_no) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
                 )
                 batch = []
 
         if batch:
             con.executemany(
                 "INSERT INTO features (contig, start, end, type, strand, "
-                "score, name, feature_id, parent, biotype, attributes) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)", batch
+                "score, name, feature_id, parent, biotype, attributes, "
+                "line_no) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", batch
             )
 
         con.execute("CREATE INDEX ix_features_locus ON features(contig, start)")

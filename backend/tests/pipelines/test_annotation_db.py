@@ -231,3 +231,38 @@ def test_rows_carry_their_status_and_depth(tmp_path):
     )[0]
     assert row["parent_status"] == "root"
     assert row["depth"] == 0
+
+
+class TestLineNumberColumn:
+    def test_line_number_round_trips(self, tmp_path):
+        db = tmp_path / "f.db"
+        rows = [
+            Feature(
+                contig="chr1", start=1, end=100, type="gene", strand="+",
+                score=None, name="g1", feature_id="g1", parents=(),
+                biotype=None, attributes="ID=g1", line_no=5,
+            )
+        ]
+        build_annotation_db(rows=rows, db_path=db)
+        page = query_features(
+            db_path=db, filters=FeatureFilters(), offset=0, limit=10
+        )
+        assert page[0]["line_no"] == 5
+
+    def test_line_number_may_be_absent(self, tmp_path):
+        """GenBank features span multiple lines and its segment children are
+        synthetic, so they have no single source line. Null must mean 'not
+        addressable by line', never 'not recorded yet'."""
+        db = tmp_path / "f.db"
+        rows = [
+            Feature(
+                contig="chr1", start=1, end=100, type="gene", strand="+",
+                score=None, name="g1", feature_id="g1", parents=(),
+                biotype=None, attributes="ID=g1",
+            )
+        ]
+        build_annotation_db(rows=rows, db_path=db)
+        page = query_features(
+            db_path=db, filters=FeatureFilters(), offset=0, limit=10
+        )
+        assert page[0]["line_no"] is None
