@@ -4,6 +4,8 @@
 // more here than convention: this repo has no jsdom or testing-library
 // setup and no .test.tsx files, so a pure module is the only testable seam.
 
+import type { VersionOptions } from "./types";
+
 /**
  * Mirrors `update_check::checkable_tag` in Rust. The backend is
  * authoritative -- it makes no network call in a suppressed mode -- but the
@@ -16,6 +18,8 @@ export type UpdateAffordance =
   | { kind: "hidden" }
   /** Release mode, a newer image exists. The clickable btn-warn. */
   | { kind: "available" }
+  /** Pinned to a stage tag and a newer stage image exists. The clickable btn-warn. */
+  | { kind: "stage-update"; targetTag: string }
   /** Developer or a pinned stage: visible, disabled, and self-explaining. */
   | { kind: "suppressed"; reason: string };
 
@@ -26,6 +30,8 @@ export interface UpdateInputs {
   developerRepo: string | null;
   /** The latest result of the backend's check_for_update poll. */
   updateAvailable: boolean;
+  /** Fetched from listVersionOptions; null while loading or on failure. */
+  versionOptions: VersionOptions | null;
 }
 
 /**
@@ -33,32 +39,88 @@ export interface UpdateInputs {
  * first so a hand-edited .env carrying both lines resolves the way
  * current_settings resolves it.
  */
+/** Mirrors update_check::check_stage_update in Rust. Pure, side-effect-free. */
+export function checkStageUpdate(
+  currentTag: string,
+  options: VersionOptions,
+): string | null {
+  if (currentTag === "latest") return null;
+
+  const current = parseStageTag(currentTag);
+  if (!current) return null;
+
+  const candidates = [options.alpha, options.beta];
+  let best: { tag: string; ver: [number, number, number]; rank: number } | null = null;
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const cv = parseStageTag(candidate);
+    if (!cv) continue;
+
+    const isForward =
+      cv.ver[0] > current.ver[0] ||
+      (cv.ver[0] === current.ver[0] && cv.ver[1] > current.ver[1]) ||
+      (cv.ver[0] === current.ver[0] && cv.ver[1] === current.ver[1] && cv.ver[2] > current.ver[2]) ||
+      (cv.ver[0] === current.ver[0] && cv.ver[1] === current.ver[1] && cv.ver[2] === current.ver[2] && cv.rank > current.rank);
+
+    if (!isForward) continue;
+
+    if (!best || cv.ver[0] > best.ver[0] ||
+        (cv.ver[0] === best.ver[0] && cv.ver[1] > best.ver[1]) ||
+        (cv.ver[0] === best.ver[0] && cv.ver[1] === best.ver[1] && cv.ver[2] > best.ver[2]) ||
+        (cv.ver[0] === best.ver[0] && cv.ver[1] === best.ver[1] && cv.ver[2] === best.ver[2] && cv.rank > best.rank)) {
+      best = { tag: candidate, ver: cv.ver, rank: cv.rank };
+    }
+  }
+
+  return best?.tag ?? null;
+}
+
+function parseStageTag(tag: string): { ver: [number, number, number]; rank: number } | null {
+  const alphaMatch = tag.match(/^(\d+)\.(\d+)\.(\d+)-alpha$/);
+  if (alphaMatch) {
+    return {
+      ver: [parseInt(alphaMatch[1]), parseInt(alphaMatch[2]), parseInt(alphaMatch[3])],
+      rank: 0,
+    };
+  }
+  const betaMatch = tag.match(/^(\d+)\.(\d+)\.(\d+)-beta$/);
+  if (betaMatch) {
+    return {
+      ver: [parseInt(betaMatch[1]), parseInt(betaMatch[2]), parseInt(betaMatch[3])],
+      rank: 1,
+    };
+  }
+  return null;
+}
+
 export function shouldPollForUpdates(
-  bioflowTag: string,
+  _bioflowTag: string,
   developerRepo: string | null,
 ): boolean {
   if (developerRepo != null) return false;
-  return bioflowTag === "latest";
+  // Poll for both release (digest) and stage (tag list) updates
+  return true;
 }
 
 export function updateAffordance({
   bioflowTag,
   developerRepo,
   updateAvailable,
+  versionOptions,
 }: UpdateInputs): UpdateAffordance {
-  // Named before the pinned case: developer mode takes precedence, and the
-  // hint names Rebuild because that genuinely is the update path for a
-  // local build.
+  // Developer mode → suppressed (unchanged)
   if (developerRepo != null) {
     return { kind: "suppressed", reason: "Developer mode — use Rebuild in Settings." };
   }
-  // Naming the tag keeps the reason concrete -- "pinned" alone does not tell
-  // the user what they are pinned to.
-  if (bioflowTag !== "latest") {
-    return {
-      kind: "suppressed",
-      reason: `Pinned to ${bioflowTag} — change version in Settings.`,
-    };
+  // Alpha/Beta mode → check for newer stage tag
+  if (bioflowTag !== "latest" && versionOptions) {
+    const target = checkStageUpdate(bioflowTag, versionOptions);
+    if (target) {
+      return { kind: "stage-update", targetTag: target };
+    }
+    return { kind: "suppressed", reason: `Pinned to ${bioflowTag} — change version in Settings.` };
   }
+  // Release mode → existing digest-based check
   return updateAvailable ? { kind: "available" } : { kind: "hidden" };
 }
