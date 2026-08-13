@@ -992,9 +992,12 @@ async def launch_annotation_export(
     body: AnnotationExportRequest, owner: OwnerDep
 ) -> JobOut:
     """Queue a subset export using the filters the table is displaying."""
-    if body.output_name and ("/" in body.output_name or ".." in body.output_name):
+    if body.output_name and (
+        body.output_name in {".", ".."}
+        or Path(body.output_name).name != body.output_name
+    ):
         raise ValidationError(
-            "output_name must not contain a path separator or '..'",
+            "output_name must be a bare filename, not a path",
             details={"output_name": body.output_name},
         )
 

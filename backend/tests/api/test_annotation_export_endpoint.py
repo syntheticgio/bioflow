@@ -75,6 +75,14 @@ class TestExportRoute:
         r = post_export(client, object_id=OBJECT_ID, output_name="../etc/passwd")
         assert r.status_code == 422
 
+    def test_rejects_output_name_of_dot(self, client):
+        # "." has no "/" and no ".." substring, so it slips past a naive
+        # separator/dot-dot check -- but it resolves to the scratch directory
+        # itself inside the handler, crashing the job with IsADirectoryError
+        # instead of failing cleanly here at the API boundary.
+        r = post_export(client, object_id=OBJECT_ID, output_name=".")
+        assert r.status_code == 422
+
     def test_allows_a_normal_output_name(self, client):
         # Passes the validation check and reaches the (here, still-404)
         # "no computed results" branch -- proving a plain filename isn't
