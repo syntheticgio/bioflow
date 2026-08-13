@@ -5,6 +5,7 @@ its indexes.
 """
 
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
+from app.models.annotation_edit import AnnotationEdit
 from app.models.app_settings import AppSettings
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.failure_explanation import FailureExplanation, normalize_failure
@@ -69,6 +70,7 @@ from app.models.workflow import (
 )
 
 ALL_MODELS = [
+    AnnotationEdit,
     AiProvider,
     AiRouting,
     AppSettings,
@@ -100,6 +102,7 @@ ALL_MODELS = [
 __all__ = [
     "ACTIVE_STATES",
     "ALL_MODELS",
+    "AnnotationEdit",
     "AiProvider",
     "AiRouting",
     "AppSettings",

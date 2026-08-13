@@ -368,3 +368,135 @@ def export_annotation_subset(ctx: JobContext) -> dict:
         "feature_count": written,
         "output": {"tmp_path": str(dest), "name": ctx.payload["output_name"]},
     }
+
+
+@handler(
+    "materialize_annotation_edits",
+    mode=HandlerMode.THREAD,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+)
+def materialize_annotation_edits(ctx: JobContext) -> dict:
+    """Rewrite edited columns in an annotation source file and produce a
+    derived object.
+
+    Reads all AnnotationEdit documents for the source object, scans the
+    source line-by-line, and rewrites the specific column(s) in each edited
+    line. Every unedited column is preserved verbatim — this never
+    reconstructs a line from a Feature (same philosophy as export's
+    "re-emit source line").
+
+    On success, the applier creates a derived annotation object and clears
+    the pending edits.
+    """
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("materialize_annotation_edits requires an 'object_id'")
+
+    fmt = ctx.payload.get("format_kind")
+    if fmt not in ("gff", "gtf"):
+        raise PermanentError(
+            f"materialize_annotation_edits cannot process format {fmt!r}"
+        )
+
+    ann_name = ctx.payload.get("annotation_name", f"{object_id}.edited.gff3")
+    source = Path(ctx.payload["annotation_path"])
+    if not source.exists():
+        raise PermanentError(f"annotation file is missing: {source}")
+
+    # Load all pending edits.
+    from app.db.client import run_from_thread
+
+    edits = run_from_thread(_load_edits(object_id))
+    if not edits:
+        raise PermanentError("no pending edits to materialize")
+
+    # Group edits by line for efficient scanning.
+    by_line: dict[int, dict[str, str]] = {}
+    edit_summary: list[dict] = []
+    for e in edits:
+        by_line.setdefault(e.line, {})[e.field] = e.new_value
+        edit_summary.append({
+            "line": e.line,
+            "field": e.field,
+            "old_value": e.old_value,
+            "new_value": e.new_value,
+        })
+
+    # Map editable field to 0-based column index.
+    _FIELD_TO_COL = {
+        "source": 1,
+        "type": 2,
+        "start": 3,
+        "end": 4,
+        "attributes": 8,
+    }
+
+    ctx.progress(phase="rewrite", pct=0.3, message="rewriting edited lines")
+
+    # ED-7 re-parse check: same parser the original normalization used.
+    parse_line = {
+        "gff": annotation_parse.parse_gff_line,
+        "gtf": annotation_parse.parse_gtf_line,
+    }[fmt]
+
+    work = _prepare_workdir(ctx, "annotation_materialize")
+    out_name = ann_name if ann_name.endswith((".gff3", ".gtf", ".gff", ".gtf")) else f"{ann_name}.gff3"
+    dest = work / out_name
+
+    changed = 0
+    with _open_text(source) as fh, open(dest, "w") as out:
+        for i, raw in enumerate(fh, start=1):
+            stripped = raw.rstrip("\n")
+            if i in by_line:
+                changes = by_line[i]
+                columns = stripped.split("\t")
+                if len(columns) < 9:
+                    # Skip comment/blank lines that happen to be in by_line
+                    # (shouldn't happen since validation checks for this).
+                    out.write(stripped + "\n")
+                    continue
+                for field, new_val in changes.items():
+                    col = _FIELD_TO_COL[field]
+                    columns[col] = new_val
+                stripped = "\t".join(columns)
+                changed += 1
+                # ED-7: re-parse the edited line.
+                feature = parse_line(stripped)
+                if feature is None:
+                    raise PermanentError(
+                        f"line {i} no longer parses after applying edit; "
+                        f"the edit produced an invalid annotation line"
+                    )
+            out.write(stripped + "\n")
+
+    if changed != len(by_line):
+        log.warning(
+            "annotation_materialized_lines_mismatch",
+            expected=len(by_line),
+            changed=changed,
+        )
+
+    log.info(
+        "annotation_edits_materialized",
+        object_id=object_id,
+        edits=len(edit_summary),
+        lines=changed,
+    )
+    return {
+        "object_id": object_id,
+        "edit_count": len(edit_summary),
+        "edit_summary": edit_summary,
+        "output": {"tmp_path": str(dest), "name": out_name},
+    }
+
+
+async def _load_edits(object_id: str):
+    """Load pending edits for the source object. Coroutine so it can be
+    scheduled via run_from_thread from the THREAD-mode handler."""
+    from app.models.annotation_edit import AnnotationEdit
+    from beanie import PydanticObjectId
+
+    return await AnnotationEdit.find(
+        AnnotationEdit.object_id == PydanticObjectId(object_id)
+    ).to_list()

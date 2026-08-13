@@ -853,6 +853,12 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # have no fixed port shape to express as PortSpec inputs.
         # TODO(#371): design and add a canvas node type.
         "pipeline_service.launch_annotation_export",
+        # User-triggered from the annotation editor's Materialize button, like
+        # the export above: it produces a derived annotation object from
+        # interactive edits rather than from a wired upstream node.
+        # TODO(#297): may be registerable as a canvas node after the editing
+        # workflow stabilizes.
+        "pipeline_service.launch_materialize_annotation_edits",
     }
 )
 

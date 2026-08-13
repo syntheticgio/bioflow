@@ -1,4 +1,5 @@
 import type {
+  AnnotationEditRow,
   AiFetchModelsResult,
   AiPreset,
   AiProvider,
@@ -1213,6 +1214,40 @@ export const api = {
     request<{ rows: AnnotationFeature[]; depth_cap: number }>(
       `/pipelines/annotationstats/children/${objectId}?parent_id=${encodeURIComponent(parentId)}`,
     ),
+
+  /** Pending annotation edits for one object (issue #297). */
+  annotationEdits: (objectId: string) =>
+    request<AnnotationEditRow[]>(
+      `/pipelines/annotationstats/edits/${objectId}`,
+    ),
+
+  /** Save or update one column edit. */
+  saveAnnotationEdit: (
+    objectId: string,
+    edit: { line: number; field: string; new_value: string },
+  ) =>
+    request<AnnotationEditRow>(`/pipelines/annotationstats/edits/${objectId}`, {
+      method: "PUT",
+      body: JSON.stringify(edit),
+    }),
+
+  /** Remove one pending edit. */
+  deleteAnnotationEdit: (
+    objectId: string,
+    line: number,
+    field: string,
+  ) =>
+    request<{ deleted: boolean }>(
+      `/pipelines/annotationstats/edits/${objectId}?line=${line}&field=${encodeURIComponent(field)}`,
+      { method: "DELETE" },
+    ),
+
+  /** Materialize pending edits into a derived annotation object. */
+  materializeAnnotationEdits: (objectId: string) =>
+    request<JobSummary>("/pipelines/annotationstats/materialize", {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
+    }),
 
   /** A page of the Genes view -- see AnnotationGenePage. */
   annotationGenes: (objectId: string, offset: number, limit: number, skipCount?: boolean) => {

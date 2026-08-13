@@ -5,6 +5,8 @@ import type { AnnotationFeature, AnnotationGene, AnnotationStatsFacts } from "..
 import { useDebounced } from "../lib/useDebounced";
 import { notify } from "../stores/messageStore";
 import { TabPanel, Tabs } from "./Tabs";
+import { AnnotationEditModal } from "./AnnotationEditModal";
+import { AnnotationPendingEdits } from "./AnnotationPendingEdits";
 
 const PAGE_SIZE = 100;
 
@@ -105,6 +107,10 @@ export function AnnotationFeatureTable({
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  // Row currently open in the edit modal (feature editing, #297). Null when
+  // no edit modal is open.
+  const [editingRow, setEditingRow] = useState<AnnotationFeature | null>(null);
+
   const nameQuery = useDebounced(nameInput, 300);
 
   const contigOptions = useMemo(
@@ -195,6 +201,12 @@ export function AnnotationFeatureTable({
   // cannot re-emit one. The control is hidden entirely for these files, not
   // merely disabled, since there is no filter combination that would work.
   const isGenBank = facts.genbank_record_count != null;
+
+  // Editing (#297) is only meaningful for line-addressable GFF/GTF -- same
+  // gate as export, minus the GenBank exclusion. The edit button is hidden
+  // (not disabled) for BED and GenBank, since neither has an editable
+  // GFF-style column to address.
+  const canEdit = facts.gff_version != null;
 
   const qc = useQueryClient();
 
@@ -321,6 +333,10 @@ export function AnnotationFeatureTable({
       />
 
       <TabPanel id={view} idPrefix="annotation-view">
+        {view !== "genes" && canEdit && (
+          <AnnotationPendingEdits objectId={objectId} facts={facts} />
+        )}
+
         {view !== "genes" && (
           <div
             style={{
@@ -525,6 +541,7 @@ export function AnnotationFeatureTable({
                 <th style={{ textAlign: "right" }}>Length</th>
                 <th>Strand</th>
                 <th>Biotype</th>
+                {canEdit && <th />}
               </tr>
             </thead>
             <tbody>
@@ -537,6 +554,8 @@ export function AnnotationFeatureTable({
                   onToggle={toggleExpanded}
                   depth={0}
                   depthCap={DEPTH_CAP}
+                  canEdit={canEdit}
+                  onEdit={setEditingRow}
                 />
               ))}
             </tbody>
@@ -583,6 +602,14 @@ export function AnnotationFeatureTable({
           </div>
         )}
       </TabPanel>
+
+      {editingRow && (
+        <AnnotationEditModal
+          objectId={objectId}
+          row={editingRow}
+          onClose={() => setEditingRow(null)}
+        />
+      )}
     </div>
   );
 }
@@ -634,6 +661,8 @@ function FeatureRow({
   onToggle,
   depth,
   depthCap,
+  canEdit,
+  onEdit,
 }: {
   objectId: string;
   row: AnnotationFeature;
@@ -641,6 +670,8 @@ function FeatureRow({
   onToggle: (featureId: string) => void;
   depth: number;
   depthCap: number;
+  canEdit: boolean;
+  onEdit: (row: AnnotationFeature) => void;
 }) {
   const expanded = !!row.feature_id && expandedIds.has(row.feature_id);
   const expandable = row.has_children && depth < depthCap;
@@ -693,6 +724,22 @@ function FeatureRow({
         <td style={{ textAlign: "right" }}>{length.toLocaleString()}</td>
         <td>{row.strand ?? "—"}</td>
         <td>{row.biotype ?? "—"}</td>
+        {canEdit && (
+          <td style={{ textAlign: "right" }}>
+            {row.line != null && (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "0 6px", fontSize: 11 }}
+                onClick={() => onEdit(row)}
+                aria-label="Edit feature"
+                title={`Edit line ${row.line}`}
+              >
+                ✏️
+              </button>
+            )}
+          </td>
+        )}
       </tr>
       {expanded &&
         (childData?.rows ?? []).map((child, i) => (
@@ -704,6 +751,8 @@ function FeatureRow({
             onToggle={onToggle}
             depth={depth + 1}
             depthCap={childDepthCap}
+            canEdit={canEdit}
+            onEdit={onEdit}
           />
         ))}
     </>
