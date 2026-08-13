@@ -1,6 +1,7 @@
 """Subset export: closure, verified re-emission, and round-trip fidelity."""
 
 import dataclasses
+from pathlib import Path
 
 import pytest
 
@@ -349,3 +350,94 @@ def test_write_subset_returns_the_line_count(tmp_path):
     )
 
     assert written == 2
+
+
+_FIXTURE = Path(__file__).parent.parent / "fixtures" / "annotation" / "ncbi_sample.gff3"
+
+
+def test_full_export_is_byte_identical_to_the_source(tmp_path):
+    """AE-11, against a real NCBI file rather than hand-built lines.
+
+    Exporting everything must reproduce every feature line exactly. This is
+    the test that fails loudly if a later refactor starts rebuilding lines
+    from Feature -- which would drop the source column and phase.
+    """
+    source = _FIXTURE
+    rows = []
+    for i, raw in enumerate(source.read_text().splitlines(), start=1):
+        if raw.startswith("#"):
+            continue
+        feature = annotation_parse.parse_gff_line(raw)
+        if feature is not None:
+            rows.append(dataclasses.replace(feature, line=i))
+    db_path = _build(tmp_path, rows)
+
+    filters = annotation_db.FeatureFilters(top_level_only=False)
+    lines = annotation_export.closure_lines(db_path=db_path, filters=filters)
+
+    dest = tmp_path / "out.gff3"
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines=lines,
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    original = [ln for ln in source.read_text().splitlines() if not ln.startswith("#")]
+    exported = [ln for ln in dest.read_text().splitlines() if not ln.startswith("#")]
+    assert exported == original
+
+
+def test_ncbi_source_column_and_phase_survive(tmp_path):
+    """The two fields Feature discards. Named separately from the fidelity
+    test so a failure says which property broke."""
+    source = _FIXTURE
+    rows = []
+    for i, raw in enumerate(source.read_text().splitlines(), start=1):
+        if raw.startswith("#"):
+            continue
+        feature = annotation_parse.parse_gff_line(raw)
+        if feature is not None:
+            rows.append(dataclasses.replace(feature, line=i))
+    db_path = _build(tmp_path, rows)
+
+    filters = annotation_db.FeatureFilters(feature_type="CDS", top_level_only=False)
+    lines = annotation_export.closure_lines(db_path=db_path, filters=filters)
+
+    dest = tmp_path / "out.gff3"
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines=lines,
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    cds = [
+        ln.split("\t") for ln in dest.read_text().splitlines()
+        if not ln.startswith("#") and ln.split("\t")[2] == "CDS"
+    ]
+    assert cds, "expected CDS rows in the export"
+    for row in cds:
+        assert row[1] == "RefSeq"   # source column, dropped by Feature
+        assert row[7] == "0"        # phase, dropped by Feature
+
+
+def test_escaped_attributes_are_not_re_encoded(tmp_path):
+    """parse_gff_attributes unquotes %2F; copying bytes means the output still
+    carries the escape rather than a literal slash."""
+    source = _FIXTURE
+    rows = []
+    for i, raw in enumerate(source.read_text().splitlines(), start=1):
+        if raw.startswith("#"):
+            continue
+        feature = annotation_parse.parse_gff_line(raw)
+        if feature is not None:
+            rows.append(dataclasses.replace(feature, line=i))
+    db_path = _build(tmp_path, rows)
+
+    filters = annotation_db.FeatureFilters(top_level_only=False)
+    lines = annotation_export.closure_lines(db_path=db_path, filters=filters)
+
+    dest = tmp_path / "out.gff3"
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines=lines,
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    assert "%2F" in dest.read_text()
