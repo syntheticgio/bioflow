@@ -4,9 +4,28 @@ from pathlib import Path
 
 import pytest
 
+from app.config import settings
+from app.errors import PermanentError
 from app.pipelines import genbank_reader, genbank_sequence
+from app.queue import annotation_handlers
+from app.queue.registry import JobContext
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "genbank"
+
+
+def _ctx(payload: dict) -> JobContext:
+    """A real JobContext, matching test_annotation_contig_lengths_fact.py.
+
+    The real class rather than a fake: a hand-rolled stand-in drifts from
+    JobContext silently, and these handlers are cheap to drive for real.
+    """
+    return JobContext(
+        job_id="j1",
+        payload=payload,
+        epoch=1,
+        attempts=1,
+        owner="local",
+    )
 
 
 def _read_fasta(path: Path) -> list[tuple[str, str]]:
@@ -147,3 +166,39 @@ class TestAgreesWithReader:
             if r.has_sequence
         ]
         assert extracted == from_reader
+
+
+class TestExtractHandler:
+    def test_rejects_a_file_with_no_sequence(self, tmp_path, monkeypatch):
+        # Redirects _prepare_workdir's output under tmp_path, the same way the
+        # existing annotation handler tests isolate their scratch space.
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        source = tmp_path / "featureless.gbff"
+        source.write_text(
+            "LOCUS       NC_000003               10 bp    DNA     linear\n"
+            "VERSION     NC_000003.1\n"
+            "//\n"
+        )
+        ctx = _ctx(
+            {
+                "object_id": "507f1f77bcf86cd799439011",
+                "genbank_path": str(source),
+                "output_name": "out.fna",
+            }
+        )
+        with pytest.raises(PermanentError, match="no sequence"):
+            annotation_handlers.extract_genbank_sequence(ctx)
+
+    def test_writes_the_fasta_and_reports_it(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
+        ctx = _ctx(
+            {
+                "object_id": "507f1f77bcf86cd799439011",
+                "genbank_path": str(FIXTURES / "ecoli_slice.gbff"),
+                "output_name": "ecoli_slice.fna",
+            }
+        )
+        result = annotation_handlers.extract_genbank_sequence(ctx)
+        assert result["record_count"] == 1
+        assert result["output"]["name"] == "ecoli_slice.fna"
+        assert Path(result["output"]["tmp_path"]).exists()

@@ -26,6 +26,7 @@ from app.pipelines import (
     annotation_stats,
     genbank_parse,
     genbank_reader,
+    genbank_sequence,
 )
 from app.queue.pipeline_handlers import _prepare_workdir
 from app.queue.registry import HandlerMode, JobContext, handler
@@ -505,3 +506,55 @@ async def _load_edits(object_id: str):
     return await AnnotationEdit.find(
         AnnotationEdit.object_id == PydanticObjectId(object_id)
     ).to_list()
+
+
+@handler(
+    "extract_genbank_sequence",
+    # THREAD for the same reason its two siblings are: the work is file I/O
+    # in this process, with no binary to spawn or kill via process group.
+    mode=HandlerMode.THREAD,
+    job_class=JobClass.COMPUTE,
+    # 512MB regardless of input size. genbank_sequence streams, so memory is
+    # flat in the size of the ORIGIN block -- a 300MB sequence costs no more
+    # here than a 300KB one.
+    resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+)
+def extract_genbank_sequence(ctx: JobContext) -> dict:
+    """Write a GenBank file's ORIGIN sequence out as a FASTA reference."""
+    object_id = ctx.payload.get("object_id")
+    if not object_id:
+        raise PermanentError("extract_genbank_sequence requires an 'object_id'")
+
+    source = Path(ctx.payload["genbank_path"])
+    if not source.exists():
+        raise PermanentError(f"genbank file is missing: {source}")
+
+    # _prepare_workdir, not a bare tmp path: it puts the output under
+    # settings.tmp_dir, which shares a filesystem with objects/, so ingesting
+    # the finished file is an atomic rename rather than a copy of what may be
+    # a very large FASTA. It also wipes the directory on entry, so a retry
+    # does not inherit a half-written file.
+    work = _prepare_workdir(ctx, "genbank_sequence")
+    dest = work / ctx.payload["output_name"]
+
+    ctx.progress(phase="extract", pct=0.1, message="extracting sequence")
+    written = genbank_sequence.write_fasta(source=source, dest=dest)
+
+    # Read from the file rather than trusting the `genbank_has_sequence` fact
+    # that offered this action: the fact was recorded by an earlier job and
+    # the file may have been replaced since.
+    if written == 0:
+        raise PermanentError(
+            "this genbank file contains no sequence to extract"
+        )
+
+    log.info(
+        "genbank_sequence_extracted",
+        object_id=str(object_id),
+        records=written,
+    )
+    return {
+        "object_id": str(object_id),
+        "record_count": written,
+        "output": {"tmp_path": str(dest), "name": ctx.payload["output_name"]},
+    }
