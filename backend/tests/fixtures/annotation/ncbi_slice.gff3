@@ -1,0 +1,14 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region NC_000021.9 1 46709983
+NC_000021.9	RefSeq	region	1	46709983	.	+	.	ID=NC_000021.9:1..46709983;Dbxref=taxon:9606;chromosome=21
+NC_000021.9	BestRefSeq	gene	5011799	5017145	.	+	.	ID=gene-LOC102723996;Name=LOC102723996;gene_biotype=protein_coding
+NC_000021.9	BestRefSeq	mRNA	5011799	5017145	.	+	.	ID=rna-XM_011529554.1;Parent=gene-LOC102723996;Name=XM_011529554.1
+NC_000021.9	BestRefSeq	exon	5011799	5011874	.	+	.	ID=exon-XM_011529554.1-1;Parent=rna-XM_011529554.1
+NC_000021.9	BestRefSeq	exon	5015000	5015200	.	+	.	ID=exon-XM_011529554.1-2;Parent=rna-XM_011529554.1
+NC_000021.9	BestRefSeq	CDS	5011820	5011874	.	+	0	ID=cds-XP_011527856.1;Parent=rna-XM_011529554.1;Name=XP_011527856.1
+NC_000021.9	BestRefSeq	CDS	5015000	5015200	.	+	2	ID=cds-XP_011527856.1;Parent=rna-XM_011529554.1;Name=XP_011527856.1
+NC_000021.9	Gnomon	gene	5022493	5040666	.	-	.	ID=gene-LOC100forward;Name=LOC100forward;gene_biotype=lncRNA
+NC_000021.9	Gnomon	lnc_RNA	5022493	5040666	.	-	.	ID=rna-XR_001754960.1;Parent=gene-LOC100forward
+NC_000021.9	Gnomon	exon	5040500	5040666	.	-	.	ID=exon-XR_001754960.1-1;Parent=rna-XR_001754960.1

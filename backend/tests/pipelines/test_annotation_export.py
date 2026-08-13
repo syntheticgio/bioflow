@@ -5,6 +5,8 @@ closure lives, and from annotation_hierarchy because that resolves status
 for the whole file while this walks one filtered set.
 """
 
+from pathlib import Path
+
 import pytest
 
 from app.pipelines.annotation_db import (
@@ -223,3 +225,103 @@ class TestSubsetName:
         assert subset_name("GRCh38.gff3.gz", {"contig": "chr21"}) == (
             "GRCh38.chr21.gff3.gz"
         )
+
+
+FIXTURES = Path(__file__).parent.parent / "fixtures" / "annotation"
+
+
+class TestRealNcbiFidelity:
+    """Against a real NCBI GFF3, not hand-built Feature objects.
+
+    Hand-built fixtures feed the code objects that already look the way it
+    expects -- how the suggestion-rules and STAR failures passed a green
+    suite while being wrong. The columns asserted here (`source`, `phase`)
+    are exactly the ones Feature does not store, so a reconstruction-based
+    implementation passes every other test in this file and fails these.
+    """
+
+    def _index(self, tmp_path):
+        from app.pipelines import annotation_parse
+
+        src = FIXTURES / "ncbi_slice.gff3"
+        rows = []
+        with open(src) as fh:
+            for i, line in enumerate(fh, start=1):
+                stripped = line.rstrip("\n")
+                if not stripped or stripped.startswith("#"):
+                    continue
+                f = annotation_parse.parse_gff_line(stripped, i)
+                if f is not None:
+                    rows.append(f)
+        db = tmp_path / "real.db"
+        build_annotation_db(rows=rows, db_path=db)
+        resolve_hierarchy(db_path=db)
+        return src, db
+
+    def test_exported_lines_are_byte_identical(self, tmp_path):
+        src, db = self._index(tmp_path)
+        lines = closure_lines(
+            db_path=db,
+            filters=FeatureFilters(feature_type="CDS", top_level_only=False),
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines=lines, verify=None)
+
+        source_lines = src.read_text().splitlines()
+        for emitted in out.read_text().splitlines():
+            if emitted.startswith("#"):
+                continue
+            assert emitted in source_lines
+
+    def test_phase_survives(self, tmp_path):
+        """The column Feature has no field for."""
+        src, db = self._index(tmp_path)
+        lines = closure_lines(
+            db_path=db,
+            filters=FeatureFilters(feature_type="CDS", top_level_only=False),
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines=lines, verify=None)
+        cds = [
+            l.split("\t") for l in out.read_text().splitlines()
+            if not l.startswith("#") and l.split("\t")[2] == "CDS"
+        ]
+        assert {row[7] for row in cds} == {"0", "2"}
+
+    def test_source_column_survives(self, tmp_path):
+        """Column 2, also absent from Feature."""
+        src, db = self._index(tmp_path)
+        lines = closure_lines(
+            db_path=db,
+            filters=FeatureFilters(feature_type="CDS", top_level_only=False),
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines=lines, verify=None)
+        for line in out.read_text().splitlines():
+            if line.startswith("#"):
+                continue
+            assert line.split("\t")[1] in ("RefSeq", "BestRefSeq", "Gnomon")
+
+    def test_no_dangling_parent_references(self, tmp_path):
+        """AE-13, against a real hierarchy."""
+        src, db = self._index(tmp_path)
+        lines = closure_lines(
+            db_path=db,
+            filters=FeatureFilters(feature_type="CDS", top_level_only=False),
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines=lines, verify=None)
+
+        from app.pipelines.annotation_parse import parse_gff_attributes
+
+        present, referenced = set(), set()
+        for line in out.read_text().splitlines():
+            if line.startswith("#"):
+                continue
+            attrs = parse_gff_attributes(line.split("\t")[8])
+            if attrs.get("ID"):
+                present.add(attrs["ID"])
+            for parent in attrs.get("Parent", "").split(","):
+                if parent:
+                    referenced.add(parent)
+        assert referenced <= present
