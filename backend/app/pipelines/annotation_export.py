@@ -94,3 +94,99 @@ def _walk(con: sqlite3.Connection, seed_ids: set[str], direction: str) -> set[in
         frontier = next_frontier
 
     return lines
+
+
+class ExportMismatch(Exception):
+    """A source line no longer parses to the feature the index recorded.
+
+    Raised rather than skipped: a subset that quietly drops or substitutes
+    features is a wrong-but-plausible annotation file, which is worse than
+    no file at all.
+    """
+
+
+# The filters that make a readable name, in the order they are tried. Kept
+# to the ones a person would actually say out loud about a subset.
+_NAME_KEYS = ("contig", "feature_type", "biotype", "strand")
+
+# Every suffix that is part of an annotation's name rather than a filter
+# slot, so `a.gff3.gz` keeps both.
+_COMPOUND_SUFFIXES = (".gz", ".bgz")
+
+
+def subset_name(source_name: str, active: dict) -> str:
+    """The exported file's name: the source's, with up to two filters.
+
+    Past two the name stops being readable, so it falls back to `subset`.
+    The complete filter is recorded in the object's facts either way, so
+    nothing is lost -- this only decides what is legible in a file list.
+    """
+    stem = source_name
+    suffixes = ""
+    for compound in _COMPOUND_SUFFIXES:
+        if stem.endswith(compound):
+            suffixes = compound + suffixes
+            stem = stem[: -len(compound)]
+            break
+    if "." in stem:
+        stem, _, ext = stem.rpartition(".")
+        suffixes = f".{ext}" + suffixes
+
+    parts = [str(active[k]) for k in _NAME_KEYS if active.get(k)]
+    label = ".".join(parts) if 0 < len(parts) <= 2 else "subset"
+    return f"{stem}.{label}{suffixes}"
+
+
+def write_subset(
+    *,
+    source: Path,
+    dest: Path,
+    lines: set[int],
+    verify: dict[int, dict] | None,
+) -> int:
+    """Copy `lines` from `source` to `dest`, header first, in file order.
+
+    One sequential pass rather than seeking per line: the lines are spread
+    through the file and a 3M-line GFF3 read once is cheaper than tens of
+    thousands of seeks.
+
+    `verify` maps a line number to the contig/start/end the index recorded
+    for it. Each selected line is re-parsed and compared; a disagreement
+    raises. Pass None only in tests that are exercising emission itself.
+
+    Headers are read from the file directly rather than through
+    `run_annotation_stats`'s `_HEADER_SCAN_LINES`, which bounds what is
+    *displayed* and would silently truncate a long ##sequence-region block.
+
+    Returns the number of feature lines written.
+    """
+    from app.pipelines import annotation_parse
+
+    written = 0
+    with open(source, errors="replace") as fh, open(dest, "w") as out:
+        in_header = True
+        for i, line in enumerate(fh, start=1):
+            stripped = line.rstrip("\n")
+            if in_header and stripped.startswith("#"):
+                out.write(line if line.endswith("\n") else line + "\n")
+                continue
+            if stripped:
+                in_header = False
+            if i not in lines:
+                continue
+            if verify is not None:
+                expected = verify.get(i)
+                parsed = annotation_parse.parse_gff_line(stripped, i)
+                if expected is not None and (
+                    parsed is None
+                    or parsed.contig != expected["contig"]
+                    or parsed.start != expected["start"]
+                    or parsed.end != expected["end"]
+                ):
+                    raise ExportMismatch(
+                        f"line {i} of {source.name} no longer matches the "
+                        f"computed index; recompute results and try again"
+                    )
+            out.write(line if line.endswith("\n") else line + "\n")
+            written += 1
+    return written

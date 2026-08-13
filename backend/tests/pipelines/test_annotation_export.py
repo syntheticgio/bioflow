@@ -11,7 +11,12 @@ from app.pipelines.annotation_db import (
     FeatureFilters,
     build_annotation_db,
 )
-from app.pipelines.annotation_export import closure_lines
+from app.pipelines.annotation_export import (
+    ExportMismatch,
+    closure_lines,
+    subset_name,
+    write_subset,
+)
 from app.pipelines.annotation_hierarchy import resolve_hierarchy
 from app.pipelines.annotation_parse import Feature
 
@@ -97,3 +102,108 @@ class TestClosure:
             db_path=db, filters=FeatureFilters(top_level_only=False)
         )
         assert lines == set()
+
+
+class TestWriteSubset:
+    def test_emits_selected_lines_verbatim(self, tmp_path):
+        src = tmp_path / "a.gff3"
+        src.write_text(
+            "##gff-version 3\n"
+            "chr1\tHAVANA\tgene\t1\t100\t.\t+\t.\tID=g1\n"
+            "chr1\tHAVANA\tCDS\t1\t100\t.\t+\t2\tID=c1;Parent=g1\n"
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines={3}, verify=None)
+        text = out.read_text()
+        assert "chr1\tHAVANA\tCDS\t1\t100\t.\t+\t2\tID=c1;Parent=g1" in text
+
+    def test_preserves_the_phase_column(self, tmp_path):
+        """The reason for re-emitting rather than reconstructing: `phase`
+        is not stored on Feature at all."""
+        src = tmp_path / "a.gff3"
+        src.write_text("chr1\tX\tCDS\t1\t100\t.\t+\t2\tID=c1\n")
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines={1}, verify=None)
+        assert out.read_text().split("\t")[7] == "2"
+
+    def test_copies_the_header(self, tmp_path):
+        """A GFF3 without ##gff-version 3 is malformed, and headers are not
+        features so the closure never selects them."""
+        src = tmp_path / "a.gff3"
+        src.write_text(
+            "##gff-version 3\n"
+            "##sequence-region chr1 1 1000\n"
+            "chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1\n"
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines={3}, verify=None)
+        lines = out.read_text().splitlines()
+        assert lines[0] == "##gff-version 3"
+        assert lines[1] == "##sequence-region chr1 1 1000"
+
+    def test_header_is_not_truncated_at_the_display_cap(self, tmp_path):
+        """_HEADER_SCAN_LINES bounds what is *displayed*; reusing it here
+        would silently drop a long ##sequence-region header."""
+        src = tmp_path / "a.gff3"
+        header = "".join(f"##sequence-region c{i} 1 10\n" for i in range(80))
+        src.write_text(header + "chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1\n")
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines={81}, verify=None)
+        assert out.read_text().count("##sequence-region") == 80
+
+    def test_emits_in_file_order(self, tmp_path):
+        src = tmp_path / "a.gff3"
+        src.write_text(
+            "chr1\tX\tgene\t1\t10\t.\t+\t.\tID=a\n"
+            "chr1\tX\tgene\t2\t20\t.\t+\t.\tID=b\n"
+            "chr1\tX\tgene\t3\t30\t.\t+\t.\tID=c\n"
+        )
+        out = tmp_path / "out.gff3"
+        write_subset(source=src, dest=out, lines={3, 1}, verify=None)
+        ids = [l.split("ID=")[1] for l in out.read_text().splitlines()]
+        assert ids == ["a", "c"]
+
+    def test_rejects_a_line_that_no_longer_matches(self, tmp_path):
+        """A wrong-but-plausible annotation file is worse than no file."""
+        src = tmp_path / "a.gff3"
+        src.write_text("chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1\n")
+        out = tmp_path / "out.gff3"
+        with pytest.raises(ExportMismatch):
+            write_subset(
+                source=src, dest=out, lines={1},
+                verify={1: {"contig": "chr1", "start": 999, "end": 100}},
+            )
+
+    def test_accepts_a_line_that_matches(self, tmp_path):
+        src = tmp_path / "a.gff3"
+        src.write_text("chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1\n")
+        out = tmp_path / "out.gff3"
+        write_subset(
+            source=src, dest=out, lines={1},
+            verify={1: {"contig": "chr1", "start": 1, "end": 100}},
+        )
+        assert "ID=g1" in out.read_text()
+
+
+class TestSubsetName:
+    def test_uses_a_single_filter(self):
+        assert subset_name("GRCh38.gff3", {"contig": "chr21"}) == "GRCh38.chr21.gff3"
+
+    def test_uses_two_filters(self):
+        name = subset_name("GRCh38.gff3", {"contig": "chr21", "feature_type": "exon"})
+        assert name == "GRCh38.chr21.exon.gff3"
+
+    def test_falls_back_past_two(self):
+        """Four active filters make an unreadable name; facts carry the
+        complete filter regardless."""
+        name = subset_name(
+            "GRCh38.gff3",
+            {"contig": "chr21", "feature_type": "exon",
+             "strand": "+", "biotype": "protein_coding"},
+        )
+        assert name == "GRCh38.subset.gff3"
+
+    def test_handles_a_compound_extension(self):
+        assert subset_name("GRCh38.gff3.gz", {"contig": "chr21"}) == (
+            "GRCh38.chr21.gff3.gz"
+        )
