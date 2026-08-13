@@ -1,7 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { api } from "../api/client";
-import { notify } from "../stores/messageStore";
 import { NodeSelector } from "./NodeSelector";
 import type {
   BamStatsFacts,
@@ -15,6 +13,7 @@ import { BirdsEyeCoverageChart, CumulativeCoverageChart } from "./CoverageChart"
 import { ContigTable } from "./ContigTable";
 import { ContigDepthChart } from "./ContigDepthChart";
 import { DepthHistogramChart } from "./DepthHistogramChart";
+import { OnDemandCompute } from "./OnDemandCompute";
 import { TranscriptQc } from "./TranscriptQc";
 
 /**
@@ -27,18 +26,8 @@ import { TranscriptQc } from "./TranscriptQc";
  * AlignmentReport's fallback to bam_stats_summary.
  */
 export function BamResults({ obj }: { obj: ObjectDetailData }) {
-  const qc = useQueryClient();
   const f = obj.facts as BamStatsFacts;
   const [targetNode, setTargetNode] = useState("");
-
-  const compute = useMutation({
-    mutationFn: () => api.launchBamStats(obj.id, targetNode || undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing results");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
 
   const starScale = isStarMapqScale(obj.facts);
   const hasResults = f.bam_stats_status === "ok";
@@ -64,11 +53,18 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
         />
       )}
 
-      {!hasResults && (
-        <div className="section">
-          <NodeSelector value={targetNode} onChange={setTargetNode} />
-          <div className="section-title">Coverage &amp; per-contig detail</div>
-          {!sortedCoordinate ? (
+      <OnDemandCompute
+        objectId={obj.id}
+        jobType="run_bam_stats"
+        launch={useCallback(
+          () => api.launchBamStats(obj.id, targetNode || undefined),
+          [obj.id, targetNode],
+        )}
+        hasResults={hasResults}
+        title="Coverage &amp; per-contig detail"
+        preflight={<NodeSelector value={targetNode} onChange={setTargetNode} />}
+        body={
+          !sortedCoordinate ? (
             <div className="warn-box">
               This BAM is not coordinate-sorted, which coverage statistics
               require.
@@ -84,169 +80,150 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
               insert-size/MAPQ distributions — computed on demand from the
               BAM and its index.
             </div>
-          )}
-          <button
-            type="button"
-            className="btn"
-            onClick={() => compute.mutate()}
-            disabled={compute.isPending || !sortedCoordinate}
-          >
-            {compute.isPending ? "Computing…" : "Compute results"}
-          </button>
-        </div>
-      )}
-
-      {hasResults && (
-        <>
-          <div className="section">
-            {f.bam_stats_coverage_bins && f.bam_stats_coverage_boundaries && (
-              <BirdsEyeCoverageChart
-                bins={f.bam_stats_coverage_bins}
-                boundaries={f.bam_stats_coverage_boundaries}
-              />
-            )}
-            <SummaryRow summary={f.bam_stats_summary} />
-          </div>
-
-          {/* Cards in a shared row carry no .section: its margin-top would
-              offset every card after the first and break the aligned title
-              baseline. The row's gap owns the spacing. */}
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-            {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
-              <div style={{ flex: "1 1 300px" }}>
-                <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
-              </div>
-            )}
-            {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
-              <div style={{ flex: "1 1 300px" }}>
-                <ContigDepthChart
-                  contigs={f.bam_stats_contigs_top}
-                  meanDepth={f.bam_stats_summary?.mean_depth}
-                  totalContigs={f.bam_stats_summary?.total_contigs}
+          )
+        }
+        buttonClass="btn"
+        disabled={!sortedCoordinate}
+      >
+        {({ recomputeButton }) => (
+          <>
+            <div className="section">
+              {f.bam_stats_coverage_bins && f.bam_stats_coverage_boundaries && (
+                <BirdsEyeCoverageChart
+                  bins={f.bam_stats_coverage_bins}
+                  boundaries={f.bam_stats_coverage_boundaries}
                 />
-              </div>
-            )}
-            {f.bam_stats_depth_histogram &&
-              f.bam_stats_depth_histogram.length > 0 &&
-              f.bam_stats_depth_bucket_width != null && (
+              )}
+              <SummaryRow summary={f.bam_stats_summary} />
+            </div>
+
+            {/* Cards in a shared row carry no .section: its margin-top would
+                offset every card after the first and break the aligned title
+                baseline. The row's gap owns the spacing. */}
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              {f.bam_stats_cumulative && f.bam_stats_cumulative.length > 0 && (
                 <div style={{ flex: "1 1 300px" }}>
-                  <DepthHistogramChart
-                    buckets={f.bam_stats_depth_histogram}
-                    bucketWidth={f.bam_stats_depth_bucket_width}
+                  <CumulativeCoverageChart curve={f.bam_stats_cumulative} />
+                </div>
+              )}
+              {f.bam_stats_contigs_top && f.bam_stats_contigs_top.length > 0 && (
+                <div style={{ flex: "1 1 300px" }}>
+                  <ContigDepthChart
+                    contigs={f.bam_stats_contigs_top}
                     meanDepth={f.bam_stats_summary?.mean_depth}
+                    totalContigs={f.bam_stats_summary?.total_contigs}
                   />
                 </div>
               )}
-          </div>
-
-          {f.bam_stats_report && (
-            <ContigTable
-              objectId={obj.id}
-              reportPath={f.bam_stats_report}
-              starMapqScale={starScale}
-            />
-          )}
-
-          {/* Same rule as the coverage row above: no .section on the cards,
-              so Insert size and Mapping quality sit on one baseline. */}
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-            {f.insert_size_histogram && f.insert_size_histogram.length > 0 && (
-              <div style={{ flex: "1 1 300px" }}>
-                <div className="section-title">Insert size</div>
-                <Histogram
-                  data={f.insert_size_histogram}
-                  xKey="insert_size"
-                  yKey="count"
-                  xLabel={(v) => `${v}`}
-                />
-              </div>
-            )}
-            {f.mapq_histogram && f.mapq_histogram.length > 0 && (
-              <div style={{ flex: "1 1 300px" }}>
-                <div className="section-title">
-                  Mapping quality{starScale ? " (STAR scale)" : ""}
-                </div>
-                {/* Without this a reader has no way to see that these bars
-                    are locus counts and the next BAM's are phred scores. */}
-                {starScale && (
-                  <div
-                    style={{
-                      color: "var(--text-faint)",
-                      fontSize: 11,
-                      marginBottom: 6,
-                    }}
-                  >
-                    {mapqScaleNote(true)}
+              {f.bam_stats_depth_histogram &&
+                f.bam_stats_depth_histogram.length > 0 &&
+                f.bam_stats_depth_bucket_width != null && (
+                  <div style={{ flex: "1 1 300px" }}>
+                    <DepthHistogramChart
+                      buckets={f.bam_stats_depth_histogram}
+                      bucketWidth={f.bam_stats_depth_bucket_width}
+                      meanDepth={f.bam_stats_summary?.mean_depth}
+                    />
                   </div>
                 )}
-                <Histogram
-                  data={f.mapq_histogram}
-                  xKey="mapq"
-                  yKey="count"
-                  xLabel={(v) => mapqBucketLabel(v, starScale)}
-                />
-              </div>
-            )}
-          </div>
+            </div>
 
-          <div className="section">
-            <div className="section-title">Provenance</div>
-            <dl className="kv">
-              {obj.facts.aligned_by != null && (
-                <>
-                  <dt>Aligner</dt>
-                  <dd>
-                    {String(obj.facts.aligned_by)}
-                    {obj.facts.aligner_version ? ` ${obj.facts.aligner_version}` : ""}
-                  </dd>
-                </>
+            {f.bam_stats_report && (
+              <ContigTable
+                objectId={obj.id}
+                reportPath={f.bam_stats_report}
+                starMapqScale={starScale}
+              />
+            )}
+
+            {/* Same rule as the coverage row above: no .section on the cards,
+                so Insert size and Mapping quality sit on one baseline. */}
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+              {f.insert_size_histogram && f.insert_size_histogram.length > 0 && (
+                <div style={{ flex: "1 1 300px" }}>
+                  <div className="section-title">Insert size</div>
+                  <Histogram
+                    data={f.insert_size_histogram}
+                    xKey="insert_size"
+                    yKey="count"
+                    xLabel={(v) => `${v}`}
+                  />
+                </div>
               )}
-              {Array.isArray(obj.facts.program_chain) && obj.facts.program_chain.length > 0 && (
-                <>
-                  <dt>Program chain</dt>
-                  {/* One PG line per invocation, so repeated tools repeat;
-                      the distinct tools are what's worth reading. */}
-                  <dd>{[...new Set(obj.facts.program_chain as string[])].join(" → ")}</dd>
-                </>
+              {f.mapq_histogram && f.mapq_histogram.length > 0 && (
+                <div style={{ flex: "1 1 300px" }}>
+                  <div className="section-title">
+                    Mapping quality{starScale ? " (STAR scale)" : ""}
+                  </div>
+                  {/* Without this a reader has no way to see that these bars
+                      are locus counts and the next BAM's are phred scores. */}
+                  {starScale && (
+                    <div
+                      style={{
+                        color: "var(--text-faint)",
+                        fontSize: 11,
+                        marginBottom: 6,
+                      }}
+                    >
+                      {mapqScaleNote(true)}
+                    </div>
+                  )}
+                  <Histogram
+                    data={f.mapq_histogram}
+                    xKey="mapq"
+                    yKey="count"
+                    xLabel={(v) => mapqBucketLabel(v, starScale)}
+                  />
+                </div>
               )}
-              {Array.isArray(obj.facts.sample_names) && obj.facts.sample_names.length > 0 && (
-                <>
-                  <dt>Samples</dt>
-                  <dd>{(obj.facts.sample_names as string[]).join(", ")}</dd>
-                </>
-              )}
-              {Array.isArray(obj.facts.platforms) && obj.facts.platforms.length > 0 && (
-                <>
-                  <dt>Platforms</dt>
-                  <dd>{(obj.facts.platforms as string[]).join(", ")}</dd>
-                </>
-              )}
-              {obj.facts.sort_order != null && (
-                <>
-                  <dt>Sort order</dt>
-                  <dd>{String(obj.facts.sort_order)}</dd>
-                </>
-              )}
-              <dt>Index</dt>
-              <dd>{hasIndex ? "present" : "missing"}</dd>
-            </dl>
-            <button
-              type="button"
-              onClick={() => compute.mutate()}
-              disabled={compute.isPending}
-              style={{
-                marginTop: 6,
-                color: "var(--accent)",
-                fontSize: 11,
-                textTransform: "none",
-                letterSpacing: 0,
-              }}
-            >
-              {compute.isPending ? "recomputing…" : "recompute results"}
-            </button>
-          </div>
-        </>
-      )}
+            </div>
+
+            <div className="section">
+              <div className="section-title">Provenance</div>
+              <dl className="kv">
+                {obj.facts.aligned_by != null && (
+                  <>
+                    <dt>Aligner</dt>
+                    <dd>
+                      {String(obj.facts.aligned_by)}
+                      {obj.facts.aligner_version ? ` ${obj.facts.aligner_version}` : ""}
+                    </dd>
+                  </>
+                )}
+                {Array.isArray(obj.facts.program_chain) && obj.facts.program_chain.length > 0 && (
+                  <>
+                    <dt>Program chain</dt>
+                    {/* One PG line per invocation, so repeated tools repeat;
+                        the distinct tools are what's worth reading. */}
+                    <dd>{[...new Set(obj.facts.program_chain as string[])].join(" → ")}</dd>
+                  </>
+                )}
+                {Array.isArray(obj.facts.sample_names) && obj.facts.sample_names.length > 0 && (
+                  <>
+                    <dt>Samples</dt>
+                    <dd>{(obj.facts.sample_names as string[]).join(", ")}</dd>
+                  </>
+                )}
+                {Array.isArray(obj.facts.platforms) && obj.facts.platforms.length > 0 && (
+                  <>
+                    <dt>Platforms</dt>
+                    <dd>{(obj.facts.platforms as string[]).join(", ")}</dd>
+                  </>
+                )}
+                {obj.facts.sort_order != null && (
+                  <>
+                    <dt>Sort order</dt>
+                    <dd>{String(obj.facts.sort_order)}</dd>
+                  </>
+                )}
+                <dt>Index</dt>
+                <dd>{hasIndex ? "present" : "missing"}</dd>
+              </dl>
+              {recomputeButton}
+            </div>
+          </>
+        )}
+      </OnDemandCompute>
     </>
   );
 }

@@ -1,11 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { api } from "../api/client";
-import { notify } from "../stores/messageStore";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { FactsColumns } from "./FactsColumns";
 import { NodeSelector } from "./NodeSelector";
+import { OnDemandCompute } from "./OnDemandCompute";
 import { DistributionChart, VariantDensityChart } from "./VariantCharts";
 import { VariantTable } from "./VariantTable";
 
@@ -15,211 +14,190 @@ import { VariantTable } from "./VariantTable";
  * and the complete filterable variant table.
  */
 export function VariantResults({ obj }: { obj: ObjectDetailData }) {
-  const qc = useQueryClient();
   const f = obj.facts as VcfStatsFacts;
   const [targetNode, setTargetNode] = useState("");
 
-  const compute = useMutation({
-    mutationFn: () => api.launchVcfStats(obj.id, targetNode || undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing results");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
-
   const hasResults = f.vcf_stats_status === "ok";
 
-  if (!hasResults) {
-    return (
-      <div className="section">
-        <NodeSelector value={targetNode} onChange={setTargetNode} />
-        <div className="section-title">Variant summary</div>
+  return (
+    <OnDemandCompute
+      objectId={obj.id}
+      jobType="run_vcf_stats"
+      launch={useCallback(
+        () => api.launchVcfStats(obj.id, targetNode || undefined),
+        [obj.id, targetNode],
+      )}
+      hasResults={hasResults}
+      title="Variant summary"
+      preflight={<NodeSelector value={targetNode} onChange={setTargetNode} />}
+      body={
         <div className="section-note">
           Call counts, Ti/Tv, QUAL and depth distributions, and the complete
           filterable variant table — computed on demand from the VCF.
         </div>
-        <button
-          type="button"
-          className="btn primary"
-          onClick={() => compute.mutate()}
-          disabled={compute.isPending}
-        >
-          {compute.isPending ? "Computing…" : "Compute results"}
-        </button>
-      </div>
-    );
-  }
+      }
+    >
+      {({ recomputeButton }) => {
+        const summary = f.vcf_stats_summary;
+        const samples = Array.isArray(obj.facts.sample_names)
+          ? (obj.facts.sample_names as string[])
+          : [];
 
-  const summary = f.vcf_stats_summary;
-  const samples = Array.isArray(obj.facts.sample_names)
-    ? (obj.facts.sample_names as string[])
-    : [];
+        // bcftools call never stamps PASS, so no caller info plus no filters at
+        // all reads as "this caller doesn't use FILTER" rather than "no reads
+        // passed" -- see the pass_pct comment on VariantSummary.
+        const calledBy =
+          typeof obj.facts.variants_called_by === "string"
+            ? obj.facts.variants_called_by +
+              (typeof obj.facts.variant_caller_version === "string"
+                ? ` ${obj.facts.variant_caller_version}`
+                : "")
+            : null;
 
-  // bcftools call never stamps PASS, so no caller info plus no filters at
-  // all reads as "this caller doesn't use FILTER" rather than "no reads
-  // passed" -- see the pass_pct comment on VariantSummary.
-  const calledBy =
-    typeof obj.facts.variants_called_by === "string"
-      ? obj.facts.variants_called_by +
-        (typeof obj.facts.variant_caller_version === "string"
-          ? ` ${obj.facts.variant_caller_version}`
-          : "")
-      : null;
-
-  return (
-    <>
-      <div className="qc-provenance">
-        {[
-          f.vcf_stats_tool_version ? `bcftools ${f.vcf_stats_tool_version}` : null,
-          calledBy ? `called by ${calledBy}` : null,
-          summary ? `${summary.samples} sample${summary.samples === 1 ? "" : "s"}` : null,
-        ]
-          .filter(Boolean)
-          .join(" · ")}{" "}
-        <button
-          type="button"
-          onClick={() => compute.mutate()}
-          disabled={compute.isPending}
-          style={{
-            color: "var(--accent)",
-            fontSize: 11,
-            textTransform: "none",
-            letterSpacing: 0,
-          }}
-        >
-          {compute.isPending ? "recomputing…" : "recompute results"}
-        </button>
-      </div>
-
-      {/* Unconditional (not nested inside the zero-variants branch below):
-          AiSummary already self-suppresses when there's nothing stored and
-          no model reachable, and a summary can still be stored here even if
-          the call set is currently empty -- e.g. after a re-run dropped the
-          count to zero following an earlier non-zero run. Nesting this
-          inside the zero-variants branch would make that stored summary
-          permanently unreachable. */}
-      <AiSummary
-        facts={obj.facts}
-        objectId={obj.id}
-        fingerprint={obj.summary_fingerprint ?? undefined}
-        factPrefix="ai_variant_summary"
-        statusFn={() => api.variantSummaryStatus()}
-        launchFn={(id) => api.launchVariantSummary(id)}
-        emptyLabel="No summary yet for this file."
-      />
-
-      {summary && summary.variants === 0 ? (
-        <div className="section">
-          <div className="section-note">
-            No variants were called. For a strict caller against a clean
-            sample this is a normal outcome, not a failure.
-          </div>
-        </div>
-      ) : (
-        <>
-          {summary && (
-            <div className="section">
-              <SummaryRow summary={summary} />
+        return (
+          <>
+            <div className="qc-provenance">
+              {[
+                f.vcf_stats_tool_version ? `bcftools ${f.vcf_stats_tool_version}` : null,
+                calledBy ? `called by ${calledBy}` : null,
+                summary ? `${summary.samples} sample${summary.samples === 1 ? "" : "s"}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}{" "}
+              {recomputeButton}
             </div>
-          )}
 
-          {f.vcf_stats_density_bins && f.vcf_stats_density_bounds && (
-            <div className="section">
-              <div className="section-title">Variant density</div>
-              <VariantDensityChart
-                bins={f.vcf_stats_density_bins}
-                boundaries={f.vcf_stats_density_bounds}
-              />
-              <div className="section-note">
-                Bar heights use a square-root scale, not a straight count, so
-                that regions with just a few variants still show up next to
-                the densest spots — read this as "where are the variants,"
-                not as an exact ratio between bars. Hover a bar for its
-                actual count.
-              </div>
-            </div>
-          )}
+            {/* Unconditional (not nested inside the zero-variants branch below):
+                AiSummary already self-suppresses when there's nothing stored and
+                no model reachable, and a summary can still be stored here even if
+                the call set is currently empty -- e.g. after a re-run dropped the
+                count to zero following an earlier non-zero run. Nesting this
+                inside the zero-variants branch would make that stored summary
+                permanently unreachable. */}
+            <AiSummary
+              facts={obj.facts}
+              objectId={obj.id}
+              fingerprint={obj.summary_fingerprint ?? undefined}
+              factPrefix="ai_variant_summary"
+              statusFn={() => api.variantSummaryStatus()}
+              launchFn={(id) => api.launchVariantSummary(id)}
+              emptyLabel="No summary yet for this file."
+            />
 
-          <div className="qc-charts">
-            {f.vcf_stats_qual_histogram && f.vcf_stats_qual_histogram.length > 0 && (
-              <div className="qc-chart">
-                <div className="section-title">QUAL</div>
-                <DistributionChart
-                  buckets={f.vcf_stats_qual_histogram}
-                  label="QUAL"
-                  format={(v) => v.toFixed(0)}
-                />
-              </div>
-            )}
-            {f.vcf_stats_depth_histogram && f.vcf_stats_depth_histogram.length > 0 && (
-              <div className="qc-chart">
-                <div className="section-title">Depth</div>
-                <DistributionChart
-                  buckets={f.vcf_stats_depth_histogram}
-                  label="depth"
-                  format={(v) => `${v.toFixed(0)}×`}
-                />
-              </div>
-            )}
-          </div>
-
-          <FactsColumns>
-            {f.vcf_stats_substitutions && f.vcf_stats_substitutions.length > 0 && (
+            {summary && summary.variants === 0 ? (
               <div className="section">
-                <div className="section-title">Substitution types</div>
-                <SubstitutionsTable rows={f.vcf_stats_substitutions} />
+                <div className="section-note">
+                  No variants were called. For a strict caller against a clean
+                  sample this is a normal outcome, not a failure.
+                </div>
               </div>
+            ) : (
+              <>
+                {summary && (
+                  <div className="section">
+                    <SummaryRow summary={summary} />
+                  </div>
+                )}
+
+                {f.vcf_stats_density_bins && f.vcf_stats_density_bounds && (
+                  <div className="section">
+                    <div className="section-title">Variant density</div>
+                    <VariantDensityChart
+                      bins={f.vcf_stats_density_bins}
+                      boundaries={f.vcf_stats_density_bounds}
+                    />
+                    <div className="section-note">
+                      Bar heights use a square-root scale, not a straight count, so
+                      that regions with just a few variants still show up next to
+                      the densest spots — read this as "where are the variants,"
+                      not as an exact ratio between bars. Hover a bar for its
+                      actual count.
+                    </div>
+                  </div>
+                )}
+
+                <div className="qc-charts">
+                  {f.vcf_stats_qual_histogram && f.vcf_stats_qual_histogram.length > 0 && (
+                    <div className="qc-chart">
+                      <div className="section-title">QUAL</div>
+                      <DistributionChart
+                        buckets={f.vcf_stats_qual_histogram}
+                        label="QUAL"
+                        format={(v) => v.toFixed(0)}
+                      />
+                    </div>
+                  )}
+                  {f.vcf_stats_depth_histogram && f.vcf_stats_depth_histogram.length > 0 && (
+                    <div className="qc-chart">
+                      <div className="section-title">Depth</div>
+                      <DistributionChart
+                        buckets={f.vcf_stats_depth_histogram}
+                        label="depth"
+                        format={(v) => `${v.toFixed(0)}×`}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <FactsColumns>
+                  {f.vcf_stats_substitutions && f.vcf_stats_substitutions.length > 0 && (
+                    <div className="section">
+                      <div className="section-title">Substitution types</div>
+                      <SubstitutionsTable rows={f.vcf_stats_substitutions} />
+                    </div>
+                  )}
+
+                  {f.vcf_stats_filters && f.vcf_stats_filters.length > 0 && (
+                    <div className="section">
+                      <div className="section-title">Filters</div>
+                      <FiltersTable rows={f.vcf_stats_filters} />
+                    </div>
+                  )}
+                </FactsColumns>
+
+                {f.vcf_stats_contigs && f.vcf_stats_contigs.length > 0 && (
+                  <div className="section">
+                    <div className="section-title">Per-contig counts</div>
+                    <table className="trim-table">
+                      <thead>
+                        <tr>
+                          <th>Contig</th>
+                          <th style={{ textAlign: "right" }}>Length</th>
+                          <th style={{ textAlign: "right" }}>Variants</th>
+                          <th style={{ textAlign: "right" }}>Per kb</th>
+                          <th style={{ textAlign: "right" }}>SNPs</th>
+                          <th style={{ textAlign: "right" }}>Indels</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {f.vcf_stats_contigs.map((row) => (
+                          <tr key={row.contig}>
+                            <td className="mono">{row.contig}</td>
+                            <td style={{ textAlign: "right" }}>{row.length.toLocaleString()}</td>
+                            <td style={{ textAlign: "right" }}>{row.variants.toLocaleString()}</td>
+                            <td style={{ textAlign: "right" }}>{row.per_kb.toFixed(2)}</td>
+                            <td style={{ textAlign: "right" }}>{row.snps.toLocaleString()}</td>
+                            <td style={{ textAlign: "right" }}>{row.indels.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <VariantTable
+                  objectId={obj.id}
+                  reportPath={f.vcf_stats_report}
+                  contigs={f.vcf_stats_contigs ?? []}
+                  filters={f.vcf_stats_filters ?? []}
+                  samples={samples}
+                />
+              </>
             )}
-
-            {f.vcf_stats_filters && f.vcf_stats_filters.length > 0 && (
-              <div className="section">
-                <div className="section-title">Filters</div>
-                <FiltersTable rows={f.vcf_stats_filters} />
-              </div>
-            )}
-          </FactsColumns>
-
-          {f.vcf_stats_contigs && f.vcf_stats_contigs.length > 0 && (
-            <div className="section">
-              <div className="section-title">Per-contig counts</div>
-              <table className="trim-table">
-                <thead>
-                  <tr>
-                    <th>Contig</th>
-                    <th style={{ textAlign: "right" }}>Length</th>
-                    <th style={{ textAlign: "right" }}>Variants</th>
-                    <th style={{ textAlign: "right" }}>Per kb</th>
-                    <th style={{ textAlign: "right" }}>SNPs</th>
-                    <th style={{ textAlign: "right" }}>Indels</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {f.vcf_stats_contigs.map((row) => (
-                    <tr key={row.contig}>
-                      <td className="mono">{row.contig}</td>
-                      <td style={{ textAlign: "right" }}>{row.length.toLocaleString()}</td>
-                      <td style={{ textAlign: "right" }}>{row.variants.toLocaleString()}</td>
-                      <td style={{ textAlign: "right" }}>{row.per_kb.toFixed(2)}</td>
-                      <td style={{ textAlign: "right" }}>{row.snps.toLocaleString()}</td>
-                      <td style={{ textAlign: "right" }}>{row.indels.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <VariantTable
-            objectId={obj.id}
-            reportPath={f.vcf_stats_report}
-            contigs={f.vcf_stats_contigs ?? []}
-            filters={f.vcf_stats_filters ?? []}
-            samples={samples}
-          />
-        </>
-      )}
-    </>
+          </>
+        );
+      }}
+    </OnDemandCompute>
   );
 }
 

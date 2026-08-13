@@ -1,13 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useState } from "react";
 import { api } from "../api/client";
-import { notify } from "../stores/messageStore";
 import type {
   BamStatsFacts,
   FeatureDistribution,
   GeneBodyPoint,
   ObjectDetail as ObjectDetailData,
 } from "../api/types";
+import { OnDemandCompute } from "./OnDemandCompute";
 
 /**
  * RNA-seq QC: where reads sit within a transcript, and where they sit
@@ -26,7 +26,6 @@ export function TranscriptQc({
   geneBody: boolean;
   featureDistribution: boolean;
 }) {
-  const qc = useQueryClient();
   const f = obj.facts as BamStatsFacts;
 
   // GTF objects in this BAM's project -- self-fetched rather than threaded
@@ -50,22 +49,22 @@ export function TranscriptQc({
   const [gtfId, setGtfId] = useState("");
   const effectiveGtfId = gtfId || gtfs[0]?.id || "";
 
-  const compute = useMutation({
-    mutationFn: () => api.launchTranscriptQc(obj.id, effectiveGtfId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing transcript QC");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
-
   const hasResults = f.transcript_qc_status === "ok";
 
-  if (!hasResults) {
-    return (
-      <div className="section">
-        <div className="section-title">RNA-seq transcript QC</div>
-        {gtfs.length === 0 ? (
+  return (
+    <OnDemandCompute
+      objectId={obj.id}
+      jobType="run_transcript_qc"
+      launch={useCallback(
+        () => api.launchTranscriptQc(obj.id, effectiveGtfId),
+        [obj.id, effectiveGtfId],
+      )}
+      hasResults={hasResults}
+      title="RNA-seq transcript QC"
+      successMessage="Computing transcript QC"
+      computeLabel="Compute transcript QC"
+      renderBody={(computeButton) =>
+        gtfs.length === 0 ? (
           // The state every project starts in -- say what to add, rather
           // than leaving a disabled button with no explanation.
           <div style={{ color: "var(--text-faint)", fontSize: 12 }}>
@@ -91,45 +90,39 @@ export function TranscriptQc({
                 ))}
               </select>
             )}
-            <button
-              type="button"
-              className="btn"
-              onClick={() => compute.mutate()}
-              disabled={compute.isPending || !effectiveGtfId}
-            >
-              {compute.isPending ? "Computing…" : "Compute transcript QC"}
-            </button>
+            {computeButton}
           </>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    // Cards in a shared row carry no .section: its margin-top would offset
-    // the second card and break the aligned title baseline.
-    <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-      {geneBody && f.gene_body_coverage && f.gene_body_coverage.length > 0 && (
-        <div style={{ flex: "1 1 300px" }}>
-          <div className="section-title">Gene body coverage</div>
-          <GeneBodyChart curve={f.gene_body_coverage} />
-          <Provenance
-            annotation={f.transcript_qc_annotation}
-            reads={f.transcript_qc_sampled_reads}
-          />
+        )
+      }
+      disabled={!effectiveGtfId}
+    >
+      {() => (
+        // Cards in a shared row carry no .section: its margin-top would offset
+        // the second card and break the aligned title baseline.
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+          {geneBody && f.gene_body_coverage && f.gene_body_coverage.length > 0 && (
+            <div style={{ flex: "1 1 300px" }}>
+              <div className="section-title">Gene body coverage</div>
+              <GeneBodyChart curve={f.gene_body_coverage} />
+              <Provenance
+                annotation={f.transcript_qc_annotation}
+                reads={f.transcript_qc_sampled_reads}
+              />
+            </div>
+          )}
+          {featureDistribution && f.feature_distribution && (
+            <div style={{ flex: "1 1 300px" }}>
+              <div className="section-title">Read distribution</div>
+              <FeatureBar counts={f.feature_distribution} />
+              <Provenance
+                annotation={f.transcript_qc_annotation}
+                reads={f.transcript_qc_sampled_reads}
+              />
+            </div>
+          )}
         </div>
       )}
-      {featureDistribution && f.feature_distribution && (
-        <div style={{ flex: "1 1 300px" }}>
-          <div className="section-title">Read distribution</div>
-          <FeatureBar counts={f.feature_distribution} />
-          <Provenance
-            annotation={f.transcript_qc_annotation}
-            reads={f.transcript_qc_sampled_reads}
-          />
-        </div>
-      )}
-    </div>
+    </OnDemandCompute>
   );
 }
 
