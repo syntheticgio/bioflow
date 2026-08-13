@@ -152,6 +152,7 @@ _STEP_VERBS: dict[str, str] = {
     "download_lineage": "downloaded",
     "export_annotation_subset": "filtered to a subset of",
     "materialize_annotation_edits": "edited with",
+    "extract_genbank_sequence": "extracted the sequence from",
 }
 
 # Registered handlers that legitimately produce no narrative step.
