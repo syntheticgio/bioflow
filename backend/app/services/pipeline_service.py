@@ -2554,6 +2554,11 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
         "project_id": str(ann.project_id),
         "format_kind": str(ann.format.kind.value),
         "contig_lengths": [[name, length] for name, length in lengths.items()],
+        # Recorded rather than re-derived from contig_lengths downstream:
+        # ingest's backfill queries this as a flat field, and an $elemMatch
+        # over annotation_per_contig could not tell "no reference resolved"
+        # apart from "reference resolved but missing this contig".
+        "contig_lengths_known": bool(lengths),
         "annotation_path": path,
     }
     if digest:
