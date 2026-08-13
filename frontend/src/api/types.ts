@@ -2010,6 +2010,40 @@ export interface AnnotationGenePage {
   mode: "typed" | "fallback";
 }
 
+/** A feature drawn in the track, with its children and packed row. */
+export interface AnnotationWindowFeature extends AnnotationFeature {
+  children: AnnotationFeature[];
+  row: number;
+}
+
+/** Individual features, below the density threshold. */
+export interface AnnotationWindowFeatures {
+  mode: "features";
+  contig: string;
+  start: number;
+  end: number;
+  total: number;
+  features: AnnotationWindowFeature[];
+  /** Features dropped because the row cap was reached. */
+  truncated_rows: number;
+}
+
+/** Per-bin counts, at or above the density threshold. */
+export interface AnnotationWindowBinned {
+  mode: "binned";
+  contig: string;
+  start: number;
+  end: number;
+  total: number;
+  bin_bases: number;
+  counts: number[];
+}
+
+/** Discriminated on `mode`, so an empty region cannot read as a dense one. */
+export type AnnotationWindow =
+  | AnnotationWindowFeatures
+  | AnnotationWindowBinned;
+
 export interface AnnotationContigStat {
   name: string;
   length: number | null;
