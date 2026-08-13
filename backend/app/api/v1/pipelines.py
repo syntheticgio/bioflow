@@ -1167,7 +1167,7 @@ async def get_annotation_window(
     rows = annotation_window.pack_rows(
         [(f["start"], f["end"]) for f in features]
     )
-    for feature, row in zip(features, rows):
+    for feature, row in zip(features, rows, strict=True):
         feature["row"] = row
 
     return {
