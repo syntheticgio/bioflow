@@ -1,7 +1,8 @@
 # Verifies code quality and build integrity on every PR into main.
 #
-# Two jobs (plus a commented-out full-suite template):
+# Three jobs (plus a commented-out full-suite template):
 #   frontend-check — lint + unit tests + prod image build (ubuntu-latest)
+#   launcher-check — unit tests + the tsc/vite build tauri runs (ubuntu-latest)
 #   backend-smoke  — ruff + import smoke test + ops script tests
 #
 # Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
@@ -27,6 +28,10 @@ on:
         default: false
       skip_backend:
         description: 'Skip the backend smoke test job'
+        type: boolean
+        default: false
+      skip_launcher:
+        description: 'Skip the launcher check job'
         type: boolean
         default: false
 
@@ -80,6 +85,43 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  launcher-check:
+    name: Launcher (test + build)
+    if: ${{ !inputs.skip_launcher }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: launcher/package-lock.json
+
+      - name: Install dependencies
+        working-directory: launcher
+        run: npm ci
+
+      - name: Test (vitest)
+        working-directory: launcher
+        run: npm run test
+
+      # This runs `tsc -b && vite build` -- the same command tauri invokes as
+      # its beforeBuildCommand, and deliberately not `npm run lint`
+      # (`tsc --noEmit`), which is a different compiler mode. The Rust side is
+      # not built here: it is slow, needs platform toolchains, and the failure
+      # this job exists to catch happens before cargo is ever reached.
+      #
+      # v0.5.0's macOS and Linux bundles both failed on a test file missing its
+      # `import { describe, expect, it } from "vitest"`. Vitest injects those
+      # globals at runtime so `npm run test` passed, but tsconfig has
+      # `include: ["src"]` and no vitest global types, so `tsc` failed -- and
+      # nothing in the PR path compiled the launcher at all.
+      - name: Build (tsc -b && vite build)
+        working-directory: launcher
+        run: npm run build
 
   backend-smoke:
     name: Backend smoke (ruff + import + ops tests)
