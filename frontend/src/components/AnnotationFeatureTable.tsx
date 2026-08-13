@@ -232,7 +232,7 @@ export function AnnotationFeatureTable({
         strand: strand || undefined,
         view: view === "unresolved" ? "unresolved" : undefined,
       }),
-    enabled: !isGenBank,
+    enabled: view !== "genes" && !isGenBank,
     placeholderData: keepPreviousData,
   });
 
