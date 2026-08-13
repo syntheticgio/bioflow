@@ -1469,6 +1469,23 @@ def active_index_job_query(reference_id: PydanticObjectId) -> dict:
     }
 
 
+def active_annotation_stats_job_query(object_id: PydanticObjectId) -> dict:
+    """The in-flight stats computation for an annotation, if there is one.
+
+    Same shape as `active_index_job_query` above, for the same reason:
+    `ensure_annotation_stats` calling `launch_annotation_stats` while an
+    identical job is already queued or running gets `None` back from
+    `queue.enqueue` (deduplicated on `dedup_key=f"annotation_stats:{id}"`),
+    and needs this to find the in-flight job's id so it can depend on it
+    instead of racing it.
+    """
+    return {
+        "type": "run_annotation_stats",
+        "state": {"$in": [s.value for s in ACTIVE_STATES]},
+        "object_id": object_id,
+    }
+
+
 class ReadSet:
     """One resolved read set in an alignment launch.
 
@@ -2577,18 +2594,65 @@ async def launch_annotation_stats(*, object_id: PydanticObjectId, owner: str):
     )
 
 
+async def ensure_annotation_stats(
+    *, object_id: PydanticObjectId, owner: str
+) -> PydanticObjectId | None:
+    """Compute the results sidecar if this annotation has none.
+
+    Returns the job id the caller must depend on, or `None` if the sidecar
+    already exists and nothing needs to run. `export_annotation_subset`
+    raises PermanentError without `features.db`, and only
+    `launch_annotation_stats` writes one -- the canvas export node holds
+    itself behind whatever this returns, via `depends_on`, so a graph cannot
+    fail purely for want of a precomputed sidecar. This mirrors
+    `launch_alignment` holding an alignment behind an unindexed reference's
+    `build_index` job: both are THREAD handlers on the same worker pool, so
+    merely enqueueing the prerequisite first is not enough to order them --
+    only a real `depends_on` on the queue does that.
+
+    A no-op when the database is already on disk, which is the common case:
+    ingest analyzes annotations automatically.
+    """
+    db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+    if db_path.exists():
+        return None
+
+    job = await launch_annotation_stats(object_id=object_id, owner=owner)
+    if job is not None:
+        return job.id
+
+    # Deduplicated away: an identical stats job is already queued or
+    # running for this object. Depend on *that* one rather than racing it.
+    existing = await Job.find_one(active_annotation_stats_job_query(object_id))
+    return existing.id if existing is not None else None
+
+
 async def launch_annotation_export(
-    *, object_id: PydanticObjectId, owner: str, filters: dict, output_name: str
+    *,
+    object_id: PydanticObjectId,
+    owner: str,
+    filters: dict,
+    output_name: str,
+    depends_on: list[PydanticObjectId] | None = None,
 ):
     """Queue a subset export for a GFF/GTF/BED annotation.
 
     Unlike launch_annotation_stats this *does* derive an object, so the job's
     result goes through _apply_export_annotation_subset.
+
+    `depends_on` holds this job back until every listed job succeeds -- the
+    canvas export node passes the id `ensure_annotation_stats` returned, the
+    same way `launch_alignment` threads its index-build job id through here.
     """
     from app.queue import queue
 
     ann = await object_service.get_object(object_id, owner=owner)
     _check_annotation_stats_callable(ann)
+
+    # A node left with the name box blank still has to produce a sensibly
+    # named object rather than failing on a missing argument.
+    if not output_name:
+        output_name = f"{ann.name} (subset)"
 
     digest, path = await _resolve_readable(ann)
     # Same reasoning as launch_annotation_stats: the THREAD handler reads
@@ -2613,6 +2677,7 @@ async def launch_annotation_export(
         max_attempts=2,
         project_id=ann.project_id,
         object_id=ann.id,
+        depends_on=depends_on or [],
     )
 
 

@@ -8,13 +8,17 @@ the STAR/_SIDECAR_ROLES failure in a new place.
 
 import inspect
 
-from app.models import FormatKind, ObjectRole
+import pytest
+from beanie import PydanticObjectId
+
+from app.models import ACTIVE_STATES, FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.pipelines.node_types import (
     EXCLUDED_LAUNCHES,
     NODE_TYPES,
     launch_function_names,
 )
+from app.services import pipeline_service
 
 
 class TestExhaustiveness:
@@ -167,3 +171,199 @@ class TestAdapterSignatures:
             assert {"inputs", "params", "owner"} <= set(sig.parameters), (
                 f"{key}'s adapter does not take (inputs, params, owner)"
             )
+
+
+class TestAnnotationExportLaunch:
+    """The adapter's sidecar handling -- the design's one implicit step."""
+
+    @pytest.mark.asyncio
+    async def test_computes_stats_first_when_the_sidecar_is_absent(self, monkeypatch):
+        calls = []
+
+        async def fake_ensure(*, object_id, owner):
+            calls.append(("ensure", str(object_id)))
+            return "job-stats-1"
+
+        async def fake_export(*, object_id, owner, filters, output_name, depends_on=None):
+            calls.append(("export", str(object_id)))
+            return {"job_id": "j1"}
+
+        monkeypatch.setattr(
+            pipeline_service, "ensure_annotation_stats", fake_ensure
+        )
+        monkeypatch.setattr(
+            pipeline_service, "launch_annotation_export", fake_export
+        )
+
+        spec = NODE_TYPES["annotation_export"]
+        await spec.launch(
+            inputs={"annotation": "64b7f0000000000000000001"},
+            params={},
+            owner="tester",
+        )
+
+        assert calls == [
+            ("ensure", "64b7f0000000000000000001"),
+            ("export", "64b7f0000000000000000001"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_passes_only_the_filters_that_were_set(self, monkeypatch):
+        """An empty box means "no bound", not a filter on empty string."""
+        seen = {}
+
+        async def fake_ensure(*, object_id, owner):
+            return None
+
+        async def fake_export(*, object_id, owner, filters, output_name, depends_on=None):
+            seen.update(filters=filters, output_name=output_name)
+            return {"job_id": "j1"}
+
+        monkeypatch.setattr(
+            pipeline_service, "ensure_annotation_stats", fake_ensure
+        )
+        monkeypatch.setattr(
+            pipeline_service, "launch_annotation_export", fake_export
+        )
+
+        spec = NODE_TYPES["annotation_export"]
+        await spec.launch(
+            inputs={"annotation": "64b7f0000000000000000001"},
+            params={"contig": "chr1", "feature_type": "", "strand": None},
+            owner="tester",
+        )
+
+        assert seen["filters"] == {"contig": "chr1"}
+
+    @pytest.mark.asyncio
+    async def test_no_filters_at_all_is_launchable(self, monkeypatch):
+        """Exporting everything is a valid request."""
+        seen = {}
+
+        async def fake_ensure(*, object_id, owner):
+            return None
+
+        async def fake_export(*, object_id, owner, filters, output_name, depends_on=None):
+            seen.update(filters=filters)
+            return {"job_id": "j1"}
+
+        monkeypatch.setattr(
+            pipeline_service, "ensure_annotation_stats", fake_ensure
+        )
+        monkeypatch.setattr(
+            pipeline_service, "launch_annotation_export", fake_export
+        )
+
+        spec = NODE_TYPES["annotation_export"]
+        await spec.launch(
+            inputs={"annotation": "64b7f0000000000000000001"},
+            params={},
+            owner="tester",
+        )
+
+        assert seen["filters"] == {}
+
+    @pytest.mark.asyncio
+    async def test_export_depends_on_the_stats_job_when_one_was_queued(
+        self, monkeypatch
+    ):
+        """The race the whole feature exists to prevent: both handlers run on
+        the same THREAD worker pool, so enqueueing the stats job first is not
+        enough -- the export must be held behind it via `depends_on`."""
+        seen = {}
+
+        async def fake_ensure(*, object_id, owner):
+            return "job-stats-42"
+
+        async def fake_export(*, object_id, owner, filters, output_name, depends_on=None):
+            seen["depends_on"] = depends_on
+            return {"job_id": "j1"}
+
+        monkeypatch.setattr(
+            pipeline_service, "ensure_annotation_stats", fake_ensure
+        )
+        monkeypatch.setattr(
+            pipeline_service, "launch_annotation_export", fake_export
+        )
+
+        spec = NODE_TYPES["annotation_export"]
+        await spec.launch(
+            inputs={"annotation": "64b7f0000000000000000001"},
+            params={},
+            owner="tester",
+        )
+
+        assert seen["depends_on"] == ["job-stats-42"]
+
+    @pytest.mark.asyncio
+    async def test_export_has_no_dependency_when_the_sidecar_already_existed(
+        self, monkeypatch
+    ):
+        """No stats job was needed, so nothing should hold the export back."""
+        seen = {}
+
+        async def fake_ensure(*, object_id, owner):
+            return None
+
+        async def fake_export(*, object_id, owner, filters, output_name, depends_on=None):
+            seen["depends_on"] = depends_on
+            return {"job_id": "j1"}
+
+        monkeypatch.setattr(
+            pipeline_service, "ensure_annotation_stats", fake_ensure
+        )
+        monkeypatch.setattr(
+            pipeline_service, "launch_annotation_export", fake_export
+        )
+
+        spec = NODE_TYPES["annotation_export"]
+        await spec.launch(
+            inputs={"annotation": "64b7f0000000000000000001"},
+            params={},
+            owner="tester",
+        )
+
+        assert not seen["depends_on"]
+
+
+class TestActiveAnnotationStatsJobQuery:
+    """The lookup that finds an in-flight stats computation to wait on.
+
+    Mirrors TestActiveIndexJobQuery in test_align_launch.py: that query
+    shipped broken once, as a Beanie ExpressionField (`Job.state.in_(...)`)
+    that raises outside a query context rather than a plain dict `Job.find_one`
+    can execute, and it stayed broken because the branch that calls it only
+    runs when two launches race for the same in-flight job -- no test staged
+    the race, so nothing caught it. Asserting the query shape here is what
+    makes `active_annotation_stats_job_query` checkable without staging that
+    race for the annotation-export path too.
+    """
+
+    def test_matches_only_annotation_stats_jobs(self):
+        q = pipeline_service.active_annotation_stats_job_query(PydanticObjectId())
+        assert q["type"] == "run_annotation_stats"
+
+    def test_matches_only_jobs_still_in_flight(self):
+        q = pipeline_service.active_annotation_stats_job_query(PydanticObjectId())
+        states = set(q["state"]["$in"])
+        assert states == {s.value for s in ACTIVE_STATES}
+        assert "succeeded" not in states
+        assert "failed" not in states
+
+    def test_includes_blocked(self):
+        """A stats job is never blocked today, but deriving the list from
+        ACTIVE_STATES means a state added later is covered without an edit."""
+        q = pipeline_service.active_annotation_stats_job_query(PydanticObjectId())
+        assert "blocked" in q["state"]["$in"]
+
+    def test_scoped_to_the_annotation(self):
+        object_id = PydanticObjectId()
+        q = pipeline_service.active_annotation_stats_job_query(object_id)
+        assert q["object_id"] == object_id
+
+    def test_is_a_plain_mongo_query(self):
+        """Values must be primitives Mongo understands, not Beanie expression
+        objects -- the specific mistake that broke the index-build sibling."""
+        q = pipeline_service.active_annotation_stats_job_query(PydanticObjectId())
+        assert isinstance(q, dict)
+        assert all(isinstance(s, str) for s in q["state"]["$in"])

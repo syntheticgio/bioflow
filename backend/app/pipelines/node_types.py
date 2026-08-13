@@ -178,12 +178,22 @@ async def _launch_annotation(*, inputs: dict, params: dict, owner: str):
 
 
 async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
-    """Export a filtered subset of an annotation.
+    """Export a filtered subset, holding the export behind the results
+    sidecar it depends on.
 
-    Filters are collected from params, dropping anything unset -- an empty
-    box means "no bound", not a filter matching the empty string. This
-    launcher does not ensure the results sidecar exists first; that is a
-    separate concern layered on afterward (see the design doc for #371).
+    `export_annotation_subset` refuses to run without `features.db`, and only
+    `launch_annotation_stats` writes one -- and enqueueing that job does not
+    wait for it to finish. Both jobs are THREAD handlers on the same worker
+    pool, so nothing stops the export job from starting before the stats job
+    has written the sidecar; this passes the stats job's id through
+    `depends_on` so the queue itself holds the export back, the same way
+    `launch_alignment` holds an alignment behind an unindexed reference's
+    `build_index` job (which is why `launch_build_index` is itself off the
+    canvas -- a separate node would let a user build a graph that races or
+    skips it).
+
+    The cost, recorded rather than hidden: a stats job may run without
+    appearing as a node. See the design doc for #371.
     """
     object_id = inputs["annotation"]
 
@@ -201,11 +211,16 @@ async def _launch_annotation_export(*, inputs: dict, params: dict, owner: str):
         if params.get(key) not in (None, "")
     }
 
+    stats_job_id = await pipeline_service.ensure_annotation_stats(
+        object_id=object_id, owner=owner
+    )
+
     return await pipeline_service.launch_annotation_export(
         object_id=object_id,
         owner=owner,
         filters=filters,
         output_name=params.get("output_name") or "",
+        depends_on=[stats_job_id] if stats_job_id else None,
     )
 
 
