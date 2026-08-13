@@ -5170,6 +5170,16 @@ table.software-matrix thead th.software-matrix-corner {
   margin-top: 16px;
 }
 
+/* The nodes page stacks its content (banner, add button, table) rather than
+   using the rail-and-detail row `.settings-body` was written for. Left as a
+   row, every child competed for main-axis space against the ~730px table, so
+   the provisioning banner was auto-sized down to ~40px and its buttons
+   overflowed the border -- the width being the cause, not the wrapping. */
+.settings-body-stacked {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 .settings-rail {
   display: flex;
   flex-direction: column;
@@ -5418,8 +5428,11 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* --- Node provisioning form --- */
 
+/* align-self, because the stacked parent stretches its children: without it
+   this sits as a full-width bar rather than a button. */
 .provision-add-btn {
   margin-bottom: 12px;
+  align-self: flex-start;
 }
 
 .provision-form {
@@ -5585,10 +5598,9 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* --- Provisioning result --- */
 
-/* Wraps rather than letting the actions crowd the border: this banner sits in
-   a narrow settings column, and an unwrapped row squeezed the message to a few
-   words per line while the buttons overhung the rounded corner. Below the
-   breakpoint the actions drop onto their own row and align right. */
+/* Wraps so the actions drop to their own row rather than crowding the message
+   in a narrow column. The banner's *width* comes from the stacked parent
+   (`.settings-body-stacked`); box-sizing keeps the 20px padding inside it. */
 .provision-result {
   display: flex;
   flex-wrap: wrap;
@@ -5599,6 +5611,8 @@ table.software-matrix thead th.software-matrix-corner {
   border-radius: 8px;
   padding: 16px 20px;
   margin-bottom: 16px;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .provision-result.success {
@@ -5632,9 +5646,11 @@ table.software-matrix thead th.software-matrix-corner {
 
 /* A flex item's min-width is auto, so without this the message refuses to
    shrink below its longest word and pushes the actions past the padding. The
-   basis is the width below which the actions wrap to their own row. */
+   basis is the width below which the actions wrap to their own row; it must
+   stay small enough that a narrow banner can still honour it, or it becomes a
+   floor that forces the overflow it was meant to prevent. */
 .provision-result-text {
-  flex: 1 1 260px;
+  flex: 1 1 160px;
   min-width: 0;
 }
 
@@ -5654,12 +5670,14 @@ table.software-matrix thead th.software-matrix-corner {
   overflow-wrap: anywhere;
 }
 
+/* Not flex-shrink: 0 -- two buttons whose combined width exceeds a narrow
+   banner have to be allowed to wrap onto a second line, or they overflow the
+   border no matter how the rest of the row is sized. */
 .provision-result-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  flex-shrink: 0;
-  /* Sit against the trailing edge once wrapped onto their own row, and stay
-     clear of the border rather than butting against the corner radius. */
+  /* Sit against the trailing edge once wrapped onto their own row. */
   margin-left: auto;
   align-self: center;
 }
