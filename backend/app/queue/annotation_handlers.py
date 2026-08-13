@@ -19,6 +19,7 @@ from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
 from app.pipelines import (
     annotation_db,
+    annotation_export,
     annotation_hierarchy,
     annotation_parse,
     annotation_stats,
@@ -271,3 +272,106 @@ def run_annotation_stats(ctx: JobContext) -> dict:
         unresolved=unresolved,
     )
     return {"object_id": str(object_id), "facts": facts}
+
+
+@handler(
+    "annotation_subset_export",
+    # THREAD for the same reason as run_annotation_stats: this is Python
+    # file I/O and SQLite, with no binary to spawn or kill.
+    mode=HandlerMode.THREAD,
+    job_class=JobClass.COMPUTE,
+    resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+)
+def run_annotation_subset_export(ctx: JobContext) -> dict:
+    """Write the filtered subset of an annotation to a new file."""
+    payload = ctx.payload
+    if payload.get("format_kind") == "genbank":
+        raise PermanentError(
+            "GenBank features span multiple lines and its segment children "
+            "are synthetic, so a subset cannot be re-emitted from it"
+        )
+
+    source = Path(payload["annotation_path"])
+    if not source.exists():
+        raise PermanentError(f"annotation file is missing: {source}")
+
+    db_path = Path(payload["db_path"])
+    if not db_path.exists():
+        raise PermanentError(
+            "No computed results for this annotation. Compute results first."
+        )
+
+    # The whole-file check, before any line is read. Per-line verification
+    # alone passes on a stale index whose file was replaced with one that is
+    # mostly unchanged -- the exported lines each verify while the subset
+    # silently mixes two versions.
+    recorded = payload.get("recorded_sha256")
+    current = payload.get("source_sha256")
+    verified = bool(recorded) and bool(current)
+    if verified and recorded != current:
+        raise PermanentError(
+            f"{payload.get('source_name') or source.name} has changed since "
+            f"its results were computed; recompute results and try again"
+        )
+
+    # parent_status is declared a tuple but arrives from the JSON payload as
+    # a list -- the queue serializes the launcher's dataclasses.asdict(). The
+    # IN clause iterates either, so nothing breaks today; restoring the tuple
+    # keeps the frozen dataclass's declared type honest for the next reader.
+    raw_filters = dict(payload.get("filters") or {})
+    if raw_filters.get("parent_status") is not None:
+        raw_filters["parent_status"] = tuple(raw_filters["parent_status"])
+    filters = annotation_db.FeatureFilters(**raw_filters)
+
+    ctx.progress(phase="select", pct=0.2, message="selecting features")
+    matched = annotation_db.count_features(db_path=db_path, filters=filters)
+    lines = annotation_export.closure_lines(db_path=db_path, filters=filters)
+
+    ctx.progress(phase="write", pct=0.6, message="writing subset")
+    out_dir = Path(payload["out_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = annotation_export.subset_name(
+        payload.get("source_name") or source.name, payload.get("filters") or {}
+    )
+    dest = out_dir / name
+
+    verify = annotation_export.verification_map(db_path=db_path, lines=lines)
+    # write_subset defaults to the GFF3 parser when none is passed, which
+    # would spuriously fail every verification on a GTF or BED export -- the
+    # two formats structure column 9 differently, so a real caller must name
+    # its own format's parser explicitly.
+    parse_line = {
+        "gff": annotation_parse.parse_gff_line,
+        "gtf": annotation_parse.parse_gtf_line,
+        "bed": annotation_parse.parse_bed_line,
+    }[payload["format_kind"]]
+    try:
+        exported = annotation_export.write_subset(
+            source=source, dest=dest, lines=lines, verify=verify,
+            parse_line=parse_line,
+        )
+    except annotation_export.ExportMismatch as e:
+        dest.unlink(missing_ok=True)
+        raise PermanentError(str(e)) from e
+
+    log.info(
+        "annotation_subset_exported",
+        object_id=str(payload.get("object_id")),
+        matched=matched,
+        exported=exported,
+    )
+    return {
+        "object_id": str(payload.get("object_id")),
+        "output": {"tmp_path": str(dest), "name": name},
+        "counts": {"matched": matched, "exported": exported},
+        "facts": {
+            "annotation_subset_filters": payload.get("filters") or {},
+            "annotation_subset_matched": matched,
+            "annotation_subset_exported": exported,
+            # False when the launcher had no digest to compare (a
+            # register-in-place file, or hashing still queued). The export
+            # still ran on per-line verification; this makes the weaker
+            # guarantee auditable rather than hidden.
+            "annotation_subset_source_verified": verified,
+        },
+    }

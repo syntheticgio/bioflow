@@ -200,3 +200,27 @@ def write_subset(
             out.write(line if line.endswith("\n") else line + "\n")
             written += 1
     return written
+
+
+def verification_map(*, db_path: Path, lines: set[int]) -> dict[int, dict]:
+    """What the index recorded for each line, for `write_subset` to check.
+
+    Read in one query rather than per line: the set is already bounded by
+    the closure, and a query per line would be one round trip per feature.
+    """
+    if not lines:
+        return {}
+    con = _connect(db_path)
+    try:
+        placeholders = ",".join("?" for _ in lines)
+        rows = con.execute(
+            f"SELECT line_no, contig, start, end FROM features "
+            f"WHERE line_no IN ({placeholders})",
+            list(lines),
+        ).fetchall()
+    finally:
+        con.close()
+    return {
+        line_no: {"contig": contig, "start": start, "end": end}
+        for line_no, contig, start, end in rows
+    }
