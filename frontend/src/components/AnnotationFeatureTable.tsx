@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { AnnotationFeature, AnnotationGene, AnnotationStatsFacts } from "../api/types";
 import { useDebounced } from "../lib/useDebounced";
+import { notify } from "../stores/messageStore";
 import { TabPanel, Tabs } from "./Tabs";
 
 const PAGE_SIZE = 100;
@@ -71,6 +72,7 @@ export function AnnotationFeatureTable({
   onViewChange,
   nameQuery: controlledNameQuery,
   onNameQueryChange,
+  isGenBank = false,
 }: {
   objectId: string;
   facts: AnnotationStatsFacts;
@@ -88,6 +90,12 @@ export function AnnotationFeatureTable({
    *  behavior for any other caller. */
   nameQuery?: string;
   onNameQueryChange?: (value: string) => void;
+  /** True when the source annotation is GenBank. GenBank records don't
+   *  carry the parent/child GFF-style hierarchy the export closure walk
+   *  relies on, so the export control never renders for it regardless of
+   *  filter state. Defaults to false so any other caller of this component
+   *  that doesn't pass it keeps today's behavior. */
+  isGenBank?: boolean;
 }) {
   const [view, setView] = useState<View>("genes");
   const [page, setPage] = useState(0);
@@ -103,6 +111,7 @@ export function AnnotationFeatureTable({
     null,
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [exportOpen, setExportOpen] = useState(false);
 
   const nameQuery = useDebounced(nameInput, 300);
 
@@ -145,6 +154,42 @@ export function AnnotationFeatureTable({
   // Effective contig: an active locus jump overrides the contig dropdown.
   const effectiveContig = locus?.contig || contig || undefined;
 
+  // Whether any filter narrows the result set at all. Drives the export
+  // control's visibility -- exporting an unfiltered table is just a copy of
+  // the source object, so the button only appears once there's an actual
+  // subset to name.
+  const filterActive = Boolean(
+    contig || featureType || biotype || strand || locus || nameQuery,
+  );
+
+  // The query shape shared by the feature-table fetch and the export
+  // request, so what the user exports always matches what they're looking
+  // at -- see api.annotationFeatures/api.annotationSubsetExport.
+  const currentFilterQuery = {
+    contig: effectiveContig,
+    startMin: locus?.min,
+    startMax: locus?.max,
+    featureType: featureType || undefined,
+    biotype: biotype || undefined,
+    nameQuery: nameQuery || undefined,
+    strand: strand || undefined,
+    view: (view === "unresolved" ? "unresolved" : undefined) as "unresolved" | undefined,
+  };
+
+  const exportSubset = useMutation({
+    mutationFn: () =>
+      api.annotationSubsetExport(objectId, {
+        offset: 0,
+        limit: PAGE_SIZE,
+        ...currentFilterQuery,
+      }),
+    onSuccess: () => {
+      setExportOpen(false);
+      notify.success("Export queued -- the new object will appear once the job finishes.");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
   const genesQuery = useQuery({
     queryKey: ["annotationstats", "genes", objectId, page],
     queryFn: () => api.annotationGenes(objectId, page * PAGE_SIZE, PAGE_SIZE, page > 0),
@@ -171,15 +216,8 @@ export function AnnotationFeatureTable({
       api.annotationFeatures(objectId, {
         offset: page * PAGE_SIZE,
         limit: PAGE_SIZE,
-        contig: effectiveContig,
-        startMin: locus?.min,
-        startMax: locus?.max,
-        featureType: featureType || undefined,
-        biotype: biotype || undefined,
-        nameQuery: nameQuery || undefined,
-        strand: strand || undefined,
         skipCount: page > 0,
-        view: view === "unresolved" ? "unresolved" : undefined,
+        ...currentFilterQuery,
       }),
     enabled: view !== "genes",
     placeholderData: keepPreviousData,
@@ -348,6 +386,49 @@ export function AnnotationFeatureTable({
                 Clear locus
               </button>
             )}
+
+            {filterActive && !isGenBank && (
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "1px 8px", fontSize: 11 }}
+                onClick={() => setExportOpen(true)}
+              >
+                Export subset
+              </button>
+            )}
+          </div>
+        )}
+
+        {view !== "genes" && exportOpen && (
+          <div className="warn-box" style={{ marginBottom: 10, fontSize: 12 }}>
+            <div style={{ marginBottom: 6 }}>
+              Export {total != null ? total.toLocaleString() : "these"} matching features as a
+              new annotation object.
+            </div>
+            <div style={{ color: "var(--text-faint)", marginBottom: 8 }}>
+              Parent and child features are included so the exported file has no dangling
+              references, so the final count will be higher than {total != null ? total.toLocaleString() : "the matched count"}
+              . Both counts are recorded on the new object.
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => exportSubset.mutate()}
+                disabled={exportSubset.isPending}
+              >
+                {exportSubset.isPending ? "Exporting…" : "Confirm export"}
+              </button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setExportOpen(false)}
+                disabled={exportSubset.isPending}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         )}
 

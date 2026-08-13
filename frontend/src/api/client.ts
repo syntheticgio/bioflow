@@ -1157,6 +1157,25 @@ export const api = {
     );
   },
 
+  /** Export the feature table's current filter as a new ANNOTATION object,
+   *  derived from the source. The closure means the exported count exceeds
+   *  the matched count whenever the filter hits a child. */
+  annotationSubsetExport: (objectId: string, q: FeatureQuery) =>
+    request<JobSummary>(`/pipelines/annotationstats/export`, {
+      method: "POST",
+      body: JSON.stringify({
+        object_id: objectId,
+        contig: q.contig || null,
+        start_min: q.startMin ?? null,
+        start_max: q.startMax ?? null,
+        feature_type: q.featureType || null,
+        biotype: q.biotype || null,
+        name_query: q.nameQuery || null,
+        strand: q.strand || null,
+        view: q.view ?? "all",
+      }),
+    }),
+
   /** Every child of one feature, for an expanded row. `depth_cap` is the
    *  server's recursion bound, echoed back so the client doesn't hardcode
    *  a second copy of the same number. */

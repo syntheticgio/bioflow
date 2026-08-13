@@ -176,6 +176,7 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
         onViewChange={() => setForcedView(null)}
         nameQuery={nameQuery}
         onNameQueryChange={setNameQuery}
+        isGenBank={obj.format.kind === "genbank"}
       />
     </>
   );
