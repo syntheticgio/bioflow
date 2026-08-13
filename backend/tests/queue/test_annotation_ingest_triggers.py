@@ -120,3 +120,151 @@ class TestFailureIsolation:
 
         again = await DataObject.get(ann.id)
         assert again.status is ObjectStatus.READY
+
+
+class TestTriggerTwo:
+    async def test_a_reference_backfills_a_never_analyzed_annotation(
+        self, _db, launched
+    ):
+        ann = await _obj("a.gff", FormatKind.GFF)
+        ref = await _obj("g.fna", FormatKind.FASTA, role=ObjectRole.REFERENCE)
+
+        await results_mod._auto_analyze_after_ingest(ref, owner="local")
+
+        assert launched == [str(ann.id)]
+
+    async def test_a_reference_repairs_a_referenceless_analysis(self, _db, launched):
+        # The race: this annotation was analyzed before its genome existed,
+        # so its coverage is null everywhere.
+        ann = await _obj(
+            "a.gff",
+            FormatKind.GFF,
+            facts={
+                "annotation_stats_status": "ok",
+                "annotation_contig_lengths_known": False,
+            },
+        )
+        ref = await _obj("g.fna", FormatKind.FASTA, role=ObjectRole.REFERENCE)
+
+        await results_mod._auto_analyze_after_ingest(ref, owner="local")
+
+        assert launched == [str(ann.id)]
+
+    async def test_a_fully_analyzed_annotation_is_left_alone(self, _db, launched):
+        await _obj(
+            "a.gff",
+            FormatKind.GFF,
+            facts={
+                "annotation_stats_status": "ok",
+                "annotation_contig_lengths_known": True,
+            },
+        )
+        ref = await _obj("g.fna", FormatKind.FASTA, role=ObjectRole.REFERENCE)
+
+        await results_mod._auto_analyze_after_ingest(ref, owner="local")
+
+        assert launched == []
+
+    async def test_backfill_skips_sidecars(self, _db, launched):
+        # The 8 misdetected .fai/.ann files must not be swept up by the
+        # backfill either -- the guard has to hold on both trigger paths.
+        parent = await _obj("g.fna", FormatKind.FASTA)
+        await _obj("g.fna.fai", FormatKind.BED, sidecar_of=parent.id)
+        ref = await _obj("ref.fna", FormatKind.FASTA, role=ObjectRole.REFERENCE)
+
+        await results_mod._auto_analyze_after_ingest(ref, owner="local")
+
+        assert launched == []
+
+    async def test_a_fasta_without_the_reference_role_backfills_nothing(
+        self, _db, launched
+    ):
+        await _obj("a.gff", FormatKind.GFF)
+        plain = await _obj("protein.faa", FormatKind.FASTA)
+
+        await results_mod._auto_analyze_after_ingest(plain, owner="local")
+
+        assert launched == []
+
+    async def test_backfill_is_scoped_to_the_reference_s_project(self, _db, launched):
+        other = DataObject(
+            project_id="507f1f77bcf86cd799439099",
+            name="elsewhere.gff",
+            size=10,
+            status=ObjectStatus.READY,
+            format=FormatInfo(kind=FormatKind.GFF),
+        )
+        await other.insert()
+        ref = await _obj("g.fna", FormatKind.FASTA, role=ObjectRole.REFERENCE)
+
+        await results_mod._auto_analyze_after_ingest(ref, owner="local")
+
+        assert launched == []
+
+    async def test_one_failing_backfill_does_not_stop_the_others(
+        self, _db, monkeypatch
+    ):
+        from app.errors import ValidationError
+        from app.services import pipeline_service
+
+        seen: list = []
+
+        async def flaky(*, object_id, owner):
+            seen.append(str(object_id))
+            if len(seen) == 1:
+                raise ValidationError("no")
+            return type("Job", (), {"id": "j"})()
+
+        monkeypatch.setattr(pipeline_service, "launch_annotation_stats", flaky)
+        await _obj("a1.gff", FormatKind.GFF)
+        await _obj("a2.gff", FormatKind.GFF)
+        ref = await _obj("g.fna", FormatKind.FASTA, role=ObjectRole.REFERENCE)
+
+        await results_mod._auto_analyze_after_ingest(ref, owner="local")
+
+        assert len(seen) == 2
+
+
+def test_the_two_format_tuples_do_not_drift():
+    """results._AUTO_ANALYZE_FORMATS mirrors pipeline_service's tuple.
+
+    Two hand-maintained tuples of the same enum members: a format added to
+    one and not the other is silently never auto-analyzed, with nothing
+    failing to say so.
+    """
+    from app.services.pipeline_service import _ANNOTATION_STATS_FORMATS
+
+    assert set(results_mod._AUTO_ANALYZE_FORMATS) == set(_ANNOTATION_STATS_FORMATS)
+
+
+async def test_the_automatic_path_shares_the_button_s_dedup_key(_db, monkeypatch):
+    """A manual "Compute results" click during an automatic run must not
+    create a second job. Both paths call launch_annotation_stats, whose key
+    is annotation_stats:{id} -- capture it rather than trusting that."""
+    from app.queue import queue as queue_module
+    from app.services import pipeline_service
+
+    keys: list = []
+
+    async def fake_enqueue(name, **kwargs):
+        keys.append(kwargs.get("dedup_key"))
+        return type("Job", (), {"id": "j"})()
+
+    async def fake_get_object(object_id, *, owner):
+        return await DataObject.get(object_id)
+
+    async def fake_resolve_readable(o):
+        return None, "/tmp/a.gff"
+
+    monkeypatch.setattr(queue_module, "enqueue", fake_enqueue)
+    monkeypatch.setattr(pipeline_service.object_service, "get_object", fake_get_object)
+    monkeypatch.setattr(pipeline_service, "_resolve_readable", fake_resolve_readable)
+
+    ann = await _obj("a.gff", FormatKind.GFF)
+
+    # The automatic path.
+    await results_mod._auto_analyze_after_ingest(ann, owner="local")
+    # The button.
+    await pipeline_service.launch_annotation_stats(object_id=ann.id, owner="local")
+
+    assert keys == [f"annotation_stats:{ann.id}"] * 2
