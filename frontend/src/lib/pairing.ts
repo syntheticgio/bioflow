@@ -249,3 +249,91 @@ export function buildStageRail(files: DataObject[]): StageRailEntry[] {
     };
   });
 }
+
+/** One reference shown by the stage rail: a RefSeq (GCF) and GenBank (GCA)
+ *  twin of the same assembly, collapsed into one card with a toggle. */
+export interface ReferenceRailEntry {
+  key: string;
+  /** Organism name when known, else the shared nine-digit core. */
+  label: string | null;
+  /** The RefSeq (GCF) twin. */
+  refseq: DataObject;
+  /** The GenBank (GCA) twin. */
+  genbank: DataObject;
+}
+
+// GCA (GenBank) or GCF (RefSeq), nine digits, optional version. Anchored at a
+// word boundary -- the same rule the backend's `_ACCESSION_RE` applies -- so
+// `MYGCA_000000001.1` does not match but an underscore-joined filename does.
+// The version is optional here because pairing only needs the core.
+const ASSEMBLY_ACCESSION_RE = /(?:^|[^A-Za-z0-9])(GC[AF])_(\d{9})(?:\.\d+)?/i;
+
+/** A reference's assembly identity: which namespace it lives in, and the
+ *  nine-digit core that names the assembly in both.
+ *
+ *  The core -- not the full accession -- is what says "same assembly, two
+ *  namespaces": a twin's version differs per namespace (GCF_000001405.40 vs
+ *  GCA_000001405.29), so matching the version would split a pair that belongs
+ *  together.
+ *
+ *  Read from the metadata accession first, then the filename as a fallback:
+ *  an upload whose enrichment never ran still carries the accession in its
+ *  name. Null when neither says anything. */
+function assemblyIdentityOf(
+  obj: DataObject,
+): { namespace: "refseq" | "genbank"; core: string } | null {
+  const explicit =
+    typeof obj.metadata.assembly_accession === "string"
+      ? obj.metadata.assembly_accession
+      : obj.name;
+  const match = ASSEMBLY_ACCESSION_RE.exec(explicit);
+  if (!match) return null;
+  return {
+    namespace: match[1].toUpperCase() === "GCF" ? "refseq" : "genbank",
+    core: match[2],
+  };
+}
+
+/**
+ * Collapse a category's references into RefSeq/GenBank twins, one card per
+ * assembly.
+ *
+ * Only references that actually pair are placed: a lone GCF (or GCA) with no
+ * twin is left for the caller to render as a plain row, exactly as it always
+ * has been -- the toggle only makes sense when both namespaces are present.
+ * Two versions of the *same* namespace (say, two GCFs) are not twins either;
+ * both are RefSeq, so neither pairs. The caller renders whatever this does
+ * not place as plain rows, mirroring how `buildStageRail`'s caller falls back
+ * for reads.
+ */
+export function buildReferenceRail(files: DataObject[]): ReferenceRailEntry[] {
+  const byCore = new Map<string, DataObject[]>();
+  for (const file of files) {
+    const identity = assemblyIdentityOf(file);
+    if (!identity) continue;
+    const bucket = byCore.get(identity.core) ?? [];
+    bucket.push(file);
+    byCore.set(identity.core, bucket);
+  }
+
+  const entries: ReferenceRailEntry[] = [];
+  for (const [core, peers] of byCore) {
+    const refseq = peers.find((o) => assemblyIdentityOf(o)?.namespace === "refseq");
+    const genbank = peers.find((o) => assemblyIdentityOf(o)?.namespace === "genbank");
+    if (!refseq || !genbank) continue;
+
+    const organism =
+      (typeof refseq.metadata.organism === "string" && refseq.metadata.organism) ||
+      (typeof genbank.metadata.organism === "string" && genbank.metadata.organism) ||
+      null;
+
+    entries.push({
+      key: core,
+      label: organism || core,
+      refseq,
+      genbank,
+    });
+  }
+
+  return entries;
+}
