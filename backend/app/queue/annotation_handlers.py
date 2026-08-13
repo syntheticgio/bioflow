@@ -226,6 +226,9 @@ def run_annotation_stats(ctx: JobContext) -> dict:
         )
         if parsed_lengths:
             acc.set_contig_lengths(parsed_lengths)
+            # A GenBank file carries its own lengths, so it is not waiting on
+            # a reference and must not be re-analyzed by ingest's backfill.
+            extra_facts["annotation_contig_lengths_known"] = True
 
     ctx.progress(phase="summarize", pct=0.9, message="summarizing")
 
@@ -235,6 +238,14 @@ def run_annotation_stats(ctx: JobContext) -> dict:
 
     facts = {
         "annotation_stats_status": "ok",
+        # From the payload, not from `contig_lengths` being non-empty: a
+        # GenBank file states its own lengths on each LOCUS line and needs no
+        # reference, so emptiness of the payload's list is not the same
+        # question. The launcher is the only place that knows whether a
+        # reference was looked for and found.
+        "annotation_contig_lengths_known": bool(
+            ctx.payload.get("contig_lengths_known")
+        ),
         **acc.finish(),
         **annotation_stats.parse_header_directives(header),
         **extra_facts,
