@@ -10,6 +10,7 @@ accumulator and the database builder, because a 3M-line GFF3 read twice is
 two minutes of I/O for numbers that could have been counted the first time.
 """
 
+import dataclasses
 import gzip
 from pathlib import Path
 
@@ -74,6 +75,9 @@ def _line_rows(parse_line, source: Path, ctx, acc, header: list[str], fmt: str):
             if feature is None:
                 acc.add_malformed()
                 continue
+            # enumerate() is 0-based; source lines are 1-based, and the export
+            # re-scan counts the same way (AE-1).
+            feature = dataclasses.replace(feature, line=i + 1)
             acc.add(feature)
             if feature.attributes:
                 # Re-parses the attribute column that parse_line already
