@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 **Status:** Draft
-**Issue:** — (branch `feat/e2e-test-harness`)
+**Issue:** [#373](https://github.com/syntheticgio/bioflow/issues/373)
 
 ## Problem
 
