@@ -1,3 +1,4 @@
+import { describe, expect, it } from "vitest";
 import { checkStageUpdate } from "./update-logic";
 import type { VersionOptions } from "./types";
 
