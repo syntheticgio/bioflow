@@ -28,6 +28,7 @@ import type {
   DeletionPreview,
   DeRequest,
   DeResultsPage,
+  ExtractedSequence,
   FacetValue,
   Facets,
   FeatureQuery,
@@ -1205,6 +1206,19 @@ export const api = {
         strand: q.strand || undefined,
         unresolved: q.view === "unresolved",
       }),
+    }),
+
+  /** The reference already extracted from this GenBank, if any. The same
+   *  query the launcher's guard runs, so the button and the launcher cannot
+   *  disagree about whether extraction has already happened. */
+  extractedGenBankSequence: (objectId: string) =>
+    request<ExtractedSequence>(`/pipelines/genbanksequence/${objectId}`),
+
+  /** Queue extraction of a GenBank's ORIGIN sequence into a FASTA reference. */
+  launchExtractGenBankSequence: (objectId: string) =>
+    request<JobSummary>(`/pipelines/genbanksequence`, {
+      method: "POST",
+      body: JSON.stringify({ object_id: objectId }),
     }),
 
   /** Every child of one feature, for an expanded row. `depth_cap` is the
