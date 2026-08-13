@@ -362,8 +362,7 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
 
     try:
         if req.private_key:
-            import io
-            key = asyncssh.import_private_key(io.StringIO(req.private_key))
+            key = asyncssh.import_private_key(req.private_key)
             connect_kw = {"client_keys": [key]}
         else:
             connect_kw = {"password": req.password}
