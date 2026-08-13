@@ -8,6 +8,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.errors import register_exception_handlers
 from app.models.node_provision import NodeProvisionTask
 
 # The autouse cleanup fixture below queries NodeProvisionTask after every test
@@ -22,6 +23,7 @@ def _app():
     """Bare FastAPI app with only the nodes router."""
     app = FastAPI()
     app.include_router(pytest.importorskip("app.api.v1.nodes").router)
+    register_exception_handlers(app)
     return app
 
 

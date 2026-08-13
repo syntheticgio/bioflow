@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from app.errors import register_exception_handlers
 
 # ---- helpers ----
 
@@ -17,6 +18,7 @@ def _app():
     """Bare FastAPI app with only the nodes router."""
     app = FastAPI()
     app.include_router(pytest.importorskip("app.api.v1.nodes").router)
+    register_exception_handlers(app)
     return app
 
 
