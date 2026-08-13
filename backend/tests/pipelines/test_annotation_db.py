@@ -6,7 +6,6 @@ feature and the only place SQL lives -- the same split variant_db documents.
 
 import pytest
 
-from app.pipelines.annotation_parse import Feature
 from app.pipelines.annotation_db import (
     FeatureFilters,
     build_annotation_db,
@@ -15,6 +14,7 @@ from app.pipelines.annotation_db import (
     query_features,
 )
 from app.pipelines.annotation_hierarchy import resolve_hierarchy
+from app.pipelines.annotation_parse import Feature
 
 
 def _f(contig, start, end, type, feature_id, parent=None, name=None, biotype=None):

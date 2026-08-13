@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 
 from app.errors import PermanentError
-from app.pipelines.annotation_db import FeatureFilters, query_features
-from app.queue.annotation_handlers import _line_rows
 from app.pipelines import annotation_parse
+from app.queue.annotation_handlers import _line_rows
 
 
 class _Ctx:
@@ -114,9 +113,9 @@ class _ExportCtx:
 
 @pytest.fixture
 def indexed(tmp_path):
+    from app.pipelines import annotation_parse
     from app.pipelines.annotation_db import build_annotation_db
     from app.pipelines.annotation_hierarchy import resolve_hierarchy
-    from app.pipelines import annotation_parse
 
     src = tmp_path / "a.gff3"
     src.write_text(

@@ -162,7 +162,7 @@ class TestWriteSubset:
         )
         out = tmp_path / "out.gff3"
         write_subset(source=src, dest=out, lines={3, 1}, verify=None)
-        ids = [l.split("ID=")[1] for l in out.read_text().splitlines()]
+        ids = [line.split("ID=")[1] for line in out.read_text().splitlines()]
         assert ids == ["a", "c"]
 
     def test_rejects_a_line_that_no_longer_matches(self, tmp_path):
@@ -309,8 +309,8 @@ class TestRealNcbiFidelity:
         out = tmp_path / "out.gff3"
         write_subset(source=src, dest=out, lines=lines, verify=None)
         cds = [
-            l.split("\t") for l in out.read_text().splitlines()
-            if not l.startswith("#") and l.split("\t")[2] == "CDS"
+            line.split("\t") for line in out.read_text().splitlines()
+            if not line.startswith("#") and line.split("\t")[2] == "CDS"
         ]
         assert {row[7] for row in cds} == {"0", "2"}
 
