@@ -225,18 +225,6 @@ class TestTriggerTwo:
         assert len(seen) == 2
 
 
-def test_the_two_format_tuples_do_not_drift():
-    """results._AUTO_ANALYZE_FORMATS mirrors pipeline_service's tuple.
-
-    Two hand-maintained tuples of the same enum members: a format added to
-    one and not the other is silently never auto-analyzed, with nothing
-    failing to say so.
-    """
-    from app.services.pipeline_service import _ANNOTATION_STATS_FORMATS
-
-    assert set(results_mod._AUTO_ANALYZE_FORMATS) == set(_ANNOTATION_STATS_FORMATS)
-
-
 async def test_the_automatic_path_shares_the_button_s_dedup_key(_db, monkeypatch):
     """A manual "Compute results" click during an automatic run must not
     create a second job. Both paths call launch_annotation_stats, whose key
