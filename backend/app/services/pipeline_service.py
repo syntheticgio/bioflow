@@ -2596,10 +2596,6 @@ async def launch_annotation_export(
     path = path or str(blob_path(digest))
 
     db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
-    if not db_path.exists():
-        raise ValidationError(
-            "this annotation has no computed results; compute them before exporting"
-        )
 
     return await queue.enqueue(
         "export_annotation_subset",
