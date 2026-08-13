@@ -1,0 +1,12 @@
+##gff-version 3
+#!gff-spec-version 1.21
+#!processor NCBI annotwriter
+##sequence-region NC_000913.3 1 4641652
+##species https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=511145
+NC_000913.3	RefSeq	region	1	4641652	.	+	.	ID=NC_000913.3:1..4641652;Dbxref=taxon:511145;genome=chromosome
+NC_000913.3	RefSeq	gene	190	255	.	+	.	ID=gene-b0001;Name=thrL;gbkey=Gene;gene=thrL;locus_tag=b0001
+NC_000913.3	RefSeq	CDS	190	255	.	+	0	ID=cds-NP_414542.1;Parent=gene-b0001;Name=NP_414542.1;product=thr operon leader peptide;protein_id=NP_414542.1
+NC_000913.3	RefSeq	gene	337	2799	.	+	.	ID=gene-b0002;Name=thrA;gbkey=Gene;gene=thrA;locus_tag=b0002
+NC_000913.3	RefSeq	CDS	337	2799	.	+	0	ID=cds-NP_414543.1;Parent=gene-b0002;Name=NP_414543.1;product=fused aspartokinase I%2Fhomoserine dehydrogenase I;protein_id=NP_414543.1
+NC_000913.3	RefSeq	gene	2801	3733	.	+	.	ID=gene-b0003;Name=thrB;gbkey=Gene;gene=thrB;locus_tag=b0003
+NC_000913.3	RefSeq	CDS	2801	3733	.	+	0	ID=cds-NP_414544.1;Parent=gene-b0003;Name=NP_414544.1;product=homoserine kinase;protein_id=NP_414544.1
