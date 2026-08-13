@@ -32,17 +32,6 @@ from app.queue.chunked_align_results import apply_chunked_alignment as _apply_ch
 
 log = get_logger(__name__)
 
-# The formats ingest may auto-analyze. Mirrors
-# pipeline_service._ANNOTATION_STATS_FORMATS, imported at call time there to
-# avoid a circular import at module load; kept here as values for the Mongo
-# query, which cannot take enum members.
-_AUTO_ANALYZE_FORMATS = (
-    FormatKind.GFF,
-    FormatKind.GTF,
-    FormatKind.BED,
-    FormatKind.GENBANK,
-)
-
 
 async def apply(job_type: str, result: dict, *, owner: str) -> None:
     """Run the applier for a finished job, telling it who launched the job.
@@ -309,7 +298,11 @@ async def _auto_analyze_after_ingest(obj: DataObject, *, owner: str) -> None:
     candidates = await DataObject.find(
         DataObject.project_id == obj.project_id,
         DataObject.status == ObjectStatus.READY,
-        {"format.kind": {"$in": [k.value for k in _AUTO_ANALYZE_FORMATS]}},
+        {
+            "format.kind": {
+                "$in": [k.value for k in pipeline_service._ANNOTATION_STATS_FORMATS]
+            }
+        },
     ).to_list()
 
     for ann in candidates:
