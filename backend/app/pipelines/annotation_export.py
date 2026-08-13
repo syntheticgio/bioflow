@@ -233,9 +233,13 @@ def write_subset(
                         f"{fmt} feature; the annotation index is out of date"
                     )
                 want = expected.get(i)
-                if want is not None and (
-                    feature.contig, feature.start, feature.end
-                ) != want:
+                if want is None:
+                    raise StaleIndexError(
+                        f"line {i} of {source.name} has no matching feature "
+                        f"in the annotation index; the annotation index is "
+                        f"out of date"
+                    )
+                if (feature.contig, feature.start, feature.end) != want:
                     raise StaleIndexError(
                         f"line {i} of {source.name} is "
                         f"{feature.contig}:{feature.start}-{feature.end}, but "

@@ -311,6 +311,34 @@ def test_a_shifted_source_file_fails_the_export(tmp_path):
         )
 
 
+def test_an_unindexed_line_fails_the_export(tmp_path):
+    """A line number the index never recorded must fail verification too,
+    not just a line number whose recorded position no longer matches.
+
+    write_subset's guarantee -- every emitted line is checked against the
+    index -- must hold unconditionally. A `lines` set built by something
+    other than closure_lines (or an index missing a row for another reason)
+    should not be able to skip verification simply by naming a line number
+    that isn't a key in `expected`. Here line 5 (chr2's gene) is a real,
+    parseable feature line that was simply never indexed.
+    """
+    source = _write_source(tmp_path)
+    rows = []
+    for i, raw in enumerate(source.read_text().splitlines(), start=1):
+        if raw.startswith("#") or i == 5:
+            continue
+        feature = annotation_parse.parse_gff_line(raw)
+        if feature is not None:
+            rows.append(dataclasses.replace(feature, line=i))
+    db_path = _build(tmp_path, rows)
+
+    with pytest.raises(annotation_export.StaleIndexError, match="out of date"):
+        annotation_export.write_subset(
+            source=source, dest=tmp_path / "out.gff3", db_path=db_path,
+            lines={3, 4, 5}, header=["##gff-version 3"], fmt="gff",
+        )
+
+
 def test_write_subset_returns_the_line_count(tmp_path):
     source = _write_source(tmp_path)
     db_path = _index_for_source(tmp_path, source)
