@@ -992,6 +992,43 @@ async def get_annotation_export_count(
     }
 
 
+class GenBankSequenceRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.get("/genbanksequence/{object_id}")
+async def get_extracted_sequence(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> dict:
+    """The reference already extracted from this GenBank, or nulls.
+
+    The same query the launcher's guard runs, exposed so the Results tab's
+    control and the launcher cannot disagree about whether extraction has
+    happened (GS-25).
+    """
+    await object_service.get_object(object_id, owner=owner)
+    existing = await pipeline_service.existing_extracted_sequence(object_id)
+    if existing is None:
+        return {"reference_id": None, "reference_name": None}
+    return {
+        "reference_id": str(existing.id),
+        "reference_name": existing.name,
+    }
+
+
+@router.post(
+    "/genbanksequence", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_extract_genbank_sequence(
+    body: GenBankSequenceRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue extraction of a GenBank's ORIGIN sequence into a FASTA reference."""
+    job = await pipeline_service.launch_extract_genbank_sequence(
+        object_id=body.object_id, owner=owner
+    )
+    return JobOut.of(job)
+
+
 @router.post(
     "/annotationstats/export", response_model=JobOut, status_code=status.HTTP_201_CREATED
 )
