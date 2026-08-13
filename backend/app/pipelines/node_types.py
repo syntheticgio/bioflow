@@ -859,6 +859,15 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # TODO(#297): may be registerable as a canvas node after the editing
         # workflow stabilizes.
         "pipeline_service.launch_materialize_annotation_edits",
+        # User-triggered from the Results tab of a GenBank annotation, with no
+        # parameters at all -- the same class as launch_annotation_export
+        # above, and like it, it derives an object. Not a graph step: the
+        # input is one specific GenBank the user is looking at, and the
+        # output is a reference that any downstream node picks up by role
+        # rather than by wiring.
+        # TODO(#371): revisit alongside its siblings if a canvas node type
+        # for on-demand annotation work is designed.
+        "pipeline_service.launch_extract_genbank_sequence",
     }
 )
 
