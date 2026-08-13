@@ -2015,3 +2015,17 @@
 .theme-broadsheet .gap-rail > div:last-child {
   border-bottom: 0;
 }
+
+.track-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.track-locus { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.annotation-track { width: 100%; height: auto; }
+.track-axis { stroke: currentColor; stroke-width: 1; opacity: 0.35; }
+.track-tick { font-size: 10px; fill: currentColor; opacity: 0.6; }
+.track-bin { fill: var(--accent, #6b8ac4); opacity: 0.75; }
+.track-spine { stroke: currentColor; stroke-width: 1; opacity: 0.55; }
+.track-feature { cursor: pointer; }
+.track-feature.plus rect { fill: #6b8ac4; }
+.track-feature.minus rect { fill: #c08a5a; }
+.track-feature.plus .track-spine { stroke: #6b8ac4; }
+.track-feature.minus .track-spine { stroke: #c08a5a; }
+.track-feature:hover rect { opacity: 0.75; }
