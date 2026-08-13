@@ -1048,7 +1048,9 @@ class AnnotationSubsetExportRequest(BaseModel):
     view: Literal["all", "unresolved"] = "all"
 
 
-@router.post("/annotationstats/export")
+@router.post(
+    "/annotationstats/export", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
 async def export_annotation_subset(
     body: AnnotationSubsetExportRequest, owner: OwnerDep
 ) -> JobOut:
