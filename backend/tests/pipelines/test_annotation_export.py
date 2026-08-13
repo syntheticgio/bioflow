@@ -1,5 +1,9 @@
 """Subset export: closure, verified re-emission, and round-trip fidelity."""
 
+import dataclasses
+
+import pytest
+
 from app.pipelines import annotation_db, annotation_export, annotation_hierarchy, annotation_parse
 
 
@@ -154,3 +158,166 @@ def test_features_without_a_line_are_skipped(tmp_path):
     filters = annotation_db.FeatureFilters(feature_type="gene", top_level_only=False)
 
     assert annotation_export.closure_lines(db_path=db_path, filters=filters) == set()
+
+
+_GFF_SOURCE = """\
+##gff-version 3
+##sequence-region chr1 1 1000
+chr1\t.\tgene\t100\t900\t.\t+\t.\tID=g1
+chr1\t.\texon\t100\t200\t.\t+\t0\tID=e1;Parent=g1
+chr2\t.\tgene\t10\t20\t.\t-\t.\tID=g2
+"""
+
+
+def _write_source(tmp_path, text=_GFF_SOURCE):
+    source = tmp_path / "in.gff3"
+    source.write_text(text)
+    return source
+
+
+def _index_for_source(tmp_path, source):
+    """Build an index whose line numbers match the file on disk."""
+    rows = []
+    for i, raw in enumerate(source.read_text().splitlines(), start=1):
+        if raw.startswith("#"):
+            continue
+        feature = annotation_parse.parse_gff_line(raw)
+        if feature is not None:
+            rows.append(dataclasses.replace(feature, line=i))
+    return _build(tmp_path, rows)
+
+
+def test_written_lines_are_byte_identical(tmp_path):
+    """AE-11: output lines are copied, never reconstructed."""
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+    dest = tmp_path / "out.gff3"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={3, 4},
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    written = dest.read_text().splitlines()
+    assert "chr1\t.\texon\t100\t200\t.\t+\t0\tID=e1;Parent=g1" in written
+
+
+def test_phase_survives_the_round_trip(tmp_path):
+    """The reason this design copies bytes: Feature does not keep phase, so a
+    reconstructed CDS line would lose its reading frame."""
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+    dest = tmp_path / "out.gff3"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={4},
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    exon = [ln for ln in dest.read_text().splitlines() if not ln.startswith("#")][0]
+    assert exon.split("\t")[7] == "0"
+
+
+def test_output_preserves_source_order(tmp_path):
+    """AE-12: satisfied structurally by walking the source, not the line set."""
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+    dest = tmp_path / "out.gff3"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={5, 3},
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    features = [ln for ln in dest.read_text().splitlines() if not ln.startswith("#")]
+    assert features[0].startswith("chr1")
+    assert features[1].startswith("chr2")
+
+
+def test_gff_version_pragma_is_written(tmp_path):
+    """AE-13: a GFF3 export starts with the version pragma."""
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+    dest = tmp_path / "out.gff3"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={3},
+        header=["##gff-version 3"], fmt="gff",
+    )
+
+    assert dest.read_text().splitlines()[0] == "##gff-version 3"
+
+
+def test_gff_version_pragma_is_synthesized_when_absent(tmp_path):
+    """AE-13: the output must be valid GFF3 even when the input was sloppy."""
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+    dest = tmp_path / "out.gff3"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={3},
+        header=[], fmt="gff",
+    )
+
+    assert dest.read_text().splitlines()[0] == "##gff-version 3"
+
+
+def test_sequence_region_pragmas_are_dropped(tmp_path):
+    """AE-17: they describe the whole source and are wrong on a subset."""
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+    dest = tmp_path / "out.gff3"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={3},
+        header=["##gff-version 3", "##sequence-region chr1 1 1000"], fmt="gff",
+    )
+
+    assert "sequence-region" not in dest.read_text()
+
+
+def test_bed_gets_no_synthesized_header(tmp_path):
+    """AE-13a: BED has no mandatory header, so none is invented."""
+    source = tmp_path / "in.bed"
+    source.write_text("chr1\t99\t200\tpeak1\n")
+    rows = [dataclasses.replace(annotation_parse.parse_bed_line("chr1\t99\t200\tpeak1"), line=1)]
+    db_path = _build(tmp_path, rows)
+    dest = tmp_path / "out.bed"
+
+    annotation_export.write_subset(
+        source=source, dest=dest, db_path=db_path, lines={1}, header=[], fmt="bed",
+    )
+
+    assert dest.read_text() == "chr1\t99\t200\tpeak1\n"
+
+
+def test_a_shifted_source_file_fails_the_export(tmp_path):
+    """AE-14/AE-15: the guardrail that makes line numbers safe.
+
+    Delete a line from the source after indexing, so every later line number
+    now points one row off. The export must refuse rather than emit a
+    plausible, wrong file.
+    """
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+
+    kept = [ln for ln in source.read_text().splitlines() if "g1" not in ln]
+    source.write_text("\n".join(kept) + "\n")
+
+    with pytest.raises(annotation_export.StaleIndexError):
+        annotation_export.write_subset(
+            source=source, dest=tmp_path / "out.gff3", db_path=db_path,
+            lines={3, 4}, header=["##gff-version 3"], fmt="gff",
+        )
+
+
+def test_write_subset_returns_the_line_count(tmp_path):
+    source = _write_source(tmp_path)
+    db_path = _index_for_source(tmp_path, source)
+
+    written = annotation_export.write_subset(
+        source=source, dest=tmp_path / "out.gff3", db_path=db_path,
+        lines={3, 4}, header=["##gff-version 3"], fmt="gff",
+    )
+
+    assert written == 2
