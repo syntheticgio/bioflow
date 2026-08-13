@@ -249,6 +249,11 @@ def run_annotation_stats(ctx: JobContext) -> dict:
         "annotation_contig_lengths_known": bool(
             ctx.payload.get("contig_lengths_known")
         ),
+        # What export verifies the source against. Null for a file the
+        # launcher could not digest (register-in-place, or hashing still
+        # queued); export then proceeds on per-line verification alone and
+        # says so in the exported object's facts.
+        "annotation_source_sha256": ctx.payload.get("annotation_sha256"),
         **acc.finish(),
         **annotation_stats.parse_header_directives(header),
         **extra_facts,

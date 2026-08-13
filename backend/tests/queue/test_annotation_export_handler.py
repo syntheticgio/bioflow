@@ -45,3 +45,37 @@ class TestLineNumbersFromFile:
             )
         )
         assert [r.line_no for r in rows] == [4, 5]
+
+
+class TestSourceHashRecorded:
+    def test_facts_carry_the_source_hash(self, tmp_path, monkeypatch):
+        """Export compares this against the object's current blob_sha256.
+        Without it, a rebuilt index over a replaced file exports a subset
+        that silently mixes two versions."""
+        from app.config import settings
+        from app.queue import annotation_handlers
+
+        src = tmp_path / "a.gff3"
+        src.write_text("chr1\tX\tgene\t1\t100\t.\t+\t.\tID=g1\n")
+        monkeypatch.setattr(
+            settings.__class__, "annotation_stats_dir",
+            property(lambda self: tmp_path / "stats"),
+        )
+
+        class Ctx:
+            payload = {
+                "object_id": "507f1f77bcf86cd799439011",
+                "format_kind": "gff",
+                "annotation_path": str(src),
+                "annotation_sha256": "abc123",
+                "contig_lengths": [],
+            }
+
+            def check_cancel(self):
+                return None
+
+            def progress(self, **kw):
+                return None
+
+        out = annotation_handlers.run_annotation_stats(Ctx())
+        assert out["facts"]["annotation_source_sha256"] == "abc123"
