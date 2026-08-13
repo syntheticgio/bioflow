@@ -138,3 +138,11 @@ def test_a_stale_index_fails_permanently(tmp_path):
 
     with pytest.raises(PermanentError, match="out of date"):
         export_annotation_subset(ctx)
+
+
+def test_export_applier_is_registered():
+    """_APPLIERS is hand-maintained and silently skips unknown job types: a
+    missing entry means the job succeeds and no object is ever created."""
+    from app.queue.results import _APPLIERS
+
+    assert "export_annotation_subset" in _APPLIERS
