@@ -47,7 +47,8 @@ class TestPackRows:
 def _f(contig, start, end, ftype="gene", feature_id="f", parent=None, strand="+"):
     return Feature(
         contig=contig, start=start, end=end, type=ftype, strand=strand,
-        score=None, name=feature_id, feature_id=feature_id, parent=parent,
+        score=None, name=feature_id, feature_id=feature_id,
+        parents=(parent,) if parent else (),
         biotype=None, attributes=f"ID={feature_id}",
     )
 
