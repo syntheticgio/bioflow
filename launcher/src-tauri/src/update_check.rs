@@ -90,7 +90,8 @@ pub fn checkable_tag(bioflow_tag: &str, developer_repo: Option<&str>) -> Option<
 /// Replaces the `BIOFLOW_TAG=` line in `.env` content with a new value,
 /// preserving all other lines and their ordering. Appends the line if not
 /// found as a safety net.
-fn set_bioflow_tag(contents: &str, new_tag: &str) -> String {
+pub(crate) fn set_bioflow_tag(contents: &str, new_tag: &str) -> String {
+    let ends_with_newline = contents.ends_with('\n');
     let mut found = false;
     let result: Vec<String> = contents
         .lines()
@@ -104,13 +105,18 @@ fn set_bioflow_tag(contents: &str, new_tag: &str) -> String {
         })
         .collect();
 
-    if !found {
+    let mut joined = if !found {
         let mut result = result;
         result.push(format!("BIOFLOW_TAG={}", new_tag));
         result.join("\n")
     } else {
         result.join("\n")
+    };
+
+    if ends_with_newline {
+        joined.push('\n');
     }
+    joined
 }
 
 /// Compares the user's current pinned tag against available version options
@@ -550,5 +556,112 @@ mod tests {
         // developer taking precedence; match it rather than inventing a
         // second answer.
         assert_eq!(checkable_tag("0.3.0-alpha", Some("/home/me/bioflow")), None);
+    }
+
+    // ── set_bioflow_tag ──────────────────────────────────────────────────
+
+    #[test]
+    fn set_bioflow_tag_replaces_existing_tag() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIND_ADDRESS=127.0.0.1\nBIOFLOW_TAG=0.3.0-alpha\n";
+        let result = set_bioflow_tag(env, "0.4.0-alpha");
+        assert!(result.contains("BIOFLOW_TAG=0.4.0-alpha"));
+        assert!(!result.contains("BIOFLOW_TAG=0.3.0-alpha"));
+        assert!(result.contains("BIOINFO_HOME=/data"));
+        assert!(result.contains("WEB_PORT=5173"));
+    }
+
+    #[test]
+    fn set_bioflow_tag_appends_when_missing() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\n";
+        let result = set_bioflow_tag(env, "0.4.0-alpha");
+        assert!(result.contains("BIOFLOW_TAG=0.4.0-alpha"));
+    }
+
+    #[test]
+    fn set_bioflow_tag_preserves_trailing_newline_style() {
+        let env = "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIOFLOW_TAG=0.3.0-alpha\n";
+        let result = set_bioflow_tag(env, "0.4.0-beta");
+        assert_eq!(result, "BIOINFO_HOME=/data\nWEB_PORT=5173\nBIOFLOW_TAG=0.4.0-beta\n");
+    }
+
+    // ── check_stage_update ───────────────────────────────────────────────
+
+    #[test]
+    fn stage_update_higher_version_wins_over_lower_version() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.4.0-alpha".to_string()),
+            beta: Some("0.3.0-beta".to_string()),
+        };
+        assert_eq!(
+            check_stage_update("0.3.0-alpha", &opts),
+            Some("0.4.0-alpha".to_string())
+        );
+    }
+
+    #[test]
+    fn stage_update_same_version_later_stage_wins() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.3.0-alpha".to_string()),
+            beta: Some("0.3.0-beta".to_string()),
+        };
+        assert_eq!(
+            check_stage_update("0.3.0-alpha", &opts),
+            Some("0.3.0-beta".to_string())
+        );
+    }
+
+    #[test]
+    fn stage_update_earlier_stage_is_not_forward() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.4.0-alpha".to_string()),
+            beta: Some("0.4.0-beta".to_string()),
+        };
+        assert_eq!(check_stage_update("0.4.0-beta", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_nothing_available_returns_none() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: None,
+            beta: None,
+        };
+        assert_eq!(check_stage_update("0.3.0-alpha", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_lower_version_is_not_forward() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.2.0-alpha".to_string()),
+            beta: None,
+        };
+        assert_eq!(check_stage_update("0.3.0-alpha", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_release_mode_returns_none() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.4.0-alpha".to_string()),
+            beta: None,
+        };
+        assert_eq!(check_stage_update("latest", &opts), None);
+    }
+
+    #[test]
+    fn stage_update_picks_highest_available() {
+        let opts = VersionOptions {
+            release: "latest".to_string(),
+            alpha: Some("0.5.0-alpha".to_string()),
+            beta: Some("0.4.0-beta".to_string()),
+        };
+        assert_eq!(
+            check_stage_update("0.3.0-alpha", &opts),
+            Some("0.5.0-alpha".to_string())
+        );
     }
 }
