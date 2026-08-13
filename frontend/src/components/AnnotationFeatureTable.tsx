@@ -284,6 +284,14 @@ export function AnnotationFeatureTable({
     onError: (e: Error) => notify.error(e.message),
   });
 
+  // Tracks the window between "job queued" and "reference confirmed to
+  // exist" -- extractMutation.isPending goes false the instant the POST
+  // returns, well before the applier has actually created the reference,
+  // and the invalidate-triggered refetch below only sets isFetching, not
+  // isLoading, and only for its one pass. Without this the button re-enables
+  // and reads "Extract sequence" again for however long the applier takes.
+  const [justQueued, setJustQueued] = useState(false);
+
   const extractMutation = useMutation({
     mutationFn: () => api.launchExtractGenBankSequence(objectId),
     onSuccess: () => {
@@ -291,10 +299,18 @@ export function AnnotationFeatureTable({
       // runs, so both this query and the project's object list must refetch.
       qc.invalidateQueries({ queryKey: ["genbanksequence", objectId] });
       qc.invalidateQueries({ queryKey: ["objects"] });
+      setJustQueued(true);
       notify.info("Extraction queued");
     },
     onError: (e: Error) => notify.error(e.message),
   });
+
+  // Clears once the query actually confirms a reference exists. If the
+  // applier never completes (a real backend failure), this stays true and
+  // the button stays disabled -- acceptable, matches other stuck-job UX.
+  useEffect(() => {
+    if (extractedQuery.data?.reference_id) setJustQueued(false);
+  }, [extractedQuery.data?.reference_id]);
 
   const matched = exportCountQuery.data?.matched;
   const exported = exportCountQuery.data?.exported;
@@ -536,9 +552,9 @@ export function AnnotationFeatureTable({
                 className="btn"
                 style={{ padding: "1px 8px", fontSize: 11 }}
                 onClick={() => extractMutation.mutate()}
-                disabled={extractMutation.isPending || extractedQuery.isLoading}
+                disabled={extractMutation.isPending || extractedQuery.isFetching || justQueued}
               >
-                {extractMutation.isPending ? "Queuing extraction…" : "Extract sequence"}
+                {extractMutation.isPending || justQueued ? "Extracting…" : "Extract sequence"}
               </button>
             )}
           </div>
