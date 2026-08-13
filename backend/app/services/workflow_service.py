@@ -138,11 +138,12 @@ def validate_definition(definition: WorkflowDefinition) -> list[ValidationError]
             )
             continue
 
-        if not port.type.accepts(produced.format, produced.role):
+        if not port.type.accepts_any(produced):
+            formats = "/".join(f.value for f in produced.accepted_formats)
             errors.append(
                 ValidationError(
                     "type_mismatch",
-                    f"{source.node_id!r} produces {produced.format.value}"
+                    f"{source.node_id!r} produces {formats}"
                     f"/{produced.role.value if produced.role else 'any'}, which "
                     f"{target.node_id!r}'s {edge.to_port!r} port does not accept.",
                     node_id=target.node_id,

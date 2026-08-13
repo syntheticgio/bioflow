@@ -14,6 +14,7 @@ test exists to prevent.
 Design note: docs/superpowers/specs/2026-08-07-workflow-dag-design.md
 """
 
+from dataclasses import asdict
 from datetime import datetime
 
 from beanie import PydanticObjectId
@@ -100,6 +101,10 @@ class NodeTypeOut(BaseModel):
     # ports each) and a fetch-per-change would show ports lagging the
     # selection.
     ports_by_tool: dict[str, PortSetOut] = Field(default_factory=dict)
+    # Parameter fields declared on the spec itself, for node types whose
+    # parameters do not vary by tool. Empty for most. The aligner's per-tool
+    # schema is still fetched separately from /pipelines/aligner-schema.
+    param_fields: list[dict] = []
 
 
 class DeriveIn(BaseModel):
@@ -255,6 +260,7 @@ async def list_node_types(owner: OwnerDep) -> list[NodeTypeOut]:
                 outputs=ports(default_outputs),
                 tool_choice=tool_choice_out,
                 ports_by_tool=ports_by_tool,
+                param_fields=[asdict(f) for f in spec.param_fields],
             )
         )
     return result

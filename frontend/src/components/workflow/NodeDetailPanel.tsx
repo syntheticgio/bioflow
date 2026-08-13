@@ -15,7 +15,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { NodeTypeMeta, WorkflowEdge, WorkflowNode } from "../../api/types";
-import { portsFor } from "../../lib/workflowGraph";
+import { acceptedFormats, portsFor } from "../../lib/workflowGraph";
 import { ParamForm } from "./ParamForm";
 
 interface Props {
@@ -54,6 +54,20 @@ export function NodeDetailPanel({
     queryFn: () => api.alignerSchema(tool!),
     enabled: Boolean(node.node_type === "align" && tool && choice),
   });
+
+  // Two sources, one form: an aligner's knobs are fetched per-tool, while a
+  // node type whose parameters never vary declares them on its spec. A node
+  // may have either, and until now only the fetched kind rendered at all.
+  const staticFields = meta?.param_fields ?? [];
+  const fields = schema.data?.fields ?? staticFields;
+
+  // The section has two independent reasons to be visible -- a static-fields
+  // node has fields to show, or an aligner fetch is in flight and wants its
+  // "Loading…" text shown before any fields exist. Name both so the outer
+  // gate is derived from the same booleans the inner content checks, rather
+  // than a hand-copied OR that can drift out of sync with either branch.
+  const showLoading = Boolean(choice && schema.isLoading);
+  const showForm = fields.length > 0;
 
   return (
     <div className="node-detail">
@@ -106,13 +120,13 @@ export function NodeDetailPanel({
         </label>
       </section>
 
-      {choice && (
+      {(showForm || showLoading) && (
         <section>
           <h3>Parameters</h3>
-          {schema.isLoading && <p className="muted">Loading…</p>}
-          {schema.data && (
+          {showLoading && <p className="muted">Loading…</p>}
+          {showForm && (
             <ParamForm
-              fields={schema.data.fields}
+              fields={fields}
               values={node.params ?? {}}
               onChange={(key, value) => onChangeParam(node.node_id, key, value)}
             />
@@ -131,7 +145,7 @@ export function NodeDetailPanel({
               <li key={port.name}>
                 <strong>{port.name}</strong>
                 <em>
-                  {port.type.format}
+                  {acceptedFormats(port.type).join("/") || "any"}
                   {port.type.role ? `/${port.type.role}` : ""}
                   {port.required ? "" : " (optional)"}
                   {port.multiple ? " (several)" : ""}
@@ -157,7 +171,7 @@ export function NodeDetailPanel({
               <li key={port.name}>
                 <strong>{port.name}</strong>
                 <em>
-                  {port.type.format}
+                  {acceptedFormats(port.type).join("/") || "any"}
                   {port.type.role ? `/${port.type.role}` : ""}
                 </em>
                 <span>
