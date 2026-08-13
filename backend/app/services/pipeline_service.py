@@ -6009,3 +6009,51 @@ def _parse_fai(fai_path: Path) -> list[tuple[str, int]]:
                     ) from None
                 result.append((parts[0], length))
     return result
+
+
+async def launch_annotation_subset_export(
+    *,
+    object_id: PydanticObjectId,
+    filters: dict,
+    owner: str,
+):
+    """Queue the export of an annotation's filtered subset as a new object.
+
+    Unlike launch_annotation_stats this *does* create an object, so the
+    applier in results.py is load-bearing -- see the _APPLIERS assertion in
+    tests/queue/test_annotation_export_applier.py.
+    """
+    from app.config import settings
+    from app.queue import queue
+    from app.services import object_service
+
+    ann = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(ann)
+
+    if str(ann.format.kind.value) == "genbank":
+        raise ValidationError(
+            "A GenBank annotation cannot be exported as a subset"
+        )
+
+    digest, path = await _resolve_readable(ann)
+    path = path or str(blob_path(digest))
+
+    return await queue.enqueue(
+        "annotation_subset_export",
+        owner=owner,
+        payload={
+            "object_id": str(ann.id),
+            "project_id": str(ann.project_id),
+            "format_kind": str(ann.format.kind.value),
+            "annotation_path": path,
+            "db_path": str(
+                settings.annotation_stats_dir / str(ann.id) / "features.db"
+            ),
+            "source_name": ann.name,
+            "source_sha256": digest,
+            # What the index was built from, recorded by run_annotation_stats.
+            "recorded_sha256": ann.facts.get("annotation_source_sha256"),
+            "filters": filters,
+            "out_dir": str(settings.tmp_dir / "annotation_subset"),
+        },
+    )

@@ -859,6 +859,11 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # Read-only genome annotation — gene density facts on an existing
         # assembly, same class as gc_tracks and meryl.
         "pipeline_service.launch_annotate_genome",
+        # Exports a subset of one annotation the user is looking at, driven
+        # by the feature table's current filter. A canvas node would have no
+        # way to express that filter, and the output is a file to download or
+        # feed elsewhere rather than a pipeline step.
+        "pipeline_service.launch_annotation_subset_export",
     }
 )
 
