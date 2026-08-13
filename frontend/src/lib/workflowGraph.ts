@@ -34,12 +34,23 @@ export interface ConnectResult {
   reason?: string;
 }
 
+/** Every format a port accepts, however it was declared. The mirror of the
+ *  backend's `PortType.accepted_formats` -- read this, never either field. */
+export function acceptedFormats(port: PortType): string[] {
+  if (port.formats && port.formats.length > 0) return port.formats;
+  return port.format ? [port.format] : [];
+}
+
 /** Whether an object of this format/role may enter a port of this type.
  *  The mirror of `PortType.accepts` on the backend: a required role is not
  *  satisfied by an absent one, which is what stops a protein FASTA reaching an
- *  aligner's reference port. */
+ *  aligner's reference port. Format membership is checked as a set, not
+ *  equality, so a port declared with `formats` (GFF/GTF/BED) accepts any one
+ *  of them. */
 export function portAccepts(port: PortType, produced: PortType): boolean {
-  if (port.format !== produced.format) return false;
+  const producedFormats = acceptedFormats(produced);
+  const accepted = acceptedFormats(port);
+  if (!producedFormats.some((f) => accepted.includes(f))) return false;
   if (port.role === null || port.role === undefined) return true;
   return port.role === produced.role;
 }
@@ -186,7 +197,7 @@ export function canConnect(
     const role = produced.role ?? "any";
     return {
       ok: false,
-      reason: `${candidate.to_port} does not accept ${produced.format}/${role}.`,
+      reason: `${candidate.to_port} does not accept ${acceptedFormats(produced).join("/") || "unknown"}/${role}.`,
     };
   }
 
@@ -284,7 +295,7 @@ export function bindableObjects(
     if (object.sidecar_of) return false;
     if (object.status !== "ready") return false;
     return portAccepts(accepts, {
-      format: object.format?.kind ?? "unknown",
+      format: object.format?.kind ?? null,
       role: object.role ?? null,
     });
   });

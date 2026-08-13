@@ -31,6 +31,7 @@ import type {
 import {
   NODE_WIDTH,
   PORT_RADIUS,
+  acceptedFormats,
   bindableObjects,
   canConnect,
   edgeKey,
@@ -82,7 +83,11 @@ const ACCEPT_CHOICES: {
 ];
 
 function acceptsKey(node: WorkflowNode): string {
-  const format = node.accepts?.format ?? "fastq";
+  // A lookup key matched against ACCEPT_CHOICES[].key, which are always
+  // single-format strings -- an input slot's `accepts` is always built from
+  // one of those choices, so the first (and only) format is the right read,
+  // not a joined list.
+  const format = node.accepts ? (acceptedFormats(node.accepts)[0] ?? "fastq") : "fastq";
   const role = node.accepts?.role;
   return role ? `${format}:${role}` : format;
 }
@@ -571,7 +576,7 @@ export function WorkflowCanvas() {
                   <span>
                     {node.label ?? node.node_id}
                     <em>
-                      {node.accepts?.format}
+                      {node.accepts ? acceptedFormats(node.accepts).join("/") || "unspecified" : "unspecified"}
                       {node.accepts?.role ? `/${node.accepts.role}` : ""}
                     </em>
                   </span>
@@ -1045,7 +1050,7 @@ export function WorkflowCanvas() {
                           finishWire(node.node_id, port.name);
                         }}
                       >
-                        <title>{`${port.name}: ${port.type.format}${
+                        <title>{`${port.name}: ${acceptedFormats(port.type).join("/") || "any"}${
                           port.type.role ? `/${port.type.role}` : ""
                         }${port.required ? " (required)" : ""}`}</title>
                       </circle>
@@ -1070,7 +1075,7 @@ export function WorkflowCanvas() {
                           startWire(node.node_id, port.name, p.x, p.y);
                         }}
                       >
-                        <title>{`${port.name}: ${port.type?.format ?? "any"}`}</title>
+                        <title>{`${port.name}: ${port.type ? acceptedFormats(port.type).join("/") || "any" : "any"}`}</title>
                       </circle>
                       <text
                         className="workflow-port-label out"

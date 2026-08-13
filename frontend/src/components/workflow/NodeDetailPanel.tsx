@@ -15,7 +15,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type { NodeTypeMeta, WorkflowEdge, WorkflowNode } from "../../api/types";
-import { portsFor } from "../../lib/workflowGraph";
+import { acceptedFormats, portsFor } from "../../lib/workflowGraph";
 import { ParamForm } from "./ParamForm";
 
 interface Props {
@@ -131,7 +131,7 @@ export function NodeDetailPanel({
               <li key={port.name}>
                 <strong>{port.name}</strong>
                 <em>
-                  {port.type.format}
+                  {acceptedFormats(port.type).join("/") || "any"}
                   {port.type.role ? `/${port.type.role}` : ""}
                   {port.required ? "" : " (optional)"}
                   {port.multiple ? " (several)" : ""}
@@ -157,7 +157,7 @@ export function NodeDetailPanel({
               <li key={port.name}>
                 <strong>{port.name}</strong>
                 <em>
-                  {port.type.format}
+                  {acceptedFormats(port.type).join("/") || "any"}
                   {port.type.role ? `/${port.type.role}` : ""}
                 </em>
                 <span>

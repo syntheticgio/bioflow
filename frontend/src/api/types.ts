@@ -978,7 +978,7 @@ export interface ParamFieldMeta {
   kind: "int" | "bool" | "select" | "text";
   default: unknown;
   help: string;
-  group: "biology" | "performance";
+  group: "biology" | "performance" | "filters";
   min: number | null;
   max: number | null;
   choices: { value: string; label: string }[];
@@ -2347,7 +2347,12 @@ export interface VersionInfo {
  *  means "any role for this format", which is the honest type for a port that
  *  genuinely does not care -- QC's, for instance. */
 export interface PortType {
-  format: string;
+  /** Set when the port names exactly one format -- how nearly every port is
+   *  declared. Null when it names several, in which case read `formats`. */
+  format: string | null;
+  /** Set when the port accepts several formats (annotation export takes
+   *  GFF/GTF/BED but refuses GenBank). Null for single-format ports. */
+  formats?: string[] | null;
   role: string | null;
 }
 
@@ -2392,6 +2397,10 @@ export interface NodeTypeMeta {
   /** Every option's ports, keyed by tool value. Lets the canvas re-shape a
    *  node on a dropdown change with no round trip. */
   ports_by_tool?: Record<string, PortSet>;
+  /** Fields declared on the spec, for node types whose parameters do not
+   *  vary by tool. Empty for most. The aligner's per-tool schema is fetched
+   *  separately. */
+  param_fields?: ParamFieldMeta[];
 }
 
 export interface NodePosition {
