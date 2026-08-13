@@ -98,6 +98,8 @@ function TestsPage() {
       ] }),
 
       jsx('h3', { children: 'Tests' }),
+      testsQ.isLoading ? jsx('div', { style: { color: 'var(--ui-text-quaternary)' }, children: 'Loading\u2026' }) : null,
+      testsQ.isError ? jsx('div', { style: { color: 'var(--ui-text-secondary)', fontFamily: 'var(--font-mono, monospace)' }, children: 'ERROR: ' + (testsQ.error && testsQ.error.message ? testsQ.error.message : JSON.stringify(testsQ.error)) }) : null,
       (testsQ.data || []).map((t) =>
         jsxs('div', { key: t.name, style: { display: 'flex', gap: 8, alignItems: 'center', padding: '3px 0' }, children: [
           jsx('span', { style: { flex: 1 }, children: t.name }),

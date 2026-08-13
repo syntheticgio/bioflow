@@ -4,8 +4,8 @@ set -euo pipefail
 # Install the BioFlow e2e harness as a Hermes desktop plugin + backend.
 # Idempotent: safe to re-run. The Python backend is COPIED (not symlinked)
 # because Hermes refuses to import an api file that resolves outside its
-# dashboard/ directory (GHSA-5qr3-c538-wm9j). The frontend plugin.js is
-# symlinked so edits hot-reload.
+# dashboard/ directory (GHSA-5qr3-c538-wm9j). The frontend plugin.js is also
+# copied so the installed plugin is self-contained (no dangling symlink).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
@@ -51,8 +51,8 @@ mkdir_data() {
   say "created     $1"
 }
 
-# Frontend (symlink: hot-reloads on edit).
-link "$SCRIPT_DIR/desktop/plugin.js" "$DESKTOP_DIR/plugin.js"
+# Frontend (copied: self-contained).
+copy_file "$SCRIPT_DIR/desktop/plugin.js" "$DESKTOP_DIR/plugin.js"
 
 # Backend (copied: must resolve inside the dashboard/ directory).
 write_manifest "$DASHBOARD_DIR/manifest.json"
