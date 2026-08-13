@@ -1,6 +1,7 @@
 """Pipeline endpoints: launching runs and reporting tool availability."""
 
 import json
+from datetime import datetime, UTC
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -2093,3 +2094,383 @@ async def get_de_results(
         "offset": offset,
         "limit": limit,
     }
+
+
+# ---------------------------------------------------------------------------
+# Annotation edit routes — issue #297
+# ---------------------------------------------------------------------------
+
+# Editable columns for GFF3 and GTF annotations.
+# 0-based column index for each editable field in a GFF/GTF line (9 columns,
+# tab-delimited). Only GFF and GTF are supported; BED and GenBank are
+# excluded from the editing affordance.
+_FIELD_TO_COL: dict[str, int] = {
+    "source": 1,
+    "type": 2,
+    "start": 3,
+    "end": 4,
+    "attributes": 8,
+}
+
+_EDITABLE_FIELDS: set[str] = set(_FIELD_TO_COL)
+
+# Identity keys whose values must not change on an attributes edit.
+# ED-3: changing ID or Parent (GFF) / gene_id or transcript_id (GTF) would
+# break the hierarchy, so these are locked.
+_GFF_ID_KEYS: tuple[str, ...] = ("ID", "Parent")
+_GTF_ID_KEYS: tuple[str, ...] = ("gene_id", "transcript_id")
+
+
+def _validate_edit_value(
+    *,
+    new_value: str,
+    field: str,
+    fmt: str,
+    old_attributes_line: str | None,
+) -> str | None:
+    """Validate an edit value before saving. Returns error string or None.
+
+    Validates basic constraints (no tab/newline), field-specific rules
+    (positive integer for coordinates, non-empty type, valid attribute syntax),
+    and identity-key protection for attributes.
+    """
+    if "\t" in new_value or "\n" in new_value:
+        return "Tab and newline characters are not allowed in annotation fields"
+
+    if field == "start" or field == "end":
+        try:
+            n = int(new_value)
+        except ValueError:
+            return f"{field} must be a positive integer"
+        if n <= 0:
+            return f"{field} must be a positive integer"
+
+    elif field == "type":
+        if not new_value.strip():
+            return "type must not be empty"
+
+    elif field == "attributes":
+        attr_err = _check_attributes(new_value, fmt)
+        if attr_err:
+            return attr_err
+        # ED-3: identity keys must not change.
+        id_err = _check_identity_keys(new_value, old_attributes_line or ".", fmt)
+        if id_err:
+            return id_err
+
+    # source: no special validation beyond the tab/newline check above.
+
+    return None
+
+
+def _check_attributes(attr_str: str, fmt: str) -> str | None:
+    """Return an error string if the attribute value is malformed, else None.
+
+    The lenient parsers (parse_gff_attributes/parse_gtf_attributes) skip bad
+    pairs rather than raising, so they cannot be reused as a validity check --
+    "not a valid attribute string" would slip through as `{}`. This checks
+    that every non-empty ;-separated pair carries the format's separator
+    (`=` for GFF, a space before the value for GTF) with a non-empty key.
+    """
+    if not attr_str or attr_str == ".":
+        return None
+    for pair in attr_str.split(";"):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if fmt == "gff":
+            if "=" not in pair or not pair.split("=", 1)[0].strip():
+                return "Attribute value must be valid GFF3 (key=value;…) syntax"
+        else:  # gtf
+            if " " not in pair or not pair.split(" ", 1)[0].strip():
+                return 'Attribute value must be valid GTF (key "value";…) syntax'
+    return None
+
+
+def _check_identity_keys(new_attrs: str, old_attrs: str, fmt: str) -> str | None:
+    """Return error if identity keys changed between old and new attributes."""
+    from app.pipelines.annotation_parse import (
+        parse_gff_attributes,
+        parse_gtf_attributes,
+    )
+
+    keys = _GFF_ID_KEYS if fmt == "gff" else _GTF_ID_KEYS
+    parser = parse_gff_attributes if fmt == "gff" else parse_gtf_attributes
+
+    old_parsed = parser(old_attrs) if old_attrs and old_attrs != "." else {}
+    new_parsed = parser(new_attrs) if new_attrs and new_attrs != "." else {}
+
+    for key in keys:
+        old_val = old_parsed.get(key)
+        new_val = new_parsed.get(key)
+        if old_val != new_val:
+            return (
+                f"Cannot change the '{key}' attribute — it is an identity key "
+                f"that would break the annotation hierarchy"
+            )
+    return None
+
+
+async def _resolve_annotation_path(ann) -> str:
+    """Resolve an annotation object's file path for reading."""
+    from app.services.pipeline_service import _resolve_readable
+    from app.storage.paths import blob_path
+
+    digest, path = await _resolve_readable(ann)
+    return path or str(blob_path(digest))
+
+
+def _read_source_column(source_path: str, line_no: int, field: str) -> str:
+    """Read the current value of `field` at `line_no` from the source file.
+
+    Only works for GFF/GTF (tab-delimited). line_no is 1-based.
+    """
+    from app.queue.annotation_handlers import _open_text
+
+    col_idx = _FIELD_TO_COL[field]
+    with _open_text(Path(source_path)) as fh:
+        for i, raw in enumerate(fh, start=1):
+            if i == line_no:
+                stripped = raw.rstrip("\n")
+                columns = stripped.split("\t")
+                if col_idx >= len(columns):
+                    raise ValidationError(
+                        f"line {line_no} has fewer columns than expected; "
+                        f"it may not be a valid annotation line"
+                    )
+                return columns[col_idx]
+            if i > line_no:
+                break
+    raise NotFoundError(f"line {line_no} not found in the source file")
+
+
+async def _effective_coord(
+    db_path: Path, object_id: PydanticObjectId, line: int, coord_field: str
+) -> int:
+    """Get the effective coordinate value, accounting for pending edits."""
+    from app.models.annotation_edit import AnnotationEdit
+
+    # Check pending edit first.
+    edit = await AnnotationEdit.find_one(
+        AnnotationEdit.object_id == object_id,
+        AnnotationEdit.line == line,
+        AnnotationEdit.field == coord_field,
+    )
+    if edit:
+        return int(edit.new_value)
+
+    # Fall back to the index.
+    import sqlite3
+
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            f"SELECT {coord_field} FROM features WHERE line = ? LIMIT 1",
+            (line,),
+        ).fetchone()
+        if row is None:
+            raise ValidationError(f"line {line} not found in the annotation index")
+        return row[0]
+    finally:
+        con.close()
+
+
+class AnnotationEditRequest(BaseModel):
+    line: int
+    field: str
+    new_value: str
+
+
+class AnnotationEditOut(BaseModel):
+    line: int
+    field: str
+    old_value: str | None
+    new_value: str
+
+
+class AnnotationMaterializeRequest(BaseModel):
+    object_id: PydanticObjectId
+
+
+@router.get("/annotationstats/edits/{object_id}")
+async def get_annotation_edits(object_id: PydanticObjectId, owner: OwnerDep) -> list[AnnotationEditOut]:
+    """List pending edits for an annotation object."""
+    await object_service.get_object(object_id, owner=owner)
+
+    from app.models.annotation_edit import AnnotationEdit
+
+    edits = await AnnotationEdit.find(
+        AnnotationEdit.object_id == object_id
+    ).sort([("+line",), ("+field",)]).to_list()
+
+    return [
+        AnnotationEditOut(
+            line=e.line,
+            field=e.field,
+            old_value=e.old_value,
+            new_value=e.new_value,
+        )
+        for e in edits
+    ]
+
+
+@router.put("/annotationstats/edits/{object_id}")
+async def save_annotation_edit(
+    object_id: PydanticObjectId, body: AnnotationEditRequest, owner: OwnerDep
+) -> AnnotationEditOut:
+    """Save or update one column edit. Reverts (deletes) when new == old."""
+    ann = await object_service.get_object(object_id, owner=owner)
+
+    fmt = ann.format.kind.value if ann.format and ann.format.kind else None
+    if fmt not in ("gff", "gtf"):
+        raise ValidationError(
+            "Editing is only supported for GFF3 and GTF annotations"
+        )
+
+    if body.field not in _EDITABLE_FIELDS:
+        raise ValidationError(
+            f"Unknown field {body.field!r}; editable fields are: "
+            + ", ".join(sorted(_EDITABLE_FIELDS))
+        )
+
+    source_path = await _resolve_annotation_path(ann)
+    old_value = _read_source_column(source_path, body.line, body.field)
+
+    # Get old attributes for identity-key validation.
+    old_attributes = None
+    if body.field == "attributes":
+        old_attributes = _read_source_column(source_path, body.line, "attributes")
+    elif body.field in ("start", "end"):
+        # For coordinate validation, get the other coordinate's current value
+        # (for the effective pair check).
+        old_attributes = None
+
+    err = _validate_edit_value(
+        new_value=body.new_value,
+        field=body.field,
+        fmt=fmt,
+        old_attributes_line=old_attributes,
+    )
+    if err:
+        raise ValidationError(err)
+
+    # Coordinate pair validation (ED-2).
+    if body.field in ("start", "end"):
+        db_path = settings.annotation_stats_dir / str(object_id) / "features.db"
+        if not db_path.exists():
+            raise NotFoundError(
+                "No computed results for this file. Compute results first."
+            )
+        other_field = "end" if body.field == "start" else "start"
+        other_int = await _effective_coord(
+            db_path=db_path,
+            object_id=object_id,
+            line=body.line,
+            coord_field=other_field,
+        )
+        this_int = int(body.new_value)
+        if body.field == "start" and this_int > other_int:
+            raise ValidationError(f"start ({this_int}) must be <= end ({other_int})")
+        if body.field == "end" and this_int < other_int:
+            raise ValidationError(f"end ({this_int}) must be >= start ({other_int})")
+
+    from app.models.annotation_edit import AnnotationEdit
+
+    # Revert: new value equals original — delete the edit.
+    if body.new_value == old_value:
+        await AnnotationEdit.find_one(
+            AnnotationEdit.object_id == object_id,
+            AnnotationEdit.line == body.line,
+            AnnotationEdit.field == body.field,
+        ).delete()
+        return AnnotationEditOut(
+            line=body.line,
+            field=body.field,
+            old_value=None,
+            new_value=body.new_value,
+        )
+
+    now = datetime.now(UTC)
+    existing = await AnnotationEdit.find_one(
+        AnnotationEdit.object_id == object_id,
+        AnnotationEdit.line == body.line,
+        AnnotationEdit.field == body.field,
+    )
+    if existing:
+        existing.new_value = body.new_value
+        existing.old_value = old_value
+        existing.owner = owner
+        existing.updated_at = now
+        await existing.save()
+    else:
+        await AnnotationEdit(
+            object_id=object_id,
+            line=body.line,
+            field=body.field,
+            old_value=old_value,
+            new_value=body.new_value,
+            owner=owner,
+            created_at=now,
+            updated_at=now,
+        ).insert()
+
+    return AnnotationEditOut(
+        line=body.line,
+        field=body.field,
+        old_value=old_value,
+        new_value=body.new_value,
+    )
+
+
+@router.delete("/annotationstats/edits/{object_id}")
+async def delete_annotation_edit(
+    object_id: PydanticObjectId,
+    line: int,
+    field: str,
+    owner: OwnerDep,
+) -> dict:
+    """Remove one pending edit."""
+    await object_service.get_object(object_id, owner=owner)
+
+    from app.models.annotation_edit import AnnotationEdit
+
+    result = await AnnotationEdit.find_one(
+        AnnotationEdit.object_id == object_id,
+        AnnotationEdit.line == line,
+        AnnotationEdit.field == field,
+    ).delete()
+    return {"deleted": bool(result and result.deleted_count)}
+
+
+@router.post(
+    "/annotationstats/materialize",
+    response_model=JobOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def launch_materialize_annotation_edits(
+    body: AnnotationMaterializeRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue a materialization job for the pending edits on this annotation."""
+    from app.models.annotation_edit import AnnotationEdit
+
+    ann = await object_service.get_object(body.object_id, owner=owner)
+
+    fmt = ann.format.kind.value if ann.format and ann.format.kind else None
+    if fmt not in ("gff", "gtf"):
+        raise ValidationError(
+            "Materialization is only supported for GFF3 and GTF annotations"
+        )
+
+    # Must have at least one edit.
+    count = await AnnotationEdit.find(
+        AnnotationEdit.object_id == body.object_id
+    ).count()
+    if count == 0:
+        raise ValidationError("No pending edits to materialize")
+
+    job = await pipeline_service.launch_materialize_annotation_edits(
+        object_id=body.object_id, owner=owner
+    )
+    return JobOut.of(job)
+

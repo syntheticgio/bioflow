@@ -1975,6 +1975,9 @@ export interface AnnotationFeature {
   biotype: string | null;
   attributes: string | null;
   has_children: boolean;
+  /** 1-based source line number (null for GenBank features). Added for
+   *  annotation editing (#297 / #369 design). */
+  line: number | null;
 }
 
 /** A page of the feature table. `total` is null when skip_count was set. */
@@ -2052,6 +2055,16 @@ export interface AnnotationContigStat {
   /** Null when the contig's length is unknown -- not zero coverage. */
   covered_fraction: number | null;
   per_mb: number | null;
+}
+
+// --- Annotation edits (issue #297) ---
+
+/** One pending column edit on an annotation source line. */
+export interface AnnotationEditRow {
+  line: number;
+  field: string;
+  old_value: string | null;
+  new_value: string;
 }
 
 export interface AnnotationLengthBin {

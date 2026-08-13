@@ -2616,6 +2616,48 @@ async def launch_annotation_export(
     )
 
 
+async def launch_materialize_annotation_edits(
+    *, object_id: PydanticObjectId, owner: str
+):
+    """Queue materialization of pending annotation edits into a derived object.
+
+    Issue #297. The handler reads all AnnotationEdit documents for the source
+    object, rewrites the edited columns in each tagged source line, and writes
+    a derived annotation object.
+    """
+    from app.models.annotation_edit import AnnotationEdit
+    from app.queue import queue
+
+    ann = await object_service.get_object(object_id, owner=owner)
+    _check_annotation_stats_callable(ann)
+
+    digest, path = await _resolve_readable(ann)
+    path = path or str(blob_path(digest))
+
+    edits = await AnnotationEdit.find(
+        AnnotationEdit.object_id == ann.id
+    ).to_list()
+    if not edits:
+        raise ValidationError("No pending edits to materialize")
+
+    return await queue.enqueue(
+        "materialize_annotation_edits",
+        owner=owner,
+        payload={
+            "object_id": str(ann.id),
+            "annotation_path": path,
+            "annotation_name": ann.name,
+            "format_kind": str(ann.format.kind.value),
+            "project_id": str(ann.project_id),
+        },
+        job_class=JobClass.COMPUTE,
+        resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+        max_attempts=2,
+        project_id=ann.project_id,
+        object_id=ann.id,
+    )
+
+
 async def _reference_for_annotation(ann) -> DataObject | None:
     """The reference this annotation describes, from its provenance.
 

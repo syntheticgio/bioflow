@@ -26,7 +26,7 @@ _INSERT_BATCH = 10_000
 # children query cannot drift apart about the row shape the client parses.
 _COLUMNS = (
     "contig, start, end, type, strand, score, name, feature_id, "
-    "parent, biotype, attributes, parent_status, depth"
+    "parent, biotype, attributes, parent_status, depth, line"
 )
 
 
