@@ -2076,6 +2076,11 @@ export interface AnnotationStatsFacts extends Record<string, unknown> {
   annotation_malformed_lines?: number;
   /** False when no reference resolved, so per-contig coverage is unavailable. */
   annotation_contig_lengths_known?: boolean;
+  /** Set only for GenBank-format annotations -- absent for GFF/GTF/BED. Its
+   *  presence is the frontend's GenBank signal, since a GenBank record spans
+   *  several lines and cannot be re-emitted by line number, so the export
+   *  control hides entirely rather than offering a launch that can't work. */
+  genbank_record_count?: number;
   gff_version?: string;
   genome_build?: string;
   annotation_source?: string;
