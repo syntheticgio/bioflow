@@ -1,7 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../api/client";
-import { notify } from "../stores/messageStore";
+import { useComputeResults } from "../hooks/useComputeResults";
 import type { ObjectDetail as ObjectDetailData, AnnotationStatsFacts } from "../api/types";
 import {
   AnnotationCoverageChart,
@@ -25,20 +24,12 @@ import { NodeSelector } from "./NodeSelector";
  * both a published GFF3 and a peak-call BED.
  */
 export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
-  const qc = useQueryClient();
   const f = obj.facts as AnnotationStatsFacts;
   const [targetNode, setTargetNode] = useState("");
   const [forcedView, setForcedView] = useState<string | null>(null);
   const [nameQuery, setNameQuery] = useState("");
 
-  const compute = useMutation({
-    mutationFn: () => api.launchAnnotationStats(obj.id, targetNode || undefined),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["jobs"] });
-      notify.info("Computing results");
-    },
-    onError: (e: Error) => notify.error(e.message),
-  });
+  const compute = useComputeResults(obj.id, targetNode, api.launchAnnotationStats);
 
   if (f.annotation_stats_status !== "ok") {
     return (
