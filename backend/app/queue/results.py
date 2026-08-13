@@ -16,6 +16,7 @@ from app.logging import get_logger
 from app.models import (
     DataObject,
     FormatInfo,
+    FormatKind,
     IoClass,
     JobClass,
     JobResources,
@@ -30,6 +31,17 @@ from app.pipelines.aligners import Aligner
 from app.queue.chunked_align_results import apply_chunked_alignment as _apply_chunked_alignment
 
 log = get_logger(__name__)
+
+# The formats ingest may auto-analyze. Mirrors
+# pipeline_service._ANNOTATION_STATS_FORMATS, imported at call time there to
+# avoid a circular import at module load; kept here as values for the Mongo
+# query, which cannot take enum members.
+_AUTO_ANALYZE_FORMATS = (
+    FormatKind.GFF,
+    FormatKind.GTF,
+    FormatKind.BED,
+    FormatKind.GENBANK,
+)
 
 
 async def apply(job_type: str, result: dict, *, owner: str) -> None:
@@ -243,33 +255,68 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
 
 
 async def _auto_analyze_after_ingest(obj: DataObject, *, owner: str) -> None:
-    """Analyze a freshly ingested annotation without being asked.
+    """Analyze annotations without being asked, from either direction.
 
-    #257 made annotation results an on-demand computation, which left every
-    newly ingested annotation opening to a button. This closes that, at a
-    measured 0.83s for a 12.5MB GFF -- queued, so the object is READY long
-    before the job runs.
+    Two triggers, because one loses a race. Analyzing an annotation when it
+    finishes ingesting is right whenever its reference is already READY --
+    but `resolve_annotation_reference` filters candidates to
+    `status=READY, role=REFERENCE`, and an NCBI download stages a genome and
+    its GFF concurrently with the FASTA's role assigned only after a network
+    lookup. An annotation winning that race is analyzed with no contig
+    lengths: null coverage on every contig, no track axis, and nothing
+    saying why. So a reference landing also sweeps the project for
+    annotations that wanted one.
 
-    Never raises. The object is already READY by the time this is called and
-    must stay that way: a malformed annotation is a failed recoverable
-    computation, not a failed ingest. The Results tab falls back to its
-    "Compute results" button and the failure shows in the Computations
-    panel like any other job.
+    That sweep is deliberately not restricted to referenceless analyses --
+    it also picks up never-analyzed files, which backfills annotations
+    ingested before this feature existed. The dedup key makes the redundancy
+    free.
+
+    Never raises, and one failure never stops the rest. The object is
+    already READY by the time this runs and must stay that way: a malformed
+    annotation is a failed recoverable computation, not a failed ingest.
     """
     from app.errors import AppError
     from app.services import pipeline_service
 
-    if not pipeline_service.should_auto_analyze_annotation(
+    async def _launch(target: DataObject) -> None:
+        try:
+            await pipeline_service.launch_annotation_stats(
+                object_id=target.id, owner=owner
+            )
+        except AppError as e:
+            log.warning(
+                "annotation_autoanalysis_failed",
+                object_id=str(target.id),
+                error=str(e),
+            )
+
+    if pipeline_service.should_auto_analyze_annotation(
         kind=obj.format.kind, sidecar_of=obj.sidecar_of, facts=obj.facts
     ):
+        await _launch(obj)
         return
 
-    try:
-        await pipeline_service.launch_annotation_stats(object_id=obj.id, owner=owner)
-    except AppError as e:
-        log.warning(
-            "annotation_autoanalysis_failed", object_id=str(obj.id), error=str(e)
-        )
+    # Trigger 2. Only a reference gives an annotation the coordinate axis it
+    # was missing, so a plain FASTA (protein.faa, cds_from_genomic.fna) is
+    # not a reason to re-analyze anything.
+    if obj.format.kind is not FormatKind.FASTA or obj.role is not ObjectRole.REFERENCE:
+        return
+
+    # One project-scoped query regardless of how many annotations it holds;
+    # the eligibility rule then filters in Python so both triggers share
+    # exactly one definition of who qualifies.
+    candidates = await DataObject.find(
+        DataObject.project_id == obj.project_id,
+        DataObject.status == ObjectStatus.READY,
+        {"format.kind": {"$in": [k.value for k in _AUTO_ANALYZE_FORMATS]}},
+    ).to_list()
+
+    for ann in candidates:
+        if pipeline_service.should_auto_analyze_annotation(
+            kind=ann.format.kind, sidecar_of=ann.sidecar_of, facts=ann.facts
+        ):
+            await _launch(ann)
 
 
 async def _link_mate(obj: DataObject) -> None:
