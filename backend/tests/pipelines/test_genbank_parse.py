@@ -157,7 +157,7 @@ class TestIterFeatures:
         assert (row.start, row.end) == (337, 2799)
         assert row.type == "gene"
         assert row.name == "thrA"
-        assert row.parent is None
+        assert row.parents == ()
         assert row.feature_id == "gb:NC_1:0"
 
     def test_join_emits_parent_then_segments(self):
@@ -169,14 +169,14 @@ class TestIterFeatures:
         # state the real extent, the same way a GFF3 gene spans its introns.
         assert (parent.start, parent.end) == (337, 2799)
         assert parent.type == "CDS"
-        assert parent.parent is None
+        assert parent.parents == ()
         assert parent.feature_id == "gb:NC_1:0"
 
         assert (seg1.start, seg1.end) == (337, 600)
         assert (seg2.start, seg2.end) == (700, 2799)
         assert seg1.type == "CDS_segment"
-        assert seg1.parent == "gb:NC_1:0"
-        assert seg2.parent == "gb:NC_1:0"
+        assert seg1.parents == ("gb:NC_1:0",)
+        assert seg2.parents == ("gb:NC_1:0",)
         assert seg1.feature_id == "gb:NC_1:0:seg1"
         assert seg2.feature_id == "gb:NC_1:0:seg2"
 
