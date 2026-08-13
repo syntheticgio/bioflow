@@ -153,12 +153,6 @@ async def _launch_vcf_stats(*, inputs: dict, params: dict, owner: str):
     )
 
 
-async def _launch_annotation_stats(*, inputs: dict, params: dict, owner: str):
-    return await pipeline_service.launch_annotation_stats(
-        object_id=inputs["annotation"], owner=owner
-    )
-
-
 async def _launch_variant_calling(*, inputs: dict, params: dict, owner: str):
     return await pipeline_service.launch_variant_calling(
         bam_id=inputs["alignment"],
@@ -413,25 +407,6 @@ NODE_TYPES: dict[str, NodeTypeSpec] = {
                 "variants",
                 PortType(format=FormatKind.VCF, role=ObjectRole.VARIANTS),
             ),
-        ),
-        outputs=(),
-    ),
-    "annotation_stats": NodeTypeSpec(
-        label="Annotation stats",
-        launch_name="pipeline_service.launch_annotation_stats",
-        run_kind=None,  # Read-only, like bam_stats/vcf_stats.
-        launch=_launch_annotation_stats,
-        inputs=(
-            # launch_annotation_stats actually accepts four formats
-            # (_ANNOTATION_STATS_FORMATS: GFF, GTF, BED, GenBank), but
-            # PortType.format is a single FormatKind -- there is no
-            # multi-format port anywhere in this codebase today (see
-            # GitHub issue #360). GFF is the representative format here,
-            # matching `quantify`'s single-GTF annotation port; a BED or
-            # GenBank annotation object cannot be wired to this node from
-            # the canvas yet, though both remain launchable directly via
-            # pipeline_service.launch_annotation_stats outside the builder.
-            PortSpec("annotation", PortType(format=FormatKind.GFF)),
         ),
         outputs=(),
     ),
