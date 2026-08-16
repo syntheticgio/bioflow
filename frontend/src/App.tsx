@@ -1,49 +1,20 @@
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import {
   BrowserRouter,
-  Navigate,
-  Route,
-  Routes,
   useLocation,
   useMatch,
   useNavigate,
 } from "react-router-dom";
 import { api } from "./api/client";
-import { ActivityView } from "./components/ActivityView";
 import { DetailPanel } from "./components/DetailPanel";
 import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
-import { HelpAbout } from "./components/HelpAbout";
-import { HelpCalculations } from "./components/HelpCalculations";
-import { Metrics } from "./components/Metrics";
-import { MetricsJobType } from "./components/MetricsJobType";
-import { HelpDatabases } from "./components/HelpDatabases";
-import { HelpFeedback } from "./components/HelpFeedback";
-import { HelpGenomeAnalysisReview } from "./components/HelpGenomeAnalysisReview";
-import { HelpPlaceholder } from "./components/HelpPlaceholder";
-import { HelpSupport } from "./components/HelpSupport";
-import { HelpSoftware } from "./components/HelpSoftware";
-import { HelpSources } from "./components/HelpSources";
-import { HelpWorkflowDiagrams } from "./components/HelpWorkflowDiagrams";
 import { ProfilePicker } from "./components/ProfilePicker";
-import { ProjectExplorer } from "./components/ProjectExplorer";
-import { SearchView } from "./components/SearchView";
-import { WorkflowCanvas } from "./components/WorkflowCanvas";
-import { SettingsGeneral } from "./components/SettingsGeneral";
-import { SettingsMcp } from "./components/SettingsMcp";
-import { SettingsNodes } from "./components/SettingsNodes";
-import { SettingsResources } from "./components/SettingsResources";
-import { SettingsTools } from "./components/SettingsTools";
-import { SettingsView } from "./components/SettingsView";
-import { SharesView } from "./components/SharesView";
 import { UploadTray } from "./components/UploadTray";
 import { useEvents } from "./hooks/useEvents";
-import { MobileActivity } from "./mobile/MobileActivity";
-import { MobileConfirm } from "./mobile/MobileConfirm";
-import { MobileDownload } from "./mobile/MobileDownload";
-import { MobileShell } from "./mobile/MobileShell";
 import { forceDesktop, useIsMobile } from "./mobile/useIsMobile";
+import { DesktopRoutes, TopLevelRoutes } from "./routes";
 import { useProfileStore } from "./stores/profileStore";
 import { useUiStore } from "./stores/uiStore";
 
@@ -114,39 +85,7 @@ function Shell() {
         className={`main${singleColumn ? " main-single" : ""}`}
         style={{ ["--left-w" as string]: `${panelWidth}px` }}
       >
-        <Routes>
-          <Route path="/" element={<ProjectExplorer />} />
-          <Route path="/p/:projectId" element={<ProjectExplorer />} />
-          <Route path="/search" element={<SearchView />} />
-          <Route path="/activity" element={<ActivityView />} />
-          <Route path="/workflows" element={<WorkflowCanvas />} />
-          <Route path="/shares" element={<SharesView />} />
-          <Route path="/help/about" element={<HelpAbout />} />
-          <Route path="/settings" element={<SettingsView />} />
-          <Route path="/settings/ai" element={<SettingsView />} />
-          <Route path="/settings/tools" element={<SettingsTools />} />
-          <Route path="/settings/resources" element={<SettingsResources />} />
-          <Route path="/settings/mcp" element={<SettingsMcp />} />
-          <Route path="/settings/general" element={<SettingsGeneral />} />
-          <Route path="/settings/nodes" element={<SettingsNodes />} />
-          <Route path="/help/calculations" element={<HelpCalculations />} />
-          <Route path="/metrics" element={<Metrics />} />
-          <Route path="/metrics/:jobType" element={<MetricsJobType />} />
-          <Route path="/help/software" element={<HelpSoftware />} />
-          <Route path="/help/sources" element={<HelpSources />} />
-          <Route path="/help/databases" element={<HelpDatabases />} />
-          <Route
-            path="/help/workflow-diagrams"
-            element={<HelpWorkflowDiagrams />}
-          />
-          <Route
-            path="/help/genome-analysis-review"
-            element={<HelpGenomeAnalysisReview />}
-          />
-          <Route path="/help/feedback" element={<FeedbackRoute />} />
-          <Route path="/help/support" element={<HelpSupport />} />
-          <Route path="/help/placeholder" element={<HelpPlaceholder />} />
-        </Routes>
+        <DesktopRoutes />
         {!singleColumn && <DetailPanel />}
       </div>
       {!singleColumn && (
@@ -214,17 +153,6 @@ function startupCheck(): Promise<void> {
 }
 
 /**
- * Decides between the picker and the shell, and waits for the startup checks
- * above before rendering either.
- *
- * It sits inside `QueryClientProvider` -- the picker itself needs no query
- * client, but this is also where `Shell` mounts, and hoisting the gate above
- * the provider would only move the boundary without gaining anything. What
- * matters is that it is *outside* `Shell`: `Shell`'s children fetch on mount
- * and every user-data route 400s with no profile, so rendering it first would
- * produce a burst of failed requests before the picker ever appeared.
- */
-/**
  * Sends a narrow viewport to the mobile routes, once.
  *
  * One-directional on purpose. Redirecting a wide viewport back off /m/*
@@ -233,22 +161,6 @@ function startupCheck(): Promise<void> {
  * straight back -- and would throw a tablet user out of the screen they
  * were reading the instant they rotated.
  */
-/**
- * Guards direct navigation to /help/feedback: the Header hides the menu
- * entry when the setting is off, but a bookmarked or typed URL bypasses
- * that, so the route itself has to check the same flag.
- */
-function FeedbackRoute() {
-  const settings = useQuery({
-    queryKey: ["settings", "general"],
-    queryFn: api.generalSettings,
-  });
-
-  if (settings.isLoading) return null;
-  if (!settings.data?.feedback_enabled) return <Navigate to="/help/about" replace />;
-  return <HelpFeedback />;
-}
-
 function MobileRedirect() {
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
@@ -264,6 +176,17 @@ function MobileRedirect() {
   return null;
 }
 
+/**
+ * Decides between the picker and the shell, and waits for the startup checks
+ * above before rendering either.
+ *
+ * It sits inside `QueryClientProvider` -- the picker itself needs no query
+ * client, but this is also where `Shell` mounts, and hoisting the gate above
+ * the provider would only move the boundary without gaining anything. What
+ * matters is that it is *outside* `Shell`: `Shell`'s children fetch on mount
+ * and every user-data route 400s with no profile, so rendering it first would
+ * produce a burst of failed requests before the picker ever appeared.
+ */
 function Gate() {
   const current = useProfileStore((s) => s.current);
   const [ready, setReady] = useState(false);
@@ -288,15 +211,7 @@ function Gate() {
   return (
     <>
       <MobileRedirect />
-      <Routes>
-        <Route path="/m" element={<MobileShell />}>
-          <Route index element={<Navigate to="/m/activity" replace />} />
-          <Route path="activity" element={<MobileActivity />} />
-          <Route path="download" element={<MobileDownload />} />
-          <Route path="download/:accession" element={<MobileConfirm />} />
-        </Route>
-        <Route path="*" element={<Shell />} />
-      </Routes>
+      <TopLevelRoutes shell={<Shell />} />
     </>
   );
 }
