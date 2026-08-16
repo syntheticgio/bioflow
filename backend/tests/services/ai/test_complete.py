@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 
 from app.models.ai import AiProvider, FailureReason, ProviderKind
-from app.services.ai import crypto, provider_service
+from app.services.ai import crypto, provider_service, redaction
 from app.services.ai.adapters import Completion, Failure
 from app.services.ai.router import ResolvedProvider
 
@@ -47,17 +47,21 @@ async def clean():
     await AiProvider.find_all().delete()
 
 
-async def _resolved(model: str = "m", cache: list[str] | None = None) -> ResolvedProvider:
+async def _resolved(
+    model: str = "m",
+    cache: list[str] | None = None,
+    api_key: str | None = None,
+) -> ResolvedProvider:
     p = await provider_service.create(
         name="P", kind=ProviderKind.OPENAI_COMPAT,
-        base_url="http://x:1", model=model, api_key=None,
+        base_url="http://x:1", model=model, api_key=api_key,
     )
     if cache:
         p.models_cache = cache
         await p.save()
     return ResolvedProvider(
         provider_id=str(p.id), name="P", kind=ProviderKind.OPENAI_COMPAT,
-        base_url="http://x:1", api_key=None, model=model,
+        base_url="http://x:1", api_key=api_key, model=model,
         models_cache=cache or [],
     )
 
@@ -208,3 +212,87 @@ class TestCompleteSync:
         )
         failure_result = complete_mod.complete_sync(provider, system="s", user="u")
         assert isinstance(failure_result, Failure)
+
+
+KEY = "sk-test-abcdef0123456789"
+
+
+def _explode_echoing_the_key(prefix: str = "", suffix: str = ""):
+    """An adapter crash whose message embeds the key -- a client library
+    reprs the request, and the Authorization header comes with it."""
+
+    def explode(p, **kw):
+        raise RuntimeError(f"{prefix}POST failed: Authorization: Bearer {KEY}{suffix}")
+
+    return explode
+
+
+class TestCrashLogsDoNotLeakTheKey:
+    """`str(e)` on an adapter crash is unscrubbed input. A provider client
+    that echoes the request into its exception message puts the key in the
+    log, which is the artifact people paste into bug reports.
+    """
+
+    async def test_complete_scrubs_the_log(self, monkeypatch, capsys):
+        provider = await _resolved(api_key=KEY)
+        monkeypatch.setattr(complete_mod, "_run", _explode_echoing_the_key())
+        await complete_mod.complete(provider, system="s", user="u")
+
+        # structlog prints straight to stdout in this codebase's config;
+        # caplog cannot see it (see test_subprocess.py's note on this).
+        out = capsys.readouterr().out
+        assert "ai_call_crashed" in out
+        assert KEY not in out
+        assert redaction.REDACTED in out
+
+    async def test_complete_scrubs_the_returned_failure(self, monkeypatch):
+        """The detail reaches `record_failure` and the settings page, which
+        outlives the log line."""
+        provider = await _resolved(api_key=KEY)
+        monkeypatch.setattr(complete_mod, "_run", _explode_echoing_the_key())
+        result = await complete_mod.complete(provider, system="s", user="u")
+
+        assert isinstance(result, Failure)
+        assert KEY not in result.detail
+        assert redaction.REDACTED in result.detail
+
+    async def test_complete_sync_scrubs_the_log(self, monkeypatch, capsys):
+        provider = await _resolved(api_key=KEY)
+        monkeypatch.setattr(complete_mod, "_run", _explode_echoing_the_key())
+        complete_mod.complete_sync(provider, system="s", user="u")
+
+        out = capsys.readouterr().out
+        assert "ai_call_crashed" in out
+        assert KEY not in out
+        assert redaction.REDACTED in out
+
+    async def test_complete_sync_scrubs_the_returned_failure(self, monkeypatch):
+        """Thread handlers return this detail in their result payload, where
+        `results.py` persists it."""
+        provider = await _resolved(api_key=KEY)
+        monkeypatch.setattr(complete_mod, "_run", _explode_echoing_the_key())
+        result = complete_mod.complete_sync(provider, system="s", user="u")
+
+        assert isinstance(result, Failure)
+        assert KEY not in result.detail
+        assert redaction.REDACTED in result.detail
+
+    async def test_a_key_straddling_the_truncation_boundary_is_scrubbed(
+        self, monkeypatch, capsys
+    ):
+        """Truncating before scrubbing would slice the key in half and leave a
+        prefix that `replace` no longer matches -- a partial key in the log.
+        This is what pins the scrub-then-truncate order.
+        """
+        # Land the key across MAX_BODY_CHARS so a leading slice would split it.
+        padding = "x" * (redaction.MAX_BODY_CHARS - len(KEY) // 2)
+        provider = await _resolved(api_key=KEY)
+        crash = _explode_echoing_the_key(prefix=padding)
+        monkeypatch.setattr(complete_mod, "_run", crash)
+        result = await complete_mod.complete(provider, system="s", user="u")
+
+        out = capsys.readouterr().out
+        # No fragment of the key survives, in the log or the stored detail.
+        head = KEY[: len(KEY) // 2]
+        assert head not in out
+        assert head not in result.detail

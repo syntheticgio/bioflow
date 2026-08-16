@@ -12,7 +12,7 @@ import asyncio
 from app.config import settings
 from app.logging import get_logger
 from app.models.ai import FailureReason
-from app.services.ai import provider_service
+from app.services.ai import provider_service, redaction
 from app.services.ai.adapters import (
     Completion,
     ConversationTurn,
@@ -82,8 +82,14 @@ async def complete(
             history=history,
         )
     except Exception as e:  # noqa: BLE001 - the invariant: never raise into a job
-        log.warning("ai_call_crashed", provider=provider.name, error=str(e))
-        result = Failure(FailureReason.BAD_RESPONSE, str(e)[:500])
+        # Scrub before truncating, not after: slicing first can split the key
+        # across the boundary, leaving a prefix that `replace` no longer
+        # matches. `scrub` truncates to MAX_BODY_CHARS itself. The same string
+        # goes to the log and to the Failure, which `record_failure` stores and
+        # the settings page renders -- both need the key gone.
+        detail = redaction.scrub(str(e), provider.api_key)
+        log.warning("ai_call_crashed", provider=provider.name, error=detail)
+        result = Failure(FailureReason.BAD_RESPONSE, detail)
 
     if isinstance(result, Failure):
         await provider_service.record_failure(provider.provider_id, result.reason)
@@ -123,5 +129,9 @@ def complete_sync(
             history=history,
         )
     except Exception as e:  # noqa: BLE001
-        log.warning("ai_call_crashed", provider=provider.name, error=str(e))
-        return Failure(FailureReason.BAD_RESPONSE, str(e)[:500])
+        # See the note in complete(): scrub before truncating. Here the
+        # Failure detail reaches the handler's result payload, which
+        # `results.py` persists.
+        detail = redaction.scrub(str(e), provider.api_key)
+        log.warning("ai_call_crashed", provider=provider.name, error=detail)
+        return Failure(FailureReason.BAD_RESPONSE, detail)
