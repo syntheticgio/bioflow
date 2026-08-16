@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { api } from "../api/client";
+import { assertEach, assertRunSummary } from "../api/validators";
 import { formatBytes, formatDate, formatDuration } from "../lib/format";
 import { notify } from "../stores/messageStore";
 import type { JobSummary, RunDetail, RunSummary, SystemLoad } from "../api/types";
@@ -48,7 +49,11 @@ export function ActivityView() {
 
   const { data: runs = [] } = useQuery({
     queryKey: ["runs", "activity"],
-    queryFn: () => api.listRuns({ limit: 50 }),
+    queryFn: async () => {
+      const list = await api.listRuns({ limit: 50 });
+      assertEach(assertRunSummary, list);
+      return list;
+    },
     refetchInterval: (q) => {
       const list = q.state.data as RunSummary[] | undefined;
       return list?.some((r) => r.status === "running" || r.status === "waiting")

@@ -20,6 +20,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiRequestError, api } from "../api/client";
+import { assertWorkflowRunSummary } from "../api/validators";
 import { NodeSelector } from "./NodeSelector";
 import type {
   GraphValidationError,
@@ -411,12 +412,15 @@ export function WorkflowCanvas() {
   });
 
   const launch = useMutation({
-    mutationFn: () =>
-      api.launchWorkflow(definitionId!, {
+    mutationFn: async () => {
+      const run = await api.launchWorkflow(definitionId!, {
         project_id: projectId!,
         label: name,
         bindings,
-      }, targetNode || undefined),
+      }, targetNode || undefined);
+      assertWorkflowRunSummary(run);
+      return run;
+    },
     onSuccess: (run) => {
       setLaunching(false);
       setNotice(`Launched "${run.label}" — ${run.status}.`);
