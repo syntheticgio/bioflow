@@ -1,5 +1,6 @@
 """Project endpoints, including the in-project upload path."""
 
+from collections.abc import Iterator
 from urllib.parse import unquote
 
 from beanie import PydanticObjectId
@@ -178,7 +179,7 @@ class _SyncStreamBridge:
         self._it = async_iter.__aiter__()
         self._loop = asyncio.get_running_loop()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[bytes]:
         import asyncio
 
         while True:
@@ -189,7 +190,7 @@ class _SyncStreamBridge:
             if chunk:
                 yield chunk
 
-    async def _next(self):
+    async def _next(self) -> bytes | None:
         try:
             return await self._it.__anext__()
         except StopAsyncIteration:
