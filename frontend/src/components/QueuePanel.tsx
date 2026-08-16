@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { formatDuration } from "../lib/format";
-import type { JobSummary } from "../api/types";
+import { computeTimingLabel, estimateSubtext } from "../lib/jobTiming";
+import type { JobSummary, TimingEstimate } from "../api/types";
 
 const RUNNING = new Set(["running"]);
 const WAITING = new Set(["pending", "queued", "delayed"]);
@@ -79,7 +80,20 @@ function QueueRow({ job }: { job: JobSummary }) {
   const { pct } = job.progress;
   const indeterminate = pct === null;
   const started = job.timing.started_at;
-  const elapsed = started ? Date.now() - new Date(started).getTime() : null;
+  const elapsedMs = started ? Math.max(0, Date.now() - new Date(started).getTime()) : 0;
+
+  // Fetch job details to get timing_estimate for running jobs
+  const { data: detail } = useQuery({
+    queryKey: ["job", job.id],
+    queryFn: () => api.getJob(job.id),
+    enabled: isRunning,
+    refetchInterval: 2000,
+  });
+
+  const estimate = detail?.timing_estimate as TimingEstimate | undefined;
+  const reportedPct = job.progress.pct ?? 0;
+  const timing = isRunning ? computeTimingLabel(elapsedMs, reportedPct, estimate) : null;
+  const subtext = isRunning ? estimateSubtext(estimate) : null;
 
   return (
     <div className="queue-row">
@@ -103,7 +117,13 @@ function QueueRow({ job }: { job: JobSummary }) {
       <div className="queue-row-meta">
         <span className="mono">{job.type}</span>
         {job.progress.message && <span>{job.progress.message}</span>}
-        {isRunning && elapsed !== null && <span>{formatDuration(elapsed)}</span>}
+        {isRunning && <span>{formatDuration(elapsedMs)}</span>}
+        {timing?.label && (
+          <span className="timing-estimate">{timing.label}</span>
+        )}
+        {subtext && (
+          <span className="timing-subtext">{subtext}</span>
+        )}
       </div>
     </div>
   );
