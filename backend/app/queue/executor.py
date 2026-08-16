@@ -10,7 +10,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
+from typing import IO, Protocol, runtime_checkable
 
 import psutil
 from beanie import PydanticObjectId
@@ -651,6 +651,102 @@ def run_subprocess(
                 log_file.close()
 
 
+class _StreamPump:
+    """Read subprocess stdout in a thread, splitting on `\r` or `\n`.
+
+    Multiplexes five concerns over a running subprocess:
+    - draining stdout
+    - draining stderr (merged into stdout)
+    - parsing progress out of the stream
+    - calling an on_line callback
+    - writing to the log file
+
+    Each concern is a named method, and each collaborator is an injectable
+    parameter a test can substitute.
+    """
+
+    def __init__(
+        self,
+        proc: subprocess.Popen,
+        log_file: IO[str] | None,
+        parser: ProgressParser | None,
+        on_line: Callable[[str], None] | None,
+        ctx: JobContext,
+    ) -> None:
+        self.proc = proc
+        self.log_file = log_file
+        self.parser = parser
+        self.on_line = on_line
+        self.ctx = ctx
+        self.line_count = 0
+        self.update_count = 0
+
+    def _observe(self, line: str) -> None:
+        """Feed the parser or call the on_line callback."""
+        if self.parser is not None:
+            if self.parser.feed(line):
+                self.update_count += 1
+                self.ctx.progress(**self.parser.snapshot())
+        elif self.on_line is not None:
+            self.on_line(line)
+
+    def _handle_line(self, line: str) -> None:
+        """Write to the log file and dispatch to the observer."""
+        if not line and self.line_count == 0:
+            # A `\r`-first stream (fasterq-dump's progress bar redraws before
+            # printing anything else) splits on that leading `\r` with nothing
+            # before it -- an artifact of the delimiter, not a line the tool
+            # printed. A later empty line (a bare `print()`) is real output
+            # and still delivered.
+            return
+        self.line_count += 1
+        if self.log_file is not None:
+            with contextlib.suppress(Exception):
+                self.log_file.write(line + "\n")
+                self.log_file.flush()
+        # An observer that raises must not kill the job: the work itself is
+        # still valid, and progress is advisory everywhere else too.
+        try:
+            self._observe(line)
+        except Exception as e:  # noqa: BLE001
+            log.debug("on_line_failed", job_id=self.ctx.job_id, error=str(e))
+
+    def run(self) -> None:
+        """Read raw bytes and split on `\r` or `\n` ourselves.
+
+        A `\r`-redrawn progress bar has no `\n` until the tool is done, so
+        text-mode line iteration (`for line in proc.stdout`) would never yield
+        it until the process exits.
+        """
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        buf = ""
+        try:
+            while True:
+                chunk = (
+                    self.proc.stdout.read1(4096)
+                    if hasattr(self.proc.stdout, "read1")
+                    else self.proc.stdout.read(4096)
+                )
+                if not chunk:
+                    break
+                buf += decoder.decode(chunk)
+                # `\r\n` is one delimiter, not two blank-line-producing ones --
+                # matches Python's own universal-newlines handling.
+                buf = buf.replace("\r\n", "\n")
+                while True:
+                    nl, cr = buf.find("\n"), buf.find("\r")
+                    if nl == -1 and cr == -1:
+                        break
+                    split = nl if cr == -1 else (cr if nl == -1 else min(nl, cr))
+                    line, buf = buf[:split], buf[split + 1 :]
+                    self._handle_line(line)
+            buf += decoder.decode(b"", final=True)
+            if buf:
+                self._handle_line(buf)
+        except Exception as e:  # noqa: BLE001 - the pipe dies when the child is killed
+            log.debug("output_pump_ended", job_id=self.ctx.job_id, error=str(e))
+
+
 def _run_streaming(
     ctx: JobContext,
     cmd: list[str],
@@ -685,74 +781,12 @@ def _run_streaming(
 
     log_file = open(log_path, "a", encoding="utf-8", errors="replace") if log_path else None
 
-    line_count = 0
-    update_count = 0
     started = datetime.now(UTC)
 
-    def observe(line: str) -> None:
-        nonlocal update_count
-        if parser is not None:
-            if parser.feed(line):
-                update_count += 1
-                ctx.progress(**parser.snapshot())
-        elif on_line is not None:
-            on_line(line)
-
-    def handle_line(line: str) -> None:
-        nonlocal line_count
-        if not line and line_count == 0:
-            # A `\r`-first stream (fasterq-dump's progress bar redraws before
-            # printing anything else) splits on that leading `\r` with nothing
-            # before it -- an artifact of the delimiter, not a line the tool
-            # printed. A later empty line (a bare `print()`) is real output
-            # and still delivered.
-            return
-        line_count += 1
-        if log_file is not None:
-            with contextlib.suppress(Exception):
-                log_file.write(line + "\n")
-                log_file.flush()
-        # An observer that raises must not kill the job: the work itself is
-        # still valid, and progress is advisory everywhere else too.
-        try:
-            observe(line)
-        except Exception as e:  # noqa: BLE001
-            log.debug("on_line_failed", job_id=ctx.job_id, error=str(e))
-
-    def pump() -> None:
-        # Read raw bytes and split on `\r` or `\n` ourselves: a `\r`-redrawn
-        # progress bar has no `\n` until the tool is done, so text-mode
-        # line iteration (`for line in proc.stdout`) would never yield it
-        # until the process exits.
-        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        buf = ""
-        try:
-            while True:
-                chunk = (
-                    proc.stdout.read1(4096)
-                    if hasattr(proc.stdout, "read1")
-                    else proc.stdout.read(4096)
-                )
-                if not chunk:
-                    break
-                buf += decoder.decode(chunk)
-                # `\r\n` is one delimiter, not two blank-line-producing ones --
-                # matches Python's own universal-newlines handling.
-                buf = buf.replace("\r\n", "\n")
-                while True:
-                    nl, cr = buf.find("\n"), buf.find("\r")
-                    if nl == -1 and cr == -1:
-                        break
-                    split = nl if cr == -1 else (cr if nl == -1 else min(nl, cr))
-                    line, buf = buf[:split], buf[split + 1 :]
-                    handle_line(line)
-            buf += decoder.decode(b"", final=True)
-            if buf:
-                handle_line(buf)
-        except Exception as e:  # noqa: BLE001 - the pipe dies when the child is killed
-            log.debug("output_pump_ended", job_id=ctx.job_id, error=str(e))
-
-    reader = threading.Thread(target=pump, name=f"subproc-out-{ctx.job_id}", daemon=True)
+    pump = _StreamPump(proc, log_file, parser, on_line, ctx)
+    reader = threading.Thread(
+        target=pump.run, name=f"subproc-out-{ctx.job_id}", daemon=True
+    )
     reader.start()
 
     try:
@@ -768,13 +802,13 @@ def _run_streaming(
             with contextlib.suppress(Exception):
                 log_file.close()
         elapsed = (datetime.now(UTC) - started).total_seconds()
-        if parser is not None and update_count == 0 and elapsed >= PARSER_SILENCE_FLOOR_S:
+        if parser is not None and pump.update_count == 0 and elapsed >= PARSER_SILENCE_FLOOR_S:
             log.warning(
                 "progress_parser_silent",
                 job_id=ctx.job_id,
                 parser=parser.name,
                 elapsed_s=round(elapsed, 1),
-                line_count=line_count,
+                line_count=pump.line_count,
             )
 
 
