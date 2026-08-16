@@ -59,8 +59,8 @@ async def merge_fastq(
 ) -> dict:
     """Concatenate multiple FASTQ files into one new file."""
     # Verify all objects exist, are FASTQ, and belong to this project
-    objects = await object_service.list_objects(project_id, owner=owner)
-    obj_map = {str(o.id): o for o in objects}
+    oids = [PydanticObjectId(oid) for oid in body.object_ids]
+    obj_map = await object_service.get_objects_by_ids(project_id, oids, owner=owner)
 
     for oid in body.object_ids:
         obj = obj_map.get(oid)

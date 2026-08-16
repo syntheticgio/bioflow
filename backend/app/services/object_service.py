@@ -78,6 +78,29 @@ async def list_objects(
     return await DataObject.find(query).sort("-created_at").limit(limit).to_list()
 
 
+async def get_objects_by_ids(
+    project_id: PydanticObjectId,
+    object_ids: list[PydanticObjectId],
+    *,
+    owner: str,
+) -> dict[str, DataObject]:
+    """Fetch specific objects within a project, keyed by str(id).
+
+    Scoped by project_id and owner so the caller inherits the same ownership
+    boundary list_objects enforces. Ids that do not exist, are not in this
+    project, or are not owned by `owner` are simply absent from the result --
+    the caller decides whether that is an error.
+    """
+    objects = await DataObject.find(
+        {
+            "_id": {"$in": object_ids},
+            "project_id": project_id,
+            "owner": owner,
+        }
+    ).to_list()
+    return {str(o.id): o for o in objects}
+
+
 async def list_sidecars(parent_id: PydanticObjectId, *, owner: str) -> list[DataObject]:
     """The scaffolding attached to one object."""
     return await DataObject.find(
