@@ -43,6 +43,7 @@ dev = [
     "hypothesis>=6.115",
     "fakeredis[lua]>=2.26",
     "ruff>=0.8",
+    "watchfiles>=1.0",
 ]
 
 [build-system]
