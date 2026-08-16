@@ -1,7 +1,7 @@
 """Tests for node provisioning endpoints and executor."""
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -385,8 +385,11 @@ async def test_provision_stores_encrypted_key_not_the_password():
         host="10.0.0.9", username="ops", password="hunter2", node_name="keynode",
     )
 
+    fake_verify_conn = MagicMock()
+    fake_verify_conn.close = MagicMock()
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key",
+               AsyncMock(return_value=(fake_verify_conn, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake"))), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = ssh.connect.return_value

@@ -70,25 +70,79 @@ async def install_public_key(conn, public_line: str) -> None:
             )
 
 
-async def verify_key(host: str, port: int, username: str, private_pem: str) -> None:
+async def connect_with_tofu(
+    host: str,
+    port: int,
+    username: str,
+    private_key: str,
+    stored_host_key: str | None,
+    *,
+    timeout: int = _VERIFY_TIMEOUT_SECONDS,
+) -> tuple[asyncssh.SSHClientConnection, str]:
+    """Connect with TOFU (trust-on-first-use) host key verification.
+
+    If `stored_host_key` is provided, it is enforced: the server must present
+    a matching key or the connection is refused. If None, the server's key is
+    captured on first use and returned so the caller can persist it.
+
+    Returns (connection, actual_host_key).
+    """
+    key = asyncssh.import_private_key(private_key)
+    captured_key: list[str] = []
+
+    def host_key_verifier(host_key, *args, **kwargs):
+        """asyncssh calls this with the server's host key."""
+        actual = host_key.export_public_key().decode().strip()
+        if stored_host_key is not None and actual != stored_host_key:
+            raise asyncssh.HostKeyNotVerifiable(
+                f"Host key for {host} changed.\n"
+                f"Expected: {stored_host_key}\n"
+                f"Actual:   {actual}\n"
+                "The machine identity may have changed. Re-enroll the node "
+                "to accept the new key."
+            )
+        captured_key.append(actual)
+        return True
+
+    try:
+        conn = await asyncio.wait_for(
+            asyncssh.connect(
+                host,
+                port=port,
+                username=username,
+                known_hosts=host_key_verifier,
+                client_keys=[key],
+            ),
+            timeout=timeout,
+        )
+    except (TimeoutError, asyncssh.Error, ValueError) as e:
+        log.warning(
+            "node_ssh_connect_failed",
+            host=host,
+            port=port,
+            username=username,
+            error=str(e),
+        )
+        raise
+
+    return conn, captured_key[0] if captured_key else ""
+
+
+async def verify_key(
+    host: str, port: int, username: str, private_pem: str
+) -> tuple[asyncssh.SSHClientConnection, str]:
     """Prove the installed key authenticates, by using it.
 
     `import_private_key` takes the PEM directly as `bytes | str` -- it does
     NOT accept a file-like object such as `io.StringIO`; passing one raises
     `AttributeError` because the implementation calls `.startswith()` on the
     argument. Confirmed empirically against asyncssh 2.24.0.
+
+    Returns (connection, host_key) so the caller can persist the host key.
     """
     try:
-        key = asyncssh.import_private_key(private_pem)
-        conn = await asyncio.wait_for(
-            asyncssh.connect(
-                host,
-                port=port,
-                username=username,
-                known_hosts=None,
-                client_keys=[key],
-            ),
-            timeout=_VERIFY_TIMEOUT_SECONDS,
+        conn, host_key = await connect_with_tofu(
+            host, port, username, private_pem, stored_host_key=None,
         )
     except (TimeoutError, asyncssh.Error, ValueError) as e:
         log.warning(
@@ -117,6 +171,8 @@ async def verify_key(host: str, port: int, username: str, private_pem: str) -> N
             raise KeyInstallError("The BioFlow key authenticated but no command ran.")
     finally:
         conn.close()
+
+    return conn, host_key
 
 
 def _quote(value: str) -> str:
