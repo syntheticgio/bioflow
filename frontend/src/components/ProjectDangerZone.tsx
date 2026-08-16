@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import type { DeletionPreview } from "../api/types";
+import { assertDeletionPreview } from "../api/validators";
 import { formatBytes } from "../lib/format";
 import { notify } from "../stores/messageStore";
 
@@ -50,7 +51,11 @@ export function ProjectDangerZone({
   // prevent an error from ever settling into view.
   const preview = useQuery({
     queryKey: ["project", projectId, "deletion-preview"],
-    queryFn: () => api.deletionPreview(projectId),
+    queryFn: async () => {
+      const data = await api.deletionPreview(projectId);
+      assertDeletionPreview(data);
+      return data;
+    },
     enabled: confirming,
     staleTime: 0,
   });
