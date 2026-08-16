@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import pathlib
 import platform
 import re
 import secrets
@@ -310,6 +309,59 @@ def _build_connection_urls(host: str) -> dict[str, str]:
     }
 
 
+def _render_node_compose() -> str:
+    """Render the worker-only compose file for a compute node.
+
+    Generated here rather than bundled into the image: the API image builds
+    with `context: ./backend` (docker-compose.override.yml and
+    release.yml both), and the repo-root docker-compose.yml sits outside
+    that context, so no `COPY` in backend/Dockerfile can reach it. Reading
+    it from /srv/ was the original approach and could never have worked --
+    nothing ever put a file there, and provisioning failed on every run with
+    "Compose file not found in API container."
+
+    The node runs the worker and nothing else: Mongo, Redis, and the API
+    live on the primary, and this file deliberately omits them so a stray
+    `docker compose up` on the node cannot start a second database. Every
+    value it needs comes from the .env written alongside it by
+    `_render_node_env`, so the two must be changed together -- the keys
+    referenced here are exactly the keys rendered there.
+    """
+    return (
+        "name: bioflow-node\n"
+        "\n"
+        "services:\n"
+        "  worker:\n"
+        "    image: ghcr.io/syntheticgio/bioflow-backend:${BIOFLOW_TAG:-latest}\n"
+        '    command: ["python", "-m", "app.worker_main"]\n'
+        "    environment:\n"
+        "      MONGO_URL: ${MONGO_URL}\n"
+        "      REDIS_URL: ${REDIS_URL}\n"
+        "      BIOINFO_HOME: /data\n"
+        "      BIOINFO_REGISTER_ROOTS: /data\n"
+        "      BIOINFO_HOME_HOST: ${BIOINFO_HOME}\n"
+        "      WORKER_NODE_ID: ${WORKER_NODE_ID:?WORKER_NODE_ID must be set}\n"
+        "      PRIMARY_API_URL: ${PRIMARY_API_URL}\n"
+        "      WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}\n"
+        "      NCBI_SETTINGS: /data/tmp/ncbi/user-settings.mkfg\n"
+        "      LOG_LEVEL: ${LOG_LEVEL:-INFO}\n"
+        "    volumes:\n"
+        "      - ${BIOINFO_HOME}:/data\n"
+        "      # The host's Docker socket, so the worker can start sibling\n"
+        "      # containers for tools too large to vendor into the image\n"
+        "      # (DeepVariant is 8.83GB). Same reason as the primary stack.\n"
+        "      - /var/run/docker.sock:/var/run/docker.sock\n"
+        "    extra_hosts:\n"
+        '      - "host.docker.internal:host-gateway"\n'
+        "    mem_limit: ${BIOFLOW_HARD_MEM_LIMIT:-0}\n"
+        "    deploy:\n"
+        "      replicas: ${WORKER_REPLICAS:-2}\n"
+        "    # The default 10s would SIGKILL mid-drain, stranding leases.\n"
+        "    stop_grace_period: 90s\n"
+        "    restart: unless-stopped\n"
+    )
+
+
 def _render_node_env(
     mongo_url: str,
     redis_url: str,
@@ -421,16 +473,27 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                     f"{mkdir_result.stderr or mkdir_result.stdout or 'no output'}"
                 )
 
-            compose_src = pathlib.Path("/srv/docker-compose.yml")  # noqa: ASYNC240
-            if compose_src.exists():  # noqa: ASYNC240
-                await asyncssh.scp(
-                    str(compose_src),
-                    (conn, f"{install_dir}/docker-compose.yml"),
-                )
-            else:
+            # The quoted heredoc delimiter is load-bearing: the compose file
+            # is almost entirely `${...}` references that the *node's* Compose
+            # must expand against the .env written below. An unquoted
+            # delimiter would let the remote shell expand them first, and
+            # since none of them are set in that shell they would all land as
+            # empty strings -- yielding a syntactically valid compose file
+            # with no image and no volumes.
+            compose_contents = _render_node_compose()
+            compose_result = await asyncio.wait_for(
+                conn.run(
+                    f"cat > {install_dir}/docker-compose.yml << 'HERMESEOF'\n"
+                    f"{compose_contents}\nHERMESEOF",
+                    check=False,
+                ),
+                timeout=15,
+            )
+            if compose_result.exit_status != 0:
                 return await _fail(
-                    "Compose file not found in API container. "
-                    "The API image must bundle docker-compose.yml at /srv/."
+                    f"Could not write {install_dir}/docker-compose.yml on "
+                    f"{req.host}: "
+                    f"{compose_result.stderr or compose_result.stdout or 'no output'}"
                 )
 
             # Phase 4: write_env
@@ -496,9 +559,16 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
 
             # Phase 7: start_worker
             await _update("start_worker", "Starting worker…")
+            # `--no-deps worker`, matching the launcher's own up_node (see
+            # launcher/src-tauri/src/docker/shell.rs). The generated compose
+            # file names only the worker, so this is belt-and-braces there --
+            # but it is what keeps this command correct if the file ever
+            # regains a service, and it mirrors what the launcher does on a
+            # node provisioned the other way.
             up_result = await asyncio.wait_for(
                 conn.run(
-                    f"docker compose -f {install_dir}/docker-compose.yml up -d",
+                    f"docker compose -f {install_dir}/docker-compose.yml "
+                    "up -d --no-deps worker",
                     check=False,
                 ),
                 timeout=60,

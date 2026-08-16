@@ -74,8 +74,9 @@ def _patched(conn):
     """Patch the whole provisioning perimeter around a fake connection."""
     return (
         patch("app.api.v1.nodes.asyncssh.connect", AsyncMock(return_value=conn)),
-        patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()),
-        patch("app.api.v1.nodes.pathlib.Path", MagicMock()),
+        # No scp/pathlib patches: the compose file is rendered in-process and
+        # written by the same `conn.run` heredoc as the .env, so the fake
+        # connection records it like any other command.
         patch("app.api.v1.nodes.node_ssh.generate_keypair",
               MagicMock(return_value=("PEM", "ssh-ed25519 AAAA comment"))),
         patch("app.api.v1.nodes.node_ssh.install_public_key", AsyncMock()),
@@ -149,7 +150,9 @@ class TestRemoteFailuresAreReported:
         assert "exit status" not in task.error
 
     async def test_env_write_failure_names_the_file_and_stderr(self):
-        conn = _FakeConn(fail_matching="cat > ")
+        # Matched on the .env path rather than a bare `cat > `: provisioning
+        # writes two files by heredoc now, and the compose one goes first.
+        conn = _FakeConn(fail_matching="cat > ~/.bioflow/.env")
         await _run_provision(conn)
 
         from app.models.node_provision import NodeProvisionTask
@@ -157,4 +160,15 @@ class TestRemoteFailuresAreReported:
         task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == "task-1")
         assert task.status == "failed"
         assert ".env" in task.error
+        assert "Permission denied" in task.error
+
+    async def test_compose_write_failure_names_the_file_and_stderr(self):
+        conn = _FakeConn(fail_matching="cat > ~/.bioflow/docker-compose.yml")
+        await _run_provision(conn)
+
+        from app.models.node_provision import NodeProvisionTask
+
+        task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == "task-1")
+        assert task.status == "failed"
+        assert "docker-compose.yml" in task.error
         assert "Permission denied" in task.error

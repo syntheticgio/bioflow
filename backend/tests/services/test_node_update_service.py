@@ -134,6 +134,35 @@ async def test_drain_stops_the_worker_before_restarting():
     assert joined.index(" pull ") < joined.index("stop")
 
 
+async def test_restart_starts_only_the_worker():
+    """A launcher-provisioned node has the *full* stack compose file at
+    ~/.bioflow/docker-compose.yml, so a bare `up -d` would start mongo,
+    redis, api and web on a compute node -- a second database the worker is
+    not even pointed at. The restart must stay scoped to the worker.
+    """
+    node = await _node("un-scope")
+    task = NodeUpdateTask(task_id="u6", node_id="un-scope")
+    await task.insert()
+    conn = _conn()
+
+    with patch("app.services.ai.crypto.decrypt", return_value="PEM"), \
+         patch("asyncssh.import_private_key", MagicMock()), \
+         patch("asyncssh.connect", AsyncMock(return_value=conn)), \
+         patch.object(svc, "_await_digest", AsyncMock(return_value="sha256:new")):
+        await svc.run_update("u6", node, drain=False)
+
+    up_commands = [
+        str(c) for c in conn.run.call_args_list if "up -d" in str(c)
+    ]
+    assert up_commands, "expected a restart command"
+    for command in up_commands:
+        assert "--no-deps" in command
+        assert "worker" in command
+
+    await node.delete()
+    await (await NodeUpdateTask.find_one(NodeUpdateTask.task_id == "u6")).delete()
+
+
 async def test_unreachable_machine_reports_connect_failure():
     """NU-20: a node whose worker is down is still attempted; only a failed
     SSH connection reports the machine unreachable."""
