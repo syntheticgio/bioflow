@@ -28,6 +28,23 @@ CACHE_KEY = "bp:tools:probes"
 
 # A backstop, not the primary invalidation -- that is the fingerprint. This
 # only bounds how long a fingerprint collision could persist.
+#
+# Decided (#410) that 24h is acceptable and no shorter TTL or write-through is
+# needed: the "install a tool and it doesn't show up" case this TTL might
+# seem to affect never actually reaches it. A BUNDLED tool's fingerprint
+# changes the moment its binary is installed/upgraded, so `_probe` in
+# tools.py ignores the stale seed and re-probes live regardless of how much
+# TTL remains -- the fingerprint check, not the TTL, is what makes an install
+# visible. An ON_DEMAND_IMAGE tool (e.g. DeepVariant) is in NOT_FINGERPRINTABLE
+# and is never written to this Redis cache at all (see `warm()`); its
+# cross-process visibility comes entirely from `publish_invalidation` /
+# `listen_for_invalidations`, which is immediate when it fires and
+# self-healing on the next probe if a message is dropped (the process just
+# re-probes on next use once its lru_cache is otherwise cleared). So a
+# dropped invalidation cannot leave a freshly-installed tool invisible for
+# anywhere near 24h; the TTL only bounds a same-fingerprint edge case, and
+# raising it or adding a write-through path was rejected as unneeded
+# complexity for a scenario that does not occur on the install path.
 CACHE_TTL_SECONDS = 24 * 60 * 60
 
 # Tools whose availability is not a property of a binary, so persisting their
