@@ -168,6 +168,69 @@ async def test_provision_status_failed(client):
 
 # ---- helpers ----
 
+def test_render_node_compose_is_valid_yaml_declaring_only_the_worker():
+    """The generated compose file parses, and names no service but worker.
+
+    The point of generating it rather than shipping the primary's own
+    docker-compose.yml is that a compute node must not stand up a second
+    mongo/redis/api/web. This is the test that would fail if one crept back.
+    """
+    import yaml
+
+    from app.api.v1.nodes import _render_node_compose
+
+    parsed = yaml.safe_load(_render_node_compose())
+
+    assert list(parsed["services"]) == ["worker"]
+    # depends_on would reference a service this file does not define, so
+    # `docker compose up` on the node would fail outright.
+    assert "depends_on" not in parsed["services"]["worker"]
+
+
+def test_render_node_compose_reads_only_keys_the_env_defines():
+    """Every ${VAR} in the compose file is set by _render_node_env, or
+    carries its own default.
+
+    The two are written to the node side by side and nothing else supplies
+    values, so a reference to a key the .env never sets silently resolves to
+    an empty string at `docker compose up` time.
+    """
+    import re
+
+    from app.api.v1.nodes import _render_node_compose, _render_node_env
+
+    env = _render_node_env(
+        mongo_url="mongodb://192.168.1.50:27017/biopipe",
+        redis_url="redis://192.168.1.50:6379/0",
+        api_url="http://192.168.1.50:8000",
+        node_name="test-node",
+        storage_location="/data/scratch",
+        worker_replicas=2,
+    )
+    env_keys = {line.split("=", 1)[0] for line in env.splitlines() if "=" in line}
+
+    compose = _render_node_compose()
+    for ref in re.findall(r"\$\{([A-Z_][A-Z0-9_]*)([:?-][^}]*)?\}", compose):
+        name, modifier = ref
+        # A `:-default` reference is fine unset; `:?` requires a real value.
+        if modifier.startswith(":-"):
+            continue
+        assert name in env_keys, f"{name} is referenced but never written to .env"
+
+
+def test_render_node_compose_pins_storage_to_the_configured_location():
+    """BIOINFO_HOME from the .env is what gets bind-mounted at /data."""
+    from app.api.v1.nodes import _render_node_compose
+
+    compose = _render_node_compose()
+
+    assert "- ${BIOINFO_HOME}:/data" in compose
+    # /data is the in-container path and must stay hardcoded: the env's own
+    # BIOINFO_HOME is the *host* path, and mounting it at itself would
+    # diverge from the primary, where /data is what every tool path assumes.
+    assert "BIOINFO_HOME: /data" in compose
+
+
 def test_render_node_env_matches_launcher():
     """_render_node_env output must match the launcher's format."""
     from app.api.v1.nodes import _render_node_env
