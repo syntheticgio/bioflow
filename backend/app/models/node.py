@@ -41,6 +41,10 @@ class Node(Document):
     ssh_username: str | None = None
     ssh_key_enc: bytes | None = None  # Fernet; the managed key's private half
     ssh_key_installed_at: datetime | None = None
+    # Pinned host key for TOFU (trust-on-first-use). Set during provisioning
+    # and verified on every subsequent connection. None for nodes enrolled
+    # before this field existed -- the next connection captures it.
+    host_key: str | None = None
 
     # What this node is running, from the worker heartbeat. Persisted here
     # rather than only in Redis because Redis entries expire with the worker,

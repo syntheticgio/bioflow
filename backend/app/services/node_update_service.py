@@ -32,6 +32,7 @@ from app.logging import get_logger
 from app.models.node import Node
 from app.models.node_update import NodeUpdateTask
 from app.services.ai import crypto
+from app.services.node_ssh import connect_with_tofu
 
 log = get_logger(__name__)
 
@@ -89,16 +90,18 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
                 "connect",
                 "The stored update key could not be decrypted. Re-provision this node.",
             )
+        if not node.ssh_host or not node.ssh_username:
+            return await _fail(
+                "connect",
+                "Node has no SSH host or username configured. Re-provision this node.",
+            )
         try:
-            key = asyncssh.import_private_key(private_pem)
-            conn = await asyncio.wait_for(
-                asyncssh.connect(
-                    node.ssh_host,
-                    port=node.ssh_port,
-                    username=node.ssh_username,
-                    known_hosts=None,
-                    client_keys=[key],
-                ),
+            conn, _ = await connect_with_tofu(
+                node.ssh_host,
+                node.ssh_port,
+                node.ssh_username,
+                private_pem,
+                stored_host_key=node.host_key,
                 timeout=20,
             )
         except (TimeoutError, asyncssh.Error, ValueError) as e:

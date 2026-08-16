@@ -531,7 +531,11 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             await _update("install_key", "Installing the BioFlow update key…")
             private_pem, public_line = node_ssh.generate_keypair(req.node_name)
             await node_ssh.install_public_key(conn, public_line)
-            await node_ssh.verify_key(req.host, req.port, req.username, private_pem)
+            # verify_key returns the host key for TOFU pinning
+            verify_conn, host_key = await node_ssh.verify_key(
+                req.host, req.port, req.username, private_pem
+            )
+            verify_conn.close()
 
             node_doc = await Node.find_one(Node.node_id == req.node_name)
             if node_doc is None:
@@ -541,6 +545,7 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             node_doc.ssh_username = req.username
             node_doc.ssh_key_enc = crypto.encrypt(private_pem)
             node_doc.ssh_key_installed_at = datetime.now(UTC)
+            node_doc.host_key = host_key
             await node_doc.save()
 
             # Phase 6: pull_image

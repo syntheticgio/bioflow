@@ -80,7 +80,8 @@ def _patched(conn):
         patch("app.api.v1.nodes.node_ssh.generate_keypair",
               MagicMock(return_value=("PEM", "ssh-ed25519 AAAA comment"))),
         patch("app.api.v1.nodes.node_ssh.install_public_key", AsyncMock()),
-        patch("app.api.v1.nodes.node_ssh.verify_key", AsyncMock()),
+        patch("app.api.v1.nodes.node_ssh.verify_key",
+              AsyncMock(return_value=(MagicMock(), "ssh-ed25519 AAAA"))),
         patch("app.api.v1.nodes.crypto.encrypt", MagicMock(return_value="enc")),
     )
 

@@ -56,12 +56,20 @@ async def test_verify_opens_a_new_connection_with_the_new_key():
     fake_conn.run = AsyncMock(return_value=MagicMock(exit_status=0))
     fake_conn.close = MagicMock()
 
+    # The host_key_verifier callback inside connect_with_tofu calls
+    # host_key.export_public_key().decode().strip() on the server's key.
+    fake_host_key = MagicMock()
+    fake_host_key.export_public_key.return_value = b"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake"
+
     with patch("asyncssh.connect", AsyncMock(return_value=fake_conn)) as conn_mock, \
          patch("asyncssh.import_private_key", MagicMock(return_value="KEY")):
-        await node_ssh.verify_key("10.0.0.5", 22, "ops", "PEM")
+        conn, host_key = await node_ssh.verify_key("10.0.0.5", 22, "ops", "PEM")
 
     assert conn_mock.await_count == 1
     assert conn_mock.await_args.kwargs["client_keys"] == ["KEY"]
+    # known_hosts is a callable, not None
+    assert callable(conn_mock.await_args.kwargs["known_hosts"])
+    assert host_key == ""  # No host key captured since mock doesn't invoke callback
 
 
 async def test_verify_raises_when_authentication_fails():
