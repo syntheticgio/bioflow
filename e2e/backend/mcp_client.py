@@ -20,7 +20,7 @@ class McpError(RuntimeError):
 
 class McpClient:
     def __init__(self, base_url: str, profile: str = ""):
-        self._url = f"{base_url.rstrip('/')}/api/v1/mcp"
+        self._url = f"{base_url.rstrip('/')}/api/v1/mcp/"
         if profile:
             self._url += f"?profile={profile}"
         self._session_id: str | None = None

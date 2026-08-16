@@ -101,9 +101,12 @@ function TestsPage() {
       testsQ.isLoading ? jsx('div', { style: { color: 'var(--ui-text-quaternary)' }, children: 'Loading\u2026' }) : null,
       testsQ.isError ? jsx('div', { style: { color: 'var(--ui-text-secondary)', fontFamily: 'var(--font-mono, monospace)' }, children: 'ERROR: ' + (testsQ.error && testsQ.error.message ? testsQ.error.message : JSON.stringify(testsQ.error)) }) : null,
       (testsQ.data || []).map((t) =>
-        jsxs('div', { key: t.name, style: { display: 'flex', gap: 8, alignItems: 'center', padding: '3px 0' }, children: [
-          jsx('span', { style: { flex: 1 }, children: t.name }),
-          jsx('span', { style: { color: 'var(--ui-text-quaternary)', fontSize: 11 }, children: t.kind }),
+        jsxs('div', { key: t.name, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '3px 0' }, children: [
+          jsxs('div', { style: { flex: 1 }, children: [
+            jsx('div', { children: t.name }),
+            t.description ? jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: 11, marginTop: 1 }, children: t.description }) : null,
+          ] }),
+          jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: 11, marginTop: 2 }, children: t.kind }),
           jsx('button', { style: btn, onClick: () => runMutation.mutate([t.name]), children: 'Run' }),
         ] }),
       ),
