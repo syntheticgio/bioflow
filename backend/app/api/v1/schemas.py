@@ -5,6 +5,7 @@ wire contract does not drift silently when a storage field is added.
 """
 
 from datetime import datetime
+from enum import StrEnum
 
 from beanie import PydanticObjectId
 from pydantic import BaseModel, Field
@@ -298,6 +299,29 @@ class ProteinRecordsOut(BaseModel):
     # The file held more records than the cap, so this list is incomplete (R6).
     truncated: bool
     rows: list[ProteinRecordOut]
+
+
+class ProteinStructureState(StrEnum):
+    """Which of four sentences the viewer shows.
+
+    Explicit rather than inferred from null fields. A client deriving these
+    from `accession is None` cannot tell "this header names nothing we can
+    resolve" from "UniProt was unreachable" -- and those need a retry button
+    and no retry button respectively.
+    """
+
+    RESOLVED = "resolved"
+    NO_STRUCTURE = "no_structure"
+    NO_REFERENCE = "no_reference"
+    LOOKUP_FAILED = "lookup_failed"
+
+
+class ProteinStructureOut(BaseModel):
+    identifier: str
+    state: ProteinStructureState
+    accession: str | None = None
+    protein_name: str | None = None
+    pdb_ids: list[str] = []
 
 
 # --- Provenance narratives ---
