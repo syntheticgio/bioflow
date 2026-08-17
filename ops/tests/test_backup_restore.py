@@ -433,6 +433,29 @@ def test_version_mismatch_without_force_writes_nothing(scratch_mongo, tmp_path):
 
 
 @docker_required
+def test_restore_rejects_a_database_mismatch_before_writing(scratch_mongo, tmp_path):
+    """mongorestore --archive ignores $MONGO_DB and restores into the name
+
+    recorded inside the dump itself. If the backup's recorded database
+    disagrees with the current $MONGO_DB, restoring would silently write into
+    the wrong database after prompting the user to confirm the one they
+    expected -- so this must be caught before mongorestore ever runs.
+    """
+    seed(scratch_mongo)
+    run_script(["backup"], scratch_mongo, tmp_path)
+    backup = sorted(tmp_path.iterdir())[0]
+
+    manifest = backup / "manifest.json"
+    manifest.write_text(manifest.read_text().replace('"database": "biopipe"', '"database": "other"'))
+
+    result = run_script(["restore", str(backup), "--force"], scratch_mongo, tmp_path)
+    assert result.returncode != 0
+    assert "other" in result.stderr
+    assert "biopipe" in result.stderr
+    assert counts(scratch_mongo) != {}, "restore should have refused before dropping anything"
+
+
+@docker_required
 def test_version_mismatch_with_force_completes(scratch_mongo, tmp_path):
     seed(scratch_mongo)
     before = counts(scratch_mongo)
