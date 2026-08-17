@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from app.config import settings
 from app.errors import AgentUnavailableError
 from app.services.agent_service import AgentEvent, AgentProcess, AgentService

@@ -7,6 +7,8 @@ aligner's reference picker. A canvas refusing that wire is that same rule.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.models import FormatKind, ObjectRole
 from app.models.workflow import (
     NodeRunState,
@@ -21,7 +23,6 @@ from app.models.workflow import (
     WorkflowStatus,
     derive_status,
 )
-from beanie import PydanticObjectId
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 

@@ -6,6 +6,7 @@ missing one otherwise fails thirty seconds into a job rather than at launch.
 """
 
 import pytest
+
 from app.errors import PermanentError
 from app.queue import registry, results, variant_handlers
 from app.queue.registry import JobContext

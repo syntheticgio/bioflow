@@ -10,6 +10,7 @@ intervals, and no test that only checks real annotations would notice.
 from types import SimpleNamespace
 
 import pytest
+
 from app.models.object import FormatKind
 from app.services.pipeline_service import should_auto_analyze_annotation
 

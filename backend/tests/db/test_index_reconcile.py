@@ -8,10 +8,11 @@ those conflicts and drops the stale index first.
 """
 
 import pytest
-from app.config import settings
-from app.db.index_reconcile import _index_def, reconcile_indexes
 from beanie import init_beanie
 from pymongo import ASCENDING, AsyncMongoClient, IndexModel
+
+from app.config import settings
+from app.db.index_reconcile import _index_def, reconcile_indexes
 
 
 @pytest.fixture

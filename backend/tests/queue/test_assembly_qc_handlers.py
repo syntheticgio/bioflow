@@ -13,6 +13,7 @@ only asserted "the report renders" would pass whether or not the fix held.
 from pathlib import Path
 
 import pytest
+
 from app.pipelines import quast_runner
 from app.queue import assembly_qc_handlers as handlers
 

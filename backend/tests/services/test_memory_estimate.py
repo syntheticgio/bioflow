@@ -7,14 +7,15 @@ estimate" passes whether or not the guard it claims to test is wired up.
 """
 
 import pytest
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import memory_estimate
 from app.services.memory_estimate import EstimateSource
 from app.services.timing_service import MIN_SAMPLES
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
 
 
 @pytest.fixture(autouse=True)

@@ -2,11 +2,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import NotFoundError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus, RunInputRole, RunKind
 from app.pipelines.tools import PipelineType
 from app.services import reference_assembly
-from beanie import PydanticObjectId
 
 
 def _object(

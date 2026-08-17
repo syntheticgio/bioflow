@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 import pytest
+
 from app.errors import PermanentError, RetryableError
 from app.queue import uniprot_handlers
 from app.queue.registry import JobContext

@@ -6,6 +6,9 @@ independently, which is the half that would be easy to lose.
 """
 
 import pytest
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.job import Job, JobState
@@ -21,8 +24,6 @@ from app.pipelines.node_types import NODE_TYPES, PortSpec
 from app.services import workflow_orchestrator as orch
 from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
 from app.services.workflow_service import validate_definition
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
 
 OWNER = "tester"
 

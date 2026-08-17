@@ -8,12 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import ConflictError, PermanentError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.models.run import RunInput, RunInputRole, RunKind
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 _IVAR_TOOL = Tool(name="ivar", path="/usr/bin/ivar", version="1.4.4")
 

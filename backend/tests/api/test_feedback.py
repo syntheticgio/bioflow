@@ -4,9 +4,10 @@ import asyncio
 from unittest.mock import patch
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app.main import app
 from app.models.feedback import COMMENT_MAX_LENGTH, Feedback
-from httpx import ASGITransport, AsyncClient
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

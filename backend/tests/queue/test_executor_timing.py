@@ -14,6 +14,7 @@ per successful job.
 import asyncio
 
 import pytest
+
 from app.errors import JobCancelled, PermanentError, RetryableError
 from app.models import Job, JobClass, JobResources, JobState
 from app.models.timing import JobRunTiming, RunOutcome

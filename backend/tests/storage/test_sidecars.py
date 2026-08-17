@@ -7,11 +7,12 @@ and, more consequentially, what deletion destroys.
 """
 
 import pytest
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS, ObjectRole, SidecarRole
 from app.models.object import DataObject
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
 
 
 @pytest.fixture(scope="module")

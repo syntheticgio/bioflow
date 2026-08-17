@@ -4,11 +4,12 @@ and the new `ToolCall` outcome neither function previously had to handle.
 
 import sys
 
+import pytest
+import pytest_asyncio
+
 # See test_complete.py for why the submodule must be pulled from sys.modules
 # rather than imported as `app.services.ai.complete`.
 import app.services.ai.complete  # noqa: F401,E402
-import pytest
-import pytest_asyncio
 from app.models.ai import AiProvider, ProviderKind
 from app.services.ai import crypto, provider_service
 from app.services.ai.adapters import Completion, ConversationTurn, ToolCall, ToolSpec

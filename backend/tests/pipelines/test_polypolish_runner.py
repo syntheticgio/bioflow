@@ -11,6 +11,7 @@ contig's tally as the whole run's.
 from pathlib import Path
 
 import pytest
+
 from app.pipelines import polypolish_runner as runner
 
 # Real output, one contig.

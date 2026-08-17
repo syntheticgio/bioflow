@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from app.pipelines import merqury_runner
 
 

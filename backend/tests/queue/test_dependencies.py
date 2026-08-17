@@ -8,9 +8,10 @@ the difference between an error the user sees and a job that never runs.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.models import JobState
 from app.queue.queue import classify_dependencies
-from beanie import PydanticObjectId
 
 
 class FakeJob:

@@ -1,8 +1,9 @@
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import NotFoundError
 from app.models import Blob, BlobState, BlobStorage, DataObject, ObjectStatus
 from app.services import blob_service
-from beanie import PydanticObjectId
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

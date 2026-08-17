@@ -9,6 +9,8 @@ the STAR/_SIDECAR_ROLES failure in a new place.
 import inspect
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.models import ACTIVE_STATES, FormatKind, ObjectRole
 from app.models.run import RunKind
 from app.pipelines.node_types import (
@@ -17,7 +19,6 @@ from app.pipelines.node_types import (
     launch_function_names,
 )
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 
 class TestExhaustiveness:

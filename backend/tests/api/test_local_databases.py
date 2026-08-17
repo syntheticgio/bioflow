@@ -3,9 +3,10 @@
 import asyncio
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app.main import app
 from app.models.local_database import URL_MAX_LENGTH, LocalDatabase
-from httpx import ASGITransport, AsyncClient
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

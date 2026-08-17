@@ -5,9 +5,10 @@ this a user running `:latest` has no way to discover what they have.
 """
 
 import pytest
+from httpx import ASGITransport, AsyncClient
+
 from app.main import app
 from app.version import __version__
-from httpx import ASGITransport, AsyncClient
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 

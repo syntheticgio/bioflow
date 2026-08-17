@@ -9,11 +9,11 @@ never find.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import ConflictError, NotFoundError
 from app.models import Blob, BlobState, DataObject, ObjectStatus, SidecarRole
 from app.services import object_service, project_service, share_service
-from beanie import PydanticObjectId
-
 from tests.services.helpers_share import make_profile, ready_object, scratch_file
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

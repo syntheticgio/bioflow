@@ -11,12 +11,13 @@ at once and had no automatic way back.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS, Blob, BlobState, BlobStorage, DataObject, ObjectStatus
 from app.queue import handlers
 from app.queue.registry import JobContext
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`.

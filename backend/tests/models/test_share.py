@@ -1,6 +1,7 @@
 import pytest
-from app.models import DataObject, Share, ShareState
 from beanie import PydanticObjectId
+
+from app.models import DataObject, Share, ShareState
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

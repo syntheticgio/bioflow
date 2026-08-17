@@ -11,6 +11,7 @@ from email.message import Message
 from unittest.mock import patch
 
 import pytest
+
 from app.services.feedback_service import (
     _format_embed,
     _post,

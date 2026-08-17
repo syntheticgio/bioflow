@@ -2,6 +2,7 @@
 metadata rather than autolineage."""
 
 import pytest
+
 from app.pipelines.lineage_inference import infer_lineage, is_specific
 
 

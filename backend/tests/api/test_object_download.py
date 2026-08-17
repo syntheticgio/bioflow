@@ -16,12 +16,13 @@ route stopped resolving blobs that way.
 
 import pytest
 import pytest_asyncio
+from beanie import PydanticObjectId
+
 from app.api.v1.objects import download_object
 from app.config import settings
 from app.errors import NotFoundError
 from app.models import Blob, BlobState, BlobStorage, DataObject
 from app.storage.paths import blob_rel_path
-from beanie import PydanticObjectId
 
 # `beanie_models` is module-scoped and holds a Motor connection bound to that
 # scope's loop, so the tests have to run on the same one. Without the explicit

@@ -9,6 +9,7 @@ through.
 """
 
 import pytest
+
 from app.errors import PermanentError
 from app.pipelines import variant_runner
 

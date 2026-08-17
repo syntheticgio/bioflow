@@ -8,6 +8,7 @@ seam breaks.
 """
 
 import pytest
+
 from app.errors import NotFoundError, ProfileUnresolvedError
 from app.mcp import tools
 from app.services import profile_service, project_service

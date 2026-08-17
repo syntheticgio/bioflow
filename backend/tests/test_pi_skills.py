@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 import pytest
+
 from app.mcp import server as mcp_server
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

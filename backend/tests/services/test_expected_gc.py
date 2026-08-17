@@ -5,9 +5,9 @@ database seam exists; these cover the table and the resolution order.
 """
 
 import pytest
+
 from app.models import ObjectRole
 from app.services import expected_gc
-
 from tests.services.helpers import make_object, make_project
 
 

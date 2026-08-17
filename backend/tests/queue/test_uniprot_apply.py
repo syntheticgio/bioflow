@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+
 from app.models import ObjectRole
 from app.queue import results
 

@@ -8,6 +8,7 @@ platform default rather than presenting a guess as fact.
 """
 
 import pytest
+
 from app.pipelines import qc_stats
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.qc_stats import infer_chemistry

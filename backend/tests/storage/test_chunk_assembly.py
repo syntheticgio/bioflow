@@ -4,11 +4,12 @@ import hashlib
 import threading
 
 import pytest
-from app.errors import JobCancelled, PermanentError
-from app.storage.chunk_assembly import assemble_and_hash
 from hypothesis import given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
+
+from app.errors import JobCancelled, PermanentError
+from app.storage.chunk_assembly import assemble_and_hash
 
 
 def write_chunks(tmp_path, pieces: list[bytes]) -> list:

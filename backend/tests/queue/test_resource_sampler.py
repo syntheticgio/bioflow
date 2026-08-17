@@ -7,6 +7,7 @@ flaky without exercising anything more.
 """
 
 import pytest
+
 from app.queue.resource_sampler import ResourceSampler
 
 

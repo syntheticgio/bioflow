@@ -13,9 +13,9 @@ absent everywhere.
 
 import pytest
 import pytest_asyncio
+
 from app.models import ObjectRole
 from app.services import pipeline_service, project_service
-
 from tests.services.helpers import make_object
 
 # `beanie_models` is module-scoped and holds a Motor connection bound to that

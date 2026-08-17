@@ -4,6 +4,7 @@ its failure silently destroys a credential.
 
 import pytest
 import pytest_asyncio
+
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 from app.services.ai import crypto, provider_service
 

@@ -5,14 +5,15 @@ both directions -- too low over-admits, too high starves the queue.
 """
 
 import pytest
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
 from app.services.pipeline_service import MIN_DECLARED_MEM_MB
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
 
 
 @pytest.fixture(autouse=True)

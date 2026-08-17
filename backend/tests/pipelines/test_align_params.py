@@ -7,6 +7,7 @@ command that actually ran said another.
 """
 
 import pytest
+
 from app.errors import ValidationError
 from app.pipelines import align_params
 

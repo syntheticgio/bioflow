@@ -2,6 +2,7 @@ import gzip
 import threading
 
 import pytest
+
 from app.errors import JobCancelled
 from app.models import Compression
 from app.pipelines import contamination_stats as cs

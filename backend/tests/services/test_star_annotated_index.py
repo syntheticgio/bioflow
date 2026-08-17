@@ -11,11 +11,11 @@ the distinct sidecar role, the dedup key, and the STAR-only guard.
 
 import pytest
 import pytest_asyncio
+
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectRole, SidecarRole
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service, project_service
-
 from tests.services.helpers import TEST_OWNER, make_object
 
 pytestmark = [

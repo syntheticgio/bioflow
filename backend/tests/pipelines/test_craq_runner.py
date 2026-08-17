@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+
 from app.pipelines import craq_runner
 
 

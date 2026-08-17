@@ -5,6 +5,7 @@ same split as `test_launch_rules.py` for the pipeline launches.
 """
 
 import pytest
+
 from app.metadata.sra_resolver import RunInfo
 from app.services import sra_service
 

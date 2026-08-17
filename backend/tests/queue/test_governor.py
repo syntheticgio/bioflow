@@ -12,6 +12,7 @@ fast and deterministic.
 import inspect
 
 import pytest
+
 from app.models import JobClass
 from app.queue.governor import (
     CPU_CLOSE,

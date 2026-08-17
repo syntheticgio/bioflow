@@ -24,10 +24,11 @@ actually visible.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.models import JobClass, Schedule
 from app.queue import keys, scheduler
 from app.queue import queue as queue_mod
-from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),

@@ -1,6 +1,7 @@
 """Install/uninstall job handlers for ON_DEMAND_IMAGE tools."""
 
 import pytest
+
 from app.errors import PermanentError, RetryableError
 from app.pipelines import tools
 from app.queue import tool_handlers

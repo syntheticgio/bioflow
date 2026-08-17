@@ -65,3 +65,13 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
+
+[tool.ruff.lint.isort]
+# Pin first-party detection to the package name rather than letting it fall
+# back to `src`, which ruff resolves relative to the *invocation* directory.
+# Without this, `ruff check` from backend/ sees backend/app and treats `app` as
+# first-party, while CI's `ruff check --config backend/pyproject.toml ...` from
+# the repo root finds no app/ there and treats it as third-party. The two
+# orderings are mutually exclusive, so one of them was always wrong and no file
+# layout could satisfy both -- see #510.
+known-first-party = ["app"]
