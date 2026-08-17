@@ -102,3 +102,50 @@ def test_serialized_collections_excludes_secret_bearing_collections():
     """
     forbidden = {"ai_providers", "app_settings", "nodes", "profiles"}
     assert forbidden.isdisjoint(set(export_service.SERIALIZED_COLLECTIONS))
+
+
+def test_manifest_lists_excluded_blobs_as_excluded():
+    small = Blob(
+        id="a" * 64, size=100, state=BlobState.PRESENT, rel_path="ab/small", content_sha256="a" * 64
+    )
+    large = Blob(
+        id="b" * 64, size=10_000, state=BlobState.PRESENT, rel_path="cd/large", content_sha256="b" * 64
+    )
+    bundle = export_service.ExportBundle(blobs=[small, large])
+
+    tsv, included = export_service.build_manifest(bundle, threshold_bytes=1_000)
+
+    rows = [line.split("\t") for line in tsv.strip().splitlines()[1:]]
+    by_size = {r[1]: r for r in rows}
+    assert by_size["100"][-1] == "included"
+    assert by_size["10000"][-1] == "excluded"
+    assert [b.id for b in included] == [small.id]
+
+
+def test_manifest_has_a_header_row():
+    bundle = export_service.ExportBundle(blobs=[])
+    tsv, included = export_service.build_manifest(bundle, threshold_bytes=1_000)
+    assert tsv.splitlines()[0].split("\t") == [
+        "blob_id",
+        "size",
+        "content_sha256",
+        "state",
+        "rel_path",
+        "bytes",
+    ]
+    assert included == []
+
+
+def test_manifest_falls_back_to_id_when_content_sha256_is_unset():
+    # content_sha256 is only populated for compressed blobs whose stored
+    # bytes differ from the plaintext hash (backend/app/models/blob.py). The
+    # common case -- an uncompressed blob, or one predating compression --
+    # leaves it None, and the manifest must still report a real digest by
+    # falling back to `id`, which is always the stored-bytes hash.
+    blob = Blob(id="c" * 64, size=10, state=BlobState.PRESENT, rel_path="ef/plain")
+    bundle = export_service.ExportBundle(blobs=[blob])
+
+    tsv, _ = export_service.build_manifest(bundle, threshold_bytes=1_000)
+
+    row = tsv.strip().splitlines()[1].split("\t")
+    assert row[2] == "c" * 64
