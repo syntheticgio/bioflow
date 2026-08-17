@@ -17,6 +17,7 @@ export function SettingsNav() {
     { to: "/settings/tools", label: "Tools" },
     { to: "/settings/nodes", label: "Nodes" },
     { to: "/settings/resources", label: "Resources" },
+    { to: "/settings/storage", label: "Storage" },
     { to: "/settings/mcp", label: "MCP" },
     { to: "/settings/general", label: "General" },
   ];
