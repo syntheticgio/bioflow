@@ -384,6 +384,82 @@ def _render_node_env(
     )
 
 
+# --- Remote command execution ---
+
+class RemoteStep(BaseModel):
+    """One remote command, with the phase it reports and how it fails.
+
+    `describe` turns the command's own output into the message the user sees.
+    It takes the completed result rather than a preformatted string so a step
+    can say something specific about *why* the command failed -- the exit
+    status alone is rarely enough to act on, and the stderr/stdout fallback
+    ordering was previously repeated at every call site.
+    """
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    phase: str
+    message: str
+    command: str
+    timeout: float
+    describe_failure: object
+
+
+class RemoteCommandError(Exception):
+    """A command in a sequence exited non-zero.
+
+    Carries the step that failed so the caller can report both the phase the
+    task was in and a message describing the failure, without re-deriving
+    either from the exception text.
+    """
+
+    def __init__(self, step: RemoteStep, reason: str) -> None:
+        super().__init__(reason)
+        self.step = step
+        self.reason = reason
+
+
+def _command_output(result) -> str:
+    """A command's output for display: stderr, else stdout, else a placeholder.
+
+    stderr first because a command that failed usually explains itself there;
+    stdout is the fallback for tools that report errors on it anyway.
+    """
+    return result.stderr or result.stdout or "no output"
+
+
+async def _execute_remote_commands(
+    conn,
+    steps: list[RemoteStep],
+    *,
+    on_progress,
+) -> None:
+    """Run `steps` in order over `conn`, stopping at the first failure.
+
+    Raises `RemoteCommandError` naming the step that failed rather than
+    returning a status, so a caller cannot continue past a failed command by
+    forgetting to check a return value -- which is the failure mode that
+    matters here, since every later step assumes the earlier ones ran.
+
+    `on_progress` is awaited once per *phase*, not once per command: several
+    commands can share a phase (writing the compose file and creating the
+    directory it goes in are both `setup_install`), and re-reporting the same
+    phase would replace the message the user is reading with an identical one.
+    The phases are what the provisioning UI renders, so a step's phase string
+    is a user-visible contract, not an internal label.
+    """
+    reported: str | None = None
+    for step in steps:
+        if step.phase != reported:
+            await on_progress(step.phase, step.message)
+            reported = step.phase
+        result = await asyncio.wait_for(
+            conn.run(step.command, check=False), timeout=step.timeout
+        )
+        if result.exit_status != 0:
+            raise RemoteCommandError(step, step.describe_failure(result))
+
+
 # --- Provisioning executor ---
 
 async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
@@ -440,20 +516,6 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             return await _fail(str(e))
 
         try:
-            # Phase 2: verify_docker
-            await _update("verify_docker", f"Checking Docker on {req.host}…")
-            result = await asyncio.wait_for(
-                conn.run("docker version --format '{{.Server.Version}}'", check=False),
-                timeout=15,
-            )
-            if result.exit_status != 0:
-                return await _fail(
-                    f"Docker is not available on {req.host}. "
-                    "Install Docker first: https://docs.docker.com/engine/install/"
-                )
-
-            # Phase 3: setup_install
-            #
             # INSTALL_DIR stays unexpanded on purpose: `~` must be resolved by
             # the *remote* user's shell, not this container's. Expanding it
             # here with os.path.expanduser() read the API container's own HOME
@@ -461,43 +523,16 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             # node, which fails for any non-root SSH user. It is shared with
             # node_update_service so provisioning and updates cannot drift
             # onto different directories.
-            await _update("setup_install", "Preparing install directory…")
             install_dir = node_update_service.INSTALL_DIR
-            mkdir_result = await asyncio.wait_for(
-                conn.run(f"mkdir -p {install_dir}", check=False),
-                timeout=15,
-            )
-            if mkdir_result.exit_status != 0:
-                return await _fail(
-                    f"Could not create {install_dir} on {req.host}: "
-                    f"{mkdir_result.stderr or mkdir_result.stdout or 'no output'}"
-                )
 
             # The quoted heredoc delimiter is load-bearing: the compose file
             # is almost entirely `${...}` references that the *node's* Compose
-            # must expand against the .env written below. An unquoted
+            # must expand against the .env written alongside it. An unquoted
             # delimiter would let the remote shell expand them first, and
             # since none of them are set in that shell they would all land as
             # empty strings -- yielding a syntactically valid compose file
             # with no image and no volumes.
             compose_contents = _render_node_compose()
-            compose_result = await asyncio.wait_for(
-                conn.run(
-                    f"cat > {install_dir}/docker-compose.yml << 'HERMESEOF'\n"
-                    f"{compose_contents}\nHERMESEOF",
-                    check=False,
-                ),
-                timeout=15,
-            )
-            if compose_result.exit_status != 0:
-                return await _fail(
-                    f"Could not write {install_dir}/docker-compose.yml on "
-                    f"{req.host}: "
-                    f"{compose_result.stderr or compose_result.stdout or 'no output'}"
-                )
-
-            # Phase 4: write_env
-            await _update("write_env", "Writing node configuration…")
             primary_host = _primary_hostname()
             urls = _build_connection_urls(primary_host)
             env_contents = _render_node_env(
@@ -508,18 +543,65 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 storage_location=req.storage_location,
                 worker_replicas=req.worker_replicas,
             )
-            env_result = await asyncio.wait_for(
-                conn.run(
-                    f"cat > {install_dir}/.env << 'HERMESEOF'\n{env_contents}\nHERMESEOF",
-                    check=False,
-                ),
-                timeout=15,
-            )
-            if env_result.exit_status != 0:
-                return await _fail(
-                    f"Could not write {install_dir}/.env on {req.host}: "
-                    f"{env_result.stderr or env_result.stdout or 'no output'}"
+
+            # Phases 2-4: verify_docker, setup_install, write_env.
+            try:
+                await _execute_remote_commands(
+                    conn,
+                    [
+                        RemoteStep(
+                            phase="verify_docker",
+                            message=f"Checking Docker on {req.host}…",
+                            command="docker version --format '{{.Server.Version}}'",
+                            timeout=15,
+                            describe_failure=lambda _r: (
+                                f"Docker is not available on {req.host}. "
+                                "Install Docker first: "
+                                "https://docs.docker.com/engine/install/"
+                            ),
+                        ),
+                        RemoteStep(
+                            phase="setup_install",
+                            message="Preparing install directory…",
+                            command=f"mkdir -p {install_dir}",
+                            timeout=15,
+                            describe_failure=lambda r: (
+                                f"Could not create {install_dir} on {req.host}: "
+                                f"{_command_output(r)}"
+                            ),
+                        ),
+                        RemoteStep(
+                            phase="setup_install",
+                            message="Writing the node compose file…",
+                            command=(
+                                f"cat > {install_dir}/docker-compose.yml "
+                                f"<< 'HERMESEOF'\n{compose_contents}\nHERMESEOF"
+                            ),
+                            timeout=15,
+                            describe_failure=lambda r: (
+                                f"Could not write {install_dir}/docker-compose.yml "
+                                f"on {req.host}: {_command_output(r)}"
+                            ),
+                        ),
+                        RemoteStep(
+                            phase="write_env",
+                            message="Writing node configuration…",
+                            command=(
+                                f"cat > {install_dir}/.env << 'HERMESEOF'\n"
+                                f"{env_contents}\nHERMESEOF"
+                            ),
+                            timeout=15,
+                            describe_failure=lambda r: (
+                                f"Could not write {install_dir}/.env on "
+                                f"{req.host}: {_command_output(r)}"
+                            ),
+                        ),
+                    ],
+                    on_progress=_update,
                 )
+            except RemoteCommandError as e:
+                task.phase = e.step.phase
+                return await _fail(e.reason)
 
             # Phase 5: install_key
             #
@@ -543,40 +625,48 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
             node_doc.ssh_key_installed_at = datetime.now(UTC)
             await node_doc.save()
 
-            # Phase 6: pull_image
-            await _update("pull_image", "Pulling backend image…")
-            pull_result = await asyncio.wait_for(
-                conn.run(
-                    "docker pull ghcr.io/syntheticgio/bioflow-backend:latest",
-                    check=False,
-                ),
-                timeout=600,
-            )
-            if pull_result.exit_status != 0:
-                return await _fail(
-                    f"Image pull failed: {pull_result.stderr or pull_result.stdout}"
-                )
-
-            # Phase 7: start_worker
-            await _update("start_worker", "Starting worker…")
+            # Phases 6-7: pull_image, start_worker.
+            #
             # `--no-deps worker`, matching the launcher's own up_node (see
             # launcher/src-tauri/src/docker/shell.rs). The generated compose
             # file names only the worker, so this is belt-and-braces there --
             # but it is what keeps this command correct if the file ever
             # regains a service, and it mirrors what the launcher does on a
             # node provisioned the other way.
-            up_result = await asyncio.wait_for(
-                conn.run(
-                    f"docker compose -f {install_dir}/docker-compose.yml "
-                    "up -d --no-deps worker",
-                    check=False,
-                ),
-                timeout=60,
-            )
-            if up_result.exit_status != 0:
-                return await _fail(
-                    f"Worker failed to start: {up_result.stderr or up_result.stdout}"
+            try:
+                await _execute_remote_commands(
+                    conn,
+                    [
+                        RemoteStep(
+                            phase="pull_image",
+                            message="Pulling backend image…",
+                            command=(
+                                "docker pull "
+                                "ghcr.io/syntheticgio/bioflow-backend:latest"
+                            ),
+                            timeout=600,
+                            describe_failure=lambda r: (
+                                f"Image pull failed: {r.stderr or r.stdout}"
+                            ),
+                        ),
+                        RemoteStep(
+                            phase="start_worker",
+                            message="Starting worker…",
+                            command=(
+                                f"docker compose -f {install_dir}/docker-compose.yml "
+                                "up -d --no-deps worker"
+                            ),
+                            timeout=60,
+                            describe_failure=lambda r: (
+                                f"Worker failed to start: {r.stderr or r.stdout}"
+                            ),
+                        ),
+                    ],
+                    on_progress=_update,
                 )
+            except RemoteCommandError as e:
+                task.phase = e.step.phase
+                return await _fail(e.reason)
 
             # Phase 8: enrolled
             await _update("enrolled", "Node enrolled ✓")
