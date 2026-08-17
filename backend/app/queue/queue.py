@@ -134,7 +134,14 @@ async def enqueue(
         return None
 
     if depends_on:
-        await _handle_dependencies(job, depends_on, tolerate_failure_of, job_type, owner)
+        held = await _handle_dependencies(
+            job, depends_on, tolerate_failure_of, job_type, owner
+        )
+        if held:
+            # Failed or still waiting: the state _handle_dependencies wrote is
+            # the final word, and _push_to_redis would both overwrite it and
+            # make the job claimable.
+            return job
 
     await _push_to_redis(job, delay_seconds=delay_seconds, target_node=_node)
     await publish_event(
@@ -198,8 +205,16 @@ async def _handle_dependencies(
     tolerate_failure_of: list[PydanticObjectId],
     job_type: str,
     owner: str,
-) -> None:
+) -> bool:
     """Resolve dependency chain for a job that has dependencies.
+
+    Returns True when the job is *held* -- failed outright, or parked in
+    BLOCKED -- meaning the caller must not dispatch it. Returning this rather
+    than leaving `enqueue` to infer it from the job's state is deliberate: the
+    state written here is not durable against a subsequent `_push_to_redis`,
+    which ends in an unconditional `job.set(...)` and would silently promote a
+    doomed or waiting job to QUEUED *and* put it on the ready set for a worker
+    to claim.
 
     Re-reads dependencies *after* inserting, never before. A dependency that
     finished during the insert would otherwise be missed by both sides:
@@ -213,7 +228,7 @@ async def _handle_dependencies(
     failed = await _failed_dependencies(depends_on, tolerate_failure_of)
     if failed:
         await _fail_blocked_job(job, failed)
-        return
+        return True
     if outstanding:
         await job.set({Job.state: JobState.BLOCKED})
         log.info(
@@ -225,9 +240,10 @@ async def _handle_dependencies(
         await publish_event(
             "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
         )
-        return
+        return True
 
     # All dependencies satisfied; fall through to _push_to_redis in enqueue().
+    return False
 
 
 def classify_dependencies(

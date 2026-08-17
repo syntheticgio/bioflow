@@ -195,8 +195,68 @@ class TestEnqueueHonoursTolerance:
         )
 
         fresh = await Job.get(job.id)
-        assert fresh.state is not JobState.FAILED
-        assert fresh.state is not JobState.BLOCKED
+        assert fresh.state is JobState.QUEUED
+
+
+class TestEnqueueDoesNotDispatchAHeldJob:
+    """`enqueue`'s docstring: a job with unsatisfied dependencies "is never
+    pushed to Redis". `_handle_dependencies` runs for its side effects and
+    returns None in every branch, so the state it writes is only durable if
+    `enqueue` then stops -- and `_push_to_redis` ends with an unconditional
+    `job.set({Job.state: ...})` that overwrites it.
+
+    The failure is invisible from the state alone: the job is also pushed onto
+    the ready set, so a worker claims it. An alignment runs against an index
+    that failed to build, or that is still building.
+    """
+
+    async def test_a_failed_dependency_leaves_the_job_failed_not_queued(self):
+        from app.queue.queue import enqueue
+
+        culprit = await _failed("build_index")
+
+        job = await enqueue("align", owner="tester", depends_on=[culprit.id])
+
+        fresh = await Job.get(job.id)
+        assert fresh.state is JobState.FAILED
+
+    async def test_a_failed_dependency_keeps_the_job_off_the_ready_set(self, redis):
+        """The state is the symptom; this is the damage. A doomed job on the
+        ready set is claimable."""
+        from app.queue import keys
+        from app.queue.queue import enqueue
+
+        culprit = await _failed("build_index")
+
+        job = await enqueue("align", owner="tester", depends_on=[culprit.id])
+
+        assert await redis.zscore(keys.ready_key(None), str(job.id)) is None
+
+    async def test_an_unfinished_dependency_leaves_the_job_blocked(self):
+        """Nothing failed here -- the dependency is simply still running, which
+        is the ordinary case every wired-up pipeline hits."""
+        from app.queue.queue import enqueue
+
+        running = Job(type="build_index", state=JobState.RUNNING)
+        await running.insert()
+
+        job = await enqueue("align", owner="tester", depends_on=[running.id])
+
+        fresh = await Job.get(job.id)
+        assert fresh.state is JobState.BLOCKED
+
+    async def test_an_unfinished_dependency_keeps_the_job_off_the_ready_set(
+        self, redis
+    ):
+        from app.queue import keys
+        from app.queue.queue import enqueue
+
+        running = Job(type="build_index", state=JobState.RUNNING)
+        await running.insert()
+
+        job = await enqueue("align", owner="tester", depends_on=[running.id])
+
+        assert await redis.zscore(keys.ready_key(None), str(job.id)) is None
 
 
 class TestDefaultsAreUnchanged:
