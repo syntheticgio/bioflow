@@ -356,7 +356,16 @@ export function App() {
         {state.kind === "Stopped" && (
           <div className="status-line">
             <span>Stopped</span>
-            <span>Launcher 0.1.0</span>
+            <span>
+              Launcher 0.1.0
+              <button
+                className="btn-reload"
+                title="Reload launcher"
+                onClick={() => window.location.reload()}
+              >
+                ↻
+              </button>
+            </span>
           </div>
         )}
         {state.kind === "Running" && (
@@ -365,7 +374,16 @@ export function App() {
               <span className="status-dot" />
               Running · localhost:{settings.port}
             </span>
-            <span>API healthy</span>
+            <span>
+              API healthy
+              <button
+                className="btn-reload"
+                title="Reload launcher"
+                onClick={() => window.location.reload()}
+              >
+                ↻
+              </button>
+            </span>
           </div>
         )}
         <div className="masthead-rule-thin" />

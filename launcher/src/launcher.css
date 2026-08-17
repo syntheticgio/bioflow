@@ -86,6 +86,24 @@ a:hover { color: var(--color-accent-2); }
 }
 .btn-warn:hover:not(:disabled) { background: var(--color-accent-2-100); }
 
+/* Subtle reload button in the status line — small, unobtrusive, for dev use. */
+.btn-reload {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-62);
+  font-size: 14px;
+  padding: 0 4px;
+  margin-left: 6px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+}
+.btn-reload:hover {
+  color: var(--color-text);
+  background: var(--color-neutral-200);
+}
+
 /* ── masthead ── */
 .masthead { padding: 26px 36px 0; }
 .masthead-row {
