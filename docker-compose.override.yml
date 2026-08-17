@@ -11,7 +11,7 @@ services:
       context: ./backend
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
-      - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
       # Read at startup to log *which checkout* this bind mount is serving.
       # Only the mounted source decides what code runs, so a checkout parked
@@ -44,7 +44,7 @@ services:
       context: ./backend
     command: ["watchfiles", "python -m app.worker_main", "app/"]
     volumes:
-      - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
       # Same reason as the api service's: the worker runs mounted source too,
       # so it reports the checkout it is serving at startup (#452).

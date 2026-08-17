@@ -20,7 +20,7 @@ x-backend-env: &backend-env
   # on-demand tool image) gets its mounts from the host, so it needs the host
   # value under a name that cannot be confused with the container path the
   # process already has.
-  BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}
+  BIOINFO_HOME_HOST: ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}
 
 services:
   mongo:
@@ -95,7 +95,7 @@ services:
       NODE_CONNECTION_MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017/biopipe?replicaSet=rs0&directConnection=true}
       NODE_CONNECTION_REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
-      - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       # The api never *runs* a sibling container -- the worker does -- but it
       # still needs to answer "could this run?" at launch time.
       # `tools.require()` in launch_variant_calling probes DeepVariant (and,
@@ -148,7 +148,7 @@ services:
       <<: *backend-env
       WORKER_MAX_CONCURRENT: ${WORKER_MAX_CONCURRENT:-4}
     volumes:
-      - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
+      - ${BIOINFO_HOME:-/Volumes/FastDataExtension/BioinfoHelper}:/data
       # The host's Docker socket, so the worker can start sibling containers
       # for tools too large to vendor into this image. DeepVariant is 8.83GB,
       # mostly TensorFlow on a Python 3.10 we do not otherwise ship. See the
