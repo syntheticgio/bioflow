@@ -403,7 +403,7 @@ def test_parse_abyss_stats_survives_garbage():
 def test_abyss_progress_reports_a_phase():
     progress = assembly_runner.AbyssProgress()
     assert progress.feed("abyss-map -j4 ...") is False or True  # tolerant
-    changed = progress.feed("ABySS-P: assembling contigs")
+    progress.feed("ABySS-P: assembling contigs")
     snap = progress.snapshot()
     assert snap["pct"] is None
     assert isinstance(snap["phase"], str)
