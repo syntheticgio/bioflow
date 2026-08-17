@@ -133,8 +133,16 @@ async def enqueue(
     if job is None:
         return None
 
-    if depends_on:
-        await _handle_dependencies(job, depends_on, tolerate_failure_of, job_type, owner)
+    if depends_on and not await _handle_dependencies(
+        job, depends_on, tolerate_failure_of, job_type, owner
+    ):
+        # Failed on a dependency, or parked in BLOCKED to wait for one. Either
+        # way it must not reach the ready queue: `_push_to_redis` sets QUEUED
+        # unconditionally, so dispatching here would overwrite the state just
+        # written and hand a worker a job whose inputs do not exist. The
+        # blocked path publishes its own `job.enqueued`, so returning here
+        # also keeps that event from firing twice.
+        return job
 
     await _push_to_redis(job, delay_seconds=delay_seconds, target_node=_node)
     await publish_event(
@@ -198,8 +206,22 @@ async def _handle_dependencies(
     tolerate_failure_of: list[PydanticObjectId],
     job_type: str,
     owner: str,
-) -> None:
+) -> bool:
     """Resolve dependency chain for a job that has dependencies.
+
+    Returns whether the caller should go on to dispatch the job -- True only
+    when every dependency is already satisfied. A job this function failed or
+    parked in BLOCKED must not then be pushed to Redis.
+
+    That return value is load-bearing rather than informational, which is why
+    it is a bool and not None. When this logic was inline in `enqueue`, its two
+    early exits were `return job` statements that left `enqueue` outright and
+    so skipped the push; extracting it (#429) turned them into returns from
+    *this* function, and control fell through to the push regardless. Both
+    exits then wrote their state and had it immediately overwritten with
+    QUEUED, so a job whose dependency had already failed -- or was still
+    running -- was pushed onto the ready queue for a worker to claim and run
+    against an input that was never produced (#445).
 
     Re-reads dependencies *after* inserting, never before. A dependency that
     finished during the insert would otherwise be missed by both sides:
@@ -213,7 +235,7 @@ async def _handle_dependencies(
     failed = await _failed_dependencies(depends_on, tolerate_failure_of)
     if failed:
         await _fail_blocked_job(job, failed)
-        return
+        return False
     if outstanding:
         await job.set({Job.state: JobState.BLOCKED})
         log.info(
@@ -225,9 +247,10 @@ async def _handle_dependencies(
         await publish_event(
             "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
         )
-        return
+        return False
 
-    # All dependencies satisfied; fall through to _push_to_redis in enqueue().
+    # Every dependency already succeeded, so there is nothing to wait for.
+    return True
 
 
 def classify_dependencies(

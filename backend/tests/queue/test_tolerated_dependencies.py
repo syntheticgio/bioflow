@@ -178,6 +178,46 @@ class TestEnqueueHonoursTolerance:
         fresh = await Job.get(job.id)
         assert fresh.state is JobState.FAILED
 
+    async def test_an_untolerated_failure_is_not_pushed_to_the_ready_queue(self):
+        """Failing the job in Mongo is only half of refusing it.
+
+        The state and the Redis push have to agree: a job left on the ready
+        queue is claimable regardless of what its document says, so a worker
+        picks it up and runs it against the input its dependency never
+        produced. That is the actual harm behind the wrong state, and it is
+        invisible to an assertion that only reads the document.
+        """
+        from app.queue import keys
+        from app.queue.queue import enqueue, get_redis
+
+        culprit = await _failed("build_index")
+
+        job = await enqueue("align", owner="tester", depends_on=[culprit.id])
+
+        queued = await get_redis().zscore(keys.ready_key(None), str(job.id))
+        assert queued is None
+
+    async def test_an_in_flight_dependency_leaves_the_job_blocked(self):
+        """The sibling of the failed case, on the same fall-through.
+
+        Nothing covered this at the `enqueue` level, which is how both halves
+        regressed together: a job whose dependency is still running was pushed
+        to the ready queue and flipped to QUEUED, so it ran immediately
+        instead of waiting.
+        """
+        from app.models.job import Job as JobDoc
+        from app.queue import keys
+        from app.queue.queue import enqueue, get_redis
+
+        running = JobDoc(type="build_index", state=JobState.RUNNING)
+        await running.insert()
+
+        job = await enqueue("align", owner="tester", depends_on=[running.id])
+
+        fresh = await Job.get(job.id)
+        assert fresh.state is JobState.BLOCKED
+        assert await get_redis().zscore(keys.ready_key(None), str(job.id)) is None
+
     async def test_a_tolerated_failure_alongside_a_success_dispatches(self):
         """With nothing left in flight and the only failure tolerated, the job
         is runnable immediately -- it must not be parked in BLOCKED waiting for
