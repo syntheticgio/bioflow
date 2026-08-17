@@ -25,6 +25,9 @@ skills-lock.json
 .worktrees/
 .pi-subagents/
 
+# Backups written by ops/backup.sh. Timestamped directories, never pruned.
+backups/
+
 # Per-machine build setup: signing identities, API key IDs, local file paths.
 # Never contains the private key itself (that lives outside the repo), but
 # does carry Key ID / Issuer ID, which are still not something to publish.

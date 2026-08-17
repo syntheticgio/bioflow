@@ -1,4 +1,4 @@
-.PHONY: up down logs ps build containers test test-queue lint shell mongo redis clean check-home release release-launcher
+.PHONY: up down logs ps build containers test test-queue lint shell mongo redis clean check-home release release-launcher backup restore backup-verify
 
 COMPOSE := docker compose
 
@@ -51,6 +51,17 @@ redis:
 
 clean: ## Stop and DELETE the mongo/redis volumes. Does not touch BIOINFO_HOME.
 	$(COMPOSE) down -v
+
+backup: ## Back up the Mongo database and enumerate /data (BACKUP_DIR= to redirect)
+	./ops/backup.sh backup
+
+restore: ## Restore a backup. Overwrites the database. BACKUP=<dir> required.
+	@test -n "$(BACKUP)" || (echo "ERROR: set BACKUP=<dir>, e.g. make restore BACKUP=backups/2026-08-17T134502Z"; exit 1)
+	./ops/backup.sh restore "$(BACKUP)"
+
+backup-verify: ## Check /data against a backup's manifest. BACKUP=<dir> required.
+	@test -n "$(BACKUP)" || (echo "ERROR: set BACKUP=<dir>"; exit 1)
+	./ops/backup.sh verify "$(BACKUP)"
 
 check-home: ## Verify BIOINFO_HOME exists and is writable on the host
 	@test -f .env || (echo "ERROR: no .env file. Run: cp .env.example .env"; exit 1)
