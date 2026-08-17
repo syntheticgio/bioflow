@@ -119,3 +119,62 @@ def test_restore_doc_states_what_is_not_recovered(tmp_path):
     assert "--force" in text
     assert "provider keys" in text.lower()
     assert "no migration" in text.lower()
+
+
+def test_json_field_reads_a_string(tmp_path):
+    m = tmp_path / "manifest.json"
+    m.write_text('{\n  "version": "0.5.1",\n  "blob_count": 42\n}\n')
+    assert sh(f'json_field {m} version', tmp_path).stdout.strip() == "0.5.1"
+
+
+def test_json_field_reads_a_number(tmp_path):
+    m = tmp_path / "manifest.json"
+    m.write_text('{\n  "version": "0.5.1",\n  "blob_count": 42\n}\n')
+    assert sh(f'json_field {m} blob_count', tmp_path).stdout.strip() == "42"
+
+
+def test_restore_refuses_a_directory_missing_files(tmp_path):
+    incomplete = tmp_path / "backup"
+    (incomplete / "dump").mkdir(parents=True)
+    result = sh(f"preflight_backup_dir {incomplete}", tmp_path)
+    assert result.returncode != 0
+    assert "manifest.json" in result.stderr
+
+
+def test_preflight_accepts_a_complete_directory(tmp_path):
+    good = tmp_path / "backup"
+    (good / "dump").mkdir(parents=True)
+    for name in ("data-manifest.tsv", "providers.txt", "manifest.json", "RESTORE.md"):
+        (good / name).write_text("x")
+    result = sh(f"preflight_backup_dir {good}", tmp_path)
+    assert result.returncode == 0, result.stderr
+
+
+def test_verify_reports_a_missing_blob(tmp_path):
+    data = tmp_path / "data"
+    (data / "ab").mkdir(parents=True)
+    (data / "ab" / "present").write_text("hello")
+
+    manifest = tmp_path / "data-manifest.tsv"
+    manifest.write_text(
+        "blob_id\tsize\tpath\tcontent_sha256\tstate\n"
+        "present\t5\tab/present\tsha-a\tactive\n"
+        "gone\t9\tab/gone\tsha-b\tactive\n"
+    )
+    result = sh(f"check_manifest_against_data {manifest} {data}", tmp_path)
+    assert "ab/gone" in result.stdout
+    assert "ab/present" not in result.stdout
+
+
+def test_verify_is_silent_when_everything_is_present(tmp_path):
+    data = tmp_path / "data"
+    (data / "ab").mkdir(parents=True)
+    (data / "ab" / "present").write_text("hello")
+
+    manifest = tmp_path / "data-manifest.tsv"
+    manifest.write_text(
+        "blob_id\tsize\tpath\tcontent_sha256\tstate\n"
+        "present\t5\tab/present\tsha-a\tactive\n"
+    )
+    result = sh(f"check_manifest_against_data {manifest} {data}", tmp_path)
+    assert result.stdout.strip() == ""
