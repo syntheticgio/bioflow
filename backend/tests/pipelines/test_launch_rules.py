@@ -7,7 +7,6 @@ what makes two runs identical -- without a database or HTTP.
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectStatus
 from app.pipelines import tools

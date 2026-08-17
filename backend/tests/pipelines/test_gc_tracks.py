@@ -1,7 +1,6 @@
 import threading
 
 import pytest
-
 from app.errors import JobCancelled
 from app.models import Compression
 from app.pipelines import gc_tracks

@@ -8,7 +8,6 @@ decides whether a job exists, so Redis is stubbed rather than provided.
 import uuid
 
 import pytest
-
 from app.errors import ConflictError, NotFoundError, ValidationError
 from app.models import Job, JobState
 from app.pipelines import tools

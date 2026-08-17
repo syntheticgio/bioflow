@@ -15,11 +15,10 @@ import importlib
 import inspect
 import pkgutil
 
-from beanie import Document
-from pymongo import IndexModel
-
 import app.models
 from app.models import ALL_MODELS
+from beanie import Document
+from pymongo import IndexModel
 
 # Bases that exist to be subclassed, not stored. These have no collection of
 # their own and must not be registered.

@@ -11,7 +11,6 @@ contig's tally as the whole run's.
 from pathlib import Path
 
 import pytest
-
 from app.pipelines import polypolish_runner as runner
 
 # Real output, one contig.
@@ -131,7 +130,9 @@ class TestPolishCommand:
 
 
 class TestCarefulThreshold:
-    @pytest.mark.parametrize("depth,expected", [(10.0, True), (25.0, True), (26.0, False), (60.0, False)])
+    @pytest.mark.parametrize(
+        "depth,expected", [(10.0, True), (25.0, True), (26.0, False), (60.0, False)]
+    )
     def test_threshold_in_both_directions(self, depth, expected):
         assert runner.params_for_depth(depth).careful is expected
 

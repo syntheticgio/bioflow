@@ -1,13 +1,11 @@
 """The variant summary job's failure style. Mirrors test_de_summary_handler.py."""
 
 import pytest
-
 from app.errors import PermanentError
 from app.models.ai import FailureReason, ProviderKind
 from app.queue import variant_summary_handlers
 from app.queue.registry import JobContext
 from app.queue.variant_summary_handlers import summarize_variant_results
-from app.services import variant_summary_prompt
 from app.services.ai.adapters import Completion, Failure
 from app.services.ai.router import ResolvedProvider
 

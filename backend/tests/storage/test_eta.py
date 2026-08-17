@@ -14,7 +14,6 @@ testable without a database.
 """
 
 import pytest
-
 from app.services.timing_service import ETA_PCT_FLOOR, eta_seconds
 
 

@@ -6,12 +6,12 @@ the flag on its drop path; these are the routes that bypass it.
 """
 
 import pytest
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS, JobState
 from app.models.job import Job, JobError
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from tests.queue.test_lifecycle import LEASE_MS, NOW_MS, claim
 
 

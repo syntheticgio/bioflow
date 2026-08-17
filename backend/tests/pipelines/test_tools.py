@@ -7,7 +7,6 @@ import subprocess
 import sys
 
 import pytest
-
 from app.errors import PermanentError
 from app.pipelines import tools
 

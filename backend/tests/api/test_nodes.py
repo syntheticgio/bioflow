@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import fakeredis.aioredis
 import pytest
-
 from app.api.v1.nodes import list_nodes
 
 

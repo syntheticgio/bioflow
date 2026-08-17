@@ -60,10 +60,9 @@ import json
 
 import httpx
 import pytest
-from fastapi import FastAPI
-
 from app.mcp.server import mount_mcp_app
 from app.services import profile_service
+from fastapi import FastAPI
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

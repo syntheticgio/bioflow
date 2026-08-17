@@ -103,6 +103,20 @@ This entry stays open: the root cause is still unconfirmed, evidence
 retention/durable sink and the mtime-timestamp check are still open, and this
 was written and reasoned about, not yet observed catching a real recurrence.
 
+**Update 2026-08-17:** [#412](https://github.com/syntheticgio/bioflow/issues/412)
+shipped a read-only maintenance sweep
+(`backend/app/services/drift_service.find_missing_report_dirs`, Settings >
+Storage) that detects exactly this symptom -- an object whose facts claim a
+computed report but whose report directory is gone -- across all four report
+roots, not just `qc_reports_dir`. This is detection, not diagnosis: the sweep
+finds that the drift happened, on a 6-hour schedule, so a recurrence no longer
+depends on a user noticing a 404 and reporting it before the forensic trail
+rots. It does not explain *why* a directory vanishes, so the root-cause
+question this entry tracks (reaper guard hole vs. `delete_object` cascade vs.
+something outside both paths) is still exactly as open as it was. If a future
+sweep catches a fresh occurrence, the object id and timestamp it reports are a
+much better starting point than "the report is gone" was here.
+
 ## Notify on new feedback submissions — FIXED
 
 Shipped 2026-08-05. New feedback submissions now push a Discord webhook embed

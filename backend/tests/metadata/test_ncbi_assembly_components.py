@@ -9,7 +9,6 @@ import json
 
 from app.metadata import ncbi_assembly_components as ac
 
-
 # GCF_000002445.2 -- fully annotated RefSeq assembly.
 ANNOTATED_PREVIEW = json.dumps({
     "resource_updated_on": "2026-07-29T14:33:00Z",

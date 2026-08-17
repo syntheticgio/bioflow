@@ -31,6 +31,7 @@ import { SettingsGeneral } from "./components/SettingsGeneral";
 import { SettingsMcp } from "./components/SettingsMcp";
 import { SettingsNodes } from "./components/SettingsNodes";
 import { SettingsResources } from "./components/SettingsResources";
+import { SettingsStorage } from "./components/SettingsStorage";
 import { SettingsTools } from "./components/SettingsTools";
 import { SettingsView } from "./components/SettingsView";
 import { SharesView } from "./components/SharesView";
@@ -71,6 +72,7 @@ export function DesktopRoutes() {
       <Route path="/settings/ai" element={<SettingsView />} />
       <Route path="/settings/tools" element={<SettingsTools />} />
       <Route path="/settings/resources" element={<SettingsResources />} />
+      <Route path="/settings/storage" element={<SettingsStorage />} />
       <Route path="/settings/mcp" element={<SettingsMcp />} />
       <Route path="/settings/general" element={<SettingsGeneral />} />
       <Route path="/settings/nodes" element={<SettingsNodes />} />

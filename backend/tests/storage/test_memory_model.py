@@ -10,9 +10,6 @@ outcome-filtered read that keeps failed/OOM-killed runs out of the fit.
 from types import SimpleNamespace
 
 import pytest
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
@@ -23,6 +20,8 @@ from app.services.timing_service import (
     _fit_segmented,
     _memory_samples_from,
 )
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`, so bare `async def` tests are collected.

@@ -1,9 +1,7 @@
 """The tile scan's contract with the QC handler: it contributes facts when it
 can, and it never fails the job when it cannot."""
 
-from pathlib import Path
 
-import pytest
 
 from app.queue import pipeline_handlers
 

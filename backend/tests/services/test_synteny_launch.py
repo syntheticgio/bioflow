@@ -14,12 +14,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
+from beanie import PydanticObjectId
 
 _MINIMAP2 = Tool(name="minimap2", path="/usr/local/bin/minimap2", version="2.28")
 

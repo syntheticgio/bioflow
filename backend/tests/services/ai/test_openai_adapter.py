@@ -8,7 +8,6 @@ import json
 import urllib.error
 
 import pytest
-
 from app.models.ai import FailureReason
 from app.services.ai import adapters
 from app.services.ai.adapters import Completion, Failure, OpenAICompatAdapter
@@ -161,6 +160,56 @@ class TestComplete:
         result = adapter.complete(system="s", user="u", model="m", max_tokens=10)
         assert isinstance(result, Failure)
         assert result.reason == FailureReason.BAD_RESPONSE
+
+    def test_empty_content_with_length_finish_names_the_budget(self, adapter, monkeypatch):
+        """A reasoning model can burn its whole token budget on
+        reasoning_content and return content: ''. finish_reason: length is the
+        tell -- the message should name the exhausted budget so the user knows
+        to raise llm_max_tokens or pick a non-reasoning model."""
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": "let me think about the reads...",
+                    },
+                    "finish_reason": "length",
+                }
+            ]
+        }
+        monkeypatch.setattr(
+            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+        )
+        result = adapter.complete(system="s", user="u", model="m", max_tokens=16)
+        assert isinstance(result, Failure)
+        assert result.reason == FailureReason.BAD_RESPONSE
+        assert result.detail is not None
+        assert "budget" in result.detail.lower()
+        assert "max_tokens=16" in result.detail
+
+    def test_empty_content_with_reasoning_names_the_reasoning(self, adapter, monkeypatch):
+        """reasoning_content present but content empty and finish_reason not
+        'length' -- still no text, but the detail should say the model only
+        reasoned, not that it returned garbage."""
+        payload = {
+            "choices": [
+                {
+                    "message": {
+                        "content": " ",
+                        "reasoning_content": "thinking...",
+                    },
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+        monkeypatch.setattr(
+            adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)
+        )
+        result = adapter.complete(system="s", user="u", model="m", max_tokens=400)
+        assert isinstance(result, Failure)
+        assert result.reason == FailureReason.BAD_RESPONSE
+        assert result.detail is not None
+        assert "reasoning" in result.detail.lower()
 
     def test_the_key_is_scrubbed_from_the_error_detail(self, adapter, monkeypatch):
         """Providers echo the key back. The detail is stored, so this matters."""

@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from app.config import Settings
 from app.storage.blob_transfer import (
     _collect_digests,
@@ -14,7 +13,6 @@ from app.storage.blob_transfer import (
     push_blob,
     resolve_payload_digests,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

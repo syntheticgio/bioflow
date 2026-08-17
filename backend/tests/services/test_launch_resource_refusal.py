@@ -3,14 +3,12 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from beanie import PydanticObjectId
 import pytest
-
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus
 from app.pipelines import resource_estimator
-from app.pipelines.aligners import Aligner
 from app.services import memory_estimate, pipeline_service
+from beanie import PydanticObjectId
 
 
 def _align_fixture():

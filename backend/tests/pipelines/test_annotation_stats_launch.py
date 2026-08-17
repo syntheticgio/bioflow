@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from app.errors import ValidationError
 from app.models.object import FormatKind, ObjectStatus
 from app.queue.registry import JobContext

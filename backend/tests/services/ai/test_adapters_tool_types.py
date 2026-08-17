@@ -2,7 +2,6 @@
 tool-calling. No wire logic here -- just the types."""
 
 import pytest
-
 from app.services.ai.adapters import ToolCall, ToolSpec
 
 

@@ -16,18 +16,16 @@ sidecar group, since that reconstruction logic is new and has no existing
 sibling to lean on for confidence.
 """
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.config import settings
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus, SidecarRole
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
+from beanie import PydanticObjectId
 
 _MERYL = Tool(name="meryl", path="/usr/local/bin/meryl", version="1.4.1")
 _MERQURY = Tool(name="merqury", path="/usr/local/bin/merqury.sh", version="1.3")
@@ -57,7 +55,9 @@ def _assembly():
 
 
 def _reads(*, name="reads.fastq.gz", project_id=None, mate_object_id=None):
-    return _obj(name=name, kind=FormatKind.FASTQ, project_id=project_id, mate_object_id=mate_object_id)
+    return _obj(
+        name=name, kind=FormatKind.FASTQ, project_id=project_id, mate_object_id=mate_object_id
+    )
 
 
 async def _run(

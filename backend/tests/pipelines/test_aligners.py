@@ -12,7 +12,6 @@ at best and a confusing error deep into a run at worst.
 from pathlib import Path
 
 import pytest
-
 from app.models import SidecarRole
 from app.pipelines import aligners
 from app.pipelines.aligners import Aligner

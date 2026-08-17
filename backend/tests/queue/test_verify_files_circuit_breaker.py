@@ -16,13 +16,12 @@ rather than N independent deletions.
 from pathlib import Path
 
 import pytest
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS, Blob, BlobState, BlobStorage
 from app.queue import handlers
 from app.queue.registry import JobContext
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`.

@@ -5,7 +5,6 @@ matching this codebase's convention.
 """
 
 import pytest
-
 from app.pipelines.align_runner import ReadChemistry
 
 

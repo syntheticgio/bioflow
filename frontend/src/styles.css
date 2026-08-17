@@ -5177,12 +5177,6 @@ table.software-matrix thead th.software-matrix-corner {
   padding: 24px 20px 40px;
 }
 
-/* Settings > Tools needs more horizontal room than the other settings pages
-   so its cards can lay out in 2-3 columns instead of one long list. */
-.settings-page-wide {
-  max-width: 1400px;
-}
-
 .settings-body {
   display: flex;
   gap: 24px;
@@ -5703,7 +5697,10 @@ table.software-matrix thead th.software-matrix-corner {
 }
 
 /* Settings section nav (AI / Tools), above the AI page's own rail-and-detail
-   body and the Tools page's table alike -- see SettingsNav.tsx. */
+   body and the Tools page's table alike -- see SettingsNav.tsx. Always sits
+   inside the narrow `.settings-page` (860px) -- see the note on
+   `.settings-tools-groups` below for why Tools no longer widens the whole
+   page (#468). */
 .settings-section-nav {
   display: flex;
   gap: 4px;
@@ -5743,16 +5740,39 @@ table.software-matrix thead th.software-matrix-corner {
  * Was a card grid before this, and before that a <table>. The card grid put a
  * border box around every tool, which reads as 30-odd separate objects; the
  * groups are what the page is actually organised by, so they get the visual
- * weight (a heading and a rule) and the rows inside them get none. */
+ * weight (a heading and a rule) and the rows inside them get none.
+ *
+ * Breaks out of `.settings-page`'s 860px column via left:50% +
+ * translateX(-50%), rather than widening `.settings-page` itself for this
+ * one page. Widening the page was the original approach
+ * (`.settings-page-wide`), but since `.settings-page` is also what centers
+ * `SettingsNav` above it, a wider Tools page shifted the whole tab bar off
+ * the position it sits at on every other settings page (#468). Breaking out
+ * only this element keeps `.settings-page` -- and everything centered on it
+ * -- the same width on every settings page. translateX(-50%) is used rather
+ * than the more common margin-left:-50vw full-bleed trick because that trick
+ * only self-cancels when the element is exactly 100vw wide; here `max-width`
+ * caps it below 100vw on anything wider than 1400px, and margin-left:-50vw
+ * would then overshoot, pushing the box off-center to the left. */
 .settings-tools-groups {
   columns: 2;
   column-gap: 48px;
   margin-top: 20px;
+  width: calc(100vw - 40px);
+  max-width: 1400px;
+  position: relative;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 @media (max-width: 900px) {
   .settings-tools-groups {
     columns: 1;
+    width: 100%;
+    max-width: none;
+    position: static;
+    left: auto;
+    transform: none;
   }
 }
 

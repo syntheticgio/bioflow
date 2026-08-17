@@ -6,9 +6,6 @@ independently, which is the half that would be easy to lose.
 """
 
 import pytest
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.job import Job, JobState
@@ -22,7 +19,10 @@ from app.models.workflow import (
 )
 from app.pipelines.node_types import NODE_TYPES, PortSpec
 from app.services import workflow_orchestrator as orch
+from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
 from app.services.workflow_service import validate_definition
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
 
 OWNER = "tester"
 
@@ -90,7 +90,9 @@ def test_two_wires_into_a_multi_port_validate():
         edges=[
             WorkflowEdge(from_node="r1", from_port="object", to_node="align_1", to_port="reads"),
             WorkflowEdge(from_node="r2", from_port="object", to_node="align_1", to_port="reads"),
-            WorkflowEdge(from_node="ref", from_port="object", to_node="align_1", to_port="reference"),
+            WorkflowEdge(
+                from_node="ref", from_port="object", to_node="align_1", to_port="reference"
+            ),
         ],
     )
     assert validate_definition(definition) == []
@@ -121,8 +123,12 @@ def test_two_wires_into_a_scalar_port_still_fail():
         ],
         edges=[
             WorkflowEdge(from_node="r1", from_port="object", to_node="align_1", to_port="reads"),
-            WorkflowEdge(from_node="ref_a", from_port="object", to_node="align_1", to_port="reference"),
-            WorkflowEdge(from_node="ref_b", from_port="object", to_node="align_1", to_port="reference"),
+            WorkflowEdge(
+                from_node="ref_a", from_port="object", to_node="align_1", to_port="reference"
+            ),
+            WorkflowEdge(
+                from_node="ref_b", from_port="object", to_node="align_1", to_port="reference"
+            ),
         ],
     )
     codes = [e.code for e in validate_definition(definition)]
@@ -155,7 +161,9 @@ def test_type_checking_still_applies_to_every_wire_of_a_multi_port():
         edges=[
             WorkflowEdge(from_node="r1", from_port="object", to_node="align_1", to_port="reads"),
             WorkflowEdge(from_node="bam", from_port="object", to_node="align_1", to_port="reads"),
-            WorkflowEdge(from_node="ref", from_port="object", to_node="align_1", to_port="reference"),
+            WorkflowEdge(
+                from_node="ref", from_port="object", to_node="align_1", to_port="reference"
+            ),
         ],
     )
     codes = [e.code for e in validate_definition(definition)]
@@ -165,11 +173,6 @@ def test_type_checking_still_applies_to_every_wire_of_a_multi_port():
 def test_align_reads_is_multiple():
     reads = next(p for p in NODE_TYPES["align"].inputs if p.name == "reads")
     assert reads.multiple is True
-
-
-from beanie import PydanticObjectId
-
-from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
 
 
 def test_multi_port_binds_a_list():
@@ -288,7 +291,9 @@ async def test_orchestrator_launches_a_multi_port_with_every_bound_id(
         edges=[
             WorkflowEdge(from_node="r1", from_port="object", to_node="align_1", to_port="reads"),
             WorkflowEdge(from_node="r2", from_port="object", to_node="align_1", to_port="reads"),
-            WorkflowEdge(from_node="ref", from_port="object", to_node="align_1", to_port="reference"),
+            WorkflowEdge(
+                from_node="ref", from_port="object", to_node="align_1", to_port="reference"
+            ),
         ],
     )
     await definition.insert()

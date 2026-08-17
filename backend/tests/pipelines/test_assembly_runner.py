@@ -10,7 +10,6 @@ below.
 from pathlib import Path
 
 import pytest
-
 from app.pipelines import assembly_runner
 from app.pipelines.assemblers import Assembler
 from app.pipelines.assembly_params import FlyeParams

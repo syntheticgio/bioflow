@@ -5,6 +5,9 @@ SRA-stripped file and a Nanopore file must both parse to None rather than to
 a wrong tile number, because a wrong tile silently produces a wrong heatmap.
 """
 
+import gzip
+import json
+
 from app.pipelines import tile_scanner
 
 
@@ -70,11 +73,6 @@ def test_non_numeric_tile_yields_none():
 def test_empty_and_bare_at_yield_none():
     assert tile_scanner.parse_header("") is None
     assert tile_scanner.parse_header("@") is None
-
-
-import gzip
-
-import pytest
 
 
 def _write_fastq(path, records):
@@ -245,9 +243,6 @@ def test_scan_ignores_quality_longer_than_the_matrix_row(tmp_path):
     )
     result = tile_scanner.scan(path)
     assert len(result.matrix[1101]) == 6
-
-
-import json
 
 
 def test_write_matrix_produces_a_sidecar_and_scalar_facts(tmp_path):

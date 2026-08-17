@@ -16,8 +16,6 @@ on two concurrent calls against one shared fakeredis instance.
 
 import asyncio
 
-import pytest
-
 from tests.queue.conftest import ALL_CLASSES
 
 

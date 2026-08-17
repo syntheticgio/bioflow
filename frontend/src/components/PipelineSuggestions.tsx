@@ -7,6 +7,11 @@ import { notify } from "../stores/messageStore";
 import type { PipelineSuggestion, PriorRun } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
 
+/** When this grid last launched a given card. See `launched`. */
+interface LaunchedJob {
+  at: number;
+}
+
 /** What this card has already produced.
  *
  * Failed runs are listed deliberately. They have no output to link, so the
@@ -81,10 +86,32 @@ export function PipelineSuggestions({
   // No `enabled` guard: this component only mounts inside the Actions tab, so
   // mounting *is* the "only when the tab is open" condition. A flag here would
   // restate that in a second place that could disagree with it.
-  const { data, isLoading, isError } = useQuery({
+  // `card.running` is part of this payload and changes without anything the
+  // user does -- a queued job starts, a running one finishes -- so the cards
+  // are polled rather than fetched once. Same interval as the active-jobs
+  // query the rest of the panel uses, since they answer the same question
+  // about the same file.
+  const { data, isLoading, isError, dataUpdatedAt } = useQuery({
     queryKey: ["suggestions", objectId],
     queryFn: () => api.suggestions(objectId),
+    refetchInterval: 5_000,
+    // Overrides the app-wide `refetchOnWindowFocus: false`, and is not
+    // optional here. React Query pauses `refetchInterval` while the tab is
+    // hidden, so without this a user who switches away mid-run and comes back
+    // sees whatever `running` was true when they left -- and because this
+    // field disables a button, a stale value is not a stale label but a
+    // control they cannot press until the next tick lands.
+    refetchOnWindowFocus: true,
   });
+
+  // Cards this tab launched, and when. The server's `card.running` is the
+  // authority -- it survives a reload and sees runs the Computations dialog
+  // started -- but it only updates when the poll above comes back. This
+  // covers the seconds in between, so the button greys on the click rather
+  // than on the next refetch.
+  //
+  // Keyed by `kind`, which is what the grid keys its cards by.
+  const [launched, setLaunched] = useState<Record<string, LaunchedJob>>({});
 
   const launch = useMutation({
     // The card carries the complete body for its own endpoint. Posting it
@@ -92,7 +119,8 @@ export function PipelineSuggestions({
     // request shapes -- see `PipelineSuggestion`.
     mutationFn: (card: PipelineSuggestion) =>
       api.launchSuggestion(card.launch!.endpoint, card.launch!.body, targetNode || undefined),
-    onSuccess: () => {
+    onSuccess: (_job, card) => {
+      setLaunched((m) => ({ ...m, [card.kind]: { at: Date.now() } }));
       qc.invalidateQueries({ queryKey: ["jobs"] });
       // The launched job changes what should be offered next, so the cards
       // themselves are stale the moment one runs.
@@ -101,6 +129,28 @@ export function PipelineSuggestions({
     },
     onError: (e: Error) => notify.error(e.message),
   });
+
+  /**
+   * Is this card's work in flight?
+   *
+   * `card.running` is the real answer: the server checks the queue for a
+   * non-terminal job of the type this card's endpoint produces, so it is
+   * right after a reload and right about runs this tab never launched.
+   * Queued and blocked count as running; a job that succeeds *or* fails is
+   * terminal and re-enables the button, since retrying a failure is what the
+   * user wants next.
+   *
+   * The local record only covers the gap before the next poll returns, and
+   * only forwards -- it can add "running", never remove it. Once a refetch
+   * that post-dates the launch has come back, the server's answer stands
+   * alone, so a finished job re-enables the button even though this tab still
+   * remembers launching it.
+   */
+  function busyFor(card: PipelineSuggestion): boolean {
+    if (card.running) return true;
+    const rec = launched[card.kind];
+    return rec != null && dataUpdatedAt <= rec.at;
+  }
 
   if (isLoading) return null;
 
@@ -135,6 +185,7 @@ export function PipelineSuggestions({
         // as a permanent dead end and the user would never learn DeepVariant
         // -- or whatever tool -- exists at all.
         const runnable = card.status === "available" || card.status === "needs_install";
+        const busy = busyFor(card);
         return (
           <div key={card.kind} className="suggestion-card">
             <div className="suggestion-card-top">
@@ -163,13 +214,18 @@ export function PipelineSuggestions({
               type="button"
               className={card === firstAvailable ? "btn primary" : "btn"}
               onClick={() => launch.mutate(card)}
-              disabled={!runnable || launch.isPending}
+              // `launch.isPending` covers only the POST, and only for whichever
+              // card is mid-request; `busy` is what keeps this one card greyed
+              // for the life of the job it started.
+              disabled={!runnable || launch.isPending || busy}
             >
-              {card.status === "needs_install"
-                ? "Install and launch"
-                : card.prior_runs.length > 0
-                  ? "Launch again"
-                  : "Launch"}
+              {busy
+                ? "Running…"
+                : card.status === "needs_install"
+                  ? "Install and launch"
+                  : card.prior_runs.length > 0
+                    ? "Launch again"
+                    : "Launch"}
             </button>
           </div>
         );

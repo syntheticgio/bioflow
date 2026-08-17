@@ -17,7 +17,6 @@ whether or not anything was actually threaded through.
 import uuid
 
 import pytest
-
 from app.models import Job, JobState
 from app.queue import queue
 

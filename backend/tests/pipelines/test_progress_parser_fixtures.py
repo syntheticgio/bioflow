@@ -22,8 +22,8 @@ docs/superpowers/specs/2026-08-05-tool-progress-instrumentation-design.md,
 
 from pathlib import Path
 
-from app.pipelines.align_runner import AlignProgress
 from app.pipelines import assembly_runner
+from app.pipelines.align_runner import AlignProgress
 from app.pipelines.assembly_params import FlyeParams
 from app.pipelines.assembly_runner import AssemblyProgress
 from app.pipelines.completeness_runner import CompletenessProgress

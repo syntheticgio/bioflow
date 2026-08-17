@@ -7,7 +7,6 @@ feature and the only place SQL lives -- the same split variant_db documents.
 import sqlite3
 
 import pytest
-
 from app.pipelines.annotation_db import (
     FeatureFilters,
     build_annotation_db,

@@ -9,8 +9,6 @@ most RNA-seq reads as T (reverse-transcribed to cDNA before sequencing), so
 import gzip
 from pathlib import Path
 
-import pytest
-
 from app.metadata.infer_molecule import infer_molecule_type
 
 

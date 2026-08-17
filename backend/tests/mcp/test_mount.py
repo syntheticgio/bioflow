@@ -7,7 +7,6 @@ someone "tidying" the path later and silently breaking every configured agent.
 """
 
 import pytest
-
 from app.main import app
 
 # `tests/mcp/conftest.py`'s autouse `clean_profiles` fixture calls

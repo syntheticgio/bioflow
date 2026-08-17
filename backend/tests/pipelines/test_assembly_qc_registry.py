@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 from app.pipelines import assembly_qc_registry
 from app.pipelines.assembly_qc_registry import (
-    BUSCO_SPEC,
     COMPLEASM_SPEC,
     CompletenessTool,
     default_tool,

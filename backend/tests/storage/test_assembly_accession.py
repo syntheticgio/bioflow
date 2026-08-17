@@ -5,8 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from app.metadata import ncbi_assembly, enrich
+from app.metadata import enrich, ncbi_assembly
 from app.models import FormatKind
 from app.queue.results import should_assign_reference_role
 

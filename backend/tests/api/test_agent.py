@@ -16,14 +16,14 @@ from unittest.mock import AsyncMock
 import pytest
 import pytest_asyncio
 import uvicorn
-from beanie import PydanticObjectId
-from fastapi import FastAPI
-from httpx import AsyncClient
-
 from app.api.v1.agent import _system_prompt
 from app.api.v1.agent import router as agent_router
 from app.services import project_service
 from app.services.agent_service import agent_service
+from beanie import PydanticObjectId
+from fastapi import FastAPI
+from httpx import AsyncClient
+
 from tests.services.test_agent_service import FakeProcess
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

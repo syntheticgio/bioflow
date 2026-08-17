@@ -1,7 +1,6 @@
 """Metadata schema resolution, coercion, and validation."""
 
 import pytest
-
 from app.metadata import schemas
 from app.metadata.schemas import FieldType
 from app.models import FormatKind, ObjectRole

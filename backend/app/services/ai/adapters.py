@@ -267,6 +267,28 @@ class OpenAICompatAdapter(_BaseAdapter):
             return Failure(FailureReason.BAD_RESPONSE)
 
         if not isinstance(text, str) or not text.strip():
+            # Empty `content` collapses two things worth telling apart: the
+            # server returned genuine garbage, or a reasoning model burned its
+            # whole budget on `reasoning_content` before emitting any text.
+            # Only the second is user-fixable (raise the token limit or pick a
+            # non-reasoning model), and `Failure.detail` is the only place the
+            # message can say so.
+            choice = result["choices"][0]
+            finish_reason = choice.get("finish_reason")
+            reasoning = message.get("reasoning_content") if isinstance(message, dict) else None
+            if finish_reason == "length":
+                return Failure(
+                    FailureReason.BAD_RESPONSE,
+                    f"The model exhausted its token budget (max_tokens={max_tokens}) "
+                    "before producing any text. Raise the token limit or choose a "
+                    "non-reasoning model.",
+                )
+            if reasoning:
+                return Failure(
+                    FailureReason.BAD_RESPONSE,
+                    "The model returned reasoning content but no text. Raise the "
+                    "token limit or choose a non-reasoning model.",
+                )
             return Failure(FailureReason.BAD_RESPONSE)
 
         # Trust the server's own claim about which model answered over the

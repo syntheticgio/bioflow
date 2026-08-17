@@ -53,4 +53,7 @@ def test_fetch_server_uses_the_installed_console_script(override_text):
 
 def test_datasets_server_uses_the_installed_console_script(override_text):
     servers = _extra_servers(override_text)
-    assert servers["mcpServers"]["datasets"]["command"] == "/opt/agent-mcp/venv/bin/ncbi-datasets-mcp"
+    assert (
+        servers["mcpServers"]["datasets"]["command"]
+        == "/opt/agent-mcp/venv/bin/ncbi-datasets-mcp"
+    )

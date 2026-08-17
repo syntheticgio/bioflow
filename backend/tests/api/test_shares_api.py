@@ -8,10 +8,10 @@ other partitioned router (`test_route_owner_scoping.py`).
 """
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-
 from app.main import app
 from app.services import object_service, profile_service
+from httpx import ASGITransport, AsyncClient
+
 from tests.services.helpers_share import ready_object, reclaim_scratch_files
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
@@ -52,7 +52,10 @@ async def _ready_object(owner: str):
 
 
 async def test_offer_requires_a_profile_header(client):
-    r = await client.post("/api/v1/shares", json={"object_id": "000000000000000000000000", "to_profile_id": "x"})
+    r = await client.post(
+        "/api/v1/shares",
+        json={"object_id": "000000000000000000000000", "to_profile_id": "x"},
+    )
 
     assert r.status_code == 400
     assert r.json()["code"] == "profile_unresolved"
@@ -78,7 +81,7 @@ async def test_offer_succeeds_and_appears_in_the_recipients_inbox(client, two_pr
 
 
 async def test_offering_someone_elses_object_is_a_404(client, two_profiles):
-    a, b = two_profiles["a"], two_profiles["b"]
+    a = two_profiles["a"]
     obj = await _ready_object(a.owner_id())
 
     r = await client.post(

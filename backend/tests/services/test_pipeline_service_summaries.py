@@ -8,8 +8,6 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models.object import DataObject, ObjectRole
-
 pytestmark = [
     pytest.mark.asyncio(loop_scope="module"),
     pytest.mark.usefixtures("beanie_models"),

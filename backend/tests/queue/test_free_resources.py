@@ -13,7 +13,6 @@ one being fixed.
 """
 
 import pytest
-
 from app.queue.worker import IO_HEAVY_LIMIT, _as_int, compute_free_resources
 
 

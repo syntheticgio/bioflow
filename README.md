@@ -346,6 +346,44 @@ make check-home  # verify the drive is mounted and writable
 make clean       # delete mongo/redis volumes (does NOT touch BIOINFO_HOME)
 ```
 
+### Backing up
+
+    make backup
+
+Writes `./backups/<timestamp>/` containing a `mongodump` of the database,
+an enumeration of every file in `/data`, a summary of configured AI
+providers, and the restore contract. Set `BACKUP_DIR=` to write elsewhere:
+
+    make backup BACKUP_DIR=/Volumes/Backups/bioflow
+
+**A backup on the same disk protects against mistakes and corruption, not
+drive failure.** Point `BACKUP_DIR` at external storage for that.
+
+The backup does **not** contain the files in `/data` — a real project's
+data may be hundreds of gigabytes, and copying it is your call with your
+own tooling. What the backup gives you is an enumeration, so after a loss
+you know exactly which files are gone and which can be re-downloaded.
+
+It also does **not** contain your AI provider API keys, deliberately: a
+backup holding both the encrypted keys and the key that decrypts them
+would defeat the encryption. `providers.txt` records which providers were
+configured and the last four characters of each key so you know what to
+re-enter.
+
+Nothing is pruned automatically. Delete old backup directories yourself.
+
+### Restoring
+
+    make restore BACKUP=backups/2026-08-17T134502Z
+
+Overwrites the database, so it asks for confirmation first. Restore into
+the version you backed up from — a mismatch requires `--force`, attempts
+no schema migration, and may fail if the schema changed.
+
+To see which enumerated files are missing from `/data`:
+
+    make backup-verify BACKUP=backups/2026-08-17T134502Z
+
 ## Known platform caveats
 
 - **`inotify` does not propagate** from host writes into the container. A filesystem

@@ -4,7 +4,6 @@ The rules that must hold before any job is queued, tested without HTTP.
 """
 
 import pytest
-
 from app.errors import ValidationError
 from app.services import ncbi_assembly_service
 

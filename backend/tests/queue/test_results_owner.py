@@ -16,12 +16,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.config import settings
 from app.models import DataObject, ObjectRole, SidecarRole
 from app.queue import results
 from app.services import object_service, project_service, run_service
+from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),

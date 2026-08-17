@@ -6,8 +6,6 @@ since list_models() already has callers that only want the id list.
 
 import json
 
-import pytest
-
 from app.services.ai import adapters
 from app.services.ai.adapters import AnthropicAdapter, Failure, OpenAICompatAdapter
 

@@ -73,7 +73,12 @@ class TestNoiseExclusion:
         assert "mapq_histogram" not in prompt
 
     def test_sampling_bookkeeping_is_left_out(self):
-        facts = {**_reads_facts(), "stats_sampled_reads": 1000, "stats_sampling": "head", "has_index": True}
+        facts = {
+            **_reads_facts(),
+            "stats_sampled_reads": 1000,
+            "stats_sampling": "head",
+            "has_index": True,
+        }
         prompt = build_user_prompt(
             name="reads.fastq.gz",
             format_kind="fastq",

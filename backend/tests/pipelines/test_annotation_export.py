@@ -4,7 +4,6 @@ import dataclasses
 from pathlib import Path
 
 import pytest
-
 from app.pipelines import annotation_db, annotation_export, annotation_hierarchy, annotation_parse
 
 

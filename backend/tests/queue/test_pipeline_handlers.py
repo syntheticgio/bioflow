@@ -8,7 +8,6 @@ functions that live in pipeline_handlers.py itself and have no other home.
 """
 
 import pytest
-
 from app.errors import PermanentError
 from app.queue import pipeline_handlers
 

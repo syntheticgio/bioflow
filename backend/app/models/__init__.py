@@ -8,6 +8,7 @@ from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, Ta
 from app.models.annotation_edit import AnnotationEdit
 from app.models.app_settings import AppSettings
 from app.models.blob import Blob, BlobState, BlobStorage
+from app.models.drift import DriftCategory, DriftEntry, DriftReport
 from app.models.failure_explanation import FailureExplanation, normalize_failure
 from app.models.feedback import Feedback
 from app.models.job import (
@@ -77,6 +78,7 @@ ALL_MODELS = [
     Project,
     Blob,
     DataObject,
+    DriftReport,
     Job,
     UploadSession,
     Schedule,
@@ -113,6 +115,9 @@ __all__ = [
     "BlobStorage",
     "Compression",
     "DataObject",
+    "DriftCategory",
+    "DriftEntry",
+    "DriftReport",
     "FailureExplanation",
     "FailureReason",
     "Feedback",

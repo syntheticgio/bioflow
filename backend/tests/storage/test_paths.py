@@ -1,7 +1,6 @@
 """Path validation: digest sanitization and register-in-place containment."""
 
 import pytest
-
 from app.errors import NotFoundError, ValidationError
 from app.storage.paths import (
     blob_rel_path,

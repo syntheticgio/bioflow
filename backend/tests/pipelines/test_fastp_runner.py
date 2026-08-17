@@ -8,7 +8,6 @@ approximation of it would test nothing.
 import json
 
 import pytest
-
 from app.pipelines import fastp_runner
 from app.pipelines.fastp_runner import TrimParams, TrimProgress
 

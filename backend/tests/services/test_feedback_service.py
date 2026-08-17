@@ -6,13 +6,11 @@ needed. The ``TestPost`` and ``TestFormatEmbed`` classes use synchronous tests
 is async because the service wraps ``_post`` in ``asyncio.to_thread``.
 """
 
-import socket
 import urllib.error
 from email.message import Message
 from unittest.mock import patch
 
 import pytest
-
 from app.services.feedback_service import (
     _format_embed,
     _post,
@@ -89,7 +87,7 @@ class TestPost:
 
     @patch("app.services.feedback_service.urllib.request.urlopen")
     def test_returns_false_on_timeout(self, mock_urlopen):
-        mock_urlopen.side_effect = socket.timeout("timed out")
+        mock_urlopen.side_effect = TimeoutError("timed out")
         assert _post("https://example.com/webhook", {"test": True}) is False
 
     @patch("app.services.feedback_service.urllib.request.urlopen")

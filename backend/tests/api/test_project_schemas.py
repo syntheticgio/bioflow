@@ -7,9 +7,8 @@ unbounded string risks ARG_MAX and a spawn failure that surfaces only as
 """
 
 import pytest
-from pydantic import ValidationError as PydanticValidationError
-
 from app.api.v1.schemas import ProjectUpdate
+from pydantic import ValidationError as PydanticValidationError
 
 
 class TestAgentSystemPromptLimit:

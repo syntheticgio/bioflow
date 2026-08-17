@@ -1,10 +1,8 @@
 """Tests for meryl_runner — histogram parsing, genome size, repeat density."""
 
-import pytest
 
 from app.pipelines import meryl_runner
 from app.storage.parsers import MAX_STORED_CONTIGS
-
 
 # ── histogram parsing ─────────────────────────────────────────────────
 
