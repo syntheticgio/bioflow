@@ -1447,6 +1447,17 @@
   font-size: 12px;
 }
 
+.theme-broadsheet .lead-step-stuck {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.theme-broadsheet .lead-stuck-note {
+  color: var(--warn);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
 .theme-broadsheet .lead-step-time {
   margin-left: auto;
   flex: none;

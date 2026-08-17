@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import type {
+  BlockedReason,
   JobState,
   RunDetail,
   RunMemberJob,
@@ -15,8 +16,10 @@ import {
   ROLE_LABELS,
   STATUS_LABELS,
   WAITING,
+  isUnsatisfiable,
   kindAction,
   runFacts,
+  unsatisfiableReason,
   waitingReason,
 } from "../../lib/runFormat";
 import { LedgerRow } from "./RunLedger";
@@ -159,6 +162,13 @@ function LeadStory({
   const facts = runFacts(run);
   const action = kindAction(run.kind);
 
+  // The recorded reason describes the head of the queue, so it is shown on
+  // this run's first waiting step only -- pinning it to every waiting step
+  // would attribute one job's gate to all of them.
+  const firstWaitingId = steps.find(
+    (j) => j.state !== null && WAITING.has(j.state),
+  )?.job_id;
+
   return (
     <>
       <div className="lead-kicker">
@@ -194,6 +204,23 @@ function LeadStory({
         </button>
       </div>
 
+      {/* The run is already launched, so the Band.BLOCK refusal card that
+          offers "Launch anyway" is behind us. Cancelling and relaunching
+          with the override is the actual way out, so say that rather than
+          leaving the user watching a job that cannot start. */}
+      {steps.some(
+        (j) =>
+          j.state !== null &&
+          WAITING.has(j.state) &&
+          isUnsatisfiable(j.resources, load),
+      ) && (
+        <div className="lead-stuck-note">
+          This needs more memory than this machine allows. Cancel the run and
+          relaunch it — the launch dialog offers "Launch anyway", or lower the
+          thread count to reduce what it needs.
+        </div>
+      )}
+
       <div className="lead-facts">
         {facts.map((f) => (
           <div key={f.k} className="activity-fact">
@@ -220,7 +247,12 @@ function LeadStory({
 
       <div className="lead-steps">
         {steps.map((job) => (
-          <LeadStep key={job.job_id} job={job} load={load} />
+          <LeadStep
+            key={job.job_id}
+            job={job}
+            load={load}
+            reason={job.job_id === firstWaitingId ? load?.blocked_reason : null}
+          />
         ))}
         {ingests.length > 0 && <IngestStep jobs={ingests} />}
       </div>
@@ -228,7 +260,15 @@ function LeadStory({
   );
 }
 
-function LeadStep({ job, load }: { job: RunMemberJob; load?: SystemLoad }) {
+function LeadStep({
+  job,
+  load,
+  reason,
+}: {
+  job: RunMemberJob;
+  load?: SystemLoad;
+  reason?: BlockedReason | null;
+}) {
   // A pruned job has no state to show. Saying so beats inventing one.
   const state = job.state ?? "expired";
   const pct =
@@ -240,17 +280,25 @@ function LeadStep({ job, load }: { job: RunMemberJob; load?: SystemLoad }) {
   // was queued behind. waitingReason already answered this for loose jobs in
   // the "Other waiting" section; this is the same sentence on the card users
   // actually watch.
-  const why =
-    job.state !== null && WAITING.has(job.state)
-      ? waitingReason(
+  const isWaiting = job.state !== null && WAITING.has(job.state);
+  // A job demanding more than the whole budget is not waiting its turn --
+  // nothing that finishes will free enough. It gets its own words and its
+  // own colour, and it is checked first because the queue would otherwise
+  // report it as an ordinary memory wait forever (#457).
+  const stuck = isWaiting && isUnsatisfiable(job.resources, load);
+  const why = !isWaiting
+    ? null
+    : stuck && job.resources && load?.memory.budget_bytes != null
+      ? unsatisfiableReason(job.resources, load.memory.budget_bytes)
+      : waitingReason(
           {
-            state: job.state,
+            state: job.state as string,
             job_class: job.job_class ?? "",
             cancel_requested: job.cancel_requested,
           },
           load,
-        )
-      : null;
+          reason,
+        );
 
   return (
     <div className="lead-step">
@@ -267,7 +315,9 @@ function LeadStep({ job, load }: { job: RunMemberJob; load?: SystemLoad }) {
           </span>
         )}
       </span>
-      {why && <span className="lead-step-why">{why}</span>}
+      {why && (
+        <span className={stuck ? "lead-step-stuck" : "lead-step-why"}>{why}</span>
+      )}
       {job.error && <span className="lead-step-error">{job.error.message}</span>}
       <span className="lead-step-time">{formatClock(job.created_at)}</span>
     </div>
