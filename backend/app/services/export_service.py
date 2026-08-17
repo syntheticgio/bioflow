@@ -47,8 +47,17 @@ DEFAULT_BLOB_THRESHOLD_BYTES = 100 * 1024 * 1024
 
 @dataclass
 class ExportBundle:
-    """Everything in scope for one export, before redaction."""
+    """Everything in scope for one export, before redaction.
 
+    `root` is the project the export was requested for -- set explicitly
+    from `collect()`'s own lookup rather than inferred as `projects[0]`,
+    because `projects` is populated via a Mongo `$in` query and `$in` does
+    not preserve array order. `projects` holds the full unordered set
+    (root plus descendants) for anything that iterates all of them
+    regardless of order.
+    """
+
+    root: Project | None = None
     projects: list[Project] = field(default_factory=list)
     objects: list[DataObject] = field(default_factory=list)
     runs: list[PipelineRun] = field(default_factory=list)
@@ -92,6 +101,7 @@ async def collect(project_id: PydanticObjectId, *, owner: str) -> ExportBundle:
     )
 
     return ExportBundle(
+        root=root,
         projects=projects,
         objects=objects,
         runs=runs,
@@ -136,14 +146,22 @@ def _strip_paths(doc: dict) -> int:
     """Drop absolute filesystem paths. Returns how many were removed.
 
     `rel_path` survives: it is relative by construction and the manifest
-    needs it. `external_path` and anything else absolute leaks a username
-    and directory layout, and means nothing on the recipient's machine.
+    needs it. The two real path-bearing fields across the redacted
+    collections (`Blob`, `DataObject`, `PipelineRun`, `RunJob`,
+    `JobRunTiming`) are `Blob.external_path` (top-level) and
+    `DataObject.source.original_path` (nested under `SourceInfo`, set for
+    every register-in-place object -- see object_service.py). Both leak a
+    username and directory layout, and mean nothing on the recipient's
+    machine.
     """
     removed = 0
-    for key in ("external_path", "source_path", "bioinfo_home"):
-        if doc.get(key) is not None:
-            doc[key] = None
-            removed += 1
+    if doc.get("external_path") is not None:
+        doc["external_path"] = None
+        removed += 1
+    source = doc.get("source")
+    if isinstance(source, dict) and source.get("original_path") is not None:
+        source["original_path"] = None
+        removed += 1
     return removed
 
 
@@ -178,6 +196,14 @@ def redact(bundle: ExportBundle) -> tuple[dict[str, list[dict]], RedactionSummar
         machine = d.get("machine") or {}
         if any(v is not None for v in machine.values()):
             d["machine"] = {}
+            # worker_id defaults to f"{socket.gethostname()}:{os.getpid()}"
+            # (queue/worker.py) -- it is the same machine-identity fact as
+            # `machine`, just carried in a sibling field, so it is cleared
+            # under the same condition rather than unconditionally (an
+            # unset worker_id counting as "cleared" would be the same
+            # false-positive the `machine` check above already guards
+            # against).
+            d["worker_id"] = None
             summary.machine_records_cleared += 1
         docs["job_timings"].append(d)
     for blob in bundle.blobs:
@@ -254,7 +280,7 @@ async def render_report(bundle: ExportBundle, *, owner: str) -> str:
     """
     from app.services import provenance_report, provenance_walker
 
-    root = bundle.projects[0]
+    root = bundle.root
     lines = [
         f"# {root.name}",
         "",
@@ -265,9 +291,10 @@ async def render_report(bundle: ExportBundle, *, owner: str) -> str:
     if root.description:
         lines += [root.description, ""]
 
-    if len(bundle.projects) > 1:
+    sub_projects = [p for p in bundle.projects if p.id != root.id]
+    if sub_projects:
         lines += ["## Sub-projects", ""]
-        lines += [f"- {p.name}" for p in bundle.projects[1:]]
+        lines += [f"- {p.name}" for p in sub_projects]
         lines.append("")
 
     lines += ["## Files", ""]
@@ -379,13 +406,13 @@ async def export_project(
     report = await render_report(bundle, owner=owner)
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    dest = settings.exports_dir / f"{bundle.projects[0].slug}-{stamp}.tar.gz"
+    dest = settings.exports_dir / f"{bundle.root.slug}-{stamp}.tar.gz"
 
     manifest_json = {
         "bioflow_export_version": BIOFLOW_EXPORT_VERSION,
         "exported_at": datetime.now(UTC).isoformat(),
         "project_id": str(project_id),
-        "project_name": bundle.projects[0].name,
+        "project_name": bundle.root.name,
         "project_count": len(bundle.projects),
         "counts": {name: len(rows) for name, rows in docs.items()},
         "blob_count": len(bundle.blobs),
