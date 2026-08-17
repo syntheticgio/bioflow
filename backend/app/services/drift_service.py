@@ -18,6 +18,7 @@ from app.config import settings
 from app.logging import get_logger
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.drift import DriftCategory, DriftEntry
+from app.models.object import DataObject
 from app.services.blob_service import GC_GRACE
 
 log = get_logger(__name__)
@@ -187,3 +188,34 @@ def object_claims_report(facts: dict, predicate: str) -> bool:
     if predicate == "annotation_stats_status":
         return value == "ok"
     return value is not None
+
+
+async def find_missing_report_dirs() -> list[DriftEntry]:
+    """Objects whose facts claim a report whose directory is gone.
+
+    The opposite direction from reap_report_dirs, which finds directories with
+    no record. This finds records with no directory -- the one that fails
+    late, when a user opens a Results tab the UI offered them.
+
+    Report directories are addressed positionally as <root>/<object_id>/;
+    nothing stores a path, so the claim is the predicate fact plus the id.
+    """
+    entries: list[DriftEntry] = []
+
+    for predicate, root in REPORT_ROOTS.items():
+        candidates = await DataObject.find({f"facts.{predicate}": {"$exists": True}}).to_list()
+        for obj in candidates:
+            if not object_claims_report(obj.facts, predicate):
+                continue
+            path = root / str(obj.id)
+            if await asyncio.to_thread(path.exists):
+                continue
+            entries.append(
+                DriftEntry(
+                    category=DriftCategory.MISSING_REPORT_DIR,
+                    path=str(path),
+                    object_id=str(obj.id),
+                )
+            )
+
+    return entries
