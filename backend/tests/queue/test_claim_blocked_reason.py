@@ -7,10 +7,7 @@ guarantee that recording never changes what gets claimed.
 
 import json
 
-import pytest
-
-from tests.queue.conftest import ALL_CLASSES
-from tests.queue.test_claim import LEASE_MS, NOW_MS, claim
+from tests.queue.test_claim import claim
 
 REASON_KEY = "bp:why:bp:q:ready"
 
