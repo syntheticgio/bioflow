@@ -8,8 +8,12 @@ note above it.
 """
 
 import json
+import os
 import re
+import shutil
 import subprocess
+import time
+import uuid
 from pathlib import Path
 
 import pytest
@@ -178,3 +182,281 @@ def test_verify_is_silent_when_everything_is_present(tmp_path):
     )
     result = sh(f"check_manifest_against_data {manifest} {data}", tmp_path)
     assert result.stdout.strip() == ""
+
+
+def test_no_bare_expansion_is_glued_to_an_ellipsis():
+    """`log "$dir…"` is a crash, not a cosmetic issue.
+
+    Under a UTF-8 LC_CTYPE -- which is what pytest's own subprocess env has --
+    bash reads the "…" bytes as identifier characters, so "$dir…" expands
+    ${dir…} and `set -u` kills the script. It cost a broken `restore` and a
+    broken `verify` that no pure-logic test could see, because sourcing the
+    preamble never reaches those lines. Brace the expansion: "${dir}…".
+    """
+    offenders = [
+        (n, line)
+        for n, line in enumerate(SCRIPT.read_text().splitlines(), 1)
+        # Comments are prose; the note explaining this rule spells the bad
+        # form out on purpose.
+        if not line.lstrip().startswith("#")
+        and re.search(r"\$[A-Za-z_][A-Za-z_0-9]*…", line)
+    ]
+    assert not offenders, f"unbraced expansion before an ellipsis: {offenders}"
+
+
+# --- the round trip -------------------------------------------------------
+#
+# Everything below drops a database and reloads it. Pointed at the running
+# stack it would destroy the user's research record while reporting a pass,
+# so every invocation goes through run_script(), which pins MONGO_CONTAINER
+# to the scratch_mongo fixture's own throwaway container.
+
+# The round-trip needs a real Mongo. The backend-smoke CI job that runs
+# ops/tests has no Docker service and its Mongo `services:` block is still
+# commented out (build-check.yml:184-190), so this skips there and runs
+# locally. The skip names its reason rather than passing quietly.
+docker_required = pytest.mark.skipif(
+    shutil.which("docker") is None
+    or subprocess.run(["docker", "info"], capture_output=True).returncode != 0,
+    reason="needs a reachable Docker daemon; the CI ops-test job has none",
+)
+
+
+@pytest.fixture
+def scratch_mongo():
+    """A throwaway Mongo container, never the running stack's.
+
+    The name is randomised so a leftover container from a crashed run cannot
+    be reused by accident, and the container is removed on teardown.
+    """
+    name = f"bioflow-backup-test-{uuid.uuid4().hex[:8]}"
+    subprocess.run(
+        ["docker", "run", "-d", "--rm", "--name", name, "mongo:7"],
+        check=True,
+        capture_output=True,
+    )
+    try:
+        for _ in range(30):
+            probe = subprocess.run(
+                ["docker", "exec", name, "mongosh", "--quiet", "--eval", "db.hello().ok"],
+                capture_output=True,
+                text=True,
+            )
+            if probe.returncode == 0 and "1" in probe.stdout:
+                break
+            time.sleep(1)
+        else:
+            pytest.fail("scratch Mongo never became ready")
+        yield name
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True)
+
+
+def seed(container: str, db: str = "biopipe") -> None:
+    """A fixture spanning the shapes that matter."""
+    script = """
+    db.projects.insertOne({_id: "proj1", name: "Test Project"});
+    db.objects.insertMany([
+      {_id: "obj1", project_id: "proj1", role: "reads", size: 100, blob_id: "blob1"},
+      {_id: "obj2", project_id: "proj1", role: "reference", size: 200, blob_id: "blob2"}
+    ]);
+    db.blobs.insertMany([
+      {_id: "blob1", size: 100, rel_path: "ab/blob1", content_sha256: "sha1", state: "active"},
+      {_id: "blob2", size: 200, external_path: "/ext/ref.fa", content_sha256: "sha2", state: "active"}
+    ]);
+    db.pipeline_runs.insertOne({_id: "run1", project_id: "proj1", status: "complete"});
+    db.run_jobs.insertOne({_id: "job1", run_id: "run1", object_id: "obj1"});
+    db.job_timings.insertOne({_id: "t1", job_id: "job1", duration_seconds: 12.5});
+    db.ai_providers.insertOne({
+      _id: "prov1", name: "anthropic", model: "claude-opus-5",
+      api_key_enc: BinData(0, "Z0FBQUFBQm1abT")
+    });
+    """
+    subprocess.run(
+        ["docker", "exec", "-i", container, "mongosh", db, "--quiet", "--eval", script],
+        check=True,
+        capture_output=True,
+    )
+
+
+def counts(container: str, db: str = "biopipe") -> dict:
+    out = subprocess.run(
+        [
+            "docker", "exec", "-i", container, "mongosh", db, "--quiet", "--eval",
+            'db.getCollectionNames().sort().forEach('
+            'n => print(n + "\\t" + db.getCollection(n).countDocuments({})))',
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    return {
+        line.split("\t")[0]: int(line.split("\t")[1])
+        for line in out.strip().splitlines()
+        if "\t" in line
+    }
+
+
+def run_script(args: list[str], container: str, backup_dir: Path, **kw):
+    """Every call into backup.sh goes through here, pinned to the scratch Mongo.
+
+    API_CONTAINER is pinned too, at a name that cannot exist. Left at its
+    default, write_provider_summary would reach the *real* api container --
+    which connects to the real Mongo -- and copy the live provider list into
+    a test backup. It is a read, so nothing is destroyed, but the summary
+    would describe the wrong stack. Unreachable is the correct answer here,
+    and the script degrades to "(could not reach the api container)".
+    """
+    env = {
+        **os.environ,
+        "MONGO_CONTAINER": container,
+        "MONGO_DB": "biopipe",
+        "API_CONTAINER": f"bioflow-backup-test-no-api-{uuid.uuid4().hex[:8]}",
+        "BACKUP_DIR": str(backup_dir),
+    }
+    return subprocess.run(
+        [str(SCRIPT), *args], capture_output=True, text=True, env=env, **kw
+    )
+
+
+def drop_db(container: str, db: str = "biopipe") -> None:
+    subprocess.run(
+        ["docker", "exec", "-i", container, "mongosh", db, "--quiet",
+         "--eval", "db.dropDatabase()"],
+        check=True,
+        capture_output=True,
+    )
+
+
+@docker_required
+def test_the_fixture_is_not_the_running_stack(scratch_mongo):
+    """The guard the rest of this file rests on.
+
+    If the fixture ever hands back the live container name, every test below
+    becomes a mongorestore --drop against the research record.
+    """
+    assert scratch_mongo.startswith("bioflow-backup-test-")
+    assert scratch_mongo != "biopipe-mongo-1"
+    # A fresh mongo:7 has no biopipe database. The live one does.
+    assert counts(scratch_mongo) == {}
+
+
+@docker_required
+def test_backup_restore_round_trip(scratch_mongo, tmp_path):
+    seed(scratch_mongo)
+    before = counts(scratch_mongo)
+    assert before["projects"] == 1 and before["objects"] == 2
+
+    result = run_script(["backup"], scratch_mongo, tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    made = sorted(tmp_path.iterdir())
+    assert len(made) == 1
+    backup = made[0]
+    for name in ("dump", "data-manifest.tsv", "providers.txt", "manifest.json", "RESTORE.md"):
+        assert (backup / name).exists(), f"{name} missing from the backup"
+
+    drop_db(scratch_mongo)
+    assert counts(scratch_mongo) == {}
+
+    result = run_script(["restore", str(backup), "--force"], scratch_mongo, tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    after = counts(scratch_mongo)
+    assert after == before, f"counts differ after restore: {before} -> {after}"
+
+
+@docker_required
+def test_provenance_chain_survives_the_round_trip(scratch_mongo, tmp_path):
+    seed(scratch_mongo)
+    run_script(["backup"], scratch_mongo, tmp_path)
+    backup = sorted(tmp_path.iterdir())[0]
+    drop_db(scratch_mongo)
+    run_script(["restore", str(backup), "--force"], scratch_mongo, tmp_path)
+
+    chain = subprocess.run(
+        ["docker", "exec", "-i", scratch_mongo, "mongosh", "biopipe", "--quiet", "--eval",
+         'const j = db.run_jobs.findOne({_id: "job1"});'
+         'const o = db.objects.findOne({_id: j.object_id});'
+         'const b = db.blobs.findOne({_id: o.blob_id});'
+         'print([j.run_id, o.role, b.content_sha256].join("|"));'],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert chain == "run1|reads|sha1"
+
+
+@docker_required
+def test_backup_contains_no_secrets(scratch_mongo, tmp_path):
+    """The assertion that keeps the security decision true after later edits.
+
+    rglob("*") walks the raw mongodump archive too, not just the text files.
+    That matters: the archive is where a provider document's ciphertext
+    actually lands, so a future change that started shipping the Fernet key
+    beside it would be caught here rather than in the text sidecars alone.
+    """
+    seed(scratch_mongo)
+    run_script(["backup"], scratch_mongo, tmp_path)
+    backup = sorted(tmp_path.iterdir())[0]
+
+    blob = b""
+    for path in backup.rglob("*"):
+        if path.is_file():
+            blob += path.read_bytes()
+
+    # The dump is in there, so this is scanning the bytes that carry the
+    # ciphertext -- not only the human-readable sidecars.
+    assert b"anthropic" in blob, "scan did not reach the dump; the assertions below are vacuous"
+
+    # The Fernet key file's own name and any Fernet token prefix.
+    assert b"secret.key" not in blob
+    assert b"BIOINFO_HOME/.biopipe" not in blob
+    # A decrypted Anthropic-style key would start like this.
+    assert b"sk-ant-" not in blob
+
+
+@docker_required
+def test_version_mismatch_without_force_writes_nothing(scratch_mongo, tmp_path):
+    seed(scratch_mongo)
+    run_script(["backup"], scratch_mongo, tmp_path)
+    backup = sorted(tmp_path.iterdir())[0]
+
+    manifest = backup / "manifest.json"
+    manifest.write_text(manifest.read_text().replace('"version": "', '"version": "9.9.9-'))
+
+    drop_db(scratch_mongo)
+    result = run_script(["restore", str(backup)], scratch_mongo, tmp_path)
+    assert result.returncode != 0
+    assert "Version mismatch" in result.stderr
+    assert counts(scratch_mongo) == {}, "restore wrote despite refusing"
+
+
+@docker_required
+def test_version_mismatch_with_force_completes(scratch_mongo, tmp_path):
+    seed(scratch_mongo)
+    before = counts(scratch_mongo)
+    run_script(["backup"], scratch_mongo, tmp_path)
+    backup = sorted(tmp_path.iterdir())[0]
+
+    manifest = backup / "manifest.json"
+    manifest.write_text(manifest.read_text().replace('"version": "', '"version": "9.9.9-'))
+
+    drop_db(scratch_mongo)
+    result = run_script(["restore", str(backup), "--force"], scratch_mongo, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert counts(scratch_mongo) == before
+
+
+@docker_required
+def test_restore_fails_loudly_on_a_count_mismatch(scratch_mongo, tmp_path):
+    seed(scratch_mongo)
+    run_script(["backup"], scratch_mongo, tmp_path)
+    backup = sorted(tmp_path.iterdir())[0]
+
+    manifest = backup / "manifest.json"
+    manifest.write_text(manifest.read_text().replace('"projects": 1', '"projects": 7'))
+
+    result = run_script(["restore", str(backup), "--force"], scratch_mongo, tmp_path)
+    assert result.returncode != 0
+    assert "do not match" in result.stderr
