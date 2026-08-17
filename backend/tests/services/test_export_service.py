@@ -1,10 +1,13 @@
+import json
+import tarfile
+
 import pytest
 
 from app.config import settings
 from app.models import Blob, BlobState, JobRunTiming, RunKind
 from app.models.timing import RunMachine
 from app.services import export_service, run_service
-from tests.services.helpers import TEST_OWNER, make_object, make_project
+from tests.services.helpers import TEST_OWNER, make_blob, make_object, make_project
 
 
 def test_exports_dir_is_under_bioinfo_home():
@@ -209,3 +212,67 @@ class TestRenderReport:
 
         assert "## Sub-projects" in report
         assert child.name in report
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+class TestExportProject:
+    async def test_archive_contains_the_expected_members(self):
+        project = await make_project("export-archive-members")
+
+        result = await export_service.export_project(project.id, owner=TEST_OWNER)
+
+        with tarfile.open(result.path) as tar:
+            names = set(tar.getnames())
+        assert {"manifest.json", "data-manifest.tsv", "report.md", "README.md"} <= names
+        assert any(n.startswith("metadata/") for n in names)
+
+    async def test_manifest_json_carries_the_version_envelope(self):
+        project = await make_project("export-archive-envelope")
+
+        result = await export_service.export_project(project.id, owner=TEST_OWNER)
+
+        with tarfile.open(result.path) as tar:
+            manifest = json.loads(tar.extractfile("manifest.json").read())
+        assert manifest["bioflow_export_version"] == export_service.BIOFLOW_EXPORT_VERSION
+        assert manifest["redaction_profile"] == "secrets+paths+machine"
+
+    async def test_objectids_are_preserved_for_a_future_importer(self):
+        project = await make_project("export-archive-objectids")
+
+        result = await export_service.export_project(project.id, owner=TEST_OWNER)
+
+        with tarfile.open(result.path) as tar:
+            docs = json.loads(tar.extractfile("metadata/projects.json").read())
+        assert docs[0]["_id"] == str(project.id)
+
+    async def test_archive_contains_no_secrets_no_paths_no_machine_names(self):
+        """The assertion that outlives whoever wrote the exporter.
+
+        Greps the whole produced archive. This is what keeps the redaction
+        rule true after someone edits export_service.py a year from now.
+
+        The blob carrying the secret path must be reachable from the project
+        (referenced by an object) -- collect() only pulls in blobs that
+        objects point to, so an orphan Blob().insert() would never enter the
+        bundle at all and the grep below would pass vacuously.
+        """
+        project = await make_project("export-archive-redaction")
+        digest = "d" * 64
+        await make_blob(digest)
+        blob = await Blob.get(digest)
+        blob.external_path = "/Users/gio/private/reads.fastq"
+        blob.state = BlobState.PRESENT
+        await blob.save()
+        await make_object(project, "reads.fastq", digest=digest)
+
+        result = await export_service.export_project(project.id, owner=TEST_OWNER)
+
+        with tarfile.open(result.path) as tar:
+            blob = b""
+            for member in tar.getmembers():
+                if member.isfile():
+                    blob += tar.extractfile(member).read()
+
+        for forbidden in (b"/Users/gio", b"secret.key", b"fernet", b"ai_providers"):
+            assert forbidden.lower() not in blob.lower(), f"{forbidden!r} leaked"

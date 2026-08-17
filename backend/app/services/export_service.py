@@ -13,10 +13,17 @@ it cannot do.
 See docs/superpowers/specs/2026-08-17-project-export-archive-design.md.
 """
 
+import asyncio
+import io
+import json
+import tarfile
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 
 from beanie import PydanticObjectId
 
+from app.config import settings
 from app.errors import NotFoundError
 from app.models import (
     Blob,
@@ -280,3 +287,127 @@ async def render_report(bundle: ExportBundle, *, owner: str) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+_README = """# BioFlow project export
+
+This archive documents an analysis: what was run, on what, with which
+versions and parameters, producing which results.
+
+## What it is
+
+- `report.md` — the analysis in prose, readable without BioFlow.
+- `data-manifest.tsv` — every file in the project, whether or not its bytes
+  are in this archive. Readable with `cut` and `grep`.
+- `metadata/` — the underlying records as JSON.
+- `blobs/` — the bytes of files small enough to include.
+
+## What it is not
+
+**This archive cannot be imported into BioFlow.** It is a record to read,
+check, and cite, not a project you can load. It carries a format version
+and preserves record identity so that an importer remains possible later.
+
+## What was removed
+
+API keys, encryption keys, absolute filesystem paths, and the names of the
+machines the analysis ran on. Durations and tool versions are kept —
+they are part of the analysis.
+"""
+
+
+@dataclass
+class ExportResult:
+    path: Path
+    size_bytes: int
+    blob_count: int
+    included_blob_count: int
+    redaction: RedactionSummary
+
+
+def _write_archive(
+    dest: Path,
+    *,
+    docs: dict[str, list[dict]],
+    manifest_json: dict,
+    manifest_tsv: str,
+    report: str,
+    included: list[Blob],
+) -> None:
+    """Pack the tarball. Sync, called via asyncio.to_thread."""
+    from app.storage.paths import blob_path
+
+    def _add_bytes(tar: tarfile.TarFile, name: str, payload: bytes) -> None:
+        info = tarfile.TarInfo(name)
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(dest, "w:gz") as tar:
+        _add_bytes(tar, "manifest.json",
+                   json.dumps(manifest_json, indent=2).encode())
+        _add_bytes(tar, "data-manifest.tsv", manifest_tsv.encode())
+        _add_bytes(tar, "report.md", report.encode())
+        _add_bytes(tar, "README.md", _README.encode())
+        for name, rows in docs.items():
+            _add_bytes(tar, f"metadata/{name}.json",
+                       json.dumps(rows, indent=2).encode())
+        for blob in included:
+            # blob.id is the sha256 of the STORED bytes and is always set (it
+            # is the primary key); blob.content_sha256 is only set when it
+            # differs from id (the compressed-blob case), so it is None for
+            # the common uncompressed blob. blob_path() resolves by the
+            # digest of the bytes actually on disk, which is always blob.id
+            # -- using content_sha256 here would silently skip packing bytes
+            # for every uncompressed blob even though the manifest lists it
+            # as included.
+            src = blob_path(blob.id)
+            if src.exists():
+                tar.add(src, arcname=f"blobs/{blob.id}")
+
+
+async def export_project(
+    project_id: PydanticObjectId,
+    *,
+    owner: str,
+    threshold_bytes: int = DEFAULT_BLOB_THRESHOLD_BYTES,
+) -> ExportResult:
+    """Produce one archive for a project and its descendants."""
+    bundle = await collect(project_id, owner=owner)
+    docs, redaction = redact(bundle)
+    manifest_tsv, included = build_manifest(bundle, threshold_bytes=threshold_bytes)
+    report = await render_report(bundle, owner=owner)
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    dest = settings.exports_dir / f"{bundle.projects[0].slug}-{stamp}.tar.gz"
+
+    manifest_json = {
+        "bioflow_export_version": BIOFLOW_EXPORT_VERSION,
+        "exported_at": datetime.now(UTC).isoformat(),
+        "project_id": str(project_id),
+        "project_name": bundle.projects[0].name,
+        "project_count": len(bundle.projects),
+        "counts": {name: len(rows) for name, rows in docs.items()},
+        "blob_count": len(bundle.blobs),
+        "included_blob_count": len(included),
+        "blob_threshold_bytes": threshold_bytes,
+        "redaction_profile": redaction.profile,
+    }
+
+    await asyncio.to_thread(
+        _write_archive,
+        dest,
+        docs=docs,
+        manifest_json=manifest_json,
+        manifest_tsv=manifest_tsv,
+        report=report,
+        included=included,
+    )
+
+    return ExportResult(
+        path=dest,
+        size_bytes=dest.stat().st_size,
+        blob_count=len(bundle.blobs),
+        included_blob_count=len(included),
+        redaction=redaction,
+    )
