@@ -27,6 +27,7 @@ import type {
   DeDefaults,
   DeletionPreview,
   DeRequest,
+  ExportArchive,
   DeResultsPage,
   ExtractedSequence,
   FacetValue,
@@ -289,6 +290,48 @@ export const api = {
 
   deletionPreview: (id: string) =>
     request<DeletionPreview>(`/projects/${id}/deletion-preview`),
+
+  /**
+   * Queues a background job that writes one `.tar.gz` archive of the
+   * project and its descendants. Returns as soon as the job is enqueued
+   * (202) -- the archive itself is not ready yet, so this does not resolve
+   * once the file exists, only once the queue has accepted the work.
+   * `thresholdBytes` is a query param on the backend, not a body field
+   * (see `backend/app/api/v1/exports.py`); omitted entirely when undefined
+   * so the backend's own 100 MB default applies rather than this client
+   * re-stating it.
+   */
+  createExport: (projectId: string, thresholdBytes?: number) =>
+    request<{ job_id: string }>(
+      `/projects/${projectId}/export${
+        thresholdBytes != null ? `?threshold_bytes=${thresholdBytes}` : ""
+      }`,
+      { method: "POST" },
+    ),
+
+  listExports: () => request<ExportArchive[]>("/exports"),
+
+  /**
+   * Fetches an archive's bytes and returns a Blob, rather than the bare URL
+   * `objectDownloadUrl` hands back for a plain `<a href>`. The download
+   * route (`GET /exports/{name}/download`) resolves its owner from the
+   * `X-BioFlow-Profile` header only -- unlike `/objects/{id}/download`,
+   * it has no `?profile=` query fallback for a browser-native navigation
+   * -- so a plain link would 401/422 for any profile but the legacy
+   * "local" one. This attaches that header the same way `request()` does
+   * for every other authenticated call, then hands back a Blob instead of
+   * parsed JSON; the caller turns it into a download with
+   * `URL.createObjectURL`.
+   */
+  downloadExport: async (name: string): Promise<Blob> => {
+    const res = await fetch(`${BASE}/exports/${encodeURIComponent(name)}/download`, {
+      headers: profileHeaders(),
+    });
+    if (!res.ok) {
+      throw new ApiRequestError(res.status, "http_error", `${res.status} ${res.statusText}`);
+    }
+    return res.blob();
+  },
 
   listObjects: (projectId: string) =>
     request<DataObject[]>(`/projects/${projectId}/objects`),

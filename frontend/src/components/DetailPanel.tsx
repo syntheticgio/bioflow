@@ -58,6 +58,7 @@ import { AnnotationResults } from "./AnnotationResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
+import { ProjectExport } from "./ProjectExport";
 import { ProteinStructureTab } from "./ProteinStructureTab";
 import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
@@ -331,6 +332,8 @@ function ProjectDetail({ id }: { id: string }) {
           <div className="section-title">Recent jobs</div>
           <JobList projectId={project.id} />
         </div>
+
+        <ProjectExport projectId={project.id} projectName={project.name} />
 
         <ProjectDangerZone projectId={project.id} projectName={project.name} />
       </div>

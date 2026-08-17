@@ -22,3 +22,16 @@ export interface Breadcrumb {
 export interface ProjectDetail extends Project {
   breadcrumbs: Breadcrumb[];
 }
+
+/**
+ * One archive on disk under the exports directory, as `GET /exports` lists
+ * it. `created_at` is a Unix timestamp in seconds (`Path.stat().st_mtime`
+ * on the backend), not an ISO string like every other timestamp this app
+ * renders -- convert with `new Date(created_at * 1000)` rather than handing
+ * it to `formatDate`, which expects ISO.
+ */
+export interface ExportArchive {
+  name: string;
+  size_bytes: number;
+  created_at: number;
+}
