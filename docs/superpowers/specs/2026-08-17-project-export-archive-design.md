@@ -189,10 +189,14 @@ unanswered, rather than seeing nothing and assuming it did not matter.
 
 ### The handler
 
-A new `@handler` in the queue registry, `HandlerMode.SUBPROCESS` -- the work
-is I/O-bound tar/gzip packing, and subprocess keeps it off the event loop.
-The job carries `project_id`, the blob-inclusion threshold, and the
-destination path.
+A new `@handler` in the queue registry, `HandlerMode.THREAD` -- not
+`SUBPROCESS`. `SUBPROCESS` is for handlers that spawn an external process
+and are killed by process group; this handler packs the tarball in-process
+with Python's own `tarfile`/`gzip` and spawns nothing, so there is no
+subprocess to be killed. It is still I/O-heavy, which is what keeps it off
+the event loop -- `THREAD` runs it in the worker-pool thread instead. The
+job carries `project_id`, the blob-inclusion threshold, and the destination
+path.
 
 ### The node-type registry: `EXCLUDED_LAUNCHES`
 
