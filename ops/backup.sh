@@ -332,7 +332,10 @@ cmd_restore() {
     [ "$answer" = "$MONGO_DB" ] || die "confirmation did not match; nothing was changed"
   fi
 
-  log "Restoring from $dir…"
+  # Braced deliberately: under a UTF-8 LC_CTYPE bash reads the following "…"
+  # as part of the identifier, so an unbraced "$dir…" expands ${dir…} and
+  # dies on `set -u`. Same for $data_root in cmd_verify.
+  log "Restoring from ${dir}…"
   docker exec -i "$MONGO_CONTAINER" mongorestore --archive --drop --quiet \
     <"$dir/dump/$MONGO_DB.archive"
 
@@ -376,7 +379,7 @@ cmd_verify() {
   local data_root="${BIOINFO_HOME:-/data}"
   [ -d "$data_root" ] || die "no such data directory: $data_root (set BIOINFO_HOME)"
 
-  log "Checking $(manifest_row_count "$dir/data-manifest.tsv") enumerated blobs against $data_root…"
+  log "Checking $(manifest_row_count "$dir/data-manifest.tsv") enumerated blobs against ${data_root}…"
 
   local missing
   missing="$(check_manifest_against_data "$dir/data-manifest.tsv" "$data_root")"
