@@ -58,6 +58,7 @@ import { AnnotationResults } from "./AnnotationResults";
 import { IndexStatus } from "./IndexStatus";
 import { PipelineToolSelector } from "./PipelineToolSelector";
 import { ProjectDangerZone } from "./ProjectDangerZone";
+import { ProteinStructureTab } from "./ProteinStructureTab";
 import { TrimDialog } from "./TrimDialog";
 import { AssembleDialog } from "./AssembleDialog";
 import { CompletenessDialog } from "./CompletenessDialog";
@@ -368,6 +369,12 @@ function tabsFor(obj: DataObject): TabDef[] {
     obj.role === "de_results";
   if (hasResults) {
     tabs.push({ id: "results", label: "Results" });
+  }
+
+  // A protein FASTA is the only object whose records are indexed, so it is
+  // the only one with anything to show here (R24).
+  if (obj.role === "protein" && obj.format.kind === "fasta") {
+    tabs.push({ id: "structure", label: "Structure" });
   }
 
   // Hints only where there is something true to say. The mockup shows one on
@@ -768,6 +775,12 @@ function ObjectDetail({ id }: { id: string }) {
         )}
 
         <Tabs tabs={tabs} active={tab} onChange={setTab} idPrefix="obj" />
+
+        {tab === "structure" && (
+          <TabPanel id="structure" idPrefix="obj">
+            <ProteinStructureTab objectId={obj.id} />
+          </TabPanel>
+        )}
 
         {tab === "qc" && (
           <div>
