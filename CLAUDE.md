@@ -9,17 +9,48 @@ users happens at a tag, from a release branch, several stages downstream of
 `main` (see [Release methodology](#release-methodology) below). Landing on
 `main` is not shipping.
 
-**But `main` is now reached through a pull request, not a direct merge.** This
-changed on 2026-08-09. The rest of the pipeline -- alpha, beta, production --
-is described under [Release methodology](#release-methodology); this section
-is only about how a piece of work gets from a worktree onto `main`.
+**`main` is reached through a pull request, not a direct merge** -- but you
+open *and* merge that PR yourself once CI is green, per the section below. The
+PR is the record and the CI gate, not a wait for someone else. The rest of the
+pipeline -- alpha, beta, production -- is described under
+[Release methodology](#release-methodology); this section is only about how a
+piece of work gets from a worktree onto `main`.
 
-## Finish work on a branch, push it, and open a PR
+## Finish work on a branch, push it, open a PR, and merge it once CI is green
 
-**Do not merge your own work to `main`.** The end state of a task is *an open
-PR*, not a merged one. The user reviews and merges. This is the one part of
-the old workflow that inverted: committing and pushing are still yours to do
-without asking, and merging is now the user's.
+**Merge your own work to `main` once every check passes.** The end state of a
+task is *a merged PR*. The PR still exists -- it is what generates the release
+notes and what someone reads later to understand the change -- but it is not a
+gate you wait at. Committing, pushing, opening the PR, and merging it are all
+yours to do without asking.
+
+This changed on 2026-08-17, reverting the 2026-08-09 rule that made merging
+the user's step. The reason is that nothing ships at a merge to `main`: it is a
+dev trunk, and alpha, beta, and production are all downstream of it (see
+[Release methodology](#release-methodology)). A green PR sitting open is not
+being reviewed, it is just waiting -- and the cost of that wait is real, since
+`main` moves underneath it and the next task starts from a base that does not
+include it.
+
+**Green CI is the whole gate, so the checks have to have actually finished.**
+"Green" means every check reports `pass` -- not `pending`, not "the ones I
+looked at." The `gh pr checks` polling described below is what establishes
+that, and it is now load-bearing rather than merely diligent: it is the only
+thing standing between a bad change and `main`.
+
+What still earns a stop-and-ask rather than a merge:
+
+- **A red check**, obviously -- fix it and re-poll, don't merge around it.
+- **A merge conflict** (`mergeStateStatus: DIRTY`). Rebase and push; that is
+  ordinary work on your own branch.
+- **A change the user asked to review before it lands.** A standing rule does
+  not override a specific instruction on a specific task.
+- **Anything the task itself flagged as uncertain.** If you wrote "I'm not sure
+  this is the right approach" in your own PR description, merging it is
+  answering your own open question. Say so and leave it.
+- **A branch whose PR is against something other than `main`** -- an alpha or
+  beta branch. Those are release-stage merges and stay the user's call, per
+  [Release methodology](#release-methodology).
 
 **Before opening the PR, catch up to `main` yourself rather than letting
 GitHub discover the conflict.** `main` moves while a task is in progress, and
@@ -86,20 +117,55 @@ re-poll -- don't leave a red check for the user to notice and report back to
 you. Same for `mergeStateStatus`: if it comes back `UNSTABLE` (checks still
 running) that's fine and you keep waiting, but if it's a real conflict,
 rebase your branch on `origin/main` and push again -- that is ordinary work
-on your own branch, not a history rewrite of a shared one. Only once checks
-are green and `mergeable` is clean do you report the PR URL and stop.
+on your own branch, not a history rewrite of a shared one.
 
-What still earns a pause before you push:
+Once every check reports `pass` and `mergeable` is `MERGEABLE`, merge it:
+
+```bash
+gh pr merge <N> --rebase --delete-branch
+```
+
+**`--rebase`, not `--squash`.** This matters more than it looks. `main`'s
+history is one commit per unit of work, first-parent -- check `git log
+origin/main --first-parent` and you will see the individual subjects, not merge
+bubbles or squashed PR titles. Two things depend on that:
+
+- **`CHANGELOG.md` is generated from commit subjects *and bodies*** by git-cliff
+  inside `ops/release.sh` (see
+  [Release notes](#release-notes-come-from-pr-titles)). A squash concatenates
+  the bodies into one blob under a single subject, which is precisely the input
+  that generator cannot use.
+- **The separable-commits rule below assumes the commits survive.** Splitting a
+  mechanical rename from a behaviour change is pointless if the merge glues
+  them back together.
+
+`--delete-branch` because a merged branch left on the remote is what
+`worktree-up.sh --prune` later has to reason about. Note it deletes the remote
+branch, not your worktree -- tear that down separately, as described under
+[Running the app](#running-the-app-one-instance-not-devprod).
+
+Then report the merge and the PR URL, and stop.
+
+Do not use `--auto`. It queues the merge for whenever checks pass and returns
+immediately, which means the task ends with you having verified nothing -- the
+point of polling is that *you* saw the checks pass before anything landed.
+
+What still earns a pause before you push or merge:
 
 - **A red or unrun suite.** "Green" is the precondition, and it means read the
   count, not the exit code of whatever was last in the pipeline.
 - **Anything genuinely destructive** -- history rewrites, force pushes,
-  deleting branches that hold unmerged work. Committing is cheap and
-  reversible; those are not.
+  deleting branches that hold unmerged work. Committing and merging a green PR
+  are cheap and revertable; those are not.
 
 Keep commits separable: a mechanical rename and a behaviour change in one
 commit is a commit nobody can review or revert, whatever the test count says.
-This mattered less when nobody read the commits; now someone does.
+Self-merging raises the stakes here rather than lowering them. Nobody is
+reading the diff before it lands, so a separable commit is what makes the
+change reviewable *after* the fact -- and the ability to revert one commit
+without unpicking three is the safety net that replaces the review gate. The
+commits are also read directly by git-cliff at release time, per `--rebase`
+above.
 
 ### Writing the PR
 
@@ -685,10 +751,12 @@ testing to bless it.** `main` is a dev trunk here, not a release
 ([above](#working-on-this-repo)); nothing in this repo ships to users at
 merge time -- alpha, beta, and production are all downstream of it -- so there
 is no "final testing" step that a TODO entry should wait on. Note the bar is
-the *merge*, not the PR: since you no longer merge your own work, an entry
-whose PR is open but unmerged is not yet `— FIXED`. If the PR is open and the
-task is otherwise done, say so and leave the entry open. If testing after
-merge turns up a real problem,
+still the *merge*, not the PR -- an entry whose PR is open but unmerged is not
+yet `— FIXED`. Since you now merge your own green PRs, that usually means
+closing out the entry in the same task rather than leaving it for later; the
+case that still leaves it open is a PR held back for one of the reasons listed
+under [merging](#finish-work-on-a-branch-push-it-open-a-pr-and-merge-it-once-ci-is-green).
+If testing after merge turns up a real problem,
 that is a new entry, not a reason the old one should have stayed open --
 the original diagnosis was still correct and the fix still shipped.
 
