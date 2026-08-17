@@ -1838,6 +1838,13 @@ async def launch_alignment(
                     ],
                     **reads_payload,
                 },
+                # Same attribution the single-shot path below gives its job.
+                # Without it `/jobs?object_id=` cannot see this run, so every
+                # "is anything running on this file?" surface -- the Actions
+                # tab's Launch buttons most of all -- reports the file idle
+                # for the hours a chunked alignment takes.
+                project_id=primary_set.r1.project_id,
+                object_id=primary_set.r1.id,
             )
 
     # --- Normal (single-shot) path ---
