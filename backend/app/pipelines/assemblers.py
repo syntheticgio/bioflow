@@ -20,9 +20,11 @@ class Assembler(StrEnum):
     # Declared, not installed. Not packaged for Debian; needs a source build
     # with the arm64 SIMD problem bwa-mem2 already has a script for.
     HIFIASM = "hifiasm"
-    # Declared, not installed. Packaged, but short-read de novo is not a
-    # workflow here yet.
+    # Declared, not installed. NOT packaged for trixie (the 2026-08-01 spec's
+    # claim that it is was true for bookworm) -- needs a vendored upstream
+    # tarball. See #519.
     SPADES = "spades"
+    ABYSS = "abyss"
 
 
 class OutputKind(StrEnum):
