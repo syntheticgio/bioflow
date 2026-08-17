@@ -29,11 +29,16 @@ export function formatDate(iso: string | null | undefined): string {
 }
 
 /**
- * Just the clock time, for rows that are all from today.
+ * Just the clock time, for rows that are necessarily from the current session.
  *
- * The activity page's ledger carries one date in its heading and then a column
- * of times; repeating "Aug 1, 2026" on every line would be six words of
- * furniture per row to distinguish runs that are minutes apart.
+ * This is right for the activity page's featured run and its step list, where
+ * every line belongs to something happening now and the question is the order
+ * steps finished in, not which day they were.
+ *
+ * It is not right for a list spanning days -- the finished-runs ledger used
+ * this and gave every line a bare clock, so a run from last week was
+ * indistinguishable from one an hour ago (#456). Those rows use
+ * `formatRelative` and carry the exact time on hover.
  */
 export function formatClock(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -43,6 +48,47 @@ export function formatClock(iso: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
+  });
+}
+
+/**
+ * How long ago something happened, for a list that spans days.
+ *
+ * "How stale is this" is the question a column of finished runs is actually
+ * asked, and an age answers it without the reader subtracting dates. Past a
+ * week the age stops being readable as a duration -- nobody parses "63d ago"
+ * -- so it gives the day instead, with the year once that is ambiguous too.
+ *
+ * Deliberately lossy: the exact instant lives in a `title` on the same row,
+ * because a ledger line has room for one of the two and this is the one that
+ * is read at a glance.
+ */
+export function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+
+  const now = new Date();
+  const seconds = (now.getTime() - d.getTime()) / 1000;
+
+  // A negative age means the clock behind the timestamp is ahead of the
+  // browser's -- skew, not a run scheduled in the future. "-3m ago" reads as
+  // a bug, so it clamps to the same thing a fresh run shows.
+  if (seconds < 60) return "just now";
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
   });
 }
 
