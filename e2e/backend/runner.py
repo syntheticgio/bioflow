@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable
+from typing import Any
 
 from .config import Config
 from .http_client import upload_object
@@ -76,7 +77,12 @@ class RunContext:
     async def op_mcp(self, tool: str, arguments: dict) -> dict:
         return await self.mcp.call_tool(tool, arguments)
 
-    async def op_wait(self, tool: str, arguments: dict, timeout: float, poll: float) -> dict:
+    # ASYNC109 wants `asyncio.timeout()`, but this timeout is a polling
+    # deadline (`time.monotonic() + timeout`) bounding repeated tool calls,
+    # not a cancellation scope around one await -- they are not equivalent.
+    async def op_wait(
+        self, tool: str, arguments: dict, timeout: float, poll: float  # noqa: ASYNC109
+    ) -> dict:
         deadline = time.monotonic() + timeout
         last: dict = {}
         while time.monotonic() < deadline:

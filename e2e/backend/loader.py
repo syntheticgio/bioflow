@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 
 from . import primitives
-from .model import Step, Test, VERBS
+from .model import VERBS, Step, Test
 
 
 def _load_yaml_tests(bioflow_dir: Path) -> list[Test]:

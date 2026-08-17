@@ -27,7 +27,7 @@ class McpClient:
         self._client = httpx.AsyncClient(timeout=httpx.Timeout(600.0))
         self._id = 0
 
-    async def __aenter__(self) -> "McpClient":
+    async def __aenter__(self) -> McpClient:
         await self._init()
         return self
 

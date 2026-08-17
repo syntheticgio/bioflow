@@ -63,6 +63,6 @@ def test_upload_non_201_raises(monkeypatch, tmp_path):
 
     try:
         asyncio.run(http_client.upload_object("http://bf:8000", "", "p1", str(fixture)))
-        assert False, "expected HttpUploadError"
+        raise AssertionError("expected HttpUploadError")
     except http_client.HttpUploadError as e:
         assert "422" in str(e)

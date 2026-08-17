@@ -20,7 +20,9 @@ async def upload_object(base_url: str, profile: str, project_id: str, file_path:
     in ``X-BioFlow-Profile``. See ``backend/app/api/v1/projects.py:upload_object``.
     """
     path = Path(file_path)
-    data = path.read_bytes()
+    # ASYNC240 wants anyio.Path. This is a one-shot fixture read in a test
+    # harness; a brief blocking read does not justify the extra dependency.
+    data = path.read_bytes()  # noqa: ASYNC240
     headers = {"X-Filename": quote(path.name)}
     if profile:
         headers["X-BioFlow-Profile"] = profile
