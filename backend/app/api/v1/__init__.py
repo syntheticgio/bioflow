@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     agent,
     events,
+    exports,
     feedback,
     jobs,
     local_databases,
@@ -41,6 +42,7 @@ api_router.include_router(agent.router)
 api_router.include_router(objects.router)
 api_router.include_router(operations.router)
 api_router.include_router(uploads.router)
+api_router.include_router(exports.router)
 api_router.include_router(jobs.router)
 api_router.include_router(pipelines.router)
 api_router.include_router(replan.router)
