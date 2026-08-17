@@ -82,7 +82,16 @@ def assemble_reads(ctx: JobContext) -> dict:
     # has no extension at all.
     reads = _named_link(work, reads, ctx.payload.get("reads_name"))
 
+    # Optional second mate. `_resolve_input` is already side-parameterized, so
+    # the paired path needs no new plumbing -- only a payload key that
+    # `launch_assembly` sets when it identified a mate.
+    mate: Path | None = None
+    if payload_has_mate(ctx.payload):
+        mate = _resolve_input(ctx.payload, "mate")
+        mate = _named_link(work, mate, ctx.payload.get("mate_name"))
+
     out_dir = work / "out"
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     cmd = assembly_runner.build_assembly_command(
         assembler=assembler,
@@ -90,11 +99,19 @@ def assemble_reads(ctx: JobContext) -> dict:
         reads=reads,
         out_dir=out_dir,
         params=params,
+        mate=mate,
+        # Set by launch_assembly from the same estimate that decided this run
+        # could proceed. None for Flye, and for an ABySS run with no estimate
+        # -- the builder floors it either way.
+        bloom_bytes=ctx.payload.get("bloom_bytes"),
     )
 
-    progress = assembly_runner.AssemblyProgress(
-        stage_order=assembly_runner.flye_stage_order(params)
-    )
+    if assembler is Assembler.ABYSS:
+        progress = assembly_runner.AbyssProgress()
+    else:
+        progress = assembly_runner.AssemblyProgress(
+            stage_order=assembly_runner.flye_stage_order(params)
+        )
     ctx.progress(phase="starting", pct=None, message=f"starting {assembler.value}")
     ctx.extend_lease(ASSEMBLY_LEASE_SECONDS)
 
@@ -130,12 +147,19 @@ def assemble_reads(ctx: JobContext) -> dict:
     facts: dict = {}
     info_path = found.get(OutputKind.INFO_TABLE)
     if info_path is not None:
-        # Parse failures are swallowed inside parse_assembly_info: a table that
-        # could not be read must not fail an assembly that took six hours and
+        # Two different tables: Flye's `assembly_info.txt` carries coverage and
+        # circularity; ABySS's `-stats.tab` carries contiguity including N50.
+        # Parse failures are swallowed inside both parsers: a table that could
+        # not be read must not fail an assembly that took six hours and
         # produced a perfectly good FASTA.
-        facts = assembly_runner.parse_assembly_info(
-            info_path.read_text(errors="replace")
-        )
+        if assembler is Assembler.ABYSS:
+            facts = assembly_runner.parse_abyss_stats(
+                info_path.read_text(errors="replace")
+            )
+        else:
+            facts = assembly_runner.parse_assembly_info(
+                info_path.read_text(errors="replace")
+            )
 
     ctx.progress(phase="done", pct=1.0, message="assembly complete")
     log.info(
@@ -164,6 +188,10 @@ def assemble_reads(ctx: JobContext) -> dict:
     }
 
 
+def payload_has_mate(payload: dict) -> bool:
+    return bool(payload.get("mate_sha256") or payload.get("mate_path"))
+
+
 def _contigs_name(ctx: JobContext) -> str:
     """`<sample>.assembly.fasta`, or Flye's own name if we have nothing better.
 
@@ -175,9 +203,20 @@ def _contigs_name(ctx: JobContext) -> str:
     return f"{stem}.assembly.fasta" if stem else "assembly.fasta"
 
 
+def _graph_suffix(assembler: str) -> str:
+    """ABySS emits Graphviz `.dot`; Flye emits GFA.
+
+    Naming an ABySS graph `.gfa` would be a lie that survives into the object
+    store, and `AssemblyGraph.tsx` would then try to render it as GFA and fail
+    confusingly rather than declining cleanly.
+    """
+    return ".assembly_graph.dot" if assembler == "abyss" else ".assembly_graph.gfa"
+
+
 def _graph_name(ctx: JobContext) -> str:
+    suffix = _graph_suffix(ctx.payload.get("assembler", "flye"))
     stem = _reads_stem(ctx)
-    return f"{stem}.assembly_graph.gfa" if stem else "assembly_graph.gfa"
+    return f"{stem}{suffix}" if stem else f"assembly_graph{suffix[len('.assembly_graph'):]}"
 
 
 def _reads_stem(ctx: JobContext) -> str:
