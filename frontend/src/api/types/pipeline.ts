@@ -278,4 +278,13 @@ export interface PipelineSuggestion {
   /** Set only when status is "needs_install": what pressing Launch costs. */
   requires_install: { tool: string; download_bytes: number | null } | null;
   prior_runs: PriorRun[];
+  /**
+   * Work this card offers is queued or running right now.
+   *
+   * Server-derived, which is the point: the client's own record of what it
+   * launched dies with a page reload, and a run started from the Computations
+   * dialog was never in it at all. Both cases leave a Launch button enabled
+   * beside work already in flight.
+   */
+  running: boolean;
 }
