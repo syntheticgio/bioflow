@@ -13,8 +13,21 @@ import pytest
 
 from app.pipelines import assembly_runner
 from app.pipelines.assemblers import Assembler
-from app.pipelines.assembly_params import FlyeParams
+from app.pipelines.assembly_params import AbyssParams, FlyeParams
 from app.pipelines.assembly_runner import AssemblyProgress, parse_assembly_info
+
+
+def _abyss_cmd(**kwargs):
+    defaults = dict(
+        assembler=Assembler.ABYSS,
+        tool_path="/usr/bin/abyss-pe",
+        reads=Path("/work/r1.fastq.gz"),
+        out_dir=Path("/work/out"),
+        params=AbyssParams(k=51, threads=4),
+        bloom_bytes=2 * 1024**3,
+    )
+    defaults.update(kwargs)
+    return assembly_runner.build_assembly_command(**defaults)
 
 
 class TestBuildAssemblyCommand:
@@ -62,6 +75,55 @@ class TestBuildAssemblyCommand:
                 reads=Path("/w/reads.fastq"),
                 out_dir=Path("/w/out"),
                 params=FlyeParams(),
+            )
+
+    def test_abyss_command_uses_make_variable_assignments(self):
+        """abyss-pe is a Make wrapper: `k=51`, never `--k 51`."""
+        cmd = _abyss_cmd()
+        assert cmd[0] == "/usr/bin/abyss-pe"
+        assert "k=51" in cmd
+        assert "j=4" in cmd
+        assert "name=asm" in cmd
+        assert not any(token.startswith("--k") for token in cmd)
+
+    def test_abyss_command_pairs_both_mates_in_one_in_variable(self):
+        cmd = _abyss_cmd(mate=Path("/work/r2.fastq.gz"))
+        assert "in=/work/r1.fastq.gz /work/r2.fastq.gz" in cmd
+        assert not any(t.startswith("se=") for t in cmd)
+
+    def test_abyss_command_falls_back_to_single_end(self):
+        cmd = _abyss_cmd(mate=None)
+        assert "se=/work/r1.fastq.gz" in cmd
+        assert not any(t.startswith("in=") for t in cmd)
+
+    def test_abyss_command_always_sets_bloom_budget(self):
+        """B is mandatory: without it abyss-pe exits non-zero immediately."""
+        cmd = _abyss_cmd(bloom_bytes=3 * 1024**3)
+        assert "B=3072M" in cmd
+
+    def test_abyss_command_floors_bloom_budget(self):
+        """A tiny or absent estimate must not produce an unusable B."""
+        cmd = _abyss_cmd(bloom_bytes=None)
+        assert "B=200M" in cmd
+
+    def test_flye_command_unchanged_by_new_keywords(self):
+        cmd = assembly_runner.build_assembly_command(
+            assembler=Assembler.FLYE,
+            tool_path="/usr/bin/flye",
+            reads=Path("/work/reads.fastq"),
+            out_dir=Path("/work/out"),
+            params=FlyeParams(mode="nano-hq", threads=8, iterations=1),
+        )
+        assert cmd[:2] == ["/usr/bin/flye", "--nano-hq"]
+
+    def test_unknown_assembler_still_raises(self):
+        with pytest.raises(ValueError, match="No command builder"):
+            assembly_runner.build_assembly_command(
+                assembler=Assembler.HIFIASM,
+                tool_path="/usr/bin/hifiasm",
+                reads=Path("/work/reads.fastq"),
+                out_dir=Path("/work/out"),
+                params=AbyssParams(),
             )
 
 
