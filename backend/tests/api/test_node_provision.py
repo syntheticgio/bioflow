@@ -467,8 +467,8 @@ async def test_provision_private_key_uses_real_import_private_key():
     the mocked connect.
     """
     from app.api.v1.nodes import ProvisionRequest, _provision_node
-    from app.services.node_ssh import generate_keypair
     from app.models.node import Node
+    from app.services.node_ssh import generate_keypair
 
     private_pem, public_line = generate_keypair("regnode")
 
@@ -627,10 +627,13 @@ async def test_provision_emits_the_documented_phase_sequence():
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
          patch("app.services.node_ssh.verify_key", AsyncMock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
+         patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch.object(NodeProvisionTask, "save", _record):
         conn = ssh.connect.return_value
+        # `running` because the verify phase reads this command's stdout as
+        # the worker's container state; an empty stdout means "not present".
         conn.run = AsyncMock(return_value=type("R", (), {
-            "exit_status": 0, "stdout": "", "stderr": "",
+            "exit_status": 0, "stdout": "running", "stderr": "",
         })())
         ssh.connect = AsyncMock(return_value=conn)
         await _provision_node("t-phases", req)
@@ -646,9 +649,107 @@ async def test_provision_emits_the_documented_phase_sequence():
         "install_key",
         "pull_image",
         "start_worker",
+        "verify",
         "enrolled",
     ]
 
     node = await Node.find_one(Node.node_id == "phasenode")
     if node:
         await node.delete()
+
+
+# ---- _verify_node_operational (#402) ----
+
+
+async def test_verify_node_operational_passes_when_worker_is_running():
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([_FakeResult(0, stdout="running\n")])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        assert await _verify_node_operational(conn, "~/.bioflow", "h") is None
+
+
+async def test_verify_node_operational_detects_a_container_that_exited():
+    """`docker compose up -d` exits 0 for a container that immediately dies;
+    only the state check afterwards catches it (#402)."""
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([_FakeResult(0, stdout="exited\n")])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        problem = await _verify_node_operational(conn, "~/.bioflow", "10.0.0.5")
+
+    assert problem is not None
+    assert "started and then stopped" in problem
+    assert "exited" in problem
+    # Points at the machine that has the logs, not at the primary.
+    assert "10.0.0.5" in problem
+
+
+async def test_verify_node_operational_detects_a_missing_container():
+    """No output means `up -d` created nothing at all."""
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([_FakeResult(0, stdout="")])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        problem = await _verify_node_operational(conn, "~/.bioflow", "10.0.0.6")
+
+    assert problem is not None
+    assert "not present" in problem
+
+
+async def test_verify_node_operational_fails_when_one_replica_is_down():
+    """A node runs several worker replicas; all of them must be up."""
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([_FakeResult(0, stdout="running\nexited\n")])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        problem = await _verify_node_operational(conn, "~/.bioflow", "h")
+
+    assert problem is not None
+    assert "started and then stopped" in problem
+
+
+async def test_verify_node_operational_reports_an_unusable_state_probe():
+    from app.api.v1.nodes import _verify_node_operational
+
+    conn = _FakeConn([_FakeResult(1, stderr="compose: command not found")])
+
+    with patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        problem = await _verify_node_operational(conn, "~/.bioflow", "h")
+
+    assert problem is not None
+    assert "command not found" in problem
+
+
+async def test_provision_fails_when_the_worker_exits_after_starting():
+    """End to end: a crash-looping worker fails provisioning at `verify`
+    rather than reporting the node enrolled (#402)."""
+    from app.api.v1.nodes import ProvisionRequest, _provision_node
+
+    req = ProvisionRequest(
+        host="10.0.0.13", username="ops", password="pw", node_name="crashnode",
+    )
+
+    async def _run(command, check=False):
+        # Everything succeeds; the worker just isn't running afterwards.
+        if "ps --format" in command:
+            return _FakeResult(0, stdout="exited")
+        return _FakeResult(0)
+
+    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
+         patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
+        conn = ssh.connect.return_value
+        conn.run = _run
+        ssh.connect = AsyncMock(return_value=conn)
+        await _provision_node("t-crash", req)
+
+    task = await NodeProvisionTask.find_one(NodeProvisionTask.task_id == "t-crash")
+    assert task.status == "failed"
+    assert task.phase == "verify"
+    assert "started and then stopped" in task.error
