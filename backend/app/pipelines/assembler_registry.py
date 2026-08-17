@@ -72,6 +72,12 @@ class AssemblerSpec:
         return self.tool is not None and self.tool().available
 
 
+# Every ABySS run assembles under this name, so its output filenames are
+# knowable before the run starts. Not user-facing: the resulting DataObject is
+# named after the reads by `assembly_handlers._contigs_name`.
+ASSEMBLY_NAME_PREFIX = "asm"
+
+
 _SHARED_FIELDS: tuple[ParamField, ...] = (
     ParamField(
         key="threads",
@@ -201,16 +207,58 @@ SPADES_SPEC = AssemblerSpec(
 
 ABYSS_SPEC = AssemblerSpec(
     assembler=Assembler.ABYSS,
-    tool=None,
+    tool=tools.abyss,
+    # Empty by construction, not by omission: ABySS has no read-accuracy mode
+    # flag. `spec_for_chemistry` routes SHORT here explicitly rather than by
+    # looking a chemistry up in this map, so an empty map is correct.
     mode_flags={},
     layout="paired",
     memory_model=AssemblyMemoryModel(
-        bytes_per_genome_base=10.0,
-        fixed_overhead_mb=2048,
-        bytes_per_read_base=2.0,
+        # A de Bruijn graph's peak is dominated by distinct k-mers, so the
+        # genome term is small next to Flye's 40 and the read term carries the
+        # weight. Published guidance, not measured on this hardware -- the same
+        # caveat FLYE_SPEC's model carries.
+        bytes_per_genome_base=15.0,
+        bytes_per_read_base=0.5,
+        fixed_overhead_mb=1024,
     ),
-    outputs=(),
-    unavailable_reason="ABySS is not installed.",
+    outputs=(
+        # Symlinks over numbered stage files (`asm-scaffolds.fa` -> `asm-8.fa`).
+        # `harvest` resolves them; storing the link itself would dangle once the
+        # workdir is reaped.
+        Output(
+            kind=OutputKind.CONTIGS,
+            filename=f"{ASSEMBLY_NAME_PREFIX}-scaffolds.fa",
+            required=True,
+        ),
+        Output(
+            kind=OutputKind.GRAPH,
+            filename=f"{ASSEMBLY_NAME_PREFIX}-scaffolds.dot",
+        ),
+        # ABySS computes N50 and friends itself, which Flye does not.
+        Output(
+            kind=OutputKind.INFO_TABLE,
+            filename=f"{ASSEMBLY_NAME_PREFIX}-stats.tab",
+        ),
+    ),
+    fields=(
+        *_SHARED_FIELDS,
+        ParamField(
+            key="k",
+            label="k-mer length",
+            kind="int",
+            default=51,
+            min=16,
+            max=127,
+            group="biology",
+            help=(
+                "The single parameter that most changes a short-read assembly. "
+                "51 suits 100-150 bp Illumina reads at typical coverage. Lower "
+                "it for shorter reads or thin coverage; raise it for long, deep, "
+                "high-quality reads."
+            ),
+        ),
+    ),
 )
 
 
@@ -253,17 +301,18 @@ def modes_for(assembler: Assembler) -> frozenset[str]:
 def spec_for_chemistry(chemistry: ReadChemistry | None) -> AssemblerSpec | None:
     """The assembler to use for these reads, or None if there is not one.
 
-    Flye for every long-read chemistry today, including HiFi -- hifiasm is the
-    better HiFi assembler and is the one this returns once it is installed.
-    This function is the single place that changes then.
+    ABySS for short reads, Flye for every long-read chemistry including HiFi
+    (hifiasm is the better HiFi assembler and is the one this returns once it
+    is installed). This function remains the single place that changes.
 
-    None for short and unknown reads, which are different refusals and are
-    distinguished by the caller: short reads have an assembler that is not
-    installed, unknown reads have a missing fact the user can fix by running
-    QC.
+    None only for unknown chemistry now -- a missing fact the user can supply
+    by running QC. Short reads used to land here too, as a *different* refusal
+    naming a missing tool; that branch is gone because the tool is installed.
     """
-    if chemistry is None:
+    if chemistry is None or chemistry is ReadChemistry.UNKNOWN:
         return None
+    if chemistry is ReadChemistry.SHORT:
+        return SPECS[Assembler.ABYSS]
     spec = SPECS[Assembler.FLYE]
     if chemistry in spec.mode_flags:
         return spec
