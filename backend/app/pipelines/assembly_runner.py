@@ -315,6 +315,99 @@ def parse_assembly_info(text: str) -> dict:
     }
 
 
+# ABySS writes its own stats table, which Flye does not:
+#   n  n:500  L50  min  N75  N50  N25  E-size  max  sum  name
+# One row per output stage; the `-scaffolds.fa` row is the finished assembly.
+_ABYSS_STATS_ROW = f"{assembler_registry.ASSEMBLY_NAME_PREFIX}-scaffolds.fa"
+
+
+def parse_abyss_stats(text: str) -> dict:
+    """Contiguity facts from ABySS's own stats table.
+
+    Unlike Flye's table, this one already contains N50 -- so unlike
+    `parse_assembly_info`, this parser does report it. Note the asymmetry is
+    deliberate: `parsers._contiguity_stats` computes `sequence_n50` from the
+    FASTA bytes independently, so these two numbers are computed from the same
+    sequences by different code and must agree. If they ever disagree, the
+    FASTA-derived one is authoritative.
+
+    Returns {} for anything malformed rather than raising, for the same reason
+    `parse_assembly_info` does: a table that could not be read must not fail an
+    assembly that produced a perfectly good FASTA.
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return {}
+
+    header = [h.strip() for h in lines[0].split("\t")]
+    index = {name: i for i, name in enumerate(header)}
+    required = ("n", "N50", "max", "sum", "name")
+    if not all(col in index for col in required):
+        log.warning("abyss_stats_unexpected_header", header=header[:11])
+        return {}
+
+    for line in lines[1:]:
+        cols = [c.strip() for c in line.split("\t")]
+        if len(cols) < len(header):
+            continue
+        if cols[index["name"]] != _ABYSS_STATS_ROW:
+            continue
+        try:
+            return {
+                "assembly_contig_count": int(cols[index["n"]]),
+                "assembly_total_length": int(cols[index["sum"]]),
+                "assembly_n50": int(cols[index["N50"]]),
+                "assembly_longest": int(cols[index["max"]]),
+            }
+        except (ValueError, IndexError):
+            return {}
+    return {}
+
+
+# ABySS runs as a Make pipeline whose recipes echo the binary they invoke.
+# There is no `>>>STAGE:` equivalent and no count knowable in advance, so this
+# reports a phase name and no step counter -- which the snapshot contract
+# already handles by omitting phase_index/phase_total.
+_ABYSS_PHASES: tuple[tuple[str, str], ...] = (
+    ("ABYSS-P", "assembling contigs"),
+    ("ABySS-P", "assembling contigs"),
+    ("abyss-map", "mapping reads"),
+    ("abyss-fixmate", "pairing alignments"),
+    ("DistanceEst", "estimating distances"),
+    ("abyss-scaffold", "scaffolding"),
+    ("abyss-fac", "computing statistics"),
+)
+
+
+@dataclass
+class AbyssProgress:
+    """Phase names from ABySS's Make output.
+
+    No percentage and no step counter, for the reason `AssemblyProgress`'s
+    docstring gives and one more: ABySS's stage list is not knowable before the
+    run, so a denominator would be invented.
+    """
+
+    name: str = "abyss"
+    phase: str = "starting"
+
+    def feed(self, line: str) -> bool:
+        """Consume a log line. True if the phase changed."""
+        for token, label in _ABYSS_PHASES:
+            if token in line:
+                if label == self.phase:
+                    return False
+                self.phase = label
+                return True
+        return False
+
+    def message(self) -> str:
+        return self.phase
+
+    def snapshot(self) -> dict:
+        return {"pct": None, "phase": self.phase, "message": self.message()}
+
+
 def harvest(out_dir: Path, outputs) -> dict[OutputKind, Path]:
     """Which declared outputs the assembler actually produced.
 
@@ -326,7 +419,11 @@ def harvest(out_dir: Path, outputs) -> dict[OutputKind, Path]:
     for output in outputs:
         path = out_dir / output.filename
         if path.exists() and path.stat().st_size > 0:
-            found[output.kind] = path
+            # `.resolve()` because ABySS's outputs are symlinks over numbered
+            # stage files (`asm-scaffolds.fa` -> `asm-8.fa`). Storing the link
+            # would dangle as soon as the workdir is reaped. Harmless for Flye,
+            # whose outputs are already real files.
+            found[output.kind] = path.resolve()
         elif output.required:
             raise FileNotFoundError(
                 f"{output.filename} is missing from the assembly output. The "
