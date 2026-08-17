@@ -9,6 +9,7 @@ from app.db.redis_client import close_redis, connect_to_redis
 from app.errors import StorageUnavailableError
 from app.logging import configure_logging, get_logger
 from app.queue.worker import Worker
+from app.services.git_revision import log_revision
 from app.storage.home import initialize_home
 
 log = get_logger(__name__)
@@ -16,6 +17,11 @@ log = get_logger(__name__)
 
 async def main() -> None:
     configure_logging()
+
+    # The worker runs bind-mounted source too, so say which checkout it came
+    # from before a stale one turns into a handler that quietly predates its
+    # own fix. See services/git_revision.py.
+    log_revision()
 
     try:
         initialize_home()

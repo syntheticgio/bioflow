@@ -17,6 +17,7 @@ from app.mcp.server import mount_mcp_app
 from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
 from app.services.agent_service import agent_service
+from app.services.git_revision import log_revision
 from app.storage.home import initialize_home
 from app.version import __version__
 
@@ -57,6 +58,11 @@ async def _warm_tools() -> None:
 async def lifespan(app: FastAPI):
     configure_logging()
     log.info("starting", home=str(settings.bioinfo_home))
+
+    # Before anything else that could fail confusingly: say which checkout is
+    # being served. A stale one makes every merged fix it predates look
+    # missing, and the resulting error always blames some other subsystem.
+    log_revision()
 
     # Storage first: if the drive is missing, say so plainly rather than
     # failing later inside a request with a confusing error.
