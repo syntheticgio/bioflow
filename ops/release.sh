@@ -197,6 +197,15 @@ while IFS= read -r line; do
 done <<< "$BUMP_OUTPUT"
 [ "${#WRITTEN[@]}" -gt 0 ] || die "bump wrote no files"
 
+# Sync the lockfile version after bumping package.json so npm ci does not
+# fail on a version mismatch in CI (#491).
+if [ "$LINE" = "app" ]; then
+  cd "$REPO_ROOT/frontend"
+  npm install --package-lock-only --silent
+  cd "$REPO_ROOT"
+  WRITTEN+=("frontend/package-lock.json")
+fi
+
 # Regenerate CHANGELOG.md so the release commit carries the section for this
 # tag. The changelog tracks the app line only (#106); the launcher line keeps
 # its GitHub release notes. `--unreleased --tag` renders the commits since the
