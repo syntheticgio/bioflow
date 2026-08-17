@@ -11,7 +11,7 @@ import asyncio
 import json
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _DDL = """
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS steps (
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ResultStore:
@@ -72,7 +72,9 @@ class ResultStore:
             )
             self._conn.commit()
 
-    def _finish_step(self, run_id, test_name, step_index, status, elapsed_ms, log, error, result_json) -> None:
+    def _finish_step(
+        self, run_id, test_name, step_index, status, elapsed_ms, log, error, result_json
+    ) -> None:
         with self._lock:
             self._conn.execute(
                 "UPDATE steps SET status=?, elapsed_ms=?, log=?, error=?, result_json=?"
@@ -92,7 +94,8 @@ class ResultStore:
     def _get_run(self, run_id):
         with self._lock:
             run = self._conn.execute(
-                "SELECT run_id, started_at, ended_at, status, error, request_json FROM runs WHERE run_id=?",
+                "SELECT run_id, started_at, ended_at, status, error, request_json "
+                "FROM runs WHERE run_id=?",
                 (run_id,),
             ).fetchone()
             if run is None:
@@ -126,7 +129,10 @@ class ResultStore:
             rows = self._conn.execute(
                 "SELECT run_id, started_at, ended_at, status FROM runs ORDER BY started_at DESC"
             ).fetchall()
-        return [{"run_id": r[0], "started_at": r[1], "ended_at": r[2], "status": r[3]} for r in rows]
+        return [
+            {"run_id": r[0], "started_at": r[1], "ended_at": r[2], "status": r[3]}
+            for r in rows
+        ]
 
     def _delete_run(self, run_id):
         with self._lock:
@@ -141,9 +147,12 @@ class ResultStore:
     async def start_step(self, run_id, test_name, step_index, verb):
         return await asyncio.to_thread(self._start_step, run_id, test_name, step_index, verb)
 
-    async def finish_step(self, run_id, test_name, step_index, status, elapsed_ms, log, error, result_json):
+    async def finish_step(
+        self, run_id, test_name, step_index, status, elapsed_ms, log, error, result_json
+    ):
         return await asyncio.to_thread(
-            self._finish_step, run_id, test_name, step_index, status, elapsed_ms, log, error, result_json
+            self._finish_step, run_id, test_name, step_index, status, elapsed_ms, log,
+            error, result_json
         )
 
     async def finish_run(self, run_id, status, error=None):
