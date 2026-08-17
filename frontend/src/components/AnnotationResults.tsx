@@ -10,6 +10,7 @@ import {
 } from "./AnnotationCharts";
 import { AnnotationFeatureTable } from "./AnnotationFeatureTable";
 import { AnnotationTrack } from "./AnnotationTrack";
+import { FactsColumns } from "./FactsColumns";
 import { NodeSelector } from "./NodeSelector";
 import { OnDemandCompute } from "./OnDemandCompute";
 
@@ -99,19 +100,22 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
               </div>
             )}
 
-            {f.annotation_type_counts && (
-              <div className="section">
-                <div className="section-title">Features by type</div>
-                <FeatureTypeChart counts={f.annotation_type_counts} />
-              </div>
-            )}
-
-            {f.annotation_biotype_counts && (
-              <div className="section">
-                <div className="section-title">Features by biotype</div>
-                <BiotypeChart counts={f.annotation_biotype_counts} />
-              </div>
-            )}
+            {f.annotation_type_counts || f.annotation_biotype_counts ? (
+              <FactsColumns>
+                {f.annotation_type_counts && (
+                  <div className="section">
+                    <div className="section-title">Features by type</div>
+                    <FeatureTypeChart counts={f.annotation_type_counts} />
+                  </div>
+                )}
+                {f.annotation_biotype_counts && (
+                  <div className="section">
+                    <div className="section-title">Features by biotype</div>
+                    <BiotypeChart counts={f.annotation_biotype_counts} />
+                  </div>
+                )}
+              </FactsColumns>
+            ) : null}
 
             {contigs.length > 0 && (
               <>
