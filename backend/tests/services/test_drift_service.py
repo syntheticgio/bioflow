@@ -130,3 +130,51 @@ class TestFindOrphanedFiles:
         entries = await drift_service.find_orphaned_files()
 
         assert entries == []
+
+
+class TestFindMissingBlobs:
+    @pytest_asyncio.fixture(autouse=True, loop_scope="module")
+    async def clean(self):
+        await Blob.find_all().delete()
+
+    async def test_missing_managed_blob_is_reported(self):
+        await Blob(
+            id=DIGEST_A,
+            size=2048,
+            state=BlobState.MISSING,
+            storage=BlobStorage.MANAGED,
+            rel_path=f"{DIGEST_A[:2]}/{DIGEST_A}",
+        ).insert()
+
+        entries = await drift_service.find_missing_blobs()
+
+        assert [e.digest for e in entries] == [DIGEST_A]
+        assert entries[0].category is DriftCategory.MISSING_BLOB
+        assert entries[0].size_bytes == 2048
+
+    async def test_missing_external_blob_is_never_reported(self):
+        """Registered in place; outside BIOINFO_HOME, never ours to reclaim."""
+        await Blob(
+            id=DIGEST_B,
+            size=2048,
+            state=BlobState.MISSING,
+            storage=BlobStorage.EXTERNAL,
+            external_path="/somewhere/else/reads.fastq",
+        ).insert()
+
+        entries = await drift_service.find_missing_blobs()
+
+        assert entries == []
+
+    async def test_present_blob_is_not_reported(self):
+        await Blob(
+            id=DIGEST_C,
+            size=2048,
+            state=BlobState.PRESENT,
+            storage=BlobStorage.MANAGED,
+            rel_path=f"{DIGEST_C[:2]}/{DIGEST_C}",
+        ).insert()
+
+        entries = await drift_service.find_missing_blobs()
+
+        assert entries == []
