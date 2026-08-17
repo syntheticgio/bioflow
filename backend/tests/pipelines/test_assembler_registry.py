@@ -39,3 +39,50 @@ def test_abyss_charges_for_read_volume():
     """A de Bruijn assembler whose model ignored coverage would under-predict."""
     spec = assembler_registry.spec_for(Assembler.ABYSS)
     assert spec.memory_model.bytes_per_read_base > 0
+
+
+class TestExhaustiveness:
+    """A declared-and-installed assembler with no command builder would be
+    dispatched to another tool's builder or refused at runtime. Both are
+    silent until someone runs it. See CLAUDE.md on hand-maintained registries
+    keyed by an enum.
+    """
+
+    def test_every_assembler_has_a_spec(self):
+        from app.pipelines.assemblers import Assembler
+
+        assert set(assembler_registry.SPECS) == set(Assembler)
+
+    def test_every_installable_assembler_has_a_command_builder(self):
+        from pathlib import Path
+
+        from app.pipelines import assembly_params, assembly_runner
+        from app.pipelines.assemblers import Assembler
+
+        for member in Assembler:
+            spec = assembler_registry.spec_for(member)
+            if spec.tool is None:
+                # Declared-but-not-installed (hifiasm, spades) is exempt:
+                # `assembly_params.from_dict` refuses them before a builder is
+                # ever reached.
+                continue
+            params = assembly_params.from_dict({"assembler": member.value})
+            cmd = assembly_runner.build_assembly_command(
+                assembler=member,
+                tool_path=f"/usr/bin/{member.value}",
+                reads=Path("/work/reads.fastq"),
+                out_dir=Path("/work/out"),
+                params=params,
+            )
+            assert cmd, f"{member.value} produced an empty command line"
+
+    def test_every_installable_assembler_has_params(self):
+        from app.pipelines import assembly_params
+        from app.pipelines.assemblers import Assembler
+
+        for member in Assembler:
+            spec = assembler_registry.spec_for(member)
+            if spec.tool is None:
+                continue
+            params = assembly_params.from_dict({"assembler": member.value})
+            assert params.assembler is member
