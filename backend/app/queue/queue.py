@@ -513,7 +513,7 @@ async def claim(
     now_ms = int(datetime.now(UTC).timestamp() * 1000)
 
     result = await get_script("claim")(
-        keys=[keys.READY, keys.RUNNING],
+        keys=[ready_key or keys.READY, keys.RUNNING],
         args=[
             now_ms,
             lease_ms,
@@ -524,6 +524,7 @@ async def claim(
             io_heavy_budget,
             CLAIM_SCAN_LIMIT,
             "1" if ignore_reservations else "0",
+            node_id,
         ],
     )
     if not result:
