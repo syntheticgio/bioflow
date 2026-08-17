@@ -12,8 +12,8 @@ import pytest_asyncio
 from beanie import PydanticObjectId
 
 from app.metadata.protein_headers import RefKind
-from app.models import DataObject, FormatInfo, Profile, ProteinRecord
-from app.services import profile_service, project_service
+from app.models import DataObject, FormatInfo, ProteinRecord
+from app.services import project_service
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -25,37 +25,18 @@ pytestmark = [
 # in tests/api/conftest.py), so a counter avoids a collision across tests.
 _project_seq = itertools.count()
 
-# `resolve_owner` treats "no header" as an error even when a profile has
-# adopted "local" -- the adoption only satisfies the literal value "local",
-# so requests still have to send it explicitly.
-LOCAL_HEADERS = {"X-BioFlow-Profile": "local"}
-
 
 @pytest_asyncio.fixture(loop_scope="module")
-async def local_profile():
-    """Adopts the `"local"` owner so a bare `client` call (no
-    X-BioFlow-Profile header) resolves without a ProfileUnresolvedError --
-    `DataObject`'s `owner` field defaults to `"local"` (TimestampedDocument),
-    and `resolve_owner` only accepts that default when a profile has adopted
-    it.
-    """
-    await Profile.find_all().delete()
-    profile = await profile_service.create_profile(
-        username="local-owner", is_first_boot=True
-    )
-    yield profile
-    await profile.delete()
-
-
-@pytest_asyncio.fixture(loop_scope="module")
-async def protein_object(local_profile) -> DataObject:
+async def protein_object(two_profiles) -> DataObject:
     n = next(_project_seq)
+    owner = two_profiles["a"].owner_id()
     project = await project_service.create_project(
-        name=f"protein-records-project-{n}", owner="local"
+        name=f"protein-records-project-{n}", owner=owner
     )
     obj = DataObject(
         project_id=project.id,
         name="proteins.faa",
+        owner=owner,
         format=FormatInfo(),
     )
     await obj.insert()
@@ -63,14 +44,16 @@ async def protein_object(local_profile) -> DataObject:
 
 
 @pytest_asyncio.fixture(loop_scope="module")
-async def non_protein_object(local_profile) -> DataObject:
+async def non_protein_object(two_profiles) -> DataObject:
     n = next(_project_seq)
+    owner = two_profiles["a"].owner_id()
     project = await project_service.create_project(
-        name=f"non-protein-records-project-{n}", owner="local"
+        name=f"non-protein-records-project-{n}", owner=owner
     )
     obj = DataObject(
         project_id=project.id,
         name="reads.fastq",
+        owner=owner,
         format=FormatInfo(),
     )
     await obj.insert()
@@ -97,9 +80,10 @@ async def seeded(protein_object):
     return protein_object
 
 
-async def test_lists_records_in_file_order(client, seeded):
+async def test_lists_records_in_file_order(client, seeded, two_profiles):
     resp = await client.get(
-        f"/api/v1/objects/{seeded.id}/protein-records?limit=5", headers=LOCAL_HEADERS
+        f"/api/v1/objects/{seeded.id}/protein-records?limit=5",
+        headers=two_profiles["a_headers"],
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -108,10 +92,10 @@ async def test_lists_records_in_file_order(client, seeded):
     assert [r["ordinal"] for r in body["rows"]] == [0, 1, 2, 3, 4]
 
 
-async def test_paging_returns_the_requested_window(client, seeded):
+async def test_paging_returns_the_requested_window(client, seeded, two_profiles):
     resp = await client.get(
         f"/api/v1/objects/{seeded.id}/protein-records?offset=10&limit=5",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     body = resp.json()
 
@@ -120,38 +104,42 @@ async def test_paging_returns_the_requested_window(client, seeded):
     assert [r["ordinal"] for r in body["rows"]] == [10, 11]
 
 
-async def test_search_matches_identifier_and_description(client, seeded):
+async def test_search_matches_identifier_and_description(client, seeded, two_profiles):
     """R26. One query covers both fields; a user does not know which they typed."""
     by_description = await client.get(
         f"/api/v1/objects/{seeded.id}/protein-records?q=pyruvate",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert [r["ordinal"] for r in by_description.json()["rows"]] == [3, 7]
 
     by_identifier = await client.get(
         f"/api/v1/objects/{seeded.id}/protein-records?q=NP_100007",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert [r["ordinal"] for r in by_identifier.json()["rows"]] == [7]
 
 
-async def test_search_total_reflects_the_match_not_the_file(client, seeded):
+async def test_search_total_reflects_the_match_not_the_file(
+    client, seeded, two_profiles
+):
     resp = await client.get(
         f"/api/v1/objects/{seeded.id}/protein-records?q=pyruvate",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert resp.json()["total"] == 2
 
 
-async def test_search_is_case_insensitive(client, seeded):
+async def test_search_is_case_insensitive(client, seeded, two_profiles):
     resp = await client.get(
         f"/api/v1/objects/{seeded.id}/protein-records?q=PYRUVATE",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert resp.json()["total"] == 2
 
 
-async def test_search_treats_regex_metacharacters_literally(client, seeded):
+async def test_search_treats_regex_metacharacters_literally(
+    client, seeded, two_profiles
+):
     """A user typing `NP_100003.1` must not have the dot read as a wildcard.
 
     The search is implemented as a Mongo regex, so an unescaped input is both
@@ -159,24 +147,45 @@ async def test_search_treats_regex_metacharacters_literally(client, seeded):
     """
     resp = await client.get(
         f"/api/v1/objects/{seeded.id}/protein-records?q=hypothetical.protein",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert resp.json()["total"] == 0
 
 
-async def test_reports_no_records_for_a_file_that_has_none(client, non_protein_object):
+async def test_reports_no_records_for_a_file_that_has_none(
+    client, non_protein_object, two_profiles
+):
     resp = await client.get(
         f"/api/v1/objects/{non_protein_object.id}/protein-records",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert resp.status_code == 200
     assert resp.json()["total"] == 0
     assert resp.json()["rows"] == []
 
 
-async def test_unknown_object_is_a_404(client, local_profile):
+async def test_unknown_object_is_a_404(client, two_profiles):
     resp = await client.get(
         f"/api/v1/objects/{PydanticObjectId()}/protein-records",
-        headers=LOCAL_HEADERS,
+        headers=two_profiles["a_headers"],
     )
     assert resp.status_code == 404
+
+
+async def test_another_profile_cannot_read_protein_records(
+    client, seeded, two_profiles
+):
+    """Same shape as test_object_computations.py's
+    TestOwnerScoping::test_another_profile_cannot_read_computations -- a
+    wrong-owner request must 404, not just an unknown id."""
+    mine = await client.get(
+        f"/api/v1/objects/{seeded.id}/protein-records",
+        headers=two_profiles["a_headers"],
+    )
+    theirs = await client.get(
+        f"/api/v1/objects/{seeded.id}/protein-records",
+        headers=two_profiles["b_headers"],
+    )
+
+    assert mine.status_code == 200
+    assert theirs.status_code == 404
