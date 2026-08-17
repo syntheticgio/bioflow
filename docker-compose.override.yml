@@ -13,6 +13,12 @@ services:
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
+      # Read at startup to log *which checkout* this bind mount is serving.
+      # Only the mounted source decides what code runs, so a checkout parked
+      # on a stale branch serves stale code with nothing saying so (#452).
+      # Development-only: the shipped image has no source tree, and
+      # git_revision.py treats the missing directory as "running an image".
+      - ./.git:/srv/.git:ro
       - ./backend/tests:/srv/tests:ro
       # /srv/tests resolves repo root as parents[2] (/srv/tests -> /srv -> /),
       # same as ops/tests' throwaway container -- VERSION must be mounted at
@@ -40,6 +46,9 @@ services:
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro
+      # Same reason as the api service's: the worker runs mounted source too,
+      # so it reports the checkout it is serving at startup (#452).
+      - ./.git:/srv/.git:ro
       # Docker socket moved to docker-compose.yml. See the comment on the
       # worker service there.
     environment:
