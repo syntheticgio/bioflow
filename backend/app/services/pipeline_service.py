@@ -2124,6 +2124,15 @@ async def launch_alignment(
         input_bytes=total_input_bytes,
     )
 
+    # The value actually enqueued, which is not the number the banding above
+    # saw: it is recomputed with building_index=False and floored at
+    # MIN_DECLARED_MEM_MB. Checking the enqueued value is the point (#478).
+    refuse_if_over_budget(
+        declared_mb=align_mem_mb,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
     job = await queue.enqueue(
         "align_reads",
         owner=owner,
