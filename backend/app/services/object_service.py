@@ -31,6 +31,16 @@ from app.storage.home import require_home
 
 log = get_logger(__name__)
 
+# Report roots shared by remove, copy, and reap. Every function that iterates
+# per-object report directories must use this tuple so a new root cannot be
+# added to some call sites and silently skipped by others.
+_REPORT_ROOTS = (
+    settings.qc_reports_dir,
+    settings.bam_stats_dir,
+    settings.vcf_stats_dir,
+    settings.annotation_stats_dir,
+)
+
 
 async def get_object(object_id: PydanticObjectId, *, owner: str) -> DataObject:
     """Fetch an object, scoped to its owner.
@@ -873,7 +883,7 @@ def remove_report_dirs(object_id: PydanticObjectId, *, caller: str, reason: str)
     missing when a report directory disappeared with no way to tell whether
     `delete_object` or the reaper was responsible.
     """
-    for parent in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
+    for parent in _REPORT_ROOTS:
         path = parent / str(object_id)
         # The id is a validated ObjectId, so it cannot traverse -- checked
         # anyway because the cost is nothing and the blast radius of an rmtree
@@ -928,7 +938,7 @@ def copy_report_dirs(src_object_id: PydanticObjectId, dst_object_id: PydanticObj
     missing report is recomputable, and failing the share over one would trade
     a working file for none.
     """
-    for parent in (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir):
+    for parent in _REPORT_ROOTS:
         src = parent / str(src_object_id)
         dst = parent / str(dst_object_id)
         try:
