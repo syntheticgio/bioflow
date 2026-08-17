@@ -12,11 +12,9 @@ import { notify } from "../stores/messageStore";
  */
 export function QcDialog({
   objectId,
-  projectId,
   onClose,
 }: {
   objectId: string;
-  projectId: string;
   onClose: () => void;
 }) {
   const qc = useQueryClient();

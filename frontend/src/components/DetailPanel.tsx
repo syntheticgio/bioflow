@@ -816,7 +816,6 @@ function ObjectDetail({ id }: { id: string }) {
             {showQcDialog && (
               <QcDialog
                 objectId={id}
-                projectId={obj.project_id}
                 onClose={() => setShowQcDialog(false)}
               />
             )}
