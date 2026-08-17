@@ -4147,6 +4147,44 @@ def _organism_key(name) -> str:
     return " ".join(parts[:2]) if len(parts) >= 2 else ""
 
 
+async def resolve_assembly_mate(
+    reads: DataObject, candidate: DataObject | None = None
+) -> DataObject | None:
+    """The R2 for these reads, or None to assemble single-end.
+
+    Delegates discovery to `suggest_mate` above, which already prefers the
+    persisted link, falls back to the filename convention, and accepts only
+    CONFIRMED/NAME_ONLY verdicts. This wrapper adds exactly one thing:
+    REJECTED_READ_IDS becomes a refusal instead of a silent single-end
+    fallback.
+
+    That difference is the point. For trimming, two mismatched files just mean
+    "trim them separately", so `suggest_mate` returning None is right. For
+    assembly, quietly assembling one half of what the user thinks is a pair
+    produces a plausible result with no error -- worse than a refusal they can
+    act on.
+    """
+    if candidate is None:
+        return await suggest_mate(reads)
+
+    verdict = pairing.verdict(
+        pairing.PairInput(name=reads.name, facts=reads.facts, metadata=reads.metadata),
+        pairing.PairInput(
+            name=candidate.name, facts=candidate.facts, metadata=candidate.metadata
+        ),
+    )
+    if verdict is pairing.Verdict.REJECTED_READ_IDS:
+        raise ValidationError(
+            f"{reads.name!r} and {candidate.name!r} look like a pair by name "
+            "but their read IDs do not appear to be mates. Assembling them "
+            "together would produce a misleading result.",
+            details={"reads": reads.name, "mate": candidate.name},
+        )
+    if verdict in (pairing.Verdict.CONFIRMED, pairing.Verdict.NAME_ONLY):
+        return candidate
+    return None
+
+
 async def default_assembly_params(obj: DataObject) -> dict:
     """The dialog's starting point for these reads.
 
@@ -4183,8 +4221,9 @@ async def launch_assembly(
     owner: str,
     params: dict | None = None,
     resource_override: bool = False,
+    mate_object_id: PydanticObjectId | None = None,
 ) -> Job:
-    """Queue a de novo assembly of one long-read FASTQ."""
+    """Queue a de novo assembly of one FASTQ, paired when we can identify both mates."""
     from app.queue import queue
     from app.queue.governor import LoadGovernor
     from app.services import object_service, run_service
@@ -4195,16 +4234,6 @@ async def launch_assembly(
     chemistry = read_chemistry(reads)
     spec = assembler_registry.spec_for_chemistry(chemistry)
     if spec is None:
-        # Two different refusals. Short reads have an assembler that is not
-        # installed; unknown chemistry has a fact the user can supply by
-        # running QC. Collapsing them would send someone looking for a missing
-        # binary when they need to press a button.
-        if chemistry is align_runner.ReadChemistry.SHORT:
-            raise ValidationError(
-                "Short-read assembly is not installed. Only long reads "
-                "(Nanopore, PacBio) can be assembled here.",
-                details={"object_id": str(reads.id), "chemistry": "short"},
-            )
         raise ValidationError(
             f"{reads.name!r} has no known read chemistry. Run QC on it first "
             "-- the assembler's input mode depends on how accurate the reads "
@@ -4222,6 +4251,20 @@ async def launch_assembly(
         params = await default_assembly_params(reads)
     parsed = assembly_params_module.from_dict(params)
 
+    mate = None
+    if spec.layout == "paired":
+        explicit = None
+        if mate_object_id is not None:
+            explicit = await object_service.get_object(mate_object_id, owner=owner)
+        mate = await resolve_assembly_mate(reads, candidate=explicit)
+
+    # Bases, approximated from file size. FASTQ carries ~2 bytes per base
+    # (sequence plus quality) before compression, and both mates contribute.
+    # Only consumed by a model with a non-zero read coefficient, so this is
+    # inert for Flye.
+    read_bytes = (reads.size or 0) + (mate.size if mate else 0)
+    read_bases = int(read_bytes / 2) if read_bytes else None
+
     # The memory guard, at launch rather than dispatch: governor.py does not
     # read a job's mem_mb, so declaring it reserves nothing. A missing genome
     # size yields no estimate and therefore no refusal -- see
@@ -4230,6 +4273,7 @@ async def launch_assembly(
         assembler=parsed.assembler,
         genome_bases=parsed.genome_size,
         threads=parsed.threads,
+        read_bases=read_bases,
     )
     resolved = await memory_estimate.resolve(
         job_type=JOB_TYPE_ASSEMBLE,
@@ -4286,13 +4330,23 @@ async def launch_assembly(
             details={"object_id": str(reads.id)},
         )
 
+    mate_digest, mate_path = (None, None)
+    if mate is not None:
+        mate_digest, mate_path = await _resolve_readable(mate)
+
+    assembly_inputs = [
+        RunInput(object_id=reads.id, name=reads.name, role=RunInputRole.READS)
+    ]
+    if mate is not None:
+        assembly_inputs.append(
+            RunInput(object_id=mate.id, name=mate.name, role=RunInputRole.MATE)
+        )
+
     run = await run_service.create_run(
         kind=RunKind.ASSEMBLY,
         project_id=reads.project_id,
         label=f"Assemble {reads.name}",
-        inputs=[
-            RunInput(object_id=reads.id, name=reads.name, role=RunInputRole.READS)
-        ],
+        inputs=assembly_inputs,
         params=parsed.as_dict(),
         owner=owner,
         tool=parsed.assembler.value,
@@ -4304,11 +4358,21 @@ async def launch_assembly(
         "reads_name": reads.name,
         "assembler": parsed.assembler.value,
         "params": parsed.as_dict(),
+        # The tool's mandatory Bloom filter budget, derived from the same
+        # estimate that decided this run could proceed -- one number, not two
+        # that must agree.
+        "bloom_bytes": (estimate * 1024 * 1024) if estimate else None,
     }
     if digest:
         payload["reads_sha256"] = digest
     if path:
         payload["reads_path"] = path
+    if mate is not None:
+        payload["mate_name"] = mate.name
+        if mate_digest:
+            payload["mate_sha256"] = mate_digest
+        if mate_path:
+            payload["mate_path"] = mate_path
 
     job = await queue.enqueue(
         "assemble_reads",
@@ -4326,7 +4390,14 @@ async def launch_assembly(
         # One attempt, matching the handler: a retried assembly costs hours and
         # fails identically.
         max_attempts=1,
-        dedup_key=f"assemble:{reads.id}:{_params_fingerprint(parsed.as_dict())}",
+        dedup_key="assemble:"
+        + ":".join(
+            [
+                str(reads.id),
+                str(mate.id) if mate else "-",
+                _params_fingerprint(parsed.as_dict()),
+            ]
+        ),
         project_id=reads.project_id,
         object_id=reads.id,
         resource_override=resource_override,

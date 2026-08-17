@@ -259,27 +259,21 @@ class TestLaunchReachesTheQueue:
         assert enqueued["max_attempts"] == 1
         assert created["kind"].value == "assembly"
 
-    async def test_short_reads_are_refused_before_any_run_is_created(self):
-        """The refusal must happen before a run row exists, or the activity
-        view fills with runs that describe no work."""
-        reads = self._reads_object()
-        reads.facts = {"qc_read_chemistry": "short"}
-        create_run = AsyncMock()
+    async def test_short_reads_no_longer_refused(self):
+        """The #490 refusal is gone: short reads now have an installed
+        assembler (ABySS), so `launch_assembly` no longer raises a
+        chemistry-based refusal for them. Superseded by
+        `test_short_reads_are_refused_before_any_run_is_created`, which
+        exercised the deleted `ReadChemistry.SHORT` branch in
+        `launch_assembly` -- that branch is gone because Task 4 made ABySS
+        available for SHORT chemistry, so the refusal it tested is now
+        false."""
+        from app.pipelines import align_runner, assembler_registry
+        from app.pipelines.assemblers import Assembler
 
-        with (
-            patch(
-                "app.services.object_service.get_object",
-                AsyncMock(return_value=reads),
-            ),
-            patch("app.services.run_service.create_run", create_run),
-        ):
-            with pytest.raises(ValidationError) as excinfo:
-                await pipeline_service.launch_assembly(
-                    object_id=reads.id, owner="local"
-                )
-
-        assert "short-read" in str(excinfo.value).lower()
-        create_run.assert_not_awaited()
+        spec = assembler_registry.spec_for_chemistry(align_runner.ReadChemistry.SHORT)
+        assert spec is not None
+        assert spec.assembler is Assembler.ABYSS
 
     async def test_unknown_chemistry_is_refused_with_different_advice(self):
         reads = self._reads_object()
@@ -294,3 +288,54 @@ class TestLaunchReachesTheQueue:
                 )
 
         assert "qc" in str(excinfo.value).lower()
+
+
+def _reads_stub(name, *, first_read_ids=None, metadata=None):
+    return SimpleNamespace(
+        id=name,
+        name=name,
+        facts={"first_read_ids": first_read_ids} if first_read_ids else {},
+        metadata=metadata or {},
+    )
+
+
+class TestResolveAssemblyMate:
+    """`resolve_assembly_mate` delegates discovery to `suggest_mate` and adds
+    exactly one thing on top: an explicitly-supplied candidate that fails
+    `pairing.verdict()` with REJECTED_READ_IDS refuses the launch instead of
+    silently falling back to single-end, which is what `suggest_mate` alone
+    would do."""
+
+    async def test_mate_rejected_on_read_ids_refuses_the_launch(self):
+        """Two filename-mates whose read IDs disagree must not be assembled.
+
+        This is the case that produces a plausible-looking wrong assembly
+        with no error, which is why it refuses rather than falling back to
+        single-end.
+        """
+        with pytest.raises(ValidationError, match="do not appear to be mates"):
+            await pipeline_service.resolve_assembly_mate(
+                _reads_stub(name="s_R1.fastq", first_read_ids=["A:1:2"]),
+                candidate=_reads_stub(name="s_R2.fastq", first_read_ids=["Z:9:9"]),
+            )
+
+    async def test_explicit_matching_mate_is_accepted(self):
+        """A confirmed pair passes through and gets assembled together."""
+        r2 = _reads_stub(name="s_R2.fastq", first_read_ids=["A:1:2"])
+        mate = await pipeline_service.resolve_assembly_mate(
+            _reads_stub(name="s_R1.fastq", first_read_ids=["A:1:2"]), candidate=r2
+        )
+        assert mate is r2
+
+    async def test_no_candidate_delegates_to_suggest_mate(self):
+        """With no explicit candidate, resolution is entirely `suggest_mate`'s
+        job -- this wrapper adds no discovery logic of its own."""
+        reads = _reads_stub(name="s_R1.fastq")
+        sentinel = object()
+        with patch(
+            "app.services.pipeline_service.suggest_mate",
+            AsyncMock(return_value=sentinel),
+        ) as mocked:
+            result = await pipeline_service.resolve_assembly_mate(reads)
+        mocked.assert_awaited_once_with(reads)
+        assert result is sentinel
