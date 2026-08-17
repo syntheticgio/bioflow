@@ -5,7 +5,6 @@ format edge cases live, and they are the part most likely to be wrong.
 """
 
 import pytest
-
 from app.pipelines.annotation_parse import (
     Feature,
     parse_bed_line,

@@ -7,8 +7,6 @@ complete and cannot run.
 """
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.errors import AppError, NotFoundError
 from app.models import FormatKind, ObjectRole
 from app.models.workflow import (
@@ -20,11 +18,11 @@ from app.models.workflow import (
 )
 from app.services.workflow_service import (
     InvalidGraph,
-    ValidationError,
     create_definition,
     update_definition,
     validate_definition,
 )
+from beanie import PydanticObjectId
 
 
 def _input(node_id: str, fmt: FormatKind, role: ObjectRole | None = None) -> WorkflowNode:
@@ -51,7 +49,9 @@ class TestTypeRules:
         definition = WorkflowDefinition(
             name="ok",
             nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
-            edges=[WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")],
+            edges=[
+                WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")
+            ],
         )
         assert validate_definition(definition) == []
 
@@ -66,7 +66,9 @@ class TestTypeRules:
             ],
             edges=[
                 WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads"),
-                WorkflowEdge(from_node="prot", from_port="object", to_node="a", to_port="reference"),
+                WorkflowEdge(
+                    from_node="prot", from_port="object", to_node="a", to_port="reference"
+                ),
             ],
         )
         errors = validate_definition(definition)
@@ -76,7 +78,9 @@ class TestTypeRules:
         definition = WorkflowDefinition(
             name="bad",
             nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
-            edges=[WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="nope")],
+            edges=[
+                WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="nope")
+            ],
         )
         assert any(e.code == "unknown_port" for e in validate_definition(definition))
 
@@ -178,7 +182,9 @@ class TestStructuralRules:
         definition = WorkflowDefinition(
             name="incomplete",
             nodes=[_input("reads", FormatKind.FASTQ), _action("a", "align")],
-            edges=[WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads")],
+            edges=[
+                WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads")
+            ],
         )
         errors = validate_definition(definition)
         assert any(e.code == "missing_required_input" and e.port == "reference" for e in errors)
@@ -188,7 +194,9 @@ class TestStructuralRules:
         definition = WorkflowDefinition(
             name="single end",
             nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
-            edges=[WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")],
+            edges=[
+                WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")
+            ],
         )
         assert validate_definition(definition) == []
 
@@ -212,7 +220,9 @@ class TestStructuralRules:
         definition = WorkflowDefinition(
             name="bad",
             nodes=[_action("t", "trim")],
-            edges=[WorkflowEdge(from_node="ghost", from_port="object", to_node="t", to_port="reads")],
+            edges=[
+                WorkflowEdge(from_node="ghost", from_port="object", to_node="t", to_port="reads")
+            ],
         )
         assert any(e.code == "unknown_node" for e in validate_definition(definition))
 
@@ -234,7 +244,9 @@ class TestCrud:
                 description="",
                 nodes=[_input("reads", FormatKind.FASTQ), _action("a", "align")],
                 edges=[
-                    WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads")
+                    WorkflowEdge(
+                        from_node="reads", from_port="object", to_node="a", to_port="reads"
+                    )
                 ],
                 owner="test-owner",
             )
@@ -251,7 +263,9 @@ class TestCrud:
                 description="",
                 nodes=[_input("reads", FormatKind.FASTQ), _action("a", "align")],
                 edges=[
-                    WorkflowEdge(from_node="reads", from_port="object", to_node="a", to_port="reads")
+                    WorkflowEdge(
+                        from_node="reads", from_port="object", to_node="a", to_port="reads"
+                    )
                 ],
                 owner="test-owner",
             )
@@ -268,7 +282,9 @@ class TestCrud:
                 description="",
                 nodes=[_input("reads", FormatKind.FASTQ), _action("t", "trim")],
                 edges=[
-                    WorkflowEdge(from_node="reads", from_port="object", to_node="t", to_port="reads")
+                    WorkflowEdge(
+                        from_node="reads", from_port="object", to_node="t", to_port="reads"
+                    )
                 ],
             )
 

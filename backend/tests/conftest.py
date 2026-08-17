@@ -9,11 +9,10 @@ import importlib
 
 import pytest
 import pytest_asyncio
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
 
 
 @pytest_asyncio.fixture(scope="module", loop_scope="module")

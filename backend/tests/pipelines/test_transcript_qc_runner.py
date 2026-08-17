@@ -4,23 +4,20 @@ Pure functions over strings and lists, mirroring bam_stats_runner.py: no
 queue, no filesystem, no pysam objects.
 """
 
-import pytest
 
-from app.pipelines.transcript_qc_runner import (
+from app.pipelines.transcript_qc_runner import (  # noqa: E402
     GENE_BODY_BINS,
     MIN_TRANSCRIPT_LENGTH,
-    Transcript,
-    _attribute,
-    parse_gtf_transcripts,
-    representative_transcripts,
-    sampling_plan,
-)
-from app.pipelines.transcript_qc_runner import (  # noqa: E402
     FeatureCounts,
     GeneBodyCoverage,
+    Transcript,
+    _attribute,
     build_feature_index,
     classify_position,
     contig_overlap,
+    parse_gtf_transcripts,
+    representative_transcripts,
+    sampling_plan,
 )
 
 # Two transcripts of one gene, plus a minus-strand gene on another contig.

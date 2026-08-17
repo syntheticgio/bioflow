@@ -8,11 +8,10 @@ those conflicts and drops the stale index first.
 """
 
 import pytest
-from beanie import init_beanie
-from pymongo import ASCENDING, AsyncMongoClient, IndexModel
-
 from app.config import settings
 from app.db.index_reconcile import _index_def, reconcile_indexes
+from beanie import init_beanie
+from pymongo import ASCENDING, AsyncMongoClient, IndexModel
 
 
 @pytest.fixture
@@ -215,7 +214,6 @@ class TestInitModelsIntegration:
         """The exact scenario: an index with an old partialFilterExpression
         exists, and the model declares a new one. _init_models must drop the
         stale one and let init_beanie create the new one — no crash."""
-        from beanie import init_beanie
 
         from app.models import ALL_MODELS
 

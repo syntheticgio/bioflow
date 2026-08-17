@@ -5,7 +5,6 @@ import hashlib
 import subprocess
 
 import pytest
-
 from app.errors import JobCancelled
 from app.models import Compression, FormatKind
 from app.pipelines import tools

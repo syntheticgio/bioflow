@@ -14,11 +14,11 @@ shared. A test that leaves a profile behind silently turns the *next* test's
 
 import pytest
 import pytest_asyncio
-from pymongo.errors import DuplicateKeyError
-
 from app.errors import ConflictError, ValidationError
 from app.models import DataObject, Profile, Project, Share, ShareState
 from app.services import object_service, profile_service, project_service, share_service
+from pymongo.errors import DuplicateKeyError
+
 from tests.services.helpers_share import ready_object
 
 pytestmark = [

@@ -8,8 +8,6 @@ from both sides.
 
 import math
 
-import pytest
-
 from app.pipelines import resource_estimator as est
 from app.pipelines.aligner_registry import spec_for
 from app.pipelines.aligners import Aligner

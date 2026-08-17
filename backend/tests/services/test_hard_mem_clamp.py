@@ -5,7 +5,6 @@ job admission approves is then OOM-killed -- which reads as BioFlow being
 broken rather than as a misconfiguration.
 """
 
-import pytest
 
 from app.services.resource_limit_service import resolve_mem_budget_mb
 

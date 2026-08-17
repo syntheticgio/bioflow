@@ -1,13 +1,11 @@
 """The DE summary job's failure style. Mirrors test_summary_handler.py."""
 
 import pytest
-
 from app.errors import PermanentError
 from app.models.ai import FailureReason, ProviderKind
 from app.queue import de_summary_handlers
-from app.queue.registry import JobContext
 from app.queue.de_summary_handlers import summarize_de_results
-from app.services import de_summary_prompt
+from app.queue.registry import JobContext
 from app.services.ai.adapters import Completion, Failure
 from app.services.ai.router import ResolvedProvider
 

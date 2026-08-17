@@ -1,6 +1,5 @@
 """Tests for node connection details endpoint."""
 
-import pytest
 from app.api.v1.nodes import _rewrite_host
 
 

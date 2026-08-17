@@ -5,10 +5,8 @@ taxon 4932 has no reference proteome, and a resolver without the fallback
 reports that yeast has no proteome while 360 sit behind it.
 """
 
-import json
 
 import pytest
-
 from app.metadata import uniprot
 
 

@@ -9,7 +9,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from app.pipelines import cutadapt_runner
 from app.pipelines.cutadapt_runner import CutadaptParams
 

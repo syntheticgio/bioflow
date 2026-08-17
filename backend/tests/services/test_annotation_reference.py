@@ -7,7 +7,6 @@ that is silently wrong.
 """
 
 import pytest
-
 from app.models.object import FormatKind, ObjectRole
 from app.services import pipeline_service
 

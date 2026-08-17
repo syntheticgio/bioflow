@@ -6,14 +6,6 @@ behaviour, so both are asserted here.
 
 import sys
 
-import pytest
-import pytest_asyncio
-
-from app.models.ai import AiProvider, FailureReason, ProviderKind
-from app.services.ai import crypto, provider_service, redaction
-from app.services.ai.adapters import Completion, Failure
-from app.services.ai.router import ResolvedProvider
-
 # `app.services.ai/__init__.py` re-exports a function named `complete`, which
 # shadows the submodule of the same name as an attribute on the package -- so
 # `import app.services.ai.complete as complete_mod` resolves to the function
@@ -25,6 +17,12 @@ from app.services.ai.router import ResolvedProvider
 # registers it under its full dotted path regardless of what `__init__.py`
 # does to the package's own attributes.
 import app.services.ai.complete  # noqa: F401,E402 - registers the submodule below
+import pytest
+import pytest_asyncio
+from app.models.ai import AiProvider, FailureReason, ProviderKind
+from app.services.ai import crypto, provider_service, redaction
+from app.services.ai.adapters import Completion, Failure
+from app.services.ai.router import ResolvedProvider
 
 complete_mod = sys.modules["app.services.ai.complete"]
 

@@ -7,7 +7,6 @@ flaky without exercising anything more.
 """
 
 import pytest
-
 from app.queue.resource_sampler import ResourceSampler
 
 
@@ -194,6 +193,7 @@ class TestChildCpuAcrossPolls:
 
         # children() still lists pid 13 this poll, but reading it now fails.
         child_poll_1._gone = True
-        child_poll_2 = FakeProcess(rss=1, cpu=1.0, pid=13)  # unused; read comes from the persisted one
+        # unused; read comes from the persisted one
+        child_poll_2 = FakeProcess(rss=1, cpu=1.0, pid=13)
         sampler.observe(FakeProcess(rss=10, cpu=0.0, children=[child_poll_2]))
         assert 13 not in sampler._child_procs

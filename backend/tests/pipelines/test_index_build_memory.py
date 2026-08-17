@@ -15,7 +15,6 @@ which is what decides whether a build is admitted or blocked.
 """
 
 import pytest
-
 from app.pipelines import resource_estimator as est
 from app.pipelines.aligner_registry import spec_for
 from app.pipelines.aligners import Aligner

@@ -10,7 +10,6 @@ not stdout -- a real file beats parsing conversational completion-line text.
 from pathlib import Path
 
 import pytest
-
 from app.pipelines import trimmomatic_runner
 from app.pipelines.trimmomatic_runner import TrimmomaticParams
 

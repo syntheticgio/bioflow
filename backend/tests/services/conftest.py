@@ -10,9 +10,9 @@ boilerplate.
 from datetime import UTC, datetime
 
 import pytest_asyncio
+from app.models import Blob, BlobStorage, DataObject, ObjectRole, ObjectStatus
 from beanie import PydanticObjectId
 
-from app.models import Blob, BlobStorage, DataObject, ObjectRole, ObjectStatus
 from tests.services import helpers
 
 
@@ -34,7 +34,15 @@ async def de_results_object_factory(beanie_models, tmp_path):
         digest = f"{abs(hash(str(PydanticObjectId()))):064x}"[:64]
         external_path = None
         if gene_rows:
-            columns = ["gene", "base_mean", "log2_fold_change", "lfc_std_error", "stat", "p_value", "padj"]
+            columns = [
+                "gene",
+                "base_mean",
+                "log2_fold_change",
+                "lfc_std_error",
+                "stat",
+                "p_value",
+                "padj",
+            ]
             path = tmp_path / f"{digest}.tsv"
             lines = ["\t".join(columns)]
             for row in gene_rows:

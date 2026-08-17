@@ -13,9 +13,8 @@ only asserted "the report renders" would pass whether or not the fix held.
 from pathlib import Path
 
 import pytest
-
-from app.queue import assembly_qc_handlers as handlers
 from app.pipelines import quast_runner
+from app.queue import assembly_qc_handlers as handlers
 
 
 class TestFixedLabelConstants:
@@ -222,7 +221,11 @@ class TestAssessAssemblyQV:
         reads = tmp_path / "sources" / "reads_R1.fastq.gz"
         reads.write_bytes(b"not real gzip but never read by the fake subprocess")
 
-        name = 'ev<img src=x onerror=alert(7)>; rm -rf /.fasta' if malicious_name else "assembly.fasta"
+        name = (
+            'ev<img src=x onerror=alert(7)>; rm -rf /.fasta'
+            if malicious_name
+            else "assembly.fasta"
+        )
         return assembly, reads, name
 
     def test_assess_assembly_qv_links_inputs_under_fixed_names(

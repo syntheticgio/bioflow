@@ -66,7 +66,8 @@ class TestAppLine:
         assert (app_tree / "VERSION").read_text() == "0.2.0\n"
         assert '__version__ = "0.2.0"' in (app_tree / "backend" / "app" / "version.py").read_text()
         assert 'version = "0.2.0"' in (app_tree / "backend" / "pyproject.toml").read_text()
-        assert json.loads((app_tree / "frontend" / "package.json").read_text())["version"] == "0.2.0"
+        package_json = json.loads((app_tree / "frontend" / "package.json").read_text())
+        assert package_json["version"] == "0.2.0"
 
     def test_leaves_other_fields_intact(self, app_tree):
         run_bump(app_tree, "app", "0.2.0")

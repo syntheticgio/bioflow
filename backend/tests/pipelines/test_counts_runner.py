@@ -7,7 +7,6 @@ biologically meaningless, which no downstream check can detect.
 """
 
 import pytest
-
 from app.errors import ValidationError
 from app.models import FormatKind
 from app.pipelines import counts_runner

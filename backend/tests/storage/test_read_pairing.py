@@ -1,9 +1,6 @@
 """Manual paired-end pairing: the override that filename inference cannot make."""
 
 import pytest
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
-
 from app.api.v1.schemas import ObjectOut, PairRequest
 from app.config import settings
 from app.errors import NotFoundError, ValidationError
@@ -11,6 +8,8 @@ from app.models import ALL_MODELS, ObjectRole, SidecarRole
 from app.models.object import DataObject
 from app.queue.results import _link_mate
 from app.services import object_service
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
 
 
 @pytest.fixture(autouse=True)

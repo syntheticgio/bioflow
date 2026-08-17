@@ -16,13 +16,13 @@ decisions that live one layer down.
 """
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from app.api.v1.pipelines import router
 from app.errors import ConflictError, NotFoundError, ValidationError, register_exception_handlers
 from app.models import Job, JobClass, JobState
 from app.services import tool_install_service
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from tests.api.bare_app import override_owner
 
 

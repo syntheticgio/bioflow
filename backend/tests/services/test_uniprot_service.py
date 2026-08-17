@@ -5,7 +5,6 @@ the same shape as `test_assembly_service.py`.
 """
 
 import pytest
-
 from app.errors import ValidationError
 from app.services import uniprot_service
 

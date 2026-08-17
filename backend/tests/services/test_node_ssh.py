@@ -15,7 +15,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import asyncssh
 import pytest
-
 from app.services import node_ssh
 
 

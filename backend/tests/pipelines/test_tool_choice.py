@@ -5,9 +5,8 @@ something outside any one enum -- so the invariant runs from the registry
 outward: every option a node type offers must resolve to a port set.
 """
 
-import pytest
 
-from app.models.object import FormatKind, ObjectRole
+from app.models.object import FormatKind
 from app.models.workflow import WorkflowNode, WorkflowNodeKind
 from app.pipelines.node_types import NODE_TYPES, ports_for
 

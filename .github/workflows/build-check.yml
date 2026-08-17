@@ -147,10 +147,15 @@ jobs:
       # Ruff is a standalone binary (no dependencies of its own), so install
       # it first — this gives fast lint feedback before the heavier backend
       # install step runs.
+      #
+      # --config is explicit rather than relied on for auto-discovery:
+      # backend/pyproject.toml only auto-applies to paths under backend/, so
+      # ops/ and e2e/ would otherwise silently fall back to ruff's own
+      # built-in defaults -- a different, smaller rule set (see #466).
       - name: Lint with ruff
         run: |
           pip install ruff
-          ruff check backend/app
+          ruff check --config backend/pyproject.toml backend/app backend/tests ops e2e
 
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'

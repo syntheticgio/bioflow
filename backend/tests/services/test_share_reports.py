@@ -6,9 +6,9 @@ deletion -- that is the case a shared_from-based fallback would get wrong.
 """
 
 import pytest
-
 from app.config import settings
 from app.services import object_service, share_service
+
 from tests.services.helpers_share import make_profile, ready_object
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

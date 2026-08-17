@@ -4,7 +4,6 @@ computation. All pure functions -- no container, queue, or binary needed.
 
 from app.pipelines import bakta_runner as runner
 
-
 # ── build_bakta_command ──────────────────────────────────────────────
 
 

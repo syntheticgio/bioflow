@@ -8,10 +8,10 @@ delete would pass the first half alone.
 """
 
 import pytest
-
 from app.errors import ConflictError, NotFoundError
 from app.models import Blob, ShareState
 from app.services import object_service, share_service
+
 from tests.services.helpers_share import make_profile, ready_object
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

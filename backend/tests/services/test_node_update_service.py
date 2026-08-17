@@ -4,11 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-
 from app.models.node import Node
 from app.models.node_update import NodeUpdateTask
 from app.services import node_update_service as svc
-
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

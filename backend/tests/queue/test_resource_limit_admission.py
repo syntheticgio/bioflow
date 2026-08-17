@@ -7,7 +7,6 @@ flowing into a gate that was already there.
 
 import pytest
 import pytest_asyncio
-
 from app.models.resource_limits import ResourceLimits
 from app.queue.worker import Worker
 

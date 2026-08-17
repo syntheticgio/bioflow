@@ -9,8 +9,6 @@ double-run, which is why these callers are not decorative.
 
 from datetime import UTC, datetime
 
-import pytest
-
 from app.queue.registry import JobContext
 
 

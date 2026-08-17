@@ -1,5 +1,4 @@
 import pytest
-
 from app.models.drift import DriftCategory, DriftEntry, DriftReport
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

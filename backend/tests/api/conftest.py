@@ -11,10 +11,9 @@ import itertools
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-
 from app.main import app
 from app.services import profile_service
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.fixture

@@ -8,12 +8,11 @@ here is the one that pins that invariant.
 """
 
 import pytest
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models.object import DataObject, ObjectStatus
 from app.queue.results import _link_mate
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
 
 
 @pytest.fixture

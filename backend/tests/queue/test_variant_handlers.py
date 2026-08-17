@@ -1,7 +1,6 @@
 """Variant calling job handler: payload validation and caller dispatch."""
 
 import pytest
-
 from app.errors import PermanentError
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.variant_runner import VariantCaller

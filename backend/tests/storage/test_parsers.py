@@ -9,7 +9,6 @@ import gzip
 import threading
 
 import pytest
-
 from app.errors import JobCancelled
 from app.models import Compression, FormatKind
 from app.storage import parsers

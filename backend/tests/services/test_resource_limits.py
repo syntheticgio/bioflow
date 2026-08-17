@@ -7,7 +7,6 @@ docs/superpowers/specs/2026-08-07-resource-limits-admission-design.md.
 
 import pytest
 import pytest_asyncio
-
 from app.models.resource_limits import ResourceLimits
 from app.services import resource_limit_service
 

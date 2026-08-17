@@ -12,7 +12,6 @@ usable for lookups, not just that the class is importable.
 """
 
 import pytest
-
 from app.models import NodeUpdateTask
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

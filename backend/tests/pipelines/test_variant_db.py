@@ -7,7 +7,6 @@ feature and the only place SQL lives.
 import sqlite3
 
 import pytest
-
 from app.pipelines.variant_db import (
     VariantFilters,
     build_variant_db,

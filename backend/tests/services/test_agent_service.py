@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from app.config import settings
 from app.errors import AgentUnavailableError
 from app.services.agent_service import AgentEvent, AgentProcess, AgentService
@@ -373,7 +372,10 @@ class TestTurnEndErrors:
                     "provider": "openai",
                     "model": "gemma-4-E2B-it-Q6_K",
                     "stopReason": "error",
-                    "errorMessage": 'OpenAI API error (401): {"message":"Incorrect API key provided: dummy."}',
+                    "errorMessage": (
+                        'OpenAI API error (401): '
+                        '{"message":"Incorrect API key provided: dummy."}'
+                    ),
                 },
             }
         )
@@ -388,7 +390,10 @@ class TestTurnEndErrors:
         proc = await service.get_or_create("p", "j")
         _, fake = spawn()
         fake.stdout.feed(
-            {"type": "turn_end", "message": {"role": "assistant", "content": [], "stopReason": "end_turn"}}
+            {
+                "type": "turn_end",
+                "message": {"role": "assistant", "content": [], "stopReason": "end_turn"},
+            }
         )
         fake.stdout.feed({"type": "agent_settled"})
         events = await collect(proc, 1)
@@ -527,7 +532,7 @@ class TestNewSession:
         # against a real pi 0.84.1 run (see Task 0).
         sid = "bioflow-prof-1-proj-1"
         (tmp_path / f"2026-08-08T23-18-19-668Z_{sid}.jsonl").write_text("{}\n")
-        (tmp_path / f"2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").write_text("{}\n")
+        (tmp_path / "2026-08-08T23-20-00-000Z_bioflow-other-proj-9.jsonl").write_text("{}\n")
 
         await service.new_session("prof-1", "proj-1")
 

@@ -6,7 +6,7 @@ sizes, negative slopes, outliers) easy to state.
 """
 
 import pytest
-
+from app.models.timing import JobRunTiming
 from app.services.timing_service import (
     MIN_SAMPLES,
     _duration_samples_from,
@@ -14,7 +14,6 @@ from app.services.timing_service import (
     _fit_segmented,
     _r_squared,
 )
-from app.models.timing import JobRunTiming
 
 
 class TestInsufficientData:

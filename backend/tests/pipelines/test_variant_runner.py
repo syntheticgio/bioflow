@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from app.errors import PermanentError, ValidationError
 from app.pipelines import variant_runner
 from app.pipelines.align_runner import ReadChemistry

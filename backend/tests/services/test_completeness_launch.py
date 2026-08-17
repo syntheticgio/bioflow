@@ -10,12 +10,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from beanie import PydanticObjectId
-
-from app.errors import ValidationError
+from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
+from beanie import PydanticObjectId
 
 _COMPLEASM_TOOL = Tool(name="compleasm", path="/usr/local/bin/compleasm", version="0.2.9")
 
@@ -184,7 +183,7 @@ class TestLaunchCompletenessReachesTheQueue:
         get_object = AsyncMock(return_value=obj)
 
         with patch("app.pipelines.tools.compleasm", return_value=missing):
-            with pytest.raises(Exception):  # PermanentError from tools.require
+            with pytest.raises(PermanentError):
                 await pipeline_service.launch_completeness(
                     object_id=obj.id, owner="local"
                 )

@@ -11,7 +11,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from app.errors import ValidationError
 from app.pipelines import align_params, align_runner
 from app.pipelines.align_runner import (

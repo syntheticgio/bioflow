@@ -12,7 +12,6 @@ makes it survive contact with the next person adding a tool.
 import re
 
 import pytest
-
 from app.mcp import tools
 
 # `tests/mcp/conftest.py`'s autouse `clean_profiles` fixture calls

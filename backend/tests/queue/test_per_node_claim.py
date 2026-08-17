@@ -1,7 +1,6 @@
 """Per-node claim routing: jobs enqueued on a node-specific queue are claimed
 only by workers on that node, and use per-node concurrency counters."""
 
-import pytest
 
 from tests.queue.conftest import ALL_CLASSES
 

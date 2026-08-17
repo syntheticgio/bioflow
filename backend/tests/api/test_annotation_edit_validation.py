@@ -6,7 +6,6 @@ full save/materialize path needs a real source file and database, so it is
 covered by the queue/handler tests and the browser, not here.
 """
 
-import pytest
 
 from app.api.v1.pipelines import (
     _check_identity_keys,

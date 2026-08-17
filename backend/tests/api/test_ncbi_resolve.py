@@ -6,7 +6,6 @@ without guessing from the shape of the response.
 """
 
 import pytest
-
 from app.metadata import ncbi_assembly, ncbi_assembly_components, ncbi_taxonomy, sra_resolver
 
 # `client` and `two_profiles` come from tests/api/conftest.py. This module used

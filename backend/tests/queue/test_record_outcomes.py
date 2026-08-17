@@ -7,14 +7,13 @@ causing the next OOM.
 """
 
 import pytest
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.timing import JobRunTiming, RunOutcome
 from app.services import timing_service
 from app.services.timing_service import MIN_SAMPLES
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`, so bare `async def` tests are collected.
@@ -218,7 +217,7 @@ class TestThreadSegmentation:
         """Outcome filtering must hold under segmentation too -- a FAILED row
         at a thread count that would otherwise qualify for its own segment
         must not enter that segment's fit or the fallback."""
-        for i in range(1, MIN_SAMPLES + 1):
+        for _ in range(MIN_SAMPLES):
             await _record(
                 RunOutcome.SUCCEEDED,
                 duration_ms=120_000,

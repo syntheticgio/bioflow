@@ -6,7 +6,6 @@ module: there is one machine here.
 
 import pytest
 import pytest_asyncio
-
 from app.models.app_settings import AppSettings
 
 pytestmark = [

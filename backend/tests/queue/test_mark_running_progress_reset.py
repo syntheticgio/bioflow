@@ -13,10 +13,8 @@ reached 80% at 'assembly'" is the most useful line the UI can show about a
 job that keeps dying at the same point.
 """
 
-from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from app.models import Job, JobProgress, JobState
 from app.queue import queue
 

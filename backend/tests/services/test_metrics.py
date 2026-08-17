@@ -11,10 +11,9 @@ model input. Two things about it are load-bearing and worth pinning down:
     floor did not measure zero memory, it measured nothing.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from app.api.v1.jobs import metrics_runs
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import timing_service
@@ -43,9 +42,15 @@ class TestPercentiles:
 class TestToolCounts:
     def test_most_used_first(self):
         records = [
-            JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, tool="fastp", tool_version="0.24.0"),
-            JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, tool="FastQC", tool_version="v0.12.1"),
-            JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, tool="fastp", tool_version="0.24.0"),
+            JobRunTiming(
+                job_type="qc", input_bytes=1, duration_ms=1, tool="fastp", tool_version="0.24.0"
+            ),
+            JobRunTiming(
+                job_type="qc", input_bytes=1, duration_ms=1, tool="FastQC", tool_version="v0.12.1"
+            ),
+            JobRunTiming(
+                job_type="qc", input_bytes=1, duration_ms=1, tool="fastp", tool_version="0.24.0"
+            ),
         ]
         counts = timing_service._tool_counts(records)
         assert counts[0] == {"name": "fastp", "version": "0.24.0", "runs": 2}
@@ -53,15 +58,21 @@ class TestToolCounts:
 
     def test_unrecorded_tool_is_named_null_not_dropped(self):
         records = [JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, tool=None)]
-        assert timing_service._tool_counts(records) == [{"name": None, "version": None, "runs": 1}]
+        assert timing_service._tool_counts(records) == [
+            {"name": None, "version": None, "runs": 1}
+        ]
 
 
 class TestNumericFeatures:
     def test_only_positive_ints_count(self):
         records = [
-            JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, features={"read_count": 1000}),
+            JobRunTiming(
+                job_type="qc", input_bytes=1, duration_ms=1, features={"read_count": 1000}
+            ),
             JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, features={"read_count": 0}),
-            JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, features={"read_count": "many"}),
+            JobRunTiming(
+                job_type="qc", input_bytes=1, duration_ms=1, features={"read_count": "many"}
+            ),
             JobRunTiming(job_type="qc", input_bytes=1, duration_ms=1, features={}),
         ]
         assert timing_service._numeric_features(records, "read_count") == [1000]
@@ -74,11 +85,10 @@ async def _fresh_job_timings():
     Same pattern as tests/queue/test_record_outcomes.py: these tests assert
     exact counts, so leftover rows from a sibling test would corrupt them.
     """
-    from beanie import init_beanie
-    from pymongo import AsyncMongoClient
-
     from app.config import settings
     from app.models import ALL_MODELS
+    from beanie import init_beanie
+    from pymongo import AsyncMongoClient
 
     client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]
@@ -141,7 +151,8 @@ class TestMetrics:
             await _record(duration_ms=100_000)
         await _record(outcome=RunOutcome.FAILED, duration_ms=1_000)
 
-        row = next(t for t in (await timing_service.metrics())["types"] if t["job_type"] == "align_reads")
+        types = (await timing_service.metrics())["types"]
+        row = next(t for t in types if t["job_type"] == "align_reads")
         assert row["duration_ms"]["median"] == 100_000
         assert row["duration_ms"]["p90"] == 100_000
 
@@ -154,7 +165,8 @@ class TestMetrics:
         await _record(peak_rss_bytes=5_000_000_000)
         await _record(peak_rss_bytes=None)
 
-        row = next(t for t in (await timing_service.metrics())["types"] if t["job_type"] == "align_reads")
+        types = (await timing_service.metrics())["types"]
+        row = next(t for t in types if t["job_type"] == "align_reads")
         assert row["peak_rss_bytes"]["median"] == 3_000_000_000
 
     async def test_read_count_and_input_bytes_are_summarized(self):
@@ -164,7 +176,8 @@ class TestMetrics:
         await _record(input_bytes=2_000_000, features={})
         await _record(input_bytes=2_500_000, features={})
 
-        row = next(t for t in (await timing_service.metrics())["types"] if t["job_type"] == "align_reads")
+        types = (await timing_service.metrics())["types"]
+        row = next(t for t in types if t["job_type"] == "align_reads")
         assert row["input_bytes"]["median"] == 1_500_000
         # Only the three runs that recorded a read count contribute -- the
         # unrecorded fourth is a missing measurement, not a count of zero.
@@ -175,7 +188,8 @@ class TestMetrics:
         await _record(tool="minimap2", tool_version="2.28")
         await _record(tool="minimap2", tool_version="2.26")
 
-        row = next(t for t in (await timing_service.metrics())["types"] if t["job_type"] == "align_reads")
+        types = (await timing_service.metrics())["types"]
+        row = next(t for t in types if t["job_type"] == "align_reads")
         assert row["tools"][0] == {"name": "minimap2", "version": "2.28", "runs": 2}
         assert row["tools"][1] == {"name": "minimap2", "version": "2.26", "runs": 1}
 
@@ -225,14 +239,14 @@ class TestRunsForType:
 
     async def test_most_recent_first(self):
         for day in (1, 3, 2):
-            await _record(finished_at=datetime(2026, 8, day, tzinfo=timezone.utc))
+            await _record(finished_at=datetime(2026, 8, day, tzinfo=UTC))
 
         runs = await timing_service.runs_for_type("align_reads")
         assert [r.finished_at.day for r in runs] == [3, 2, 1]
 
     async def test_limit_and_offset_page(self):
         for day in range(1, 6):
-            await _record(finished_at=datetime(2026, 8, day, tzinfo=timezone.utc))
+            await _record(finished_at=datetime(2026, 8, day, tzinfo=UTC))
 
         page = await timing_service.runs_for_type("align_reads", limit=2, offset=2)
         assert [r.finished_at.day for r in page] == [3, 2]
@@ -325,7 +339,7 @@ class TestRunsEndpoint:
 
     async def test_single_type_query_is_paged(self):
         for day in range(1, 6):
-            await _record(finished_at=datetime(2026, 8, day, tzinfo=timezone.utc))
+            await _record(finished_at=datetime(2026, 8, day, tzinfo=UTC))
 
         body = await metrics_runs(job_type="align_reads", limit=2, offset=0)
         assert body["job_type"] == "align_reads"

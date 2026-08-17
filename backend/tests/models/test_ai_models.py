@@ -1,7 +1,6 @@
 """Shape of the AI provider and routing documents."""
 
 import pytest
-
 from app.models.ai import AiProvider, AiRouting, FailureReason, ProviderKind, TaskSlot
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")

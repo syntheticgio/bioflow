@@ -9,7 +9,6 @@ prose it was meant to replace.
 from dataclasses import asdict
 
 import pytest
-
 from app.mcp import resources
 from app.pipelines.tools import TOOL_META
 

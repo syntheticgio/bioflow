@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock
 
 import fakeredis.aioredis
 import pytest
-
 from app.api.v1 import events as events_route
 from app.queue import keys, queue
 

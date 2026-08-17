@@ -7,11 +7,11 @@ owner is refused.
 """
 
 import pytest
+from app.errors import ConflictError, NotFoundError, ProfileUnresolvedError, ValidationError
+from app.models import ObjectStatus
+from app.services import object_service, share_service
 from beanie import PydanticObjectId
 
-from app.errors import ConflictError, NotFoundError, ValidationError
-from app.models import ObjectStatus, Share
-from app.services import object_service, share_service
 from tests.services.helpers_share import make_profile, ready_object
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
@@ -88,7 +88,7 @@ async def test_offering_to_an_unknown_profile_is_rejected():
     owner = await make_profile("offer-unknown-target")
     obj = await ready_object(owner=owner)
 
-    with pytest.raises(Exception):
+    with pytest.raises(ProfileUnresolvedError):
         await share_service.offer_share(
             owner=owner,
             object_id=obj.id,

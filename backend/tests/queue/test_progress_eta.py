@@ -10,7 +10,6 @@ the time since it was written; deriving it at emit time is the whole point.
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from app.queue.executor import JobExecutor
 
 pytestmark = [pytest.mark.asyncio(loop_scope="module")]

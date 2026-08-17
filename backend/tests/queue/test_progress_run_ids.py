@@ -8,7 +8,6 @@ and simply carried through the throttled writer, never re-queried.
 """
 
 import pytest
-
 from app.queue import queue
 from app.queue.executor import JobExecutor
 
@@ -65,7 +64,9 @@ class TestRunIdsOnThePublishedEvent:
         monkeypatch.setattr("app.queue.executor.get_db", lambda: _FakeDb())
 
         ex = JobExecutor("test-worker")
-        await ex._write_progress("6a0000000000000000000001", 0, {"pct": 0.5}, owner="local", run_ids=[])
+        await ex._write_progress(
+            "6a0000000000000000000001", 0, {"pct": 0.5}, owner="local", run_ids=[]
+        )
 
         _, data, _ = published[0]
         assert "run_ids" not in data

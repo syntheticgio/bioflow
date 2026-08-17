@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import fakeredis.aioredis
 import pytest
-
 from app.queue.governor import current_load
 
 

@@ -6,8 +6,7 @@ property the whole design rests on, across every response shape.
 
 import pytest
 import pytest_asyncio
-
-from app.models.ai import AiProvider, AiRouting, ProviderKind, TaskSlot
+from app.models.ai import AiProvider, AiRouting
 from app.services.ai import crypto, provider_service
 
 pytestmark = [
