@@ -957,6 +957,31 @@ async def reap_report_dirs(ctx: JobContext) -> dict:
     return {"removed": removed, "bytes_reclaimed": reclaimed}
 
 
+@handler(
+    "sweep_storage_drift",
+    mode=HandlerMode.ASYNC,
+    job_class=JobClass.MAINTENANCE,
+    resources=JobResources(cpu=1, mem_mb=128, io=IoClass.LIGHT),
+    max_attempts=2,
+)
+async def sweep_storage_drift(ctx: JobContext) -> dict:
+    """Report drift between object records and the filesystem. Never deletes.
+
+    A thin wrapper: the detection lives in drift_service so it can be tested
+    without going through the queue, matching how reap_report_dirs delegates
+    its deletion to object_service.remove_report_dirs.
+    """
+    from app.services import drift_service
+
+    ctx.check_cancel()
+    report = await drift_service.sweep()
+    return {
+        "skipped": report.skipped,
+        "counts": report.counts,
+        "reclaimable_bytes": report.reclaimable_bytes,
+    }
+
+
 # Pipeline handlers live in their own modules -- they shell out to external
 # tools and carry a different failure model -- but must be imported here, since
 # registry.load_handlers() imports only this one.

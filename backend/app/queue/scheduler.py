@@ -61,6 +61,18 @@ DEFAULT_SCHEDULES = [
         "job_class": JobClass.MAINTENANCE,
         "payload": {"scratch_grace_hours": 6},
     },
+    {
+        "_id": "sweep_storage_drift",
+        # Every six hours. Drift is caused by crashes and interrupted writes,
+        # not by ordinary use, so it accumulates slowly -- and the sweep walks
+        # the whole objects/ tree, which is the most expensive maintenance
+        # read in the system. Nothing here is urgent: the report exists so a
+        # user can look deliberately, not so they are told immediately.
+        "job_type": "sweep_storage_drift",
+        "interval_seconds": 21600,
+        "job_class": JobClass.MAINTENANCE,
+        "payload": {},
+    },
 ]
 
 RESOURCES = {
@@ -69,6 +81,7 @@ RESOURCES = {
     "reap_uploads": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
     "reap_report_dirs": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
     "reap_pipeline_scratch": JobResources(cpu=1, mem_mb=64, io=IoClass.LIGHT),
+    "sweep_storage_drift": JobResources(cpu=1, mem_mb=128, io=IoClass.LIGHT),
 }
 
 
