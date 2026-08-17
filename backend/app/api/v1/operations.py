@@ -13,9 +13,9 @@ from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import OwnerDep
-from app.errors import ValidationError
+from app.errors import ConflictError, ValidationError
 from app.logging import get_logger
-from app.services import object_service, project_service
+from app.services import object_service, pipeline_service, project_service
 
 log = get_logger(__name__)
 
@@ -194,8 +194,6 @@ async def qc_all_reads(
     owner: OwnerDep,
 ) -> dict:
     """Queue QC jobs for all read files in the project."""
-    from app.queue import queue
-
     objects = await object_service.list_objects(project_id, owner=owner)
     reads = [
         o for o in objects
@@ -203,15 +201,19 @@ async def qc_all_reads(
     ]
 
     job_ids = []
+    errors: list[dict] = []
     for read in reads:
-        job = await queue.enqueue(
-            job_type="run_qc",
-            payload={"object_id": str(read.id)},
-            owner=owner,
-        )
-        job_ids.append(str(job.id))
+        try:
+            job = await pipeline_service.launch_qc(object_id=read.id, owner=owner)
+            job_ids.append(str(job.id))
+        except ConflictError as e:
+            errors.append({"object_id": str(read.id), "error": str(e)})
+            continue
 
-    return {"job_ids": job_ids, "count": len(job_ids)}
+    result: dict = {"job_ids": job_ids, "count": len(job_ids)}
+    if errors:
+        result["errors"] = errors
+    return result
 
 
 def _count_by(items, key_fn):
