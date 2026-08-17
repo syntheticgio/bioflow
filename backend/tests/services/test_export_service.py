@@ -297,3 +297,73 @@ def test_export_launcher_is_excluded_from_node_types():
     assert name in EXCLUDED_LAUNCHES
     launch_names = {spec.launch_name for spec in NODE_TYPES.values()}
     assert name not in launch_names
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+class TestLaunchProjectExport:
+    """`launch_project_export`'s own enqueue contract.
+
+    Nothing else touches this launcher directly -- the exhaustiveness test
+    above only checks node_types.py's registry, not that the function
+    actually queues a job. That gap is exactly what let a missing
+    `owner=owner` kwarg on the `queue.enqueue` call through: every call
+    raised `TypeError: enqueue() missing 1 required keyword-only argument:
+    'owner'` and nothing caught it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _no_redis(self, monkeypatch):
+        """Keep the Mongo insert and stub the rest, same as test_queue_owner.py.
+
+        This process has no live Redis; `enqueue` writes Mongo first (what
+        these tests actually check) and only then pushes to Redis and
+        publishes an event, both of which are stubbed out here.
+        """
+        from app.queue import queue
+
+        async def _skip(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(queue, "_push_to_redis", _skip)
+        monkeypatch.setattr(queue, "publish_event", _skip)
+
+    async def test_queues_a_job_for_the_project(self):
+        from app.models import Job, JobClass
+        from app.services import pipeline_service
+
+        project = await make_project("export-launch")
+
+        job = await pipeline_service.launch_project_export(
+            project_id=project.id, owner=TEST_OWNER
+        )
+
+        assert isinstance(job, Job)
+        assert job.project_id == project.id
+        assert job.job_class == JobClass.USER_BACKGROUND
+        assert job.type == "project_export"
+        assert job.payload["project_id"] == str(project.id)
+        assert job.payload["owner"] == TEST_OWNER
+        assert job.payload["threshold_bytes"] == export_service.DEFAULT_BLOB_THRESHOLD_BYTES
+
+    async def test_a_custom_threshold_is_passed_through(self):
+        from app.services import pipeline_service
+
+        project = await make_project("export-launch-threshold")
+
+        job = await pipeline_service.launch_project_export(
+            project_id=project.id, owner=TEST_OWNER, threshold_bytes=1234
+        )
+
+        assert job.payload["threshold_bytes"] == 1234
+
+    async def test_a_wrong_owner_is_treated_as_not_found(self):
+        from app.errors import NotFoundError
+        from app.services import pipeline_service
+
+        project = await make_project("export-launch-wrong-owner")
+
+        with pytest.raises(NotFoundError):
+            await pipeline_service.launch_project_export(
+                project_id=project.id, owner="someone-else"
+            )

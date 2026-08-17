@@ -6326,8 +6326,13 @@ async def launch_project_export(
 
     project = await project_service.get_project(project_id, owner=owner)
 
+    # No dedup_key is passed, so queue.enqueue's dedup-collision path (its
+    # only source of a None return) can never trigger here -- the return
+    # type is safely `Job`, unlike launch_continuity_qc nearby, which does
+    # pass one and must guard for None.
     return await queue.enqueue(
         "project_export",
+        owner=owner,
         payload={
             "project_id": str(project.id),
             "owner": owner,
