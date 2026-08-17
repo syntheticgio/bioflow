@@ -335,6 +335,14 @@ versions and parameters, producing which results.
 check, and cite, not a project you can load. It carries a format version
 and preserves record identity so that an importer remains possible later.
 
+**Report and analysis-artifact directories are not included.** QC reports,
+BAM/VCF stats, and annotation stats directories (`qc_reports_dir`,
+`bam_stats_dir`, `vcf_stats_dir`, `annotation_stats_dir`) live outside the
+blob store, keyed by object id, and this archive does not currently pack
+them -- even though the objects they describe are exported. A recipient may
+see an object without the report that made it easy to read. This is a
+known, deliberate gap for a follow-up, not an oversight.
+
 ## What was removed
 
 API keys, encryption keys, absolute filesystem paths, and the names of the
