@@ -5,8 +5,10 @@ from unittest.mock import patch
 import pytest
 import pytest_asyncio
 
+from app.config import settings
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.drift import DriftCategory, DriftEntry, DriftReport
+from app.models.object import DataObject
 from app.services import drift_service
 
 pytestmark = [
@@ -178,3 +180,86 @@ class TestFindMissingBlobs:
         entries = await drift_service.find_missing_blobs()
 
         assert entries == []
+
+
+@pytest.fixture
+def report_roots(tmp_path: Path):
+    """Throwaway report-root directories, patched in for both settings and
+    drift_service's REPORT_ROOTS.
+
+    REPORT_ROOTS is built once at drift_service import time from
+    settings.qc_reports_dir et al. (each a property derived from
+    settings.bioinfo_home), so patching settings.bioinfo_home alone would not
+    move the already-captured Path objects inside REPORT_ROOTS. Both need
+    patching so settings.qc_reports_dir (read directly by the test, per the
+    brief) and REPORT_ROOTS (read by find_missing_report_dirs) agree on the
+    same tmp_path root. Same rationale as the objects_dir fixture above, one
+    level up the dependency chain.
+    """
+    home = tmp_path / "data"
+    home.mkdir(parents=True, exist_ok=True)
+    with patch.object(settings, "bioinfo_home", home):
+        patched_roots = {
+            "qc_tool": settings.qc_reports_dir,
+            "bam_stats_summary": settings.bam_stats_dir,
+            "vcf_stats_summary": settings.vcf_stats_dir,
+            "annotation_stats_status": settings.annotation_stats_dir,
+        }
+        with patch.object(drift_service, "REPORT_ROOTS", patched_roots):
+            yield
+
+
+class TestFindMissingReportDirs:
+    @pytest_asyncio.fixture(autouse=True, loop_scope="module")
+    async def clean(self):
+        await DataObject.find_all().delete()
+
+    async def test_object_claiming_qc_with_no_directory_is_reported(self, report_roots):
+        obj = await _make_object({"qc_tool": "fastp"})
+
+        entries = await drift_service.find_missing_report_dirs()
+
+        assert [e.object_id for e in entries] == [str(obj.id)]
+        assert entries[0].category is DriftCategory.MISSING_REPORT_DIR
+
+    async def test_object_with_its_directory_present_is_not_reported(self, report_roots):
+        obj = await _make_object({"qc_tool": "fastp"})
+        (settings.qc_reports_dir / str(obj.id)).mkdir(parents=True, exist_ok=True)
+
+        entries = await drift_service.find_missing_report_dirs()
+
+        assert entries == []
+
+    async def test_object_claiming_no_report_is_not_reported(self, report_roots):
+        await _make_object({"qc_total_reads": 1000})
+
+        entries = await drift_service.find_missing_report_dirs()
+
+        assert entries == []
+
+    async def test_failed_annotation_status_is_not_a_claim(self, report_roots):
+        """`annotation_stats_status` gates on == "ok", matching the UI."""
+        await _make_object({"annotation_stats_status": "failed"})
+
+        entries = await drift_service.find_missing_report_dirs()
+
+        assert entries == []
+
+    async def test_transcript_qc_has_no_directory_and_is_never_reported(self, report_roots):
+        await _make_object({"transcript_qc_status": "ok"})
+
+        entries = await drift_service.find_missing_report_dirs()
+
+        assert entries == []
+
+
+async def _make_object(facts: dict) -> DataObject:
+    from beanie import PydanticObjectId
+
+    obj = DataObject(
+        project_id=PydanticObjectId(),
+        name="sample.fastq.gz",
+        facts=facts,
+    )
+    await obj.insert()
+    return obj
