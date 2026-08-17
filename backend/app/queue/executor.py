@@ -690,13 +690,16 @@ class _StreamPump:
         elif self.on_line is not None:
             self.on_line(line)
 
-    def _handle_line(self, line: str) -> None:
+    def _handle_line(self, line: str, delimiter: str = "\n") -> None:
         """Write to the log file and dispatch to the observer."""
-        if not line and self.line_count == 0:
-            # A `\r`-first stream (fasterq-dump's progress bar redraws before
-            # printing anything else) splits on that leading `\r` with nothing
-            # before it -- an artifact of the delimiter, not a line the tool
-            # printed. A later empty line (a bare `print()`) is real output
+        if not line and delimiter == "\r":
+            # An empty split on a `\r` is an artifact of the delimiter, not a
+            # line the tool printed: a progress bar redrawing itself emits
+            # `\r` *before* the text it is about to draw. That happens at the
+            # very start of a `\r`-first stream (fasterq-dump) and again after
+            # every completed line the bar follows -- `start\r\ndone\rp: 10%`
+            # would otherwise report a blank line between `start` and the bar.
+            # An empty line delimited by `\n` is a bare `print()`: real output,
             # and still delivered.
             return
         self.line_count += 1
@@ -738,8 +741,16 @@ class _StreamPump:
                     if nl == -1 and cr == -1:
                         break
                     split = nl if cr == -1 else (cr if nl == -1 else min(nl, cr))
+                    if split == len(buf) - 1 and buf[split] == "\r":
+                        # A `\r` at the very end of the buffer may be the first
+                        # half of a `\r\n` whose `\n` is in the next read. The
+                        # replace() above only sees within one buffer, so
+                        # splitting here would turn one delimiter into two and
+                        # emit a phantom blank line. Wait for the next chunk.
+                        break
+                    delimiter = buf[split]
                     line, buf = buf[:split], buf[split + 1 :]
-                    self._handle_line(line)
+                    self._handle_line(line, delimiter)
             buf += decoder.decode(b"", final=True)
             if buf:
                 self._handle_line(buf)
