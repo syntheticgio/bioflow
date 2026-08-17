@@ -41,6 +41,12 @@ class AssemblyMemoryModel:
     # Per thread, and small: Flye's parallelism is mostly over disjointigs
     # that share the graph rather than per-thread copies of it.
     mb_per_thread: int = 128
+    # Bytes of peak residency per base of *input reads*. Zero for a repeat-graph
+    # assembler like Flye, whose peak is dominated by the genome. Non-zero for a
+    # de Bruijn assembler, where peak tracks distinct k-mers -- a function of
+    # coverage as much as genome size. Defaulted to 0.0 so Flye's model is
+    # arithmetically unchanged by this field existing.
+    bytes_per_read_base: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -193,11 +199,26 @@ SPADES_SPEC = AssemblerSpec(
     unavailable_reason="Short-read assembly is not installed.",
 )
 
+ABYSS_SPEC = AssemblerSpec(
+    assembler=Assembler.ABYSS,
+    tool=None,
+    mode_flags={},
+    layout="paired",
+    memory_model=AssemblyMemoryModel(
+        bytes_per_genome_base=10.0,
+        fixed_overhead_mb=2048,
+        bytes_per_read_base=2.0,
+    ),
+    outputs=(),
+    unavailable_reason="ABySS is not installed.",
+)
+
 
 SPECS: dict[Assembler, AssemblerSpec] = {
     Assembler.FLYE: FLYE_SPEC,
     Assembler.HIFIASM: HIFIASM_SPEC,
     Assembler.SPADES: SPADES_SPEC,
+    Assembler.ABYSS: ABYSS_SPEC,
 }
 
 

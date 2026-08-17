@@ -211,3 +211,52 @@ class TestExplainProvenance:
             mem_budget_mb=16384,
         )
         assert est.explain(**kwargs) == est.explain(**kwargs, provenance="")
+
+
+class TestAssemblyEstimate:
+    def test_flye_estimate_ignores_read_bases(self):
+        """Flye's model is genome-dominated; adding reads must not move it."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        without = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE, genome_bases=5_000_000, threads=8
+        )
+        with_reads = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.FLYE,
+            genome_bases=5_000_000,
+            threads=8,
+            read_bases=2_000_000_000,
+        )
+        assert without == with_reads
+
+    def test_abyss_estimate_grows_with_read_bases(self):
+        """A de Bruijn graph's peak tracks distinct k-mers, so coverage counts."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        low = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.ABYSS,
+            genome_bases=5_000_000,
+            threads=8,
+            read_bases=500_000_000,
+        )
+        high = resource_estimator.estimate_assembly_mb(
+            assembler=Assembler.ABYSS,
+            genome_bases=5_000_000,
+            threads=8,
+            read_bases=5_000_000_000,
+        )
+        assert high > low
+
+    def test_assembly_estimate_still_none_without_genome_size(self):
+        """None stays a real answer -- de novo is what you do with no reference."""
+        from app.pipelines import resource_estimator
+        from app.pipelines.assemblers import Assembler
+
+        assert (
+            resource_estimator.estimate_assembly_mb(
+                assembler=Assembler.ABYSS, genome_bases=None, threads=8
+            )
+            is None
+        )

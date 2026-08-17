@@ -67,11 +67,14 @@ def estimate_assembly_mb(
     assembler,
     genome_bases: int | None,
     threads: int,
+    read_bases: int | None = None,
 ) -> int | None:
     """Peak resident memory for a de novo assembly, in MB. None if unknowable.
 
     The genome dominates rather than the reads: a repeat graph is built over
     the assembly, and coverage drives runtime far more than peak residency.
+    Read volume is used only by assemblers whose memory model sets
+    bytes_per_read_base.
 
     **None is a real answer, not a failure.** De novo assembly is what you do
     when there is no reference, so a project that cannot supply a genome size
@@ -87,7 +90,14 @@ def estimate_assembly_mb(
 
     model = assembler_spec_for(assembler).memory_model
     graph_mb = (genome_bases * model.bytes_per_genome_base) / (1024 * 1024)
-    return math.ceil(model.fixed_overhead_mb + graph_mb + threads * model.mb_per_thread)
+    # Zero for every assembler whose model leaves the coefficient at its
+    # default, so this term is invisible to Flye.
+    reads_mb = 0.0
+    if read_bases and model.bytes_per_read_base:
+        reads_mb = (read_bases * model.bytes_per_read_base) / (1024 * 1024)
+    return math.ceil(
+        model.fixed_overhead_mb + graph_mb + reads_mb + threads * model.mb_per_thread
+    )
 
 
 def classify(
