@@ -176,7 +176,7 @@ export function SettingsTools() {
   })).filter((section) => section.tools.length > 0);
 
   return (
-    <div className="settings-page settings-page-wide">
+    <div className="settings-page">
       <SettingsNav />
       <h1>Settings · Tools</h1>
       <p className="settings-hint">
