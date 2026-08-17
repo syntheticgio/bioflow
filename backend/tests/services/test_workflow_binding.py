@@ -11,6 +11,8 @@ candidates.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.models.object import FormatKind, ObjectRole
 from app.models.workflow import (
     WorkflowDefinition,
@@ -19,7 +21,6 @@ from app.models.workflow import (
     WorkflowNodeKind,
 )
 from app.services.workflow_binding import OutputCandidate, bind_downstream_inputs
-from beanie import PydanticObjectId
 
 
 def _candidate(

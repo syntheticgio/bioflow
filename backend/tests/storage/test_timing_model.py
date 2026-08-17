@@ -6,6 +6,7 @@ sizes, negative slopes, outliers) easy to state.
 """
 
 import pytest
+
 from app.models.timing import JobRunTiming
 from app.services.timing_service import (
     MIN_SAMPLES,

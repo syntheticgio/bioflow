@@ -6,6 +6,7 @@ was ever applied. These assert what the OTHER profile cannot see.
 """
 
 import pytest
+
 from app.errors import NotFoundError
 from app.models import Project
 from app.services import project_service

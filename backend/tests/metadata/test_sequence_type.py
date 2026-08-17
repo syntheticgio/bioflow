@@ -11,6 +11,7 @@ claim they have to notice first.
 """
 
 import pytest
+
 from app.metadata import enrich, schemas
 from app.models import FormatKind, ObjectRole, SequenceType
 

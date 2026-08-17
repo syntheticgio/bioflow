@@ -8,9 +8,10 @@ failing at import or startup. NodeProvisionTask shipped that way.
 import importlib
 import pkgutil
 
+from beanie import Document
+
 import app.models
 from app.models import ALL_MODELS
-from beanie import Document
 
 
 def _all_document_subclasses() -> set[type]:

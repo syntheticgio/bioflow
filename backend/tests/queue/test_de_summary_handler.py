@@ -1,6 +1,7 @@
 """The DE summary job's failure style. Mirrors test_summary_handler.py."""
 
 import pytest
+
 from app.errors import PermanentError
 from app.models.ai import FailureReason, ProviderKind
 from app.queue import de_summary_handlers

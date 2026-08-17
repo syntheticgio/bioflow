@@ -10,6 +10,7 @@ catches a scalar shortcut -- see models/run.py's `RunJob` docstring for why
 
 
 import pytest
+
 from app.models import (
     Job,
     JobClass,

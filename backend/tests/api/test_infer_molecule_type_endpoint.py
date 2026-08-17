@@ -8,12 +8,13 @@ holds, and mixing the two fails with "attached to a different loop".
 
 import pytest
 import pytest_asyncio
+from beanie import PydanticObjectId
+
 from app.api.v1.objects import infer_molecule_type_endpoint
 from app.config import settings
 from app.errors import NotFoundError, ValidationError
 from app.models import Blob, BlobState, BlobStorage, DataObject, FormatInfo, FormatKind
 from app.storage.paths import blob_rel_path
-from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),

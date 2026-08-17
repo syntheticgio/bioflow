@@ -5,6 +5,7 @@ import struct
 from pathlib import Path
 
 import pytest
+
 from app.models import Compression, FormatConfidence, FormatKind
 from app.storage.detect import (
     EXTENSION_MAP,

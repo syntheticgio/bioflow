@@ -8,9 +8,10 @@ the request carries an ordered list of sets with optional mates.
 """
 
 import pytest
-from app.api.v1.pipelines import AlignRequest
 from beanie import PydanticObjectId
 from pydantic import ValidationError
+
+from app.api.v1.pipelines import AlignRequest
 
 PRIMARY = PydanticObjectId()
 REFERENCE = PydanticObjectId()

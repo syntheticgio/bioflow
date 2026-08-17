@@ -8,6 +8,9 @@ nothing saying why. Trigger 2 repairs that when the reference lands.
 """
 
 import pytest
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models.object import (
     DataObject,
@@ -17,8 +20,6 @@ from app.models.object import (
     ObjectStatus,
 )
 from app.queue import results as results_mod
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
 
 PROJECT = "507f1f77bcf86cd799439011"
 

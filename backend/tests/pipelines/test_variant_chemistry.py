@@ -7,6 +7,7 @@ step that makes it reachable from a BAM.
 """
 
 import pytest
+
 from app.errors import ValidationError
 from app.models import SidecarRole
 from app.pipelines import variant_runner

@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import fakeredis.aioredis
 import pytest
+
 from app.queue.node_stats import node_stats, orphaned_queue_nodes
 
 

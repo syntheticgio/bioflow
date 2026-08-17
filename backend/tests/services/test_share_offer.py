@@ -7,11 +7,11 @@ owner is refused.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import ConflictError, NotFoundError, ProfileUnresolvedError, ValidationError
 from app.models import ObjectStatus
 from app.services import object_service, share_service
-from beanie import PydanticObjectId
-
 from tests.services.helpers_share import make_profile, ready_object
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from app.errors import register_exception_handlers
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+
+from app.errors import register_exception_handlers
 
 # ---- helpers ----
 

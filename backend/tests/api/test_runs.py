@@ -10,9 +10,10 @@ in tests/pipelines/test_launch_rules.py) stands in for it here -- only the
 mapping itself is under test, not persistence.
 """
 
+from beanie import PydanticObjectId
+
 from app.api.v1.runs import RunOut
 from app.models import RunInputRole
-from beanie import PydanticObjectId
 
 
 class FakeInput:

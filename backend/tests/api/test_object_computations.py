@@ -11,10 +11,11 @@ whether or not owner scoping ever ran.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.models import DataObject, FormatInfo, JobRunTiming
 from app.models.timing import RunOutcome
 from app.services import project_service
-from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),

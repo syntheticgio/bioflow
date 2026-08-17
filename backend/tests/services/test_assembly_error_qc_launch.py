@@ -18,10 +18,11 @@ loudly instead of only failing at runtime against a real BAM.
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from beanie import PydanticObjectId
+
 from app.models import FormatKind, ObjectStatus, SidecarRole
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 _CRAQ = Tool(name="craq", path="/usr/local/bin/craq", version="1.0.9")
 

@@ -9,12 +9,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from app.api.v1.pipelines import QuantifyRequest, router
-from app.errors import ValidationError, register_exception_handlers
-from app.models import FormatKind, ObjectStatus
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.api.v1.pipelines import QuantifyRequest, router
+from app.errors import ValidationError, register_exception_handlers
+from app.models import FormatKind, ObjectStatus
 from tests.api.bare_app import override_owner
 
 

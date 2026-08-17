@@ -1,6 +1,7 @@
 """Preconditions for launching a Variant Results computation."""
 
 import pytest
+
 from app.errors import ValidationError
 from app.models import FormatInfo, ObjectStatus
 from app.services.pipeline_service import _check_vcf_stats_callable

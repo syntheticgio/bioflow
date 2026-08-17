@@ -9,13 +9,13 @@ with no database, since this route also touches only the filesystem.
 import json
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1 import pipelines as pipelines_api
 from app.api.v1.pipelines import router
 from app.config import settings
 from app.errors import register_exception_handlers
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from tests.api.bare_app import override_owner, stub_get_object
 
 OBJECT_ID = "507f1f77bcf86cd799439011"
@@ -91,7 +91,6 @@ class TestPathTraversal:
         from app.api.v1 import pipelines as pipelines_module
         from app.errors import NotFoundError
         from app.pipelines import tile_scanner
-
         from tests.api.bare_app import TEST_OWNER
 
         monkeypatch.setattr(tile_scanner, "TILE_MATRIX_FILENAME", attack)

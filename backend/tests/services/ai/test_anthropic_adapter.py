@@ -5,6 +5,7 @@ test, because each is a silent 400 if wrong.
 import json
 
 import pytest
+
 from app.models.ai import FailureReason, ProviderKind
 from app.services.ai import adapters
 from app.services.ai.adapters import (

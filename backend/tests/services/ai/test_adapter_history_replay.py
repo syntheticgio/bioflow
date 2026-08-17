@@ -7,6 +7,7 @@ turn rather than only ever sending one `user` string.
 import json
 
 import pytest
+
 from app.services.ai import adapters
 from app.services.ai.adapters import (
     AnthropicAdapter,

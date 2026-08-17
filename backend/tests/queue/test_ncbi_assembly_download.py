@@ -15,6 +15,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+
 from app.errors import PermanentError
 from app.queue import ncbi_assembly_handlers
 

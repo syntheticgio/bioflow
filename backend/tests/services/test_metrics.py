@@ -14,6 +14,7 @@ model input. Two things about it are load-bearing and worth pinning down:
 from datetime import UTC, datetime
 
 import pytest
+
 from app.api.v1.jobs import metrics_runs
 from app.models.timing import JobRunTiming, RunOutcome, RunResources
 from app.services import timing_service
@@ -85,10 +86,11 @@ async def _fresh_job_timings():
     Same pattern as tests/queue/test_record_outcomes.py: these tests assert
     exact counts, so leftover rows from a sibling test would corrupt them.
     """
-    from app.config import settings
-    from app.models import ALL_MODELS
     from beanie import init_beanie
     from pymongo import AsyncMongoClient
+
+    from app.config import settings
+    from app.models import ALL_MODELS
 
     client = AsyncMongoClient(settings.mongo_url, tz_aware=True)
     db = client["biopipe_test"]

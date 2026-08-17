@@ -8,6 +8,7 @@ these tests pin the fire-and-forget shape.
 import asyncio
 
 import pytest
+
 from app import main
 
 

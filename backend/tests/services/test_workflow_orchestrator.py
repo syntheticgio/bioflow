@@ -13,6 +13,9 @@ import time and patching the module attribute never reached them.
 """
 
 import pytest
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS, JobState
 from app.models.job import Job
@@ -28,8 +31,6 @@ from app.models.workflow import (
     WorkflowStatus,
 )
 from app.services import workflow_orchestrator as orch
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
 
 OWNER = "tester"
 

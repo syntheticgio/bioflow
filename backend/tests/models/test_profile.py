@@ -1,6 +1,7 @@
 import pytest
-from app.models import Profile
 from pymongo.errors import DuplicateKeyError
+
+from app.models import Profile
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

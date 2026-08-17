@@ -6,12 +6,13 @@ HTTP, mirroring test_launch_rules.py for trimming.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import ValidationError
 from app.models import ACTIVE_STATES, FormatKind, ObjectStatus
 from app.pipelines.align_runner import Preset, ReadChemistry
 from app.pipelines.aligners import Aligner
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 
 class FakeObject:

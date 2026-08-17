@@ -7,6 +7,7 @@ reports that yeast has no proteome while 360 sit behind it.
 
 
 import pytest
+
 from app.metadata import uniprot
 
 

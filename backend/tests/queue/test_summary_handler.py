@@ -7,6 +7,7 @@ never have opted into.
 """
 
 import pytest
+
 from app.errors import PermanentError
 from app.models.ai import FailureReason, ProviderKind
 from app.queue import summary_handlers

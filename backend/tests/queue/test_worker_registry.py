@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import fakeredis.aioredis
 import pytest
+
 from app.queue import worker_registry
 
 

@@ -10,6 +10,7 @@ field on JobOut and is checked explicitly.
 from datetime import UTC, datetime, timedelta
 
 import pytest
+
 from app.models import AttemptProgress, Job, JobClass, JobProgress, JobResources, JobState
 
 pytestmark = [

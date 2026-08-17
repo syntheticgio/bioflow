@@ -4,11 +4,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+
 from app.errors import register_exception_handlers
 from app.models.node import Node
 from app.models.node_update import NodeUpdateTask
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

@@ -8,6 +8,7 @@ been pruned, a run that produced its BAM but failed to parse it.
 """
 
 import pytest
+
 from app.models import JobState, RunJobRole, RunStatus
 from app.services.run_service import derive_status
 

@@ -7,6 +7,8 @@ complete and cannot run.
 """
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import AppError, NotFoundError
 from app.models import FormatKind, ObjectRole
 from app.models.workflow import (
@@ -22,7 +24,6 @@ from app.services.workflow_service import (
     update_definition,
     validate_definition,
 )
-from beanie import PydanticObjectId
 
 
 def _input(node_id: str, fmt: FormatKind, role: ObjectRole | None = None) -> WorkflowNode:

@@ -6,9 +6,9 @@ correctly.
 """
 
 import pytest
+
 from app.models import DataObject, Project, SidecarRole
 from app.services import project_service
-
 from tests.services.helpers import TEST_OWNER, make_project
 
 pytestmark = [
@@ -121,7 +121,6 @@ class TestDeleteProjectTree:
         gc_candidates selects on ref_count <= 0.
         """
         from app.models import Blob
-
         from tests.services.helpers import make_object
 
         root = await make_project("sidecar-leak")
@@ -162,7 +161,6 @@ class TestDeleteProjectTree:
 
     async def test_removes_runs_and_jobs(self):
         from app.models import Job, PipelineRun
-
         from tests.services.helpers import make_job
 
         root = await make_project("tree-jobs")
@@ -278,7 +276,6 @@ class TestDeleteProjectTree:
 
     async def test_refuses_while_a_job_is_active(self):
         from app.errors import ConflictError
-
         from tests.services.helpers import make_job
 
         root = await make_project("tree-blocked")
@@ -293,7 +290,6 @@ class TestDeleteProjectTree:
         """A refusal must be total. A partial delete that then raises would
         leave the project half-destroyed with no way to tell."""
         from app.errors import ConflictError
-
         from tests.services.helpers import make_job, make_object
 
         root = await make_project("tree-blocked-intact")
@@ -311,7 +307,6 @@ class TestDeleteProjectTree:
         not to 0 -- the surviving file still needs those bytes."""
         from app.db.client import get_db
         from app.models import Blob
-
         from tests.services.helpers import make_object
 
         keep = await make_project("shared-keep")
@@ -333,7 +328,6 @@ class TestLegacyCascade:
         """The old cascade leaked here. Re-pointed at delete_project_tree so
         there is only one delete path to keep correct."""
         from app.models import Blob
-
         from tests.services.helpers import make_object
 
         root = await make_project("legacy-cascade")
@@ -352,7 +346,6 @@ class TestLegacyCascade:
 
     async def test_cascade_false_still_refuses_a_non_empty_project(self):
         from app.errors import ConflictError
-
         from tests.services.helpers import make_object
 
         root = await make_project("legacy-refuse")

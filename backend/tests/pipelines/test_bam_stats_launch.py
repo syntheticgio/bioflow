@@ -7,6 +7,7 @@ service module has no established pattern for a database-backed launch test.
 """
 
 import pytest
+
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus
 from app.services import pipeline_service

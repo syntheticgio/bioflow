@@ -5,6 +5,7 @@ parsing a `tool_calls` response instead of plain text.
 import json
 
 import pytest
+
 from app.models.ai import FailureReason
 from app.services.ai import adapters
 from app.services.ai.adapters import Completion, Failure, OpenAICompatAdapter, ToolCall, ToolSpec

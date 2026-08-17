@@ -8,10 +8,10 @@ other partitioned router (`test_route_owner_scoping.py`).
 """
 
 import pytest
-from app.main import app
-from app.services import object_service, profile_service
 from httpx import ASGITransport, AsyncClient
 
+from app.main import app
+from app.services import object_service, profile_service
 from tests.services.helpers_share import ready_object, reclaim_scratch_files
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

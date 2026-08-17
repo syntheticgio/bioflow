@@ -11,6 +11,9 @@ launcher to test the engine's logic; this one is about the seam to the queue.
 """
 
 import pytest
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS, JobState
 from app.models.job import Job, JobError
@@ -25,8 +28,6 @@ from app.models.workflow import (
     WorkflowRun,
 )
 from app.services import workflow_hook
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
 
 OWNER = "tester"
 

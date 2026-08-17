@@ -11,6 +11,7 @@ No test here touches the network; the live check runs separately.
 from pathlib import Path
 
 import pytest
+
 from app.metadata import enrich, sra
 from app.models import FormatKind
 

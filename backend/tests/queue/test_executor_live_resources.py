@@ -18,6 +18,7 @@ merge-only implementation gets wrong.
 import asyncio
 
 import pytest
+
 from app.models import Job, JobClass, JobLease, JobResources, JobState
 from app.queue import queue
 from app.queue.executor import JobExecutor

@@ -1,4 +1,5 @@
 import pytest
+
 from app.api.deps import get_current_owner, get_current_owner_linkable
 from app.errors import ProfileUnresolvedError
 from app.models import Profile

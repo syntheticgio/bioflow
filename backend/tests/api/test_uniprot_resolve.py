@@ -6,11 +6,12 @@ taxon must produce a picker rather than "nothing found".
 """
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from app.api.v1 import uniprot as uniprot_router
 from app.errors import register_exception_handlers
 from app.metadata import uniprot as uniprot_meta
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture

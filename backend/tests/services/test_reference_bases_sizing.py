@@ -20,6 +20,7 @@ but the exact file about to be indexed.
 """
 
 import pytest
+
 from app.services import pipeline_service
 
 

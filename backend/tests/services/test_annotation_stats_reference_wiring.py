@@ -11,6 +11,7 @@ for every annotation in a real seeded dataset because of this.
 """
 
 import pytest
+
 from app.models.object import FormatKind, ObjectRole, ObjectStatus
 from app.queue import queue as queue_module
 from app.services import pipeline_service

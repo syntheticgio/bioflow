@@ -8,6 +8,8 @@ exactly as the ingest path sets them.
 
 from datetime import UTC, datetime
 
+from beanie import PydanticObjectId
+
 from app.models import (
     Blob,
     BlobStorage,
@@ -19,7 +21,6 @@ from app.models import (
     SidecarRole,
 )
 from app.services import project_service
-from beanie import PydanticObjectId
 
 # These factories exist for deletion-cascade tests, which care about the
 # document graph and refcounts rather than the owner boundary -- that boundary

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+
 from app.config import settings
 from app.errors import PermanentError
 from app.pipelines import genbank_reader, genbank_sequence

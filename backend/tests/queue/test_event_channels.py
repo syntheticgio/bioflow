@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import fakeredis.aioredis
 import pytest
+
 from app.models import Job, JobLease, JobState, JobTiming
 from app.queue import keys, queue
 

@@ -6,6 +6,7 @@ content block rather than a `tool_calls` array.
 import json
 
 import pytest
+
 from app.models.ai import FailureReason
 from app.services.ai import adapters
 from app.services.ai.adapters import AnthropicAdapter, Completion, Failure, ToolCall, ToolSpec

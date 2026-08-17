@@ -16,12 +16,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import ConflictError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.models.run import RunInput, RunInputRole, RunKind
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 _PP = Tool(name="polypolish", path="/usr/local/bin/polypolish", version="0.7.1")
 _BWA = Tool(name="bwa-mem2", path="/usr/local/bin/bwa-mem2", version="2.2.1")

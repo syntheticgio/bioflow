@@ -6,11 +6,12 @@ the spec calls out as easy to miss.
 """
 
 import pytest
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models.object import DataObject, ObjectStatus
 from app.services.pipeline_service import suggest_mate
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
 
 
 @pytest.fixture

@@ -1,10 +1,11 @@
 """API surface for the data source catalog."""
 
 import pytest
-from app.api.v1.system import router
-from app.errors import register_exception_handlers
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from app.api.v1.system import router
+from app.errors import register_exception_handlers
 
 
 @pytest.fixture

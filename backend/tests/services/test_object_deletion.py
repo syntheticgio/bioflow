@@ -7,9 +7,9 @@ hand or they leak permanently.
 """
 
 import pytest
+
 from app.config import settings
 from app.services import object_service, project_service
-
 from tests.services.helpers import TEST_OWNER
 
 pytestmark = [
@@ -93,7 +93,6 @@ class TestReportDirCleanup:
         """The normal case: most objects never have Results computed, so a
         missing directory is expected and must not fail the delete."""
         from app.models import DataObject
-
         from tests.services.helpers import make_object
 
         root = await project_service.create_project(name="reports-absent", owner=TEST_OWNER)
@@ -109,7 +108,6 @@ class TestReportDirCleanup:
         """Sidecars are deleted by recursion, so their reports have to ride the
         same path -- a .bai's own stats directory would otherwise outlive it."""
         from app.models import SidecarRole
-
         from tests.services.helpers import make_object
 
         root = await project_service.create_project(name="reports-sidecar", owner=TEST_OWNER)
@@ -133,7 +131,6 @@ class TestCopyReportDirs:
     async def test_copies_annotation_stats_dir(self):
         """Sharing an object copies the annotation feature database too."""
         from app.services import project_service
-
         from tests.services.helpers import make_object
 
         root = await project_service.create_project(name="copy-annot", owner=TEST_OWNER)
@@ -152,7 +149,6 @@ class TestCopyReportDirs:
     async def test_skips_missing_source_dirs(self):
         """A source with no annotation results copies without error."""
         from app.services import project_service
-
         from tests.services.helpers import make_object
 
         root = await project_service.create_project(name="copy-skip", owner=TEST_OWNER)
@@ -184,8 +180,9 @@ class TestReapReportDirs:
         os.utime(path, (old, old))
 
     async def test_removes_a_directory_whose_object_is_gone(self):
-        from app.queue.handlers import reap_report_dirs
         from bson import ObjectId
+
+        from app.queue.handlers import reap_report_dirs
 
         gone = ObjectId()
         d = settings.vcf_stats_dir / str(gone)
@@ -203,7 +200,6 @@ class TestReapReportDirs:
         """The check that matters: a live object's Results must survive a sweep
         that is running specifically to delete directories like it."""
         from app.queue.handlers import reap_report_dirs
-
         from tests.services.helpers import make_object
 
         root = await project_service.create_project(name="reap-live", owner=TEST_OWNER)
@@ -220,8 +216,9 @@ class TestReapReportDirs:
     async def test_spares_a_recent_orphan(self):
         """A directory is created before the compute job writes into it, so a
         just-made one may have no object row yet. The grace window covers it."""
-        from app.queue.handlers import reap_report_dirs
         from bson import ObjectId
+
+        from app.queue.handlers import reap_report_dirs
 
         fresh = settings.bam_stats_dir / str(ObjectId())
         fresh.mkdir(parents=True, exist_ok=True)
@@ -250,10 +247,10 @@ class TestReapReportDirs:
         candidate -- reaped, spared as young, or spared as live -- must now
         produce a `report_dir_reap_candidate` line, and an actual removal must
         be attributed to the reaper by name."""
-        from app.queue import handlers as handlers_module
-        from app.queue.handlers import reap_report_dirs
         from bson import ObjectId
 
+        from app.queue import handlers as handlers_module
+        from app.queue.handlers import reap_report_dirs
         from tests.services.helpers import make_object
 
         infos: list[tuple] = []

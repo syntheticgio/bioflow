@@ -21,12 +21,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus, SidecarRole
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 _GCI = Tool(name="gci", path="/usr/local/bin/GCI.py", version="1.2.0")
 

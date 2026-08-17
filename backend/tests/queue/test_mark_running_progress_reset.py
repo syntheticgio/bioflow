@@ -15,6 +15,7 @@ job that keeps dying at the same point.
 
 
 import pytest
+
 from app.models import Job, JobProgress, JobState
 from app.queue import queue
 

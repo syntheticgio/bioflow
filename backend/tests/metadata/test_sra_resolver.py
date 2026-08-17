@@ -13,6 +13,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+
 from app.metadata import sra_resolver
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"

@@ -7,6 +7,7 @@ document that does not exist yet.
 
 import pytest
 import pytest_asyncio
+
 from app.models.ai import AiProvider, AiRouting, ProviderKind
 from app.services.ai import crypto, migration, provider_service
 

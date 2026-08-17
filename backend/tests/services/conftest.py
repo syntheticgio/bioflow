@@ -10,9 +10,9 @@ boilerplate.
 from datetime import UTC, datetime
 
 import pytest_asyncio
-from app.models import Blob, BlobStorage, DataObject, ObjectRole, ObjectStatus
 from beanie import PydanticObjectId
 
+from app.models import Blob, BlobStorage, DataObject, ObjectRole, ObjectStatus
 from tests.services import helpers
 
 

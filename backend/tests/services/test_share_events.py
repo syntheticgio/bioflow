@@ -7,9 +7,9 @@ this needs no new plumbing, only the right owner argument.
 """
 
 import pytest
+
 from app.queue import queue
 from app.services import object_service, share_service
-
 from tests.services.helpers_share import make_profile, ready_object
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]

@@ -8,6 +8,7 @@ and simply carried through the throttled writer, never re-queried.
 """
 
 import pytest
+
 from app.queue import queue
 from app.queue.executor import JobExecutor
 

@@ -16,6 +16,7 @@ invisible here and free to rot.
 import re
 
 import pytest
+
 from app.main import app
 from app.mcp import resources
 from app.pipelines.tools import TOOL_META

@@ -2,6 +2,7 @@
 
 import pytest
 import pytest_asyncio
+
 from app.models.ai import AiProvider, AiRouting, ProviderKind, TaskSlot
 from app.services.ai import crypto, provider_service, router
 

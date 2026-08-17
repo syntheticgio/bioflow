@@ -7,11 +7,12 @@ under contention is what fails if `sole` is computed wrongly.
 """
 
 import pytest
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
+
 from app.config import settings
 from app.models import ALL_MODELS
 from app.models.job import Job, JobState
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
 
 
 @pytest.fixture(autouse=True)
