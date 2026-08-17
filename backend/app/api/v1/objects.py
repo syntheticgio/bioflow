@@ -1,6 +1,7 @@
 """Object endpoints."""
 
 import hashlib
+import re
 import secrets
 from dataclasses import asdict
 from pathlib import Path
@@ -21,6 +22,8 @@ from app.api.v1.schemas import (
     ObjectOut,
     ObjectUpdate,
     PairRequest,
+    ProteinRecordOut,
+    ProteinRecordsOut,
     ProvenanceGapOut,
     ProvenanceNarrativeOut,
     ProvenanceProseOut,
@@ -30,7 +33,7 @@ from app.config import settings
 from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
 from app.metadata import infer_molecule
-from app.models import BlobStorage, FormatKind, JobClass, JobRunTiming
+from app.models import BlobStorage, FormatKind, JobClass, JobRunTiming, ProteinRecord
 from app.models.ai import FailureReason, TaskSlot
 from app.services import (
     ai,
@@ -110,6 +113,58 @@ async def object_computations(
         produced_by_job=str(obj.produced_by_job) if obj.produced_by_job else None,
         records=records,
         has_more=has_more,
+    )
+
+
+@router.get("/{object_id}/protein-records", response_model=ProteinRecordsOut)
+async def list_protein_records(
+    object_id: PydanticObjectId,
+    owner: OwnerDep,
+    offset: int = 0,
+    limit: int = 100,
+    q: str | None = None,
+) -> ProteinRecordsOut:
+    """The proteins in a protein FASTA, paged and searchable.
+
+    A file with no indexed records returns an empty list rather than a 404:
+    the object exists, and "this file has no protein records" is an answer the
+    tab renders, not an error the client branches on.
+    """
+    obj = await object_service.get_object(object_id, owner=owner)
+
+    query = ProteinRecord.find(ProteinRecord.object_id == obj.id)
+    if q:
+        # Escaped: a user typing `NP_009342.1` must have the dot matched
+        # literally rather than as a wildcard, and an unescaped box is a way
+        # to hand Mongo a pathological pattern.
+        pattern = re.escape(q)
+        query = query.find(
+            {
+                "$or": [
+                    {"identifier": {"$regex": pattern, "$options": "i"}},
+                    {"description": {"$regex": pattern, "$options": "i"}},
+                ]
+            }
+        )
+
+    total = await query.count()
+    rows = (
+        await query.sort(ProteinRecord.ordinal).skip(offset).limit(limit).to_list()
+    )
+
+    return ProteinRecordsOut(
+        total=total,
+        truncated=bool(obj.facts.get("protein_records_truncated")),
+        rows=[
+            ProteinRecordOut(
+                ordinal=r.ordinal,
+                identifier=r.identifier,
+                description=r.description,
+                length=r.length,
+                has_reference=r.ref_accession is not None,
+            )
+            for r in rows
+        ],
     )
 
 

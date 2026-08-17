@@ -274,6 +274,32 @@ class ObjectComputationsOut(BaseModel):
     has_more: bool
 
 
+class ProteinRecordOut(BaseModel):
+    """One row of the protein record list.
+
+    Deliberately does not carry the byte offset: it is stored for work this
+    design defers, and an offset in a response is an invitation to build a
+    client that seeks with it.
+    """
+
+    ordinal: int
+    identifier: str
+    description: str
+    length: int
+    # Whether the header named an accession at all. The client shows a
+    # different empty state for "names nothing we can resolve" than for
+    # "resolved but has no structure", and this is what tells them apart
+    # without a resolution round trip per row.
+    has_reference: bool
+
+
+class ProteinRecordsOut(BaseModel):
+    total: int
+    # The file held more records than the cap, so this list is incomplete (R6).
+    truncated: bool
+    rows: list[ProteinRecordOut]
+
+
 # --- Provenance narratives ---
 class ProvenanceStepOut(BaseModel):
     """One numbered row of "How this file was made".
