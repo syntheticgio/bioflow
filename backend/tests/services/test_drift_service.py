@@ -10,6 +10,7 @@ from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.drift import DriftCategory, DriftEntry, DriftReport
 from app.models.object import DataObject
 from app.services import drift_service
+from app.storage.home import HomeStatus
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
@@ -263,3 +264,75 @@ async def _make_object(facts: dict) -> DataObject:
     )
     await obj.insert()
     return obj
+
+
+class TestSweep:
+    @pytest_asyncio.fixture(autouse=True, loop_scope="module")
+    async def clean(self):
+        await Blob.find_all().delete()
+        await DataObject.find_all().delete()
+        await DriftReport.find_all().delete()
+
+    @pytest.fixture(autouse=True)
+    def home_ok(self):
+        """sweep() checks the real check_home() against the container's own
+        BIOINFO_HOME, which carries no sentinel in the test environment.
+        Patch it ok by default; the one skip test overrides it locally.
+        """
+        with patch(
+            "app.services.drift_service.check_home",
+            return_value=HomeStatus(True, "ok", "/data"),
+        ):
+            yield
+
+    async def test_sweep_counts_each_category_and_sums_reclaimable(
+        self, objects_dir, report_roots
+    ):
+        _place_blob_file(objects_dir, DIGEST_A, b"0123456789")  # orphan, 10 bytes
+        await Blob(
+            id=DIGEST_B,
+            size=2048,
+            state=BlobState.MISSING,
+            storage=BlobStorage.MANAGED,
+            rel_path=f"{DIGEST_B[:2]}/{DIGEST_B}",
+        ).insert()
+
+        report = await drift_service.sweep()
+
+        assert report.counts["orphaned_file"] == 1
+        assert report.counts["missing_blob"] == 1
+        # Only categories 1 and 2 are reclaimable: a missing blob's bytes are
+        # already gone, so counting them would promise space that does not exist.
+        assert report.reclaimable_bytes == 10
+
+    async def test_sweep_is_stored_and_readable(self, objects_dir, report_roots):
+        _place_blob_file(objects_dir, DIGEST_A)
+
+        await drift_service.sweep()
+        stored = await DriftReport.load()
+
+        assert stored.counts["orphaned_file"] == 1
+        assert stored.swept_at is not None
+
+    async def test_sweep_skips_when_home_is_not_mounted(self, objects_dir, report_roots):
+        """Every blob looks missing when the drive is gone."""
+        with patch(
+            "app.services.drift_service.check_home",
+            return_value=HomeStatus(False, "sentinel missing", "/data"),
+        ):
+            report = await drift_service.sweep()
+
+        assert report.skipped is True
+        assert report.skip_reason == "sentinel missing"
+        assert report.counts == {}
+
+    async def test_entries_are_capped_but_counts_stay_exact(self, objects_dir, report_roots):
+        for i in range(drift_service.MAX_ENTRIES_PER_CATEGORY + 5):
+            digest = f"{i:064x}"
+            _place_blob_file(objects_dir, digest)
+
+        report = await drift_service.sweep()
+
+        assert report.counts["orphaned_file"] == drift_service.MAX_ENTRIES_PER_CATEGORY + 5
+        capped = [e for e in report.entries if e.category is DriftCategory.ORPHANED_FILE]
+        assert len(capped) == drift_service.MAX_ENTRIES_PER_CATEGORY

@@ -17,9 +17,15 @@ from pathlib import Path
 from app.config import settings
 from app.logging import get_logger
 from app.models.blob import Blob, BlobState, BlobStorage
-from app.models.drift import DriftCategory, DriftEntry
+from app.models.drift import (
+    MAX_ENTRIES_PER_CATEGORY,
+    DriftCategory,
+    DriftEntry,
+    DriftReport,
+)
 from app.models.object import DataObject
 from app.services.blob_service import GC_GRACE
+from app.storage.home import check_home
 
 log = get_logger(__name__)
 
@@ -219,3 +225,64 @@ async def find_missing_report_dirs() -> list[DriftEntry]:
             )
 
     return entries
+
+
+# Categories whose bytes are still on disk and could be freed. A missing blob's
+# bytes are already gone, so counting them would promise space that does not
+# exist.
+_RECLAIMABLE = (DriftCategory.ORPHANED_FILE, DriftCategory.STALLED_INGEST)
+
+
+async def sweep() -> DriftReport:
+    """Run every detector and store the result. Never deletes anything.
+
+    The mount sentinel is checked first, for the same reason verify_files
+    checks it: an unmounted external drive presents as an *empty* /data rather
+    than an error, so a sweep that ran anyway would report the entire library
+    as drift.
+    """
+    report = await DriftReport.load()
+    report.swept_at = datetime.now(UTC)
+
+    home = check_home()
+    if not home.ok:
+        report.skipped = True
+        report.skip_reason = home.detail
+        report.counts = {}
+        report.entries = []
+        report.reclaimable_bytes = 0
+        await report.save()
+        log.info("drift_sweep_skipped", reason=home.detail)
+        return report
+
+    found: list[DriftEntry] = []
+    found.extend(await find_orphaned_files())
+    found.extend(await find_missing_blobs())
+    found.extend(await find_missing_report_dirs())
+
+    counts: dict[str, int] = {}
+    for entry in found:
+        counts[entry.category.value] = counts.get(entry.category.value, 0) + 1
+
+    reclaimable = sum(e.size_bytes for e in found if e.category in _RECLAIMABLE)
+
+    # Cap per category, not globally: a flood of one category must not hide
+    # every example of another. Counts above stay exact.
+    kept: list[DriftEntry] = []
+    per_category: dict[str, int] = {}
+    for entry in found:
+        seen = per_category.get(entry.category.value, 0)
+        if seen >= MAX_ENTRIES_PER_CATEGORY:
+            continue
+        per_category[entry.category.value] = seen + 1
+        kept.append(entry)
+
+    report.skipped = False
+    report.skip_reason = None
+    report.counts = counts
+    report.entries = kept
+    report.reclaimable_bytes = reclaimable
+    await report.save()
+
+    log.info("drift_sweep_complete", counts=counts, reclaimable_bytes=reclaimable)
+    return report
