@@ -140,6 +140,86 @@ PY
   fi
 }
 
+counts_to_json() {
+  local file="$1"
+  awk -F'\t' '
+    BEGIN { printf "{" ; sep = "" }
+    NF == 2 { printf "%s\"%s\": %s", sep, $1, $2; sep = ", " }
+    END { printf "}\n" }
+  ' "$file"
+}
+
+# Every collection, no allowlist: a collection added later is captured
+# without anyone remembering to update this script.
+collection_counts() {
+  docker exec -i "$MONGO_CONTAINER" mongosh "$MONGO_DB" --quiet --eval '
+    db.getCollectionNames().sort().forEach(n => {
+      print(n + "\t" + db.getCollection(n).countDocuments({}));
+    });
+  '
+}
+
+write_backup_manifest() {
+  local outfile="$1" countsfile="$2" manifestfile="$3"
+  local version git_sha blobs total_size
+  version="$(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo unknown)"
+  git_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  blobs="$(manifest_row_count "$manifestfile")"
+  total_size="$(tail -n +2 "$manifestfile" | awk -F'\t' '{s += $2} END {print s + 0}')"
+
+  cat >"$outfile" <<EOF
+{
+  "version": "$version",
+  "git_sha": "$git_sha",
+  "created_utc": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "bioinfo_home": "${BIOINFO_HOME:-unknown}",
+  "database": "$MONGO_DB",
+  "blob_count": $blobs,
+  "blob_total_size": $total_size,
+  "collection_counts": $(counts_to_json "$countsfile")
+}
+EOF
+}
+
+cmd_backup() {
+  local stamp dest
+  stamp="$(backup_stamp)"
+  dest="$BACKUP_DIR/$stamp"
+
+  docker exec -i "$MONGO_CONTAINER" true 2>/dev/null \
+    || die "cannot reach Mongo container '$MONGO_CONTAINER'. Is the stack up?"
+
+  mkdir -p "$dest/dump"
+  log "Backing up to $dest"
+
+  log "  mongodump…"
+  docker exec -i "$MONGO_CONTAINER" mongodump --db "$MONGO_DB" --archive --quiet \
+    >"$dest/dump/$MONGO_DB.archive"
+
+  log "  enumerating /data…"
+  write_data_manifest "$dest/data-manifest.tsv"
+
+  log "  provider summary…"
+  write_provider_summary "$dest/providers.txt"
+
+  log "  manifest…"
+  collection_counts >"$dest/.counts.tsv"
+  write_backup_manifest "$dest/manifest.json" "$dest/.counts.tsv" "$dest/data-manifest.tsv"
+  rm -f "$dest/.counts.tsv"
+
+  write_restore_doc "$dest/RESTORE.md"
+
+  log ""
+  log "Backup complete: $dest"
+  log "  blobs enumerated: $(manifest_row_count "$dest/data-manifest.tsv")"
+  log "  backup size:      $(du -sh "$dest" | cut -f1)"
+  log "  backups on disk:  $(find "$BACKUP_DIR" -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ')"
+  log ""
+  log "This backup does NOT contain /data blobs or provider keys."
+  log "A backup on the same disk survives mistakes, not drive failure --"
+  log "set BACKUP_DIR= to external storage for that."
+}
+
 # --- dispatch ---
 case "${1:-}" in
   backup)  shift; cmd_backup "$@" ;;
