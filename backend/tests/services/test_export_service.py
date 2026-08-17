@@ -1,10 +1,10 @@
 import pytest
 
 from app.config import settings
-from app.models import Blob, BlobState, JobRunTiming
+from app.models import Blob, BlobState, JobRunTiming, RunKind
 from app.models.timing import RunMachine
-from app.services import export_service
-from tests.services.helpers import TEST_OWNER, make_project
+from app.services import export_service, run_service
+from tests.services.helpers import TEST_OWNER, make_object, make_project
 
 
 def test_exports_dir_is_under_bioinfo_home():
@@ -149,3 +149,63 @@ def test_manifest_falls_back_to_id_when_content_sha256_is_unset():
 
     row = tsv.strip().splitlines()[1].split("\t")
     assert row[2] == "c" * 64
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+class TestRenderReport:
+    async def test_names_the_project_and_its_description(self):
+        project = await make_project("export-report-ecoli")
+        project.description = "Nanopore run"
+        await project.save()
+        bundle = export_service.ExportBundle(projects=[project])
+
+        report = await export_service.render_report(bundle, owner=TEST_OWNER)
+
+        assert project.name in report
+        assert "Nanopore run" in report
+
+    async def test_states_the_archive_is_not_importable(self):
+        project = await make_project("export-report-not-importable")
+        bundle = export_service.ExportBundle(projects=[project])
+
+        report = await export_service.render_report(bundle, owner=TEST_OWNER)
+
+        assert "cannot be imported" in report.lower()
+
+    async def test_includes_each_object_with_its_provenance(self):
+        project = await make_project("export-report-objects")
+        obj = await make_object(project, "reads.fastq.gz")
+        bundle = export_service.ExportBundle(projects=[project], objects=[obj])
+
+        report = await export_service.render_report(bundle, owner=TEST_OWNER)
+
+        assert obj.name in report
+        assert "## Provenance" in report
+
+    async def test_includes_run_history(self):
+        project = await make_project("export-report-runs")
+        run = await run_service.create_run(
+            kind=RunKind.ALIGNMENT,
+            project_id=project.id,
+            label="reads -> ref",
+            inputs=[],
+            params={},
+            owner=TEST_OWNER,
+        )
+        bundle = export_service.ExportBundle(projects=[project], runs=[run])
+
+        report = await export_service.render_report(bundle, owner=TEST_OWNER)
+
+        assert "## Run history" in report
+        assert run.label in report
+
+    async def test_lists_sub_projects(self):
+        parent = await make_project("export-report-parent")
+        child = await make_project("export-report-child", parent)
+        bundle = export_service.ExportBundle(projects=[parent, child])
+
+        report = await export_service.render_report(bundle, owner=TEST_OWNER)
+
+        assert "## Sub-projects" in report
+        assert child.name in report

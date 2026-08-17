@@ -26,7 +26,7 @@ from app.models import (
     Project,
     RunJob,
 )
-from app.services import project_service
+from app.services import project_service, run_service
 
 # Bumped when the archive layout changes in a way a reader must notice.
 # Preserved ObjectIds plus this stamp are what a future importer needs.
@@ -228,3 +228,55 @@ def build_manifest(bundle: ExportBundle, *, threshold_bytes: int) -> tuple[str, 
         )
 
     return "\n".join(lines) + "\n", included
+
+
+async def render_report(bundle: ExportBundle, *, owner: str) -> str:
+    """Render report.md: the analysis, readable without BioFlow.
+
+    Per-object provenance comes from `provenance_report.render_markdown`,
+    the same renderer the History tab uses, rather than a second one. That
+    is deliberate: it carries the renderer's gap markers into the archive,
+    so a reader scanning for "which aligner version" sees the question
+    asked and unanswered rather than seeing nothing and assuming it did not
+    matter.
+
+    Run status is derived through `run_service.status_for_many` rather than
+    read off `PipelineRun` directly -- `PipelineRun` stores no status field
+    of its own; it is always computed from the run's linked jobs, the same
+    way the activity view computes it.
+    """
+    from app.services import provenance_report, provenance_walker
+
+    root = bundle.projects[0]
+    lines = [
+        f"# {root.name}",
+        "",
+        "_Exported from BioFlow. This archive documents an analysis; it "
+        "cannot be imported into another BioFlow instance._",
+        "",
+    ]
+    if root.description:
+        lines += [root.description, ""]
+
+    if len(bundle.projects) > 1:
+        lines += ["## Sub-projects", ""]
+        lines += [f"- {p.name}" for p in bundle.projects[1:]]
+        lines.append("")
+
+    lines += ["## Files", ""]
+    for obj in bundle.objects:
+        lines += [f"### {obj.name}", ""]
+        chain = await provenance_walker.walk(obj.id, owner=owner)
+        lines += [provenance_report.render_markdown(chain), ""]
+
+    if bundle.runs:
+        statuses = await run_service.status_for_many(
+            [run.id for run in bundle.runs], owner=owner
+        )
+        lines += ["## Run history", ""]
+        for run in bundle.runs:
+            status = statuses.get(run.id, "unknown")
+            lines.append(f"- {run.label} — {run.kind} — {status} ({run.created_at:%Y-%m-%d})")
+        lines.append("")
+
+    return "\n".join(lines)
