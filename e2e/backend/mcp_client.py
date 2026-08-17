@@ -18,6 +18,21 @@ class McpError(RuntimeError):
     pass
 
 
+def _extract_json(resp) -> dict:
+    """Extract the JSON payload from an MCP Streamable-HTTP response.
+
+    The server may reply with a plain JSON body or an SSE stream
+    (``event: message\\ndata: {...}\\n\\n``). Parse both.
+    """
+    body = resp.text
+    if "data:" in body:
+        data = "\n".join(
+            line[5:].strip() for line in body.splitlines() if line.startswith("data:")
+        )
+        return json.loads(data)
+    return json.loads(body)
+
+
 class McpClient:
     def __init__(self, base_url: str, profile: str = ""):
         self._url = f"{base_url.rstrip('/')}/api/v1/mcp/"
@@ -77,7 +92,7 @@ class McpClient:
             "method": "tools/call",
             "params": {"name": f"bioflow_{name}", "arguments": arguments},
         })
-        payload = resp.json()
+        payload = _extract_json(resp)
         if "error" in payload:
             raise McpError(f"tools/call error: {payload['error']}")
         result = payload.get("result", {})
