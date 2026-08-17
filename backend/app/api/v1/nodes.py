@@ -460,6 +460,64 @@ async def _execute_remote_commands(
             raise RemoteCommandError(step, step.describe_failure(result))
 
 
+# --- Post-install verification ---
+
+# How long a freshly started worker gets to still be running. Short: this
+# checks that the container did not immediately exit, not that it has
+# finished starting up. A crash-loop shows up within seconds -- the failures
+# this catches (a bad image, an unreadable .env, a storage path the worker
+# cannot write) all kill the process on startup.
+_VERIFY_SETTLE_SECONDS = 5
+_VERIFY_TIMEOUT_SECONDS = 30
+
+
+async def _verify_node_operational(conn, install_dir: str, host: str) -> str | None:
+    """Check that the worker `up -d` started is actually still running.
+
+    Returns None when the node is operational, or a message describing the
+    failure. `docker compose up -d` exits 0 as soon as the container is
+    *created*, which is before it can crash -- so a node whose worker dies on
+    startup (bad image, unwritable storage path, unreadable .env) provisioned
+    "successfully" and then never appeared, with the failure visible only in
+    `docker compose logs` on the node itself. node_update_service already
+    treats this as the failure worth guarding against; provisioning did not.
+
+    Asks Docker for the container's state rather than waiting for the worker
+    to enroll: a worker that starts fine but cannot reach the primary's Mongo
+    is a *different* failure with a different fix, and reporting it as "the
+    worker did not start" would send the user to the wrong machine.
+    """
+    await asyncio.sleep(_VERIFY_SETTLE_SECONDS)
+
+    result = await asyncio.wait_for(
+        conn.run(
+            f"docker compose -f {install_dir}/docker-compose.yml "
+            "ps --format '{{.State}}' worker",
+            check=False,
+        ),
+        timeout=_VERIFY_TIMEOUT_SECONDS,
+    )
+    if result.exit_status != 0:
+        return (
+            f"Could not check the worker's state on {host}: "
+            f"{_command_output(result)}"
+        )
+
+    states = [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+    if not states:
+        return (
+            f"The worker container is not present on {host} despite starting "
+            f"without error. Check `docker compose logs worker` on {host}."
+        )
+    if not all(state == "running" for state in states):
+        return (
+            f"The worker on {host} started and then stopped "
+            f"(state: {', '.join(states)}). This usually means it crashed on "
+            f"startup -- check `docker compose logs worker` on {host}."
+        )
+    return None
+
+
 # --- Provisioning executor ---
 
 async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
@@ -673,7 +731,14 @@ async def _provision_node(task_id: str, req: ProvisionRequest) -> None:
                 task.phase = e.step.phase
                 return await _fail(e.reason)
 
-            # Phase 8: enrolled
+            # Phase 8: verify
+            await _update("verify", "Checking the worker stayed up…")
+            problem = await _verify_node_operational(conn, install_dir, req.host)
+            if problem is not None:
+                task.phase = "verify"
+                return await _fail(problem)
+
+            # Phase 9: enrolled
             await _update("enrolled", "Node enrolled ✓")
             task.status = "success"
             task.finished_at = datetime.now(UTC)
