@@ -25,8 +25,9 @@ bare-string registry would silently collapse three different launchers into
 one classifiable unit, defeating the exhaustiveness check it was meant to
 serve. Qualifying by module is what keeps them distinguishable.
 
-Status: every launch_* is classified. 27 launch_* functions exist across
-services/; 12 create a PipelineRun (trim, align, variant_calling, quantify,
+Status: every launch_* is classified exactly once -- 35 launch_* functions
+exist across services/, 24 as node types and 11 excluded. 12 create a
+PipelineRun (trim, align, variant_calling, quantify,
 differential_expression, assembly, the three downloads, and -- since GitHub
 issue #91 -- consensus, polish, and scaffold) and the rest do not, including
 `launch_synteny` (issue #149), read-only like `launch_misassembly_qc`.
@@ -997,30 +998,26 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # that has usually happened. The export node will ensure it on
         # demand once its adapter is layered with that logic (see #371).
         "pipeline_service.launch_annotation_stats",
-        # User-triggered from the Results tab's feature table, with an
-        # arbitrary filter chosen interactively rather than wired from an
-        # upstream node's output — not a graph step in the sense the other
-        # entries here are. It does produce a derived object (unlike its
-        # siblings above), which is exactly why a real canvas node type is
-        # worth designing properly rather than shoehorning in now: filters
-        # have no fixed port shape to express as PortSpec inputs.
-        # TODO(#371): design and add a canvas node type.
-        "pipeline_service.launch_annotation_export",
-        # User-triggered from the annotation editor's Materialize button, like
-        # the export above: it produces a derived annotation object from
-        # interactive edits rather than from a wired upstream node.
+        # User-triggered from the annotation editor's Materialize button: it
+        # produces a derived annotation object from interactive edits rather
+        # than from a wired upstream node.
         # TODO(#297): may be registerable as a canvas node after the editing
         # workflow stabilizes.
         "pipeline_service.launch_materialize_annotation_edits",
         # User-triggered from the Results tab of a GenBank annotation, with no
-        # parameters at all -- the same class as launch_annotation_export
-        # above, and like it, it derives an object. Not a graph step: the
+        # parameters at all -- the same class as the materialize entry above,
+        # and like it, it derives an object. Not a graph step: the
         # input is one specific GenBank the user is looking at, and the
         # output is a reference that any downstream node picks up by role
         # rather than by wiring.
         # TODO(#371): revisit alongside its siblings if a canvas node type
         # for on-demand annotation work is designed.
         "pipeline_service.launch_extract_genbank_sequence",
+        # `pipeline_service.launch_annotation_export` is deliberately absent:
+        # #392 gave it the `annotation_export` node type its exclusion comment
+        # here had a TODO(#371) asking for, without removing the exclusion, so
+        # it was classified both ways at once until #433. The node type is the
+        # correct classification; nothing goes back here for it.
     }
 )
 
