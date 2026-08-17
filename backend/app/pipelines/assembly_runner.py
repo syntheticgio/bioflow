@@ -17,10 +17,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.logging import get_logger
+from app.pipelines import assembler_registry
 from app.pipelines.assemblers import Assembler, OutputKind
-from app.pipelines.assembly_params import BaseAssemblyParams, FlyeParams
+from app.pipelines.assembly_params import AbyssParams, BaseAssemblyParams, FlyeParams
 
 log = get_logger(__name__)
+
+# ABySS refuses to start without a Bloom filter budget, so a run with no memory
+# estimate still needs a number. 200M is small enough to be safe anywhere and
+# large enough to assemble a bacterial genome.
+MIN_BLOOM_MB = 200
 
 
 def build_assembly_command(
@@ -30,14 +36,38 @@ def build_assembly_command(
     reads: Path,
     out_dir: Path,
     params: BaseAssemblyParams,
+    mate: Path | None = None,
+    bloom_bytes: int | None = None,
 ) -> list[str]:
-    """The argv for one assembly run."""
-    if assembler is not Assembler.FLYE:
-        # Not a fallback: an assembler with no builder here would otherwise
-        # produce a Flye command line for a different binary.
-        raise ValueError(f"No command builder for {assembler.value}")
+    """The argv for one assembly run.
 
-    assert isinstance(params, FlyeParams)
+    `mate` and `bloom_bytes` are ABySS-only and ignored by the Flye builder --
+    a paired long-read assembly is not a thing, and Flye needs no memory
+    ceiling to start.
+    """
+    if assembler is Assembler.FLYE:
+        assert isinstance(params, FlyeParams)
+        return _flye_command(
+            tool_path=tool_path, reads=reads, out_dir=out_dir, params=params
+        )
+    if assembler is Assembler.ABYSS:
+        assert isinstance(params, AbyssParams)
+        return _abyss_command(
+            tool_path=tool_path,
+            reads=reads,
+            out_dir=out_dir,
+            params=params,
+            mate=mate,
+            bloom_bytes=bloom_bytes,
+        )
+    # Not a fallback: an assembler with no builder here would otherwise
+    # produce another tool's command line for this binary.
+    raise ValueError(f"No command builder for {assembler.value}")
+
+
+def _flye_command(
+    *, tool_path: str, reads: Path, out_dir: Path, params: FlyeParams
+) -> list[str]:
     return [
         tool_path,
         f"--{params.mode}",
@@ -49,6 +79,43 @@ def build_assembly_command(
         "--iterations",
         str(params.iterations),
     ]
+
+
+def _abyss_command(
+    *,
+    tool_path: str,
+    reads: Path,
+    out_dir: Path,
+    params: AbyssParams,
+    mate: Path | None,
+    bloom_bytes: int | None,
+) -> list[str]:
+    """`abyss-pe` takes Make variable assignments, not flags.
+
+    `-C <dir>` is make's own change-directory option and is how the outputs
+    land in `out_dir` -- ABySS has no `--out-dir` equivalent and would
+    otherwise write into the process's cwd.
+    """
+    bloom_mb = MIN_BLOOM_MB
+    if bloom_bytes:
+        bloom_mb = max(MIN_BLOOM_MB, int(bloom_bytes / (1024 * 1024)))
+
+    cmd = [
+        tool_path,
+        "-C",
+        str(out_dir),
+        f"name={assembler_registry.ASSEMBLY_NAME_PREFIX}",
+        f"k={params.k}",
+        f"j={params.threads}",
+        f"B={bloom_mb}M",
+    ]
+    if mate is not None:
+        # Both mates in one space-joined value: ABySS's `in` variable is a
+        # single Make variable holding a read pair, not a repeatable flag.
+        cmd.append(f"in={reads} {mate}")
+    else:
+        cmd.append(f"se={reads}")
+    return cmd
 
 
 # Flye announces each stage with a `>>>STAGE: <name>` line, and those names are
