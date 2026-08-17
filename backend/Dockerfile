@@ -96,6 +96,7 @@ RUN apt-get update \
         tabix \
         subread \
         flye \
+        abyss \
         hmmer \
         ivar \
         bedtools \
@@ -119,8 +120,12 @@ RUN apt-get update \
 # flye is the de novo assembler, and the cheapest of the three worth having:
 # Debian packages it (2.9.5, ~37MB) and its dependencies are minimap2 and
 # samtools, both already above. hifiasm is not packaged at all and would need
-# a source build with the same arm64 SIMD problem bwa-mem2 has, and SPAdes is
-# packaged but only assembles short reads, which is not a workflow here yet.
+# a source build with the same arm64 SIMD problem bwa-mem2 has.
+# abyss is the short-read assembler (2.3.10, paired-end de Bruijn). SPAdes
+# would be the better choice on isolates but is NOT packaged for trixie --
+# verified 2026-08-17, `apt-cache policy spades` has no candidate -- and needs
+# a vendored upstream tarball. See #519 and
+# docs/superpowers/specs/2026-08-17-short-read-assembly-design.md.
 # See docs/superpowers/specs/2026-08-01-de-novo-assembly-design.md.
 # bcftools and tabix are separate packages from samtools -- installing samtools
 # does not bring htslib's command-line tools along. bcftools does the

@@ -272,6 +272,7 @@ class TestSerialization:
             "clair3",
             "deepvariant",
             "flye",
+            "abyss",
             "miniprot",
             "compleasm",
             "fasterq-dump",
@@ -1126,3 +1127,17 @@ class TestDeepVariantProbe:
 
         tool = tools.deepvariant()
         assert tool.version is None
+
+
+def test_abyss_is_declared_and_documented():
+    """abyss must be probeable and carry complete help-page metadata."""
+    from app.pipelines import tools
+
+    tool = tools.abyss()
+    assert tool.name == "abyss"
+
+    meta = tools.TOOL_META["abyss"]
+    assert meta.homepage
+    assert meta.citation
+    assert meta.license
+    assert meta.usage
