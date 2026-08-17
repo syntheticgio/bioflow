@@ -91,6 +91,6 @@ def test_is_error_raises(monkeypatch):
 
     try:
         asyncio.run(go())
-        assert False, "expected McpError"
+        raise AssertionError("expected McpError")
     except mcp_client.McpError as e:
         assert "isError" in str(e)

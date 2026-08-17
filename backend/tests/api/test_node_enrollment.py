@@ -318,7 +318,7 @@ class TestListNodesWithEnrollment:
                 self._idx += 1
                 return item
 
-        redis_patch = patch("app.api.v1.nodes.get_redis", return_value=redis)
+        redis_patch = patch("app.queue.worker_registry.get_redis", return_value=redis)
         mongo_patch = patch(
             "app.api.v1.nodes.Node.find_all", return_value=AsyncIterMock()
         )
@@ -359,7 +359,7 @@ class TestListNodesWithEnrollment:
                 self._idx += 1
                 return item
 
-        redis_patch = patch("app.api.v1.nodes.get_redis", return_value=redis)
+        redis_patch = patch("app.queue.worker_registry.get_redis", return_value=redis)
         mongo_patch = patch(
             "app.api.v1.nodes.Node.find_all", return_value=AsyncIterMock()
         )
@@ -409,7 +409,7 @@ class TestListNodesWithEnrollment:
             "app.api.v1.nodes.Node.find_all",
             side_effect=Exception("connection refused"),
         )
-        redis_patch = patch("app.api.v1.nodes.get_redis", return_value=redis)
+        redis_patch = patch("app.queue.worker_registry.get_redis", return_value=redis)
 
         redis_patch.start()
         mongo_patch.start()

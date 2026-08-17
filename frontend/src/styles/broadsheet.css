@@ -622,6 +622,16 @@
   background: var(--color-divider);
 }
 
+/* Stage-rail cards (RAW/TRIMMED, REFSEQ/GENBANK) already bracket their rows
+   with a toggle header, so the spine is redundant -- see styles.css. */
+.theme-broadsheet .stage-rail-card {
+  padding-left: 0;
+}
+
+.theme-broadsheet .stage-rail-card::before {
+  display: none;
+}
+
 .theme-broadsheet .pair-label {
   font-family: var(--font-body);
   font-size: 11px;

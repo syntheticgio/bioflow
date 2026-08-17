@@ -10,7 +10,20 @@
 # Usage:  ./backend/run-worktree-tests.sh [pytest args...]
 #         ./backend/run-worktree-tests.sh tests/models -v
 #         ./backend/run-worktree-tests.sh            # whole suite
+#         ./backend/run-worktree-tests.sh --with-sshd tests/integration
 set -euo pipefail
+
+# --with-sshd: also run a real sshd for tests/integration/test_node_ssh_live.py.
+#
+# Those tests skip themselves unless BIOFLOW_TEST_SSHD_HOST is set, because the
+# test container has no Docker socket and so cannot start sshd itself. Opt-in
+# rather than always-on: it pulls an image and adds ~10s of startup that the
+# other ~1900 tests have no use for.
+WITH_SSHD=
+if [ "${1:-}" = "--with-sshd" ]; then
+  WITH_SSHD=1
+  shift
+fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -89,8 +102,12 @@ echo "Testing in image: $IMAGE" >&2
 # Redis is still shared: nothing in the suite flushes it, so it does not have
 # the same problem.
 MONGO_NAME="wt-mongo-$$"
+SSHD_NAME="wt-sshd-$$"
 
-cleanup() { docker rm -f "$MONGO_NAME" >/dev/null 2>&1 || true; }
+cleanup() {
+  docker rm -f "$MONGO_NAME" >/dev/null 2>&1 || true
+  docker rm -f "$SSHD_NAME" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 docker run -d --rm --name "$MONGO_NAME" --network biopipe_default \
@@ -102,6 +119,35 @@ until docker exec "$MONGO_NAME" mongosh --quiet --eval \
       2>/dev/null | grep -q 1; do
   sleep 0.5
 done
+
+SSHD_ENV=()
+if [ -n "$WITH_SSHD" ]; then
+  # linuxserver/openssh-server listens on 2222 and enables password auth for
+  # the user it creates, which is what the provisioning flow starts from: the
+  # user's password is used once, to install BioFlow's own key.
+  docker run -d --rm --name "$SSHD_NAME" --network biopipe_default \
+    -e USER_NAME=bioflow -e USER_PASSWORD=testpw -e PASSWORD_ACCESS=true \
+    -e PUID=1000 -e PGID=1000 \
+    lscr.io/linuxserver/openssh-server:latest >/dev/null
+
+  # Wait for sshd to actually accept connections rather than sleeping a fixed
+  # interval -- the image generates host keys on first boot, which is the slow
+  # part and varies by machine.
+  echo "Waiting for sshd..." >&2
+  for _ in $(seq 60); do
+    if docker logs "$SSHD_NAME" 2>&1 | grep -q "sshd is listening on port 2222"; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  SSHD_ENV=(
+    -e BIOFLOW_TEST_SSHD_HOST="$SSHD_NAME"
+    -e BIOFLOW_TEST_SSHD_PORT=2222
+    -e BIOFLOW_TEST_SSHD_USER=bioflow
+    -e BIOFLOW_TEST_SSHD_PASSWORD=testpw
+  )
+fi
 
 # Quiet by default, but never on top of a verbosity flag the caller passed.
 #
@@ -139,4 +185,5 @@ docker run --rm \
   -w /srv \
   -e MONGO_URL="mongodb://$MONGO_NAME:27017/?replicaSet=rs0" \
   -e REDIS_URL="redis://redis:6379/0" \
+  "${SSHD_ENV[@]+"${SSHD_ENV[@]}"}" \
   "$IMAGE" python -m pytest "${PYTEST_ARGS[@]}"

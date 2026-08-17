@@ -144,6 +144,18 @@ bubbles or squashed PR titles. Two things depend on that:
 branch, not your worktree -- tear that down separately, as described under
 [Running the app](#running-the-app-one-instance-not-devprod).
 
+**If the task ran in a worktree, remove it once the merge lands.** A merged
+PR is the same "done with this" signal that governs bringing down a test
+stack, below -- the branch is gone from the remote, so there is nothing left
+for the worktree to hold open. Bring down anything you brought up for testing
+in it first (`./ops/worktree-up.sh --down`), then remove the worktree itself
+rather than leaving it for the end-of-session prompt: `ExitWorktree` with
+`action: "remove"` if the harness put you there via `EnterWorktree`, or `git
+worktree remove <path>` from the main checkout otherwise. Skipping this is
+what `worktree-up.sh --prune` exists to clean up after the fact, but that is
+a machine-wide sweep for orphans nobody remembered, not a substitute for
+removing your own when the task that needed it is finished.
+
 Then report the merge and the PR URL, and stop.
 
 Do not use `--auto`. It queues the merge for whenever checks pass and returns

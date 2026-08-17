@@ -6,8 +6,8 @@ per-step recording as YAML tests.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
 
 
 class StepFailure(RuntimeError):
@@ -43,7 +43,11 @@ async def mcp(ctx, tool: str, arguments: dict) -> dict:
     return await ctx.step("mcp", ctx.op_mcp(tool, arguments))
 
 
-async def wait(ctx, tool: str, arguments: dict, *, timeout: float = 600.0, poll: float = 5.0) -> dict:
+async def wait(
+    # ASYNC109: a poll budget passed through to op_wait, not a cancel scope.
+    ctx, tool: str, arguments: dict, *, timeout: float = 600.0,  # noqa: ASYNC109
+    poll: float = 5.0,
+) -> dict:
     return await ctx.step("wait", ctx.op_wait(tool, arguments, timeout, poll))
 
 
