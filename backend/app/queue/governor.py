@@ -80,10 +80,11 @@ RAMP_COUNT = 3  # consecutive clean admissions before normal operation
 # verify_files job that never runs is a silent failure, so it gets a way out.
 #
 # The escape is deliberately limited to maintenance (see worker._maintenance_
-# starving). Compute does not qualify: a waiting pipeline run is *visible* as
-# waiting in the activity view, so it fails loudly rather than silently, and
-# forcing a multi-hour job onto an already-strained machine is the outcome the
-# governor exists to prevent.
+# starving). Compute does not qualify: a waiting pipeline run says what it is
+# waiting on in the activity view -- the gate and the numbers, recorded by
+# claim.lua (#457) -- so it fails loudly rather than silently, and forcing a
+# multi-hour job onto an already-strained machine is the outcome the governor
+# exists to prevent.
 STARVATION_ESCAPE_SECONDS = 30 * 60
 
 
