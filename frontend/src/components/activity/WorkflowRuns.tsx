@@ -29,7 +29,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../../api/client";
 import type { WorkflowNodeRow, WorkflowRunRow } from "../../api/types";
-import { formatClock } from "../../lib/format";
+import { formatDate, formatRelative } from "../../lib/format";
 import { STATUS_LABELS } from "../../lib/runFormat";
 import { notify } from "../../stores/messageStore";
 
@@ -131,7 +131,7 @@ export function WorkflowLedgerRow({
     STATUS_LABELS[run.status],
     "workflow",
     `${run.node_done}/${run.node_total} nodes`,
-    formatClock(run.updated_at),
+    formatRelative(run.updated_at),
   ].join(" · ");
 
   return (
@@ -151,7 +151,7 @@ export function WorkflowLedgerRow({
       >
         <span className="ledger-num">{String(index).padStart(2, "0")}</span>
         <span className="ledger-title">{run.label}</span>
-        <span className="ledger-meta">
+        <span className="ledger-meta" title={formatDate(run.updated_at)}>
           {meta}
           {/* Failures are called out separately rather than folded into the
               fraction: a PARTIAL run has real outputs *and* a dead branch, and
