@@ -4,7 +4,7 @@ import tarfile
 import pytest
 
 from app.config import settings
-from app.models import Blob, BlobState, JobRunTiming, RunKind
+from app.models import Blob, BlobState, JobRunTiming, RunKind, SourceInfo, SourceMode
 from app.models.timing import RunMachine
 from app.services import export_service, run_service
 from tests.services.helpers import TEST_OWNER, make_blob, make_object, make_project
@@ -161,7 +161,7 @@ class TestRenderReport:
         project = await make_project("export-report-ecoli")
         project.description = "Nanopore run"
         await project.save()
-        bundle = export_service.ExportBundle(projects=[project])
+        bundle = export_service.ExportBundle(root=project, projects=[project])
 
         report = await export_service.render_report(bundle, owner=TEST_OWNER)
 
@@ -170,7 +170,7 @@ class TestRenderReport:
 
     async def test_states_the_archive_is_not_importable(self):
         project = await make_project("export-report-not-importable")
-        bundle = export_service.ExportBundle(projects=[project])
+        bundle = export_service.ExportBundle(root=project, projects=[project])
 
         report = await export_service.render_report(bundle, owner=TEST_OWNER)
 
@@ -179,7 +179,9 @@ class TestRenderReport:
     async def test_includes_each_object_with_its_provenance(self):
         project = await make_project("export-report-objects")
         obj = await make_object(project, "reads.fastq.gz")
-        bundle = export_service.ExportBundle(projects=[project], objects=[obj])
+        bundle = export_service.ExportBundle(
+            root=project, projects=[project], objects=[obj]
+        )
 
         report = await export_service.render_report(bundle, owner=TEST_OWNER)
 
@@ -196,7 +198,7 @@ class TestRenderReport:
             params={},
             owner=TEST_OWNER,
         )
-        bundle = export_service.ExportBundle(projects=[project], runs=[run])
+        bundle = export_service.ExportBundle(root=project, projects=[project], runs=[run])
 
         report = await export_service.render_report(bundle, owner=TEST_OWNER)
 
@@ -206,12 +208,17 @@ class TestRenderReport:
     async def test_lists_sub_projects(self):
         parent = await make_project("export-report-parent")
         child = await make_project("export-report-child", parent)
-        bundle = export_service.ExportBundle(projects=[parent, child])
+        # `projects` is deliberately given in child-before-parent order --
+        # the same shape a Mongo `$in` query can return, since `$in` does
+        # not preserve array order. Sub-projects must be identified by
+        # `root.id`, not by list position, or this test would pass by luck.
+        bundle = export_service.ExportBundle(root=parent, projects=[child, parent])
 
         report = await export_service.render_report(bundle, owner=TEST_OWNER)
 
         assert "## Sub-projects" in report
         assert child.name in report
+        assert parent.name not in report.split("## Sub-projects")[1]
 
 
 @pytest.mark.usefixtures("beanie_models")
@@ -264,7 +271,32 @@ class TestExportProject:
         blob.external_path = "/Users/gio/private/reads.fastq"
         blob.state = BlobState.PRESENT
         await blob.save()
-        await make_object(project, "reads.fastq", digest=digest)
+        obj = await make_object(project, "reads.fastq", digest=digest)
+
+        # C1: DataObject.source.original_path is a second, nested path field
+        # (SourceInfo, set for every register-in-place object by
+        # object_service.py) that _strip_paths must also clear -- the
+        # top-level-only version of this function was a complete no-op for
+        # objects.
+        obj.source = SourceInfo(
+            mode=SourceMode.REGISTER_IN_PLACE,
+            original_path="/Users/gio/private/other-reads.fastq",
+        )
+        await obj.save()
+
+        # C2: JobRunTiming.worker_id defaults to
+        # f"{socket.gethostname()}:{os.getpid()}" (queue/worker.py) and is a
+        # sibling of `machine` -- both are machine-identity facts, and
+        # redact() must clear both, not just `machine`.
+        await JobRunTiming(
+            job_type="align",
+            input_bytes=1_000_000,
+            job_id="j-redaction",
+            duration_ms=1_000,
+            object_id=str(obj.id),
+            machine=RunMachine(machine_id="gio-workstation.local"),
+            worker_id="gio-workstation.local:4242",
+        ).insert()
 
         result = await export_service.export_project(project.id, owner=TEST_OWNER)
 
@@ -274,7 +306,13 @@ class TestExportProject:
                 if member.isfile():
                     blob += tar.extractfile(member).read()
 
-        for forbidden in (b"/Users/gio", b"secret.key", b"fernet", b"ai_providers"):
+        for forbidden in (
+            b"/Users/gio",
+            b"secret.key",
+            b"fernet",
+            b"ai_providers",
+            b"gio-workstation",
+        ):
             assert forbidden.lower() not in blob.lower(), f"{forbidden!r} leaked"
 
 
