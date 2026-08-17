@@ -241,11 +241,10 @@ async def sweep() -> DriftReport:
     than an error, so a sweep that ran anyway would report the entire library
     as drift.
     """
-    report = await DriftReport.load()
-    report.swept_at = datetime.now(UTC)
-
     home = check_home()
     if not home.ok:
+        report = await DriftReport.load()
+        report.swept_at = datetime.now(UTC)
         report.skipped = True
         report.skip_reason = home.detail
         report.counts = {}
@@ -277,6 +276,12 @@ async def sweep() -> DriftReport:
         per_category[entry.category.value] = seen + 1
         kept.append(entry)
 
+    # Loaded here, immediately before the writes, rather than at the top of
+    # the function: the detectors above can run for minutes on a large tree,
+    # and loading late narrows the window during which this in-memory copy
+    # could go stale before save()'s full-document replace.
+    report = await DriftReport.load()
+    report.swept_at = datetime.now(UTC)
     report.skipped = False
     report.skip_reason = None
     report.counts = counts
