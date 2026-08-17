@@ -64,3 +64,20 @@ def test_manifest_row_count_of_a_header_only_file_is_zero(tmp_path):
     manifest.write_text("blob_id\tsize\tpath\tcontent_sha256\tstate\n")
     result = sh(f"manifest_row_count {manifest}", tmp_path)
     assert result.stdout.strip() == "0"
+
+
+def test_key_digest_shows_only_the_last_four(tmp_path):
+    result = sh('key_digest "sk-ant-api03-SECRETVALUE-f4a2"', tmp_path)
+    assert result.stdout.strip() == "…f4a2"
+
+
+def test_key_digest_of_an_absent_key_says_so(tmp_path):
+    result = sh('key_digest ""', tmp_path)
+    assert result.stdout.strip() == "(no key)"
+
+
+def test_key_digest_never_echoes_the_whole_key(tmp_path):
+    secret = "sk-ant-api03-DONOTLEAK-9c1d"
+    result = sh(f'key_digest "{secret}"', tmp_path)
+    assert "DONOTLEAK" not in result.stdout
+    assert "DONOTLEAK" not in result.stderr
