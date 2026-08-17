@@ -16,7 +16,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.logging import get_logger
-from app.models.blob import Blob, BlobState
+from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.drift import DriftCategory, DriftEntry
 from app.services.blob_service import GC_GRACE
 
@@ -102,3 +102,33 @@ async def find_orphaned_files() -> list[DriftEntry]:
         )
 
     return entries
+
+
+async def find_missing_blobs() -> list[DriftEntry]:
+    """Records whose bytes verify_files has confirmed absent.
+
+    A read of existing detection, not a second implementation of it.
+    verify_files requires two consecutive misses at least 60s apart and trips a
+    whole-batch circuit breaker when a large fraction of one batch misses, so
+    BlobState.MISSING already means "absent, and not merely because a drive
+    blinked". Re-statting here would be strictly worse: a single check with
+    none of those guards.
+
+    EXTERNAL blobs are excluded. Their bytes live outside BIOINFO_HOME under
+    paths we registered but never owned, so a vanished external file is the
+    user's business, not reclaimable drift.
+    """
+    records = await Blob.find(
+        Blob.state == BlobState.MISSING,
+        Blob.storage == BlobStorage.MANAGED,
+    ).to_list()
+
+    return [
+        DriftEntry(
+            category=DriftCategory.MISSING_BLOB,
+            path=blob.rel_path or blob.id,
+            digest=blob.id,
+            size_bytes=blob.size,
+        )
+        for blob in records
+    ]
