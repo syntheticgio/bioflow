@@ -111,8 +111,11 @@ token in the header, so a user can tell two records apart by their text.
 **R4.** Recording must apply only to objects whose format is FASTA and whose
 role is `protein`. No other object gains records.
 
-**R5.** At most 100,000 records must be recorded for one object. Above that,
-the object must be marked as having an incomplete record list.
+**R5.** At most 150,000 records must be recorded for one object. Above that,
+the object must be marked as having an incomplete record list. The cap is set
+above the largest realistic input -- human RefSeq is roughly 120,000 records --
+so that it does not trip on an ordinary proteome, while still bounding growth
+for a pathological file.
 
 **R6.** A user viewing an object with an incomplete record list must be able to
 tell that the list is incomplete. Where the file's true record count is known,
@@ -212,7 +215,7 @@ that object's ingest wall time by more than 50%, measured against the same file
 ingested without recording.
 
 **R33.** A page of records must be served in under 500 ms for a file at the
-100,000-record cap, including a search over identifier and description. Stated
+150,000-record cap, including a search over identifier and description. Stated
 as a single-request budget rather than a percentile: this is a single-user
 local tool, and there is no concurrent load to take a percentile over.
 
@@ -247,7 +250,7 @@ Two indexes, because R26's search and R25's paging are different queries: the
 unique `(object_id, ordinal)` index orders the list, and a second
 `(object_id, identifier)` index serves identifier search. Description search
 is a prefix/substring match scoped to one object rather than a Mongo text
-index -- the corpus is at most 100,000 short strings under a key already in
+index -- the corpus is at most 150,000 short strings under a key already in
 hand, and a text index would be a third index maintained at ingest for a query
 that never spans objects.
 
