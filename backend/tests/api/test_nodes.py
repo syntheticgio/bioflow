@@ -1,7 +1,7 @@
 """Tests for the nodes router endpoint."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import fakeredis.aioredis
@@ -24,7 +24,10 @@ def _worker_blob(
     online: bool = True,
 ) -> dict:
     now = datetime.now(UTC)
-    last_seen = now if online else now.replace(year=2000)
+    # Offline means "past the 60s heartbeat threshold", not "abandoned". A
+    # last_seen far enough back to be reaped as a dead worker's leftovers
+    # (see worker_registry) would test something else entirely.
+    last_seen = now if online else now - timedelta(minutes=5)
     return {
         "last_seen": last_seen.isoformat(),
         "slots": slots,
@@ -50,7 +53,7 @@ async def _seed_workers(redis, **workers):
 
 class TestListNodes:
     async def test_empty_when_no_workers(self, fake_redis):
-        with patch("app.api.v1.nodes.get_redis", return_value=fake_redis):
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
             nodes = await list_nodes()
         assert nodes == []
 
@@ -59,7 +62,7 @@ class TestListNodes:
             fake_redis,
             **{"host1:1234": _worker_blob("primary", slots=4, running=["j1", "j2"])},
         )
-        with patch("app.api.v1.nodes.get_redis", return_value=fake_redis):
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
             nodes = await list_nodes()
         assert len(nodes) == 1
         assert nodes[0]["node_id"] == "primary"
@@ -74,7 +77,7 @@ class TestListNodes:
             fake_redis,
             **{"dead:host": _worker_blob("primary", online=False)},
         )
-        with patch("app.api.v1.nodes.get_redis", return_value=fake_redis):
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
             nodes = await list_nodes()
         assert nodes[0]["online"] is False
         assert nodes[0]["online_workers"] == 0
@@ -87,7 +90,7 @@ class TestListNodes:
                 "host2:200": _worker_blob("gpu-node", slots=2, running=["b"]),
             },
         )
-        with patch("app.api.v1.nodes.get_redis", return_value=fake_redis):
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
             nodes = await list_nodes()
         assert len(nodes) == 1
         assert nodes[0]["node_id"] == "gpu-node"
@@ -104,13 +107,18 @@ class TestListNodes:
                 "b:1": _worker_blob("child-node"),
             },
         )
-        with patch("app.api.v1.nodes.get_redis", return_value=fake_redis):
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
             nodes = await list_nodes()
         assert len(nodes) == 2
         node_ids = {n["node_id"] for n in nodes}
         assert node_ids == {"primary", "child-node"}
 
-    async def test_unknown_node_id_for_missing_field(self, fake_redis):
+    async def test_worker_without_node_id_is_not_a_node(self, fake_redis):
+        """A payload with no node_id is malformed, not a node called "unknown".
+
+        Before #451 this synthesized a phantom "unknown" row in the settings
+        table, which also collided with the real "unknown" enrollment status.
+        """
         blob = {
             "last_seen": datetime.now(UTC).isoformat(),
             "slots": 1,
@@ -118,10 +126,40 @@ class TestListNodes:
             "draining": False,
         }
         await _seed_workers(fake_redis, **{"old:worker": blob})
-        with patch("app.api.v1.nodes.get_redis", return_value=fake_redis):
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
+            nodes = await list_nodes()
+        assert nodes == []
+
+    async def test_stale_worker_is_reaped_not_listed(self, fake_redis):
+        """The hash keeps dead workers' heartbeats; a read drops and deletes them.
+
+        This is the #451 root cause: nothing removes an entry when a worker
+        dies without a graceful shutdown, so the node table counted week-old
+        corpses as workers.
+        """
+        long_dead = _worker_blob("primary")
+        long_dead["last_seen"] = (datetime.now(UTC) - timedelta(days=11)).isoformat()
+        await _seed_workers(
+            fake_redis,
+            **{"live:1": _worker_blob("primary"), "dead:1": long_dead},
+        )
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
             nodes = await list_nodes()
         assert len(nodes) == 1
-        assert nodes[0]["node_id"] == "unknown"
+        assert nodes[0]["workers"] == 1
+        assert await fake_redis.hkeys("bp:workers") == ["live:1"]
+
+    async def test_recently_offline_worker_survives_the_reap(self, fake_redis):
+        """Offline is not dead. A node down for an hour still belongs in the table."""
+        recent = _worker_blob("primary")
+        recent["last_seen"] = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        await _seed_workers(fake_redis, **{"napping:1": recent})
+        with patch("app.queue.worker_registry.get_redis", return_value=fake_redis):
+            nodes = await list_nodes()
+        assert len(nodes) == 1
+        assert nodes[0]["workers"] == 1
+        assert nodes[0]["online"] is False
+        assert await fake_redis.hkeys("bp:workers") == ["napping:1"]
 
 
 class TestNodeQueueStats:
@@ -132,7 +170,7 @@ class TestNodeQueueStats:
         )
         await fake_redis.zadd("bp:q:ready:primary", {"j1": 1, "j2": 2})
         with (
-            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.worker_registry.get_redis", return_value=fake_redis),
             patch("app.queue.node_stats.get_redis", return_value=fake_redis),
         ):
             nodes = await list_nodes()
@@ -144,7 +182,7 @@ class TestNodeQueueStats:
             **{"host1:1234": _worker_blob("primary")},
         )
         with (
-            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.worker_registry.get_redis", return_value=fake_redis),
             patch("app.queue.node_stats.get_redis", return_value=fake_redis),
         ):
             nodes = await list_nodes()
@@ -159,7 +197,7 @@ class TestNodeQueueStats:
         )
         await fake_redis.mset({"bp:conc:cpu:primary": "4"})
         with (
-            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.worker_registry.get_redis", return_value=fake_redis),
             patch("app.queue.node_stats.get_redis", return_value=fake_redis),
         ):
             nodes = await list_nodes()
@@ -173,7 +211,7 @@ class TestNodeQueueStats:
         )
         await fake_redis.zadd("bp:q:ready:gpu-nodee", {"j1": 1})
         with (
-            patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+            patch("app.queue.worker_registry.get_redis", return_value=fake_redis),
             patch("app.queue.node_stats.get_redis", return_value=fake_redis),
         ):
             nodes = await list_nodes()

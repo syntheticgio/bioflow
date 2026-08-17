@@ -1,7 +1,6 @@
 """Compute node status: which machines are connected and what they are doing."""
 
 import asyncio
-import json
 import platform
 import re
 import secrets
@@ -14,14 +13,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, model_validator
 
 from app.config import settings
-from app.db.redis_client import get_redis
 from app.errors import ConflictError, NotFoundError, ValidationError
 from app.logging import get_logger
 from app.models.node import Node
 from app.models.node_provision import NodeProvisionTask
 from app.models.node_update import NodeUpdateTask
-from app.queue import keys
 from app.queue import node_stats as node_stats_mod
+from app.queue import worker_registry
 from app.queue.worker import _own_image_digest
 from app.services import node_ssh, node_update_service
 from app.services.ai import crypto
@@ -114,11 +112,7 @@ async def enumerate_nodes() -> dict[str, dict]:
         # without checking every caller's mocks/fixtures first.
         log.warning("node_mongo_read_failed")
 
-    try:
-        raw = await get_redis().hgetall(keys.WORKERS)
-    except Exception:
-        log.warning("nodes_read_failed")
-        raw = {}
+    workers = await worker_registry.live_workers()
 
     by_node: dict[str, dict] = {}
 
@@ -132,12 +126,14 @@ async def enumerate_nodes() -> dict[str, dict]:
             "online": False,
         }
 
-    for _worker_id, blob in raw.items():
-        try:
-            data = json.loads(blob)
-        except (json.JSONDecodeError, TypeError):
+    for worker_id, data in workers:
+        # A payload with no node_id is malformed, not a node called "unknown".
+        # Synthesizing one used to invent a phantom row in the settings table
+        # (#451) and collided with the real "unknown" enrollment status below.
+        node_id = data.get("node_id")
+        if not node_id:
+            log.warning("worker_missing_node_id", worker_id=worker_id)
             continue
-        node_id = data.get("node_id", "unknown")
         last_seen_str = data.get("last_seen", "")
         try:
             last_seen = datetime.fromisoformat(last_seen_str)

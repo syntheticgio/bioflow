@@ -1,11 +1,9 @@
 """Queue statistics for /system/stats and the footer badge."""
 
-import json
-
 from app.db.client import get_db
 from app.db.redis_client import get_redis
 from app.models import JobState
-from app.queue import keys
+from app.queue import keys, worker_registry
 
 
 async def snapshot() -> dict:
@@ -14,16 +12,15 @@ async def snapshot() -> dict:
     pipe.zcard(keys.READY)
     pipe.zcard(keys.DELAYED)
     pipe.zcard(keys.RUNNING)
-    pipe.hgetall(keys.WORKERS)
-    ready, delayed, running, workers_raw = await pipe.execute()
+    ready, delayed, running = await pipe.execute()
 
-    workers = []
-    for worker_id, blob in (workers_raw or {}).items():
-        try:
-            info = json.loads(blob)
-        except (TypeError, ValueError):
-            continue
-        workers.append({"id": worker_id, **info})
+    # Via the registry rather than a raw hgetall: the hash retains dead
+    # workers' last heartbeats, which would inflate the footer's count the
+    # same way they inflated the node table (#451).
+    workers = [
+        {"id": worker_id, **info}
+        for worker_id, info in await worker_registry.live_workers()
+    ]
 
     # Grouped server-side: iterating documents just to count them would scale
     # with queue depth on an endpoint the footer polls continuously.

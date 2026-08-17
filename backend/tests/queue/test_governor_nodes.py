@@ -35,7 +35,7 @@ def _patches(fake_redis):
     return (
         patch("app.db.redis_client.get_redis", return_value=fake_redis),
         patch("app.queue.node_stats.get_redis", return_value=fake_redis),
-        patch("app.api.v1.nodes.get_redis", return_value=fake_redis),
+        patch("app.queue.worker_registry.get_redis", return_value=fake_redis),
     )
 
 
