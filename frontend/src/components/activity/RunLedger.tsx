@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { RunMemberJob, RunSummary, WorkflowRunRow } from "../../api/types";
-import { formatClock } from "../../lib/format";
+import { formatDate, formatRelative } from "../../lib/format";
 import { STATUS_LABELS, kindAction, mergeLedgerLines, runFacts } from "../../lib/runFormat";
 import { SectionHead } from "./SectionHead";
 import { RunFailureBlock } from "./RunFailureBlock";
@@ -107,7 +107,7 @@ export function LedgerRow({
     kindAction(run.kind),
     STATUS_LABELS[run.status],
     jobCount != null ? `${jobCount} ${jobCount === 1 ? "job" : "jobs"}` : null,
-    formatClock(run.updated_at),
+    formatRelative(run.updated_at),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -129,7 +129,11 @@ export function LedgerRow({
       >
         <span className="ledger-num">{String(index).padStart(2, "0")}</span>
         <span className="ledger-title">{run.label}</span>
-        <span className="ledger-meta">{meta}</span>
+        {/* The age is what the line shows; the exact instant is one hover
+            away, since the row has room for one of the two. */}
+        <span className="ledger-meta" title={formatDate(run.updated_at)}>
+          {meta}
+        </span>
       </div>
 
       {open && (

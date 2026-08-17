@@ -1494,6 +1494,9 @@
   text-transform: uppercase;
   color: var(--ink-55);
   font-variant-numeric: tabular-nums;
+  /* The meta carries a title with the exact timestamp behind its relative
+     age (#456); the cursor is what says so. */
+  cursor: help;
 }
 
 /* A failed run earns colour in the one place the eye is already scanning. */
