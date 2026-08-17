@@ -181,6 +181,52 @@ write_backup_manifest() {
 EOF
 }
 
+version_matches() {
+  local backup_version="$1" current_version="$2"
+  [ "$backup_version" != "unknown" ] && [ "$backup_version" = "$current_version" ]
+}
+
+# Written into every backup, not just the repo: the machine that needs this
+# may not have a checkout.
+write_restore_doc() {
+  cat >"$1" <<'EOF'
+# Restoring this backup
+
+    make restore BACKUP=<this directory>
+
+## What this recovers
+
+Everything in the Mongo database: projects, objects and their detected
+formats and roles, provenance, run history, and timings.
+
+## What this does NOT recover
+
+**Files in `/data`.** This backup enumerates them in `data-manifest.tsv`
+but does not contain them. After restoring, run
+
+    make backup-verify BACKUP=<this directory>
+
+to list which enumerated files are missing from the current `/data`. Many
+references and assemblies can be re-downloaded from public sources.
+
+**Provider keys (API keys).** See `providers.txt` for which providers were
+configured and the last four characters of each key. Re-enter them under
+Settings → AI, where they will show red until you do. The encryption key
+is deliberately not in this backup, so nothing here decrypts anything.
+
+## Version contract
+
+Restore into the version you backed up from. `manifest.json` records the
+version this was taken at. A mismatch warns and requires `--force`,
+attempts **no migration**, and may fail on read if the schema changed.
+
+## Restore is not "reset to exactly this backup"
+
+Collections are dropped and reloaded one by one, so a collection created
+*after* this backup was taken survives the restore.
+EOF
+}
+
 cmd_backup() {
   local stamp dest
   stamp="$(backup_stamp)"
