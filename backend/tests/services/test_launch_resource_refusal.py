@@ -271,6 +271,268 @@ class TestAssemblyRefusal:
         assert enqueued["resource_override"] is True
 
 
+class TestIndexBuildDeclarationIsCheckedBeforeEnqueue:
+    """Regression for the ordering bug found in final review (#478 follow-up).
+
+    `_enqueue_build_index` declares MORE memory than the align job for the
+    same reference (`declared_align_mem_mb`'s own docstring: a STAR human
+    index needs about 30 GB), and `launch_alignment` used to enqueue that
+    job before ever computing the align-side declared-vs-budget check --
+    so an over-budget index-build declaration reached the queue unchecked
+    and could wait forever, exactly the symptom #478 exists to eliminate.
+    """
+
+    async def test_over_budget_index_build_refuses_before_enqueueing_anything(self):
+        reads, reference = _align_fixture()
+
+        enqueue_calls = []
+
+        async def _enqueue(job_type, **kwargs):
+            enqueue_calls.append(job_type)
+            return SimpleNamespace(id=PydanticObjectId())
+
+        # declared_align_mem_mb is called twice in the real flow: once for
+        # the index build (building_index=True, huge) and once for the align
+        # job itself (building_index=False, modest). The huge one must be
+        # checked, and checked first.
+        async def _declared_align_mem_mb(*, building_index, **kwargs):
+            return 999_999 if building_index else 2048
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=[reads, reference]),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                # No index and no .fai -- an index build is required.
+                AsyncMock(return_value={"minimap2": False, "fai": False}),
+            ),
+            patch(
+                "app.pipelines.resource_estimator.classify",
+                lambda **kwargs: resource_estimator.Band.OK,
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(2048)),
+            ),
+            patch(
+                "app.services.pipeline_service.declared_align_mem_mb",
+                _declared_align_mem_mb,
+            ),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                # Above the modest align declaration (2048) but below the
+                # index build's (999_999) -- only the index-build check
+                # should fire.
+                AsyncMock(return_value=5600),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            with pytest.raises(ValidationError) as exc:
+                await pipeline_service.launch_alignment(
+                    object_id=reads.id,
+                    reference_id=reference.id,
+                    owner="local",
+                    paired=False,
+                )
+
+        assert "999,999" in str(exc.value)
+        # Neither the build_index job nor the align_reads job was ever
+        # enqueued -- the whole launch is all-or-nothing.
+        assert enqueue_calls == []
+
+    async def test_override_allows_an_over_budget_index_build(self):
+        """The same 'launch anyway' flag that governs the align check must
+        also govern the index-build check -- it is one user decision for the
+        whole launch, not per-job."""
+        reads, reference = _align_fixture()
+
+        enqueue_calls = []
+
+        async def _enqueue(job_type, **kwargs):
+            enqueue_calls.append(job_type)
+            return SimpleNamespace(id=PydanticObjectId())
+
+        async def _declared_align_mem_mb(*, building_index, **kwargs):
+            return 999_999 if building_index else 2048
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=[reads, reference]),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                AsyncMock(return_value={"minimap2": False, "fai": False}),
+            ),
+            patch(
+                "app.pipelines.resource_estimator.classify",
+                lambda **kwargs: resource_estimator.Band.OK,
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(2048)),
+            ),
+            patch(
+                "app.services.pipeline_service.declared_align_mem_mb",
+                _declared_align_mem_mb,
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service.sidecar_payload",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            job = await pipeline_service.launch_alignment(
+                object_id=reads.id,
+                reference_id=reference.id,
+                owner="local",
+                paired=False,
+                resource_override=True,
+            )
+
+        assert job is not None
+        assert enqueue_calls == ["build_index", "align_reads"]
+
+    async def test_admission_budget_resolved_at_most_once(self):
+        """`current_admission_budget_mb()` must be shared between the
+        index-build and align checks, not resolved twice."""
+        reads, reference = _align_fixture()
+
+        async def _enqueue(job_type, **kwargs):
+            return SimpleNamespace(id=PydanticObjectId())
+
+        budget_calls = []
+
+        async def _budget():
+            budget_calls.append(1)
+            return 10_000_000
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=[reads, reference]),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                AsyncMock(return_value={"minimap2": False, "fai": False}),
+            ),
+            patch(
+                "app.pipelines.resource_estimator.classify",
+                lambda **kwargs: resource_estimator.Band.OK,
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(2048)),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service.sidecar_payload",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                _budget,
+            ),
+        ):
+            job = await pipeline_service.launch_alignment(
+                object_id=reads.id,
+                reference_id=reference.id,
+                owner="local",
+                paired=False,
+            )
+
+        assert job is not None
+        assert len(budget_calls) == 1
+
+    async def test_no_index_build_needed_skips_the_index_check(self):
+        """An alignment against an already-indexed reference must not be
+        refused based on a hypothetical index-build cost it will never pay."""
+        reads, reference = _align_fixture()
+
+        enqueue_calls = []
+
+        async def _enqueue(job_type, **kwargs):
+            enqueue_calls.append(job_type)
+            return SimpleNamespace(id=PydanticObjectId())
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(side_effect=[reads, reference]),
+            ),
+            patch(
+                "app.services.pipeline_service.reference_index_status",
+                # Already indexed -- no build_index job should be enqueued
+                # or checked. Keyed by whatever aligner default_align_params
+                # resolves to in this environment (bwa-mem2 when available,
+                # else minimap2), so both keys are marked present.
+                AsyncMock(
+                    return_value={"bwa-mem2": True, "minimap2": True, "fai": True}
+                ),
+            ),
+            patch(
+                "app.pipelines.resource_estimator.classify",
+                lambda **kwargs: resource_estimator.Band.OK,
+            ),
+            patch(
+                "app.services.memory_estimate.resolve",
+                AsyncMock(return_value=_memory_estimate(2048)),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=(None, None)),
+            ),
+            patch(
+                "app.services.pipeline_service.sidecar_payload",
+                AsyncMock(return_value={}),
+            ),
+            patch(
+                "app.services.run_service.create_run",
+                AsyncMock(return_value=SimpleNamespace(id="run1", owner="local")),
+            ),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+        ):
+            job = await pipeline_service.launch_alignment(
+                object_id=reads.id,
+                reference_id=reference.id,
+                owner="local",
+                paired=False,
+            )
+
+        assert job is not None
+        assert enqueue_calls == ["align_reads"]
+
+
 def test_a_child_job_never_reaches_the_block_check():
     """Acceptance criterion: jobs with a parent_job_id never render a card.
 

@@ -1921,6 +1921,15 @@ async def launch_alignment(
     index_status = await reference_index_status(reference)
     building = not index_status.get(aligner.value) or not index_status.get("fai")
 
+    # Resolved once and reused for both the index-build and align declared-vs-
+    # budget checks below (#478 follow-up): calling it twice would be wasteful
+    # and, worse, `resource_override=True` makes it unnecessary work entirely
+    # since neither check will use it. Skipped in that case rather than
+    # resolved and discarded.
+    admission_budget_mb = (
+        None if resource_override else await current_admission_budget_mb()
+    )
+
     heuristic_mb = resource_estimator.estimate_mb(
         aligner=aligner,
         reference_bases=reference_bases_for(reference),
@@ -2027,6 +2036,27 @@ async def launch_alignment(
     depends_on = []
     index_job = None
     if needs_index:
+        # The index build declares MORE memory than the alignment itself for
+        # the same reference (`declared_align_mem_mb`'s own docstring: a STAR
+        # human index needs about 30 GB) -- so it must be checked here, before
+        # it is enqueued, using the same mirrored kwargs `_enqueue_build_index`
+        # uses internally. Checking only the align job's declaration below
+        # would let this larger, unchecked reservation queue and wait forever
+        # even when the align job's own check would have passed -- the exact
+        # #478 symptom, reachable through this function's own index-build path.
+        # All-or-nothing: raising here happens before either job is enqueued.
+        index_build_mem_mb = await declared_align_mem_mb(
+            aligner=aligner,
+            reference_bases=reference_bases_for(reference),
+            threads=INDEX_BUILD_THREADS,
+            sort_memory_mb=0,
+            building_index=True,
+        )
+        refuse_if_over_budget(
+            declared_mb=index_build_mem_mb,
+            budget_mb=admission_budget_mb or 0,
+            resource_override=resource_override,
+        )
         index_job = await _enqueue_build_index(reference, aligner, owner=owner)
         if index_job is not None:
             depends_on.append(index_job.id)
@@ -2129,7 +2159,7 @@ async def launch_alignment(
     # MIN_DECLARED_MEM_MB. Checking the enqueued value is the point (#478).
     refuse_if_over_budget(
         declared_mb=align_mem_mb,
-        budget_mb=await current_admission_budget_mb(),
+        budget_mb=admission_budget_mb or 0,
         resource_override=resource_override,
     )
 
