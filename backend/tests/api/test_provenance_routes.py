@@ -100,6 +100,98 @@ async def test_prose_route_reports_unavailable_with_no_provider(
     assert resp.json()["unavailable_reason"]
 
 
+async def test_prose_route_names_the_reason_the_call_failed(
+    client: AsyncClient, two_profiles, monkeypatch
+):
+    """The reason has to reach the tab, not just the log.
+
+    A provider pointed at a host the container cannot route to produced
+    "The model call did not succeed." with nothing else -- the detail
+    naming the unreachable URL existed on the `Failure` and was dropped
+    here, so diagnosing it meant reading container logs.
+    """
+    from app.api.v1 import objects as objects_route
+    from app.models.ai import FailureReason
+    from app.services.ai.adapters import Failure
+    from app.services.ai.router import ResolvedProvider
+
+    obj = await _obj(two_profiles["a"].owner_id(), "reads.fastq.gz")
+
+    async def _resolve(_slot):
+        return ResolvedProvider(
+            provider_id="p1",
+            name="llama.cpp",
+            kind="openai_compat",
+            base_url="http://192.168.1.237:8080",
+            api_key=None,
+            model="qwen",
+            models_cache=["qwen"],
+        )
+
+    async def _complete(_provider, **_kw):
+        return Failure(
+            FailureReason.UNREACHABLE,
+            "<urlopen error [Errno 101] Network is unreachable>",
+        )
+
+    monkeypatch.setattr(objects_route.ai, "resolve", _resolve)
+    monkeypatch.setattr(objects_route.ai, "complete", _complete)
+
+    resp = await client.post(
+        f"/api/v1/objects/{obj.id}/provenance-narrative/prose",
+        headers=two_profiles["a_headers"],
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["prose"] is None
+    reason = body["unavailable_reason"]
+    # The coarse reason, the provider that failed, and the upstream detail:
+    # without all three the message cannot be acted on.
+    assert "unreachable" in reason
+    assert "llama.cpp" in reason
+    assert "Errno 101" in reason
+
+
+async def test_prose_route_reports_a_failure_carrying_no_detail(
+    client: AsyncClient, two_profiles, monkeypatch
+):
+    """Several adapter paths return a bare reason. The message must still
+    name the reason and the provider rather than falling back to the old
+    detail-free sentence."""
+    from app.api.v1 import objects as objects_route
+    from app.models.ai import FailureReason
+    from app.services.ai.adapters import Failure
+    from app.services.ai.router import ResolvedProvider
+
+    obj = await _obj(two_profiles["a"].owner_id(), "reads.fastq.gz")
+
+    async def _resolve(_slot):
+        return ResolvedProvider(
+            provider_id="p1",
+            name="llama.cpp",
+            kind="openai_compat",
+            base_url="http://192.168.1.237:8080",
+            api_key=None,
+            model="qwen",
+            models_cache=["qwen"],
+        )
+
+    async def _complete(_provider, **_kw):
+        return Failure(FailureReason.BAD_RESPONSE)
+
+    monkeypatch.setattr(objects_route.ai, "resolve", _resolve)
+    monkeypatch.setattr(objects_route.ai, "complete", _complete)
+
+    resp = await client.post(
+        f"/api/v1/objects/{obj.id}/provenance-narrative/prose",
+        headers=two_profiles["a_headers"],
+    )
+    body = resp.json()
+    assert body["prose"] is None
+    assert "bad_response" in body["unavailable_reason"]
+    assert "llama.cpp" in body["unavailable_reason"]
+
+
 async def test_route_serves_the_structured_lineage_the_tab_renders(
     client: AsyncClient, two_profiles
 ):
