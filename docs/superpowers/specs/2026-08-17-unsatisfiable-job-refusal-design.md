@@ -22,28 +22,81 @@ when `resource_estimator.classify()` returns `Band.BLOCK`, unless
 `resource_override` is set. That flag rides the job document to `claim.lua` as
 the `override` field (`queue.py:471`) and enables the sole-occupancy clause.
 
-That machinery bands the wrong number. `classify()` reads `estimated_mb` — a
-heuristic from input byte counts and thread count (`resource_estimator.py:35`).
-`claim.lua` gates on `job.resources.mem_mb` — a **static per-handler literal**
-(`assembly_handlers.py:52` declares `mem_mb=16384`;
-`reference_assembly_handlers.py:214` likewise). Nothing compares the declared
-literal to the budget. A job therefore passes `Band.OK` — the heuristic says it
-fits — and is then permanently unclaimable on its declared number.
+The gap is between the number that is *banded* and the number that is
+*declared*. `classify()` bands `estimated_mb`. `claim.lua` gates on the job's
+declared `resources.mem_mb`. At both launch sites the declared value is computed
+separately from the banded one, and nothing compares it to the budget.
 
-Two numbers, two code paths, no check between them. That gap is the bug.
+The static `JobResources(mem_mb=16384)` literals in the handler modules
+(`assembly_handlers.py:52`, `reference_assembly_handlers.py:214`) are
+`default_resources` and are **overridden** at both launch sites, so they are not
+the cause. The declared values actually enqueued are:
 
-### The budget is 70% of the configured limit
+- **align** — `declared_align_mem_mb()` (`pipeline_service.py:1312`), resolved
+  through the same estimator plus `memory_estimate.resolve`, floored at
+  `MIN_DECLARED_MEM_MB`, and recomputed with `building_index=False`.
+- **assemble** — `estimate or UNKNOWN_ASSEMBLY_MEM_MB` (`:4323`), a flat 16384
+  when nothing can estimate.
 
-`worker.py:405` applies headroom: `budget_mb = int(budget_source_mb * 0.7)`,
-where `budget_source_mb` comes from
-`resource_limit_service.resolve_mem_budget_mb(stored_mb=..., machine_mb=...)`.
-The value `claim.lua` receives as `mem_budget` is that reduced figure, not the
-configured ceiling.
+Three ways the declared number escapes the banding, in descending order of how
+badly they bite:
 
-Any launch-time check must compare against the same reduced figure. Comparing
-against the full limit would admit jobs in the 70–100% band that the queue then
-refuses — the identical failure at a narrower margin, and harder to diagnose
-because the two numbers would nearly agree.
+1. **The banding is skipped entirely when there is no estimate.** Both sites
+   guard on `if estimate is not None:` (`:1888`, `:4241`). An assembly with no
+   estimate declares a flat `UNKNOWN_ASSEMBLY_MEM_MB = 16384` having been banded
+   by nothing at all. On any budget below ~16 GB it is unclaimable forever, with
+   no warning at launch. **This is the cleanest instance of #478**, and the
+   reason the new check must sit *outside* that guard.
+2. **The `MIN_DECLARED_MEM_MB` floor** can lift the declared value above an
+   estimate that banded `OK`.
+3. **The align recomputation** with `building_index=False` yields a declared
+   number the banding never evaluated.
+
+An exact declared-vs-budget check catches all three, because it reads the value
+that is actually enqueued.
+
+### The budget is not the configured limit
+
+`worker.py:405-409` computes what `claim.lua` actually receives:
+
+```python
+budget_mb = int(budget_source_mb * 0.7)
+return {"mem_mb": max(min(available_mb, budget_mb), 128), ...}
+```
+
+Three parts, and only one of them is stable:
+
+- `budget_source_mb` — `resolve_mem_budget_mb(stored_mb, machine_mb)`, the
+  configured ceiling. Stable.
+- `× 0.7` — headroom so a job overshooting its declaration does not reach swap.
+  Stable.
+- `min(available_mb, ...)` — a **live** `psutil` reading, floored at 128 MB.
+  Moves with whatever else is running.
+
+The live term means a launch-time check **cannot** predict claimability exactly:
+the reading it would take is stale by the time the job reaches the head of the
+queue. It also means the 128 MB floor can make almost any job *temporarily*
+unclaimable under memory pressure — transient, self-resolving, and already
+explained by #457's activity view. That is not this bug.
+
+The check therefore compares against `0.7 × budget_source_mb`, the stable part.
+Exceeding it means the job can *never* be claimed regardless of machine state,
+which is exactly the permanent condition R1 targets. Comparing against the raw
+configured ceiling instead would leave jobs in the 70–100% band queueing
+forever — the same bug at a narrower margin.
+
+### A prerequisite bug: the worker ignores `hard_mem_mb`
+
+`resolve_mem_budget_mb` accepts a third argument, `hard_mem_mb` — the
+kernel-enforced cgroup ceiling, which "binds unconditionally: a soft budget
+above it would admit jobs the kernel then kills"
+(`resource_limit_service.py:27-30`). `worker.py:392-394` does not pass it.
+
+So the admission budget can currently sit above the kernel's hard limit, and
+jobs are admitted that the kernel then OOM-kills. This work depends on the
+figure being correct — a launch check passing `hard_mem_mb` while the worker
+omits it would have the two budgets disagree — so it is fixed here, in its own
+commit, ahead of the feature.
 
 ## Decisions
 
@@ -74,13 +127,20 @@ Each is checkable, has one obligation, and names its actor.
 - **R3** — When the same user retries with `resource_override=True`, the launch
   succeeds and the created job carries `resource_override=True`, so `claim.lua`
   admits it under sole occupancy.
-- **R4** — The check derives its budget from the same source and headroom factor
-  the worker applies, so a job that passes the check is claimable on an idle
-  machine.
+- **R4** — The check derives its budget from the same configured source and
+  headroom factor the worker applies, so a job it refuses is one `claim.lua`
+  could never admit. It deliberately excludes the worker's live `available_mb`
+  term: a job that passes the check may still wait under transient memory
+  pressure, which #457 already explains and this work does not address.
+- **R4a** — The worker's admission budget accounts for `hard_mem_mb`, so it
+  never exceeds the kernel-enforced cgroup ceiling.
 - **R5** — When no `max_mem_mb` is stored, the check uses the machine's own
   memory budget rather than skipping.
 - **R6** — A job whose declared `mem_mb` is within the effective budget is
   unaffected: no new refusal, no new warning, no change to its queueing.
+- **R6a** — An assembly for which no memory estimate can be produced, declaring
+  `UNKNOWN_ASSEMBLY_MEM_MB`, is still checked and still refused when that value
+  exceeds the budget — the existing banding is skipped entirely in this case.
 - **R7** — The refusal is distinguishable in its wording from the existing
   `Band.BLOCK` estimate refusal, so a user can tell which number is the problem.
 
@@ -89,22 +149,30 @@ Each is checkable, has one obligation, and names its actor.
 ### A shared budget helper
 
 The 0.7 factor currently lives as a bare literal at `worker.py:405`. R4 requires
-the launch path to agree with it exactly, and two copies of a magic number that
+the launch path to use the same factor, and two copies of a magic number that
 must agree is the setup for them to silently diverge.
 
-Extract the headroom factor and the effective-budget computation into
+Extract the factor and the stable part of the computation into
 `resource_limit_service`, next to `resolve_mem_budget_mb` which already resolves
 the stored-vs-machine half:
 
 ```python
 MEM_HEADROOM_FRACTION = 0.7
 
-async def effective_mem_budget_mb(machine_mb: int) -> int:
-    """The budget claim.lua actually gates against."""
+def admission_budget_mb(*, stored_mb: int | None, machine_mb: int,
+                        hard_mem_mb: int | None = None) -> int:
+    """The stable ceiling admission plans against, before live headroom.
+
+    `worker._resource_budgets` further clamps this by a live `available_mb`
+    reading; the launch-time check deliberately does not. See the spec's
+    "The budget is not the configured limit".
+    """
 ```
 
-`worker.py` calls it instead of applying 0.7 inline. The launch path calls the
-same function. One definition, two callers, and a test asserting they agree.
+`worker.py` calls it and then applies its live clamp to the result, rather than
+applying 0.7 inline. The launch path calls the same function and uses it
+directly. One definition of the stable ceiling, two callers, and a test
+asserting the worker's budget never exceeds it.
 
 ### The check
 
@@ -124,15 +192,22 @@ names no input sizes.
 
 ### Call sites
 
-Both existing `Band.BLOCK` sites gain the new check alongside, ahead of the
-estimator call — an exact impossibility should be reported before a heuristic
-warning about the same job:
+Both launch paths gain the new check, and **outside the `if estimate is not
+None:` guard** that wraps the existing banding. Case 1 above is exactly a job
+with no estimate, so a check placed inside that guard would miss the clearest
+instance of the bug.
 
-- `pipeline_service.py:~1890` (align_reads)
-- `pipeline_service.py:~4243` (assemble)
+The check runs on the value that will actually be enqueued:
 
-The declared `mem_mb` is read from the handler's registered `JobResources`, via
-the existing registry lookup by job type.
+- `pipeline_service.py` align — the result of `declared_align_mem_mb(...)`,
+  computed at `:2058` and passed to `enqueue` at `:2085`. The check moves after
+  `:2058` and before the enqueue.
+- `pipeline_service.py` assemble — `estimate or UNKNOWN_ASSEMBLY_MEM_MB`,
+  currently inline at `:4323`. Hoist it to a local before the enqueue and check
+  that local.
+
+Reading the enqueued value rather than the handler's `default_resources` is what
+makes the check correct: the defaults are overridden at both sites.
 
 No `replan` proposal accompanies this refusal. `replan_service` proposes lower
 thread counts, which cannot help: the declared literal is static and does not
@@ -173,9 +248,11 @@ already renders.
 | `test_declared_over_budget_is_refused` | R1 — launch raises, no job created |
 | `test_refusal_names_both_numbers` | R2 — declared and budget both in the message |
 | `test_override_admits_the_job` | R3 — job created, `resource_override is True` |
-| `test_launch_budget_matches_worker_budget` | R4 — both callers of the helper agree |
+| `test_worker_budget_never_exceeds_admission_budget` | R4 — the worker's live clamp only lowers the shared ceiling |
+| `test_hard_mem_mb_lowers_the_worker_budget` | R4a — the kernel ceiling binds |
 | `test_no_stored_limit_uses_machine_budget` | R5 — `max_mem_mb=None` still checks |
 | `test_within_budget_job_is_unaffected` | R6 — the regression guard |
+| `test_unestimatable_assembly_is_still_refused` | R6a — the check runs outside the `estimate is not None` guard |
 | `test_declared_refusal_differs_from_estimate_refusal` | R7 — wording is distinguishable |
 
 Per CLAUDE.md's note on registries and real data, one check beyond the unit
