@@ -16,10 +16,11 @@ is only about how a piece of work gets from a worktree onto `main`.
 
 ## Finish work on a branch, push it, and open a PR
 
-**Do not merge your own work to `main`.** The end state of a task is *an open
-PR*, not a merged one. The user reviews and merges. This is the one part of
-the old workflow that inverted: committing and pushing are still yours to do
-without asking, and merging is now the user's.
+**You may merge your own PR to `main` once all required CI checks pass.** This
+changed on 2026-08-17: the user authorized agents to merge routine work without
+waiting for a review, gated on a green suite. If a change is unusually large or
+design-sensitive, or the user asked to review first, still leave it as an open
+PR and report the URL. Committing, pushing, and merging are all yours to do.
 
 **Before opening the PR, catch up to `main` yourself.** `main` moves while a
 task is in progress; rebasing before you push is what makes the PR mergeable
@@ -55,8 +56,8 @@ git push -u origin HEAD
 gh pr create --base main --fill
 ```
 
-Then report the PR URL and stop. Do not `gh pr merge`, and do not push to
-`main` directly.
+Then report the PR URL and, once all required checks are green, merge with
+`gh pr merge --squash --delete-branch`. Do not force-push to `main` directly.
 
 What still earns a pause before you push:
 
