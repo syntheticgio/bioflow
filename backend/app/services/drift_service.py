@@ -132,3 +132,58 @@ async def find_missing_blobs() -> list[DriftEntry]:
         )
         for blob in records
     ]
+
+
+# Which fact means "this object has a report", and where that report lives.
+#
+# Keyed on the fact the *UI* gates each tab on, not on the handler's
+# `*_status` fact, and the two are not always the same. That choice is what
+# makes this detector match the failure a user actually hits: a visible
+# Results tab that fails when opened. Keying on `*_status` would report
+# objects the UI never offers a tab for, and miss objects showing a broken
+# one.
+#
+# The predicates are not uniform because the UI's gates are not uniform:
+#   qc_tool                  -> typeof facts.qc_tool === "string"  (DetailPanel.tsx:619)
+#   bam_stats_summary        -> presence                           (BamResults.tsx:98)
+#   vcf_stats_summary        -> presence                           (VariantResults.tsx:42)
+#   annotation_stats_status  -> === "ok"                           (AnnotationResults.tsx:40)
+REPORT_ROOTS: dict[str, Path] = {
+    "qc_tool": settings.qc_reports_dir,
+    "bam_stats_summary": settings.bam_stats_dir,
+    "vcf_stats_summary": settings.vcf_stats_dir,
+    "annotation_stats_status": settings.annotation_stats_dir,
+}
+
+# Report status facts that intentionally have no directory. transcript_qc
+# stores its results entirely in facts, so there is nothing on disk to drift.
+# This is the companion frozenset from CLAUDE.md's "genuinely derivable"
+# registry pattern: every status fact is either mapped above or listed here,
+# and test_every_status_fact_is_classified fails if a new one is neither.
+REPORTS_WITHOUT_DIRS: frozenset[str] = frozenset({"transcript_qc_status"})
+
+# Every fact a handler writes to say a report was computed. Update this when a
+# handler grows a new `*_status` fact -- the exhaustiveness test then forces a
+# decision about whether it has a directory.
+ALL_REPORT_STATUS_FACTS: frozenset[str] = frozenset(
+    {
+        "qc_tool",
+        "bam_stats_summary",
+        "vcf_stats_summary",
+        "annotation_stats_status",
+        "transcript_qc_status",
+    }
+)
+
+
+def object_claims_report(facts: dict, predicate: str) -> bool:
+    """Whether these facts assert the report behind `predicate` exists.
+
+    Mirrors the frontend's gate for each tab exactly; see REPORT_ROOTS.
+    """
+    value = facts.get(predicate)
+    if predicate == "qc_tool":
+        return isinstance(value, str)
+    if predicate == "annotation_stats_status":
+        return value == "ok"
+    return value is not None
