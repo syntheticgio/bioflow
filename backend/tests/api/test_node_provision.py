@@ -390,7 +390,6 @@ async def test_provision_stores_encrypted_key_not_the_password():
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
          patch("app.services.node_ssh.verify_key",
                AsyncMock(return_value=(fake_verify_conn, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake"))), \
-         patch("pathlib.Path.exists", return_value=True), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = ssh.connect.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
@@ -431,7 +430,6 @@ async def test_provision_fails_loudly_when_key_cannot_be_installed():
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
          patch("app.services.node_ssh.install_public_key",
                AsyncMock(side_effect=KeyInstallError("read-only home"))), \
-         patch("pathlib.Path.exists", return_value=True), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = ssh.connect.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
@@ -482,7 +480,6 @@ async def test_provision_private_key_uses_real_import_private_key():
 
     with patch("asyncssh.connect", AsyncMock()) as connect_mock, \
          patch("app.services.node_ssh.verify_key", AsyncMock()), \
-         patch("pathlib.Path.exists", return_value=True), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = connect_mock.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
