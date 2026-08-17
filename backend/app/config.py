@@ -316,6 +316,17 @@ class Settings(BaseSettings):
         return self.bioinfo_home / "logs"
 
     @property
+    def exports_dir(self) -> Path:
+        """Where project export archives land.
+
+        Outside objects/ deliberately, same rationale as qc_reports_dir: an
+        export is a derived artifact keyed by job, not a blob. Retention is
+        the user's job -- automatic pruning is a feature whose bugs delete
+        things the user meant to send.
+        """
+        return self.bioinfo_home / "exports"
+
+    @property
     def agent_sessions_dir(self) -> Path:
         """Where pi keeps the agent's per-(profile, project) session files.
 
