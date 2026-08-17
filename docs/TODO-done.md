@@ -294,9 +294,19 @@ Touches: `frontend/src/lib/upload.ts`, `frontend/src/api/client.ts`,
 `backend/app/services/upload_service.py` (no change expected, but it is the
 other half of the contract).
 
-## Non-local / remote NCBI data — SPECCED
+## Non-local / remote NCBI data — SPECCED, PLANNED, TRACKED AS #523
 
 Design: `docs/superpowers/specs/2026-07-31-remote-data-design.md` (2026-07-31).
+Plan: `docs/superpowers/plans/2026-08-17-remote-data.md` (2026-08-17).
+Issue: [#523](https://github.com/syntheticgio/bioflow/issues/523).
+
+**Still unbuilt as of 2026-08-17.** `grep -rn "Locality\|RemoteSource\|locality\|fetch_remote"`
+over `backend/app` and `frontend/src` returns zero hits. This entry living in
+`TODO-done.md` while describing open work is part of why it went unnoticed for
+two and a half weeks — a `— SPECCED` entry is not a closed entry, and per the
+"Closing out a TODO entry" rules only `— FIXED` work belongs in this file.
+Left in place rather than moved back so the existing diagnosis stays with the
+issue that now tracks it; the issue is the live record from here.
 
 Keep an NCBI download remote rather than ingesting it: store a pointer, fetch
 just-in-time when used. The file explorer badges files `Local`, `NCBI`, or both,
