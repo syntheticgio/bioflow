@@ -240,7 +240,13 @@ export function TrimDialog({
                     checked={(params as TrimParams).dedup ?? false}
                     onChange={(e) => setOverrides((o) => ({ ...o, dedup: e.target.checked }))}
                   />
-                  <span>Remove duplicate reads</span>
+                  <span>
+                    Remove duplicate reads
+                    <small style={{ display: "block" }}>
+                      Removes reads that appear to be PCR duplicates. Useful for
+                      amplicon data or when coverage is unevenly distributed.
+                    </small>
+                  </span>
                 </label>
                 <label className="trim-check trim-wide">
                   <input
