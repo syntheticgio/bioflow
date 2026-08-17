@@ -1,6 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
+import type { Share } from "../api/types";
 import mastheadImg from "../assets/broadhead-masthead.png";
 import { formatBytes } from "../lib/format";
 import { useElementWidth } from "../lib/useElementWidth";
@@ -17,7 +18,7 @@ function useShareInboxCount() {
   const profileId = useProfileStore((s) => s.current?.id);
   const { data } = useQuery({
     queryKey: ["shares", "inbox", profileId],
-    queryFn: api.shareInbox,
+    queryFn: () => api.get<Share[]>("/shares/inbox"),
     enabled: Boolean(profileId),
   });
   return data?.length ?? 0;

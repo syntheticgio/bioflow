@@ -19,7 +19,8 @@ function InboxRow({ share }: { share: Share }) {
   const [projectId, setProjectId] = useState("");
 
   const accept = useMutation({
-    mutationFn: () => api.acceptShare(share.id, projectId || undefined),
+    mutationFn: () =>
+      api.post<Share>(`/shares/${share.id}/accept`, { project_id: projectId || null }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["shares"] });
       qc.invalidateQueries({ queryKey: ["objects"] });
@@ -30,7 +31,7 @@ function InboxRow({ share }: { share: Share }) {
   });
 
   const decline = useMutation({
-    mutationFn: () => api.declineShare(share.id),
+    mutationFn: () => api.post<Share>(`/shares/${share.id}/decline`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["shares"] });
       notify.success(`Declined “${share.name}”`);
@@ -84,7 +85,7 @@ function OutboxRow({ share }: { share: Share }) {
   const qc = useQueryClient();
 
   const revoke = useMutation({
-    mutationFn: () => api.revokeShare(share.id),
+    mutationFn: () => api.delete<Share>(`/shares/${share.id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["shares"] });
       notify.success(`Withdrew the offer of “${share.name}”`);
@@ -132,12 +133,12 @@ export function SharesView() {
 
   const { data: inbox = [] } = useQuery({
     queryKey: ["shares", "inbox", profileId],
-    queryFn: api.shareInbox,
+    queryFn: () => api.get<Share[]>("/shares/inbox"),
   });
 
   const { data: outbox = [] } = useQuery({
     queryKey: ["shares", "outbox", profileId],
-    queryFn: api.shareOutbox,
+    queryFn: () => api.get<Share[]>("/shares/outbox"),
   });
 
   return (

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { Share } from "../api/types";
 import { useProfileStore } from "../stores/profileStore";
 import { notify } from "../stores/messageStore";
 import { ModalBackdrop } from "./ModalBackdrop";
@@ -33,7 +34,7 @@ export function ShareFileModal({ objectId, objectName, isExternal, onClose }: Pr
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.offerShare({
+      api.post<Share>("/shares", {
         object_id: objectId,
         to_profile_id: toProfileId,
         message: message.trim() || undefined,
