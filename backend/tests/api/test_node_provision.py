@@ -19,6 +19,23 @@ pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop
 
 # ---- helpers ----
 
+def _verify_key_mock() -> AsyncMock:
+    """A `node_ssh.verify_key` stand-in returning the (conn, host_key) pair.
+
+    `verify_key` has returned a two-tuple since host keys were pinned on first
+    use, and `_provision_node` unpacks it. A bare `AsyncMock()` returns a
+    MagicMock, which unpacks to nothing -- so provisioning died with
+    `ValueError: not enough values to unpack` inside the executor's catch-all
+    `except Exception`, and the run simply stopped after `install_key` with no
+    sign that the *mock*, not the code, was wrong (#444).
+    """
+    conn = MagicMock()
+    conn.close = MagicMock()
+    return AsyncMock(
+        return_value=(conn, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake")
+    )
+
+
 def _app():
     """Bare FastAPI app with only the nodes router."""
     app = FastAPI()
@@ -385,11 +402,8 @@ async def test_provision_stores_encrypted_key_not_the_password():
         host="10.0.0.9", username="ops", password="hunter2", node_name="keynode",
     )
 
-    fake_verify_conn = MagicMock()
-    fake_verify_conn.close = MagicMock()
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
-         patch("app.services.node_ssh.verify_key",
-               AsyncMock(return_value=(fake_verify_conn, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake"))), \
+         patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = ssh.connect.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
@@ -479,7 +493,7 @@ async def test_provision_private_key_uses_real_import_private_key():
     )
 
     with patch("asyncssh.connect", AsyncMock()) as connect_mock, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = connect_mock.return_value
         conn.run = AsyncMock(return_value=type("R", (), {
@@ -625,7 +639,7 @@ async def test_provision_emits_the_documented_phase_sequence():
         return await real_save(self)
 
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch.object(NodeProvisionTask, "save", _record):
@@ -741,7 +755,7 @@ async def test_provision_fails_when_the_worker_exits_after_starting():
         return _FakeResult(0)
 
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key", _verify_key_mock()), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
         conn = ssh.connect.return_value
