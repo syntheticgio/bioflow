@@ -1945,6 +1945,73 @@ def build_quantify_card(obj, annotations) -> SuggestionCard | None:
     )
 
 
+@dataclass(frozen=True)
+class _Prefetched:
+    """The async lookups `suggestions_for` does once, before any builder runs.
+
+    Every field is something a builder needs but must not fetch itself: the
+    builders are synchronous and pure so they can be unit-tested against plain
+    objects, and so one card's database question is not paid for on a click
+    that renders a different card. `None` means "could not tell" -- a lookup
+    that raised, or one this object's format never triggers -- which each
+    builder reports as an unavailable card rather than treating as empty.
+    """
+
+    references: list[DataObject]
+    annotations: list[DataObject]
+    chemistry: object | None
+    annotation_inputs: object | None
+    alignment_target: object | None
+    read_sets: object | None
+    scaffold_references: list[DataObject] | None
+    all_read_sets: object | None
+    assembly_alignments: object | None
+    continuity_candidates: object | None
+
+
+# Fixed order, and the order is behaviour: it is the order cards appear in the
+# Actions tab, and a card's position should not move between files or the grid
+# becomes something to re-read rather than scan. Appending here puts a card
+# last; that is a UI decision, not a formality.
+#
+# Every `build_*_card` in this module must appear exactly once, which
+# `test_every_builder_is_registered` enforces -- a builder that exists but is
+# not registered is dead code that reads as a working feature, the failure a
+# hand-maintained registry keyed by convention invites.
+CARD_BUILDERS: tuple[tuple[str, object], ...] = (
+    ("preprocess", lambda obj, ctx: build_preprocess_card(obj)),
+    ("align", lambda obj, ctx: build_align_card(obj, ctx.references)),
+    ("variants", lambda obj, ctx: build_variants_card(obj, ctx.chemistry)),
+    ("quantify", lambda obj, ctx: build_quantify_card(obj, ctx.annotations)),
+    ("annotate", lambda obj, ctx: build_annotate_card(obj, ctx.annotation_inputs)),
+    ("annotate_genome", lambda obj, ctx: build_annotate_genome_card(obj)),
+    ("assemble", lambda obj, ctx: build_assemble_card(obj)),
+    ("completeness", lambda obj, ctx: build_completeness_card(obj)),
+    ("consensus", lambda obj, ctx: build_consensus_card(obj, ctx.alignment_target)),
+    ("polish", lambda obj, ctx: build_polish_card(obj, ctx.read_sets)),
+    ("scaffold", lambda obj, ctx: build_scaffold_card(obj, ctx.scaffold_references)),
+    (
+        "misassembly",
+        lambda obj, ctx: build_misassembly_card(obj, ctx.scaffold_references),
+    ),
+    ("gc_tracks", lambda obj, ctx: build_gc_tracks_card(obj)),
+    ("synteny", lambda obj, ctx: build_synteny_card(obj, ctx.scaffold_references)),
+    ("kmer_spectra", lambda obj, ctx: build_kmer_spectra_card(obj, ctx.all_read_sets)),
+    ("repeat_density", lambda obj, ctx: build_repeat_density_card(obj)),
+    (
+        "assembly_errors",
+        lambda obj, ctx: build_assembly_error_card(obj, ctx.assembly_alignments),
+    ),
+    ("assembly_qv", lambda obj, ctx: build_qv_card(obj, ctx.all_read_sets)),
+    (
+        "assembly_continuity",
+        lambda obj, ctx: build_continuity_card(
+            obj, ctx.assembly_alignments, ctx.continuity_candidates
+        ),
+    ),
+)
+
+
 async def suggestions_for(obj) -> list[dict]:
     """Every card for one file, in fixed order.
 
@@ -2137,35 +2204,21 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
             continuity_candidates = None
 
-    builders = (
-        ("preprocess", lambda: build_preprocess_card(obj)),
-        ("align", lambda: build_align_card(obj, references)),
-        ("variants", lambda: build_variants_card(obj, chemistry)),
-        ("quantify", lambda: build_quantify_card(obj, annotations)),
-        ("annotate", lambda: build_annotate_card(obj, annotation_inputs)),
-        ("annotate_genome", lambda: build_annotate_genome_card(obj)),
-        ("assemble", lambda: build_assemble_card(obj)),
-        ("completeness", lambda: build_completeness_card(obj)),
-        ("consensus", lambda: build_consensus_card(obj, alignment_target)),
-        ("polish", lambda: build_polish_card(obj, read_sets)),
-        ("scaffold", lambda: build_scaffold_card(obj, scaffold_references)),
-        ("misassembly", lambda: build_misassembly_card(obj, scaffold_references)),
-        ("gc_tracks", lambda: build_gc_tracks_card(obj)),
-        ("synteny", lambda: build_synteny_card(obj, scaffold_references)),
-        ("kmer_spectra", lambda: build_kmer_spectra_card(obj, all_read_sets)),
-        ("repeat_density", lambda: build_repeat_density_card(obj)),
-        ("assembly_errors", lambda: build_assembly_error_card(obj, assembly_alignments)),
-        ("assembly_qv", lambda: build_qv_card(obj, all_read_sets)),
-        (
-            "assembly_continuity",
-            lambda: build_continuity_card(
-                obj, assembly_alignments, continuity_candidates
-            ),
-        ),
+    ctx = _Prefetched(
+        references=references,
+        annotations=annotations,
+        chemistry=chemistry,
+        annotation_inputs=annotation_inputs,
+        alignment_target=alignment_target,
+        read_sets=read_sets,
+        scaffold_references=scaffold_references,
+        all_read_sets=all_read_sets,
+        assembly_alignments=assembly_alignments,
+        continuity_candidates=continuity_candidates,
     )
 
     cards: list[dict] = []
-    for kind, build in builders:
+    for kind, build in CARD_BUILDERS:
         # One card's contract drifting must not cost the other three. Several
         # builders raise deliberately when an upstream assumption moves --
         # `Aligner(...)` on an unregistered aligner, the CLR assertion in the
@@ -2175,7 +2228,7 @@ async def suggestions_for(obj) -> list[dict]:
         # still reach through Computations anyway. Logged at error so the
         # signal survives; the grid renders without the offender.
         try:
-            card = build()
+            card = build(obj, ctx)
         except Exception:
             log.exception(
                 "suggestion_builder_failed", kind=kind, object_id=str(obj.id)
