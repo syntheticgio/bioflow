@@ -1723,6 +1723,36 @@ async def launch_assembly_qv_route(body: AssemblyQvRequest, owner: OwnerDep) -> 
     return JobOut.of(job)
 
 
+class MerylAnalysisRequest(BaseModel):
+    object_id: PydanticObjectId
+    # Both optional, same reasoning AssemblyQvRequest gives above: the
+    # kmer_spectra card names the read set because it only fires when one is
+    # unambiguous, and the repeat_density card sends neither -- it asks about
+    # the assembly alone and lets the service auto-pick.
+    read_object_id: PydanticObjectId | None = None
+    k: int | None = None
+
+
+@router.post(
+    "/meryl-analysis", response_model=JobOut, status_code=status.HTTP_201_CREATED
+)
+async def launch_meryl_analysis_route(
+    body: MerylAnalysisRequest, owner: OwnerDep
+) -> JobOut:
+    """Queue meryl k-mer spectra and repeat-density analysis for one assembly.
+
+    Read-only, like /gc-tracks and /assembly-qv: produces facts on the
+    assembly, no derived object. One job covers both the kmer_spectra and
+    repeat_density cards, since the handler runs both analyses together."""
+    job = await pipeline_service.launch_meryl_analysis(
+        object_id=body.object_id,
+        owner=owner,
+        read_object_id=body.read_object_id,
+        k=body.k,
+    )
+    return JobOut.of(job)
+
+
 class AssemblyContinuityRequest(BaseModel):
     object_id: PydanticObjectId
     # Both default empty, same reasoning as AssemblyErrorRequest's ngs_bam_id
