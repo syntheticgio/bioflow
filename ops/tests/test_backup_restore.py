@@ -45,3 +45,22 @@ def test_stamp_is_utc_and_filesystem_safe(tmp_path):
     stamp = result.stdout.strip()
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{6}Z", stamp), stamp
     assert ":" not in stamp
+
+
+def test_manifest_row_count_ignores_the_header(tmp_path):
+    manifest = tmp_path / "data-manifest.tsv"
+    manifest.write_text(
+        "blob_id\tsize\tpath\tcontent_sha256\tstate\n"
+        "aaa\t10\tab/aaa\tsha-a\tactive\n"
+        "bbb\t20\tcd/bbb\tsha-b\tactive\n"
+    )
+    result = sh(f"manifest_row_count {manifest}", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "2"
+
+
+def test_manifest_row_count_of_a_header_only_file_is_zero(tmp_path):
+    manifest = tmp_path / "data-manifest.tsv"
+    manifest.write_text("blob_id\tsize\tpath\tcontent_sha256\tstate\n")
+    result = sh(f"manifest_row_count {manifest}", tmp_path)
+    assert result.stdout.strip() == "0"

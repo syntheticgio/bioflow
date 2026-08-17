@@ -44,6 +44,37 @@ backup_stamp() {
   date -u +"%Y-%m-%dT%H%M%SZ"
 }
 
+# One row per blob, written so it stays readable when nothing else works: no
+# Mongo, no Docker, no BioFlow. After a disk failure this is the file that
+# says what was lost.
+#
+# `path` is rel_path for a managed blob and external_path for an external one;
+# they are mutually exclusive by the model's own uniqueness constraint.
+write_data_manifest() {
+  local outfile="$1"
+  printf 'blob_id\tsize\tpath\tcontent_sha256\tstate\n' >"$outfile"
+  docker exec -i "$MONGO_CONTAINER" mongosh "$MONGO_DB" --quiet --eval '
+    db.blobs.find({}, {
+      _id: 1, size: 1, rel_path: 1, external_path: 1,
+      content_sha256: 1, state: 1
+    }).forEach(b => {
+      print([
+        b._id,
+        b.size ?? 0,
+        b.rel_path ?? b.external_path ?? "",
+        b.content_sha256 ?? "",
+        b.state ?? ""
+      ].join("\t"));
+    });
+  ' >>"$outfile"
+}
+
+manifest_row_count() {
+  local file="$1"
+  # tail -n +2 drops the header. wc -l on an empty remainder is 0.
+  tail -n +2 "$file" | grep -c . || true
+}
+
 # --- dispatch ---
 case "${1:-}" in
   backup)  shift; cmd_backup "$@" ;;
