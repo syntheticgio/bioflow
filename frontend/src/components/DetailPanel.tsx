@@ -25,6 +25,7 @@ import { AssemblyGraph } from "./AssemblyGraph";
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
 import { NodeSelector } from "./NodeSelector";
+import { QcDialog } from "./QcDialog";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
@@ -505,6 +506,7 @@ function ObjectDetail({ id }: { id: string }) {
   });
   const qcActive = (activeJobs ?? []).some((j) => j.type === "run_qc");
   const trimActive = (activeJobs ?? []).some((j) => j.type === "trim_reads");
+  const [showQcDialog, setShowQcDialog] = useState(false);
 
   const reingest = useMutation({
     mutationFn: () => api.reingestObject(id),
@@ -768,47 +770,57 @@ function ObjectDetail({ id }: { id: string }) {
         <Tabs tabs={tabs} active={tab} onChange={setTab} idPrefix="obj" />
 
         {tab === "qc" && (
-          <TabPanel id="qc" idPrefix="obj">
-            <QcTab
-              obj={obj}
-              isReference={isReference}
-              // Built here because it needs the same runQC mutation the
-              // Computations section drives; QcTab only decides where it sits.
-              runQcPrompt={
-                canQC && !hasQc ? (
-                  <div
-                    className="warn-box"
-                    style={{
-                      marginBottom: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <span>
-                      No QC has been run on this file yet. Read chemistry,
-                      adapter content and the quality distribution all come
-                      from it — and several pipeline suggestions stay disabled
-                      without it.
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <NodeSelector value={targetNode} onChange={setTargetNode} />
-                      <button
-                        type="button"
-                        className="btn primary"
-                        style={{ flexShrink: 0 }}
-                        onClick={() => runQC.mutate()}
-                        disabled={runQC.isPending || qcActive}
-                      >
-                        {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
-                      </button>
+          <div>
+            <TabPanel id="qc" idPrefix="obj">
+              <QcTab
+                obj={obj}
+                isReference={isReference}
+                // Built here because it needs the same runQC mutation the
+                // Computations section drives; QcTab only decides where it sits.
+                runQcPrompt={
+                  canQC && !hasQc ? (
+                    <div
+                      className="warn-box"
+                      style={{
+                        marginBottom: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                      }}
+                    >
+                      <span>
+                        No QC has been run on this file yet. Read chemistry,
+                        adapter content and the quality distribution all come
+                        from it — and several pipeline suggestions stay disabled
+                        without it.
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <NodeSelector value={targetNode} onChange={setTargetNode} />
+                        <button
+                          type="button"
+                          className="btn primary"
+                          style={{ flexShrink: 0 }}
+                          onClick={() => setShowQcDialog(true)}
+                          disabled={runQC.isPending || qcActive}
+                        >
+                          {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : null
-              }
-            />
-          </TabPanel>
+                  ) : null
+                }
+              />
+            </TabPanel>
+
+            {showQcDialog && (
+              <QcDialog
+                objectId={id}
+                onClose={() => setShowQcDialog(false)}
+              />
+            )}
+          </div>
+
         )}
 
         {tab === "results" && (
