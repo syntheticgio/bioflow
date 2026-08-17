@@ -48,6 +48,7 @@ from app.models.organism import OrganismBlurb, normalize_organism
 from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
 from app.models.protein_record import ProteinRecord
+from app.models.protein_structure_lookup import ProteinStructureLookup
 from app.models.resource_limits import ResourceLimits
 from app.models.run import (
     OPTIONAL_ROLES,
@@ -90,6 +91,7 @@ ALL_MODELS = [
     FailureExplanation,
     Profile,
     ProteinRecord,
+    ProteinStructureLookup,
     StructureLookup,
     Feedback,
     LocalDatabase,
@@ -152,6 +154,7 @@ __all__ = [
     "Project",
     "ProjectCounters",
     "ProteinRecord",
+    "ProteinStructureLookup",
     "ProviderKind",
     "ResourceLimits",
     "RunInput",
