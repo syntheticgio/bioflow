@@ -506,11 +506,20 @@ textarea:focus {
 
 /* ---------- Stage rail (raw/trimmed toggle) ---------- */
 
-/* Extra bottom padding: the toggle sits between the header and the rows, and
-   without it the card's spine (inherited from .pair-group) ends flush with
-   the last row instead of matching the breathing room every other card gets. */
+/* Extra bottom padding: the toggle sits between the header and the rows. */
 .stage-rail-card {
   padding-bottom: 4px;
+}
+
+/* The RAW/TRIMMED and REFSEQ/GENBANK toggle header already brackets the rows
+   below it, so the .pair-group spine (meant for a bare label-only pair) is
+   redundant here -- drop it and the indent it was drawn into. */
+.stage-rail-card {
+  padding-left: 0;
+}
+
+.stage-rail-card::before {
+  display: none;
 }
 
 .stage-rail-header {
