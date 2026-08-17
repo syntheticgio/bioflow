@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DataObject, PipelineTool, PipelineType } from "../api/types";
@@ -124,6 +124,25 @@ export function PipelineToolSelector({
   });
 
   const tools = (data?.tools ?? []).filter((t) => t.pipelines.includes(pipeline));
+
+  // Auto-select the first recommended tool when data loads, if nothing selected yet
+  useEffect(() => {
+    if (selected != null) return;
+    if (!data) return;
+    const bucket = chemistryBucket(object);
+    const recommended = tools.find(
+      (t) => bucket && t.recommendations[bucket] === "recommended",
+    );
+    if (recommended) {
+      onSelect(recommended.name);
+      return;
+    }
+    // Fall back to the first available tool
+    const firstAvailable = tools.find((t) => t.available && t.runnable);
+    if (firstAvailable) {
+      onSelect(firstAvailable.name);
+    }
+  }, [data, selected, object, onSelect, tools]);
 
   // A row is choosable only when the binary works *and* something in this
   // application actually calls it. `available` alone would offer cutadapt as
