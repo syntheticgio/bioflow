@@ -163,7 +163,13 @@ def redact(bundle: ExportBundle) -> tuple[dict[str, list[dict]], RedactionSummar
         d = timing.model_dump(mode="json", by_alias=True)
         # Durations stay -- "this alignment took 40 minutes" is part of the
         # analysis record. "It ran on gio-workstation.local" is not.
-        if d.get("machine"):
+        #
+        # A default/unset RunMachine still dumps to a dict of all-None
+        # values, which is truthy -- so this checks for an actual populated
+        # field, not just the dict's presence, or every timing (even ones
+        # that never recorded machine identity) would count as "cleared".
+        machine = d.get("machine") or {}
+        if any(v is not None for v in machine.values()):
             d["machine"] = {}
             summary.machine_records_cleared += 1
         docs["job_timings"].append(d)

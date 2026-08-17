@@ -75,6 +75,25 @@ def test_redact_clears_machine_identity_but_keeps_durations():
     assert summary.machine_records_cleared == 1
 
 
+def test_redact_does_not_count_an_unset_machine_as_cleared():
+    # RunMachine() with no fields set still dumps to a dict of all-None
+    # values, which is truthy -- the count must not fire for a timing that
+    # never actually recorded machine identity.
+    timing = JobRunTiming(
+        job_type="align",
+        input_bytes=1_000_000,
+        job_id="j2",
+        duration_ms=1_000,
+        machine=RunMachine(),
+    )
+    bundle = export_service.ExportBundle(timings=[timing])
+
+    docs, summary = export_service.redact(bundle)
+
+    assert summary.machine_records_cleared == 0
+    assert all(v is None for v in docs["job_timings"][0]["machine"].values())
+
+
 def test_serialized_collections_excludes_secret_bearing_collections():
     """Exclusion by construction: the allowlist is the guarantee.
 
