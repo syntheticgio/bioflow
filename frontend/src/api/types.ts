@@ -440,6 +440,17 @@ export interface TimingEstimate {
   throughput_mb_s?: number | null;
 }
 
+/** Which gate stopped the head-of-queue job, and the two numbers it
+ *  compared. `need`/`free` are cores for cpu and MB for mem; the class gate
+ *  carries `class`/`admitted` instead (#457). */
+export interface BlockedReason {
+  gate: "class" | "cpu" | "mem" | "io";
+  need: number | null;
+  free: number | null;
+  class: string | null;
+  admitted: string[] | null;
+}
+
 export interface SystemLoadNode {
   node_id: string;
   running: number;
@@ -473,6 +484,7 @@ export interface SystemLoad {
   governor_active: boolean;
   nodes: SystemLoadNode[];
   nodes_error?: string;
+  blocked_reason?: BlockedReason | null;
 }
 
 export interface NodeInfo {
@@ -906,6 +918,8 @@ export interface RunMemberJob {
   progress: JobSummary["progress"] | null;
   error: { code: string; message: string; retryable: boolean } | null;
   created_at: string | null;
+  /** Declared demand. Null for a pruned job. */
+  resources: { cpu: number; mem_mb: number; io: string } | null;
 }
 
 export interface RunDetail extends RunSummary {

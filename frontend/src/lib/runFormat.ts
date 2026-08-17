@@ -1,4 +1,5 @@
 import type {
+  BlockedReason,
   JobSummary,
   RunKind,
   RunStatus,
@@ -187,14 +188,75 @@ export type WaitingJob = {
   cancel_requested?: boolean;
 };
 
+/** MB as the largest unit that keeps the number readable. */
+function mb(value: number): string {
+  return value >= 1024 ? `${(value / 1024).toFixed(1)} GB` : `${value} MB`;
+}
+
+/**
+ * The recorded gate as a sentence.
+ *
+ * Fact rather than inference: these numbers are the ones claim.lua actually
+ * compared, so they answer "is it waiting on resources" with the amounts
+ * instead of a guess (#457).
+ */
+export function formatBlockedReason(reason: BlockedReason): string {
+  switch (reason.gate) {
+    case "cpu":
+      return `waiting on CPU — needs ${reason.need}, ${reason.free} free`;
+    case "mem":
+      return reason.need != null && reason.free != null
+        ? `waiting on memory — needs ${mb(reason.need)}, ${mb(reason.free)} free`
+        : "waiting on memory";
+    case "io":
+      return "waiting on disk — another heavy job is reading";
+    case "class":
+      return "waiting: system loaded";
+  }
+}
+
+/**
+ * True when this job can never be claimed on this machine.
+ *
+ * Compared against the *total* budget, not free headroom: headroom recovers
+ * as other jobs finish, a budget does not. The two need different words
+ * because only one of them ends on its own.
+ */
+export function isUnsatisfiable(
+  resources: { mem_mb: number } | null,
+  load?: SystemLoad,
+): boolean {
+  const budget = load?.memory.budget_bytes;
+  if (!resources || budget == null) return false;
+  return resources.mem_mb * 1024 * 1024 > budget;
+}
+
+/** The unsatisfiable sentence, naming both numbers. */
+export function unsatisfiableReason(
+  resources: { mem_mb: number },
+  budget: number,
+): string {
+  return `cannot start here — needs ${mb(resources.mem_mb)}, this machine's budget is ${mb(
+    Math.round(budget / (1024 * 1024)),
+  )}`;
+}
+
 /**
  * A spinner says "wait"; this says what for. The governor's admitted_classes
  * is authoritative about whether this job's class can start at all.
  */
-export function waitingReason(job: WaitingJob, load?: SystemLoad): string {
+export function waitingReason(
+  job: WaitingJob,
+  load?: SystemLoad,
+  reason?: BlockedReason | null,
+): string {
   if (job.cancel_requested) return "cancelling";
   if (job.state === "delayed") return "retrying after a failure";
   if (job.state === "blocked") return "waiting on an earlier step";
+  // A recorded reason is what the queue actually decided; everything below is
+  // inference from global state. Kept as the fallback so a cold or expired
+  // key degrades to the previous behaviour rather than to a blank (#457).
+  if (reason) return formatBlockedReason(reason);
   if (!load) return "waiting";
   if (!load.admitted_classes.includes(job.job_class)) {
     return load.state === "CLOSED"
