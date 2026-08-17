@@ -480,14 +480,29 @@ async def current_load() -> dict:
     vanish exactly when the leader lock lapses.
     """
     from app.db.redis_client import get_redis
+    from app.queue import blocked_reason as blocked_reason_mod
 
     nodes, nodes_error = await _node_breakdown()
+
+    reason = await blocked_reason_mod.read(get_redis())
+    reason_out = (
+        {
+            "gate": reason.gate,
+            "need": reason.need,
+            "free": reason.free,
+            "class": reason.job_class,
+            "admitted": reason.admitted,
+        }
+        if reason
+        else None
+    )
 
     snap = await read_snapshot(get_redis())
     if snap is not None:
         snap["nodes"] = nodes
         if nodes_error:
             snap["nodes_error"] = nodes_error
+        snap["blocked_reason"] = reason_out
         return snap
 
     # No leader has published yet (or Redis is empty): report raw metrics so the
@@ -502,6 +517,7 @@ async def current_load() -> dict:
         "disk": None,
         "governor_active": False,
         "nodes": nodes,
+        "blocked_reason": reason_out,
     }
     if nodes_error:
         load["nodes_error"] = nodes_error

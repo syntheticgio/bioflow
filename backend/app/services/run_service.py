@@ -234,6 +234,10 @@ async def status_for(run_id: PydanticObjectId, *, owner: str) -> tuple[RunStatus
                 # job, and a cancelling job must not read as "waiting".
                 "job_class": job.job_class.value if job else None,
                 "cancel_requested": bool(job.cancel_requested) if job else False,
+                # Declared demand, for the unsatisfiable check on the card: a
+                # job needing more memory than the whole budget can never be
+                # claimed, which is a different thing from waiting a turn.
+                "resources": job.resources.model_dump(mode="json") if job else None,
                 "progress": job.progress.model_dump(mode="json") if job else None,
                 "error": job.error.model_dump(mode="json") if job and job.error else None,
                 "created_at": job.created_at if job else None,
