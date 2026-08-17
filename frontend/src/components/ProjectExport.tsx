@@ -177,8 +177,8 @@ export function ProjectExport({
                 )}
         </div>
         <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 8 }}>
-          Removed automatically: API keys, absolute file paths, and machine
-          names.
+          API keys are never collected. Absolute file paths and machine
+          names are stripped automatically.
         </div>
       </div>
 
