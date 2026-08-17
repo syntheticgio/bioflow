@@ -97,3 +97,25 @@ def test_counts_to_json_of_nothing_is_an_empty_object(tmp_path):
     counts.write_text("")
     result = sh(f"counts_to_json {counts}", tmp_path)
     assert json.loads(result.stdout) == {}
+
+
+def test_version_matches_on_identical_versions(tmp_path):
+    assert sh('version_matches "0.5.1" "0.5.1"', tmp_path).returncode == 0
+
+
+def test_version_matches_rejects_a_different_version(tmp_path):
+    assert sh('version_matches "0.5.1" "0.6.0"', tmp_path).returncode == 1
+
+
+def test_version_matches_rejects_an_unknown_version(tmp_path):
+    assert sh('version_matches "unknown" "0.5.1"', tmp_path).returncode == 1
+
+
+def test_restore_doc_states_what_is_not_recovered(tmp_path):
+    out = tmp_path / "RESTORE.md"
+    result = sh(f"write_restore_doc {out}", tmp_path)
+    assert result.returncode == 0, result.stderr
+    text = out.read_text()
+    assert "--force" in text
+    assert "provider keys" in text.lower()
+    assert "no migration" in text.lower()
