@@ -18,6 +18,7 @@ set -euo pipefail
 # research database. Do not inline this default at the call sites.
 MONGO_CONTAINER="${MONGO_CONTAINER:-biopipe-mongo-1}"
 MONGO_DB="${MONGO_DB:-biopipe}"
+API_CONTAINER="${API_CONTAINER:-biopipe-api-1}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,6 +37,7 @@ Environment:
   BACKUP_DIR        Where backups land (default: ./backups)
   MONGO_CONTAINER   Mongo container to talk to (default: biopipe-mongo-1)
   MONGO_DB          Database name (default: biopipe)
+  API_CONTAINER     api container to talk to (default: biopipe-api-1)
 EOF
 }
 
@@ -98,7 +100,7 @@ write_provider_summary() {
     printf 'Keys are NOT included in this backup and must be re-entered after restore.\n\n'
   } >"$outfile"
 
-  if ! docker compose exec -T api python - <<'PY' >>"$outfile" 2>/dev/null
+  if ! docker exec -i "$API_CONTAINER" python - <<'PY' >>"$outfile" 2>/dev/null
 import asyncio
 from collections import defaultdict
 
