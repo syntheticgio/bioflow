@@ -179,3 +179,52 @@ def redact(bundle: ExportBundle) -> tuple[dict[str, list[dict]], RedactionSummar
         docs["blobs"].append(d)
 
     return docs, summary
+
+
+_MANIFEST_HEADER = (
+    "blob_id",
+    "size",
+    "content_sha256",
+    "state",
+    "rel_path",
+    "bytes",
+)
+
+
+def build_manifest(bundle: ExportBundle, *, threshold_bytes: int) -> tuple[str, list[Blob]]:
+    """Render data-manifest.tsv and decide which blobs' bytes to pack.
+
+    Every blob in scope gets a row, including those whose bytes are left
+    out -- the last column says which. That distinction is the manifest's
+    whole value: the recipient can tell "not sent" from "does not exist",
+    and knows exactly what to ask for.
+
+    Written as TSV, readable with cut and grep on a machine with no Mongo,
+    no Docker, and no BioFlow. The recipient is the one person guaranteed
+    not to have the app. Same shape as ops/backup.sh's manifest.
+    """
+    lines = ["\t".join(_MANIFEST_HEADER)]
+    included: list[Blob] = []
+
+    for blob in sorted(bundle.blobs, key=lambda b: str(b.id)):
+        pack = blob.size <= threshold_bytes and blob.rel_path is not None
+        if pack:
+            included.append(blob)
+        lines.append(
+            "\t".join(
+                (
+                    str(blob.id),
+                    str(blob.size),
+                    # content_sha256 is only set when it differs from id (the
+                    # compressed-blob case) -- for the common case (an
+                    # uncompressed blob, or one predating compression) it is
+                    # None, and id is already the canonical stored-bytes hash.
+                    blob.content_sha256 or blob.id,
+                    str(blob.state),
+                    blob.rel_path or "",
+                    "included" if pack else "excluded",
+                )
+            )
+        )
+
+    return "\n".join(lines) + "\n", included
