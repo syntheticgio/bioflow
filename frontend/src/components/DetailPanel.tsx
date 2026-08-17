@@ -25,6 +25,7 @@ import { AssemblyGraph } from "./AssemblyGraph";
 import { ChromosomeStrip } from "./ChromosomeStrip";
 import { FactsColumns } from "./FactsColumns";
 import { NodeSelector } from "./NodeSelector";
+import { QcDialog } from "./QcDialog";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
 import { IngestProgress } from "./IngestProgress";
@@ -505,6 +506,7 @@ function ObjectDetail({ id }: { id: string }) {
   });
   const qcActive = (activeJobs ?? []).some((j) => j.type === "run_qc");
   const trimActive = (activeJobs ?? []).some((j) => j.type === "trim_reads");
+  const [showQcDialog, setShowQcDialog] = useState(false);
 
   const reingest = useMutation({
     mutationFn: () => api.reingestObject(id),
@@ -798,7 +800,7 @@ function ObjectDetail({ id }: { id: string }) {
                         type="button"
                         className="btn primary"
                         style={{ flexShrink: 0 }}
-                        onClick={() => runQC.mutate()}
+                        onClick={() => setShowQcDialog(true)}
                         disabled={runQC.isPending || qcActive}
                       >
                         {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
@@ -809,6 +811,15 @@ function ObjectDetail({ id }: { id: string }) {
               }
             />
           </TabPanel>
+
+          {showQcDialog && (
+            <QcDialog
+              objectId={id}
+              projectId={obj.project_id}
+              onClose={() => setShowQcDialog(false)}
+            />
+          )}
+
         )}
 
         {tab === "results" && (
