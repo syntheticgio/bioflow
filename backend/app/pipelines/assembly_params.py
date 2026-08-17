@@ -28,6 +28,11 @@ MAX_THREADS = 128
 MIN_ITERATIONS = 0
 MAX_ITERATIONS = 10
 
+# k-mer length. ABySS's own practical range; below 16 the graph is noise and
+# above 127 the build is not compiled for it.
+MIN_K = 16
+MAX_K = 127
+
 
 def parse_genome_size(value) -> int | None:
     """`4.6m` / `3.1g` / `4600000` -> bases. None when unset.
@@ -152,7 +157,33 @@ class FlyeParams(BaseAssemblyParams):
         )
 
 
-_BY_ASSEMBLER = {Assembler.FLYE: FlyeParams}
+@dataclass
+class AbyssParams(BaseAssemblyParams):
+    """Short-read assembly parameters.
+
+    Only `k` is exposed beyond the shared fields. ABySS's Bloom filter budget
+    `B` is mandatory but deliberately *not* a user field: it is derived from
+    the memory estimate in `assembly_runner`, so the number the guard used to
+    decide the run can proceed is the same number the tool is given. Two
+    independent memory figures that are supposed to agree is a bug with a
+    delay fuse.
+    """
+
+    assembler: Assembler = Assembler.ABYSS
+    k: int = 51
+
+    def as_dict(self) -> dict:
+        return {**super().as_dict(), "k": self.k}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "AbyssParams":
+        k = int(data.get("k", 51))
+        if not MIN_K <= k <= MAX_K:
+            raise ValidationError(f"k must be between {MIN_K} and {MAX_K}")
+        return cls(assembler=Assembler.ABYSS, k=k, **cls._shared(data))
+
+
+_BY_ASSEMBLER = {Assembler.FLYE: FlyeParams, Assembler.ABYSS: AbyssParams}
 
 
 def from_dict(data: dict | None) -> BaseAssemblyParams:
