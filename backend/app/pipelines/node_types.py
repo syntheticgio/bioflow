@@ -1013,6 +1013,11 @@ EXCLUDED_LAUNCHES: frozenset[str] = frozenset(
         # TODO(#371): revisit alongside its siblings if a canvas node type
         # for on-demand annotation work is designed.
         "pipeline_service.launch_extract_genbank_sequence",
+        # Project-level export producing a shareable archive on disk, not an
+        # object a downstream node could consume -- the same class as
+        # launch_summary and launch_gc_tracks. It also takes a project rather
+        # than an object, so it has no input port to wire.
+        "pipeline_service.launch_project_export",
     }
 )
 

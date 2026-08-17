@@ -6308,6 +6308,40 @@ async def launch_continuity_qc(
     return job
 
 
+async def launch_project_export(
+    *,
+    project_id: PydanticObjectId,
+    owner: str,
+    threshold_bytes: int | None = None,
+    job_class: JobClass = JobClass.USER_BACKGROUND,
+) -> Job:
+    """Queue an export of a project and its descendants to one archive.
+
+    Raises rather than returning None when the project does not exist or
+    belongs to another profile: an export is an explicit user action, and
+    silence would look like a broken button.
+    """
+    from app.queue import queue
+    from app.services import export_service, project_service
+
+    project = await project_service.get_project(project_id, owner=owner)
+
+    return await queue.enqueue(
+        "project_export",
+        payload={
+            "project_id": str(project.id),
+            "owner": owner,
+            "threshold_bytes": (
+                threshold_bytes
+                if threshold_bytes is not None
+                else export_service.DEFAULT_BLOB_THRESHOLD_BYTES
+            ),
+        },
+        job_class=job_class,
+        project_id=project.id,
+    )
+
+
 def _parse_fai(fai_path: Path) -> list[tuple[str, int]]:
     """Read a .fai file into (name, length) tuples."""
     result = []

@@ -924,6 +924,48 @@ async def reap_pipeline_scratch(ctx: JobContext) -> dict:
     return {"removed_scratch_dirs": removed_dirs, "removed_logs": removed_logs}
 
 
+@handler(
+    "project_export",
+    mode=HandlerMode.THREAD,
+    job_class=JobClass.USER_BACKGROUND,
+    resources=JobResources(cpu=1, mem_mb=512, io=IoClass.HEAVY),
+)
+def project_export(ctx: JobContext) -> dict:
+    """Pack one project and its descendants into a shareable archive.
+
+    THREAD rather than SUBPROCESS: this packs a tarball in-process and
+    spawns nothing. It is IO-heavy, which is what keeps it off the event
+    loop.
+
+    Reports what redaction removed, so the user can check what left the
+    machine rather than trusting that it did.
+    """
+    from beanie import PydanticObjectId
+
+    from app.db.client import run_from_thread
+    from app.services import export_service
+
+    result = run_from_thread(
+        export_service.export_project(
+            PydanticObjectId(ctx.payload["project_id"]),
+            owner=ctx.payload["owner"],
+            threshold_bytes=ctx.payload["threshold_bytes"],
+        )
+    )
+
+    return {
+        "archive_path": str(result.path),
+        "size_bytes": result.size_bytes,
+        "blob_count": result.blob_count,
+        "included_blob_count": result.included_blob_count,
+        "redaction": {
+            "profile": result.redaction.profile,
+            "paths_relativized": result.redaction.paths_relativized,
+            "machine_records_cleared": result.redaction.machine_records_cleared,
+        },
+    }
+
+
 async def _reap_dir(ctx: JobContext, root: Path, *, cutoff, remove, want_dirs: bool) -> int:
     """Delete entries under `root` last modified before `cutoff`."""
     if not await asyncio.to_thread(root.exists):

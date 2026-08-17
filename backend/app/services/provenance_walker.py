@@ -209,6 +209,10 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "noop",
         "sleep_test",
         "worker_run_ids_probe",
+        # Project-level archive export: produces a tarball on disk, not an
+        # object with provenance of its own, and it runs against a project
+        # rather than any single object a chain could walk through.
+        "project_export",
     }
 )
 
