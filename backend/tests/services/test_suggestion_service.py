@@ -888,12 +888,22 @@ class TestAssembleCard:
 
     def test_short_reads_are_refused_for_a_different_reason_than_unknown(self):
         """Two refusals, deliberately distinct: one the user cannot act on
-        today, one they fix by pressing a button."""
+        today, one they fix by pressing a button.
+
+        Short-read chemistry now has an assembler (ABySS, Task 4) rather than
+        no assembler at all, so this is no longer the
+        `chemistry is SHORT with spec is None` branch -- it is the ordinary
+        `not spec.available()` branch, taken because the test image does not
+        ship ABySS. The old assertion pinned the now-deleted "Short-read
+        assembly is not installed" sentence; what still holds, and is what
+        this test actually verifies, is that a missing-tool refusal and a
+        missing-fact refusal read differently.
+        """
         short = build_assemble_card(_fake_obj(facts={"qc_read_chemistry": "short"}))
         unknown = build_assemble_card(_fake_obj())
 
         assert short.status is CardStatus.UNAVAILABLE
-        assert "short-read" in short.reason.lower()
+        assert "abyss" in short.reason.lower()
 
         assert unknown.status is CardStatus.UNAVAILABLE
         assert "qc" in unknown.reason.lower()
