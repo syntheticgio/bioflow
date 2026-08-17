@@ -31,7 +31,7 @@ from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
 from app.metadata import infer_molecule
 from app.models import BlobStorage, FormatKind, JobClass, JobRunTiming
-from app.models.ai import TaskSlot
+from app.models.ai import FailureReason, TaskSlot
 from app.services import (
     ai,
     expected_gc,
@@ -198,6 +198,10 @@ async def provenance_narrative_prose(
     provider configured, the call failed, or the output was rejected for
     introducing an unsupported fact. None of those is an error the caller
     should retry, and the structured report is unaffected either way.
+
+    A failed call names the provider, the coarse reason, and the upstream
+    detail. The tab renders this verbatim, so it is the only place a user
+    sees why -- anything omitted here is only in the container log.
     """
     chain = await provenance_walker.walk(object_id, owner=owner)
 
@@ -215,10 +219,17 @@ async def provenance_narrative_prose(
     # Completion | ToolCall | Failure. Checking for None here would treat
     # every failure as a success.
     if not isinstance(result, Completion):
-        return ProvenanceProseOut(
-            prose=None,
-            unavailable_reason="The model call did not succeed.",
-        )
+        # Say which provider failed and why. `Failure.detail` is scrubbed of
+        # the API key at every construction site, so it is safe to surface --
+        # and without it the message cannot be acted on: an unreachable
+        # provider and a rejected key read identically, which is what sent
+        # one report to the container logs to find an `Errno 101`.
+        reason = getattr(result, "reason", FailureReason.BAD_RESPONSE)
+        detail = getattr(result, "detail", None)
+        message = f"The model call to {provider.name} did not succeed ({reason})."
+        if detail:
+            message = f"{message} {detail}"
+        return ProvenanceProseOut(prose=None, unavailable_reason=message)
 
     rejection = provenance_prompt.verify_containment(result.text, chain)
     if rejection is not None:
