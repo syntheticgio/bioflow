@@ -7,8 +7,7 @@ aligner's reference picker. A canvas refusing that wire is that same rule.
 """
 
 import pytest
-from beanie import PydanticObjectId
-
+from app.models import FormatKind, ObjectRole
 from app.models.workflow import (
     NodeRunState,
     PortType,
@@ -22,7 +21,7 @@ from app.models.workflow import (
     WorkflowStatus,
     derive_status,
 )
-from app.models import FormatKind, ObjectRole
+from beanie import PydanticObjectId
 
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
@@ -122,10 +121,16 @@ class TestDerivedStatus:
         assert derive_status([NodeRunState.PENDING, NodeRunState.PENDING]) is WorkflowStatus.WAITING
 
     def test_any_running_is_running(self):
-        assert derive_status([NodeRunState.SUCCEEDED, NodeRunState.RUNNING]) is WorkflowStatus.RUNNING
+        assert (
+            derive_status([NodeRunState.SUCCEEDED, NodeRunState.RUNNING])
+            is WorkflowStatus.RUNNING
+        )
 
     def test_all_succeeded_is_succeeded(self):
-        assert derive_status([NodeRunState.SUCCEEDED, NodeRunState.SUCCEEDED]) is WorkflowStatus.SUCCEEDED
+        assert (
+            derive_status([NodeRunState.SUCCEEDED, NodeRunState.SUCCEEDED])
+            is WorkflowStatus.SUCCEEDED
+        )
 
     def test_a_finished_run_with_a_failure_is_partial(self):
         """The branch-scoped failure rule: an independent branch succeeded, so

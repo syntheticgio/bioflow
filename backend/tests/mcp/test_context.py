@@ -6,7 +6,6 @@ same accommodation `deps.resolve_owner` already makes for the SSE stream.
 """
 
 import pytest
-
 from app.errors import ProfileUnresolvedError
 from app.mcp import context
 from app.services import profile_service

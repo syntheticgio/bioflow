@@ -16,13 +16,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.errors import ConflictError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.models.run import RunInput, RunInputRole, RunKind
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
+from beanie import PydanticObjectId
 
 _RT = Tool(name="ragtag", path="/usr/local/bin/ragtag.py", version="v2.1.0")
 

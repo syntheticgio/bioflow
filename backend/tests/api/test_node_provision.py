@@ -5,11 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
-
 from app.errors import register_exception_handlers
 from app.models.node_provision import NodeProvisionTask
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 # The autouse cleanup fixture below queries NodeProvisionTask after every test
 # in this module, including the pure-function ones, so beanie must be
@@ -193,7 +192,6 @@ def test_render_node_compose_is_valid_yaml_declaring_only_the_worker():
     mongo/redis/api/web. This is the test that would fail if one crept back.
     """
     import yaml
-
     from app.api.v1.nodes import _render_node_compose
 
     parsed = yaml.safe_load(_render_node_compose())

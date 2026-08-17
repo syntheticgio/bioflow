@@ -8,7 +8,6 @@ import gzip
 import threading
 
 import pytest
-
 from app.errors import JobCancelled
 from app.models import Compression
 from app.storage import sequence_stats as ss

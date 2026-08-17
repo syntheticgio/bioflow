@@ -5,7 +5,6 @@ day, and a denylist silently ships every field nobody thought of.
 """
 
 import pytest
-
 from app.services.params_sanitizer import MAX_STRING_LENGTH, PATH_MARKERS, sanitize
 
 

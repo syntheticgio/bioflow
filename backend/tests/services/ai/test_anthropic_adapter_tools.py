@@ -6,7 +6,6 @@ content block rather than a `tool_calls` array.
 import json
 
 import pytest
-
 from app.models.ai import FailureReason
 from app.services.ai import adapters
 from app.services.ai.adapters import AnthropicAdapter, Completion, Failure, ToolCall, ToolSpec
@@ -50,9 +49,15 @@ SEARCH_TOOL = ToolSpec(
 
 class TestSendingTools:
     def test_sends_tools_as_input_schema_not_parameters(self, adapter, capture):
-        adapter.complete(system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL])
+        adapter.complete(
+            system="s", user="u", model="claude-x", max_tokens=100, tools=[SEARCH_TOOL]
+        )
         assert capture["body"]["tools"] == [
-            {"name": "search_objects", "description": "Search files.", "input_schema": {"type": "object"}}
+            {
+                "name": "search_objects",
+                "description": "Search files.",
+                "input_schema": {"type": "object"},
+            }
         ]
 
     def test_omits_the_field_entirely_when_no_tools_passed(self, adapter, capture):
@@ -68,7 +73,12 @@ class TestParsingToolUse:
     def test_tool_use_content_block_returns_a_toolcall(self, adapter, monkeypatch):
         payload = {
             "content": [
-                {"type": "tool_use", "id": "toolu_1", "name": "list_jobs", "input": {"state": "running"}}
+                {
+                    "type": "tool_use",
+                    "id": "toolu_1",
+                    "name": "list_jobs",
+                    "input": {"state": "running"},
+                }
             ]
         }
         monkeypatch.setattr(
@@ -113,7 +123,9 @@ class TestParsingToolUse:
         assert result.id == "toolu_1"
         assert "ai_multi_tool_call_dropped" in capsys.readouterr().out
 
-    def test_text_block_only_still_returns_completion_when_tools_offered(self, adapter, monkeypatch):
+    def test_text_block_only_still_returns_completion_when_tools_offered(
+        self, adapter, monkeypatch
+    ):
         payload = {"content": [{"type": "text", "text": "the answer is 4"}]}
         monkeypatch.setattr(
             adapters.urllib.request, "urlopen", lambda *a, **k: _Response(payload)

@@ -7,9 +7,13 @@ turn rather than only ever sending one `user` string.
 import json
 
 import pytest
-
 from app.services.ai import adapters
-from app.services.ai.adapters import AnthropicAdapter, ConversationTurn, OpenAICompatAdapter, ToolCall
+from app.services.ai.adapters import (
+    AnthropicAdapter,
+    ConversationTurn,
+    OpenAICompatAdapter,
+    ToolCall,
+)
 
 
 class _Response:
@@ -42,7 +46,12 @@ def capture(monkeypatch):
 
     def _capture(request, *a, **k):
         seen["body"] = json.loads(request.data) if request.data else None
-        return _Response({"choices": [{"message": {"content": "hi"}}], "content": [{"type": "text", "text": "hi"}]})
+        return _Response(
+            {
+                "choices": [{"message": {"content": "hi"}}],
+                "content": [{"type": "text", "text": "hi"}],
+            }
+        )
 
     monkeypatch.setattr(adapters.urllib.request, "urlopen", _capture)
     return seen
@@ -70,7 +79,10 @@ class TestOpenAiHistoryReplay:
             {
                 "id": "call_1",
                 "type": "function",
-                "function": {"name": "search_objects", "arguments": json.dumps({"kinds": ["bam"]})},
+                "function": {
+                    "name": "search_objects",
+                    "arguments": json.dumps({"kinds": ["bam"]}),
+                },
             }
         ]
         assert messages[3] == {"role": "tool", "tool_call_id": "call_1", "content": '{"total": 3}'}
@@ -93,7 +105,9 @@ class TestOpenAiHistoryReplay:
 
 class TestAnthropicHistoryReplay:
     def test_pairs_tool_use_and_tool_result_as_content_blocks(self, anthropic_adapter, capture):
-        anthropic_adapter.complete(system="s", user="", model="claude-x", max_tokens=100, history=HISTORY)
+        anthropic_adapter.complete(
+            system="s", user="", model="claude-x", max_tokens=100, history=HISTORY
+        )
 
         sent = capture["body"]
         assert sent["system"] == "s"
@@ -101,7 +115,12 @@ class TestAnthropicHistoryReplay:
         assert messages[0] == {"role": "user", "content": "how many bams?"}
         assert messages[1]["role"] == "assistant"
         assert messages[1]["content"] == [
-            {"type": "tool_use", "id": "call_1", "name": "search_objects", "input": {"kinds": ["bam"]}}
+            {
+                "type": "tool_use",
+                "id": "call_1",
+                "name": "search_objects",
+                "input": {"kinds": ["bam"]},
+            }
         ]
         assert messages[2]["role"] == "user"
         assert messages[2]["content"] == [
@@ -113,7 +132,9 @@ class TestAnthropicHistoryReplay:
             ConversationTurn(role="user", content="q1"),
             ConversationTurn(role="assistant", content="a1"),
         ]
-        anthropic_adapter.complete(system="s", user="", model="claude-x", max_tokens=100, history=history)
+        anthropic_adapter.complete(
+            system="s", user="", model="claude-x", max_tokens=100, history=history
+        )
         assert capture["body"]["messages"] == [
             {"role": "user", "content": "q1"},
             {"role": "assistant", "content": "a1"},

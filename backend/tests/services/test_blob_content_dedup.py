@@ -4,10 +4,9 @@ docs/superpowers/specs/2026-08-05-object-compression-design.md.
 """
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.models import BlobState, DataObject
 from app.services import blob_service
+from beanie import PydanticObjectId
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

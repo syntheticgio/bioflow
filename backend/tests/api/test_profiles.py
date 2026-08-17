@@ -21,11 +21,10 @@ alone.
 """
 
 import pytest
-from httpx import ASGITransport, AsyncClient
-
 from app.main import app
 from app.models import Profile
 from app.services import profile_service, project_service
+from httpx import ASGITransport, AsyncClient
 
 pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop_scope="module")]
 

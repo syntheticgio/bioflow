@@ -1,7 +1,6 @@
 """Matching paired-end read files by filename convention."""
 
 import pytest
-
 from app.pipelines import pairing
 
 

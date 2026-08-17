@@ -6,10 +6,9 @@ story, the reference is a material the story used. Getting this wrong puts
 the reference's NCBI accession at the same level as trim parameters.
 """
 
-from beanie import PydanticObjectId
-
 from app.models.object import ObjectRole
 from app.services.provenance_walker import classify_parent
+from beanie import PydanticObjectId
 
 BAM = PydanticObjectId()
 REF = PydanticObjectId()

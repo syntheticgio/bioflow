@@ -12,10 +12,9 @@ tests pin down.
 
 from types import SimpleNamespace
 
-from beanie import PydanticObjectId
-
 from app.models import FormatKind, ObjectStatus
 from app.services import reference_assembly
+from beanie import PydanticObjectId
 
 
 def _fastq(

@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-
 from app.config import settings
 from app.models.blob import Blob, BlobState, BlobStorage
 from app.models.drift import DriftCategory, DriftEntry, DriftReport

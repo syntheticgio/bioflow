@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from app.pipelines import gci_runner
 
 

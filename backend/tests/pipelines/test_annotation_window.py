@@ -6,7 +6,6 @@ have different fixtures and different failure modes.
 """
 
 import pytest
-
 from app.pipelines.annotation_db import (
     bin_counts,
     build_annotation_db,

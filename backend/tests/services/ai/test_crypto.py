@@ -6,7 +6,6 @@ No `beanie_models` here: this touches the filesystem and nothing else.
 import stat
 
 import pytest
-
 from app.services.ai import crypto
 
 

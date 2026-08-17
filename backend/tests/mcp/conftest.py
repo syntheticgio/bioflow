@@ -8,7 +8,6 @@ cannot express.
 """
 
 import pytest_asyncio
-
 from app.models import Profile
 
 

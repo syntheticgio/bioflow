@@ -10,10 +10,9 @@ scalar there would silently drop the second run's membership.
 """
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.models import Job, JobClass, JobResources, JobState, RunJobRole, RunKind
 from app.services import run_service
+from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),

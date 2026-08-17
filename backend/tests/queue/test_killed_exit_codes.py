@@ -18,7 +18,6 @@ import subprocess
 import time
 
 import pytest
-
 from app.errors import PermanentError, RetryableError
 from app.queue import download_failures
 from app.queue.pipeline_handlers import _failure, _killed_by_signal

@@ -9,13 +9,11 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
-
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, assembler_registry, tools
 from app.services import pipeline_service
 from app.services.suggestion_service import (
     CardStatus,
-    ReferenceChoice,
     SuggestionCard,
     build_align_card,
     build_annotate_card,
@@ -1323,11 +1321,11 @@ class TestSuggestionsEndpoint:
 
     @pytest.fixture
     def client(self):
+        from app.api.v1.pipelines import router
+        from app.errors import register_exception_handlers
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from app.api.v1.pipelines import router
-        from app.errors import register_exception_handlers
         from tests.api.bare_app import override_owner
 
         app = FastAPI()

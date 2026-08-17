@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from app.metadata import ncbi_assembly, enrich
+from app.metadata import enrich, ncbi_assembly
 from app.models import FormatKind
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"

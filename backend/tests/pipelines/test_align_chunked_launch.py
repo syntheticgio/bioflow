@@ -15,10 +15,9 @@ were the ones that reported nothing.
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from beanie import PydanticObjectId
-
 from app.models import FormatKind, ObjectStatus
 from app.services import memory_estimate, pipeline_service
+from beanie import PydanticObjectId
 
 
 def _memory_estimate(mb: int) -> memory_estimate.MemoryEstimate:

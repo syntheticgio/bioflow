@@ -13,7 +13,6 @@ known 4x effect: recall 200/200, precision 0.98, and log2 fold changes of
 """
 
 import pytest
-
 from app.errors import ValidationError
 from app.pipelines import de_runner
 

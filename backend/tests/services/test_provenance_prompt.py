@@ -7,8 +7,6 @@ causal claims ("to remove adapter contamination"), and these tests do not
 pretend otherwise.
 """
 
-from beanie import PydanticObjectId
-
 from app.services.provenance_prompt import (
     build_prompt,
     supported_tokens,
@@ -21,6 +19,7 @@ from app.services.provenance_walker import (
     ProvenanceChain,
     Step,
 )
+from beanie import PydanticObjectId
 
 BAM = PydanticObjectId()
 

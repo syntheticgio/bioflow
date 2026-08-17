@@ -5,7 +5,6 @@ style -- every branch testable without a database.
 """
 
 import pytest
-
 from app.services.timing_service import MAX_ESTIMATED_PCT, pct_estimated
 
 

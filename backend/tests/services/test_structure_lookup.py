@@ -21,7 +21,6 @@ import json
 
 import pytest
 import pytest_asyncio
-
 from app.models import StructureLookup
 from app.services import structure_lookup
 

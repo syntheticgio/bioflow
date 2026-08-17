@@ -15,12 +15,11 @@ silent, which is exactly the kind that survives a green suite.
 """
 
 import pytest
-from beanie import init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS, JobState
 from app.models.job import Job, JobError
+from beanie import init_beanie
+from pymongo import AsyncMongoClient
 
 
 @pytest.fixture(autouse=True)

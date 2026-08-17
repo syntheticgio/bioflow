@@ -8,10 +8,10 @@ action available again, and a renamed one does not.
 
 import pytest
 import pytest_asyncio
-from beanie import PydanticObjectId
-
 from app.models import DataObject, ObjectRole, ObjectStatus
 from app.services import pipeline_service
+from beanie import PydanticObjectId
+
 from tests.services import helpers
 
 # `beanie_models` is module-scoped and holds a Motor connection bound to that

@@ -15,12 +15,11 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.errors import PermanentError, ValidationError
 from app.models import FormatKind, ObjectStatus
 from app.queue.align_handlers import _concatenate_reads, _extra_reads_paths
 from app.services import memory_estimate, pipeline_service
+from beanie import PydanticObjectId
 
 
 def _memory_estimate(mb: int) -> memory_estimate.MemoryEstimate:

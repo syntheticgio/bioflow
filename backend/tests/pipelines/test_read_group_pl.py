@@ -8,7 +8,6 @@ three deliberately.
 """
 
 import pytest
-
 from app.pipelines.align_runner import ReadGroup
 
 

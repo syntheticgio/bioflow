@@ -9,9 +9,10 @@ a run field, not a param).
 from contextlib import contextmanager
 from datetime import datetime
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.models import RunInputRole, RunKind, RunStatus
-from app.services.prior_runs import row_for_run, run_matches_card
+from app.services.prior_runs import attach_prior_runs, row_for_run, run_matches_card
 
 
 def _run(kind=RunKind.ALIGNMENT, params=None, tool=None, inputs=()):
@@ -184,11 +185,6 @@ class TestRowShape:
         }
         row = row_for_run(run, RunStatus.SUCCEEDED, names)
         assert [o["name"] for o in row["outputs"]] == ["sample.bam"]
-
-
-from unittest.mock import patch
-
-from app.services.prior_runs import attach_prior_runs
 
 
 @contextmanager

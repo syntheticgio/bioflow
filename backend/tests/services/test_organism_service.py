@@ -7,7 +7,6 @@ guard protects the cache at least as much as it protects the model.
 """
 
 import pytest
-
 from app.models import normalize_organism
 from app.services import organism_service
 from app.services.organism_service import is_summarizable

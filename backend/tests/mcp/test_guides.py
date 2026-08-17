@@ -16,9 +16,8 @@ invisible here and free to rot.
 import re
 
 import pytest
-
-from app.mcp import resources
 from app.main import app
+from app.mcp import resources
 from app.pipelines.tools import TOOL_META
 from app.queue.registry import all_handlers
 
@@ -156,7 +155,9 @@ def test_endpoint_paths_are_real():
     ran its assertion loop -- rather than actually checking anything.
     """
     routes = set(app.openapi()["paths"].keys())
-    assert len(routes) > 10, "Route table looks suspiciously empty -- check app.openapi() still works"
+    assert len(routes) > 10, (
+        "Route table looks suspiciously empty -- check app.openapi() still works"
+    )
 
     named = {s for s in _all_guide_symbols() if s.startswith("/")}
 

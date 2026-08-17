@@ -8,7 +8,6 @@ seam breaks.
 """
 
 import pytest
-
 from app.errors import NotFoundError, ProfileUnresolvedError
 from app.mcp import tools
 from app.services import profile_service, project_service
@@ -82,7 +81,7 @@ async def test_suggest_next_returns_cards_with_their_reasons(monkeypatch):
     """
     profile = await profile_service.create_profile(username="tools-suggest")
     owner = profile.owner_id()
-    project = await project_service.create_project(name="P", owner=owner)
+    await project_service.create_project(name="P", owner=owner)
 
     from app.mcp import tools as mcp_tools
 

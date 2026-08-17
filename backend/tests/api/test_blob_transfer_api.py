@@ -9,11 +9,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
-
 from app.api.v1.objects import router
 from app.errors import AppError, JSONResponse
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 
 def _patch_objects_dir(objects_dir: Path):

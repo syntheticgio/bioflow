@@ -8,13 +8,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from beanie import PydanticObjectId
-
-from app.errors import ConflictError, ValidationError
+from app.errors import ConflictError, PermanentError, ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.models.run import RunInput, RunInputRole, RunKind
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
+from beanie import PydanticObjectId
 
 _IVAR_TOOL = Tool(name="ivar", path="/usr/bin/ivar", version="1.4.4")
 
@@ -143,7 +142,9 @@ class TestLaunchConsensusReachesTheQueue:
         bam = _bam(reference=reference)
         primer_bed = _primer_bed(project_id=reference.project_id)
 
-        job, enqueued, created = await self._run(bam=bam, reference=reference, primer_bed=primer_bed)
+        job, enqueued, created = await self._run(
+            bam=bam, reference=reference, primer_bed=primer_bed
+        )
 
         assert enqueued["payload"]["primer_bed_sha256"] == "a" * 64
 
@@ -188,7 +189,6 @@ class TestLaunchConsensusReachesTheQueue:
         had in mind."""
         other_reference = _reference(names=("NC_045512.2",))
         bam = _bam(reference=other_reference)
-        enqueue = AsyncMock()
 
         async def _enqueue(job_type, **kwargs):
             enqueue_calls.append(kwargs)
@@ -234,7 +234,7 @@ class TestLaunchConsensusReachesTheQueue:
         get_object = AsyncMock(return_value=bam)
 
         with patch("app.pipelines.tools.ivar", return_value=missing):
-            with pytest.raises(Exception):  # PermanentError from tools.require
+            with pytest.raises(PermanentError):
                 await pipeline_service.launch_consensus(
                     bam_object_id=bam.id, owner="local"
                 )

@@ -6,9 +6,9 @@ correctly.
 """
 
 import pytest
-
 from app.models import DataObject, Project, SidecarRole
 from app.services import project_service
+
 from tests.services.helpers import TEST_OWNER, make_project
 
 pytestmark = [
@@ -121,6 +121,7 @@ class TestDeleteProjectTree:
         gc_candidates selects on ref_count <= 0.
         """
         from app.models import Blob
+
         from tests.services.helpers import make_object
 
         root = await make_project("sidecar-leak")
@@ -161,6 +162,7 @@ class TestDeleteProjectTree:
 
     async def test_removes_runs_and_jobs(self):
         from app.models import Job, PipelineRun
+
         from tests.services.helpers import make_job
 
         root = await make_project("tree-jobs")
@@ -194,11 +196,11 @@ class TestDeleteProjectTree:
             total_size=1000,
         )
         staging = Path(session.staging_dir)
-        assert staging.exists()
+        assert staging.exists()  # noqa: ASYNC240 - trivial local FS check, not a real block
 
         await project_service.delete_project_tree(root.id, owner=TEST_OWNER)
 
-        assert not staging.exists()
+        assert not staging.exists()  # noqa: ASYNC240 - trivial local FS check, not a real block
         assert await UploadSession.find({"project_id": root.id}).count() == 0
 
     async def test_upload_session_carries_its_projects_owner(self):
@@ -268,7 +270,7 @@ class TestDeleteProjectTree:
         with pytest.raises(NotFoundError):
             await project_service.delete_project_tree(root.id, owner="someone-else")
 
-        assert staging.exists()
+        assert staging.exists()  # noqa: ASYNC240 - trivial local FS check, not a real block
         assert await UploadSession.get(session.id) is not None
 
         # Cleanup, so this test does not leave the staging dir behind.
@@ -276,6 +278,7 @@ class TestDeleteProjectTree:
 
     async def test_refuses_while_a_job_is_active(self):
         from app.errors import ConflictError
+
         from tests.services.helpers import make_job
 
         root = await make_project("tree-blocked")
@@ -290,6 +293,7 @@ class TestDeleteProjectTree:
         """A refusal must be total. A partial delete that then raises would
         leave the project half-destroyed with no way to tell."""
         from app.errors import ConflictError
+
         from tests.services.helpers import make_job, make_object
 
         root = await make_project("tree-blocked-intact")
@@ -307,6 +311,7 @@ class TestDeleteProjectTree:
         not to 0 -- the surviving file still needs those bytes."""
         from app.db.client import get_db
         from app.models import Blob
+
         from tests.services.helpers import make_object
 
         keep = await make_project("shared-keep")
@@ -328,6 +333,7 @@ class TestLegacyCascade:
         """The old cascade leaked here. Re-pointed at delete_project_tree so
         there is only one delete path to keep correct."""
         from app.models import Blob
+
         from tests.services.helpers import make_object
 
         root = await make_project("legacy-cascade")
@@ -346,6 +352,7 @@ class TestLegacyCascade:
 
     async def test_cascade_false_still_refuses_a_non_empty_project(self):
         from app.errors import ConflictError
+
         from tests.services.helpers import make_object
 
         root = await make_project("legacy-refuse")

@@ -10,8 +10,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.models import ObjectRole
 from app.queue import results
 

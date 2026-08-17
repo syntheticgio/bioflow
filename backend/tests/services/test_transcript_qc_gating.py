@@ -5,7 +5,7 @@ between signals is the part worth testing: the authoritative field is
 unpopulated on real data, so the fallbacks carry the feature.
 """
 
-from app.services.transcript_qc_gating import Applicability, applicability
+from app.services.transcript_qc_gating import applicability
 
 
 def _obj(metadata=None, facts=None):

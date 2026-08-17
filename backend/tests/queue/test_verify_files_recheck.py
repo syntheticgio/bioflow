@@ -9,16 +9,14 @@ at once and had no automatic way back.
 """
 
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
 import pytest
-from beanie import PydanticObjectId, init_beanie
-from pymongo import AsyncMongoClient
-
 from app.config import settings
 from app.models import ALL_MODELS, Blob, BlobState, BlobStorage, DataObject, ObjectStatus
 from app.queue import handlers
 from app.queue.registry import JobContext
+from beanie import PydanticObjectId, init_beanie
+from pymongo import AsyncMongoClient
 
 # No `pytestmark = pytest.mark.asyncio` needed: pyproject.toml sets
 # `asyncio_mode = "auto"`.
@@ -90,7 +88,13 @@ class TestRecheckMissingBlobs:
     ):
         digest = "a" * 64
         await _missing_blob(digest)
-        obj = DataObject(project_id=PydanticObjectId(), name="f.fa", owner="local", blob_sha256=digest, status=ObjectStatus.MISSING)
+        obj = DataObject(
+            project_id=PydanticObjectId(),
+            name="f.fa",
+            owner="local",
+            blob_sha256=digest,
+            status=ObjectStatus.MISSING,
+        )
         await obj.insert()
 
         monkeypatch.setattr(handlers, "_stat_or_none", lambda path: object())
@@ -141,7 +145,13 @@ class TestRecheckMissingBlobs:
         over that by force-setting every referencing object back to READY."""
         digest = "c" * 64
         await _missing_blob(digest)
-        obj = DataObject(project_id=PydanticObjectId(), name="f.fa", owner="local", blob_sha256=digest, status=ObjectStatus.ERROR)
+        obj = DataObject(
+            project_id=PydanticObjectId(),
+            name="f.fa",
+            owner="local",
+            blob_sha256=digest,
+            status=ObjectStatus.ERROR,
+        )
         await obj.insert()
 
         monkeypatch.setattr(handlers, "_stat_or_none", lambda path: object())

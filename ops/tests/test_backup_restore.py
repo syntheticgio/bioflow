@@ -262,7 +262,8 @@ def seed(container: str, db: str = "biopipe") -> None:
     ]);
     db.blobs.insertMany([
       {_id: "blob1", size: 100, rel_path: "ab/blob1", content_sha256: "sha1", state: "active"},
-      {_id: "blob2", size: 200, external_path: "/ext/ref.fa", content_sha256: "sha2", state: "active"}
+      {_id: "blob2", size: 200, external_path: "/ext/ref.fa", content_sha256: "sha2",
+        state: "active"}
     ]);
     db.pipeline_runs.insertOne({_id: "run1", project_id: "proj1", status: "complete"});
     db.run_jobs.insertOne({_id: "job1", run_id: "run1", object_id: "obj1"});
@@ -446,7 +447,9 @@ def test_restore_rejects_a_database_mismatch_before_writing(scratch_mongo, tmp_p
     backup = sorted(tmp_path.iterdir())[0]
 
     manifest = backup / "manifest.json"
-    manifest.write_text(manifest.read_text().replace('"database": "biopipe"', '"database": "other"'))
+    manifest.write_text(
+        manifest.read_text().replace('"database": "biopipe"', '"database": "other"')
+    )
 
     result = run_script(["restore", str(backup), "--force"], scratch_mongo, tmp_path)
     assert result.returncode != 0

@@ -6,8 +6,6 @@ they need exhaustive cheap tests. `_chain` below is the only fixture helper.
 
 from datetime import datetime
 
-from beanie import PydanticObjectId
-
 from app.services.provenance_report import (
     _GAP_TEXT,
     gap_label,
@@ -22,6 +20,7 @@ from app.services.provenance_walker import (
     ProvenanceChain,
     Step,
 )
+from beanie import PydanticObjectId
 
 READS = PydanticObjectId()
 BAM = PydanticObjectId()

@@ -11,7 +11,6 @@ No test here touches the network; the live check runs separately.
 from pathlib import Path
 
 import pytest
-
 from app.metadata import enrich, sra
 from app.models import FormatKind
 
@@ -179,8 +178,10 @@ class TestMetadataMapping:
         assert sra.SraMetadata(library_source="SYNTHETIC").to_metadata()["molecule_type"] == "DNA"
 
     def test_metatranscriptomic_and_viral_rna_map_to_rna(self):
-        assert sra.SraMetadata(library_source="METATRANSCRIPTOMIC").to_metadata()["molecule_type"] == "RNA"
-        assert sra.SraMetadata(library_source="VIRAL RNA").to_metadata()["molecule_type"] == "RNA"
+        metatx = sra.SraMetadata(library_source="METATRANSCRIPTOMIC")
+        assert metatx.to_metadata()["molecule_type"] == "RNA"
+        viral = sra.SraMetadata(library_source="VIRAL RNA")
+        assert viral.to_metadata()["molecule_type"] == "RNA"
 
     def test_unrecognized_source_passes_through_but_molecule_type_is_other(self):
         """Losing information to an incomplete lookup table would be worse than

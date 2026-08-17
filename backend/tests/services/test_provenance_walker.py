@@ -6,10 +6,9 @@ the walker is tested against hand-built chains instead, with no DB at all.
 """
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.models.object import DataObject, ObjectRole, ObjectStatus
 from app.services.provenance_walker import GapKind, walk
+from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.asyncio(loop_scope="module"),

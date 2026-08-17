@@ -8,15 +8,12 @@ catches a scalar shortcut -- see models/run.py's `RunJob` docstring for why
 `Job` itself has no `run_id` field to fall back on.
 """
 
-import asyncio
 
 import pytest
-
 from app.models import (
     Job,
     JobClass,
     JobLease,
-    JobResources,
     JobState,
     RunJobRole,
     RunKind,

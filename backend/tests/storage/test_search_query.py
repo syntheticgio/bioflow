@@ -1,13 +1,12 @@
 """Search filter construction and the metadata filter mini-syntax."""
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.services.search_service import (
     SearchQuery,
     build_filter,
     parse_metadata_filters,
 )
+from beanie import PydanticObjectId
 
 OWNER = "owner-under-test"
 

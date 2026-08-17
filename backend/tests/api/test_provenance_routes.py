@@ -10,10 +10,9 @@ the isolation assertion has to be B asking for A's object.
 """
 
 import pytest
+from app.models.object import DataObject, ObjectRole, ObjectStatus
 from beanie import PydanticObjectId
 from httpx import AsyncClient
-
-from app.models.object import DataObject, ObjectRole, ObjectStatus
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),

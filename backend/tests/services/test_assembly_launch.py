@@ -7,15 +7,13 @@ including the parts of it that are wrong.
 """
 
 from types import SimpleNamespace
-
-from beanie import PydanticObjectId
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.services import pipeline_service
+from beanie import PydanticObjectId
 
 
 def _fasta(name, *, organism, role=ObjectRole.REFERENCE, facts=None):

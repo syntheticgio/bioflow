@@ -8,7 +8,6 @@ import json
 import urllib.error
 
 import pytest
-
 from app.models.ai import FailureReason
 from app.services.ai import adapters
 from app.services.ai.adapters import Completion, Failure, OpenAICompatAdapter

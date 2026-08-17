@@ -15,7 +15,6 @@ import time
 from dataclasses import dataclass, field
 
 import pytest
-
 from app.errors import JobCancelled
 from app.queue import executor as executor_module
 from app.queue.executor import run_subprocess

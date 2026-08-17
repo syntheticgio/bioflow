@@ -1,7 +1,6 @@
 """Chunk sizing and atomic chunk writes."""
 
 import pytest
-
 from app.services.upload_service import (
     DEFAULT_CHUNK_SIZE,
     MAX_CHUNKS,

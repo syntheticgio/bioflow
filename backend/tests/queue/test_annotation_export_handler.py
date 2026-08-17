@@ -5,8 +5,6 @@ import uuid
 from unittest.mock import AsyncMock
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.config import settings
 from app.errors import PermanentError
 from app.models import ObjectRole
@@ -14,6 +12,7 @@ from app.pipelines import annotation_db, annotation_hierarchy, annotation_parse
 from app.queue import results
 from app.queue.annotation_handlers import export_annotation_subset
 from app.services import object_service, project_service, run_service
+from beanie import PydanticObjectId
 
 
 @pytest.fixture(autouse=True)

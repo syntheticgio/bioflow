@@ -23,9 +23,8 @@ card kinds are bare strings with no enum. Endpoints are real routes, so
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from beanie import PydanticObjectId
-
 from app.services import running_now
+from beanie import PydanticObjectId
 
 
 class TestEndpointJobTypes:

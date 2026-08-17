@@ -6,9 +6,7 @@ cgroup ceiling, which does not move: the job dies identically on all five
 attempts, burning its full runtime each time.
 """
 
-from pathlib import Path
 
-import pytest
 
 from app.errors import PermanentError, RetryableError
 from app.queue.pipeline_handlers import _failure

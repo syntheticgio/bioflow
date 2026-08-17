@@ -8,8 +8,6 @@ exhaustive tests.
 
 from datetime import datetime
 
-from beanie import PydanticObjectId
-
 from app.services.provenance_lineage import (
     format_names,
     lineage_for,
@@ -17,6 +15,7 @@ from app.services.provenance_lineage import (
     order_lineage,
 )
 from app.services.provenance_walker import Node, ProvenanceChain, Step
+from beanie import PydanticObjectId
 
 DOWNLOAD_JOB = PydanticObjectId()
 TRIM_JOB = PydanticObjectId()

@@ -1,7 +1,6 @@
-import pytest
 from pathlib import Path
-from app.pipelines import synteny_runner
-from app.pipelines import ragtag_runner
+
+from app.pipelines import ragtag_runner, synteny_runner
 
 MIN = synteny_runner.MIN_SEGMENT_LENGTH
 MAX = synteny_runner.MAX_SYNTENY_SEGMENTS

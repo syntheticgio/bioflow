@@ -16,8 +16,6 @@ turn an isolation assertion into an ordering one.
 """
 
 import pytest
-from beanie import PydanticObjectId
-
 from app.errors import NotFoundError
 from app.models import (
     Job,
@@ -31,6 +29,7 @@ from app.models import (
     RunStatus,
 )
 from app.services import run_service
+from beanie import PydanticObjectId
 
 pytestmark = [
     pytest.mark.usefixtures("beanie_models"),
