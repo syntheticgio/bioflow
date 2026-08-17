@@ -86,23 +86,41 @@ async def connect_with_tofu(
     captured on first use and returned so the caller can persist it.
 
     Returns (connection, actual_host_key).
+
+    The host key is inspected through a `client_factory` client's
+    `validate_host_public_key`, NOT by passing a callable as `known_hosts`.
+    A callable given to `known_hosts` is a *known-hosts lookup*: asyncssh
+    calls it with `(host, addr, port)` -- three strings -- and expects it to
+    return the known-hosts entries for that host. Used as a host-key verifier
+    it raises `AttributeError: 'str' object has no attribute
+    'export_public_key'` against any real server, which no test caught
+    because they all mock `asyncssh.connect` and never invoke the callback.
+
+    `known_hosts` is left unset rather than passed as None: `known_hosts=None`
+    disables host key validation altogether, which would silently turn TOFU
+    pinning off instead of enforcing it.
     """
     key = asyncssh.import_private_key(private_key)
     captured_key: list[str] = []
 
-    def host_key_verifier(host_key, *args, **kwargs):
-        """asyncssh calls this with the server's host key."""
-        actual = host_key.export_public_key().decode().strip()
-        if stored_host_key is not None and actual != stored_host_key:
-            raise asyncssh.HostKeyNotVerifiable(
-                f"Host key for {host} changed.\n"
-                f"Expected: {stored_host_key}\n"
-                f"Actual:   {actual}\n"
-                "The machine identity may have changed. Re-enroll the node "
-                "to accept the new key."
-            )
-        captured_key.append(actual)
-        return True
+    class _TofuClient(asyncssh.SSHClient):
+        """asyncssh calls this with the server's host key, as an SSHKey."""
+
+        def validate_host_public_key(self, host_, addr, port_, host_key):
+            actual = host_key.export_public_key().decode().strip()
+            if stored_host_key is not None and actual != stored_host_key:
+                # Raised, not returned False: asyncssh turns a False return
+                # into its own generic "Host key is not trusted" message,
+                # which loses the expected/actual detail below.
+                raise asyncssh.HostKeyNotVerifiable(
+                    f"Host key for {host} changed.\n"
+                    f"Expected: {stored_host_key}\n"
+                    f"Actual:   {actual}\n"
+                    "The machine identity may have changed. Re-enroll the node "
+                    "to accept the new key."
+                )
+            captured_key.append(actual)
+            return True
 
     try:
         conn = await asyncio.wait_for(
@@ -110,7 +128,7 @@ async def connect_with_tofu(
                 host,
                 port=port,
                 username=username,
-                known_hosts=host_key_verifier,
+                client_factory=_TofuClient,
                 client_keys=[key],
             ),
             timeout=timeout_seconds,
