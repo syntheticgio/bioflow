@@ -829,10 +829,10 @@ def build_assemble_card(obj) -> SuggestionCard | None:
     predicts: a card reading "No assembler is installed" beside an installed
     assembler.
 
-    The two remaining refusals are kept distinct on purpose. Short reads have
-    an assembler that is not installed, which the user cannot fix today.
-    Unknown chemistry is a *missing fact*, which they can fix by running QC --
-    and telling them to install something instead would send them nowhere.
+    Short reads now assemble too, with ABySS -- added 2026-08-17. The one
+    remaining refusal is unknown chemistry, which is a *missing fact*, fixable
+    by running QC -- telling them to install something instead would send
+    them nowhere.
     """
     if obj.format.kind is not FormatKind.FASTQ:
         return None
@@ -841,18 +841,6 @@ def build_assemble_card(obj) -> SuggestionCard | None:
     spec = assembler_registry.spec_for_chemistry(chemistry)
 
     if spec is None:
-        if chemistry is align_runner.ReadChemistry.SHORT:
-            return SuggestionCard(
-                kind="assemble",
-                category="ASSEMBLE",
-                title="De novo assembly",
-                description="Assemble these reads into contigs without a reference.",
-                status=CardStatus.UNAVAILABLE,
-                reason=(
-                    "Short-read assembly is not installed. Only long reads "
-                    "can be assembled here."
-                ),
-            )
         if chemistry is None or chemistry is align_runner.ReadChemistry.UNKNOWN:
             return SuggestionCard(
                 kind="assemble",
@@ -895,13 +883,32 @@ def build_assemble_card(obj) -> SuggestionCard | None:
             or f"{spec.assembler.value} is not installed.",
         )
 
-    mode = assembler_registry.mode_for_chemistry(spec, chemistry)
+    if spec.layout == "paired":
+        from app.pipelines import pairing
+
+        # Filename-level only: this builder is synchronous and pure by
+        # contract, so it cannot look up the mate object. `launch_assembly`
+        # does the real resolution, including the read-ID veto. Saying
+        # "unpaired" here when a mate exists is not possible; saying "paired"
+        # when the veto later fires is, and that path refuses with an
+        # explanation rather than assembling.
+        paired = pairing.pairing_key(obj.name) is not None
+        why = (
+            "Paired short reads, assembled with ABySS."
+            if paired
+            else "Unpaired short reads, assembled with ABySS -- pairing both "
+            "mates gives a better assembly."
+        )
+    else:
+        mode = assembler_registry.mode_for_chemistry(spec, chemistry)
+        why = f"{_CHEMISTRY_LABELS.get(chemistry, 'Long')} reads, assembled as {mode}."
+
     return SuggestionCard(
         kind="assemble",
         category="ASSEMBLE",
         title=f"De novo assembly -- {spec.assembler.value}",
         description="Assemble these reads into contigs without a reference.",
-        why=f"{_CHEMISTRY_LABELS.get(chemistry, 'Long')} reads, assembled as {mode}.",
+        why=why,
         status=CardStatus.AVAILABLE,
         launch={
             "endpoint": "/pipelines/assemble",
