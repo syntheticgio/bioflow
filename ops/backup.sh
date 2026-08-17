@@ -39,6 +39,11 @@ Environment:
 EOF
 }
 
+# Colons are stripped: valid in ISO-8601, not a valid filename everywhere.
+backup_stamp() {
+  date -u +"%Y-%m-%dT%H%M%SZ"
+}
+
 # --- dispatch ---
 case "${1:-}" in
   backup)  shift; cmd_backup "$@" ;;
