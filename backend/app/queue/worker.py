@@ -381,28 +381,31 @@ class Worker:
         # The user's admission budget, if they set one. It only ever lowers
         # the ceiling -- see resource_limit_service.resolve_mem_budget_mb.
         #
-        # This is the entire enforcement path for the setting: `claim.lua`
-        # already refuses any candidate whose declared mem_mb exceeds the
-        # live-computed free amount, so a smaller ceiling here *is* the limit
-        # taking effect. A read failure falls back to the machine budget
-        # rather than stalling dispatch, matching _read_reservations' policy
-        # for the same reason.
+        # Enforcement is primarily at launch: pipeline_service refuses a job
+        # whose declared mem_mb exceeds this ceiling, because such a job could
+        # never be claimed (#478). `claim.lua` remains the backstop for jobs
+        # that reach the queue by another route. A read failure falls back to
+        # the machine budget rather than stalling dispatch, matching
+        # _read_reservations' policy for the same reason.
         machine_mb = int(mem_budget / (1024 * 1024))
         try:
             stored = await resource_limit_service.load()
-            budget_source_mb = resource_limit_service.resolve_mem_budget_mb(
-                stored_mb=stored.max_mem_mb, machine_mb=machine_mb
+            budget_mb = resource_limit_service.admission_budget_mb(
+                stored_mb=stored.max_mem_mb,
+                machine_mb=machine_mb,
+                # Binds unconditionally: a soft budget above the kernel's own
+                # ceiling admits jobs the kernel then OOM-kills.
+                hard_mem_mb=resource_limit_service.hard_mem_mb(),
             )
             if stored.max_cpu:
                 cpu_budget = min(cpu_budget, stored.max_cpu)
         except Exception as e:  # noqa: BLE001 - dispatch must survive a DB blip
             log.warning("resource_limits_read_failed", error=str(e))
-            budget_source_mb = machine_mb
+            budget_mb = resource_limit_service.admission_budget_mb(
+                stored_mb=None, machine_mb=machine_mb
+            )
 
         available_mb = int(psutil.virtual_memory().available / (1024 * 1024))
-        # Never hand out the last of memory: leave headroom so a job that
-        # slightly overshoots its declared demand does not push into swap.
-        budget_mb = int(budget_source_mb * 0.7)
 
         return {
             "cpu": int(cpu_budget),
