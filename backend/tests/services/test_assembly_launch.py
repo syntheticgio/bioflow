@@ -243,6 +243,15 @@ class TestLaunchReachesTheQueue:
             patch(
                 "app.services.object_service.list_objects", AsyncMock(return_value=[])
             ),
+            # No memory estimate is mocked here, so this run declares the flat
+            # UNKNOWN_ASSEMBLY_MEM_MB fallback (#478's cleanest case). A
+            # generous admission budget keeps that declaration from being
+            # refused, since this test's purpose is asserting the launch
+            # reaches the queue, not exercising the budget refusal itself.
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
         ):
             job = await pipeline_service.launch_assembly(
                 object_id=reads.id, owner="local"

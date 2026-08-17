@@ -189,6 +189,14 @@ class TestAssemblyRefusal:
                 "app.services.memory_estimate.resolve",
                 AsyncMock(return_value=_memory_estimate(999_999)),
             ),
+            # A generous admission budget so the #478 declared-vs-budget
+            # refusal (which runs before this heuristic BLOCK check) does not
+            # preempt it -- this test is pinning the heuristic refusal's own
+            # message shape, not the declared-budget one.
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
         ):
             with pytest.raises(ValidationError) as exc:
                 await pipeline_service.launch_assembly(
