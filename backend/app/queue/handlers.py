@@ -13,7 +13,15 @@ from beanie import PydanticObjectId
 from app.config import settings
 from app.errors import PermanentError
 from app.logging import get_logger
-from app.models import DataObject, IoClass, JobClass, JobResources, ObjectStatus
+from app.models import (
+    DataObject,
+    FormatKind,
+    IoClass,
+    JobClass,
+    JobResources,
+    ObjectRole,
+    ObjectStatus,
+)
 from app.queue.registry import HandlerMode, JobContext, handler
 from app.storage import cas
 from app.storage.paths import blob_path
@@ -322,6 +330,43 @@ def ingest_headers(ctx: JobContext) -> dict:
             existing_metadata=ctx.payload.get("metadata") or {},
             format_kind=detection.kind,
         ).to_dict()
+
+    # Protein FASTA records: what proteins are in this file, so the Structure
+    # tab can list them. Gated on format and role (R4) -- no other object
+    # gains records. `role` is not on the payload (`enqueue_ingest` only puts
+    # object_id/name/metadata/path there), so the object itself is fetched.
+    #
+    # Wrapped so a failure here cannot fail the ingest (R9): facts are this
+    # handler's primary product and the record list is additive. A protein
+    # file that ingests today must still ingest after this change (R34).
+    #
+    # `run_from_thread`, not `asyncio.run`: this handler is HandlerMode.THREAD
+    # and has no loop of its own, while the Mongo client is bound to the loop
+    # `connect_to_mongo()` ran on. A fresh loop makes Motor raise "attached to
+    # a different loop" the moment a query touches it.
+    if detection.kind is FormatKind.FASTA:
+        from app.db.client import run_from_thread
+
+        try:
+            obj = run_from_thread(DataObject.get(PydanticObjectId(object_id)))
+            if obj is not None and obj.role is ObjectRole.PROTEIN:
+                from app.services import protein_record_index
+
+                ctx.progress(phase="indexing proteins", pct=0.9)
+                result = run_from_thread(
+                    protein_record_index.index_protein_records(
+                        object_id=object_id,
+                        path=path,
+                        compression=detection.compression,
+                    )
+                )
+                facts["protein_records_indexed"] = result.indexed
+                if result.truncated:
+                    facts["protein_records_truncated"] = True
+        except Exception as exc:
+            log.warning(
+                "protein_record_index_failed", object_id=str(object_id), error=str(exc)
+            )
 
     # Sequence type: purely a read of the filename, so unlike the two lookups
     # above it costs nothing, never fails and needs no setting to gate it. It
