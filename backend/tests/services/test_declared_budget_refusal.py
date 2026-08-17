@@ -7,7 +7,6 @@ that wait.
 """
 
 import pytest
-
 from app.errors import ValidationError
 from app.pipelines import resource_estimator
 from app.services import pipeline_service, resource_limit_service
