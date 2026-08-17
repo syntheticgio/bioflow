@@ -64,3 +64,24 @@ def test_unknown_assembly_declaration_exceeds_a_modest_budget():
             budget_mb=budget,
             resource_override=False,
         )
+
+
+def test_min_declared_floor_can_exceed_a_small_budget():
+    """Spec case 2: the floor lifts a declaration past a banded-OK estimate.
+
+    `declared_align_mem_mb` floors at MIN_DECLARED_MEM_MB, so a tiny alignment
+    still declares 2048 MB. Under a very small budget that is unclaimable,
+    while the estimate the banding saw was smaller and passed.
+    """
+    tiny_budget = resource_limit_service.admission_budget_mb(
+        stored_mb=1024, machine_mb=32000
+    )
+    assert resource_estimator.exceeds_declared_budget(
+        declared_mb=pipeline_service.MIN_DECLARED_MEM_MB, budget_mb=tiny_budget
+    )
+    with pytest.raises(ValidationError):
+        pipeline_service.refuse_if_over_budget(
+            declared_mb=pipeline_service.MIN_DECLARED_MEM_MB,
+            budget_mb=tiny_budget,
+            resource_override=False,
+        )
