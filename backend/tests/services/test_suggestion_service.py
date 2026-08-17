@@ -2205,3 +2205,70 @@ class TestContinuityCard:
         assert card is not None
         assert card.status is CardStatus.UNAVAILABLE
         assert "same aligner" in card.reason.lower()
+
+
+class TestCardBuilderRegistry:
+    """`CARD_BUILDERS` is hand-maintained and keyed by convention.
+
+    The registry-audit shape from CLAUDE.md: a builder that exists but is not
+    registered renders nothing, with no error anywhere -- the same silent-skip
+    failure that cost `results._SIDECAR_ROLES` a build_index job's eight files.
+    A chain of `if` statements could not have that bug; a registry can, so it
+    pays for the test.
+    """
+
+    def _builder_names(self):
+        """Every `build_*_card` this module defines."""
+        import app.services.suggestion_service as mod
+
+        return {
+            name
+            for name in dir(mod)
+            if name.startswith("build_") and name.endswith("_card")
+        }
+
+    def _registered_names(self):
+        """Every `build_*_card` the registry's lambdas actually call.
+
+        Read from each lambda's bytecode rather than by calling it: calling
+        would need a fully-populated context and would make this test depend
+        on card logic it is not testing.
+        """
+        from app.services.suggestion_service import CARD_BUILDERS
+
+        names = set()
+        for _kind, build in CARD_BUILDERS:
+            names.update(
+                n
+                for n in build.__code__.co_names
+                if n.startswith("build_") and n.endswith("_card")
+            )
+        return names
+
+    def test_every_builder_is_registered(self):
+        """If this fails after you added a card: add it to CARD_BUILDERS.
+
+        Position in that tuple is the card's position in the Actions tab, so
+        appending puts it last -- a UI decision worth making deliberately.
+        Do not delete the assertion.
+        """
+        assert self._builder_names() == self._registered_names()
+
+    def test_no_builder_is_registered_twice(self):
+        """Two entries calling one builder renders that card twice."""
+        from app.services.suggestion_service import CARD_BUILDERS
+
+        called = [
+            n
+            for _kind, build in CARD_BUILDERS
+            for n in build.__code__.co_names
+            if n.startswith("build_") and n.endswith("_card")
+        ]
+        assert len(called) == len(set(called))
+
+    def test_kinds_are_unique(self):
+        """`kind` is what the frontend keys a card by, and what the failure log names."""
+        from app.services.suggestion_service import CARD_BUILDERS
+
+        kinds = [kind for kind, _build in CARD_BUILDERS]
+        assert len(kinds) == len(set(kinds))
