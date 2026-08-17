@@ -770,55 +770,57 @@ function ObjectDetail({ id }: { id: string }) {
         <Tabs tabs={tabs} active={tab} onChange={setTab} idPrefix="obj" />
 
         {tab === "qc" && (
-          <TabPanel id="qc" idPrefix="obj">
-            <QcTab
-              obj={obj}
-              isReference={isReference}
-              // Built here because it needs the same runQC mutation the
-              // Computations section drives; QcTab only decides where it sits.
-              runQcPrompt={
-                canQC && !hasQc ? (
-                  <div
-                    className="warn-box"
-                    style={{
-                      marginBottom: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 12,
-                    }}
-                  >
-                    <span>
-                      No QC has been run on this file yet. Read chemistry,
-                      adapter content and the quality distribution all come
-                      from it — and several pipeline suggestions stay disabled
-                      without it.
-                    </span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <NodeSelector value={targetNode} onChange={setTargetNode} />
-                      <button
-                        type="button"
-                        className="btn primary"
-                        style={{ flexShrink: 0 }}
-                        onClick={() => setShowQcDialog(true)}
-                        disabled={runQC.isPending || qcActive}
-                      >
-                        {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
-                      </button>
+          <div>
+            <TabPanel id="qc" idPrefix="obj">
+              <QcTab
+                obj={obj}
+                isReference={isReference}
+                // Built here because it needs the same runQC mutation the
+                // Computations section drives; QcTab only decides where it sits.
+                runQcPrompt={
+                  canQC && !hasQc ? (
+                    <div
+                      className="warn-box"
+                      style={{
+                        marginBottom: 12,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                      }}
+                    >
+                      <span>
+                        No QC has been run on this file yet. Read chemistry,
+                        adapter content and the quality distribution all come
+                        from it — and several pipeline suggestions stay disabled
+                        without it.
+                      </span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <NodeSelector value={targetNode} onChange={setTargetNode} />
+                        <button
+                          type="button"
+                          className="btn primary"
+                          style={{ flexShrink: 0 }}
+                          onClick={() => setShowQcDialog(true)}
+                          disabled={runQC.isPending || qcActive}
+                        >
+                          {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : null
-              }
-            />
-          </TabPanel>
+                  ) : null
+                }
+              />
+            </TabPanel>
 
-          {showQcDialog && (
-            <QcDialog
-              objectId={id}
-              projectId={obj.project_id}
-              onClose={() => setShowQcDialog(false)}
-            />
-          )}
+            {showQcDialog && (
+              <QcDialog
+                objectId={id}
+                projectId={obj.project_id}
+                onClose={() => setShowQcDialog(false)}
+              />
+            )}
+          </div>
 
         )}
 
