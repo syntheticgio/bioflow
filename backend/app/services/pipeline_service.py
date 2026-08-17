@@ -61,7 +61,13 @@ from app.pipelines import (
     assembly_params as assembly_params_module,
 )
 from app.pipelines.aligners import Aligner
-from app.services import blob_service, memory_estimate, object_service, run_service
+from app.services import (
+    blob_service,
+    memory_estimate,
+    object_service,
+    resource_limit_service,
+    run_service,
+)
 from app.storage.paths import blob_path
 
 log = get_logger(__name__)
@@ -1307,6 +1313,60 @@ JOB_TYPE_ASSEMBLE = "assemble_reads"
 # generous. Reserving too little would let the governor admit an assembly
 # alongside other work and drive the machine into swap.
 UNKNOWN_ASSEMBLY_MEM_MB = 16384
+
+
+def refuse_if_over_budget(
+    *, declared_mb: int, budget_mb: int, resource_override: bool
+) -> None:
+    """Refuse a job whose declared reservation could never be claimed (#478).
+
+    Pure and budget-injected so it can be tested without a database, and so
+    both launch paths share one definition of the refusal.
+
+    `resource_override` is the user's "Launch anyway", the same flag the
+    estimate-based refusal honours: it rides the job document to claim.lua,
+    which admits the job when it is the sole occupant. That is a real escape
+    here rather than a rubber stamp -- an over-budget job genuinely can run,
+    just not alongside anything else.
+    """
+    if resource_override:
+        return
+    if not resource_estimator.exceeds_declared_budget(
+        declared_mb=declared_mb, budget_mb=budget_mb
+    ):
+        return
+    raise ValidationError(
+        resource_estimator.explain_declared_refusal(
+            declared_mb=declared_mb, budget_mb=budget_mb
+        ),
+        details={"declared_mb": declared_mb, "budget_mb": budget_mb},
+    )
+
+
+async def current_admission_budget_mb() -> int:
+    """The ceiling a launch is checked against, matching the worker's.
+
+    Reads the stored limits like `worker._resource_budgets` does, and falls
+    back to the machine's own budget on a read failure for the same reason:
+    a DB blip must not refuse every launch.
+    """
+    # Imported in-function, matching the existing LoadGovernor call sites
+    # in this module. Hoisting it to module scope is a separate change with
+    # cycle risk, not part of this fix.
+    from app.queue.governor import LoadGovernor
+
+    machine_mb = int(LoadGovernor().mem_budget_bytes() / (1024 * 1024))
+    try:
+        stored = await resource_limit_service.load()
+        stored_mb = stored.max_mem_mb
+    except Exception as e:  # noqa: BLE001 - a launch must survive a DB blip
+        log.warning("resource_limits_read_failed", error=str(e))
+        stored_mb = None
+    return resource_limit_service.admission_budget_mb(
+        stored_mb=stored_mb,
+        machine_mb=machine_mb,
+        hard_mem_mb=resource_limit_service.hard_mem_mb(),
+    )
 
 
 async def declared_align_mem_mb(
@@ -4292,6 +4352,18 @@ async def launch_assembly(
         threads=parsed.threads,
     )
     estimate = resolved.mb
+
+    # Hoisted from the enqueue below so it can be checked before we get there.
+    # Outside the `estimate is not None` guard on purpose: an assembly nothing
+    # can estimate declares the flat fallback and is banded by nothing at all,
+    # which is the cleanest instance of #478.
+    declared_mem_mb = estimate or UNKNOWN_ASSEMBLY_MEM_MB
+    refuse_if_over_budget(
+        declared_mb=declared_mem_mb,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
+
     if estimate is not None:
         mem_budget_mb = int(LoadGovernor().mem_budget_bytes() / (1024 * 1024))
         band = resource_estimator.classify(
@@ -4395,7 +4467,7 @@ async def launch_assembly(
         # for whenever the governor learns to read it.
         resources=JobResources(
             cpu=parsed.threads,
-            mem_mb=estimate or UNKNOWN_ASSEMBLY_MEM_MB,
+            mem_mb=declared_mem_mb,
             io=IoClass.HEAVY,
         ),
         # One attempt, matching the handler: a retried assembly costs hours and
