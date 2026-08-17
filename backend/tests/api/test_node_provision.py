@@ -19,6 +19,14 @@ pytestmark = [pytest.mark.usefixtures("beanie_models"), pytest.mark.asyncio(loop
 
 # ---- helpers ----
 
+# `verify_key` returns (connection, host_key) so the caller can pin the key on
+# first use (6b3f0c18). A mock that returns a bare AsyncMock unpacks to nothing
+# and fails provisioning before the node document is written, which reads as a
+# provisioning bug rather than a stale mock -- so every patch of it in this
+# module returns a real two-tuple.
+_FAKE_HOST_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake"
+
+
 def _app():
     """Bare FastAPI app with only the nodes router."""
     app = FastAPI()
@@ -389,7 +397,7 @@ async def test_provision_stores_encrypted_key_not_the_password():
     fake_verify_conn.close = MagicMock()
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
          patch("app.services.node_ssh.verify_key",
-               AsyncMock(return_value=(fake_verify_conn, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFake"))), \
+               AsyncMock(return_value=(fake_verify_conn, _FAKE_HOST_KEY))), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = ssh.connect.return_value
@@ -481,7 +489,8 @@ async def test_provision_private_key_uses_real_import_private_key():
     )
 
     with patch("asyncssh.connect", AsyncMock()) as connect_mock, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key",
+               AsyncMock(return_value=(MagicMock(), _FAKE_HOST_KEY))), \
          patch("pathlib.Path.exists", return_value=True), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()):
         conn = connect_mock.return_value
@@ -628,7 +637,8 @@ async def test_provision_emits_the_documented_phase_sequence():
         return await real_save(self)
 
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key",
+               AsyncMock(return_value=(MagicMock(), _FAKE_HOST_KEY))), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0), \
          patch.object(NodeProvisionTask, "save", _record):
@@ -744,7 +754,8 @@ async def test_provision_fails_when_the_worker_exits_after_starting():
         return _FakeResult(0)
 
     with patch("app.api.v1.nodes.asyncssh") as ssh, \
-         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.services.node_ssh.verify_key",
+               AsyncMock(return_value=(MagicMock(), _FAKE_HOST_KEY))), \
          patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
          patch("app.api.v1.nodes._VERIFY_SETTLE_SECONDS", 0):
         conn = ssh.connect.return_value
