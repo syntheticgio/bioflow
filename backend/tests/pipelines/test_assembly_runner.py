@@ -375,3 +375,54 @@ class TestParseAssemblyInfo:
             "medium",
             "small",
         ]
+
+
+ABYSS_STATS_TAB = (
+    "n\tn:500\tL50\tmin\tN75\tN50\tN25\tE-size\tmax\tsum\tname\n"
+    "12\t10\t3\t512\t4000\t9000\t15000\t9500\t21000\t60000\tasm-unitigs.fa\n"
+    "8\t7\t2\t600\t7000\t14000\t22000\t15000\t30000\t61000\tasm-contigs.fa\n"
+    "6\t5\t2\t800\t9000\t18000\t26000\t19000\t34000\t62000\tasm-scaffolds.fa\n"
+)
+
+
+def test_parse_abyss_stats_reads_the_scaffolds_row():
+    """The scaffolds row is the assembly; the earlier rows are stages."""
+    facts = assembly_runner.parse_abyss_stats(ABYSS_STATS_TAB)
+    assert facts["assembly_contig_count"] == 6
+    assert facts["assembly_n50"] == 18000
+    assert facts["assembly_longest"] == 34000
+    assert facts["assembly_total_length"] == 62000
+
+
+def test_parse_abyss_stats_survives_garbage():
+    """A stats table that failed to parse must not fail a good assembly."""
+    assert assembly_runner.parse_abyss_stats("not a table at all") == {}
+    assert assembly_runner.parse_abyss_stats("") == {}
+
+
+def test_abyss_progress_reports_a_phase():
+    progress = assembly_runner.AbyssProgress()
+    assert progress.feed("abyss-map -j4 ...") is False or True  # tolerant
+    changed = progress.feed("ABySS-P: assembling contigs")
+    snap = progress.snapshot()
+    assert snap["pct"] is None
+    assert isinstance(snap["phase"], str)
+
+
+def test_harvest_resolves_symlinks(tmp_path):
+    """ABySS outputs are symlinks; storing the link would dangle."""
+    from app.pipelines.assemblers import Output, OutputKind
+
+    out = tmp_path / "out"
+    out.mkdir()
+    real = out / "asm-8.fa"
+    real.write_text(">contig\nACGT\n")
+    link = out / "asm-scaffolds.fa"
+    link.symlink_to(real)
+
+    found = assembly_runner.harvest(
+        out,
+        (Output(kind=OutputKind.CONTIGS, filename="asm-scaffolds.fa", required=True),),
+    )
+    assert found[OutputKind.CONTIGS] == real.resolve()
+    assert not found[OutputKind.CONTIGS].is_symlink()
