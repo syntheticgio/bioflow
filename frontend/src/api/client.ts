@@ -61,6 +61,8 @@ import type {
   Profile,
   Project,
   ProjectDetail,
+  ProteinRecords,
+  ProteinStructure,
   ProvenanceNarrative,
   ProvenanceProse,
   QuantifyDefaults,
@@ -1139,6 +1141,34 @@ export const api = {
   /** URL for downloading the complete variants TSV. */
   vcfStatsDownloadUrl: (objectId: string, reportPath: string) =>
     `${BASE}/pipelines/vcfstats/report/${objectId}/${reportPath}?${profileQuery()}`,
+
+  /** One page of a protein FASTA's records, optionally filtered.
+   *
+   *  `q` matches identifier or description: a user does not know which field
+   *  holds the text they remember. */
+  proteinRecords: (
+    objectId: string,
+    opts: { offset?: number; limit?: number; q?: string } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (opts.offset) params.set("offset", String(opts.offset));
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.q) params.set("q", opts.q);
+    const query = params.toString();
+    return request<ProteinRecords>(
+      `/objects/${objectId}/protein-records${query ? `?${query}` : ""}`,
+    );
+  },
+
+  /** The structure for one record, resolved on selection.
+   *
+   *  Resolved per record rather than per page for the reason the variants
+   *  viewer records: most records resolve to nothing, and pre-resolving would
+   *  spend a round trip per row to decide how buttons look. */
+  proteinRecordStructure: (objectId: string, ordinal: number) =>
+    request<ProteinStructure>(
+      `/objects/${objectId}/protein-records/${ordinal}/structure`,
+    ),
 
   /** Queue the Results computation for a GFF/GTF/BED. Read-only: produces
    * facts and a SQLite feature index, no derived objects. */

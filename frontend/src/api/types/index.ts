@@ -17,6 +17,7 @@ export * from "./ncbi";
 export * from "./object";
 export * from "./pipeline";
 export * from "./project";
+export * from "./protein";
 export * from "./qc";
 export * from "./run";
 export * from "./share";
