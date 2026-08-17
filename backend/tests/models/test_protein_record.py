@@ -6,8 +6,9 @@ why registration is asserted here rather than assumed.
 """
 
 import pytest
-from app.models import ALL_MODELS, ProteinRecord
+
 from app.metadata.protein_headers import RefKind
+from app.models import ALL_MODELS, ProteinRecord
 
 pytestmark = pytest.mark.usefixtures("beanie_models")
 
