@@ -46,14 +46,47 @@ export function ProjectExport({
     enabled: open,
   });
 
+  // Backing data for the projected-archive-size estimate below. There is no
+  // backend endpoint that computes this (Task 8 only shipped create/list/
+  // download), so it's derived client-side from the same object listing the
+  // rest of the app already fetches for a project. Same lazy-fetch reasoning
+  // as `exports` above.
+  const objects = useQuery({
+    queryKey: ["objects", projectId],
+    queryFn: () => api.listObjects(projectId),
+    enabled: open,
+  });
+
+  // Shared by the mutation and the projected-size estimate below, so the
+  // number shown is provably the same threshold the submit button would
+  // send -- undefined (falls back to the backend's own default) whenever the
+  // field is empty or not a usable number.
+  const thresholdBytes = (() => {
+    const trimmed = thresholdMb.trim();
+    const mb = trimmed ? Number(trimmed) : NaN;
+    return trimmed && Number.isFinite(mb) && mb >= 0
+      ? Math.round(mb * 1024 * 1024)
+      : undefined;
+  })();
+  const effectiveThresholdBytes = thresholdBytes ?? DEFAULT_THRESHOLD_BYTES;
+
+  // What the archive would weigh at the current threshold: the sum of every
+  // object's own size, for objects at or under the threshold -- the same
+  // `size <= threshold_bytes` rule export_service.build_manifest applies on
+  // the backend (backend/app/services/export_service.py:217), just run here
+  // against DataObject.size rather than Blob.size. That's an approximation,
+  // not the real figure: the backend's rule is per deduplicated *blob*, and
+  // two objects can share one blob, so summing per-object sizes can double
+  // count a blob included via two objects. It only ever overstates the real
+  // total, so it's shown as an upper bound rather than an exact number.
+  const projectedBytes =
+    objects.data?.filter((o) => o.size <= effectiveThresholdBytes).reduce(
+      (sum, o) => sum + o.size,
+      0,
+    ) ?? null;
+
   const create = useMutation({
     mutationFn: () => {
-      const trimmed = thresholdMb.trim();
-      const mb = trimmed ? Number(trimmed) : NaN;
-      const thresholdBytes =
-        trimmed && Number.isFinite(mb) && mb >= 0
-          ? Math.round(mb * 1024 * 1024)
-          : undefined;
       return api.createExport(projectId, thresholdBytes);
     },
     onSuccess: () => {
@@ -125,6 +158,27 @@ export function ProjectExport({
         <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 4 }}>
           Larger files are listed in the archive but not included in it.
           Default is {formatBytes(DEFAULT_THRESHOLD_BYTES)}.
+        </div>
+        <div style={{ fontSize: 12, marginTop: 8 }}>
+          {objects.isLoading
+            ? "Estimating archive size…"
+            : objects.isError
+              ? `Couldn't estimate archive size: ${objects.error.message}`
+              : projectedBytes != null && (
+                  <>
+                    Projected size: up to{" "}
+                    <strong>{formatBytes(projectedBytes)}</strong>
+                    <span style={{ color: "var(--text-faint)" }}>
+                      {" "}
+                      (an upper bound -- files shared between two records in
+                      this project are only stored once in the real archive)
+                    </span>
+                  </>
+                )}
+        </div>
+        <div style={{ color: "var(--text-faint)", fontSize: 11, marginTop: 8 }}>
+          Removed automatically: API keys, absolute file paths, and machine
+          names.
         </div>
       </div>
 
