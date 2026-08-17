@@ -276,3 +276,24 @@ class TestExportProject:
 
         for forbidden in (b"/Users/gio", b"secret.key", b"fernet", b"ai_providers"):
             assert forbidden.lower() not in blob.lower(), f"{forbidden!r} leaked"
+
+
+def test_export_launcher_is_excluded_from_node_types():
+    """Export is a project-level operation, not a pipeline node.
+
+    node_types.py asserts every launch_* is either a NodeTypeSpec or
+    explicitly excluded. #355 added both for one launcher in separate
+    commits, satisfying the test its issue named while silently failing
+    test_no_launcher_is_both_used_and_excluded in the same class.
+
+    Compares against spec.launch_name (the "module.function_name" string),
+    not spec.launch (the callable) -- a string can never be "in" a set of
+    function objects, so comparing against spec.launch would make this
+    assertion vacuously true regardless of whether the exclusion is correct.
+    """
+    from app.pipelines.node_types import EXCLUDED_LAUNCHES, NODE_TYPES
+
+    name = "pipeline_service.launch_project_export"
+    assert name in EXCLUDED_LAUNCHES
+    launch_names = {spec.launch_name for spec in NODE_TYPES.values()}
+    assert name not in launch_names
