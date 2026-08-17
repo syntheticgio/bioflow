@@ -92,3 +92,84 @@ async def collect(project_id: PydanticObjectId, *, owner: str) -> ExportBundle:
         timings=timings,
         blobs=blobs,
     )
+
+
+# The collections an archive may contain, named explicitly.
+#
+# Exclusion by construction, and deliberately the OPPOSITE of ops/backup.sh,
+# which dumps every collection with no allowlist. The two are right for
+# opposite reasons: for a backup, a missed collection is silent permanent
+# data loss, so including by default fails safe. For an export, a collection
+# added later that holds something sensitive would quietly leave the machine,
+# so excluding by default fails safe.
+#
+# Adding a collection here is a decision to send its contents to someone
+# else. `ai_providers`, `app_settings`, `nodes`, and `profiles` are absent
+# and must stay absent.
+SERIALIZED_COLLECTIONS = (
+    "projects",
+    "objects",
+    "runs",
+    "run_jobs",
+    "job_timings",
+    "blobs",
+)
+
+
+@dataclass
+class RedactionSummary:
+    """What redaction removed, reported to the user after the fact."""
+
+    paths_relativized: int = 0
+    machine_records_cleared: int = 0
+    profile: str = "secrets+paths+machine"
+
+
+def _strip_paths(doc: dict) -> int:
+    """Drop absolute filesystem paths. Returns how many were removed.
+
+    `rel_path` survives: it is relative by construction and the manifest
+    needs it. `external_path` and anything else absolute leaks a username
+    and directory layout, and means nothing on the recipient's machine.
+    """
+    removed = 0
+    for key in ("external_path", "source_path", "bioinfo_home"):
+        if doc.get(key) is not None:
+            doc[key] = None
+            removed += 1
+    return removed
+
+
+def redact(bundle: ExportBundle) -> tuple[dict[str, list[dict]], RedactionSummary]:
+    """Serialize the bundle, stripping secrets, paths, and machine identity.
+
+    Returns the per-collection documents and a summary of what was removed,
+    which the job reports so the user can check what left the machine.
+    """
+    summary = RedactionSummary()
+    docs: dict[str, list[dict]] = {name: [] for name in SERIALIZED_COLLECTIONS}
+
+    for project in bundle.projects:
+        docs["projects"].append(project.model_dump(mode="json", by_alias=True))
+    for obj in bundle.objects:
+        d = obj.model_dump(mode="json", by_alias=True)
+        summary.paths_relativized += _strip_paths(d)
+        docs["objects"].append(d)
+    for run in bundle.runs:
+        docs["runs"].append(run.model_dump(mode="json", by_alias=True))
+    for run_job in bundle.run_jobs:
+        docs["run_jobs"].append(run_job.model_dump(mode="json", by_alias=True))
+    for timing in bundle.timings:
+        d = timing.model_dump(mode="json", by_alias=True)
+        # Durations stay -- "this alignment took 40 minutes" is part of the
+        # analysis record. "It ran on gio-workstation.local" is not.
+        if d.get("machine"):
+            d["machine"] = {}
+            summary.machine_records_cleared += 1
+        docs["job_timings"].append(d)
+    for blob in bundle.blobs:
+        d = blob.model_dump(mode="json", by_alias=True)
+        summary.paths_relativized += _strip_paths(d)
+        docs["blobs"].append(d)
+
+    return docs, summary
