@@ -71,6 +71,21 @@ to the same size threshold as any other bytes (§3) and listed in
 separate opt-in: an object included without its sidecars is a trap the
 recipient discovers later.
 
+**Known gap: report directories are not yet packed.** Sidecars (`DataObject`s
+with `sidecar_of` set, e.g. a BAM index) are covered -- `collect()` picks
+them up incidentally because they are ordinary objects. But
+`qc_reports_dir`, `bam_stats_dir`, `vcf_stats_dir`, and `annotation_stats_dir`
+(`config.py`) are not blobs at all; they live outside `objects/`, keyed by
+object id, and the implementation does not currently walk them, add their
+bytes to the archive, or add rows for them to `data-manifest.tsv`. This was
+flagged in the 2026-08-17 final whole-branch review (I4) as an omission the
+spec's own text rules out being silent about -- the README and `report.md`
+now say plainly that these directories are not included, and
+[#536](https://github.com/syntheticgio/bioflow/issues/536) tracks packing
+them properly (mapping each directory to manifest rows, applying the size
+threshold, and matching entries to objects is real scope of its own). This
+is a deliberate, recorded deferral, not an oversight.
+
 ### 2. Read-only now, import later
 
 The recipient reads, checks, or cites the analysis. They may not be running
