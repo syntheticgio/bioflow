@@ -334,6 +334,7 @@ def _assembly_estimate(params: dict) -> int | None:
         assembler=Assembler(params["assembler"]),
         genome_bases=params["genome_bases"],
         threads=params["threads"],
+        read_bases=params.get("read_bases"),
     )
 
 
