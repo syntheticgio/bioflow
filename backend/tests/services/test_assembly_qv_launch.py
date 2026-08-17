@@ -16,16 +16,18 @@ sidecar group, since that reconstruction logic is new and has no existing
 sibling to lean on for confidence.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from beanie import PydanticObjectId
+
 from app.config import settings
 from app.errors import ValidationError
 from app.models import FormatKind, ObjectStatus, SidecarRole
 from app.pipelines.tools import Tool
 from app.services import pipeline_service
-from beanie import PydanticObjectId
 
 _MERYL = Tool(name="meryl", path="/usr/local/bin/meryl", version="1.4.1")
 _MERQURY = Tool(name="merqury", path="/usr/local/bin/merqury.sh", version="1.3")
@@ -221,6 +223,22 @@ class TestMerylCacheMaterialization:
     gets its own direct coverage rather than only being exercised indirectly
     through the launch path.
     """
+
+    @pytest.fixture(autouse=True)
+    def _isolated_home(self, monkeypatch, tmp_path: Path):
+        """Redirect this class's blob writes off the real storage home.
+
+        `_member` below writes real bytes where a managed blob would live, and
+        `_materialize_meryl_cache` reads them back through `blob_path()` before
+        reassembling the database under `settings.tmp_dir`. Unpatched, both land
+        in the `/data` tree shared with the running stack (shared deliberately,
+        per CLAUDE.md) -- and since `_member` never calls `create_blob_record`,
+        every run left files that #412's drift sweep then reported as
+        `orphaned_file`. `objects_dir` and `tmp_dir` are read-only properties
+        derived from `bioinfo_home`, so that field is the one seam that moves
+        both.
+        """
+        monkeypatch.setattr(settings, "bioinfo_home", tmp_path / "home")
 
     def _member(
         self, *, db_name, rel, k, owner, project_id, content=b"x", digest=None,
