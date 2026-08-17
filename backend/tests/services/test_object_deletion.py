@@ -19,7 +19,12 @@ pytestmark = [
 
 
 def report_dirs():
-    return (settings.qc_reports_dir, settings.bam_stats_dir, settings.vcf_stats_dir)
+    return (
+        settings.qc_reports_dir,
+        settings.bam_stats_dir,
+        settings.vcf_stats_dir,
+        settings.annotation_stats_dir,
+    )
 
 
 class TestReportDirCleanup:
@@ -122,6 +127,42 @@ class TestReportDirCleanup:
         await object_service.delete_object(bam.id, owner=TEST_OWNER)
 
         assert not d.exists()
+
+
+class TestCopyReportDirs:
+    async def test_copies_annotation_stats_dir(self):
+        """Sharing an object copies the annotation feature database too."""
+        from app.services import project_service
+
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="copy-annot", owner=TEST_OWNER)
+        src = await make_object(root, "source.gff")
+        dst = await make_object(root, "copy.gff")
+
+        d = settings.annotation_stats_dir / str(src.id)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "features.db").write_text("annotation data")
+
+        object_service.copy_report_dirs(src.id, dst.id)
+
+        copied = settings.annotation_stats_dir / str(dst.id)
+        assert (copied / "features.db").read_text() == "annotation data"
+
+    async def test_skips_missing_source_dirs(self):
+        """A source with no annotation results copies without error."""
+        from app.services import project_service
+
+        from tests.services.helpers import make_object
+
+        root = await project_service.create_project(name="copy-skip", owner=TEST_OWNER)
+        src = await make_object(root, "source.fasta")
+        dst = await make_object(root, "copy.fasta")
+
+        # No annotation_stats dir exists for src — should not raise.
+        object_service.copy_report_dirs(src.id, dst.id)
+
+        assert not (settings.annotation_stats_dir / str(dst.id)).exists()
 
 
 class TestReapReportDirs:
