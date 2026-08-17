@@ -6,11 +6,19 @@ import type {
   RunDetail,
   RunMemberJob,
   RunSummary,
+  SystemLoad,
   WorkflowRunRow,
 } from "../../api/types";
 import { formatClock } from "../../lib/format";
 import { notify } from "../../stores/messageStore";
-import { ROLE_LABELS, STATUS_LABELS, kindAction, runFacts } from "../../lib/runFormat";
+import {
+  ROLE_LABELS,
+  STATUS_LABELS,
+  WAITING,
+  kindAction,
+  runFacts,
+  waitingReason,
+} from "../../lib/runFormat";
 import { LedgerRow } from "./RunLedger";
 import { SectionHead } from "./SectionHead";
 import { WorkflowLedgerRow } from "./WorkflowRuns";
@@ -34,6 +42,7 @@ export function ActivityLead({
   runs,
   workflows = [],
   details,
+  load,
   onSelect,
 }: {
   runs: RunSummary[];
@@ -42,6 +51,9 @@ export function ActivityLead({
    *  in its node list, and the lead story is built around a run's jobs. */
   workflows?: WorkflowRunRow[];
   details: Map<string, RunDetail>;
+  /** Drives each waiting step's reason. Optional: the card renders before
+   *  the first /system/load response arrives. */
+  load?: SystemLoad;
   onSelect: (objectId: string, projectId: string) => void;
 }) {
   // One open at a time across both kinds -- the ids share a namespace here
@@ -74,6 +86,7 @@ export function ActivityLead({
             key={lead.id}
             run={lead}
             detail={details.get(lead.id)}
+            load={load}
             onSelect={onSelect}
           />
         )
@@ -109,10 +122,12 @@ export function ActivityLead({
 function LeadStory({
   run,
   detail,
+  load,
   onSelect,
 }: {
   run: RunSummary;
   detail?: RunDetail;
+  load?: SystemLoad;
   onSelect: (objectId: string, projectId: string) => void;
 }) {
   const qc = useQueryClient();
@@ -205,7 +220,7 @@ function LeadStory({
 
       <div className="lead-steps">
         {steps.map((job) => (
-          <LeadStep key={job.job_id} job={job} />
+          <LeadStep key={job.job_id} job={job} load={load} />
         ))}
         {ingests.length > 0 && <IngestStep jobs={ingests} />}
       </div>
@@ -213,13 +228,29 @@ function LeadStory({
   );
 }
 
-function LeadStep({ job }: { job: RunMemberJob }) {
+function LeadStep({ job, load }: { job: RunMemberJob; load?: SystemLoad }) {
   // A pruned job has no state to show. Saying so beats inventing one.
   const state = job.state ?? "expired";
   const pct =
     job.state === "running" && job.progress?.pct
       ? ` ${Math.round(job.progress.pct * 100)}%`
       : "";
+
+  // #457: a run-owned job showed a bare "queued" with nothing saying what it
+  // was queued behind. waitingReason already answered this for loose jobs in
+  // the "Other waiting" section; this is the same sentence on the card users
+  // actually watch.
+  const why =
+    job.state !== null && WAITING.has(job.state)
+      ? waitingReason(
+          {
+            state: job.state,
+            job_class: job.job_class ?? "",
+            cancel_requested: job.cancel_requested,
+          },
+          load,
+        )
+      : null;
 
   return (
     <div className="lead-step">
@@ -236,6 +267,7 @@ function LeadStep({ job }: { job: RunMemberJob }) {
           </span>
         )}
       </span>
+      {why && <span className="lead-step-why">{why}</span>}
       {job.error && <span className="lead-step-error">{job.error.message}</span>}
       <span className="lead-step-time">{formatClock(job.created_at)}</span>
     </div>

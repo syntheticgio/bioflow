@@ -900,6 +900,9 @@ export interface RunMemberJob {
   /** Null once the job has been pruned by the 30-day TTL. */
   type: string | null;
   state: JobState | null;
+  /** Null for a pruned job. Drives the governor branch of waitingReason. */
+  job_class: JobClass | null;
+  cancel_requested: boolean;
   progress: JobSummary["progress"] | null;
   error: { code: string; message: string; retryable: boolean } | null;
   created_at: string | null;

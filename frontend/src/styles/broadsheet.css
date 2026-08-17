@@ -1442,6 +1442,11 @@
   color: var(--error);
 }
 
+.theme-broadsheet .lead-step-why {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 .theme-broadsheet .lead-step-time {
   margin-left: auto;
   flex: none;

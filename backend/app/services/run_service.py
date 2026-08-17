@@ -229,6 +229,11 @@ async def status_for(run_id: PydanticObjectId, *, owner: str) -> tuple[RunStatus
                 # rather than inventing a state.
                 "type": job.type if job else None,
                 "state": job.state.value if job else None,
+                # Both drive the waiting reason on the run card (#457): the
+                # class decides whether the governor is what is holding this
+                # job, and a cancelling job must not read as "waiting".
+                "job_class": job.job_class.value if job else None,
+                "cancel_requested": bool(job.cancel_requested) if job else False,
                 "progress": job.progress.model_dump(mode="json") if job else None,
                 "error": job.error.model_dump(mode="json") if job and job.error else None,
                 "created_at": job.created_at if job else None,

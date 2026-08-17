@@ -159,6 +159,7 @@ export function ActivityView() {
           runs={activeRuns}
           workflows={workflows.active}
           details={details}
+          load={load}
           onSelect={selectObject}
         />
 

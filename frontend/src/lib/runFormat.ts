@@ -178,11 +178,20 @@ export function isInFlight(state: string): boolean {
   return RUNNING.has(state) || WAITING.has(state) || BLOCKED.has(state);
 }
 
+/** The fields `waitingReason` actually reads. Narrowed so a run member job
+ *  — which is not a JobSummary and has no payload — can ask the same
+ *  question and get the same words back (#457). */
+export type WaitingJob = {
+  state: string;
+  job_class: string;
+  cancel_requested?: boolean;
+};
+
 /**
  * A spinner says "wait"; this says what for. The governor's admitted_classes
  * is authoritative about whether this job's class can start at all.
  */
-export function waitingReason(job: JobSummary, load?: SystemLoad): string {
+export function waitingReason(job: WaitingJob, load?: SystemLoad): string {
   if (job.cancel_requested) return "cancelling";
   if (job.state === "delayed") return "retrying after a failure";
   if (job.state === "blocked") return "waiting on an earlier step";
