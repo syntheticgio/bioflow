@@ -10,12 +10,14 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+import psutil
 from beanie import PydanticObjectId
 from pymongo.errors import DuplicateKeyError
 
 from app.api.deps import target_node_ctx
 from app.config import settings
 from app.db.redis_client import get_redis, get_script
+from app.errors import ValidationError
 from app.logging import get_logger
 from app.models import (
     ACTIVE_STATES,
@@ -124,6 +126,20 @@ async def enqueue(
     _node = target_node if target_node is not None else target_node_ctx.get()
     resources = resources or JobResources()
     available_at = now + timedelta(seconds=delay_seconds) if delay_seconds > 0 else None
+
+    # Fail immediately if the job asks for more memory than this machine has.
+    # Without this check the job sits in the ready set forever — claim.lua can
+    # never admit it, but nothing tells the user why. This is a permanent
+    # error, not a retry: raising the machine's RAM is the only fix.
+    if resources.mem_mb:
+        machine_mb = int(psutil.virtual_memory().total / (1024 * 1024))
+        if resources.mem_mb > machine_mb:
+            raise ValidationError(
+                f"Job requires {resources.mem_mb} MB of RAM, "
+                f"but this machine only has {machine_mb} MB. "
+                "Raise the Docker Desktop memory allocation or reduce the job's memory request."
+            )
+
     depends_on = list(depends_on or [])
     tolerate_failure_of = list(tolerate_failure_of or [])
 
