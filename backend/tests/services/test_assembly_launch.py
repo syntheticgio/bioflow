@@ -275,6 +275,87 @@ class TestLaunchReachesTheQueue:
         assert spec is not None
         assert spec.assembler is Assembler.ABYSS
 
+    async def test_a_short_read_launch_with_no_params_fills_in_k(self):
+        """The final-review bug: `default_assembly_params` called
+        `assembler_registry.mode_for_chemistry` unconditionally, which does a
+        bare `spec.mode_flags[chemistry]` lookup. ABySS's spec has an empty
+        `mode_flags` (it has no chemistry-graded mode, unlike Flye), so every
+        short-read launch through the Actions-tab card -- which sends only
+        `object_id`, forcing `launch_assembly` to call
+        `default_assembly_params` -- raised KeyError before this fix. This
+        drives the real `launch_assembly` path end-to-end, not a mock of it,
+        so it would have caught the regression the 3-line registry-lookup
+        test next to this one could not.
+        """
+        import dataclasses
+
+        from app.models import RunInput, RunInputRole
+        from app.pipelines import assembler_registry
+
+        class _Available:
+            available = True
+
+        abyss_installed = dataclasses.replace(
+            assembler_registry.ABYSS_SPEC, tool=lambda: _Available()
+        )
+
+        reads = self._reads_object()
+        reads.facts = {"qc_read_chemistry": "short"}
+        created = {}
+
+        async def _create_run(**kwargs):
+            for item in kwargs["inputs"]:
+                assert isinstance(item, RunInput)
+                assert item.name
+                assert item.role is RunInputRole.READS
+            created.update(kwargs)
+            return SimpleNamespace(id="run1", owner="local")
+
+        enqueued = {}
+
+        async def _enqueue(job_type, **kwargs):
+            enqueued["type"] = job_type
+            enqueued.update(kwargs)
+            return SimpleNamespace(id="job1")
+
+        with (
+            patch(
+                "app.services.object_service.get_object",
+                AsyncMock(return_value=reads),
+            ),
+            patch(
+                "app.services.pipeline_service._resolve_readable",
+                AsyncMock(return_value=("a" * 64, None)),
+            ),
+            patch("app.services.run_service.create_run", _create_run),
+            patch("app.services.run_service.link_job", AsyncMock()),
+            patch("app.queue.queue.enqueue", _enqueue),
+            patch(
+                "app.services.object_service.list_objects", AsyncMock(return_value=[])
+            ),
+            patch(
+                "app.services.pipeline_service.resolve_assembly_mate",
+                AsyncMock(return_value=None),
+            ),
+            patch.object(
+                assembler_registry,
+                "spec_for_chemistry",
+                return_value=abyss_installed,
+            ),
+        ):
+            # params=None is the exact shape the Actions-tab card sends --
+            # forces launch_assembly through default_assembly_params.
+            job = await pipeline_service.launch_assembly(
+                object_id=reads.id, owner="local", params=None
+            )
+
+        assert job.id == "job1"
+        assert enqueued["payload"]["assembler"] == "abyss"
+        # The one parameter that most changes a short-read assembly must be
+        # pre-filled, not missing.
+        assert enqueued["payload"]["params"]["k"] == 51
+        assert created["kind"].value == "assembly"
+
     async def test_unknown_chemistry_is_refused_with_different_advice(self):
         reads = self._reads_object()
         reads.facts = {}

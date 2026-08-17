@@ -4202,12 +4202,22 @@ async def default_assembly_params(obj: DataObject) -> dict:
         )
 
     size, source_name = await infer_genome_size(obj)
-    params: dict = {
-        "assembler": spec.assembler.value,
-        "mode": assembler_registry.mode_for_chemistry(spec, chemistry),
-        "threads": 8,
-        "iterations": 1,
-    }
+    if spec.layout == "paired":
+        # ABySS: no chemistry-graded mode to look up (mode_flags is empty by
+        # design -- see ABYSS_SPEC), so the dialog's one real knob is k. Mirror
+        # AbyssParams' own default rather than duplicating a magic number.
+        params: dict = {
+            "assembler": spec.assembler.value,
+            "k": assembly_params_module.AbyssParams.k,
+            "threads": 8,
+        }
+    else:
+        params = {
+            "assembler": spec.assembler.value,
+            "mode": assembler_registry.mode_for_chemistry(spec, chemistry),
+            "threads": 8,
+            "iterations": 1,
+        }
     if size is not None:
         params["genome_size"] = size
         params["genome_size_source"] = "inferred"
@@ -4301,6 +4311,7 @@ async def launch_assembly(
                 params={
                     **parsed.as_dict(),
                     "genome_bases": parsed.genome_size,
+                    "read_bases": read_bases,
                 },
                 budget_mb=mem_budget_mb,
                 cpu_budget=LoadGovernor().cpu_budget() or 1,
