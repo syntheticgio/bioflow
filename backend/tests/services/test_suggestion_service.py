@@ -1015,6 +1015,23 @@ class TestAnnotateCard:
 
 
 @contextmanager
+def _no_db():
+    """Silence the two database questions `suggestions_for` asks at the end.
+
+    `attach_prior_runs` reads PipelineRun history and `attach_running` reads
+    the live queue. Neither decides which cards appear, which is what the
+    tests using this are about -- but both hit Beanie, so an unpatched one
+    raises CollectionWasNotInitialized in a test that never wanted a
+    database. Patched at the same seam each module keeps for the purpose.
+    """
+    with (
+        patch("app.services.prior_runs._runs_touching", return_value=[]),
+        patch("app.services.running_now._active_jobs_for", return_value=[]),
+    ):
+        yield
+
+
+@contextmanager
 def stub_db(references=(), chemistry=None, annotation_inputs=None):
     """Cut the four database seams `suggestions_for` reaches through.
 
@@ -1044,6 +1061,10 @@ def stub_db(references=(), chemistry=None, annotation_inputs=None):
         patch("app.services.pipeline_service.resolve_annotation_inputs",
               return_value=annotation_inputs),
         patch("app.services.prior_runs._runs_touching", return_value=[]),
+        # Same reason as the line above: the DB seam, patched so these stay
+        # pure unit tests. `running_now` asks the live queue whether this
+        # file has work in flight; here it never does.
+        patch("app.services.running_now._active_jobs_for", return_value=[]),
     ):
         yield
 
@@ -1067,6 +1088,7 @@ def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
 CARD_KEYS = {
     "kind", "category", "title", "description",
     "why", "status", "reason", "launch", "requires_install", "prior_runs",
+    "running",
 }
 
 
@@ -1156,9 +1178,7 @@ class TestSuggestionsFor:
         ), patch(
             "app.services.suggestion_service.tools.fastp",
             return_value=_FakeTool(True),
-        ), patch(
-            "app.services.prior_runs._runs_touching", return_value=[]
-        ):
+        ), _no_db():
             cards = await suggestions_for(
                 _fake_obj(
                     facts={"qc_read_chemistry": "short"},
@@ -1218,9 +1238,7 @@ class TestSuggestionsFor:
                 "app.services.pipeline_service.read_chemistry_for_alignment",
                 return_value=align_runner.ReadChemistry.SHORT,
             ):
-                with patch(
-                    "app.services.prior_runs._runs_touching", return_value=[]
-                ):
+                with _no_db():
                     await suggestions_for(_bam())
         assert listing.call_count == 1
 
@@ -1235,10 +1253,7 @@ class TestSuggestionsFor:
             ) as annotations:
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
-                    with patch(
-                        "app.services.prior_runs._runs_touching",
-                        return_value=[],
-                    ):
+                    with _no_db():
                         await suggestions_for(_fake_obj())
         annotations.assert_not_called()
 
@@ -1254,10 +1269,7 @@ class TestSuggestionsFor:
                        return_value=_FakeTool(True)):
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
-                    with patch(
-                        "app.services.prior_runs._runs_touching",
-                        return_value=[],
-                    ):
+                    with _no_db():
                         await suggestions_for(_fake_obj())
         resolve.assert_not_called()
 
@@ -1279,10 +1291,7 @@ class TestSuggestionsFor:
                 # asserting.
                 with patch("app.services.object_service.list_objects",
                            return_value=[]):
-                    with patch(
-                        "app.services.prior_runs._runs_touching",
-                        return_value=[],
-                    ):
+                    with _no_db():
                         await suggestions_for(_bam())
         resolve.assert_not_called()
 
@@ -1293,9 +1302,7 @@ class TestSuggestionsFor:
                    return_value=_FakeTool(True)):
             with patch("app.services.object_service.list_objects",
                        return_value=[]) as listing:
-                with patch(
-                    "app.services.prior_runs._runs_touching", return_value=[]
-                ):
+                with _no_db():
                     await suggestions_for(_fake_obj())
         assert listing.call_args.kwargs["status"] is ObjectStatus.READY
 
@@ -1486,6 +1493,7 @@ class TestScaffoldCardOrchestration:
             patch("app.services.pipeline_service.resolve_annotation_inputs",
                   return_value=None),
             patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
         ):
             cards = await suggestions_for(obj)
         scaffold = next(c for c in cards if c["kind"] == "scaffold")
@@ -1525,6 +1533,7 @@ class TestScaffoldCardOrchestration:
             patch("app.services.pipeline_service.resolve_annotation_inputs",
                   return_value=None),
             patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
         ):
             cards = await suggestions_for(obj)
         scaffold = next(c for c in cards if c["kind"] == "scaffold")
@@ -1566,6 +1575,7 @@ class TestMisassemblyCardOrchestration:
             patch("app.services.pipeline_service.resolve_annotation_inputs",
                   return_value=None),
             patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
         ):
             cards = await suggestions_for(obj)
         misassembly = next(c for c in cards if c["kind"] == "misassembly")
@@ -1602,6 +1612,7 @@ class TestMisassemblyCardOrchestration:
             patch("app.services.pipeline_service.resolve_annotation_inputs",
                   return_value=None),
             patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
         ):
             cards = await suggestions_for(obj)
         misassembly = next(c for c in cards if c["kind"] == "misassembly")
@@ -1644,6 +1655,7 @@ class TestSyntenyCardOrchestration:
             patch("app.services.pipeline_service.resolve_annotation_inputs",
                   return_value=None),
             patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
         ):
             cards = await suggestions_for(obj)
         synteny = next(c for c in cards if c["kind"] == "synteny")
@@ -1682,6 +1694,7 @@ class TestSyntenyCardOrchestration:
             patch("app.services.pipeline_service.resolve_annotation_inputs",
                   return_value=None),
             patch("app.services.prior_runs._runs_touching", return_value=[]),
+            patch("app.services.running_now._active_jobs_for", return_value=[]),
         ):
             cards = await suggestions_for(obj)
         synteny = next(c for c in cards if c["kind"] == "synteny")

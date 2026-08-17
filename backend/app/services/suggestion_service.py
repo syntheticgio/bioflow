@@ -31,7 +31,13 @@ from app.pipelines import (
 )
 from app.pipelines.aligners import Aligner
 from app.pipelines.organism_taxonomy import OrganismClass, classify_organism, is_eukaryotic
-from app.services import object_service, pipeline_service, prior_runs, reference_assembly
+from app.services import (
+    object_service,
+    pipeline_service,
+    prior_runs,
+    reference_assembly,
+    running_now,
+)
 
 log = get_logger(__name__)
 
@@ -94,6 +100,12 @@ class SuggestionCard:
     # a database question, and the builders are deliberately synchronous and
     # pure.
     prior_runs: list = field(default_factory=list)
+    # True when work this card offers is queued or running right now. Filled
+    # by `running_now.attach_running`, alongside prior_runs and for the same
+    # reason -- a database question, not a rule about the file. Drives the
+    # Launch button's disabled state, which is why it has to come from the
+    # server: the client cannot reconstruct it after a page reload.
+    running: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -107,6 +119,7 @@ class SuggestionCard:
             "launch": self.launch,
             "requires_install": self.requires_install,
             "prior_runs": self.prior_runs,
+            "running": self.running,
         }
 
 
@@ -2240,4 +2253,8 @@ async def suggestions_for(obj) -> list[dict]:
     # After the builders, not inside them: this is the one part of a card that
     # is a database question rather than a rule about the file.
     await prior_runs.attach_prior_runs(cards, obj, owner=obj.owner)
+    # What is happening now, as against what already happened above. Separate
+    # module and separate query: prior runs are a question about PipelineRun
+    # history, this is a question about the live queue.
+    await running_now.attach_running(cards, obj, owner=obj.owner)
     return cards
