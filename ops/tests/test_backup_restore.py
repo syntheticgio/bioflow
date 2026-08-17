@@ -7,6 +7,7 @@ round-trip test needs a real Mongo and carries the `docker` marker; see the
 note above it.
 """
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -81,3 +82,18 @@ def test_key_digest_never_echoes_the_whole_key(tmp_path):
     result = sh(f'key_digest "{secret}"', tmp_path)
     assert "DONOTLEAK" not in result.stdout
     assert "DONOTLEAK" not in result.stderr
+
+
+def test_counts_tsv_becomes_a_json_object(tmp_path):
+    counts = tmp_path / "counts.tsv"
+    counts.write_text("projects\t3\nobjects\t128\njob_timings\t9\n")
+    result = sh(f"counts_to_json {counts}", tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"projects": 3, "objects": 128, "job_timings": 9}
+
+
+def test_counts_to_json_of_nothing_is_an_empty_object(tmp_path):
+    counts = tmp_path / "counts.tsv"
+    counts.write_text("")
+    result = sh(f"counts_to_json {counts}", tmp_path)
+    assert json.loads(result.stdout) == {}
