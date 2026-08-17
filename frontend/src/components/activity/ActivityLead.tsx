@@ -13,6 +13,7 @@ import type {
 import { formatClock } from "../../lib/format";
 import { notify } from "../../stores/messageStore";
 import {
+  BLOCKED,
   ROLE_LABELS,
   STATUS_LABELS,
   WAITING,
@@ -280,7 +281,8 @@ function LeadStep({
   // was queued behind. waitingReason already answered this for loose jobs in
   // the "Other waiting" section; this is the same sentence on the card users
   // actually watch.
-  const isWaiting = job.state !== null && WAITING.has(job.state);
+  const isWaiting =
+    job.state !== null && (WAITING.has(job.state) || BLOCKED.has(job.state));
   // A job demanding more than the whole budget is not waiting its turn --
   // nothing that finishes will free enough. It gets its own words and its
   // own colour, and it is checked first because the queue would otherwise

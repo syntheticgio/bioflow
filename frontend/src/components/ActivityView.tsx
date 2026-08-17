@@ -12,7 +12,7 @@ import { ActivityLead } from "./activity/ActivityLead";
 import { FailureExplanationExpander } from "./activity/FailureExplanationExpander";
 import { RunLedger } from "./activity/RunLedger";
 import { useWorkflowRuns } from "./activity/WorkflowRuns";
-import { RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
+import { BLOCKED, RUNNING, WAITING, jobLabel, waitingReason } from "../lib/runFormat";
 
 /** How many finished runs the ledger column carries. */
 const LEDGER_LIMIT = 10;
@@ -409,7 +409,7 @@ function JobRow({
         {job.state === "running" && elapsed !== null && (
           <span>{formatDuration(elapsed)} elapsed</span>
         )}
-        {WAITING.has(job.state) && (
+        {(WAITING.has(job.state) || BLOCKED.has(job.state)) && (
           <span>{waitingReason(job, load)}</span>
         )}
         {job.timing.duration_ms != null && (
