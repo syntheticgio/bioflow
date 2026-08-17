@@ -11,6 +11,7 @@ a second, worse implementation of the same thing.
 """
 
 import asyncio
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,26 +31,108 @@ from app.storage.home import check_home
 log = get_logger(__name__)
 
 
-def _walk_object_files() -> list[Path]:
-    """Every regular file under objects/, across the two-level sharding.
+# Categories whose bytes are still on disk and could be freed. A missing blob's
+# bytes are already gone, so counting them would promise space that does not
+# exist.
+_RECLAIMABLE = (DriftCategory.ORPHANED_FILE, DriftCategory.STALLED_INGEST)
 
-    Synchronous: called through asyncio.to_thread so a large tree never blocks
-    the event loop, matching reap_report_dirs.
+
+# How many files one pass holds in memory and asks Mongo about at once.
+#
+# A whole-tree walk does not scale to the few hundred thousand files the design
+# doc names as the target (#499): every Path is held at once against a job
+# provisioned at mem_mb=128, and the matching `$in` of every digest blows past
+# MongoDB's 16MB BSON command limit long before that -- an opaque
+# BSONObjectTooLarge from a job nobody is watching.
+#
+# 2,000 64-char digests is roughly 150KB of BSON, two orders of magnitude under
+# the limit, while keeping the query count low enough that a large tree is not
+# dominated by round-trips.
+WALK_BATCH_SIZE = 2000
+
+
+# A cap high enough to mean "keep everything", for a detector called on its own
+# rather than through sweep(). Only sweep() cares about the real cap.
+_UNCAPPED = 2**62
+
+
+class DriftAccumulator:
+    """Exact counts and reclaimable bytes; capped examples.
+
+    The detectors used to return a full list of every entry found, which
+    sweep() then counted, summed, and discarded all but
+    MAX_ENTRIES_PER_CATEGORY of. At the few hundred thousand files #499
+    targets that discarded list is
+    the peak allocation of the whole sweep -- measured at 212MB for 300k
+    orphans, against a job provisioned at mem_mb=128 -- so batching the walk
+    alone would have moved the ceiling without removing it.
+
+    Counts and `reclaimable_bytes` stay exact above the cap, which is the
+    invariant the report has always promised: the number is the actionable
+    part, the examples are illustration.
     """
+
+    def __init__(self, cap: int = MAX_ENTRIES_PER_CATEGORY):
+        self.cap = cap
+        self.counts: dict[str, int] = {}
+        self.reclaimable_bytes = 0
+        self.entries: list[DriftEntry] = []
+
+    def add(self, entry: DriftEntry) -> None:
+        category = entry.category.value
+        seen = self.counts.get(category, 0)
+        self.counts[category] = seen + 1
+        if entry.category in _RECLAIMABLE:
+            self.reclaimable_bytes += entry.size_bytes
+        if seen < self.cap:
+            self.entries.append(entry)
+
+
+def _iter_object_files(batch_size: int | None = None) -> Iterator[list[Path]]:
+    """Regular files under objects/ in fixed-size batches, across the sharding.
+
+    A generator rather than a list so memory stays bounded by `batch_size`
+    regardless of tree size. Synchronous: each batch is pulled through
+    asyncio.to_thread so a large tree never blocks the event loop, matching
+    reap_report_dirs.
+
+    `batch_size` defaults to WALK_BATCH_SIZE read at call time, not bound as a
+    default argument -- a module-level default would freeze the value at import
+    and leave the constant unable to change it.
+    """
+    if batch_size is None:
+        batch_size = WALK_BATCH_SIZE
     root = settings.objects_dir
     if not root.exists():
-        return []
-    found: list[Path] = []
+        return
+    batch: list[Path] = []
     for shard in root.iterdir():
         if not shard.is_dir():
             continue
         for entry in shard.iterdir():
-            if entry.is_file():
-                found.append(entry)
-    return found
+            if not entry.is_file():
+                continue
+            batch.append(entry)
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
 
 
-async def find_orphaned_files() -> list[DriftEntry]:
+_WALK_DONE = object()
+
+
+def _next_batch(batches: Iterator[list[Path]]):
+    """One step of the walk generator, for asyncio.to_thread.
+
+    `next()` cannot cross a thread boundary with its StopIteration intact, so
+    exhaustion is signalled with a sentinel instead.
+    """
+    return next(batches, _WALK_DONE)
+
+
+async def find_orphaned_files(into: DriftAccumulator | None = None) -> list[DriftEntry]:
     """Files under objects/ with no usable Blob record.
 
     Two categories, not one. A file with no record at all is a different
@@ -62,56 +145,66 @@ async def find_orphaned_files() -> list[DriftEntry]:
     inserted PENDING *before* bytes are placed, so a file with no record is a
     genuine anomaly rather than a race. A PENDING record younger than GC_GRACE
     is an ingest in flight and is never reported.
+
+    The tree is walked in batches, one bounded `$in` lookup per batch -- see
+    WALK_BATCH_SIZE. Pass `into` to stream findings into a shared
+    DriftAccumulator, which caps retained examples so peak memory does not grow
+    with the number of orphans; the return value is then the capped list rather
+    than every entry found. Called with no accumulator it returns everything,
+    which is what the per-detector tests read.
     """
-    files = await asyncio.to_thread(_walk_object_files)
-    if not files:
-        return []
-
-    digests = [f.name for f in files]
-    records = await Blob.find({"_id": {"$in": digests}}).to_list()
-    by_digest = {b.id: b for b in records}
-
+    acc = into if into is not None else DriftAccumulator(cap=_UNCAPPED)
     cutoff = datetime.now(UTC) - GC_GRACE
-    entries: list[DriftEntry] = []
+    before = len(acc.entries)
 
-    for path in files:
-        digest = path.name
-        blob = by_digest.get(digest)
+    batches = _iter_object_files()
+    while True:
+        files = await asyncio.to_thread(_next_batch, batches)
+        if files is _WALK_DONE:
+            break
 
-        if blob is not None and blob.state is not BlobState.PENDING:
-            continue
+        digests = [f.name for f in files]
+        records = await Blob.find({"_id": {"$in": digests}}).to_list()
+        by_digest = {b.id: b for b in records}
 
-        if blob is not None:
-            updated = blob.updated_at
-            if updated is not None and updated.tzinfo is None:
-                updated = updated.replace(tzinfo=UTC)
-            if updated is not None and updated > cutoff:
-                # An ingest in flight. Not drift.
+        for path in files:
+            digest = path.name
+            blob = by_digest.get(digest)
+
+            if blob is not None and blob.state is not BlobState.PENDING:
                 continue
-            category = DriftCategory.STALLED_INGEST
-        else:
-            category = DriftCategory.ORPHANED_FILE
 
-        try:
-            size = path.stat().st_size
-        except OSError:
-            # Vanished between the walk and the stat -- the sweep is
-            # best-effort and a partial report beats no report.
-            continue
+            if blob is not None:
+                updated = blob.updated_at
+                if updated is not None and updated.tzinfo is None:
+                    updated = updated.replace(tzinfo=UTC)
+                if updated is not None and updated > cutoff:
+                    # An ingest in flight. Not drift.
+                    continue
+                category = DriftCategory.STALLED_INGEST
+            else:
+                category = DriftCategory.ORPHANED_FILE
 
-        entries.append(
-            DriftEntry(
-                category=category,
-                path=f"{digest[:2]}/{digest}",
-                digest=digest,
-                size_bytes=size,
+            try:
+                size = path.stat().st_size
+            except OSError:
+                # Vanished between the walk and the stat -- the sweep is
+                # best-effort and a partial report beats no report.
+                continue
+
+            acc.add(
+                DriftEntry(
+                    category=category,
+                    path=f"{digest[:2]}/{digest}",
+                    digest=digest,
+                    size_bytes=size,
+                )
             )
-        )
 
-    return entries
+    return acc.entries[before:]
 
 
-async def find_missing_blobs() -> list[DriftEntry]:
+async def find_missing_blobs(into: DriftAccumulator | None = None) -> list[DriftEntry]:
     """Records whose bytes verify_files has confirmed absent.
 
     A read of existing detection, not a second implementation of it.
@@ -124,21 +217,28 @@ async def find_missing_blobs() -> list[DriftEntry]:
     EXTERNAL blobs are excluded. Their bytes live outside BIOINFO_HOME under
     paths we registered but never owned, so a vanished external file is the
     user's business, not reclaimable drift.
+
+    Streamed rather than `.to_list()`ed (#499): a library whose drive went
+    missing has every managed blob in this state at once, and there is no
+    reason to hold them all to walk them once.
     """
-    records = await Blob.find(
+    acc = into if into is not None else DriftAccumulator(cap=_UNCAPPED)
+    before = len(acc.entries)
+
+    async for blob in Blob.find(
         Blob.state == BlobState.MISSING,
         Blob.storage == BlobStorage.MANAGED,
-    ).to_list()
-
-    return [
-        DriftEntry(
-            category=DriftCategory.MISSING_BLOB,
-            path=blob.rel_path or blob.id,
-            digest=blob.id,
-            size_bytes=blob.size,
+    ):
+        acc.add(
+            DriftEntry(
+                category=DriftCategory.MISSING_BLOB,
+                path=blob.rel_path or blob.id,
+                digest=blob.id,
+                size_bytes=blob.size,
+            )
         )
-        for blob in records
-    ]
+
+    return acc.entries[before:]
 
 
 # Which fact means "this object has a report", and where that report lives.
@@ -196,7 +296,7 @@ def object_claims_report(facts: dict, predicate: str) -> bool:
     return value is not None
 
 
-async def find_missing_report_dirs() -> list[DriftEntry]:
+async def find_missing_report_dirs(into: DriftAccumulator | None = None) -> list[DriftEntry]:
     """Objects whose facts claim a report whose directory is gone.
 
     The opposite direction from reap_report_dirs, which finds directories with
@@ -205,32 +305,39 @@ async def find_missing_report_dirs() -> list[DriftEntry]:
 
     Report directories are addressed positionally as <root>/<object_id>/;
     nothing stores a path, so the claim is the predicate fact plus the id.
+
+    Streamed through a projected cursor rather than `.to_list()` of whole
+    documents (#499): only `_id` and the one fact being tested are needed, and
+    a library with many QC'd objects would otherwise hold every full DataObject
+    in memory at once for no gain.
     """
-    entries: list[DriftEntry] = []
+    acc = into if into is not None else DriftAccumulator(cap=_UNCAPPED)
+    before = len(acc.entries)
+    collection = DataObject.get_pymongo_collection()
 
     for predicate, root in REPORT_ROOTS.items():
-        candidates = await DataObject.find({f"facts.{predicate}": {"$exists": True}}).to_list()
-        for obj in candidates:
-            if not object_claims_report(obj.facts, predicate):
+        field = f"facts.{predicate}"
+        cursor = collection.find(
+            {field: {"$exists": True}},
+            projection={"_id": 1, field: 1},
+        )
+        async for doc in cursor:
+            facts = doc.get("facts") or {}
+            if not object_claims_report(facts, predicate):
                 continue
-            path = root / str(obj.id)
+            object_id = doc["_id"]
+            path = root / str(object_id)
             if await asyncio.to_thread(path.exists):
                 continue
-            entries.append(
+            acc.add(
                 DriftEntry(
                     category=DriftCategory.MISSING_REPORT_DIR,
                     path=str(path),
-                    object_id=str(obj.id),
+                    object_id=str(object_id),
                 )
             )
 
-    return entries
-
-
-# Categories whose bytes are still on disk and could be freed. A missing blob's
-# bytes are already gone, so counting them would promise space that does not
-# exist.
-_RECLAIMABLE = (DriftCategory.ORPHANED_FILE, DriftCategory.STALLED_INGEST)
+    return acc.entries[before:]
 
 
 async def sweep() -> DriftReport:
@@ -254,27 +361,18 @@ async def sweep() -> DriftReport:
         log.info("drift_sweep_skipped", reason=home.detail)
         return report
 
-    found: list[DriftEntry] = []
-    found.extend(await find_orphaned_files())
-    found.extend(await find_missing_blobs())
-    found.extend(await find_missing_report_dirs())
+    # One accumulator across all three detectors, so nothing ever holds the
+    # full set of findings: it caps retained examples per category -- not
+    # globally, since a flood of one category must not hide every example of
+    # another -- while keeping counts and reclaimable bytes exact.
+    acc = DriftAccumulator()
+    await find_orphaned_files(into=acc)
+    await find_missing_blobs(into=acc)
+    await find_missing_report_dirs(into=acc)
 
-    counts: dict[str, int] = {}
-    for entry in found:
-        counts[entry.category.value] = counts.get(entry.category.value, 0) + 1
-
-    reclaimable = sum(e.size_bytes for e in found if e.category in _RECLAIMABLE)
-
-    # Cap per category, not globally: a flood of one category must not hide
-    # every example of another. Counts above stay exact.
-    kept: list[DriftEntry] = []
-    per_category: dict[str, int] = {}
-    for entry in found:
-        seen = per_category.get(entry.category.value, 0)
-        if seen >= MAX_ENTRIES_PER_CATEGORY:
-            continue
-        per_category[entry.category.value] = seen + 1
-        kept.append(entry)
+    counts = acc.counts
+    reclaimable = acc.reclaimable_bytes
+    kept = acc.entries
 
     # Loaded here, immediately before the writes, rather than at the top of
     # the function: the detectors above can run for minutes on a large tree,
