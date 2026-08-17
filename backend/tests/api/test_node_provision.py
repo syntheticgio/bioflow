@@ -495,3 +495,163 @@ async def test_provision_private_key_uses_real_import_private_key():
     assert node is not None
     assert node.ssh_host == "10.0.0.11"
     await node.delete()
+
+
+# ---- _execute_remote_commands (#402) ----
+#
+# These run against a fake connection object, which is the point of the
+# extraction: every failure branch below was previously reachable only by
+# arranging a real remote machine to fail in that exact way.
+
+
+class _FakeResult:
+    def __init__(self, exit_status=0, stdout="", stderr=""):
+        self.exit_status = exit_status
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class _FakeConn:
+    """Records the commands it was asked to run and replays canned results."""
+
+    def __init__(self, results=None):
+        self.commands = []
+        self._results = list(results or [])
+
+    async def run(self, command, check=False):
+        self.commands.append(command)
+        if self._results:
+            return self._results.pop(0)
+        return _FakeResult()
+
+
+def _step(phase, command, timeout=15, message=None):
+    from app.api.v1.nodes import RemoteStep
+
+    return RemoteStep(
+        phase=phase,
+        message=message or f"running {command}",
+        command=command,
+        timeout=timeout,
+        describe_failure=lambda r: f"{command} failed: {r.stderr or r.stdout}",
+    )
+
+
+async def test_execute_remote_commands_runs_every_step_in_order():
+    from app.api.v1.nodes import _execute_remote_commands
+
+    conn = _FakeConn()
+    progress = []
+
+    async def on_progress(phase, message):
+        progress.append((phase, message))
+
+    await _execute_remote_commands(
+        conn,
+        [_step("a", "first"), _step("b", "second"), _step("c", "third")],
+        on_progress=on_progress,
+    )
+
+    assert conn.commands == ["first", "second", "third"]
+    assert [p for p, _ in progress] == ["a", "b", "c"]
+
+
+async def test_execute_remote_commands_stops_at_the_failing_command():
+    """A command that fails mid-sequence stops the sequence and reports which
+    one -- the later steps assume the earlier ones ran."""
+    from app.api.v1.nodes import RemoteCommandError, _execute_remote_commands
+
+    conn = _FakeConn([
+        _FakeResult(0),
+        _FakeResult(1, stderr="permission denied"),
+    ])
+
+    async def on_progress(phase, message):
+        pass
+
+    with pytest.raises(RemoteCommandError) as excinfo:
+        await _execute_remote_commands(
+            conn,
+            [_step("a", "first"), _step("b", "second"), _step("c", "third")],
+            on_progress=on_progress,
+        )
+
+    # The third command never ran.
+    assert conn.commands == ["first", "second"]
+    # The error names the step that failed, not merely that something did.
+    assert excinfo.value.step.phase == "b"
+    assert excinfo.value.step.command == "second"
+    assert "permission denied" in excinfo.value.reason
+
+
+async def test_execute_remote_commands_reports_each_phase_once():
+    """Commands sharing a phase report progress once, so a later command in a
+    phase does not replace the message the user is already reading."""
+    from app.api.v1.nodes import _execute_remote_commands
+
+    progress = []
+
+    async def on_progress(phase, message):
+        progress.append((phase, message))
+
+    await _execute_remote_commands(
+        _FakeConn(),
+        [
+            _step("setup_install", "mkdir", message="Preparing install directory…"),
+            _step("setup_install", "write-compose", message="ignored"),
+            _step("write_env", "write-env", message="Writing node configuration…"),
+        ],
+        on_progress=on_progress,
+    )
+
+    assert progress == [
+        ("setup_install", "Preparing install directory…"),
+        ("write_env", "Writing node configuration…"),
+    ]
+
+
+async def test_provision_emits_the_documented_phase_sequence():
+    """The provisioning UI renders `phase` verbatim, so the sequence and the
+    exact strings are a user-visible contract (#402)."""
+    from app.api.v1.nodes import ProvisionRequest, _provision_node
+    from app.models.node import Node
+
+    req = ProvisionRequest(
+        host="10.0.0.12", username="ops", password="pw", node_name="phasenode",
+    )
+
+    phases = []
+    real_save = NodeProvisionTask.save
+
+    async def _record(self):
+        phases.append(self.phase)
+        return await real_save(self)
+
+    with patch("app.api.v1.nodes.asyncssh") as ssh, \
+         patch("app.services.node_ssh.verify_key", AsyncMock()), \
+         patch("app.api.v1.nodes.asyncssh.scp", AsyncMock()), \
+         patch.object(NodeProvisionTask, "save", _record):
+        conn = ssh.connect.return_value
+        conn.run = AsyncMock(return_value=type("R", (), {
+            "exit_status": 0, "stdout": "", "stderr": "",
+        })())
+        ssh.connect = AsyncMock(return_value=conn)
+        await _provision_node("t-phases", req)
+
+    # Consecutive duplicates collapsed: what matters is the order of distinct
+    # phases the user sees, not how many times each was written.
+    seen = [p for i, p in enumerate(phases) if i == 0 or p != phases[i - 1]]
+    assert seen == [
+        "validate_ssh",
+        "verify_docker",
+        "setup_install",
+        "write_env",
+        "install_key",
+        "pull_image",
+        "start_worker",
+        "enrolled",
+    ]
+
+    node = await Node.find_one(Node.node_id == "phasenode")
+    if node:
+        await node.delete()
