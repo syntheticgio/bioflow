@@ -191,6 +191,37 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   /**
+   * The generic verb surface. Prefer these for new endpoints over adding
+   * another named wrapper: `api.post<Project>("/projects", { name })` says the
+   * same thing a one-line `createProject` would, without a second place to
+   * look it up.
+   *
+   * The named methods below predate this and are being retired as their last
+   * callers go (see #405). Not all of them can be: `putChunk` sends a raw
+   * `ArrayBuffer` with an `X-Chunk-SHA256` header, and `objectDownloadUrl` /
+   * `exportProject` build a URL for the browser to fetch rather than issuing
+   * a request at all. Those keep their dedicated methods; anything else that
+   * needs a header or a non-JSON body should pass `init` through rather than
+   * grow a wrapper.
+   *
+   * `body` is `unknown` rather than a generic parameter because the payload is
+   * whatever the route accepts, and the type that matters at a call site is
+   * the response `T`. Passing `undefined` sends `JSON.stringify(undefined)`,
+   * i.e. no body -- which is what the several POST routes that take no payload
+   * want.
+   */
+  get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
+
+  post: <T>(path: string, body?: unknown, init?: RequestInit) =>
+    request<T>(path, { ...init, method: "POST", body: JSON.stringify(body) }),
+
+  patch: <T>(path: string, body: unknown, init?: RequestInit) =>
+    request<T>(path, { ...init, method: "PATCH", body: JSON.stringify(body) }),
+
+  delete: <T>(path: string, init?: RequestInit) =>
+    request<T>(path, { ...init, method: "DELETE" }),
+
+  /**
    * The four profile routes, and the only ones callable before a profile is
    * selected. They send the `X-BioFlow-Profile` header like everything else
    * -- `request<T>` adds it unconditionally -- but the backend ignores it
