@@ -181,6 +181,9 @@ _NO_NARRATIVE_STEP: frozenset[str] = frozenset(
         "reap_pipeline_scratch",
         "reap_report_dirs",
         "reap_uploads",
+        # Read-only drift report; touches nothing, so it is never a step in
+        # any object's lineage.
+        "sweep_storage_drift",
         # Chunked alignment orchestrator and merge are internal dispatch
         # steps; the BAM they produce is the narrative object.
         "align_reads_chunked",

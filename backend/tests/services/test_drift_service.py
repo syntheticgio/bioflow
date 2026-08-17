@@ -336,3 +336,52 @@ class TestSweep:
         assert report.counts["orphaned_file"] == drift_service.MAX_ENTRIES_PER_CATEGORY + 5
         capped = [e for e in report.entries if e.category is DriftCategory.ORPHANED_FILE]
         assert len(capped) == drift_service.MAX_ENTRIES_PER_CATEGORY
+
+
+class TestSweepHandler:
+    @pytest_asyncio.fixture(autouse=True, loop_scope="module")
+    async def clean(self):
+        await Blob.find_all().delete()
+        await DataObject.find_all().delete()
+        await DriftReport.find_all().delete()
+
+    @pytest.fixture(autouse=True)
+    def home_ok(self):
+        """sweep() checks the real check_home(), which carries no sentinel in
+        the test environment. Same patch TestSweep uses."""
+        with patch(
+            "app.services.drift_service.check_home",
+            return_value=HomeStatus(True, "ok", "/data"),
+        ):
+            yield
+
+    def _ctx(self):
+        """Minimal JobContext stand-in: the handler only needs check_cancel."""
+        from unittest.mock import MagicMock
+
+        ctx = MagicMock()
+        ctx.payload = {}
+        ctx.check_cancel = MagicMock(return_value=None)
+        return ctx
+
+    async def test_handler_runs_the_sweep_and_returns_counts(self, objects_dir, report_roots):
+        from app.queue.handlers import sweep_storage_drift
+
+        _place_blob_file(objects_dir, DIGEST_A)
+
+        result = await sweep_storage_drift(self._ctx())
+
+        assert result["counts"]["orphaned_file"] == 1
+        assert "reclaimable_bytes" in result
+
+    async def test_handler_is_registered_with_the_queue(self):
+        from app.queue.registry import get_handler
+
+        assert get_handler("sweep_storage_drift") is not None
+
+    async def test_schedule_and_resources_are_seeded(self):
+        from app.queue.scheduler import DEFAULT_SCHEDULES, RESOURCES
+
+        ids = {s["_id"] for s in DEFAULT_SCHEDULES}
+        assert "sweep_storage_drift" in ids
+        assert "sweep_storage_drift" in RESOURCES
