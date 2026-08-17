@@ -206,3 +206,69 @@ class TestDefaultsAreUnchanged:
         run against missing inputs."""
         job = Job(type="align", state=JobState.PENDING)
         assert job.tolerate_failure_of == []
+
+
+class TestEnqueueDoesNotDispatchUndispatchableJobs:
+    """`enqueue` must not push a job whose dependencies say it cannot run.
+
+    `_handle_dependencies` decides three things -- failed, blocked, runnable --
+    and returns None for all of them, so `enqueue` cannot tell them apart and
+    calls `_push_to_redis` regardless. That call ends in an unconditional
+    `job.set({Job.state: state})`, which overwrites the decision that was just
+    made and puts the job in the ready set.
+
+    Asserting on Redis as well as on state is the point. The state alone would
+    pass the moment the clobber is fixed, while a job still sitting in the
+    ready queue would go on being claimed and run without its input.
+    """
+
+    async def test_a_failed_dependency_keeps_the_job_out_of_the_ready_set(self, redis):
+        from app.queue import keys
+        from app.queue.queue import enqueue
+
+        culprit = await _failed("build_index")
+
+        job = await enqueue("align", owner="tester", depends_on=[culprit.id])
+
+        assert await redis.zscore(keys.ready_key(), str(job.id)) is None
+
+    async def test_a_blocked_job_is_not_dispatched(self):
+        """`enqueue`'s own docstring: "Such a job is never pushed to Redis;
+        `_release_dependents` puts it there when its last dependency finishes."
+        """
+        from app.models.job import Job
+        from app.queue.queue import enqueue
+
+        running = Job(type="build_index", state=JobState.RUNNING)
+        await running.insert()
+
+        job = await enqueue("align", owner="tester", depends_on=[running.id])
+
+        fresh = await Job.get(job.id)
+        assert fresh.state is JobState.BLOCKED
+
+    async def test_a_blocked_job_is_kept_out_of_the_ready_set(self, redis):
+        """The half of the contract the state assertion above cannot see."""
+        from app.models.job import Job
+        from app.queue import keys
+        from app.queue.queue import enqueue
+
+        running = Job(type="build_index", state=JobState.RUNNING)
+        await running.insert()
+
+        job = await enqueue("align", owner="tester", depends_on=[running.id])
+
+        assert await redis.zscore(keys.ready_key(), str(job.id)) is None
+
+    async def test_a_satisfied_dependency_still_dispatches(self):
+        """The branch that must keep working: nothing outstanding, nothing
+        failed, so the job is runnable and belongs in the ready set."""
+        from app.models.job import Job
+        from app.queue.queue import enqueue
+
+        done = await _succeeded()
+
+        job = await enqueue("align", owner="tester", depends_on=[done.id])
+
+        fresh = await Job.get(job.id)
+        assert fresh.state is JobState.QUEUED
