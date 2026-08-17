@@ -12,8 +12,8 @@ actually emit.
 def test_abyss_job_passes_mate_and_bloom_budget(monkeypatch, tmp_path):
     """The paired path must reach the command line, not just the payload."""
     from app.pipelines import assembly_runner
-    from app.pipelines.assembly_params import AbyssParams
     from app.pipelines.assemblers import Assembler
+    from app.pipelines.assembly_params import AbyssParams
 
     r1 = tmp_path / "s_R1.fastq"
     r2 = tmp_path / "s_R2.fastq"
