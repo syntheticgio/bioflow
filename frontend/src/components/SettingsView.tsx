@@ -63,7 +63,7 @@ export function SettingsView() {
         />
 
         {current ? (
-          <ProviderForm provider={current} />
+          <ProviderForm provider={current} routing={routing.data!} />
         ) : (
           <TaskRoutingPanel routing={routing.data!} providers={list} />
         )}

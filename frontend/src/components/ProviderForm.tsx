@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { api } from "../api/client";
-import type { AiProvider } from "../api/types";
+import type { AiProvider, AiRouting } from "../api/types";
 import { notify } from "../stores/messageStore";
 import { ModelCombo } from "./ModelCombo";
 
@@ -16,7 +16,13 @@ import { ModelCombo } from "./ModelCombo";
  * its credential, silently, with the failure only surfacing hours later when a
  * summary stopped appearing.
  */
-export function ProviderForm({ provider }: { provider: AiProvider }) {
+export function ProviderForm({
+  provider,
+  routing,
+}: {
+  provider: AiProvider;
+  routing: AiRouting;
+}) {
   const queryClient = useQueryClient();
 
   const [name, setName] = useState(provider.name);
@@ -83,6 +89,17 @@ export function ProviderForm({ provider }: { provider: AiProvider }) {
     onSuccess: () => {
       invalidate();
       notify.success("Provider deleted.");
+    },
+    onError: (e: Error) => notify.error(e.message),
+  });
+
+  const isDefault = routing.default === provider.id;
+
+  const setDefault = useMutation({
+    mutationFn: () => api.setAiRouting({ default: provider.id, slots: routing.slots }),
+    onSuccess: () => {
+      invalidate();
+      notify.success(`${provider.name} is now the default.`);
     },
     onError: (e: Error) => notify.error(e.message),
   });
@@ -159,6 +176,13 @@ export function ProviderForm({ provider }: { provider: AiProvider }) {
           disabled={fetchModels.isPending}
         >
           {fetchModels.isPending ? "Fetching…" : "Fetch models"}
+        </button>
+        <button
+          className="btn"
+          onClick={() => setDefault.mutate()}
+          disabled={isDefault || setDefault.isPending}
+        >
+          {isDefault ? "Default" : "Set default"}
         </button>
         <button
           className="btn danger settings-danger"
