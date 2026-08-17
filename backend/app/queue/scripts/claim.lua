@@ -121,6 +121,25 @@ for i = 1, #candidates do
                  and mem_ok
                  and (io ~= 'heavy' or io_free > 0)
 
+    -- #457: the head-of-queue candidate is the job a user is watching, and
+    -- until now the reason it did not start was computed here and discarded.
+    -- Only i == 1 is described: it keeps this O(1) regardless of queue depth,
+    -- and it is the job actually next in line. Gate order is fixed (class,
+    -- cpu, mem, io) so the same queue state always yields the same sentence.
+    if not fits and i == 1 then
+      local why
+      if not allowed[class] then
+        why = {gate = 'class', class = class, admitted = ARGV[4]}
+      elseif cpu > cpu_free then
+        why = {gate = 'cpu', need = cpu, free = cpu_free}
+      elseif not mem_ok then
+        why = {gate = 'mem', need = mem, free = mem_free}
+      else
+        why = {gate = 'io', need = 1, free = io_free}
+      end
+      redis.call('SET', 'bp:why:' .. KEYS[1], cjson.encode(why), 'EX', 15)
+    end
+
     if fits then
       -- Fencing token: every lease grant bumps the epoch. A worker whose VM
       -- was paused past its lease expiry will still hold the old epoch, so its
@@ -142,6 +161,10 @@ for i = 1, #candidates do
       if io == 'heavy' then
         redis.call('INCR', conc_io)
       end
+
+      -- This queue is dispatching again; a reason from an earlier tick now
+      -- describes a condition that has passed.
+      redis.call('DEL', 'bp:why:' .. KEYS[1])
 
       return {job_id, class, tostring(cpu), tostring(mem), io, tostring(epoch)}
     end
