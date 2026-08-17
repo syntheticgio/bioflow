@@ -12,6 +12,7 @@ import pytest
 
 from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import align_runner, aligner_registry, assembler_registry, tools
+from app.pipelines.assemblers import Assembler
 from app.services import pipeline_service
 from app.services.suggestion_service import (
     CardStatus,
@@ -841,6 +842,15 @@ class TestAssembleCard:
             assembler_registry.FLYE_SPEC, tool=lambda: _Absent()
         )
 
+    @staticmethod
+    def _abyss_installed():
+        class _Available:
+            available = True
+
+        return dataclasses.replace(
+            assembler_registry.ABYSS_SPEC, tool=lambda: _Available()
+        )
+
     def test_not_offered_for_a_bam(self):
         assert build_assemble_card(_fake_obj(kind=FormatKind.BAM)) is None
 
@@ -886,28 +896,103 @@ class TestAssembleCard:
         assert card.launch is None
         assert "flye" in card.reason.lower()
 
-    def test_short_reads_are_refused_for_a_different_reason_than_unknown(self):
-        """Two refusals, deliberately distinct: one the user cannot act on
-        today, one they fix by pressing a button.
+    def test_short_reads_get_an_available_assemble_card(self):
+        """The #490 screenshot's refusal must be gone: short reads have an
+        installed assembler (ABySS, Task 4) now, so this is a card the user
+        can launch, not a permanent refusal.
 
-        Short-read chemistry now has an assembler (ABySS, Task 4) rather than
-        no assembler at all, so this is no longer the
-        `chemistry is SHORT with spec is None` branch -- it is the ordinary
-        `not spec.available()` branch, taken because the test image does not
-        ship ABySS. The old assertion pinned the now-deleted "Short-read
-        assembly is not installed" sentence; what still holds, and is what
-        this test actually verifies, is that a missing-tool refusal and a
-        missing-fact refusal read differently.
+        Patches `spec_for_chemistry` rather than relying on the test image
+        shipping ABySS, same reasoning as the Flye cases above: the card's
+        own launch-time behavior is what is under test, not the host.
         """
-        short = build_assemble_card(_fake_obj(facts={"qc_read_chemistry": "short"}))
-        unknown = build_assemble_card(_fake_obj())
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        obj.name = "sample_R1.fastq.gz"
 
-        assert short.status is CardStatus.UNAVAILABLE
-        assert "abyss" in short.reason.lower()
+        with patch.object(
+            assembler_registry,
+            "spec_for_chemistry",
+            return_value=self._abyss_installed(),
+        ):
+            card = build_assemble_card(obj)
 
-        assert unknown.status is CardStatus.UNAVAILABLE
-        assert "qc" in unknown.reason.lower()
-        assert short.reason != unknown.reason
+        assert card.status is CardStatus.AVAILABLE
+        assert "not installed" not in (card.reason or "")
+        assert "abyss" in card.title.lower()
+
+    def test_short_read_card_says_when_reads_are_unpaired(self):
+        """`why` is filename-level only -- this builder is synchronous and
+        pure and cannot look up the mate object, so it can only say what the
+        name suggests. The real pairing verdict, including the read-ID veto,
+        happens at launch time (Task 9)."""
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        obj.name = "sample.fastq.gz"
+
+        with patch.object(
+            assembler_registry,
+            "spec_for_chemistry",
+            return_value=self._abyss_installed(),
+        ):
+            card = build_assemble_card(obj)
+
+        assert card.status is CardStatus.AVAILABLE
+        assert "unpaired" in card.why.lower()
+
+    def test_short_read_card_says_when_reads_are_paired(self):
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        obj.name = "sample_R1.fastq.gz"
+
+        with patch.object(
+            assembler_registry,
+            "spec_for_chemistry",
+            return_value=self._abyss_installed(),
+        ):
+            card = build_assemble_card(obj)
+
+        assert card.status is CardStatus.AVAILABLE
+        assert "paired" in card.why.lower()
+        assert "unpaired" not in card.why.lower()
+
+    def test_assemble_card_unavailable_when_abyss_is_missing(self):
+        """The direction that fails when the patch seam breaks: the image
+        ships ABySS, so asserting availability would pass whether or not the
+        patch worked. Patch `spec_for` -- not `tools.abyss`, which a frozen
+        dataclass captured at import time."""
+        real = assembler_registry.spec_for
+
+        def fake_spec_for(assembler):
+            spec = real(assembler)
+            if assembler is Assembler.ABYSS:
+                return dataclasses.replace(
+                    spec, tool=None, unavailable_reason="abyss is not installed."
+                )
+            return spec
+
+        obj = _fake_obj(facts={"qc_read_chemistry": "short"})
+        obj.name = "sample_R1.fastq.gz"
+
+        with (
+            patch.object(assembler_registry, "spec_for", fake_spec_for),
+            patch.object(
+                assembler_registry,
+                "spec_for_chemistry",
+                lambda c: fake_spec_for(Assembler.ABYSS),
+            ),
+        ):
+            card = build_assemble_card(obj)
+
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "not installed" in card.reason
+
+    def test_unknown_chemistry_still_says_run_qc(self):
+        """The actionable refusal must survive -- it is a different failure
+        than a missing tool."""
+        obj = _fake_obj()
+        obj.name = "sample.fastq.gz"
+
+        card = build_assemble_card(obj)
+
+        assert card.status is CardStatus.UNAVAILABLE
+        assert "Run QC first" in card.reason
 
     def test_the_old_no_assembler_sentence_is_gone(self):
         """It was true while tools.py declared no assembler and became a lie
