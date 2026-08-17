@@ -37,6 +37,31 @@ def resolve_mem_budget_mb(
     return budget
 
 
+# Headroom so a job that slightly overshoots its declared demand does not push
+# the machine into swap. Extracted from worker._resource_budgets, which applied
+# it as a bare literal: the launch-time refusal must use the same figure, and
+# two copies of a constant that must agree is how they come to disagree.
+MEM_HEADROOM_FRACTION = 0.7
+
+
+def admission_budget_mb(
+    *, stored_mb: int | None, machine_mb: int, hard_mem_mb: int | None = None
+) -> int:
+    """The stable ceiling admission plans against, before live headroom.
+
+    This is the number that decides whether a job can *ever* be claimed.
+    `worker._resource_budgets` clamps it further by a live `available_mb`
+    reading, which moves with whatever else is running; the launch-time check
+    deliberately does not, because a job under this ceiling is claimable once
+    the machine is quiet, and refusing it would be a false refusal. See the
+    spec's "The budget is not the configured limit".
+    """
+    resolved = resolve_mem_budget_mb(
+        stored_mb=stored_mb, machine_mb=machine_mb, hard_mem_mb=hard_mem_mb
+    )
+    return max(int(resolved * MEM_HEADROOM_FRACTION), 0)
+
+
 def hard_mem_mb() -> int | None:
     """The kernel-enforced ceiling, or None when hard limits are off.
 
