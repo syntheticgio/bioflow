@@ -24,6 +24,8 @@ from app.api.v1.schemas import (
     PairRequest,
     ProteinRecordOut,
     ProteinRecordsOut,
+    ProteinStructureOut,
+    ProteinStructureState,
     ProvenanceGapOut,
     ProvenanceNarrativeOut,
     ProvenanceProseOut,
@@ -33,6 +35,7 @@ from app.config import settings
 from app.errors import NotFoundError, ValidationError
 from app.logging import get_logger
 from app.metadata import infer_molecule
+from app.metadata.protein_headers import ProteinRef
 from app.models import BlobStorage, FormatKind, JobClass, JobRunTiming, ProteinRecord
 from app.models.ai import FailureReason, TaskSlot
 from app.services import (
@@ -40,6 +43,7 @@ from app.services import (
     expected_gc,
     object_service,
     pipeline_service,
+    protein_structure,
     provenance_lineage,
     provenance_prompt,
     provenance_report,
@@ -165,6 +169,59 @@ async def list_protein_records(
             )
             for r in rows
         ],
+    )
+
+
+@router.get(
+    "/{object_id}/protein-records/{ordinal}/structure",
+    response_model=ProteinStructureOut,
+)
+async def get_protein_record_structure(
+    object_id: PydanticObjectId, ordinal: int, owner: OwnerDep
+) -> ProteinStructureOut:
+    """The structure for one record of a protein FASTA.
+
+    Resolved on selection rather than for the whole list, for the reason the
+    variants viewer records: most records resolve to nothing, and pre-resolving
+    a page would spend a round trip per row to decide how buttons look.
+
+    Always a 200 for a record that exists. Every outcome the user can act on --
+    including a UniProt outage -- is a state in the body rather than a status
+    code the client has to branch on.
+    """
+    obj = await object_service.get_object(object_id, owner=owner)
+
+    record = await ProteinRecord.find_one(
+        ProteinRecord.object_id == obj.id, ProteinRecord.ordinal == ordinal
+    )
+    if record is None:
+        raise NotFoundError(f"No protein record {ordinal} for this file.")
+
+    if record.ref_accession is None or record.ref_kind is None:
+        # Nothing to look up. Querying anyway would spend a round trip to learn
+        # what the header already said.
+        return ProteinStructureOut(
+            identifier=record.identifier,
+            state=ProteinStructureState.NO_REFERENCE,
+        )
+
+    hit = await protein_structure.resolve(
+        ProteinRef(kind=record.ref_kind, accession=record.ref_accession)
+    )
+    if hit is None:
+        return ProteinStructureOut(
+            identifier=record.identifier,
+            state=ProteinStructureState.LOOKUP_FAILED,
+        )
+
+    return ProteinStructureOut(
+        identifier=record.identifier,
+        state=ProteinStructureState.RESOLVED
+        if hit.pdb_ids
+        else ProteinStructureState.NO_STRUCTURE,
+        accession=hit.accession,
+        protein_name=hit.protein_name,
+        pdb_ids=hit.pdb_ids,
     )
 
 
