@@ -61,13 +61,8 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
     "/pipelines/assembly-qv": frozenset({"assess_assembly_qv"}),
     "/pipelines/assembly-continuity": frozenset({"assess_assembly_continuity"}),
     "/pipelines/quantify": frozenset({"quantify"}),
-    # Offered by the kmer_spectra and repeat_density cards. The route does not
-    # exist yet -- `pipeline_service.launch_meryl_analysis` is there but was
-    # never wired to one, so both cards currently 404 on Launch (filed
-    # separately). Mapped here anyway: the job type is not in doubt, and
-    # leaving it out would mean the guard silently missed these two cards on
-    # the day the route lands. `_ENDPOINTS_WITHOUT_ROUTES` is where that
-    # exception is recorded so the route test stays meaningful for the rest.
+    # Offered by the kmer_spectra and repeat_density cards. One route serves
+    # both, since the handler runs both analyses in a single job.
     "/pipelines/meryl-analysis": frozenset({"analyze_meryl_tracks"}),
 }
 
@@ -77,9 +72,9 @@ ENDPOINT_JOB_TYPES: dict[str, frozenset[str]] = {
 # every other key. An entry should be deleted the moment its route lands, and
 # the test fails if one is added here that does resolve, so this cannot quietly
 # become a dumping ground.
-_ENDPOINTS_WITHOUT_ROUTES: frozenset[str] = frozenset(
-    {"/pipelines/meryl-analysis"}
-)
+#
+# Empty since #495 landed `/pipelines/meryl-analysis`, its only ever entry.
+_ENDPOINTS_WITHOUT_ROUTES: frozenset[str] = frozenset()
 
 
 async def _active_jobs_for(obj, *, owner: str) -> list[Job]:
