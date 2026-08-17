@@ -80,10 +80,11 @@ RAMP_COUNT = 3  # consecutive clean admissions before normal operation
 # verify_files job that never runs is a silent failure, so it gets a way out.
 #
 # The escape is deliberately limited to maintenance (see worker._maintenance_
-# starving). Compute does not qualify: a waiting pipeline run is *visible* as
-# waiting in the activity view, so it fails loudly rather than silently, and
-# forcing a multi-hour job onto an already-strained machine is the outcome the
-# governor exists to prevent.
+# starving). Compute does not qualify: a waiting pipeline run says what it is
+# waiting on in the activity view -- the gate and the numbers, recorded by
+# claim.lua (#457) -- so it fails loudly rather than silently, and forcing a
+# multi-hour job onto an already-strained machine is the outcome the governor
+# exists to prevent.
 STARVATION_ESCAPE_SECONDS = 30 * 60
 
 
@@ -480,14 +481,29 @@ async def current_load() -> dict:
     vanish exactly when the leader lock lapses.
     """
     from app.db.redis_client import get_redis
+    from app.queue import blocked_reason as blocked_reason_mod
 
     nodes, nodes_error = await _node_breakdown()
+
+    reason = await blocked_reason_mod.read(get_redis())
+    reason_out = (
+        {
+            "gate": reason.gate,
+            "need": reason.need,
+            "free": reason.free,
+            "class": reason.job_class,
+            "admitted": reason.admitted,
+        }
+        if reason
+        else None
+    )
 
     snap = await read_snapshot(get_redis())
     if snap is not None:
         snap["nodes"] = nodes
         if nodes_error:
             snap["nodes_error"] = nodes_error
+        snap["blocked_reason"] = reason_out
         return snap
 
     # No leader has published yet (or Redis is empty): report raw metrics so the
@@ -502,6 +518,7 @@ async def current_load() -> dict:
         "disk": None,
         "governor_active": False,
         "nodes": nodes,
+        "blocked_reason": reason_out,
     }
     if nodes_error:
         load["nodes_error"] = nodes_error

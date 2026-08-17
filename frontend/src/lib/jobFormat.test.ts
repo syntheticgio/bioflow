@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { RUNNING, WAITING, BLOCKED, waitingReason, jobLabel } from "./runFormat";
-import type { JobSummary, SystemLoad } from "../api/types";
+import {
+  RUNNING,
+  WAITING,
+  BLOCKED,
+  waitingReason,
+  jobLabel,
+  formatBlockedReason,
+  isUnsatisfiable,
+} from "./runFormat";
+import type { BlockedReason, JobSummary, SystemLoad } from "../api/types";
 
 /**
  * These moved out of ActivityView.tsx so the mobile feed could reuse them
@@ -51,6 +59,28 @@ describe("state sets", () => {
 });
 
 describe("waitingReason", () => {
+  it("still explains a blocked job when a reason or load is also passed", () => {
+    // Regression test: waitingReason's `blocked` branch used to be dead code
+    // because both call sites only invoked it when job.state was in WAITING
+    // (which does not include "blocked"). A blocked job must reach this
+    // function and say "waiting on an earlier step" regardless of what else
+    // is passed in -- not "waiting on memory" or anything load-derived.
+    const busyLoad = load({ state: "CLOSED", admitted_classes: [] });
+    const memReason: BlockedReason = {
+      gate: "mem",
+      need: 32768,
+      free: 8192,
+      class: null,
+      admitted: null,
+    };
+    expect(waitingReason(job({ state: "blocked" }), busyLoad, memReason)).toBe(
+      "waiting on an earlier step",
+    );
+    expect(waitingReason(job({ state: "blocked" }), undefined, null)).toBe(
+      "waiting on an earlier step",
+    );
+  });
+
   it("reports cancelling ahead of everything else", () => {
     expect(waitingReason(job({ cancel_requested: true }), load())).toBe(
       "cancelling",
@@ -87,6 +117,113 @@ describe("waitingReason", () => {
     expect(waitingReason(job({ state: "blocked" }), load())).toBe(
       "waiting on an earlier step",
     );
+  });
+
+  it("prefers a fresh recorded reason over inference from load", () => {
+    // The recorded reason is what the queue actually decided; load-derived
+    // inference is only a fallback for when it is missing or expired. Give
+    // both, disagreeing, and confirm the recorded one wins.
+    const cpuReason: BlockedReason = {
+      gate: "cpu",
+      need: 8,
+      free: 2,
+      class: null,
+      admitted: null,
+    };
+    const closedLoad = load({ state: "CLOSED", admitted_classes: [] });
+    expect(waitingReason(job(), closedLoad, cpuReason)).toBe(
+      "waiting on CPU — needs 8, 2 free",
+    );
+  });
+});
+
+describe("formatBlockedReason", () => {
+  it("formats the class gate", () => {
+    expect(
+      formatBlockedReason({
+        gate: "class",
+        need: null,
+        free: null,
+        class: "bulk",
+        admitted: ["user_interactive"],
+      }),
+    ).toBe("waiting: system loaded");
+  });
+
+  it("formats the cpu gate with need and free", () => {
+    expect(
+      formatBlockedReason({
+        gate: "cpu",
+        need: 16,
+        free: 4,
+        class: null,
+        admitted: null,
+      }),
+    ).toBe("waiting on CPU — needs 16, 4 free");
+  });
+
+  it("formats the mem gate in MB below the GB boundary", () => {
+    expect(
+      formatBlockedReason({
+        gate: "mem",
+        need: 512,
+        free: 256,
+        class: null,
+        admitted: null,
+      }),
+    ).toBe("waiting on memory — needs 512 MB, 256 MB free");
+  });
+
+  it("formats the mem gate in GB at and above the 1024 MB boundary", () => {
+    expect(
+      formatBlockedReason({
+        gate: "mem",
+        need: 1024,
+        free: 8192,
+        class: null,
+        admitted: null,
+      }),
+    ).toBe("waiting on memory — needs 1.0 GB, 8.0 GB free");
+  });
+
+  it("falls back to a bare memory message when need/free are unknown", () => {
+    expect(
+      formatBlockedReason({
+        gate: "mem",
+        need: null,
+        free: null,
+        class: null,
+        admitted: null,
+      }),
+    ).toBe("waiting on memory");
+  });
+
+  it("formats the io gate", () => {
+    expect(
+      formatBlockedReason({
+        gate: "io",
+        need: null,
+        free: null,
+        class: null,
+        admitted: null,
+      }),
+    ).toBe("waiting on disk — another heavy job is reading");
+  });
+});
+
+describe("isUnsatisfiable", () => {
+  it("is true when declared mem_mb comfortably exceeds the budget", () => {
+    const l = load({ memory: { percent: 50, available_bytes: 0, budget_bytes: 1024 * 1024 * 1024 } });
+    expect(isUnsatisfiable({ mem_mb: 32768 }, l)).toBe(true);
+  });
+
+  it("is false when declared mem_mb is well under the budget", () => {
+    const l = load({ memory: { percent: 50, available_bytes: 0, budget_bytes: 64 * 1024 * 1024 * 1024 } });
+    expect(isUnsatisfiable({ mem_mb: 4096 }, l)).toBe(false);
+  });
+
+  it("is false when load is undefined, without throwing", () => {
+    expect(isUnsatisfiable({ mem_mb: 32768 }, undefined)).toBe(false);
   });
 });
 

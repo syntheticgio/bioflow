@@ -1,4 +1,4 @@
-import type { JobState, JobSummary } from "./job";
+import type { JobClass, JobState, JobSummary } from "./job";
 
 /** What a user asked for, and the jobs that served it.
  *
@@ -87,9 +87,14 @@ export interface RunMemberJob {
   /** Null once the job has been pruned by the 30-day TTL. */
   type: string | null;
   state: JobState | null;
+  /** Null for a pruned job. Drives the governor branch of waitingReason. */
+  job_class: JobClass | null;
+  cancel_requested: boolean;
   progress: JobSummary["progress"] | null;
   error: { code: string; message: string; retryable: boolean } | null;
   created_at: string | null;
+  /** Declared demand. Null for a pruned job. */
+  resources: { cpu: number; mem_mb: number; io: string } | null;
 }
 
 export interface RunDetail extends RunSummary {
