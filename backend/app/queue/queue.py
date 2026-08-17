@@ -126,6 +126,46 @@ async def enqueue(
     # string would collide every opted-out job in a profile with every other.
     stored_dedup_key = f"{owner}:{dedup_key}" if dedup_key is not None else None
 
+    job = await _handle_dedup(job_type, owner, job_class, payload, stored_dedup_key,
+                              project_id, object_id, resources, max_attempts,
+                              available_at, depends_on, tolerate_failure_of,
+                              parent_job_id, resource_override, now)
+    if job is None:
+        return None
+
+    if depends_on:
+        await _handle_dependencies(job, depends_on, tolerate_failure_of, job_type, owner)
+
+    await _push_to_redis(job, delay_seconds=delay_seconds, target_node=_node)
+    await publish_event(
+        "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
+    )
+    return job
+
+
+async def _handle_dedup(
+    job_type: str,
+    owner: str,
+    job_class: JobClass,
+    payload: dict | None,
+    stored_dedup_key: str | None,
+    project_id: PydanticObjectId | None,
+    object_id: PydanticObjectId | None,
+    resources: JobResources,
+    max_attempts: int | None,
+    available_at: datetime | None,
+    depends_on: list[PydanticObjectId],
+    tolerate_failure_of: list[PydanticObjectId],
+    parent_job_id: PydanticObjectId | None,
+    resource_override: bool,
+    now: datetime,
+) -> Job | None:
+    """Create and insert a job, returning None if a duplicate exists.
+
+    Deduplication is enforced by a unique partial index on non-terminal states:
+    a concurrent duplicate raises DuplicateKeyError rather than producing two
+    jobs. The caller's dedup_key is already folded with owner by enqueue().
+    """
     job = Job(
         type=job_type,
         owner=owner,
@@ -144,44 +184,50 @@ async def enqueue(
         resource_override=resource_override,
         timing=JobTiming(enqueued_at=now),
     )
-
     try:
         await job.insert()
     except DuplicateKeyError:
         log.debug("job_deduplicated", type=job_type, dedup_key=stored_dedup_key)
         return None
-
-    if depends_on:
-        # Re-read the dependencies *after* inserting, never before. A dependency
-        # that finished during the insert would otherwise be missed by both
-        # sides: `_release_dependents` could not see a job that did not exist
-        # yet, and a pre-insert check would not have seen it finish. Checking
-        # afterwards means the job is already visible to any concurrent
-        # completion, so at worst both paths try to release it -- which the
-        # conditional state update in `_release_dependents` makes safe.
-        outstanding = await _unfinished_dependencies(depends_on, tolerate_failure_of)
-        failed = await _failed_dependencies(depends_on, tolerate_failure_of)
-        if failed:
-            await _fail_blocked_job(job, failed)
-            return job
-        if outstanding:
-            await job.set({Job.state: JobState.BLOCKED})
-            log.info(
-                "job_blocked",
-                job_id=str(job.id),
-                type=job_type,
-                waiting_on=[str(d) for d in outstanding],
-            )
-            await publish_event(
-                "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
-            )
-            return job
-
-    await _push_to_redis(job, delay_seconds=delay_seconds, target_node=_node)
-    await publish_event(
-        "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
-    )
     return job
+
+
+async def _handle_dependencies(
+    job: Job,
+    depends_on: list[PydanticObjectId],
+    tolerate_failure_of: list[PydanticObjectId],
+    job_type: str,
+    owner: str,
+) -> None:
+    """Resolve dependency chain for a job that has dependencies.
+
+    Re-reads dependencies *after* inserting, never before. A dependency that
+    finished during the insert would otherwise be missed by both sides:
+    `_release_dependents` could not see a job that did not exist yet, and a
+    pre-insert check would not have seen it finish. Checking afterwards means
+    the job is already visible to any concurrent completion, so at worst both
+    paths try to release it -- which the conditional state update in
+    `_release_dependents` makes safe.
+    """
+    outstanding = await _unfinished_dependencies(depends_on, tolerate_failure_of)
+    failed = await _failed_dependencies(depends_on, tolerate_failure_of)
+    if failed:
+        await _fail_blocked_job(job, failed)
+        return
+    if outstanding:
+        await job.set({Job.state: JobState.BLOCKED})
+        log.info(
+            "job_blocked",
+            job_id=str(job.id),
+            type=job_type,
+            waiting_on=[str(d) for d in outstanding],
+        )
+        await publish_event(
+            "job.enqueued", {"job_id": str(job.id), "type": job_type}, owner=owner
+        )
+        return
+
+    # All dependencies satisfied; fall through to _push_to_redis in enqueue().
 
 
 def classify_dependencies(

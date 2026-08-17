@@ -28,6 +28,24 @@ value is a filesystem path.
 `machine_profile.py` writes to the same record under the same constraint, and
 its `_machine_id` docstring is the worked example of the reasoning -- hash the
 MAC address because it is identifying, rather than record the hostname.
+
+## Path marker rejection
+
+The markers in `PATH_MARKERS` are checked as a substring match anywhere in
+the value, not only at the start. This is deliberate — a value containing a
+separator at any position is rejected, not just one that begins with it.
+Narrowing this to a prefix check would widen the security boundary.
+
+- `/` — POSIX path separator.
+- `\\` — Windows path separator and shell escape character.
+- `~` — Shell home-directory expansion.
+
+## Where sanitized values are consumed
+
+- `app/queue/executor.py` — the sanitized payload is merged into the
+  subprocess environment when running pipeline tools.
+- `app/models/timing.py` — the sanitized payload is stored in computation
+  records as a description of the parameters used.
 """
 
 # Fields that explain a run's cost without saying anything about the machine

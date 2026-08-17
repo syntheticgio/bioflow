@@ -36,6 +36,7 @@ services:
   worker:
     build:
       context: ./backend
+    command: ["watchfiles", "python -m app.worker_main", "app/"]
     volumes:
       - ${BIOINFO_HOME:-/Volumes/ModelExtension/BioinfoHelper}:/data
       - ./backend/app:/srv/app:ro

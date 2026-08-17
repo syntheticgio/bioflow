@@ -17,10 +17,10 @@ docker-compose.yml -- and a tag hardcoded here would silently update a pinned
 node to the wrong image, the same bug already found and fixed for the
 worker's own digest probe (see worker.py's _own_image_digest). `docker
 compose pull` reads the compose file's `image: ...${BIOFLOW_TAG:-latest}`
-directive and resolves BIOFLOW_TAG from the node's own .env, exactly as
-`docker compose up -d` already does for the restart phase two lines below --
-so this needs no image reference of its own, and the primary never needs to
-know what tag any given node runs.
+directive and resolves BIOFLOW_TAG from the node's own .env, exactly as the
+restart phase's own `docker compose up` does below -- so this needs no image
+reference of its own, and the primary never needs to know what tag any given
+node runs.
 """
 
 import asyncio
@@ -137,10 +137,18 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
             await _await_drained(node.node_id)
 
         # ---- restart ----
+        #
+        # `--no-deps worker` because this runs against whatever compose file
+        # provisioning left behind, and a launcher-provisioned node has the
+        # *full* stack file there (the launcher copies docker-compose.yml
+        # verbatim and starts only the worker). A bare `up -d` would start
+        # mongo, redis, api, and web on the compute node -- a second database
+        # nobody asked for, with the worker still pointed at the primary's.
         await _phase("restart", "Starting the updated worker…", 70)
         result = await asyncio.wait_for(
             conn.run(
-                f"docker compose -f {INSTALL_DIR}/docker-compose.yml up -d",
+                f"docker compose -f {INSTALL_DIR}/docker-compose.yml "
+                "up -d --no-deps worker",
                 check=False,
             ),
             timeout=120,

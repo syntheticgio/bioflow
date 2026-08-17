@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { formatDuration } from "../lib/format";
+import { computeTimingLabel, estimateSubtext } from "../lib/jobTiming";
 
 /**
  * Estimated progress for a running ingest.
@@ -69,15 +70,9 @@ export function IngestProgress({ objectId }: { objectId: string }) {
     pct = Math.min(100, reportedPct * 100);
   } else if (detail?.pct_estimated != null) {
     pct = detail.pct_estimated * 100;
-    isEstimated = true;
-    const predictedMs = estimate?.known ? estimate.estimate_ms : null;
-    const remainMs = predictedMs != null ? Math.max(0, predictedMs - elapsedMs) : null;
-    label =
-      pct >= 95
-        ? "longer than expected"
-        : remainMs != null && remainMs > 1000
-          ? `~${formatDuration(remainMs)} remaining (estimated)`
-          : "finishing… (estimated)";
+    const timing = computeTimingLabel(elapsedMs, reportedPct, estimate);
+    isEstimated = timing.isEstimated;
+    if (timing.label) label = timing.label;
   }
 
   return (
@@ -123,15 +118,8 @@ export function IngestProgress({ objectId }: { objectId: string }) {
 
       <div style={{ fontSize: 11, color: "var(--text-faint)", marginTop: 4 }}>
         {formatDuration(elapsedMs)} elapsed
-        {estimate && !estimate.known && (
-          <>
-            {" · no estimate yet ("}
-            {estimate.needed} more run{estimate.needed === 1 ? "" : "s"} needed
-            {")"}
-          </>
-        )}
-        {estimate?.known && estimate.r_squared != null && estimate.r_squared < 0.5 && (
-          <> · rough estimate, timings vary</>
+        {estimateSubtext(estimate) && (
+          <> · {estimateSubtext(estimate)}</>
         )}
       </div>
     </div>

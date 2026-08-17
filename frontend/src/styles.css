@@ -2004,6 +2004,17 @@ a.btn {
   margin-top: 3px;
 }
 
+.timing-estimate {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.timing-subtext {
+  width: 100%;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
 .queue-empty {
   padding: 18px 12px;
   text-align: center;

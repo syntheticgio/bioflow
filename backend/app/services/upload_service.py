@@ -228,10 +228,17 @@ async def write_chunk(
         )
 
     digest = hashlib.sha256(data).hexdigest()
-    if expected_sha256 and digest != expected_sha256.lower():
-        raise ValidationError(
-            "Chunk digest mismatch; the chunk was corrupted in transit",
-            details={"index": index, "expected": expected_sha256, "actual": digest},
+    if expected_sha256:
+        if digest != expected_sha256.lower():
+            raise ValidationError(
+                "Chunk digest mismatch; the chunk was corrupted in transit",
+                details={"index": index, "expected": expected_sha256, "actual": digest},
+            )
+    else:
+        log.warning(
+            "Chunk received without client digest: session=%s index=%d",
+            session_id,
+            index,
         )
 
     staging = Path(session.staging_dir)
