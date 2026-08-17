@@ -602,6 +602,20 @@ def flye() -> Tool:
 
 
 @lru_cache(maxsize=1)
+def abyss() -> Tool:
+    """ABySS, the short-read assembler.
+
+    Probes `abyss-pe`, which is a GNU Make wrapper rather than a binary with a
+    conventional CLI. `abyss-pe version` writes a spurious
+    `test: -le: unary operator expected` line to stderr while still exiting 0
+    and printing the version to stdout -- `_probe` reads stdout, so this is
+    noise rather than a failure, and a probe that treated any stderr output as
+    broken would report an installed tool as missing.
+    """
+    return _probe("abyss", settings.abyss_path, ["version"])
+
+
+@lru_cache(maxsize=1)
 def bakta() -> Tool:
     # On-demand delivery: this probes the binary, not the database. A missing
     # database surfaces at launch time, not here -- same posture as compleasm's
@@ -821,6 +835,7 @@ def all_tools() -> list[Tool]:
         clair3(),
         deepvariant(),
         flye(),
+        abyss(),
         miniprot(),
         compleasm(),
         ivar(),
@@ -1566,6 +1581,51 @@ TOOL_META: dict[str, ToolMeta] = {
             "cannot assemble them."
         ),
     ),
+    "abyss": ToolMeta(
+        pipelines=(PipelineType.ASSEMBLE,),
+        one_liner="De novo assembler for short paired-end reads",
+        summary=(
+            "Assembles short paired-end reads into contigs without a "
+            "reference, using a de Bruijn graph. ABySS 2.0's Bloom filter "
+            "de Bruijn graph keeps memory bounded on large genomes, at the "
+            "cost of needing an explicit filter-size budget rather than "
+            "sizing itself automatically."
+        ),
+        strengths=(
+            "Paired-end short reads, single-end when mates can't be "
+            "identified",
+            "Bloom filter mode bounds memory on large genomes",
+            "Widely cited, long-maintained short-read assembler",
+        ),
+        homepage="https://github.com/bcgsc/abyss",
+        repository="https://github.com/bcgsc/abyss",
+        # The ABySS 2.0 paper, which describes the Bloom-filter de Bruijn
+        # graph mode this application uses. The original 2009 ABySS paper
+        # (Simpson et al., Genome Research) describes the earlier
+        # non-Bloom-filter algorithm and is not what a 2.3.x run reflects.
+        citation=(
+            "Jackman SD, Vandervalk BP, Mohamadi H, Chu J, Yeo S, Hammond "
+            "SA, Jahesh G, Khan H, Coombe L, Warren RL, Birol I. ABySS 2.0: "
+            "resource-efficient assembly of large genomes using a Bloom "
+            "filter. Genome Res. 2017."
+        ),
+        citation_url="https://doi.org/10.1101/gr.214346.116",
+        # Verified against the project's own LICENSE file on 2026-08-17:
+        # GPLv3 ("GNU General Public License ... version 3"), with a
+        # separately offered commercial license for anyone who wants terms
+        # other than the GPL -- that offer does not change what the GPL
+        # itself permits, so this is GPL-3.0-only, not a restricted or
+        # academic-only license.
+        license="GPL-3.0-only",
+        usage=(
+            "Assembles short paired-end reads into contigs with no "
+            "reference. BioFlow runs it paired when it can identify both "
+            "mates and single-end when it cannot, and derives its "
+            "mandatory Bloom filter budget from the same memory estimate "
+            "that guards the run."
+        ),
+        runnable=True,
+    ),
     "miniprot": ToolMeta(
         pipelines=(PipelineType.ASSEMBLY_QC,),
         one_liner="Protein-to-genome aligner behind compleasm",
@@ -2251,6 +2311,7 @@ def reset_cache() -> None:
     clair3.cache_clear()
     deepvariant.cache_clear()
     flye.cache_clear()
+    abyss.cache_clear()
     miniprot.cache_clear()
     compleasm.cache_clear()
     ivar.cache_clear()

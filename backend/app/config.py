@@ -155,6 +155,10 @@ class Settings(BaseSettings):
     # minimap2 and samtools, both of which this image already carries, so it
     # costs ~37MB rather than a toolchain.
     flye_path: str = "flye"
+    # The short-read assembler. `abyss-pe` is a GNU Make wrapper, not a
+    # conventional binary -- see tools.abyss()'s docstring for the probe
+    # argument it needs.
+    abyss_path: str = "abyss-pe"
     # Bacterial genome annotation. On-demand delivery — the database is
     # several GB — so this probe only checks the binary, not the DB.
     bakta_path: str = "bakta"
