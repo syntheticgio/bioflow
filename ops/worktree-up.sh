@@ -304,6 +304,27 @@ export COMPOSE_PROJECT_NAME="$PROJECT"
 # main checkout's .env pins BIOFLOW_TAG.
 export BIOFLOW_TAG="wt-${SLUG}"
 
+# Let the stack report which revision it is serving (#452).
+#
+# docker-compose.override.yml mounts this worktree's `./.git`, which for a
+# linked worktree is a file reading `gitdir: <GIT_COMMON>/worktrees/<name>`.
+# That is a host path, so inside the container it dangles unless the main
+# checkout's .git is mounted at the identical path -- which is what these two
+# feed into ops/docker-compose.worktree.yml. The source and the target are
+# deliberately the same string: the pointer file's contents are fixed, so the
+# container path is not ours to choose.
+#
+# In a non-worktree checkout `.git` is already a real directory and the
+# override's own mount is sufficient, so this maps /dev/null onto itself --
+# a no-op bind rather than a special case in the compose file.
+if [ -d "$GIT_COMMON" ] && [ "$WT_ROOT" != "$MAIN_ROOT" ]; then
+  export WT_MAIN_GIT="$GIT_COMMON"
+  export WT_MAIN_GIT_PATH="$GIT_COMMON"
+else
+  export WT_MAIN_GIT="/dev/null"
+  export WT_MAIN_GIT_PATH="/dev/null"
+fi
+
 # Pick a port pair this worktree can have to itself.
 #
 # These used to be fixed at 5273/8100, which meant the *second* concurrent

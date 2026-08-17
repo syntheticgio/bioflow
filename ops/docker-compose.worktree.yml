@@ -14,10 +14,27 @@
 # The port values themselves are chosen by ops/worktree-up.sh, which derives
 # them from the branch slug and probes for a free pair; the defaults here are
 # only a fallback for a direct `docker compose -f ...` invocation.
+#
+# The `.git` mounts below are what let a worktree stack answer "which revision
+# am I serving?" (#452) at all. docker-compose.override.yml mounts the
+# worktree's own `./.git`, which in a linked worktree is a *file* holding
+# `gitdir: <absolute host path>` into the main checkout. That path does not
+# exist inside the container, so the pointer dangles and the stack reports
+# itself as running a published image rather than the branch it is testing --
+# the exact "nothing says which code this is" gap #452 is about, arrived at
+# from the worktree side. Mounting the main checkout's `.git` at the *same
+# absolute path the pointer names* makes it resolve; WT_MAIN_GIT and
+# WT_MAIN_GIT_PATH are exported by ops/worktree-up.sh, which knows both.
 services:
   api:
     ports: !override
       - "${BIND_ADDRESS:-127.0.0.1}:${WT_API_PORT:-8100}:8000"
+    volumes:
+      - ${WT_MAIN_GIT:-/dev/null}:${WT_MAIN_GIT_PATH:-/dev/null}:ro
+
+  worker:
+    volumes:
+      - ${WT_MAIN_GIT:-/dev/null}:${WT_MAIN_GIT_PATH:-/dev/null}:ro
 
   web:
     ports: !override
