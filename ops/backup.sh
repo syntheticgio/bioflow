@@ -307,8 +307,16 @@ cmd_restore() {
   [ -n "$dir" ] || die "usage: ops/backup.sh restore <dir> [--force]"
 
   preflight_backup_dir "$dir"
+  [ -f "$dir/dump/$MONGO_DB.archive" ] \
+    || die "$dir/dump is missing $MONGO_DB.archive (does MONGO_DB match the database this backup was taken from?)"
   docker exec -i "$MONGO_CONTAINER" true 2>/dev/null \
     || die "cannot reach Mongo container '$MONGO_CONTAINER'. Is the stack up?"
+
+  local backup_database
+  backup_database="$(json_field "$dir/manifest.json" database)"
+  if [ -n "$backup_database" ] && [ "$backup_database" != "$MONGO_DB" ]; then
+    die "this backup was taken from database '$backup_database', but MONGO_DB is currently '$MONGO_DB'. mongorestore --archive restores into the name recorded in the dump, not \$MONGO_DB, so restoring here would silently write into the wrong database. Set MONGO_DB=$backup_database to restore this backup."
+  fi
 
   local backup_version current_version
   backup_version="$(json_field "$dir/manifest.json" version)"
@@ -340,8 +348,7 @@ cmd_restore() {
     <"$dir/dump/$MONGO_DB.archive"
 
   log "Verifying document counts…"
-  local expected actual
-  expected="$(json_field "$dir/manifest.json" collection_counts)"
+  local actual
   collection_counts >"/tmp/bioflow-restore-counts.$$"
   actual="$(counts_to_json "/tmp/bioflow-restore-counts.$$")"
   rm -f "/tmp/bioflow-restore-counts.$$"
