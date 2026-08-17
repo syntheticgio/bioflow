@@ -75,6 +75,69 @@ manifest_row_count() {
   tail -n +2 "$file" | grep -c . || true
 }
 
+# The last four characters, enough for a user to confirm which key they are
+# pasting back without the value being recoverable from the backup.
+key_digest() {
+  local key="${1:-}"
+  if [ -z "$key" ]; then
+    printf '(no key)\n'
+  else
+    printf '…%s\n' "${key: -4}"
+  fi
+}
+
+# Which providers were configured, so restore can say what needs re-entering.
+# Runs through the api container because decrypting needs Fernet and the key
+# file; the key itself never reaches this script.
+#
+# Best-effort: a stopped api container costs the summary, not the backup.
+write_provider_summary() {
+  local outfile="$1"
+  {
+    printf 'Providers configured at backup time.\n'
+    printf 'Keys are NOT included in this backup and must be re-entered after restore.\n\n'
+  } >"$outfile"
+
+  if ! docker compose exec -T api python - <<'PY' >>"$outfile" 2>/dev/null
+import asyncio
+from collections import defaultdict
+
+from app.db.client import close_mongo, connect_to_mongo
+from app.models.ai import AiProvider, AiRouting
+from app.services.ai.crypto import decrypt
+
+
+async def main() -> None:
+    await connect_to_mongo()
+    try:
+        providers = await AiProvider.find_all().to_list()
+        if not providers:
+            print("  (none configured)")
+            return
+
+        routing = await AiRouting.load()
+        slots_by_provider: dict[str, list[str]] = defaultdict(list)
+        for slot, provider_id in routing.slots.items():
+            slots_by_provider[provider_id].append(slot)
+        if routing.default:
+            slots_by_provider[routing.default].append("default")
+
+        for p in providers:
+            plaintext = decrypt(p.api_key_enc) if p.api_key_enc else None
+            digest = f"…{plaintext[-4:]}" if plaintext else "(no key)"
+            slots = ", ".join(sorted(slots_by_provider.get(str(p.id), []))) or "unassigned"
+            print(f"  {p.name:<12} {digest:<10} {p.model or '-':<24} {slots}")
+    finally:
+        await close_mongo()
+
+
+asyncio.run(main())
+PY
+  then
+    printf '  (could not reach the api container; summary unavailable)\n' >>"$outfile"
+  fi
+}
+
 # --- dispatch ---
 case "${1:-}" in
   backup)  shift; cmd_backup "$@" ;;
