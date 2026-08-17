@@ -77,7 +77,7 @@ async def connect_with_tofu(
     private_key: str,
     stored_host_key: str | None,
     *,
-    timeout: int = _VERIFY_TIMEOUT_SECONDS,
+    timeout_seconds: int = _VERIFY_TIMEOUT_SECONDS,
 ) -> tuple[asyncssh.SSHClientConnection, str]:
     """Connect with TOFU (trust-on-first-use) host key verification.
 
@@ -113,7 +113,7 @@ async def connect_with_tofu(
                 known_hosts=host_key_verifier,
                 client_keys=[key],
             ),
-            timeout=timeout,
+            timeout=timeout_seconds,
         )
     except (TimeoutError, asyncssh.Error, ValueError) as e:
         log.warning(

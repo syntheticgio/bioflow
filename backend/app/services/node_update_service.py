@@ -102,7 +102,7 @@ async def run_update(task_id: str, node: Node, drain: bool) -> None:
                 node.ssh_username,
                 private_pem,
                 stored_host_key=node.host_key,
-                timeout=20,
+                timeout_seconds=20,
             )
         except (TimeoutError, asyncssh.Error, ValueError) as e:
             return await _fail(
