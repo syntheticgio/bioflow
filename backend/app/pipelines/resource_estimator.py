@@ -200,3 +200,31 @@ def explain(
         parts.append(f"Estimate {provenance}.")
 
     return " ".join(parts)
+
+
+def exceeds_declared_budget(*, declared_mb: int, budget_mb: int) -> bool:
+    """Whether a job's declared reservation can never be claimed.
+
+    Deliberately separate from `classify()`. That function bands a *heuristic*
+    prediction and answers "is this likely to be tight?"; this one compares two
+    exact numbers and answers "is this impossible?". Strict `>` mirrors
+    claim.lua's `mem <= mem_free`, so a job declaring exactly the budget fits
+    here and there alike.
+    """
+    return declared_mb > budget_mb
+
+
+def explain_declared_refusal(*, declared_mb: int, budget_mb: int) -> str:
+    """The refusal sentence for a job that could never be claimed.
+
+    Worded to be distinguishable from `explain()`, which reports an estimate
+    and points at the sliders that move it. Nothing the user can change about
+    the run alters this number -- it is a fixed reservation -- so the sentence
+    points at the memory budget setting instead.
+    """
+    return (
+        f"This job requires {declared_mb:,} MB, which is more than the "
+        f"{budget_mb:,} MB memory budget. It would wait forever without "
+        f"running. Raise the memory budget in Settings, or launch it anyway "
+        f"to run it on its own when the machine is idle."
+    )

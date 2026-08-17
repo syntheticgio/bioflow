@@ -260,3 +260,42 @@ class TestAssemblyEstimate:
             )
             is None
         )
+
+
+def test_exceeds_declared_budget_is_a_strict_comparison():
+    # Equal fits: claim.lua admits on `mem <= mem_free`.
+    assert not est.exceeds_declared_budget(
+        declared_mb=8000, budget_mb=8000
+    )
+    assert est.exceeds_declared_budget(
+        declared_mb=8001, budget_mb=8000
+    )
+
+
+def test_declared_refusal_names_both_numbers():
+    msg = est.explain_declared_refusal(
+        declared_mb=16384, budget_mb=5600
+    )
+    assert "16,384" in msg
+    assert "5,600" in msg
+
+
+def test_declared_refusal_says_requires_not_estimated():
+    """R7: distinguishable from the heuristic refusal, which says 'Estimated'.
+
+    The declared number is a fixed reservation, not a prediction. Calling it an
+    estimate would send the user looking for a slider to move, when the fix is
+    the memory budget setting.
+    """
+    msg = est.explain_declared_refusal(
+        declared_mb=16384, budget_mb=5600
+    )
+    assert "Estimated" not in msg
+    assert "requires" in msg.lower()
+
+
+def test_declared_refusal_points_at_the_setting():
+    msg = est.explain_declared_refusal(
+        declared_mb=16384, budget_mb=5600
+    )
+    assert "memory budget" in msg.lower()
