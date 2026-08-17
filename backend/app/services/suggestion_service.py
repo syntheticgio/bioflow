@@ -2024,34 +2024,54 @@ async def suggestions_for(obj) -> list[dict]:
         except Exception:  # noqa: BLE001 - a resolution failure loses one card, not the grid
             alignment_target = None
 
-    read_sets = None
+    # One listing, named once, for every assembly-like card below.
+    # `read_sets`, `scaffold_references` and `all_read_sets` are three
+    # different filters over the *same* query -- same project, same owner,
+    # READY, same default limit -- and all three are gated on the same
+    # `_is_assembly_like(obj)`, so they either all run or none do. Writing
+    # that query once says so; three separate `await`s of it read as three
+    # independent lookups that happen to coincide.
+    #
+    # This is a readability change, not a performance one. The three spellings
+    # it replaced already issued a single round trip between them, so the query
+    # count is unchanged -- measured at two per assembly-like click before and
+    # after, the second being `alignments_against`'s own listing below.
+    #
+    # Kept out of the FASTQ `references` listing above deliberately. That one
+    # raises the limit to 500 and is gated on FASTQ, which `_is_assembly_like`
+    # excludes by construction (it requires FASTA), so the two branches never
+    # both run and merging them would only put a different limit in front of
+    # one of them.
+    project_objects: list[DataObject] | None = None
     if reference_assembly._is_assembly_like(obj):
-        # Same reasoning as chemistry and alignment_target above: an async
-        # project listing, kept out of the synchronous polish card. Only for
-        # assembly-like FASTA, so a project listing is not paid for on every
-        # FASTQ's Actions tab.
+        # A listing failure loses the cards that need it, not the grid --
+        # the same trade each of these branches made when it owned its own
+        # query. `None` is what the builders below read as "could not tell".
         try:
-            read_sets = reference_assembly.short_read_sets(
-                await object_service.list_objects(
-                    obj.project_id, owner=obj.owner, status=ObjectStatus.READY
-                )
+            project_objects = await object_service.list_objects(
+                obj.project_id, owner=obj.owner, status=ObjectStatus.READY
             )
         except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+            project_objects = None
+
+    read_sets = None
+    if project_objects is not None:
+        # Kept out of the synchronous polish card: `short_read_sets` is the
+        # chemistry-filtered candidate list Polypolish accepts.
+        try:
+            read_sets = reference_assembly.short_read_sets(project_objects)
+        except Exception:  # noqa: BLE001 - a filter failure loses one card, not the grid
             read_sets = None
 
     scaffold_references = None
-    if reference_assembly._is_assembly_like(obj):
-        # Same reasoning as read_sets above: an async project listing kept
-        # out of the synchronous scaffold card, computed only for
-        # assembly-like FASTA. Deliberately not the `references` list built
-        # above -- that one is gated to the FASTQ branch and stays empty for
-        # a FASTA click, which would starve this card of every candidate.
+    if project_objects is not None:
+        # Deliberately not the `references` list built above -- that one is
+        # gated to the FASTQ branch and stays empty for a FASTA click, which
+        # would starve this card of every candidate.
         try:
             scaffold_references = [
                 o
-                for o in await object_service.list_objects(
-                    obj.project_id, owner=obj.owner, status=ObjectStatus.READY
-                )
+                for o in project_objects
                 if o.role is ObjectRole.REFERENCE
                 and o.format.kind is FormatKind.FASTA
                 # A draft that is itself marked REFERENCE -- an already
@@ -2063,28 +2083,22 @@ async def suggestions_for(obj) -> list[dict]:
                 # naming itself as the target.
                 and o.id != obj.id
             ]
-        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+        except Exception:  # noqa: BLE001 - a filter failure loses one card, not the grid
             scaffold_references = None
 
     all_read_sets = None
-    if reference_assembly._is_assembly_like(obj):
-        # Same reasoning as read_sets above, but not filtered to short reads:
-        # QV's k-mer comparison works for any chemistry, unlike Polypolish,
-        # so `build_qv_card` needs every read set in the project rather than
+    if project_objects is not None:
+        # Same source as read_sets, but not filtered to short reads: QV's
+        # k-mer comparison works for any chemistry, unlike Polypolish, so
+        # `build_qv_card` needs every read set in the project rather than
         # `short_read_sets`'s narrower candidate list. `group_read_sets` is
         # the same mate-pairing logic `short_read_sets` itself is built on,
         # just without the chemistry filter.
         try:
             all_read_sets = reference_assembly.group_read_sets(
-                [
-                    o
-                    for o in await object_service.list_objects(
-                        obj.project_id, owner=obj.owner, status=ObjectStatus.READY
-                    )
-                    if o.format.kind is FormatKind.FASTQ
-                ]
+                [o for o in project_objects if o.format.kind is FormatKind.FASTQ]
             )
-        except Exception:  # noqa: BLE001 - a listing failure loses one card, not the grid
+        except Exception:  # noqa: BLE001 - a filter failure loses one card, not the grid
             all_read_sets = None
 
     assembly_alignments = None
