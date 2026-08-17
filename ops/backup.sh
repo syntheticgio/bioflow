@@ -266,6 +266,137 @@ cmd_backup() {
   log "set BACKUP_DIR= to external storage for that."
 }
 
+# A scalar out of manifest.json without a jq dependency. The file is written
+# by write_backup_manifest, one field per line, so this is safe here in a way
+# it would not be for arbitrary JSON.
+json_field() {
+  local file="$1" key="$2"
+  sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\{0,1\}\([^\",]*\)\"\{0,1\}.*/\1/p" "$file" | head -1
+}
+
+preflight_backup_dir() {
+  local dir="$1"
+  [ -d "$dir" ] || die "no such backup directory: $dir"
+  [ -d "$dir/dump" ] || die "$dir is missing dump/"
+  for f in manifest.json data-manifest.tsv providers.txt RESTORE.md; do
+    [ -f "$dir/$f" ] || die "$dir is missing $f"
+  done
+}
+
+# Rows whose file is absent from /data. Silent when everything is present, so
+# it composes: no output means nothing missing.
+check_manifest_against_data() {
+  local manifest="$1" data_root="$2"
+  tail -n +2 "$manifest" | while IFS=$'\t' read -r _id _size path _sha _state; do
+    [ -n "$path" ] || continue
+    case "$path" in
+      /*) [ -e "$path" ] || printf '%s\n' "$path" ;;
+      *)  [ -e "$data_root/$path" ] || printf '%s\n' "$path" ;;
+    esac
+  done
+}
+
+cmd_restore() {
+  local dir="" force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --force) force=1; shift ;;
+      *) dir="$1"; shift ;;
+    esac
+  done
+  [ -n "$dir" ] || die "usage: ops/backup.sh restore <dir> [--force]"
+
+  preflight_backup_dir "$dir"
+  docker exec -i "$MONGO_CONTAINER" true 2>/dev/null \
+    || die "cannot reach Mongo container '$MONGO_CONTAINER'. Is the stack up?"
+
+  local backup_version current_version
+  backup_version="$(json_field "$dir/manifest.json" version)"
+  current_version="$(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo unknown)"
+
+  if ! version_matches "$backup_version" "$current_version"; then
+    log "Version mismatch:"
+    log "  backup was taken at: $backup_version"
+    log "  this checkout is:    $current_version"
+    log ""
+    log "Restore attempts no schema migration. Restoring across versions may"
+    log "fail on read if the schema changed. Re-run with --force to proceed."
+    [ "$force" -eq 1 ] || exit 1
+    log "Proceeding because --force was given."
+  fi
+
+  if [ "$force" -eq 0 ]; then
+    [ -t 0 ] || die "restore overwrites '$MONGO_DB' and stdin is not a terminal. Pass --force to proceed unattended."
+    log "This overwrites the '$MONGO_DB' database. Type the database name to confirm:"
+    local answer; read -r answer
+    [ "$answer" = "$MONGO_DB" ] || die "confirmation did not match; nothing was changed"
+  fi
+
+  log "Restoring from $dir…"
+  docker exec -i "$MONGO_CONTAINER" mongorestore --archive --drop --quiet \
+    <"$dir/dump/$MONGO_DB.archive"
+
+  log "Verifying document counts…"
+  local expected actual
+  expected="$(json_field "$dir/manifest.json" collection_counts)"
+  collection_counts >"/tmp/bioflow-restore-counts.$$"
+  actual="$(counts_to_json "/tmp/bioflow-restore-counts.$$")"
+  rm -f "/tmp/bioflow-restore-counts.$$"
+
+  local manifest_counts
+  manifest_counts="$(sed -n 's/.*"collection_counts": \(.*\)/\1/p' "$dir/manifest.json" | tr -d '\n')"
+  if [ "$actual" != "$manifest_counts" ]; then
+    log ""
+    log "Document counts do not match the backup manifest."
+    log "  expected: $manifest_counts"
+    log "  actual:   $actual"
+    die "restore is incomplete"
+  fi
+  log "  counts match."
+
+  log ""
+  cat "$dir/providers.txt"
+  log ""
+  log "Blobs enumerated in this backup: $(manifest_row_count "$dir/data-manifest.tsv")"
+  log "Restore does not check /data. To see what is missing:"
+  log "  make backup-verify BACKUP=$dir"
+}
+
+cmd_verify() {
+  local dir="" do_hash=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --hash) do_hash=1; shift ;;
+      *) dir="$1"; shift ;;
+    esac
+  done
+  [ -n "$dir" ] || die "usage: ops/backup.sh verify <dir> [--hash]"
+  preflight_backup_dir "$dir"
+
+  local data_root="${BIOINFO_HOME:-/data}"
+  [ -d "$data_root" ] || die "no such data directory: $data_root (set BIOINFO_HOME)"
+
+  log "Checking $(manifest_row_count "$dir/data-manifest.tsv") enumerated blobs against $data_root…"
+
+  local missing
+  missing="$(check_manifest_against_data "$dir/data-manifest.tsv" "$data_root")"
+
+  if [ -z "$missing" ]; then
+    log "All enumerated blobs are present."
+  else
+    log ""
+    log "Missing from $data_root:"
+    printf '%s\n' "$missing" | sed 's/^/  /'
+    log ""
+    log "$(printf '%s\n' "$missing" | grep -c .) file(s) missing."
+  fi
+
+  if [ "$do_hash" -eq 1 ]; then
+    log ""
+    log "Hash check not implemented yet -- see #411 follow-up."
+  fi
+}
+
 # --- dispatch ---
 case "${1:-}" in
   backup)  shift; cmd_backup "$@" ;;
