@@ -2283,3 +2283,45 @@ class TestCardBuilderRegistry:
 
         kinds = [kind for kind, _build in CARD_BUILDERS]
         assert len(kinds) == len(set(kinds))
+
+    def test_every_launch_endpoint_is_a_real_route(self):
+        """An AVAILABLE card whose endpoint no route serves 404s on Launch,
+        and nothing on screen says so -- the card looks launchable because
+        it is AVAILABLE rather than UNAVAILABLE. That was #495: both meryl
+        cards pointed at `/pipelines/meryl-analysis`, which existed as a
+        service function and never as a route.
+
+        Read statically from the source rather than by building every card,
+        because the endpoint of a card this test cannot construct (one
+        needing a fixture nobody wrote yet) is exactly the one that breaks
+        unnoticed. Every `"endpoint": "..."` literal in the module counts,
+        reachable or not.
+        """
+        import ast
+        import inspect
+
+        from app.api.v1 import pipelines
+        from app.services import suggestion_service
+
+        tree = ast.parse(inspect.getsource(suggestion_service))
+        declared = {
+            value.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Dict)
+            for key, value in zip(node.keys, node.values, strict=True)
+            if isinstance(key, ast.Constant)
+            and key.value == "endpoint"
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+        }
+        assert declared, "found no endpoint literals -- has the shape changed?"
+
+        routes = {
+            r.path
+            for r in pipelines.router.routes
+            if "POST" in getattr(r, "methods", set())
+        }
+        unknown = {ep for ep in declared if ep not in routes}
+        assert unknown == set(), (
+            f"cards launch endpoints with no POST route: {sorted(unknown)}"
+        )
