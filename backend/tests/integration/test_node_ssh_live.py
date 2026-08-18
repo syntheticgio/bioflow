@@ -14,9 +14,10 @@ callback raised `AttributeError: 'str' object has no attribute
 'export_public_key'` against every real server while the mocked tests, which
 never invoke the callback, stayed green. TOFU pinning had never once worked.
 
-What still cannot be tested here, and stays manual on #356: a real update's
-success and failure paths, which need Docker on a second machine and a worker
-that re-enrolls.
+A real update's success and failure paths were carried over to #474 and are
+now covered by `test_node_update_live.py`, against a sidecar that adds Docker
+to this same sshd. What stays manual there is narrower: a real worker
+re-enrolling with the primary, which no container harness can perform.
 
 Skipped unless BIOFLOW_TEST_SSHD_HOST is set. The test container has no Docker
 socket, so it cannot start sshd itself; `run-worktree-tests.sh` starts the
