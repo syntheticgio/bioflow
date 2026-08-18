@@ -130,6 +130,14 @@ async def _run(
             AsyncMock(side_effect=_alignments_against),
         ),
         patch("app.queue.queue.enqueue", _enqueue),
+        # A generous admission budget so this file's tests -- chemistry
+        # routing, plot gating, map_qual defaults -- reach the queue rather
+        # than being refused by CONTINUITY_QC_MEM_MB (#527). See
+        # test_declared_budget_refusal.py for the refusal's own coverage.
+        patch(
+            "app.services.pipeline_service.current_admission_budget_mb",
+            AsyncMock(return_value=10_000_000),
+        ),
     ):
         job = await pipeline_service.launch_continuity_qc(
             object_id=assembly.id,
