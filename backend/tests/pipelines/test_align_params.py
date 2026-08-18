@@ -263,6 +263,104 @@ class TestWinnowmap:
             align_params.from_dict({"aligner": "winnowmap", "distinct": 0.0})
 
 
+class TestMinimap2:
+    def test_optional_minimap2_fields_default_to_none(self):
+        params = align_params.from_dict({"aligner": "minimap2"})
+        assert params.kmer_size is None
+        assert params.window_size is None
+        assert params.min_chain_score is None
+        assert params.max_gap is None
+        assert params.secondary_ratio is None
+        assert params.max_secondary is None
+        assert params.batch_size is None
+        assert params.secondary_mode is None
+        assert params.soft_clip_supplementary is None
+        assert params.cs_mode is None
+        assert params.emit_md is None
+
+    def test_default_and_none_sentinels_normalize_to_none(self):
+        params = align_params.from_dict(
+            {
+                "aligner": "minimap2",
+                "secondary_mode": "default",
+                "cs_mode": "none",
+            }
+        )
+        assert params.secondary_mode is None
+        assert params.cs_mode is None
+
+    def test_invalid_lower_bounds_are_rejected(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "kmer_size": 0})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "window_size": 0})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "min_chain_score": 0})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "max_gap": 0})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "max_secondary": 0})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "batch_size": 0})
+
+    def test_secondary_ratio_must_stay_within_unit_interval(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "secondary_ratio": -0.1})
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "secondary_ratio": 1.1})
+
+    def test_invalid_secondary_mode_is_rejected(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict(
+                {"aligner": "minimap2", "secondary_mode": "maybe"}
+            )
+
+    def test_invalid_cs_mode_is_rejected(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "cs_mode": "full"})
+
+    def test_full_round_trip_preserves_explicit_overrides(self):
+        original = align_params.from_dict(
+            {
+                "aligner": "minimap2",
+                "preset": "map-ont",
+                "kmer_size": 19,
+                "window_size": 10,
+                "min_chain_score": 40,
+                "max_gap": 5000,
+                "secondary_ratio": 0.8,
+                "max_secondary": 10,
+                "secondary_mode": "disabled",
+                "batch_size": 1000000,
+                "soft_clip_supplementary": True,
+                "cs_mode": "long",
+                "emit_md": True,
+            }
+        )
+        assert align_params.from_dict(original.as_dict()) == original
+
+    def test_unset_numeric_overrides_are_not_serialized(self):
+        params = align_params.from_dict(
+            {
+                "aligner": "minimap2",
+                "preset": "map-ont",
+                "secondary_mode": "enabled",
+                "cs_mode": "short",
+            }
+        )
+        data = params.as_dict()
+        assert data["preset"] == "map-ont"
+        assert data["secondary_mode"] == "enabled"
+        assert data["cs_mode"] == "short"
+        assert "kmer_size" not in data
+        assert "window_size" not in data
+        assert "min_chain_score" not in data
+        assert "max_gap" not in data
+        assert "secondary_ratio" not in data
+        assert "max_secondary" not in data
+        assert "batch_size" not in data
+
+
 class TestRoundTrip:
     def test_as_dict_round_trips_through_from_dict(self):
         """Params are persisted on the run record and read back when a run is
