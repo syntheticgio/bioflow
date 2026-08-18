@@ -34,6 +34,7 @@ class FakeRun:
         params=None,
         inputs=None,
         outputs=None,
+        from_parameter_set=None,
     ):
         self.id = PydanticObjectId()
         self.kind = type("K", (), {"value": kind})()
@@ -45,6 +46,7 @@ class FakeRun:
         self.outputs = outputs or []
         self.created_at = "2026-07-28T00:00:00Z"
         self.updated_at = "2026-07-28T00:00:00Z"
+        self.from_parameter_set = from_parameter_set
 
 
 class TestRunOutTool:
@@ -74,3 +76,26 @@ class TestRunOutFieldMapping:
         assert out.inputs == [
             {"object_id": str(object_id), "name": "reads.fastq.gz", "role": "reads"}
         ]
+
+
+class TestRunOutFromParameterSet:
+    """RunOut used to declare no `from_parameter_set` field at all, so
+    Pydantic silently dropped it from every response -- see
+    tests/api/test_run_provenance.py for the HTTP-level regression test that
+    exercises the same gap through the real GET /runs/{id} route."""
+
+    def test_carries_the_applied_parameter_set(self):
+        from app.models.run import AppliedParameterSet
+
+        applied = AppliedParameterSet(
+            set_id=PydanticObjectId(),
+            name="Nanopore fast",
+            revision=2,
+            edited_after_apply=True,
+        )
+        run = FakeRun(from_parameter_set=applied)
+        assert RunOut.of(run, "succeeded").from_parameter_set == applied
+
+    def test_defaults_to_none_when_configured_by_hand(self):
+        run = FakeRun()
+        assert RunOut.of(run, "succeeded").from_parameter_set is None
