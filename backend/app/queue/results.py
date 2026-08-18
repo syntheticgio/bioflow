@@ -123,19 +123,22 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
             magic_says=fmt.get("magic_says"),
             detected_at=datetime.now(UTC),
         )
-    if facts:
-        # Merged, not replaced: a re-ingest should not discard facts an earlier
-        # pass established (or that a future parser added).
-        merged_facts = {**obj.facts, **facts}
-        # `has_index` from this parse is a sibling-file check that is only
-        # meaningful for register-in-place files -- for a managed blob (stored
-        # by hash, not next to a `.bai`) it is unconditionally False, and
-        # `ingest_headers` can finish after `index_bam` (see
-        # `_apply_index_bam`) on a small/fast file, clobbering a real index
-        # back to "missing". An index, once true, does not become untrue.
-        if obj.facts.get("has_index") and not merged_facts.get("has_index"):
-            merged_facts["has_index"] = True
-        update[DataObject.facts] = merged_facts
+    # Accumulated across the branches below, then written as per-key
+    # `facts.<key>` paths rather than a whole-dict merge: after an alignment
+    # this applier and `_apply_index_bam` finish on the same BAM at nearly the
+    # same moment, and a merge computed from a stale `obj.facts` snapshot
+    # erased whichever keys the other had just written (#606).
+    facts_update: dict = dict(facts)
+    # `has_index` from this parse is a sibling-file check that is only
+    # meaningful for register-in-place files -- for a managed blob (stored by
+    # hash, not next to a `.bai`) it is unconditionally False, and
+    # `ingest_headers` can finish after `index_bam` (see `_apply_index_bam`)
+    # on a small/fast file. An index, once true, does not become untrue, so a
+    # False is written with `$max` below (False < True in BSON) instead of
+    # `$set` -- it lands only where no True already exists.
+    write_missing_index = "has_index" in facts_update and not facts_update["has_index"]
+    if write_missing_index:
+        del facts_update["has_index"]
 
     enrichment = result.get("enrichment") or {}
     if enrichment.get("values"):
@@ -155,11 +158,9 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
             provenance["sra_conflicts"] = enrichment["conflicts"]
         if enrichment.get("error"):
             provenance["sra_error"] = enrichment["error"]
-        merged_facts = update.get(DataObject.facts, obj.facts)
-        update[DataObject.facts] = {**merged_facts, **provenance}
+        facts_update.update(provenance)
     elif enrichment.get("error"):
-        merged_facts = update.get(DataObject.facts, obj.facts)
-        update[DataObject.facts] = {**merged_facts, "sra_error": enrichment["error"]}
+        facts_update["sra_error"] = enrichment["error"]
 
     assembly_enrichment = result.get("assembly_enrichment") or {}
     if assembly_enrichment.get("values"):
@@ -182,28 +183,26 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
         }
 
     if assembly_enrichment.get("facts"):
-        merged_facts = update.get(DataObject.facts, obj.facts)
-        update[DataObject.facts] = {
-            **merged_facts,
-            **assembly_enrichment["facts"],
-        }
+        facts_update.update(assembly_enrichment["facts"])
     if assembly_enrichment.get("accession"):
-        merged_facts = update.get(DataObject.facts, obj.facts)
         provenance = {
             "assembly_accession_source": assembly_enrichment.get("source"),
             "assembly_fields_applied": sorted(assembly_enrichment.get("values", {})),
         }
         if assembly_enrichment.get("conflicts"):
             provenance["assembly_conflicts"] = assembly_enrichment["conflicts"]
-        update[DataObject.facts] = {**merged_facts, **provenance}
+        facts_update.update(provenance)
     if assembly_enrichment.get("error"):
-        merged_facts = update.get(DataObject.facts, obj.facts)
-        update[DataObject.facts] = {
-            **merged_facts,
-            "assembly_error": assembly_enrichment["error"],
-        }
+        facts_update["assembly_error"] = assembly_enrichment["error"]
+
+    for key, value in facts_update.items():
+        update[f"facts.{key}"] = value
 
     await obj.set(update)
+    if write_missing_index:
+        await DataObject.find_one(DataObject.id == obj.id).update(
+            {"$max": {"facts.has_index": False}}
+        )
 
     # Role is assigned separately, and conditionally, because `obj` was read
     # before a network lookup that can take seconds. A user who converted the
@@ -240,7 +239,7 @@ async def _apply_ingest_headers(result: dict, *, owner: str) -> None:
     # completed ingest. `obj` carries the pre-update snapshot, so re-read the
     # fields the eligibility rule needs from what was actually written.
     obj.format = update.get(DataObject.format, obj.format)
-    obj.facts = update.get(DataObject.facts, obj.facts)
+    obj.facts = {**obj.facts, **facts_update}
     await _auto_analyze_after_ingest(obj, owner=owner)
 
 
@@ -1675,10 +1674,13 @@ async def _apply_index_bam(result: dict, *, owner: str) -> None:
         facts = {**facts, "has_index": True}
     if facts:
         # On the BAM itself: this is where a user looks to decide whether the
-        # alignment is worth keeping.
+        # alignment is worth keeping. Written as per-key `facts.<key>` paths,
+        # not a whole-dict merge -- `_apply_ingest_headers` runs on this same
+        # BAM at nearly the same moment, and a merge computed from a stale
+        # `bam.facts` snapshot erased its header facts (#606).
         await bam.set(
             {
-                DataObject.facts: {**bam.facts, **facts},
+                **{f"facts.{key}": value for key, value in facts.items()},
                 DataObject.updated_at: datetime.now(UTC),
             }
         )
