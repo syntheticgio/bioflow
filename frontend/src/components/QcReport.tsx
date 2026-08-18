@@ -1,4 +1,5 @@
 import { api } from "../api/client";
+import { InfoMarker } from "./InfoMarker";
 import type { QcFacts } from "../api/types";
 import type { JSX } from "react";
 
@@ -10,9 +11,20 @@ import type { JSX } from "react";
  * used: these pages embed raw sequence data, so they stay out of an iframe
  * in the app's own document.
  */
-function ReportLink({ href, children }: { href: string; children: React.ReactNode }) {
+function ReportLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="report-link">
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="report-link"
+    >
       {children}
       <span className="report-link-icon" aria-hidden="true">
         ↗
@@ -63,7 +75,13 @@ export function QcReport({
   return null;
 }
 
-function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
+function ShortReadQcReport({
+  qc,
+  objectId,
+}: {
+  qc: QcFacts;
+  objectId: string;
+}) {
   const measured = qc.qc_before_filtering!;
   const fastqcPath = qc.qc_fastqc_report;
   const fastpPath = qc.qc_fastp_report;
@@ -73,26 +91,44 @@ function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) 
       <div className="section-title">Quality control</div>
 
       <dl className="kv">
-        <dt>Reads</dt>
+        <dt>
+          Reads
+          <InfoMarker metric="ui.qc_total_reads" />
+        </dt>
         <dd>{count(measured.total_reads)}</dd>
 
-        <dt>Bases</dt>
+        <dt>
+          Bases
+          <InfoMarker metric="ui.qc_total_bases" />
+        </dt>
         <dd>{count(measured.total_bases)}</dd>
 
         {measured.read1_mean_length != null && (
           <>
-            <dt>Mean length</dt>
+            <dt>
+              Mean length
+              <InfoMarker metric="ui.qc_mean_length" />
+            </dt>
             <dd>{count(measured.read1_mean_length)} bp</dd>
           </>
         )}
 
-        <dt>Q20</dt>
+        <dt>
+          Q20
+          <InfoMarker metric="ui.qc_q20" />
+        </dt>
         <dd>{quality(measured.q20_rate, 0.9)}</dd>
 
-        <dt>Q30</dt>
+        <dt>
+          Q30
+          <InfoMarker metric="ui.qc_q30" />
+        </dt>
         <dd>{quality(measured.q30_rate, 0.8)}</dd>
 
-        <dt>GC</dt>
+        <dt>
+          GC
+          <InfoMarker metric="ui.qc_gc" />
+        </dt>
         <dd>{pct(measured.gc_content)}</dd>
 
         {/* The whole-file scan's number wins over fastp's when it exists:
@@ -104,7 +140,10 @@ function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) 
             the same screen. */}
         {(qc.qc_percent_unique != null || qc.qc_duplication_rate != null) && (
           <>
-            <dt>Duplication</dt>
+            <dt>
+              Duplication
+              <InfoMarker metric="ui.qc_duplication" />
+            </dt>
             {/* Inverted: a high duplication rate is the bad direction, where a
                 high Q30 is the good one. */}
             <dd>
@@ -121,15 +160,24 @@ function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) 
 
         {qc.qc_insert_size_peak ? (
           <>
-            <dt>Insert size</dt>
+            <dt>
+              Insert size
+              <InfoMarker metric="ui.qc_insert_size_peak" />
+            </dt>
             <dd>{count(qc.qc_insert_size_peak)} bp (peak)</dd>
           </>
         ) : null}
 
         {qc.qc_adapters?.read1_sequence && (
           <>
-            <dt>Adapter detected</dt>
-            <dd className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>
+            <dt>
+              Adapter detected
+              <InfoMarker metric="ui.qc_adapter" />
+            </dt>
+            <dd
+              className="mono"
+              style={{ fontSize: 11, wordBreak: "break-all" }}
+            >
               {qc.qc_adapters.read1_sequence}
             </dd>
           </>
@@ -151,11 +199,15 @@ function ShortReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) 
                   application's own document. The server sandboxes them via
                   CSP; this is the second half of that. */}
               {fastqcPath && (
-                <ReportLink href={api.qcReportUrl(objectId, fastqcPath)}>FastQC</ReportLink>
+                <ReportLink href={api.qcReportUrl(objectId, fastqcPath)}>
+                  FastQC
+                </ReportLink>
               )}
               {fastqcPath && fastpPath && " · "}
               {fastpPath && (
-                <ReportLink href={api.qcReportUrl(objectId, fastpPath)}>fastp</ReportLink>
+                <ReportLink href={api.qcReportUrl(objectId, fastpPath)}>
+                  fastp
+                </ReportLink>
               )}
             </dd>
           </>
@@ -177,25 +229,40 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
       <div className="section-title">Quality control</div>
 
       <dl className="kv">
-        <dt>N50</dt>
+        <dt>
+          N50
+          <InfoMarker metric="ui.qc_read_length_n50" />
+        </dt>
         <dd>{count(qc.qc_read_length_n50)} bp</dd>
 
-        <dt>Reads</dt>
+        <dt>
+          Reads
+          <InfoMarker metric="ui.qc_total_reads" />
+        </dt>
         <dd>{count(qc.qc_total_reads)}</dd>
 
-        <dt>Bases</dt>
+        <dt>
+          Bases
+          <InfoMarker metric="ui.qc_total_bases" />
+        </dt>
         <dd>{count(qc.qc_total_bases)}</dd>
 
         {qc.qc_mean_read_length != null && (
           <>
-            <dt>Mean length</dt>
+            <dt>
+              Mean length
+              <InfoMarker metric="ui.qc_mean_length" />
+            </dt>
             <dd>{count(qc.qc_mean_read_length)} bp</dd>
           </>
         )}
 
         {qc.qc_median_read_length != null && (
           <>
-            <dt>Median length</dt>
+            <dt>
+              Median length
+              <InfoMarker metric="ui.qc_median_read_length" />
+            </dt>
             <dd>{count(qc.qc_median_read_length)} bp</dd>
           </>
         )}
@@ -204,28 +271,40 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
             one is the normal shape of a Nanopore run, not a fault. */}
         {qc.qc_read_length_stdev != null && (
           <>
-            <dt>Length std. dev.</dt>
+            <dt>
+              Length std. dev.
+              <InfoMarker metric="ui.qc_read_length_stdev" />
+            </dt>
             <dd>{count(qc.qc_read_length_stdev)} bp</dd>
           </>
         )}
 
         {qc.qc_mean_quality != null && (
           <>
-            <dt>Mean quality</dt>
+            <dt>
+              Mean quality
+              <InfoMarker metric="ui.qc_mean_quality" />
+            </dt>
             <dd>Q{count(qc.qc_mean_quality)}</dd>
           </>
         )}
 
         {qc.qc_median_quality != null && (
           <>
-            <dt>Median quality</dt>
+            <dt>
+              Median quality
+              <InfoMarker metric="ui.qc_median_quality" />
+            </dt>
             <dd>Q{count(qc.qc_median_quality)}</dd>
           </>
         )}
 
         {qc.qc_read_chemistry && (
           <>
-            <dt>Chemistry</dt>
+            <dt>
+              Chemistry
+              <InfoMarker metric="ui.qc_read_chemistry" />
+            </dt>
             <dd>
               {qc.qc_read_chemistry}
               {qc.qc_read_chemistry_reason && (
@@ -240,7 +319,10 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
 
         {qc.qc_platform && (
           <>
-            <dt>Platform</dt>
+            <dt>
+              Platform
+              <InfoMarker metric="ui.qc_platform" />
+            </dt>
             <dd>{qc.qc_platform}</dd>
           </>
         )}
@@ -249,7 +331,10 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
             every file is a row that never says anything. */}
         {qc.qc_status && qc.qc_status !== "ok" && (
           <>
-            <dt>Status</dt>
+            <dt>
+              Status
+              <InfoMarker metric="ui.qc_status" />
+            </dt>
             <dd>{qc.qc_status}</dd>
           </>
         )}
@@ -265,7 +350,9 @@ function LongReadQcReport({ qc, objectId }: { qc: QcFacts; objectId: string }) {
             <dd>
               {/* Same untrusted-content treatment as the fastp/FastQC links:
                   new tab, noopener, CSP-sandboxed on the server. */}
-              <ReportLink href={api.qcReportUrl(objectId, nanoplotPath)}>NanoPlot</ReportLink>
+              <ReportLink href={api.qcReportUrl(objectId, nanoplotPath)}>
+                NanoPlot
+              </ReportLink>
             </dd>
           </>
         )}
@@ -287,7 +374,9 @@ function quality(
   if (value == null) return "—";
   const poor = goodWhenLow ? value > threshold : value < threshold;
   return (
-    <span style={{ color: poor ? "var(--warn)" : undefined }}>{pct(value)}</span>
+    <span style={{ color: poor ? "var(--warn)" : undefined }}>
+      {pct(value)}
+    </span>
   );
 }
 

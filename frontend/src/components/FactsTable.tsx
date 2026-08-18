@@ -164,22 +164,46 @@ const GROUPS: FactGroup[] = [
   {
     title: "File contents",
     keys: [
-      "sort_order", "paired", "paired_hint", "read_length", "read_length_min",
-      "read_length_max", "read_count_estimate", "record_count", "sequence_count",
-      "sequence_count_estimate", "total_bases", "sequence_longest",
-      "sequence_shortest", "sequence_n50", "sequence_n90", "sequence_l50",
-      "sequence_auN", "sequence_gap_count", "sequence_gap_bases",
-      "sequence_names", "first_contig", "first_read_ids",
-      "sampled_records", "column_counts", "header_lines",
+      "sort_order",
+      "paired",
+      "paired_hint",
+      "read_length",
+      "read_length_min",
+      "read_length_max",
+      "read_count_estimate",
+      "record_count",
+      "sequence_count",
+      "sequence_count_estimate",
+      "total_bases",
+      "sequence_longest",
+      "sequence_shortest",
+      "sequence_n50",
+      "sequence_n90",
+      "sequence_l50",
+      "sequence_auN",
+      "sequence_gap_count",
+      "sequence_gap_bases",
+      "sequence_names",
+      "first_contig",
+      "first_read_ids",
+      "sampled_records",
+      "column_counts",
+      "header_lines",
     ],
   },
   {
     title: "Measured quality",
     note: "Computed by sampling records in this file.",
     keys: [
-      "quality_encoding", "mean_quality", "min_position_quality",
-      "gc_content_percent", "gc_per_read_mean", "mapped_percent",
-      "duplicate_percent", "mean_mapping_quality", "uniquely_mapped_percent",
+      "quality_encoding",
+      "mean_quality",
+      "min_position_quality",
+      "gc_content_percent",
+      "gc_per_read_mean",
+      "mapped_percent",
+      "duplicate_percent",
+      "mean_mapping_quality",
+      "uniquely_mapped_percent",
       "mapq_scale",
     ],
   },
@@ -187,10 +211,22 @@ const GROUPS: FactGroup[] = [
     title: "Header",
     note: "Declared by the file itself, not measured.",
     keys: [
-      "sam_version", "vcf_version", "sample_names", "sample_count", "platforms",
-      "read_group_count", "reference_count", "reference_total_length",
-      "reference_names", "reference_lengths", "info_fields", "info_field_count",
-      "format_fields", "filters", "variant_types_sampled", "program_chain",
+      "sam_version",
+      "vcf_version",
+      "sample_names",
+      "sample_count",
+      "platforms",
+      "read_group_count",
+      "reference_count",
+      "reference_total_length",
+      "reference_names",
+      "reference_lengths",
+      "info_fields",
+      "info_field_count",
+      "format_fields",
+      "filters",
+      "variant_types_sampled",
+      "program_chain",
       "has_index",
     ],
   },
@@ -213,7 +249,11 @@ const GROUPS: FactGroup[] = [
   {
     title: "BAM statistics",
     note: "Written by samtools; see the charts below.",
-    keys: ["bam_stats_status", "bam_stats_tool_version", "bam_stats_computed_at"],
+    keys: [
+      "bam_stats_status",
+      "bam_stats_tool_version",
+      "bam_stats_computed_at",
+    ],
     match: (k) => k.startsWith("bam_stats_"),
   },
   {
@@ -231,14 +271,18 @@ const GROUPS: FactGroup[] = [
  * dropped -- a new fact from a parser must still be visible before anyone
  * remembers to classify it here.
  */
-function groupKeys(keys: string[]): { title: string; note?: string; keys: string[] }[] {
+function groupKeys(
+  keys: string[],
+): { title: string; note?: string; keys: string[] }[] {
   const remaining = new Set(keys);
   const out: { title: string; note?: string; keys: string[] }[] = [];
 
   for (const group of GROUPS) {
     const named = group.keys.filter((k) => remaining.has(k));
     const matched = group.match
-      ? [...remaining].filter((k) => !group.keys.includes(k) && group.match!(k)).sort()
+      ? [...remaining]
+          .filter((k) => !group.keys.includes(k) && group.match!(k))
+          .sort()
       : [];
     const members = [...named, ...matched];
     if (members.length === 0) continue;
@@ -253,8 +297,9 @@ function groupKeys(keys: string[]): { title: string; note?: string; keys: string
 }
 
 function label(key: string): string {
-  return (LABELS[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase()))
-    .replace(/^Ai\b/, "AI");
+  return (
+    LABELS[key] ?? key.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())
+  ).replace(/^Ai\b/, "AI");
 }
 
 function formatNumber(n: number): string {
@@ -264,11 +309,15 @@ function formatNumber(n: number): string {
   // Leading zeros don't count as precision, so scale the budget by magnitude:
   // 0.87 keeps 3 digits, 0.00042 keeps 3 digits rather than rounding to 0.
   const sigFigs = Math.max(3, -Math.floor(Math.log10(abs)) + 2);
-  const text = n.toLocaleString(undefined, { maximumSignificantDigits: sigFigs });
+  const text = n.toLocaleString(undefined, {
+    maximumSignificantDigits: sigFigs,
+  });
   // Rounding a fraction up to a bare "1" would claim a whole number the value
   // never reached; keep enough digits to stay visibly below it.
   if (Math.abs(Number(text.replace(/,/g, ""))) >= 1) {
-    return n.toLocaleString(undefined, { maximumSignificantDigits: sigFigs + 3 });
+    return n.toLocaleString(undefined, {
+      maximumSignificantDigits: sigFigs + 3,
+    });
   }
   return text;
 }
@@ -300,7 +349,13 @@ function scalarText(v: unknown): string {
     .join(", ");
 }
 
-function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number }) {
+function CollapsibleList({
+  items,
+  max = 8,
+}: {
+  items: unknown[];
+  max?: number;
+}) {
   const [visible, setVisible] = useState(max);
   const shown = items.slice(0, visible);
   const remaining = items.length - shown.length;
@@ -343,7 +398,11 @@ function CollapsibleList({ items, max = 8 }: { items: unknown[]; max?: number })
   );
 }
 
-function renderValue(key: string, value: unknown, facts: Record<string, unknown>) {
+function renderValue(
+  key: string,
+  value: unknown,
+  facts: Record<string, unknown>,
+) {
   if (typeof value === "boolean") return value ? "Yes" : "No";
 
   // Facts arrive as whatever a parser or pipeline stored, so timestamps land
@@ -380,20 +439,26 @@ function renderValue(key: string, value: unknown, facts: Record<string, unknown>
     return (
       <span>
         ~{formatNumber(value as number)}{" "}
-        <span style={{ color: "var(--text-faint)", fontSize: 11 }}>(estimated)</span>
+        <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+          (estimated)
+        </span>
       </span>
     );
   }
 
   if (key === "record_count" || key === "sequence_count") {
-    const exactKey = key === "record_count" ? "record_count_exact" : "sequence_count_exact";
+    const exactKey =
+      key === "record_count" ? "record_count_exact" : "sequence_count_exact";
     const exact = facts[exactKey] !== false;
     return (
       <span>
         {exact ? "" : "~"}
         {formatNumber(value as number)}
         {!exact && (
-          <span style={{ color: "var(--text-faint)", fontSize: 11 }}> (estimated)</span>
+          <span style={{ color: "var(--text-faint)", fontSize: 11 }}>
+            {" "}
+            (estimated)
+          </span>
         )}
       </span>
     );
@@ -497,7 +562,8 @@ export function FactsTable({
   columns?: boolean;
 }) {
   const keys = Object.keys(facts).filter((k) => !isSuppressed(k, facts));
-  if (keys.length === 0 && !facts.parse_error && !facts.parse_warning) return null;
+  if (keys.length === 0 && !facts.parse_error && !facts.parse_warning)
+    return null;
 
   const groups = groupKeys(keys);
   // One group is just a list; a heading over the whole table would be noise.

@@ -49,7 +49,9 @@ describe("metric info content", () => {
         info.description.length,
         `${key} description is too short to explain anything`,
       ).toBeGreaterThan(40);
-      expect(info.description.trimEnd(), `${key} description`).toMatch(/[.?!]$/);
+      expect(info.description.trimEnd(), `${key} description`).toMatch(
+        /[.?!]$/,
+      );
     }
   });
 
