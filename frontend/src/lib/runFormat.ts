@@ -156,6 +156,14 @@ export function runFacts(run: RunSummary): RunFact[] {
 
   if (run.tool) facts.push({ k: "Tool", v: run.tool });
 
+  if (run.from_parameter_set) {
+    const preset = run.from_parameter_set;
+    facts.push({
+      k: "Preset",
+      v: `${preset.name} (rev ${preset.revision}${preset.edited_after_apply ? ", edited" : ""})`,
+    });
+  }
+
   return facts;
 }
 
