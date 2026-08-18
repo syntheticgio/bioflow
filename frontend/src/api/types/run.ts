@@ -1,4 +1,5 @@
 import type { JobClass, JobState, JobSummary } from "./job";
+import type { AppliedParameterSetIn } from "./parameter-set";
 
 /** What a user asked for, and the jobs that served it.
  *
@@ -77,6 +78,10 @@ export interface RunSummary {
   outputs: string[];
   created_at: string;
   updated_at: string;
+  /** The saved parameter set that configured this run, snapshotted at launch
+   *  time so it still reads correctly after the set itself is edited or
+   *  deleted. Null when the run was launched without one. */
+  from_parameter_set?: AppliedParameterSetIn | null;
 }
 
 export interface RunMemberJob {
