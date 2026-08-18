@@ -1779,6 +1779,9 @@ class AssemblyContinuityRequest(BaseModel):
     nano_bam_ids: list[PydanticObjectId] = []
     map_qual: int | None = None
     plot: bool | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/assembly-continuity", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1795,6 +1798,7 @@ async def launch_assembly_continuity_route(
         nano_bam_ids=body.nano_bam_ids,
         map_qual=body.map_qual,
         plot=body.plot,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 

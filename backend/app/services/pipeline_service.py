@@ -1381,6 +1381,8 @@ POLISH_MEM_MB = 16384
 # is based on.
 QV_QC_MEM_MB = 12288
 
+CONTINUITY_QC_MEM_MB = 16384
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -6328,6 +6330,7 @@ async def launch_continuity_qc(
     nano_bam_ids: list[PydanticObjectId] | None = None,
     map_qual: int | None = None,
     plot: bool | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a GCI run: long-read assembly continuity inspection.
 
@@ -6352,6 +6355,15 @@ async def launch_continuity_qc(
     from app.queue import queue
     from app.queue.assembly_qc_handlers import GCI_PLOT_MAX_CONTIGS
     from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=CONTINUITY_QC_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.gci())
 
@@ -6507,11 +6519,12 @@ async def launch_continuity_qc(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+        resources=JobResources(cpu=8, mem_mb=CONTINUITY_QC_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=dedup,
         project_id=assembly.project_id,
         object_id=assembly.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError("This assembly continuity QC job is already queued")
