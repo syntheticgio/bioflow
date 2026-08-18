@@ -17,6 +17,8 @@ Implemented the report-artifact discovery slice for issue #544, Task 1.
   - 64 KiB chunked SHA-256 hashing,
   - POSIX relative source paths and archive paths,
   - sorting by `(category, object_id, relative_path)`.
+- Qualified `artifact_id` with the artifact category to avoid collisions in the
+  later manifest.
 - Wired `collect()` to call `collect_report_artifacts()` through `asyncio.to_thread`.
 
 ### Tests
@@ -27,7 +29,7 @@ Added focused discovery/safety tests in `backend/tests/services/test_export_serv
 - missing roots,
 - orphan object IDs,
 - symlink targets,
-- escaped paths that resolve outside the object directory.
+- escaped paths that resolve outside the object directory on a regular file path.
 
 ## Verification
 
@@ -41,4 +43,4 @@ Result: `33 passed`
 
 ## Concerns
 
-None at the moment. The worktree stack was started for verification and should be torn down after the task is finished.
+None from the implementation itself. This attempt was stopped by the user after the code changes were made and verified; no code blocker was encountered.
