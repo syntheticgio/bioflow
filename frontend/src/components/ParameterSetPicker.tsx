@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import type { ParamSpecFamily, RejectedParam } from "../api/types";
 
 /**
@@ -81,7 +81,7 @@ export function ParameterSetPicker({
     },
     onError: (e: unknown) =>
       setError(
-        e instanceof Error && e.message.includes("409")
+        e instanceof ApiRequestError && e.status === 409
           ? "A preset with that name already exists for this tool."
           : "Could not save that preset.",
       ),
