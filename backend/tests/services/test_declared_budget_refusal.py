@@ -851,3 +851,69 @@ async def test_synteny_override_enqueues_with_the_flag(monkeypatch):
                 resource_override=True,
             )
     assert captured["resource_override"] is True
+
+@pytest.mark.asyncio
+async def test_assembly_error_qc_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_assembly_error_qc(
+            object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_assembly_error_qc_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    assembly = _draft_assembly_fixture()
+    ngs_bam = SimpleNamespace(
+        id=PydanticObjectId(),
+        name="ngs.bam",
+        format=SimpleNamespace(kind=FormatKind.BAM),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="r" * 64,
+        project_id=assembly.project_id,
+        owner="t",
+        derived_from=[assembly.id],
+    )
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=[assembly, ngs_bam]),
+        ),
+        patch(
+            "app.services.reference_assembly.check_draft_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("s" * 64, None)),
+        ),
+        patch(
+            "app.services.pipeline_service._sidecar_of_role",
+            AsyncMock(return_value=None),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_assembly_error_qc(
+                object_id=assembly.id,
+                owner="t",
+                ngs_bam_id=ngs_bam.id,
+                resource_override=True,
+            )
+    assert captured["resource_override"] is True
