@@ -2,7 +2,6 @@
 import json
 import urllib.error
 import urllib.request
-from pathlib import Path
 
 from app.config import settings
 from app.db.client import run_from_thread

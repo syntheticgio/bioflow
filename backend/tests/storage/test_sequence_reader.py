@@ -1,12 +1,16 @@
 """Test reading a protein record's sequence from a FASTA file by byte offset."""
 import tempfile
 from pathlib import Path
+
 from app.storage.sequence_reader import read_protein_sequence
 
 
 def test_read_first_record():
     """Read the first record of a two-record FASTA."""
-    fasta = ">sp|P00924|ENO1_YEAST\nMVLSPADKTNVKAAW\nGKVGAHAGEYGAEALER\n>sp|P00925|ENO2_YEAST\nSEQUENCE2\n"
+    fasta = (
+        ">sp|P00924|ENO1_YEAST\nMVLSPADKTNVKAAW\nGKVGAHAGEYGAEALER\n"
+        ">sp|P00925|ENO2_YEAST\nSEQUENCE2\n"
+    )
     with tempfile.NamedTemporaryFile(mode="w", suffix=".fasta", delete=False) as f:
         f.write(fasta)
         path = f.name

@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from beanie import PydanticObjectId
-from fastapi import APIRouter, BackgroundTasks, Header, Query, Request, status
+from fastapi import APIRouter, Header, Query, Request, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
@@ -52,6 +52,7 @@ from app.models import (
     ProteinRecord,
 )
 from app.models.ai import FailureReason, TaskSlot
+from app.queue import queue
 from app.services import (
     ai,
     expected_gc,
@@ -64,7 +65,6 @@ from app.services import (
     provenance_walker,
     timing_service,
 )
-from app.queue import queue
 from app.services.ai import Completion
 from app.storage.paths import blob_path, validate_sha256
 from app.storage.sequence_reader import read_protein_sequence
