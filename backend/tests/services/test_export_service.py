@@ -112,7 +112,11 @@ def test_manifest_lists_excluded_blobs_as_excluded():
         id="a" * 64, size=100, state=BlobState.PRESENT, rel_path="ab/small", content_sha256="a" * 64
     )
     large = Blob(
-        id="b" * 64, size=10_000, state=BlobState.PRESENT, rel_path="cd/large", content_sha256="b" * 64
+        id="b" * 64,
+        size=10_000,
+        state=BlobState.PRESENT,
+        rel_path="cd/large",
+        content_sha256="b" * 64,
     )
     bundle = export_service.ExportBundle(blobs=[small, large])
 
