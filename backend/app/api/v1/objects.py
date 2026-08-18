@@ -42,6 +42,7 @@ from app.logging import get_logger
 from app.metadata import infer_molecule
 from app.metadata.protein_headers import ProteinRef
 from app.models import (
+    Blob,
     BlobStorage,
     FormatKind,
     Job,
@@ -50,6 +51,7 @@ from app.models import (
     JobState,
     ProteinPrediction,
     ProteinRecord,
+    ProteinSequenceLookup,
 )
 from app.models.ai import FailureReason, TaskSlot
 from app.queue import queue
@@ -58,6 +60,7 @@ from app.services import (
     expected_gc,
     object_service,
     pipeline_service,
+    protein_record_index,
     protein_structure,
     provenance_lineage,
     provenance_prompt,
@@ -207,21 +210,71 @@ async def get_protein_record_structure(
     code the client has to branch on.
     """
     obj = await object_service.get_object(object_id, owner=owner)
-
     record = await ProteinRecord.find_one(
         ProteinRecord.object_id == obj.id, ProteinRecord.ordinal == ordinal
     )
     if record is None:
         raise NotFoundError(f"No protein record {ordinal} for this file.")
-
     if record.ref_accession is None or record.ref_kind is None:
-        # Nothing to look up. Querying anyway would spend a round trip to learn
-        # what the header already said.
+        # The header names nothing we can look up by accession. Fall back to a
+        # sequence search: read the record's sequence and query UniProt for an
+        # exact match (issue #534). This needs the underlying blob path, same as
+        # the download endpoints.
+        blob = await Blob.get(obj.blob_sha256) if obj.blob_sha256 else None
+        if blob is None or not obj.blob_sha256:
+            # No blob means no file to read a sequence from.
+            return ProteinStructureOut(
+                identifier=record.identifier,
+                state=ProteinStructureState.NO_REFERENCE,
+            )
+        if blob.storage is BlobStorage.EXTERNAL:
+            if not blob.external_path:
+                return ProteinStructureOut(
+                    identifier=record.identifier,
+                    state=ProteinStructureState.NO_REFERENCE,
+                )
+            path = Path(blob.external_path)
+        else:
+            path = blob_path(obj.blob_sha256)
+
+        try:
+            sequence = protein_record_index.read_record_sequence(
+                path, obj.format.compression, byte_offset=record.byte_offset
+            )
+            hit = await protein_structure.resolve_by_sequence(sequence)
+        except (FileNotFoundError, OSError):
+            # File is gone or unreadable -- same as "nothing to look up."
+            return ProteinStructureOut(
+                identifier=record.identifier,
+                state=ProteinStructureState.NO_REFERENCE,
+            )
+
+        if hit is not None:
+            return ProteinStructureOut(
+                identifier=record.identifier,
+                state=ProteinStructureState.RESOLVED
+                if hit.pdb_ids
+                else ProteinStructureState.NO_STRUCTURE,
+                accession=hit.accession,
+                protein_name=hit.protein_name,
+                pdb_ids=hit.pdb_ids,
+            )
+        # None return: a cached miss (no exact match in UniProt) or a UniProt
+        # outage. The cache records misses but NOT outages, so checking it here
+        # is the reliable signal: present -> final, absent -> transient.
+        sequence_hash = hashlib.sha256(sequence.encode("utf-8")).hexdigest()
+        cached = await ProteinSequenceLookup.find_one(
+            ProteinSequenceLookup.sequence_hash == sequence_hash
+        )
+        if cached is not None:
+            return ProteinStructureOut(
+                identifier=record.identifier,
+                state=ProteinStructureState.NO_SEQUENCE_MATCH,
+            )
         return ProteinStructureOut(
             identifier=record.identifier,
-            state=ProteinStructureState.NO_REFERENCE,
+            state=ProteinStructureState.LOOKUP_FAILED,
         )
-
     hit = await protein_structure.resolve(
         ProteinRef(kind=record.ref_kind, accession=record.ref_accession)
     )
@@ -230,7 +283,6 @@ async def get_protein_record_structure(
             identifier=record.identifier,
             state=ProteinStructureState.LOOKUP_FAILED,
         )
-
     return ProteinStructureOut(
         identifier=record.identifier,
         state=ProteinStructureState.RESOLVED

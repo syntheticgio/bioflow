@@ -166,3 +166,79 @@ async def test_a_file_exactly_at_the_cap_is_not_truncated(fasta_file, monkeypatc
     )
     assert result.indexed == 3
     assert result.truncated is False
+
+
+# --- read_record_sequence (issue #534) ---
+
+
+def test_read_first_record_sequence(fasta_file):
+    records = list(index_mod.scan_records(fasta_file, Compression.NONE))
+    seq = index_mod.read_record_sequence(
+        fasta_file, Compression.NONE, byte_offset=records[0].byte_offset
+    )
+    assert seq == "MAVSKVYARSVYDSRGNPTV"
+
+
+def test_read_middle_record_sequence(fasta_file):
+    records = list(index_mod.scan_records(fasta_file, Compression.NONE))
+    seq = index_mod.read_record_sequence(
+        fasta_file, Compression.NONE, byte_offset=records[1].byte_offset
+    )
+    assert seq == "MSRLERLTSL"
+
+
+def test_read_last_record_sequence(fasta_file):
+    records = list(index_mod.scan_records(fasta_file, Compression.NONE))
+    seq = index_mod.read_record_sequence(
+        fasta_file, Compression.NONE, byte_offset=records[2].byte_offset
+    )
+    assert seq == "MKKLLA"
+
+
+def test_read_record_sequence_matches_scanned_length(fasta_file):
+    """The reader strips line endings the same way the scan does, so the
+    sequence length must match the `length` field from scan_records."""
+    for record in index_mod.scan_records(fasta_file, Compression.NONE):
+        seq = index_mod.read_record_sequence(
+            fasta_file, Compression.NONE, byte_offset=record.byte_offset
+        )
+        assert len(seq) == record.length
+
+
+def test_read_record_sequence_crlf(crlf_fasta_file):
+    records = list(index_mod.scan_records(crlf_fasta_file, Compression.NONE))
+    for record in records:
+        seq = index_mod.read_record_sequence(
+            crlf_fasta_file, Compression.NONE, byte_offset=record.byte_offset
+        )
+        assert "\r" not in seq
+
+
+def test_read_record_sequence_from_gzip(tmp_path):
+    """A gzipped file is decompressed transparently; offsets are counted in
+    the decompressed stream, same as scan_records."""
+    import gzip
+
+    path = tmp_path / "proteins.faa.gz"
+    with gzip.open(path, "wb") as fh:
+        fh.write(FASTA.encode("utf-8"))
+
+    records = list(index_mod.scan_records(path, Compression.GZIP))
+    assert [r.identifier for r in records] == [
+        "sp|P00924|ENO1_YEAST",
+        "NP_009342.1",
+        "KLLIPMDF_00023",
+    ]
+
+    seq = index_mod.read_record_sequence(
+        path, Compression.GZIP, byte_offset=records[2].byte_offset
+    )
+    assert seq == "MKKLLA"
+
+
+def test_read_record_sequence_past_eof_returns_empty(fasta_file):
+    """An offset past the last record reads nothing without raising."""
+    seq = index_mod.read_record_sequence(
+        fasta_file, Compression.NONE, byte_offset=999999
+    )
+    assert seq == ""

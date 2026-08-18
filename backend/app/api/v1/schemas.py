@@ -320,7 +320,7 @@ class ProteinRecordsOut(BaseModel):
 
 
 class ProteinStructureState(StrEnum):
-    """Which of four sentences the viewer shows.
+    """Which of five sentences the viewer shows.
 
     Explicit rather than inferred from null fields. A client deriving these
     from `accession is None` cannot tell "this header names nothing we can
@@ -332,6 +332,7 @@ class ProteinStructureState(StrEnum):
     NO_STRUCTURE = "no_structure"
     NO_REFERENCE = "no_reference"
     LOOKUP_FAILED = "lookup_failed"
+    NO_SEQUENCE_MATCH = "no_sequence_match"
 
 
 class ProteinStructureOut(BaseModel):

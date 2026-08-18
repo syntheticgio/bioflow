@@ -26,6 +26,7 @@ Uses stdlib urllib rather than httpx, matching `uniprot.py` and
 """
 
 import asyncio
+import hashlib
 import json
 import urllib.parse
 import urllib.request
@@ -33,7 +34,7 @@ from dataclasses import dataclass
 
 from app.logging import get_logger
 from app.metadata.protein_headers import ProteinRef, RefKind
-from app.models import ProteinStructureLookup
+from app.models import ProteinSequenceLookup, ProteinStructureLookup
 
 log = get_logger(__name__)
 
@@ -186,6 +187,86 @@ async def resolve(ref: ProteinRef) -> StructureHit | None:
     hit = _choose(results if isinstance(results, list) else [])
     await _remember(ref.accession, hit)
     return hit
+
+
+async def resolve_by_sequence(sequence: str) -> StructureHit | None:
+    """Resolve a protein sequence to structures via UniProt sequence search.
+
+    The fallback for records whose headers name no accession (issue #534): read
+    the record's sequence from its byte offset and query UniProt for an exact
+    sequence match, reusing `_choose()` for candidate selection.
+
+    Returns ``StructureHit`` on a match (with possibly empty ``pdb_ids``),
+    ``None`` on a UniProt outage. A no-match result is cached as a negative, so
+    the caller can distinguish "searched, nothing found" (cached miss) from
+    "could not reach UniProt" (uncached None) by checking the collection.
+    """
+    sequence_hash = hashlib.sha256(sequence.encode("utf-8")).hexdigest()
+
+    cached = await ProteinSequenceLookup.find_one(
+        ProteinSequenceLookup.sequence_hash == sequence_hash
+    )
+    if cached is not None:
+        if cached.resolved_accession is None:
+            return None
+        return StructureHit(
+            accession=cached.resolved_accession,
+            protein_name=cached.protein_name,
+            pdb_ids=list(cached.pdb_ids),
+        )
+
+    # UniProt's `sequence:` field finds entries whose sequence is identical to
+    # the query. The full uniline string is passed as-is; UniProt accepts raw
+    # amino-acid sequences. Same fields and selection as accession resolution.
+    query = urllib.parse.urlencode(
+        {
+            "query": f'sequence:"{sequence}"',
+            "fields": "accession,xref_pdb,protein_name,reviewed",
+            "format": "json",
+            "size": str(_MAX_CANDIDATES),
+        }
+    )
+
+    try:
+        raw = await asyncio.to_thread(
+            _get, f"{_SEARCH_URL}?{query}", timeout=_TIMEOUT_SECONDS
+        )
+        results = json.loads(raw).get("results", [])
+    except Exception as exc:
+        # Deliberately not cached: a cached failure is indistinguishable from a
+        # cached miss, and this collection has no expiry. An outage must not
+        # become permanent.
+        log.info(
+            "protein_structure_sequence_lookup_failed",
+            sequence_hash=sequence_hash,
+            error=str(exc),
+        )
+        return None
+
+    hit = _choose(results if isinstance(results, list) else [])
+    await _remember_sequence(sequence_hash, hit)
+    return hit
+
+
+async def _remember_sequence(
+    sequence_hash: str, hit: StructureHit | None
+) -> None:
+    """Store a sequence-resolution result, including a negative one.
+
+    Mirrors `_remember` but keyed by sequence hash. Upsert handles concurrent
+    lookups of the same sequence reaching here together.
+    """
+    values = {
+        "resolved_accession": hit.accession if hit else None,
+        "protein_name": hit.protein_name if hit else None,
+        "pdb_ids": hit.pdb_ids if hit else [],
+    }
+    await ProteinSequenceLookup.find_one(
+        ProteinSequenceLookup.sequence_hash == sequence_hash
+    ).upsert(
+        {"$set": values},
+        on_insert=ProteinSequenceLookup(sequence_hash=sequence_hash, **values),
+    )
 
 
 async def _remember(accession: str, hit: StructureHit | None) -> None:
