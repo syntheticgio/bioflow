@@ -9,7 +9,7 @@
 # Backend Docker images are NOT built on PRs: they compile bwa-mem2, Clair3,
 # and compleasm from source and are expensive. The backend is instead
 # smoke-tested here (ruff + import + ops tests). The full pytest suite runs
-# as a separate job with a Mongo replica-set service container.
+# as a separate job with a Mongo replica-set container.
 
 name: Build check
 
@@ -204,21 +204,6 @@ jobs:
     if: ${{ !inputs.skip_backend_full }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    services:
-      # A single-node replica set is required for MongoDB transactions
-      # (used by blob refcount updates, share cascades, etc.). The
-      # conftest hardcodes mongo_url pointing at "rs0".
-      mongo:
-        image: mongo:7
-        ports: ['27017:27017']
-        env:
-          MONGO_INITDB_ROOT_USERNAME: root
-          MONGO_INITDB_ROOT_PASSWORD: example
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v7
 
@@ -236,13 +221,15 @@ jobs:
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
 
+      - name: Create data directory
+        run: |
+          sudo mkdir -p /data
+          sudo chmod 777 /data
+
       - name: Start MongoDB with replica set
         run: |
           docker run -d --name mongo \
-            --network-alias mongo \
             -p 27017:27017 \
-            -e MONGO_INITDB_ROOT_USERNAME=root \
-            -e MONGO_INITDB_ROOT_PASSWORD=example \
             mongo:7 --replSet rs0 --bind_ip_all
           # Wait for MongoDB to accept connections
           for i in $(seq 1 30); do
@@ -253,24 +240,22 @@ jobs:
             sleep 1
           done
 
-      - name: Install mongosh
-        # No Mongo shell on the base image; needed to init the replica set.
-        run: |
-          curl -fsSL https://www.mongodb.com/serversh/scripts/mongodb-shell.sh | bash
-
       - name: Initialize replica set
         run: |
           # Wait for the primary to accept connections, then initiate.
-          until mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true" \
-            --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
+          for i in $(seq 1 30); do
+            if docker exec mongo mongosh --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; then
+              echo "MongoDB is ready"
+              break
+            fi
             sleep 1
           done
-          mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true" \
-            --quiet \
+          # Initialize the replica set
+          docker exec mongo mongosh --quiet \
             --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
           sleep 3
 
       - name: Run full test suite
-        run: pytest tests/ -q --tb=no
+        run: pytest backend/tests/ -q --tb=no
         env:
-          MONGO_URL: "mongodb://root:example@localhost:27017/biopipe_test?replicaSet=rs0&directConnection=true"
+          MONGO_URL: "mongodb://localhost:27017/biopipe_test?replicaSet=rs0&directConnection=true"
