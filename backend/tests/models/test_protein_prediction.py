@@ -24,4 +24,4 @@ def test_prediction_indexes():
     """Verify the unique index on sequence_hash exists."""
     indexes = ProteinPrediction.Settings.indexes
     assert len(indexes) == 1
-    assert indexes[0].name == "uniq_sequence_hash"
+    assert indexes[0].document["name"] == "uniq_sequence_hash"
