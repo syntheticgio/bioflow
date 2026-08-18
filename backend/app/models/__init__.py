@@ -54,6 +54,7 @@ from app.models.protein_structure_lookup import ProteinStructureLookup
 from app.models.resource_limits import ResourceLimits
 from app.models.run import (
     OPTIONAL_ROLES,
+    AppliedParameterSet,
     PipelineRun,
     RunInput,
     RunInputRole,
@@ -153,6 +154,7 @@ __all__ = [
     "OrganismBlurb",
     "ParamSpecFamily",
     "ParameterSet",
+    "AppliedParameterSet",
     "PipelineRun",
     "Profile",
     "ProfileDisplay",
