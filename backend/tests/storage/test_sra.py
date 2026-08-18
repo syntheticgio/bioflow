@@ -125,8 +125,40 @@ class TestMetadataMapping:
         meta = sra.parse_experiment_xml(chipseq_xml, requested="SRR11768093").to_metadata()
         assert meta["sra_run"] == "SRR11768093"
         assert meta["organism"] == "Trypanosoma brucei brucei"
-        assert meta["platform"] == "NextSeq 550"
+        assert meta["platform"] == "ILLUMINA"
+        assert meta["instrument_model"] == "NextSeq 550"
         assert meta["bioproject"] == "PRJNA631678"
+
+    def test_platform_and_instrument_model_are_separate_fields(self, chipseq_xml):
+        """SRA carries both, and they are different vocabularies: the
+        PLATFORM tag is NCBI's closed set, the INSTRUMENT_MODEL is an open
+        machine name. Before #525 only the instrument was written, into
+        `platform` -- so the closed field never once held a closed value."""
+        meta = sra.parse_experiment_xml(chipseq_xml).to_metadata()
+        assert meta["platform"] == "ILLUMINA"
+        assert meta["instrument_model"] == "NextSeq 550"
+
+    def test_platform_is_written_without_an_instrument(self, chipseq_xml):
+        """The two fields are independently optional; a record with a
+        PLATFORM tag and no INSTRUMENT_MODEL still types its platform."""
+        meta = sra.parse_experiment_xml(chipseq_xml)
+        meta.instrument = None
+        out = meta.to_metadata()
+        assert out["platform"] == "ILLUMINA"
+        assert "instrument_model" not in out
+
+    def test_instrument_is_written_without_a_platform(self, chipseq_xml):
+        meta = sra.parse_experiment_xml(chipseq_xml)
+        meta.platform = None
+        out = meta.to_metadata()
+        assert out["instrument_model"] == "NextSeq 550"
+        assert "platform" not in out
+
+    def test_a_long_read_platform_tag_maps_verbatim(self, wgs_xml):
+        """LS454 is neither long- nor short-read-affirming, and is written
+        through unchanged rather than being coerced into a familiar tag."""
+        meta = sra.parse_experiment_xml(wgs_xml).to_metadata()
+        assert meta["platform"] == "LS454"
 
     def test_library_strategy_maps_to_our_assay_vocabulary(self, chipseq_xml, wgs_xml):
         chip = sra.parse_experiment_xml(chipseq_xml).to_metadata()
@@ -284,7 +316,7 @@ class TestEnrichmentSafety:
             existing_metadata={"organism": "Homo sapiens"},
             format_kind=FormatKind.FASTQ,
         )
-        assert r.values["platform"] == "NextSeq 550"
+        assert r.values["instrument_model"] == "NextSeq 550"
 
     def test_manual_accession_is_used_when_filename_has_none(self):
         r = enrich.enrich_from_sra(

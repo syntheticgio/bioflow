@@ -124,16 +124,22 @@ class TestValidationIsAdvisory:
 
     def test_open_vocabulary_value_is_not_a_warning(self):
         """The defect from #66: every SRA-enriched file carried a warning
-        that was wrong about which value was the authoritative one."""
-        r = schemas.coerce_and_validate({"platform": "NextSeq 550"}, FormatKind.FASTQ)
-        assert r.values["platform"] == "NextSeq 550"
+        that was wrong about which value was the authoritative one.
+
+        The example moved from `platform` to `instrument_model` in #525,
+        which split the two -- the instrument model is the half that was
+        always open, and so is still the case this test describes."""
+        r = schemas.coerce_and_validate(
+            {"instrument_model": "NextSeq 550"}, FormatKind.FASTQ
+        )
+        assert r.values["instrument_model"] == "NextSeq 550"
         assert r.warnings == []
 
     def test_open_vocabulary_suppression_is_per_field(self):
         """One metadata dict, one open and one closed field, so a blanket
         suppression that ignores the flag fails here."""
         r = schemas.coerce_and_validate(
-            {"platform": "NextSeq 550", "read_type": "triple-end"},
+            {"instrument_model": "NextSeq 550", "read_type": "triple-end"},
             FormatKind.FASTQ,
         )
         keys = {w["key"] for w in r.warnings}
@@ -188,7 +194,7 @@ class TestApiShape:
         and silently blocks the values SRA writes."""
         out = schemas.schema_for_api(FormatKind.FASTQ)
         flat = {f["key"]: f for g in out["groups"] for f in g["fields"]}
-        assert flat["platform"]["open_vocabulary"] is True
+        assert flat["instrument_model"]["open_vocabulary"] is True
         assert flat["read_type"]["open_vocabulary"] is False
 
 
@@ -362,3 +368,70 @@ class TestReferenceFieldDefinitions:
         fields = schemas.field_map(None, role=ObjectRole.REFERENCE)
         for key in ("tax_id", "assembly_level", "assembly_date", "paired_accession"):
             assert not fields[key].suggested
+
+
+class TestPlatformAndInstrumentModel:
+    """`platform` is closed (SRA's tags); `instrument_model` is open.
+
+    Split in #525. Before it, `platform` was a single open field holding
+    whatever SRA enrichment wrote -- always an instrument model, never a
+    platform tag -- so the one field carried two different vocabularies and
+    could be grouped on neither.
+    """
+
+    def test_platform_options_are_the_sra_tags(self):
+        from app.models.object import SequencingPlatform
+
+        field = next(
+            f for f in schemas.FORMAT_FIELDS[FormatKind.FASTQ] if f.key == "platform"
+        )
+        assert field.type == FieldType.ENUM
+        assert field.options == tuple(p.value for p in SequencingPlatform)
+
+    def test_platform_is_closed_vocabulary(self):
+        """NCBI defines the complete set, so an off-list value is worth a
+        warning -- the opposite of the pre-#525 field, which was open
+        precisely because it held unbounded instrument models."""
+        field = next(
+            f for f in schemas.FORMAT_FIELDS[FormatKind.FASTQ] if f.key == "platform"
+        )
+        assert field.open_vocabulary is False
+
+    def test_instrument_model_is_open_vocabulary(self):
+        """New machines ship constantly; the options are suggestions."""
+        field = next(
+            f
+            for f in schemas.FORMAT_FIELDS[FormatKind.FASTQ]
+            if f.key == "instrument_model"
+        )
+        assert field.type == FieldType.ENUM
+        assert field.open_vocabulary is True
+        assert field.options, "an open field with no suggestions is a text box"
+
+    def test_instrument_model_is_a_fastq_field(self):
+        keys = {f.key for f in schemas.fields_for(FormatKind.FASTQ)}
+        assert {"platform", "instrument_model"} <= keys
+
+    def test_an_instrument_model_in_platform_now_warns(self):
+        """The direction that proves the field is closed. 'NextSeq 550' was
+        the *normal* stored value before #525 and warned only because the
+        options were family names; now it warns because it belongs in
+        `instrument_model` instead."""
+        result = schemas.coerce_and_validate(
+            {"platform": "NextSeq 550"}, FormatKind.FASTQ
+        )
+        assert result.values["platform"] == "NextSeq 550"
+        assert any(w["key"] == "platform" for w in result.warnings)
+
+    def test_an_sra_tag_in_platform_does_not_warn(self):
+        result = schemas.coerce_and_validate(
+            {"platform": "OXFORD_NANOPORE"}, FormatKind.FASTQ
+        )
+        assert not [w for w in result.warnings if w["key"] == "platform"]
+
+    def test_an_unlisted_instrument_model_does_not_warn(self):
+        result = schemas.coerce_and_validate(
+            {"instrument_model": "PromethION 24"}, FormatKind.FASTQ
+        )
+        assert result.values["instrument_model"] == "PromethION 24"
+        assert not [w for w in result.warnings if w["key"] == "instrument_model"]

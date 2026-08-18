@@ -70,9 +70,13 @@ class TestIngestMetadata:
         assert meta["sra_run"] == "SRR11768093"
         assert meta["bioproject"] == "PRJNA631678"
         assert meta["organism"] == "Trypanosoma brucei brucei"
-        # The instrument model, not the platform family: that is what the
-        # schema's `platform` field holds everywhere else.
-        assert meta["platform"] == "NextSeq 550"
+        # Since #525 the two are separate fields: `platform` holds NCBI's
+        # closed PLATFORM tag, `instrument_model` the open machine name.
+        # Both must be stamped, or a downloaded file and an uploaded one
+        # stop being findable by the same search -- which is what this test
+        # is for.
+        assert meta["platform"] == "ILLUMINA"
+        assert meta["instrument_model"] == "NextSeq 550"
         assert meta["read_type"] == "paired-end"
         assert meta["assay"] == "ChIP-seq"
 

@@ -100,8 +100,16 @@ class SraMetadata:
             out.setdefault("sample_id", self.biosample)
         if self.organism:
             out["organism"] = self.organism
+        # Two fields, two vocabularies. SRA's PLATFORM tag is NCBI's closed
+        # set and lands in `platform`; INSTRUMENT_MODEL is the open machine
+        # name and lands in `instrument_model`. Before #525 only the
+        # instrument was written, into `platform` -- so the field the schema
+        # declared closed never once held a value from its own vocabulary,
+        # and the two could not be grouped or compared separately.
+        if self.platform:
+            out["platform"] = self.platform
         if self.instrument:
-            out["platform"] = self.instrument
+            out["instrument_model"] = self.instrument
         if self.library_strategy:
             out["assay"] = _map_strategy(self.library_strategy)
         if self.library_source:

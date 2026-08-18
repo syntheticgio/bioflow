@@ -48,6 +48,79 @@ def _fastq(
     )
 
 
+def _split_fastq(*, platform=None, instrument_model=None, chemistry=None):
+    """A post-#525 object: platform is an SRA tag, instrument_model is the
+    machine name. `_fastq` above still builds the pre-split shape, on
+    purpose -- both must keep working, since a migration cannot reach an
+    object that was never in the database."""
+    metadata = {}
+    if platform:
+        metadata["platform"] = platform
+    if instrument_model:
+        metadata["instrument_model"] = instrument_model
+    facts = {"qc_read_chemistry": chemistry} if chemistry else {}
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name="reads.fastq",
+        format=SimpleNamespace(kind=FormatKind.FASTQ),
+        status=ObjectStatus.READY,
+        facts=facts,
+        metadata=metadata,
+        mate_object_id=None,
+    )
+
+
+class TestIsShortReadAfterTheSplit:
+    """#525 moved instrument models to their own field. Every case in
+    `TestIsShortRead` must reach the same verdict from the new shape."""
+
+    def test_instrument_model_still_resolves_the_platform(self):
+        assert reference_assembly.is_short_read(
+            _split_fastq(instrument_model="Illumina NovaSeq X Plus")
+        )
+
+    def test_nanopore_instrument_model_is_not_short(self):
+        assert (
+            reference_assembly.is_short_read(
+                _split_fastq(instrument_model="MinION", chemistry="short")
+            )
+            is False
+        )
+
+    def test_the_platform_tag_alone_is_enough(self):
+        """The point of the split: a closed tag answers directly, with no
+        substring inference over a machine name."""
+        assert (
+            reference_assembly.is_short_read(
+                _split_fastq(platform="OXFORD_NANOPORE")
+            )
+            is False
+        )
+        assert reference_assembly.is_short_read(_split_fastq(platform="ILLUMINA"))
+
+    def test_platform_tag_beats_a_disagreeing_instrument_model(self):
+        """`platform` is the typed, closed field; the model is free text
+        that may be a vendor's marketing name. The closed one wins."""
+        assert (
+            reference_assembly.is_short_read(
+                _split_fastq(platform="OXFORD_NANOPORE", instrument_model="NextSeq 550")
+            )
+            is False
+        )
+
+    def test_platform_before_chemistry_precedence_holds(self):
+        """The regression this whole path exists to prevent, asserted
+        directly on the new shape: chemistry says short, platform says ONT,
+        and platform must win."""
+        obj = _split_fastq(
+            platform="OXFORD_NANOPORE",
+            instrument_model="MinION",
+            chemistry="short",
+        )
+        assert obj.facts["qc_read_chemistry"] == "short"
+        assert reference_assembly.is_short_read(obj) is False
+
+
 class TestIsShortRead:
     def test_illumina_instrument_model_is_short(self):
         """`metadata.platform` holds an instrument model, not a platform

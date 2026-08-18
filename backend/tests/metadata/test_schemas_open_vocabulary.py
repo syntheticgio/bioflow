@@ -21,13 +21,14 @@ CLOSED_ENUM_FIELDS = {
     "variant_type",
     "assembly_level",  # NCBI's fixed four
     "molecule_type",   # DNA/RNA/Other: what this repo can actually infer
+    "platform",        # SRA's PLATFORM tags, derived from SequencingPlatform
 }
 
 OPEN_ENUM_FIELDS = {
     "organism",
     "assay",
     "library_prep",
-    "platform",
+    "instrument_model",  # vendor machine names, unbounded and always growing
     "reference_build",
     "aligner",
     "variant_caller",
@@ -65,9 +66,10 @@ def _all_enum_fields():
 
 
 def test_the_helper_sees_both_reference_build_enums():
-    """Guards the docstring above. Measured 2026-08-12: 17 distinct ENUM
-    FieldDef objects over 16 keys, `reference_build` being the only key with
-    two. (Was 15 over 14 on 2026-08-06, before `molecule_type` and
+    """Guards the docstring above. Measured 2026-08-18: 18 distinct ENUM
+    FieldDef objects over 17 keys, `reference_build` being the only key with
+    two. (Was 17 over 16 on 2026-08-12, before #525 split `instrument_model`
+    out of `platform`; 15 over 14 on 2026-08-06, before `molecule_type` and
     `library_source` were added.) If this collection ever starts deduplicating
     by key, every other test in this file quietly narrows and none of them
     fails."""
@@ -76,8 +78,8 @@ def test_the_helper_sees_both_reference_build_enums():
     assert keys.count("reference_build") == 2, (
         f"expected both ENUM copies, got {keys.count('reference_build')}"
     )
-    assert len(fields) == 17, (
-        f"expected 17 distinct ENUM FieldDefs, got {len(fields)}. If you added "
+    assert len(fields) == 18, (
+        f"expected 18 distinct ENUM FieldDefs, got {len(fields)}. If you added "
         "one, add it to OPEN_ENUM_FIELDS or CLOSED_ENUM_FIELDS and update this "
         "number."
     )
