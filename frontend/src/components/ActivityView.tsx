@@ -206,7 +206,6 @@ export function ActivityView() {
             <JobRow
               key={job.id}
               job={job}
-              load={load}
               onSelect={select}
               onCancel={() => cancel.mutate(job.id)}
             />
