@@ -1,5 +1,23 @@
 import type { AlignParams, ParamFieldMeta } from "../api/types";
 
+function optionalSelectSentinel(field: ParamFieldMeta): string | null {
+  if (field.kind !== "select") return null;
+
+  const sentinelByKey: Record<string, string> = {
+    secondary_mode: "default",
+    cs_mode: "none",
+  };
+  const sentinel = sentinelByKey[field.key];
+  if (
+    sentinel == null ||
+    field.default !== sentinel ||
+    !field.choices.some((choice) => choice.value === sentinel)
+  ) {
+    return null;
+  }
+  return sentinel;
+}
+
 /**
  * Renders parameter inputs from registry metadata.
  *
@@ -28,12 +46,7 @@ export function AlignerParamFields({
         const isOptionalToggle = f.kind === "bool" && f.default == null;
         const isOptionalNumeric =
           (f.kind === "int" || f.kind === "float") && f.default == null;
-        const optionalSentinel =
-          f.kind === "select" &&
-          typeof f.default === "string" &&
-          f.choices.some((c) => c.value === f.default)
-            ? f.default
-            : null;
+        const optionalSentinel = optionalSelectSentinel(f);
 
         if (f.kind === "bool") {
           return (

@@ -13,6 +13,7 @@ rather than silently dropped.
 """
 
 from dataclasses import dataclass
+import math
 
 from app.errors import ValidationError
 from app.pipelines.aligner_preset_ids import BOWTIE2_PRESET_IDS
@@ -210,11 +211,13 @@ def _optional_float(
     value = data.get(key)
     if value in (None, ""):
         return None
+    if isinstance(value, bool):
+        raise ValidationError(f"{key} must be a number")
     try:
         value = float(value)
     except (TypeError, ValueError) as exc:
         raise ValidationError(f"{key} must be a number") from exc
-    if value < minimum or value > maximum:
+    if not math.isfinite(value) or value < minimum or value > maximum:
         raise ValidationError(f"{key} must be between {minimum} and {maximum}")
     return value
 
