@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { formatDate, isIsoTimestamp } from "../lib/format";
 import { isStarMapqScale } from "../lib/mapq";
+import { InfoMarker } from "./InfoMarker";
 import { TruncatedValue } from "./TruncatedValue";
 
 /**
@@ -11,7 +12,9 @@ import { TruncatedValue } from "./TruncatedValue";
  * because it will end up in someone's methods section.
  */
 
-const LABELS: Record<string, string> = {
+/** Exported for the metric-info exhaustiveness test, which asserts every
+ *  labelled fact either has an explanation or is listed as not needing one. */
+export const LABELS: Record<string, string> = {
   read_length: "Read length",
   read_length_min: "Read length (min)",
   read_length_max: "Read length (max)",
@@ -562,7 +565,10 @@ export function FactsTable({
             <dl className="kv">
               {group.keys.map((k) => (
                 <span key={k} style={{ display: "contents" }}>
-                  <dt>{label(k)}</dt>
+                  <dt>
+                    {label(k)}
+                    <InfoMarker metric={k} />
+                  </dt>
                   <dd>{renderValue(k, facts[k], facts)}</dd>
                 </span>
               ))}
