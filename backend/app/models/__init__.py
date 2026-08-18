@@ -46,6 +46,7 @@ from app.models.object import (
     SourceMode,
 )
 from app.models.organism import OrganismBlurb, normalize_organism
+from app.models.parameter_set import ParameterSet, ParamSpecFamily
 from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
 from app.models.protein_record import ProteinRecord
@@ -101,6 +102,7 @@ ALL_MODELS = [
     NodeUpdateTask,
     Share,
     ResourceLimits,
+    ParameterSet,
     WorkflowDefinition,
     WorkflowRun,
     WorkflowNodeRun,
@@ -149,6 +151,8 @@ __all__ = [
     "ObjectRole",
     "ObjectStatus",
     "OrganismBlurb",
+    "ParamSpecFamily",
+    "ParameterSet",
     "PipelineRun",
     "Profile",
     "ProfileDisplay",
