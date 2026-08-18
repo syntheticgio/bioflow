@@ -52,17 +52,43 @@ export function InfoMarker({
     const card = cardRef.current.getBoundingClientRect();
     const M = 8;
 
+    // A marker scrolled out of view has no position worth pointing at, and
+    // the clamp below would otherwise park its card mid-screen attached to
+    // nothing. This happens for real: the detail panel scrolls inside its own
+    // container, so a focused marker can leave the viewport without the card
+    // ever being told. Close instead of placing it.
+    if (marker.bottom < 0 || marker.top > window.innerHeight) {
+      setOpen(false);
+      setPinned(false);
+      return;
+    }
+
     // Prefer below-and-left-aligned, the direction with the most room in a
-    // facts table. Flip rather than clamp: a card pinned to the viewport edge
-    // covers the row it is describing.
+    // facts table. Flip rather than clamp where there is a choice: a card
+    // pinned to the viewport edge covers the row it is describing.
     let top = marker.bottom + 6;
     if (top + card.height > window.innerHeight - M) {
-      top = Math.max(M, marker.top - card.height - 6);
+      top = marker.top - card.height - 6;
     }
     let left = marker.left;
     if (left + card.width > window.innerWidth - M) {
-      left = Math.max(M, window.innerWidth - card.width - M);
+      left = window.innerWidth - card.width - M;
     }
+
+    // Then clamp both axes regardless of which way it flipped. The marker's
+    // own rect is not guaranteed to be on screen: the detail panel scrolls
+    // inside its own container, so a marker can sit below the fold while the
+    // page itself has not scrolled. Positioning relative to it alone then
+    // puts the card off-screen entirely -- measured at top 723 against a
+    // 720px viewport, for a marker whose own top was 981.
+    top = Math.min(
+      Math.max(M, top),
+      Math.max(M, window.innerHeight - card.height - M),
+    );
+    left = Math.min(
+      Math.max(M, left),
+      Math.max(M, window.innerWidth - card.width - M),
+    );
     setPos({ top, left });
   }, [open]);
 
