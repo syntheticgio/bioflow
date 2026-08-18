@@ -23,7 +23,7 @@ docs/superpowers/specs/2026-08-05-tool-progress-instrumentation-design.md,
 from pathlib import Path
 
 from app.pipelines import assembly_runner
-from app.pipelines.align_runner import AlignProgress
+from app.pipelines.align_runner import AlignProgress, SamtoolsProgress
 from app.pipelines.assembly_params import FlyeParams
 from app.pipelines.assembly_runner import AssemblyProgress
 from app.pipelines.completeness_runner import CompletenessProgress
@@ -278,3 +278,31 @@ class TestCompleasmFixture:
         parser = CompletenessProgress()
         _replay(parser, FIXTURES / "compleasm-0.2.9.log")
         assert parser.pct is None
+
+
+class TestSamtoolsProgress:
+    """SamtoolsProgress parser tested against a captured samtools sort log."""
+
+    def test_transitions_from_starting_to_merging(self):
+        """The first "merging from N files" line transitions the phase."""
+        parser = SamtoolsProgress()
+        phases = _replay(parser, FIXTURES / "samtools-1.21.log")
+        assert phases == ["merging"]
+
+    def test_second_merge_line_does_not_repeat_phase_change(self):
+        """A second merge line while already merging must not re-fire."""
+        parser = SamtoolsProgress()
+        parser.feed("[bam_sort_core] merging from 2 files...")
+        assert parser.feed("[bam_sort_core] merging from 1 files...") is False
+
+    def test_pct_is_always_none(self):
+        """Samtools sort/merge has no countable unit, so pct stays None."""
+        parser = SamtoolsProgress()
+        _replay(parser, FIXTURES / "samtools-1.21.log")
+        assert parser.pct is None
+
+    def test_snapshot_contains_expected_keys(self):
+        """snapshot() returns the standard keys a handler's ctx.progress() expects."""
+        parser = SamtoolsProgress()
+        snap = parser.snapshot()
+        assert snap == {"pct": None, "phase": "starting", "message": "starting"}

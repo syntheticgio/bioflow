@@ -30,7 +30,7 @@ from app.config import settings
 from app.errors import PermanentError, RetryableError
 from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources
-from app.pipelines import ivar_runner, polypolish_runner, ragtag_runner, tools
+from app.pipelines import align_runner, ivar_runner, polypolish_runner, ragtag_runner, tools
 from app.queue.executor import run_subprocess
 from app.queue.pipeline_handlers import _failure, _named_link, _prepare_workdir, _resolve_input
 from app.queue.registry import HandlerMode, JobContext, handler
@@ -118,7 +118,8 @@ def consensus_from_alignment(ctx: JobContext) -> dict:
         sort_cmd = ivar_runner.build_sort_command(
             samtools_path=samtools.path, bam=trimmed_bam, out=sorted_bam
         )
-        code = run_subprocess(ctx, sort_cmd, log_path=str(log_path))
+        sort_progress = align_runner.SamtoolsProgress()
+        code = run_subprocess(ctx, sort_cmd, log_path=str(log_path), parser=sort_progress)
         if code != 0:
             raise _failure(code, log_path, "samtools sort")
         consensus_input = sorted_bam
@@ -279,10 +280,12 @@ def polish_assembly(ctx: JobContext) -> dict:
         align_cmd = polypolish_runner.build_align_command(
             aligner_path=aligner.path, draft=draft, reads=read_file, threads=threads
         )
+        align_progress = align_runner.AlignProgress(name="bwa-mem2")
         code = run_subprocess(
             ctx,
             polypolish_runner.redirect_stdout(align_cmd, sam),
             log_path=str(log_path),
+            parser=align_progress,
         )
         if code != 0:
             # Named per stage: a large draft can exhaust memory during the
