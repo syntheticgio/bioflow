@@ -6700,3 +6700,115 @@ label.checkbox em {
   margin-top: 6px;
   max-width: 460px;
 }
+
+/* Metric info markers -- the circled "i" beside a reported number, and the
+   card it opens. See components/InfoMarker.tsx and lib/metricInfo.ts. */
+
+.info-marker {
+  /* Inline-flex rather than inline so the glyph centres on the cap height of
+     the label it follows, instead of sitting on the baseline. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  margin-left: 5px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  cursor: help;
+  /* The glyph is 13px inside a 16px box: a marker sized to the icon alone is
+     an awkwardly small pointer and touch target. */
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  transition: color 0.12s ease;
+}
+
+.info-marker:hover,
+.info-marker[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+.info-marker:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  color: var(--accent);
+}
+
+/* Chart and section headings put the marker after a heavier label, where the
+   default faint grey reads as a smudge rather than an affordance. */
+.chart-title .info-marker,
+.section-title .info-marker {
+  color: var(--text-dim);
+}
+
+.info-card {
+  position: fixed;
+  z-index: 400;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  /* The card is not a hover target: it opens on the marker and is dismissed
+     by leaving it, Escape, or an outside click. Letting the pointer interact
+     with it would trap the cursor over a card the user is only reading --
+     except when pinned, re-enabled below. */
+  pointer-events: none;
+}
+
+.info-card:has(.info-card-more) {
+  /* A card with a link in it has to be reachable to be useful. */
+  pointer-events: auto;
+}
+
+.info-card-term {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+
+.info-card-body {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+/* The "how it is computed" note: the caveat that changes how the number
+   should be read, set apart from the plain-language definition above it. */
+.info-card-computed {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.info-card-more {
+  display: inline-block;
+  margin-top: 8px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 11.5px;
+  pointer-events: auto;
+}
+
+.info-card-more:hover {
+  text-decoration: underline;
+}
+
+/* A heading that carries a marker: keeps the icon on the same line as the
+   text and stops it stretching in a flex/grid parent. */
+.chart-title {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
