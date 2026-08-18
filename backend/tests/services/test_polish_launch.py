@@ -114,6 +114,14 @@ async def _run(*, draft, project_objects, reads_object_id=None, mate_object_id=N
         patch("app.services.run_service.create_run", _create_run),
         patch("app.services.run_service.link_job", AsyncMock()),
         patch("app.queue.queue.enqueue", _enqueue),
+        # A generous admission budget so this file's tests -- read-set
+        # resolution, depth computation, run record shape -- reach the queue
+        # rather than being refused by POLISH_MEM_MB (#527). See
+        # test_declared_budget_refusal.py for the refusal's own coverage.
+        patch(
+            "app.services.pipeline_service.current_admission_budget_mb",
+            AsyncMock(return_value=10_000_000),
+        ),
     ):
         job = await pipeline_service.launch_polish(
             draft_object_id=draft.id,
@@ -314,6 +322,12 @@ class TestTheRunRecord:
             patch("app.services.run_service.discard_run", discard),
             # None is what enqueue returns when the dedup key already exists.
             patch("app.queue.queue.enqueue", AsyncMock(return_value=None)),
+            # A generous admission budget -- this test is about the discard-on-
+            # dedup path, not the declared-budget refusal (#527).
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
         ):
             with pytest.raises(ConflictError):
                 await pipeline_service.launch_polish(

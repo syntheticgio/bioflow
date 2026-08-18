@@ -103,6 +103,14 @@ async def _run(
             AsyncMock(return_value=("a" * 64, None)),
         ),
         patch("app.queue.queue.enqueue", _enqueue),
+        # A generous admission budget so this file's tests -- about read-set
+        # resolution and caching, not the declared-budget refusal -- reach
+        # the queue rather than being refused by QV_QC_MEM_MB (#527). See
+        # test_declared_budget_refusal.py for the refusal's own coverage.
+        patch(
+            "app.services.pipeline_service.current_admission_budget_mb",
+            AsyncMock(return_value=10_000_000),
+        ),
     ):
         job = await pipeline_service.launch_qv_qc(
             assembly.id, owner="local", read_object_id=read_object_id, k=k,
