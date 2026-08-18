@@ -192,130 +192,135 @@ export function HelpDatabases() {
         />
       )}
 
-      <p className="db-stats">
-        <b>{DATABASES.length}</b> databases · <b>{allCategories.length}</b> categories ·
-        offline-capable · access methods tagged (API / FTP / bulk / web / controlled / license)
-      </p>
+      <section className="db-remote-section">
+        <h2>Remote Databases</h2>
 
-      <div className="db-tools">
-        <input
-          id="db-search"
-          type="search"
-          placeholder="Search by name, keyword, or tag…  (press / to focus, Esc to clear)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoComplete="off"
-        />
-        <select value={access} onChange={(e) => setAccess(e.target.value as Access)} title="Filter by access method">
-          <option value="">All access methods</option>
-          <option value="web">Web UI</option>
-          <option value="api">REST API / E-utilities / BioMart</option>
-          <option value="dl">FTP / bulk download / S3</option>
-          <option value="ct">Controlled / license / subscription</option>
-        </select>
-        <button
-          type="button"
-          className="db-btn"
-          title="Show a random database"
-          onClick={() => {
-            const d = DATABASES[Math.floor(Math.random() * DATABASES.length)];
-            // scroll the user to a random card as the "surprise"
-            const el = document.getElementById("db-" + encodeURIComponent(d.n));
-            el?.scrollIntoView({ behavior: "smooth", block: "center" });
-            el?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
-          }}
-        >
-          Surprise me
-        </button>
-      </div>
+        <p className="db-stats">
+          <b>{DATABASES.length}</b> databases · <b>{allCategories.length}</b> categories ·
+          offline-capable · access methods tagged (API / FTP / bulk / web / controlled / license)
+        </p>
 
-      <details className="db-chips-details" open={true}>
-        <summary className="db-category-summary">
-          <span className="db-arrow">▸</span> Categories{" "}
-          <span className="db-active">
-            {categories.size === 0
-              ? `All (${DATABASES.length})`
-              : `${categories.size} categories`}
-          </span>
-        </summary>
-        <span className="db-chip-divider" aria-hidden="true">
-          |
-        </span>
-        <div className="db-chips">
-          <span
-            className={`db-chip${categories.size === 0 ? " db-chip-on" : ""}`}
-            data-c=""
-            onClick={() => toggleCategory("")}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                toggleCategory("");
-              }
+        <div className="db-tools">
+          <input
+            id="db-search"
+            type="search"
+            placeholder="Search by name, keyword, or tag…  (press / to focus, Esc to clear)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoComplete="off"
+          />
+          <select value={access} onChange={(e) => setAccess(e.target.value as Access)} title="Filter by access method">
+            <option value="">All access methods</option>
+            <option value="web">Web UI</option>
+            <option value="api">REST API / E-utilities / BioMart</option>
+            <option value="dl">FTP / bulk download / S3</option>
+            <option value="ct">Controlled / license / subscription</option>
+          </select>
+          <button
+            type="button"
+            className="db-btn"
+            title="Show a random database"
+            onClick={() => {
+              const d = DATABASES[Math.floor(Math.random() * DATABASES.length)];
+              // scroll the user to a random card as the "surprise"
+              const el = document.getElementById("db-" + encodeURIComponent(d.n));
+              el?.scrollIntoView({ behavior: "smooth", block: "center" });
+              el?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
             }}
           >
-            All <span className="db-chip-count">({DATABASES.length})</span>
+            Surprise me
+          </button>
+        </div>
+
+        <details className="db-chips-details" open={true}>
+          <summary className="db-category-summary">
+            <span className="db-arrow">▸</span> Categories{" "}
+            <span className="db-active">
+              {categories.size === 0
+                ? `All (${DATABASES.length})`
+                : `${categories.size} categories`}
+            </span>
+          </summary>
+          <span className="db-chip-divider" aria-hidden="true">
+            |
           </span>
-          {allCategories.map((c) => {
-            const on = categories.has(c);
-            return (
-              <span
-                key={c}
-                className={`db-chip${on ? " db-chip-on" : ""}`}
-                data-c={c}
-                onClick={() => toggleCategory(c)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    toggleCategory(c);
-                  }
-                }}
-              >
-                {c} <span className="db-chip-count">({catCounts[c]})</span>
-              </span>
-            );
-          })}
-        </div>
-      </details>
+          <div className="db-chips">
+            <span
+              className={`db-chip${categories.size === 0 ? " db-chip-on" : ""}`}
+              data-c=""
+              onClick={() => toggleCategory("")}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggleCategory("");
+                }
+              }}
+            >
+              All <span className="db-chip-count">({DATABASES.length})</span>
+            </span>
+            {allCategories.map((c) => {
+              const on = categories.has(c);
+              return (
+                <span
+                  key={c}
+                  className={`db-chip${on ? " db-chip-on" : ""}`}
+                  data-c={c}
+                  onClick={() => toggleCategory(c)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggleCategory(c);
+                    }
+                  }}
+                >
+                  {c} <span className="db-chip-count">({catCounts[c]})</span>
+                </span>
+              );
+            })}
+          </div>
+        </details>
 
-      <p className="db-meta">
-        {filtered.length} of {DATABASES.length} databases
-        {catClause}
-        {access ? ` · ${ACCESS_LABELS[access]}` : ""}
-        {query ? ` matching "${query}"` : ""}
-      </p>
-
-      {filtered.length === 0 ? (
-        <p className="db-empty">
-          No databases match your search. Try a different term or clear the
-          category filter.
+        <p className="db-meta">
+          {filtered.length} of {DATABASES.length} databases
+          {catClause}
+          {access ? ` · ${ACCESS_LABELS[access]}` : ""}
+          {query ? ` matching "${query}"` : ""}
         </p>
-      ) : (
-        <div className="db-cards">
-          {filtered.map((d) => (
-            <article key={d.n} className="db-card" id={"db-" + encodeURIComponent(d.n)}>
-              <div className="db-card-top">
-                <h3 className="db-card-name">
-                  {d.u ? (
-                    <a href={d.u} target="_blank" rel="noopener noreferrer">
-                      {d.n} ↗
-                    </a>
-                  ) : (
-                    d.n
-                  )}
-                </h3>
-                <span className="db-card-cat">{d.c}</span>
-              </div>
-              <p className="db-card-desc">{d.d}</p>
-              <span className={accCls(d.a)}>{d.a}</span>
-              <p className="db-card-tags">{d.t}</p>
-            </article>
-          ))}
-        </div>
-      )}
+
+        {filtered.length === 0 ? (
+          <p className="db-empty">
+            No databases match your search. Try a different term or clear the
+            category filter.
+          </p>
+        ) : (
+          <div className="db-cards">
+            {filtered.map((d) => (
+              <article key={d.n} className="db-card" id={"db-" + encodeURIComponent(d.n)}>
+                <div className="db-card-top">
+                  <h3 className="db-card-name">
+                    {d.u ? (
+                      <a href={d.u} target="_blank" rel="noopener noreferrer">
+                        {d.n} ↗
+                      </a>
+                    ) : (
+                      d.n
+                    )}
+                  </h3>
+                  <span className="db-card-cat">{d.c}</span>
+                </div>
+                <p className="db-card-desc">{d.d}</p>
+                <span className={accCls(d.a)}>{d.a}</span>
+                <p className="db-card-tags">{d.t}</p>
+              </article>
+            ))}
+          </div>
+        )}
+
+      </section>
 
       <footer className="db-footer">
         <h2>How to go deeper</h2>

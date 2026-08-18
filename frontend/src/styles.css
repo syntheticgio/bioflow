@@ -3028,6 +3028,11 @@ a.btn {
   margin-bottom: 2rem;
 }
 
+.db-remote-section {
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+
 /* --- tools (search / access filter / surprise) --- */
 .db-tools {
   display: flex;
