@@ -10,6 +10,7 @@ import type {
 import { formatBytes, formatDuration } from "../lib/format";
 import { FileHeadlineStats } from "./FileHeadline";
 import type { Stat } from "./FileHeadline";
+import { InfoMarker } from "./InfoMarker";
 
 /**
  * The Reference → Metrics page: what BioFlow's computations have cost.
@@ -142,7 +143,9 @@ function RecentRunsColumn() {
 
   return (
     <section className="help-section">
-      <h2>Recent runs</h2>
+      <h2>
+        Recent runs <InfoMarker metric="ui.metrics_recent_runs" />
+      </h2>
       {types.length === 0 && (
         <p className="run-table-empty">
           No runs recorded yet — this fills in as jobs complete.
@@ -212,14 +215,18 @@ function MetricsBody({ data }: { data: MetricsStats }) {
   return (
     <div className="metrics-page">
       <div className="metrics-overview">
-      <h1>Metrics</h1>
+        <h1>
+          Metrics <InfoMarker metric="ui.metrics_overview" />
+        </h1>
       <p className="help-intro">
         What BioFlow's computations have cost — how long they took, how much
         memory they used, how big the inputs were — recorded from every run.
       </p>
 
       <section className="help-section">
-        <h2>Overview</h2>
+        <h2>
+          Overview <InfoMarker metric="ui.metrics_overview" />
+        </h2>
         <FileHeadlineStats stats={stats} />
         <p>
           Duration, memory, input-size and read-count numbers describe the most
@@ -232,7 +239,9 @@ function MetricsBody({ data }: { data: MetricsStats }) {
       </section>
 
       <section className="help-section">
-        <h2>By job type</h2>
+        <h2>
+          By job type <InfoMarker metric="ui.metrics_estimates" />
+        </h2>
         <table className="help-table">
           <thead>
             <tr>

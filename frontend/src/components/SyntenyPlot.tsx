@@ -27,6 +27,8 @@
  * a few pixels -- color is what actually makes it legible, not slope.
  */
 
+import { InfoMarker } from "./InfoMarker";
+
 export interface SyntenyAlignment {
   /** Reference object this draft was aligned against, for the aria label. */
   referenceName?: string;
@@ -184,6 +186,9 @@ export function SyntenyPlot({
 
   return (
     <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 4 }}>
+        Synteny plot <InfoMarker metric="ui.chart_synteny" />
+      </div>
       <svg width={W} height={H} role="img" aria-label={aria}>
         {/* plot border */}
         <rect

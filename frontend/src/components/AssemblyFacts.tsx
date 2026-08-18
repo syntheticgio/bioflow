@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { accessionUrl } from "../lib/format";
 import { BuscoChart } from "./BuscoChart";
+import { InfoMarker } from "./InfoMarker";
 import { NxChart } from "./NxChart";
 import CircosPlot from "./CircosPlot";
 import { SyntenyPlot, type SyntenyAlignment } from "./SyntenyPlot";
@@ -302,7 +303,7 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
         )}
         {n50 !== undefined && (
           <>
-            <dt>N50</dt>
+            <dt>N50 <InfoMarker metric="sequence_n50" /></dt>
             <dd>
               {formatBases(n50)}
               {l50 !== undefined && (
@@ -316,19 +317,19 @@ export function AssemblyFacts({ facts, objectId, projectId }: Props) {
         )}
         {n90 !== undefined && (
           <>
-            <dt>N90</dt>
+            <dt>N90 <InfoMarker metric="sequence_n90" /></dt>
             <dd>{formatBases(n90)}</dd>
           </>
         )}
         {auN !== undefined && (
           <>
-            <dt>auN</dt>
+            <dt>auN <InfoMarker metric="sequence_auN" /></dt>
             <dd>{formatBases(auN)}</dd>
           </>
         )}
         {gapCount !== undefined && gapCount > 0 && (
           <>
-            <dt>Gaps</dt>
+            <dt>Gaps <InfoMarker metric="sequence_gap_count" /></dt>
             <dd>{gapCount.toLocaleString()}</dd>
           </>
         )}

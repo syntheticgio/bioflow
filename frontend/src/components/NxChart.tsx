@@ -10,6 +10,8 @@
  * several orders of magnitude, which is exactly what the reader needs to see.
  */
 
+import { InfoMarker } from "./InfoMarker";
+
 interface Props {
   /** [percent, length] pairs at x = 1..100, from `sequence_nx_curve`. */
   curve: [number, number][];
@@ -122,6 +124,9 @@ export function NxChart({ curve, totalBases, genomeSize }: Props) {
 
   return (
     <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 4 }}>
+        Nx and NGx contiguity <InfoMarker metric="ui.chart_nx" />
+      </div>
       <svg width={W} height={H} role="img" aria-label={aria}>
         {/* axes */}
         <line

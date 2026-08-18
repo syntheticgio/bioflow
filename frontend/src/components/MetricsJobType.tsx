@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { RunTable } from "./Metrics";
+import { InfoMarker } from "./InfoMarker";
 
 const PAGE = 25;
 
@@ -32,7 +33,9 @@ export function MetricsJobType() {
         <p className="help-intro">
           <Link to="/metrics">← Metrics</Link>
         </p>
-        <h1 className="mono">{jobType}</h1>
+        <h1 className="mono">
+          {jobType} <InfoMarker metric="ui.metrics_recent_runs" />
+        </h1>
 
         {isLoading && <p className="help-intro">Loading…</p>}
         {isError && <p className="help-intro">Couldn't load runs.</p>}

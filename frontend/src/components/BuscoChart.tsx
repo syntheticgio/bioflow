@@ -1,3 +1,5 @@
+import { InfoMarker } from "./InfoMarker";
+
 interface Props {
   singlePct: number;
   duplicatedPct: number;
@@ -31,6 +33,9 @@ export function BuscoChart({ singlePct, duplicatedPct, fragmentedPct, missingPct
 
   return (
     <div style={{ marginTop: 8, marginBottom: 4 }}>
+      <div style={{ fontSize: 11, color: "var(--text-faint)", marginBottom: 4 }}>
+        BUSCO completeness <InfoMarker metric="ui.chart_busco" />
+      </div>
       <svg width={BAR_W + 1} height={BAR_H} role="img" aria-label={aria}>
         {segments.reduce<{ x: number; els: React.ReactNode[] }>(
           (acc, seg) => {
