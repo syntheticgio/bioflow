@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { notify } from "../stores/messageStore";
-import type { DeSample } from "../api/types";
+import type { DeSample, ResourceRefusalDetails } from "../api/types";
 
 /**
  * Launch a differential expression test across a project's counts files.
@@ -50,6 +51,10 @@ export function DifferentialExpressionDialog({
     test: string;
     reference: string;
   } | null>(null);
+  // Populated from a 422's `details`, the same reactive path AssembleDialog
+  // uses -- differential expression has no client-side estimate to check
+  // pre-flight.
+  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
 
   const samples = defaults?.samples ?? [];
 
@@ -132,6 +137,31 @@ export function DifferentialExpressionDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Differential expression started");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => {
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
+        setRefusal(e.details as unknown as ResourceRefusalDetails);
+        return;
+      }
+      notify.error(e.message);
+    },
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchDifferentialExpression({
+        project_id: projectId,
+        design: Object.fromEntries(
+          assigned.map((s) => [s.object_id, conditionOf(s).trim()])
+        ),
+        contrast: chosen!,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
       onClose();
       navigate("/activity");
     },
@@ -340,6 +370,28 @@ export function DifferentialExpressionDialog({
                   </div>
                 )}
             </>
+          )}
+
+          {refusal && (
+            <ResourceRefusalCard
+              estimateMb={refusal.estimate_mb}
+              budgetMb={refusal.budget_mb}
+              detail={refusal.detail}
+              explanation={
+                refusal.refusal === "declared"
+                  ? `This test reserves ${(refusal.declared_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB budget. ` +
+                    `Nothing about the run changes that number.`
+                  : `This test needs about ${(refusal.estimate_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+              }
+              replan={refusal.replan ?? null}
+              onCancel={onClose}
+              onEdit={() => setRefusal(null)}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
+              onAcceptReplan={() => setRefusal(null)}
+            />
           )}
         </div>
 

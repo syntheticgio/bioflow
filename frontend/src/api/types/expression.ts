@@ -36,6 +36,7 @@ export interface QuantifyRequest {
   bam_id: string;
   annotation_id?: string | null;
   params?: Partial<CountsParams>;
+  resource_override?: boolean;
 }
 
 /** One counts file, as the DE dialog sees it before a design is chosen. */
@@ -67,6 +68,7 @@ export interface DeRequest {
   design: Record<string, string>;
   contrast: { test: string; reference: string };
   threads?: number | null;
+  resource_override?: boolean;
 }
 
 /** One gene's result. Nulls are real: DESeq2 leaves padj unset for genes it

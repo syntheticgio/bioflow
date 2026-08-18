@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { notify } from "../stores/messageStore";
-import type { DataObject } from "../api/types";
+import type { DataObject, ResourceRefusalDetails } from "../api/types";
 import { NodeSelector } from "./NodeSelector";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 
 /**
  * Launch compleasm against one assembly.
@@ -54,6 +55,9 @@ export function CompletenessDialog({
     () => (prefill?.lineage as string) ?? null,
   );
   const [targetNode, setTargetNode] = useState("");
+  // Populated from a 422's `details`, the same reactive path AssembleDialog
+  // uses -- completeness has no client-side estimate to check pre-flight.
+  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
   const lineage = lineageOverride ?? defaults?.lineage ?? null;
   const odb = defaults?.odb ?? "odb12";
 
@@ -84,6 +88,29 @@ export function CompletenessDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Completeness scoring started");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => {
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
+        setRefusal(e.details as unknown as ResourceRefusalDetails);
+        return;
+      }
+      notify.error(e.message);
+    },
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchCompleteness({
+        object_id: object.id,
+        lineage,
+        odb,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
       onClose();
       navigate("/activity");
     },
@@ -160,6 +187,28 @@ export function CompletenessDialog({
               The {lineage}_{odb} lineage dataset is not downloaded yet.
               Download it once — it is then shared across every project.
             </div>
+          )}
+
+          {refusal && (
+            <ResourceRefusalCard
+              estimateMb={refusal.estimate_mb}
+              budgetMb={refusal.budget_mb}
+              detail={refusal.detail}
+              explanation={
+                refusal.refusal === "declared"
+                  ? `This completeness check reserves ${(refusal.declared_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB budget. ` +
+                    `Nothing about the run changes that number.`
+                  : `This completeness check needs about ${(refusal.estimate_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+              }
+              replan={refusal.replan ?? null}
+              onCancel={onClose}
+              onEdit={() => setRefusal(null)}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
+              onAcceptReplan={() => setRefusal(null)}
+            />
           )}
 
           <div className="trim-mate-note" style={{ marginTop: 12 }}>

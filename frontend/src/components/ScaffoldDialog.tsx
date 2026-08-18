@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { notify } from "../stores/messageStore";
-import type { DataObject } from "../api/types";
+import type { DataObject, ResourceRefusalDetails } from "../api/types";
 
 const DIVERGENCE_OPTIONS = [
   { value: "same_species", label: "Same species", hint: "minimap2 -x asm5 (default)" },
@@ -64,6 +65,9 @@ export function ScaffoldDialog({
   );
   const [divergence, setDivergence] = useState<string>("same_species");
   const [targetNode, setTargetNode] = useState("");
+  // Populated from a 422's `details`, the same reactive path AssembleDialog
+  // uses -- scaffolding has no client-side estimate to check pre-flight.
+  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
 
   const references = (refs?.references ?? []).filter(
     (r) => r.object_id !== object.id,
@@ -81,6 +85,29 @@ export function ScaffoldDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Scaffolding started");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => {
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
+        setRefusal(e.details as unknown as ResourceRefusalDetails);
+        return;
+      }
+      notify.error(e.message);
+    },
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchScaffold({
+        draft_object_id: object.id,
+        reference_object_id: chosenId,
+        divergence,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
       onClose();
       navigate("/activity");
     },
@@ -157,6 +184,28 @@ export function ScaffoldDialog({
             not appear in the result; it will show the reference's
             arrangement with your sample's sequence in it.
           </div>
+
+          {refusal && (
+            <ResourceRefusalCard
+              estimateMb={refusal.estimate_mb}
+              budgetMb={refusal.budget_mb}
+              detail={refusal.detail}
+              explanation={
+                refusal.refusal === "declared"
+                  ? `This scaffold run reserves ${(refusal.declared_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB budget. ` +
+                    `Nothing about the run changes that number.`
+                  : `This scaffold run needs about ${(refusal.estimate_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+              }
+              replan={refusal.replan ?? null}
+              onCancel={onClose}
+              onEdit={() => setRefusal(null)}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
+              onAcceptReplan={() => setRefusal(null)}
+            />
+          )}
         </div>
 
         <NodeSelector value={targetNode} onChange={setTargetNode} fullWidth />
