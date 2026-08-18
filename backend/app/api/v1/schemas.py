@@ -152,6 +152,11 @@ class ObjectOut(BaseModel):
     read_number: int | None
     sidecar_of: str | None
     sidecar_role: str | None
+    # Where the bytes are. Serialized on every object, not only offloaded ones,
+    # so the explorer can badge without a second request; `remote_source` is
+    # null for a local file and carries the re-fetch address otherwise.
+    locality: str
+    remote_source: dict | None
     created_at: datetime
     updated_at: datetime
 
@@ -177,6 +182,10 @@ class ObjectOut(BaseModel):
             read_number=o.read_number,
             sidecar_of=str(o.sidecar_of) if o.sidecar_of else None,
             sidecar_role=o.sidecar_role.value if o.sidecar_role else None,
+            locality=o.locality.value,
+            remote_source=(
+                o.remote_source.model_dump(mode="json") if o.remote_source else None
+            ),
             created_at=o.created_at,
             updated_at=o.updated_at,
         )

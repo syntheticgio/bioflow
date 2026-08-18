@@ -11,6 +11,7 @@ from beanie import PydanticObjectId
 from app.config import settings
 from app.errors import ConflictError, NotFoundError, PayloadTooLargeError, ValidationError
 from app.logging import get_logger
+from app.metadata import sra as sra_metadata
 from app.models import (
     Blob,
     BlobStorage,
@@ -975,6 +976,43 @@ async def object_with_blob(
     obj = await get_object(object_id, owner=owner)
     blob = await Blob.get(obj.blob_sha256) if obj.blob_sha256 else None
     return obj, blob
+
+
+async def offload_object(object_id: PydanticObjectId, *, owner: str) -> DataObject:
+    """Drop an object's bytes, keeping the file in the project tree.
+
+    The precondition is the whole feature: bytes may only be released when
+    they can be got back. `metadata.sra_run` is the address the SRA download
+    path has always written; `parse_accession` on the filename is the fallback
+    for objects that predate it, and is deliberately checked second so a
+    stored accession always beats one guessed from a name.
+
+    v1 releases SRA runs only. An assembly is one of the things this refuses:
+    what accession an assembly object stores, and whether a single component
+    can be re-fetched, has not been established, and guessing would produce an
+    object that can never be restored -- silent data loss dressed as a
+    space saving.
+
+    Sidecars are not cascaded, unlike `delete_object`. An index is scaffolding
+    and rebuildable, but it is also small, and dropping it would mean a fetch
+    has to rebuild the index too. The user asked to reclaim a multi-gigabyte
+    FASTQ, not to make the next alignment slower.
+    """
+    obj = await get_object(object_id, owner=owner)
+
+    if obj.locality is Locality.REMOTE:
+        return obj  # already offloaded; idempotent, see release_bytes_for_object
+
+    accession = obj.metadata.get("sra_run") or sra_metadata.parse_accession(obj.name)
+    if not accession:
+        raise ValidationError(
+            f"{obj.name!r} cannot be offloaded: nothing records where to fetch it back from",
+            details={"object_id": str(object_id), "name": obj.name},
+        )
+
+    return await blob_service.release_bytes_for_object(
+        object_id, accession=str(accession)
+    )
 
 
 def check_local(obj: DataObject, *, verb: str) -> None:

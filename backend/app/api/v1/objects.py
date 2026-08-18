@@ -499,6 +499,23 @@ async def infer_molecule_type_endpoint(
     return MoleculeTypeInferenceOut(**result)
 
 
+@router.post("/{object_id}/offload", response_model=ObjectOut)
+async def offload_object_endpoint(
+    object_id: PydanticObjectId, owner: OwnerDep
+) -> ObjectOut:
+    """Release an object's bytes, keeping the file in the project.
+
+    Distinct from DELETE, and the distinction is the point: the object stays
+    listed, keeps its facts and its provenance links, and can be fetched back
+    from the source it was downloaded from. Only the bytes go.
+
+    Refuses anything with no recorded way to fetch it back -- that precondition
+    is what separates reclaiming space from losing data.
+    """
+    obj = await object_service.offload_object(object_id, owner=owner)
+    return ObjectOut.of(obj)
+
+
 @router.delete("/{object_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_object(object_id: PydanticObjectId, owner: OwnerDep) -> None:
     """Detach the object. The blob's bytes are unlinked later by GC, once its
