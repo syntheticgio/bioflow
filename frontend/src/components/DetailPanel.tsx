@@ -28,6 +28,7 @@ import { NodeSelector } from "./NodeSelector";
 import { QcDialog } from "./QcDialog";
 import { countVisibleFacts, FactsTable } from "./FactsTable";
 import { assemblyLabel, FileHeadlineStats, fileStats } from "./FileHeadline";
+import { InfoMarker } from "./InfoMarker";
 import { IngestProgress } from "./IngestProgress";
 import {
   BaseCompositionChart,
@@ -36,7 +37,10 @@ import {
   NContentChart,
   QualityChart,
 } from "./SequenceCharts";
-import { AdapterContentChart, DuplicationLevelsChart } from "./ContaminationCharts";
+import {
+  AdapterContentChart,
+  DuplicationLevelsChart,
+} from "./ContaminationCharts";
 import { TileQualityChart } from "./TileQualityChart";
 import { JobList } from "./JobList";
 import { MetadataEditor } from "./MetadataEditor";
@@ -141,8 +145,8 @@ function EmptyDetail() {
           )}
 
           <p className="splash-prompt">
-            Select a project on the left to see its files, or create one to
-            get started.
+            Select a project on the left to see its files, or create one to get
+            started.
           </p>
         </div>
       </div>
@@ -227,7 +231,14 @@ function ProjectDetail({ id }: { id: string }) {
       </div>
       <div className="panel-body detail">
         {editingName ? (
-          <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 2 }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              marginBottom: 2,
+            }}
+          >
             <input
               autoFocus
               value={nameDraft}
@@ -237,7 +248,12 @@ function ProjectDetail({ id }: { id: string }) {
                 if (e.key === "Escape") setEditingName(false);
               }}
               disabled={renameProject.isPending}
-              style={{ fontSize: 16, fontWeight: 600, flex: 1, padding: "3px 6px" }}
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                flex: 1,
+                padding: "3px 6px",
+              }}
             />
             <button
               type="button"
@@ -261,7 +277,9 @@ function ProjectDetail({ id }: { id: string }) {
         ) : (
           <div className="detail-title">{project.name}</div>
         )}
-        <div className="detail-subtitle">{project.description || "No description"}</div>
+        <div className="detail-subtitle">
+          {project.description || "No description"}
+        </div>
 
         {/* Named actions rather than an icon beside the title: rename is not
             the primary thing you come here to do, and burying it in a glyph
@@ -289,7 +307,11 @@ function ProjectDetail({ id }: { id: string }) {
                 }}
               />
             </label>
-            <button type="button" className="btn-text" onClick={startEditingName}>
+            <button
+              type="button"
+              className="btn-text"
+              onClick={startEditingName}
+            >
               Rename
             </button>
           </div>
@@ -551,7 +573,8 @@ function ObjectDetail({ id }: { id: string }) {
   });
 
   const save = useMutation({
-    mutationFn: (metadata: Record<string, unknown>) => api.updateObject(id, { metadata }),
+    mutationFn: (metadata: Record<string, unknown>) =>
+      api.updateObject(id, { metadata }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["object", id] });
       // Organism and assay are inputs to the align rule, so editing them can
@@ -844,8 +867,8 @@ function ObjectDetail({ id }: { id: string }) {
         {formatDisagreement && (
           <div className="warn-box">
             Format mismatch: the filename suggests{" "}
-            <strong>{formatKindLabel(obj.format.extension_says!)}</strong> but the
-            contents look like{" "}
+            <strong>{formatKindLabel(obj.format.extension_says!)}</strong> but
+            the contents look like{" "}
             <strong>{formatKindLabel(obj.format.magic_says!)}</strong>.
           </div>
         )}
@@ -884,8 +907,17 @@ function ObjectDetail({ id }: { id: string }) {
                         from it — and several pipeline suggestions stay disabled
                         without it.
                       </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <NodeSelector value={targetNode} onChange={setTargetNode} />
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <NodeSelector
+                          value={targetNode}
+                          onChange={setTargetNode}
+                        />
                         <button
                           type="button"
                           className="btn primary"
@@ -893,7 +925,9 @@ function ObjectDetail({ id }: { id: string }) {
                           onClick={() => setShowQcDialog(true)}
                           disabled={runQC.isPending || qcActive}
                         >
-                          {runQC.isPending || qcActive ? "Running QC…" : "Run QC"}
+                          {runQC.isPending || qcActive
+                            ? "Running QC…"
+                            : "Run QC"}
                         </button>
                       </div>
                     </div>
@@ -903,13 +937,9 @@ function ObjectDetail({ id }: { id: string }) {
             </TabPanel>
 
             {showQcDialog && (
-              <QcDialog
-                objectId={id}
-                onClose={() => setShowQcDialog(false)}
-              />
+              <QcDialog objectId={id} onClose={() => setShowQcDialog(false)} />
             )}
           </div>
-
         )}
 
         {tab === "results" && (
@@ -991,7 +1021,9 @@ function ObjectDetail({ id }: { id: string }) {
               confirmingDelete={confirmingDelete}
               setConfirmingDelete={setConfirmingDelete}
               remove={remove}
-              onTagsChanged={() => qc.invalidateQueries({ queryKey: ["object", id] })}
+              onTagsChanged={() =>
+                qc.invalidateQueries({ queryKey: ["object", id] })
+              }
               metadataDirty={metadataDirty}
             />
           </TabPanel>
@@ -1004,7 +1036,8 @@ function ObjectDetail({ id }: { id: string }) {
           selected={pendingTool}
           onSelect={setPendingTool}
           onContinue={() => {
-            if (pendingTool) setFlow({ pipeline: flow.pipeline, tool: pendingTool });
+            if (pendingTool)
+              setFlow({ pipeline: flow.pipeline, tool: pendingTool });
           }}
           onClose={() => setFlow(null)}
           object={obj}
@@ -1166,14 +1199,17 @@ function QcTab({
   // case) defaults to linear, matching the reference FastQC single-peak
   // shape. Mirrors LONG_READ_PLATFORMS in backend/app/pipelines/qc_stats.py.
   const isLongReadPlatform =
-    obj.facts.qc_platform === "OXFORD_NANOPORE" || obj.facts.qc_platform === "PACBIO_SMRT";
+    obj.facts.qc_platform === "OXFORD_NANOPORE" ||
+    obj.facts.qc_platform === "PACBIO_SMRT";
 
   // Fetched only when this tab is mounted (QcTab only exists in the tree
   // while the QC tab is active) and the file actually has tiles. The matrix
   // is far larger than the object document it's described by, so it must
   // not ride along with the rest of the detail panel's own load.
   const tileSource =
-    typeof obj.facts.qc_tile_source === "string" ? obj.facts.qc_tile_source : undefined;
+    typeof obj.facts.qc_tile_source === "string"
+      ? obj.facts.qc_tile_source
+      : undefined;
   const [tileMatrix, setTileMatrix] = useState<TileMatrix | null>(null);
 
   useEffect(() => {
@@ -1249,45 +1285,68 @@ function QcTab({
         <div className="qc-charts">
           {composition && (
             <div className="qc-chart">
-              <div className="section-title">Base composition</div>
+              <div className="section-title">
+                Base composition
+                <InfoMarker metric="ui.chart_base_composition" />
+              </div>
               <BaseCompositionChart
                 composition={composition as never}
-                sampledReads={obj.facts.stats_sampled_reads as number | undefined}
-                sampledBases={obj.facts.stats_sampled_bases as number | undefined}
+                sampledReads={
+                  obj.facts.stats_sampled_reads as number | undefined
+                }
+                sampledBases={
+                  obj.facts.stats_sampled_bases as number | undefined
+                }
                 gcPercent={obj.facts.gc_content_percent as number | undefined}
               />
             </div>
           )}
           {curve && (
             <div className="qc-chart">
-              <div className="section-title">Quality per position</div>
+              <div className="section-title">
+                Quality per position
+                <InfoMarker metric="ui.chart_quality_per_position" />
+              </div>
               <QualityChart curve={curve as never} />
             </div>
           )}
           {lengthHistogram && (
             <div className="qc-chart">
-              <div className="section-title">Read length distribution</div>
+              <div className="section-title">
+                Read length distribution
+                <InfoMarker metric="ui.chart_read_length" />
+              </div>
               <LengthDistributionChart
                 buckets={lengthHistogram as never}
                 logScale={isLongReadPlatform}
-                sampledReads={obj.facts.stats_sampled_reads as number | undefined}
+                sampledReads={
+                  obj.facts.stats_sampled_reads as number | undefined
+                }
               />
             </div>
           )}
           {gcHistogram && (
             <div className="qc-chart">
-              <div className="section-title">GC distribution</div>
+              <div className="section-title">
+                GC distribution
+                <InfoMarker metric="ui.chart_gc_per_read" />
+              </div>
               <GcDistributionChart
                 histogram={gcHistogram as never}
                 meanGc={obj.facts.gc_per_read_mean as number | undefined}
                 expected={obj.expected_gc}
-                sampledReads={obj.facts.stats_sampled_reads as number | undefined}
+                sampledReads={
+                  obj.facts.stats_sampled_reads as number | undefined
+                }
               />
             </div>
           )}
           {nCurve && (
             <div className="qc-chart">
-              <div className="section-title">N content per position</div>
+              <div className="section-title">
+                N content per position
+                <InfoMarker metric="ui.chart_n_per_position" />
+              </div>
               <NContentChart curve={nCurve as never} />
             </div>
           )}
@@ -1296,21 +1355,55 @@ function QcTab({
               so the grid keeps its old shape for them. */}
           {obj.facts.qc_adapter_content != null && (
             <div className="qc-chart">
-              <div className="section-title">Adapter content</div>
+              <div className="section-title">
+                Adapter content
+                <InfoMarker metric="ui.chart_adapter_content" />
+              </div>
               <AdapterContentChart
-                positions={(obj.facts.qc_adapter_content as never as { positions: number[] }).positions}
-                series={(obj.facts.qc_adapter_content as never as { series: { name: string; values: number[] }[] }).series}
+                positions={
+                  (
+                    obj.facts.qc_adapter_content as never as {
+                      positions: number[];
+                    }
+                  ).positions
+                }
+                series={
+                  (
+                    obj.facts.qc_adapter_content as never as {
+                      series: { name: string; values: number[] }[];
+                    }
+                  ).series
+                }
               />
             </div>
           )}
           {obj.facts.qc_duplication_levels != null && (
             <div className="qc-chart">
-              <div className="section-title">Sequence duplication levels</div>
+              <div className="section-title">
+                Sequence duplication levels
+                <InfoMarker metric="ui.chart_duplication_levels" />
+              </div>
               <DuplicationLevelsChart
-                labels={(obj.facts.qc_duplication_levels as never as { labels: string[] }).labels}
-                percentages={(obj.facts.qc_duplication_levels as never as { percentages: number[] }).percentages}
-                percentUnique={obj.facts.qc_percent_unique as number | undefined}
-                scannedReads={obj.facts.qc_duplication_scanned_reads as number | undefined}
+                labels={
+                  (
+                    obj.facts.qc_duplication_levels as never as {
+                      labels: string[];
+                    }
+                  ).labels
+                }
+                percentages={
+                  (
+                    obj.facts.qc_duplication_levels as never as {
+                      percentages: number[];
+                    }
+                  ).percentages
+                }
+                percentUnique={
+                  obj.facts.qc_percent_unique as number | undefined
+                }
+                scannedReads={
+                  obj.facts.qc_duplication_scanned_reads as number | undefined
+                }
               />
             </div>
           )}
@@ -1320,7 +1413,10 @@ function QcTab({
           {showChromStrip && <ChromosomeStrip facts={obj.facts} />}
           {tileMatrix && (
             <div className="qc-chart">
-              <div className="section-title">Quality per tile</div>
+              <div className="section-title">
+                Quality per tile
+                <InfoMarker metric="ui.chart_tile_quality" />
+              </div>
               <TileQualityChart data={tileMatrix} />
             </div>
           )}
@@ -1458,7 +1554,9 @@ function MetadataTab({
               <>
                 <dt>State</dt>
                 <dd>
-                  <span className={`badge ${obj.blob.state}`}>{obj.blob.state}</span>
+                  <span className={`badge ${obj.blob.state}`}>
+                    {obj.blob.state}
+                  </span>
                 </dd>
                 <dt>Mode</dt>
                 <dd>{obj.blob.storage}</dd>
@@ -1473,7 +1571,10 @@ function MetadataTab({
                 <dd>
                   {obj.blob.ref_count}
                   {obj.blob.ref_count > 1 && (
-                    <span style={{ color: "var(--text-faint)" }}> (deduplicated)</span>
+                    <span style={{ color: "var(--text-faint)" }}>
+                      {" "}
+                      (deduplicated)
+                    </span>
                   )}
                 </dd>
                 <dt>Verified</dt>

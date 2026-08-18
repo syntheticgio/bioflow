@@ -55,7 +55,7 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   stats_sampling: {
     term: "Sampling method",
     description:
-      "Whether the sample was taken from the start of the file (\"head\") or spread across it in blocks (\"strided\"). Strided sampling needs an index; without one, reading from the start is the only option.",
+      'Whether the sample was taken from the start of the file ("head") or spread across it in blocks ("strided"). Strided sampling needs an index; without one, reading from the start is the only option.',
     computed:
       "A head sample of a coordinate-sorted BAM sees the first chromosome only, which is why the method is reported rather than assumed.",
   },
@@ -122,7 +122,8 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   },
   read_length_min: {
     term: "Read length (min)",
-    description: "The shortest read observed. A wide spread between minimum and maximum means the file has already been trimmed, or holds long-read data.",
+    description:
+      "The shortest read observed. A wide spread between minimum and maximum means the file has already been trimmed, or holds long-read data.",
   },
   read_length_max: {
     term: "Read length (max)",
@@ -138,7 +139,8 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   },
   sampled_records: {
     term: "Records sampled",
-    description: "How many records were read to produce the statistics on this file.",
+    description:
+      "How many records were read to produce the statistics on this file.",
   },
   paired: {
     term: "Paired-end",
@@ -165,14 +167,15 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     term: "Duplicates",
     description:
       "The percentage of reads flagged as PCR or optical duplicates. High duplication means the library had less unique material than the read count suggests, so the effective depth is lower than it looks.",
-    computed: "Read from the duplicate flag already set in the file, not re-detected here.",
+    computed:
+      "Read from the duplicate flag already set in the file, not re-detected here.",
   },
   mean_mapping_quality: {
     term: "Mean MAPQ",
     description:
       "The average confidence that reads are placed at the right locus, on a Phred-like scale. Repetitive regions drive it down, because a read that fits several places well cannot be confidently assigned to one.",
     computed:
-      "Absent for STAR alignments, which do not use this scale — those report \"Uniquely mapped\" instead.",
+      'Absent for STAR alignments, which do not use this scale — those report "Uniquely mapped" instead.',
   },
   mapq_scale: {
     term: "MAPQ scale",
@@ -185,13 +188,15 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     term: "Uniquely mapped",
     description:
       "The percentage of reads STAR placed at exactly one locus. This replaces mean MAPQ for STAR output, where the codes count loci rather than express a confidence.",
-    computed: "The share of reads carrying MAPQ 255, STAR's unique-alignment code.",
+    computed:
+      "The share of reads carrying MAPQ 255, STAR's unique-alignment code.",
   },
   insert_size_histogram: {
     term: "Insert size",
     description:
       "The distribution of distances between the two ends of a read pair. A single clean peak is a healthy library; a peak near zero means the mates overlap, and a long tail suggests chimeric fragments.",
-    computed: "Binned at 10 bp up to 2 kb. Absent entirely for unpaired data rather than shown as zeros.",
+    computed:
+      "Binned at 10 bp up to 2 kb. Absent entirely for unpaired data rather than shown as zeros.",
   },
   mapq_histogram: {
     term: "MAPQ distribution",
@@ -221,7 +226,8 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     term: "auN",
     description:
       "The area under the Nx curve: a contiguity summary that weights every base by the length of the contig it sits in. Unlike N50 it does not jump when a single contig crosses the halfway point, which is why two assemblies can share an N50 and still differ here.",
-    computed: "The sum of squared contig lengths divided by the total assembly length.",
+    computed:
+      "The sum of squared contig lengths divided by the total assembly length.",
   },
   sequence_gap_count: {
     term: "Gaps",
@@ -247,11 +253,13 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   },
   sequence_count_estimate: {
     term: "Sequences",
-    description: "How many sequence records the file holds, extrapolated rather than counted in full.",
+    description:
+      "How many sequence records the file holds, extrapolated rather than counted in full.",
   },
   total_bases: {
     term: "Total bases",
-    description: "The sum of all sequence lengths. For an assembly, this is its total size — compare it against the expected genome size.",
+    description:
+      "The sum of all sequence lengths. For an assembly, this is its total size — compare it against the expected genome size.",
   },
   sequence_longest: {
     term: "Longest sequence",
@@ -270,13 +278,23 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   },
   reference_count: {
     term: "Reference contigs",
-    description: "How many reference sequences the alignment header declares. This is the reference's contig count, not this file's read count.",
+    description:
+      "How many reference sequences the alignment header declares. This is the reference's contig count, not this file's read count.",
   },
-  reference_names: { term: "Contig names", description: "The reference sequences this file was aligned against, from its header." },
-  reference_lengths: { term: "Contig lengths", description: "The length of each reference sequence, from the alignment header." },
+  reference_names: {
+    term: "Contig names",
+    description:
+      "The reference sequences this file was aligned against, from its header.",
+  },
+  reference_lengths: {
+    term: "Contig lengths",
+    description:
+      "The length of each reference sequence, from the alignment header.",
+  },
   reference_total_length: {
     term: "Reference length",
-    description: "The summed length of every reference sequence in the header — the size of the genome this file was aligned to.",
+    description:
+      "The summed length of every reference sequence in the header — the size of the genome this file was aligned to.",
   },
 
   // ---- QC report (fastp / FastQC) ----------------------------------------
@@ -292,7 +310,8 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
   },
   "ui.qc_mean_length": {
     term: "Mean length",
-    description: "The average read length measured across the whole file by QC.",
+    description:
+      "The average read length measured across the whole file by QC.",
   },
   "ui.qc_q20": {
     term: "Q20",
@@ -318,6 +337,53 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
       "Taken from a full-file scan with FastQC's frozen-dictionary correction when available, falling back to fastp's sampled estimate. Both are kept in the facts, but only one is shown — two methods disagreeing side by side is worse than one answer.",
     learnMore: CALC,
   },
+  "ui.qc_insert_size_peak": {
+    term: "Insert size",
+    description:
+      "The most common distance between the two ends of a read pair. A peak shorter than twice the read length means the mates overlap, which some callers exploit and others cannot handle.",
+  },
+  "ui.qc_adapter": {
+    term: "Adapter detected",
+    description:
+      "Adapter sequence QC found in the reads. Adapter left in place is sequence that came from the library kit rather than the sample, so it misaligns or blocks assembly — trimming removes it.",
+  },
+  "ui.qc_median_read_length": {
+    term: "Median length",
+    description:
+      "The middle read length, which for long-read data describes the run better than the mean. A median far below the mean means a few very long reads are pulling the average up.",
+  },
+  "ui.qc_read_length_stdev": {
+    term: "Length std. dev.",
+    description:
+      "How widely read lengths are spread around the mean. A wide spread is the normal shape of a Nanopore run rather than a fault, which is why it is reported beside the averages rather than as a warning.",
+  },
+  "ui.qc_mean_quality": {
+    term: "Mean quality",
+    description:
+      "The average Phred score across reads, where Q20 is 99% base-call accuracy. Long-read platforms sit well below the Q30 expected of short reads, so read this against the platform rather than against an absolute bar.",
+  },
+  "ui.qc_median_quality": {
+    term: "Median quality",
+    description:
+      "The middle read quality. It is the more robust of the two averages when a run has a tail of poor reads, which is common for Nanopore.",
+  },
+  "ui.qc_read_chemistry": {
+    term: "Chemistry",
+    description:
+      "Which sequencing chemistry the reads appear to come from — HiFi or CLR for PacBio, duplex or simplex for Nanopore. It decides the aligner preset, so the row shows the reason alongside the answer.",
+    computed:
+      "Inferred from mean read length and mean quality, because neither the SAM nor the SRA platform tag distinguishes these modes. Ambiguous evidence reports as unknown rather than as a guess.",
+  },
+  "ui.qc_platform": {
+    term: "Platform",
+    description:
+      "The sequencing instrument family the file came from. It decides which QC tool runs: a per-base quality curve makes no sense for reads running from 200 bp to 100 kb, so long-read files take a different path.",
+  },
+  "ui.qc_status": {
+    term: "Status",
+    description:
+      'Shown only when QC did not finish cleanly. An ordinary successful run has no status row, because a row reading "ok" on every file never says anything.',
+  },
   "ui.qc_read_length_n50": {
     term: "Read length N50",
     description:
@@ -326,22 +392,22 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
 
   // ---- Quality-tab charts ------------------------------------------------
   "ui.chart_quality_per_position": {
-    term: "Quality by position",
+    term: "Quality per position",
     description:
       "Mean Phred score at each position along the read, averaged across the sample. Look for the point where the curve falls below Q20 — that is where trimming should cut.",
   },
   "ui.chart_base_composition": {
-    term: "Base composition by position",
+    term: "Base composition",
     description:
       "How often each base appears at each read position. The lines should settle roughly flat and parallel after the first few positions; sustained divergence at the start is usually adapter or primer sequence.",
   },
   "ui.chart_gc_per_read": {
-    term: "GC content per read",
+    term: "GC distribution",
     description:
       "The distribution of GC content across individual reads. A single peak at the organism's expected GC is healthy; a second peak generally means a second organism is present.",
   },
   "ui.chart_n_per_position": {
-    term: "Uncalled bases by position",
+    term: "N content per position",
     description:
       "The share of reads with an uncalled (N) base at each position. A spike at one position means that sequencing cycle failed outright, which is a different problem from a gradual quality decline.",
   },
@@ -349,12 +415,28 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     term: "Read length distribution",
     description:
       "How many reads fall in each length bin. Untrimmed short-read data is a single spike at the run length; a spread means the file has been trimmed, or holds long reads.",
-    computed: "Binned at 10 bp with no upper limit, so long-read distributions keep their shape.",
+    computed:
+      "Binned at 10 bp with no upper limit, so long-read distributions keep their shape.",
   },
   "ui.chart_tile_quality": {
-    term: "Quality by flowcell tile",
+    term: "Quality per tile",
     description:
       "Mean quality for each physical tile of the flowcell, against read position. Uniform colour is healthy; a dark band on one tile is a localised flowcell defect such as a bubble, affecting only the reads that came from it.",
+  },
+  "ui.chart_adapter_content": {
+    term: "Adapter content",
+    description:
+      "The percentage of reads carrying adapter sequence at each position. Adapter rises toward the read end when fragments were shorter than the read length, so the sequencer ran off the end of the insert and into the kit's own sequence.",
+    computed:
+      "From the whole-file QC scan. Files QC'd before that scan existed show no chart rather than an empty one.",
+  },
+  "ui.chart_duplication_levels": {
+    term: "Sequence duplication levels",
+    description:
+      "How many reads appear once, twice, and so on. A large bar at high duplication levels means the library was over-amplified from little starting material, so extra sequencing depth would add copies rather than new information.",
+    computed:
+      "From a full-file scan with FastQC's frozen-dictionary correction, not a sampled estimate.",
+    learnMore: "/help/calculations",
   },
   "ui.chart_chromosome_strip": {
     term: "Sequence lengths",

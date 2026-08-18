@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { InfoMarker } from "./InfoMarker";
 import {
   classifyChromosomes,
   isNcbiNucleotideAccession,
@@ -80,7 +81,8 @@ export function ChromosomeStrip({ facts }: { facts: Record<string, unknown> }) {
       >
         {view.bars.map((bar, i) => {
           const h = Math.max(MIN_BAR_H, (bar.length / longest) * MAX_BAR_H);
-          const clickable = view.linkable && isNcbiNucleotideAccession(bar.name);
+          const clickable =
+            view.linkable && isNcbiNucleotideAccession(bar.name);
           const described = bar.label
             ? `${bar.label} · ${bar.name} · ${formatBases(bar.length)}`
             : `${bar.name} · ${formatBases(bar.length)}`;
@@ -177,7 +179,13 @@ function Framed({
 }) {
   return (
     <div className="qc-chart">
-      <div className="section-title">{title}</div>
+      <div className="section-title">
+        {title}
+        {/* Keyed on the card rather than on `title`, which varies with what
+            the file actually holds (chromosomes, scaffolds, contigs). The
+            explanation is the same in all three cases. */}
+        <InfoMarker metric="ui.chart_chromosome_strip" />
+      </div>
       {children}
     </div>
   );
