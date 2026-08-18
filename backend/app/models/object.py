@@ -24,6 +24,47 @@ class ObjectStatus(StrEnum):
     MISSING = "missing"  # underlying blob went away
 
 
+class Locality(StrEnum):
+    """Whether an object's bytes are on this machine right now.
+
+    Deliberately *not* a member of `ObjectStatus`. `status` is guarded in
+    roughly fourteen places, and two of them filter whole collections rather
+    than validating one object -- the reference picker and the Actions rules,
+    the latter at the query layer. A remote file carrying its own status would
+    vanish from both with no error and nothing to catch it. Remoteness is an
+    orthogonal fact about where the bytes live, so it gets its own field and an
+    offloaded object keeps `ObjectStatus.READY`.
+
+    Note this is also the reason `MISSING` does not apply to an offloaded
+    object: `MISSING` means the blob went away unexpectedly, which is a
+    problem, while REMOTE means it was released on purpose and can be fetched
+    back.
+    """
+
+    LOCAL = "local"
+    REMOTE = "remote"
+
+
+class RemoteSource(BaseModel):
+    """Where an offloaded object's bytes can be fetched from again.
+
+    A typed field rather than a `metadata` key, for the reason `derived_from`
+    and `shared_from` both give: metadata is user-owned and user-editable, and
+    an address that can be silently retyped is one that re-download will follow
+    off a cliff.
+
+    `accession` is an SRA run (`ERR`/`SRR`/`DRR`) today; `component` is null for
+    those and exists for sources addressed by more than an accession, such as a
+    single file within a genome assembly. `size` is what the source reported
+    when the bytes were last held, so the UI can warn "this will download
+    ~3.2 GB" before a pipeline starts.
+    """
+
+    accession: str
+    component: str | None = None
+    size: int = 0
+
+
 class FormatKind(StrEnum):
     FASTQ = "fastq"
     FASTA = "fasta"
@@ -350,6 +391,13 @@ class DataObject(TimestampedDocument):
     # {1, 2}, and an enum whose members are ONE and TWO reads worse at every
     # use site than the integer does. The request schema does the validating.
     read_number: int | None = None
+
+    # Where the bytes are, and how to get them back if they are not here.
+    # Defaulting to LOCAL is what makes every object written before this field
+    # correct without a migration -- a stored document with no `locality` key
+    # reads back as LOCAL rather than raising or, far worse, as REMOTE.
+    locality: Locality = Locality.LOCAL
+    remote_source: RemoteSource | None = None
 
     source: SourceInfo = Field(default_factory=SourceInfo)
 
