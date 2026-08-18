@@ -21,6 +21,10 @@ class ProteinPrediction(TimestampedDocument):
     model_name: str
     model_version: str
     pdb_path: str = Field(description="Absolute path to the PDB file on disk")
+    # pLDDT is stored on 0-1, not the 0-100 AlphaFold and ESMFold report it on.
+    # `_parse_mean_plddt` in queue/prediction_handlers.py divides the PDB B-factor
+    # column by 100 on the way in, and the frontend multiplies by 100 to display it.
+    # Widening this bound to 100 would let an un-normalised value through silently.
     mean_plddt: float = Field(ge=0.0, le=1.0)
     plddt_per_residue: list[float] = Field(default_factory=list)
     source_object_id: PydanticObjectId
