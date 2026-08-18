@@ -159,6 +159,7 @@ class Settings(BaseSettings):
     # conventional binary -- see tools.abyss()'s docstring for the probe
     # argument it needs.
     abyss_path: str = "abyss-pe"
+    spades_path: str = "spades.py"
     # Bacterial genome annotation. On-demand delivery — the database is
     # several GB — so this probe only checks the binary, not the DB.
     bakta_path: str = "bakta"

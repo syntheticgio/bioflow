@@ -197,10 +197,7 @@ HIFIASM_SPEC = AssemblerSpec(
 
 SPADES_SPEC = AssemblerSpec(
     assembler=Assembler.SPADES,
-    # Flipped to tools.spades once the binary is installed -- see the
-    # install-spades.sh task. Until then `available()` returns False and the
-    # card reads as not installed.
-    tool=None,
+    tool=tools.spades,
     # Empty by construction, like ABySS: SPAdes has no read-accuracy mode
     # flag, and `spec_for_chemistry` does not reach it by chemistry lookup.
     mode_flags={},
