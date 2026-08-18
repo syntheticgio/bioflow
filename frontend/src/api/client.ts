@@ -57,6 +57,8 @@ import type {
   OrganismSearchResponse,
   OrganismSuggestResponse,
   OverdueSchedule,
+  ParameterSet,
+  ParamSpecFamily,
   PipelineSuggestion,
   PipelineTools,
   Profile,
@@ -71,6 +73,7 @@ import type {
   ReferenceOption,
   RegisterAccepted,
   ReplanResult,
+  ResolveResult,
   ResourceLimits,
   ResourceLimitsIn,
   RunDetail,
@@ -271,6 +274,36 @@ export const api = {
     }),
 
   deleteProfile: (id: string) => request<void>(`/profiles/${id}`, { method: "DELETE" }),
+
+  /* ------ parameter sets ------ */
+
+  listParameterSets: (tool: string) =>
+    request<ParameterSet[]>(`/parameter-sets?tool=${encodeURIComponent(tool)}`),
+
+  createParameterSet: (body: {
+    name: string;
+    tool: string;
+    family: ParamSpecFamily;
+    params: Record<string, unknown>;
+  }) =>
+    request<ParameterSet>("/parameter-sets", { method: "POST", body: JSON.stringify(body) }),
+
+  updateParameterSet: (
+    id: string,
+    body: { name?: string; params?: Record<string, unknown> },
+  ) =>
+    request<ParameterSet>(`/parameter-sets/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+
+  deleteParameterSet: (id: string) =>
+    request<void>(`/parameter-sets/${id}`, { method: "DELETE" }),
+
+  resolveParameterSet: (id: string) =>
+    request<ResolveResult>(`/parameter-sets/${id}/resolve`, { method: "POST" }),
+
+  parameterSetsSupported: (family: ParamSpecFamily, tool: string) =>
+    request<{ supported: boolean }>(
+      `/parameter-sets/supported?family=${family}&tool=${encodeURIComponent(tool)}`,
+    ),
 
   listProjects: (parentId?: string) =>
     request<Project[]>(
