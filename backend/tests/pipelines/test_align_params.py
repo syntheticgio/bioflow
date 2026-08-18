@@ -313,6 +313,14 @@ class TestMinimap2:
         with pytest.raises(ValidationError):
             align_params.from_dict({"aligner": "minimap2", "secondary_ratio": 1.1})
 
+    def test_invalid_numeric_text_raises_validation_error(self):
+        with pytest.raises(ValidationError):
+            align_params.from_dict({"aligner": "minimap2", "kmer_size": "default"})
+        with pytest.raises(ValidationError):
+            align_params.from_dict(
+                {"aligner": "minimap2", "secondary_ratio": "none"}
+            )
+
     def test_invalid_secondary_mode_is_rejected(self):
         with pytest.raises(ValidationError):
             align_params.from_dict(
