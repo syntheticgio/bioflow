@@ -1,7 +1,10 @@
 import json
+import hashlib
 import tarfile
+from pathlib import Path
 
 import pytest
+from beanie import PydanticObjectId
 
 from app.config import settings
 from app.models import Blob, BlobState, JobRunTiming, RunKind, SourceInfo, SourceMode
@@ -17,6 +20,17 @@ def test_exports_dir_is_under_bioinfo_home():
 def test_export_format_constants():
     assert export_service.BIOFLOW_EXPORT_VERSION == 1
     assert export_service.DEFAULT_BLOB_THRESHOLD_BYTES == 100 * 1024 * 1024
+
+
+@pytest.fixture
+def report_roots(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "bioinfo_home", tmp_path)
+    return {
+        "qc_reports_dir": settings.qc_reports_dir,
+        "bam_stats_dir": settings.bam_stats_dir,
+        "vcf_stats_dir": settings.vcf_stats_dir,
+        "annotation_stats_dir": settings.annotation_stats_dir,
+    }
 
 
 @pytest.mark.usefixtures("beanie_models")
@@ -108,6 +122,140 @@ class TestCollect:
         bundle = await export_service.collect(project.id, owner=TEST_OWNER)
 
         assert bundle.timings == []
+
+
+@pytest.mark.usefixtures("beanie_models")
+@pytest.mark.asyncio(loop_scope="module")
+class TestCollectReportArtifacts:
+    @staticmethod
+    def _write(path: Path, payload: bytes) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
+
+    def _assert_artifact(
+        self,
+        artifact,
+        *,
+        category: str,
+        object_id: str,
+        source_path: str,
+        payload: bytes,
+    ) -> None:
+        assert artifact.artifact_type == "report"
+        assert artifact.artifact_id == f"{object_id}:{source_path}"
+        assert artifact.object_id == object_id
+        assert artifact.category == category
+        assert artifact.source_path == source_path
+        assert artifact.archive_path == f"reports/{category}/{object_id}/{source_path}"
+        assert artifact.size == len(payload)
+        assert artifact.sha256 == hashlib.sha256(payload).hexdigest()
+        assert artifact.status == "present"
+
+    async def test_discovers_regular_files_under_each_report_root(
+        self, report_roots
+    ):
+        project = await make_project("export-report-artifacts")
+        obj = await make_object(project, "reads.fastq.gz")
+        object_id = str(obj.id)
+
+        payloads = {
+            ("qc", "fastp.html"): b"<html>fastp</html>",
+            ("qc", "nested/qc-summary.txt"): b"nested-qc",
+            ("bam_stats", "contigs.tsv"): b"contigs\nchr1\t10\n",
+            ("vcf_stats", "variants.tsv"): b"variants\n1\n",
+            ("annotation_stats", "features.db"): b"sqlite-bytes",
+        }
+
+        for (category, rel_path), payload in payloads.items():
+            root = {
+                "qc": report_roots["qc_reports_dir"],
+                "bam_stats": report_roots["bam_stats_dir"],
+                "vcf_stats": report_roots["vcf_stats_dir"],
+                "annotation_stats": report_roots["annotation_stats_dir"],
+            }[category]
+            self._write(root / object_id / rel_path, payload)
+
+        artifacts = export_service.collect_report_artifacts([obj])
+
+        assert [(a.category, a.object_id, a.source_path) for a in artifacts] == [
+            ("annotation_stats", object_id, "features.db"),
+            ("bam_stats", object_id, "contigs.tsv"),
+            ("qc", object_id, "fastp.html"),
+            ("qc", object_id, "nested/qc-summary.txt"),
+            ("vcf_stats", object_id, "variants.tsv"),
+        ]
+        for artifact in artifacts:
+            payload = payloads[(artifact.category, artifact.source_path)]
+            self._assert_artifact(
+                artifact,
+                category=artifact.category,
+                object_id=object_id,
+                source_path=artifact.source_path,
+                payload=payload,
+            )
+
+    async def test_skips_missing_roots_and_orphan_object_ids(
+        self, report_roots
+    ):
+        project = await make_project("export-report-artifacts-skip")
+        obj = await make_object(project, "sample.bam")
+        object_id = str(obj.id)
+        orphan_id = str(PydanticObjectId())
+
+        payload = b"qc-only"
+        self._write(report_roots["qc_reports_dir"] / object_id / "fastp.html", payload)
+        self._write(report_roots["qc_reports_dir"] / orphan_id / "orphan.html", b"orphan")
+
+        artifacts = export_service.collect_report_artifacts([obj])
+
+        assert len(artifacts) == 1
+        self._assert_artifact(
+            artifacts[0],
+            category="qc",
+            object_id=object_id,
+            source_path="fastp.html",
+            payload=payload,
+        )
+
+    async def test_ignores_symlink_targets(self, report_roots):
+        project = await make_project("export-report-artifacts-symlink")
+        obj = await make_object(project, "sample.vcf.gz")
+        object_id = str(obj.id)
+
+        report_roots["qc_reports_dir"].mkdir(parents=True, exist_ok=True)
+        outside = report_roots["qc_reports_dir"].parent / "outside.html"
+        outside.write_bytes(b"outside")
+        link = report_roots["qc_reports_dir"] / object_id / "linked.html"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(outside)
+
+        artifacts = export_service.collect_report_artifacts([obj])
+
+        assert artifacts == []
+
+    async def test_rejects_files_that_resolve_outside_the_object_directory(
+        self, report_roots
+    ):
+        project = await make_project("export-report-artifacts-escape")
+        obj = await make_object(project, "sample.gff")
+        object_id = str(obj.id)
+
+        escaped_root = report_roots["qc_reports_dir"]
+        escaped_target = report_roots["qc_reports_dir"].parent / "qc-target"
+        escaped_target.mkdir(parents=True, exist_ok=True)
+        escaped_root.symlink_to(escaped_target, target_is_directory=True)
+
+        object_dir = escaped_target / object_id
+        nested_target = escaped_target.parent / "escaped-target"
+        nested_target.mkdir(parents=True, exist_ok=True)
+        (nested_target / "escaped.html").write_bytes(b"escaped")
+        object_dir.mkdir(parents=True, exist_ok=True)
+        (object_dir / "nested").symlink_to(nested_target, target_is_directory=True)
+
+        artifacts = export_service.collect_report_artifacts([obj])
+
+        assert artifacts == []
 
 
 def test_redact_strips_external_path():
