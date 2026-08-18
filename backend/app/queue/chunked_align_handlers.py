@@ -14,6 +14,7 @@ from app.logging import get_logger
 from app.models import IoClass, JobClass, JobResources, JobState
 from app.models.job import Job
 from app.pipelines import align_runner, tools
+from app.queue.executor import run_subprocess
 from app.queue.handlers import HandlerMode, handler
 
 log = get_logger(__name__)
@@ -156,7 +157,8 @@ def merge_chunked_buckets(ctx):
     ] + [str(b) for b in bucket_bams]
     merge_log = log_dir / f"{ctx.job_id}-merge.log"
 
-    code = _run_subprocess(ctx, merge_cmd, merge_log)
+    merge_progress = align_runner.SamtoolsProgress()
+    code = run_subprocess(ctx, merge_cmd, log_path=str(merge_log), parser=merge_progress)
     if code != 0:
         raise RetryableError(f"samtools merge exited {code} — see {merge_log}")
 
@@ -172,7 +174,8 @@ def merge_chunked_buckets(ctx):
     )
     sort_log = log_dir / f"{ctx.job_id}-sort.log"
 
-    code = _run_subprocess(ctx, sort_cmd, sort_log)
+    sort_progress = align_runner.SamtoolsProgress()
+    code = run_subprocess(ctx, sort_cmd, log_path=str(sort_log), parser=sort_progress)
     if code != 0:
         raise RetryableError(f"samtools sort exited {code} — see {sort_log}")
 

@@ -271,6 +271,9 @@ function JobRow({
   const isRunning = RUNNING.has(job.state);
   const isWaiting = WAITING.has(job.state);
   const isBlocked = BLOCKED.has(job.state);
+  const { pct, phase, message, phase_index, phase_total, units_done, units_total, unit_label } = job.progress ?? {};
+  const indeterminate = pct === null;
+  const hasProgress = isRunning && (pct != null || phase != null);
   return (
     <div className="activity-row">
       <div className="activity-row-head">
@@ -292,6 +295,25 @@ function JobRow({
           </button>
         )}
       </div>
+      {hasProgress && (
+        <div style={{ marginTop: 4, paddingLeft: 2 }}>
+          <div className="progress" style={{ height: 4 }}>
+            <div
+              className={`progress-bar${indeterminate ? " indeterminate" : ""}`}
+              style={indeterminate ? undefined : { width: `${Math.round(pct! * 100)}%` }}
+            />
+          </div>
+          <div style={{ color: "var(--text-faint)", fontSize: 10, marginTop: 2, display: "flex", gap: 8 }}>
+            <span>{message || phase || job.state}</span>
+            {phase_index != null && phase_total != null && (
+              <span>step {phase_index}/{phase_total}</span>
+            )}
+            {units_done != null && units_total != null && (
+              <span>{units_done.toLocaleString()}/{units_total.toLocaleString()}{unit_label ? ` ${unit_label}` : ""}</span>
+            )}
+          </div>
+        </div>
+      )}
       {logOpen && <JobLogView jobId={job.id} />}
     </div>
   );

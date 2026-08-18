@@ -762,6 +762,48 @@ def parse_flagstat(text: str) -> dict:
 
 
 @dataclass
+class SamtoolsProgress:
+    """Turns samtools sort/merge/index stderr lines into progress updates.
+
+    samtools reports its merge phase during sort and merge:
+      [bam_sort_core] merging from 2 files...
+
+    These are phase-only signals with no countable unit, so pct stays None
+    and the bar stays indeterminate — but the phase label tells the user
+    what the tool is doing rather than showing a generic "sorting" for
+    the entire run.
+    """
+
+    name: str = "samtools"
+    phase: str = "starting"
+    _merge_seen: bool = False
+
+    def feed(self, line: str) -> bool:
+        """Consume a line. True if the caller should publish an update."""
+        if _MERGING_RE.search(line):
+            if not self._merge_seen:
+                self._merge_seen = True
+                self.phase = "merging"
+                return True
+            return False
+        return False
+
+    @property
+    def pct(self) -> float | None:
+        return None
+
+    def message(self) -> str:
+        return self.phase
+
+    def snapshot(self) -> dict:
+        return {
+            "pct": self.pct,
+            "phase": self.phase,
+            "message": self.message(),
+        }
+
+
+@dataclass
 class AlignProgress:
     """Turns an aligner's own output into a progress fraction.
 
