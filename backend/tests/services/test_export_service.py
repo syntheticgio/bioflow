@@ -685,6 +685,31 @@ class TestExportProject:
         assert rows[f"qc:{object_id}:fastp.html"][-1] == "included"
         assert rows[f"qc:{object_id}:multiqc.html"][-1] == "excluded"
 
+    async def test_archive_readme_describes_report_artifact_layout_and_thresholds(
+        self, report_roots
+    ):
+        project = await make_project("export-archive-readme-report-layout")
+        obj = await make_object(project, "sample.fastq.gz")
+        object_id = str(obj.id)
+        report_path = report_roots["qc_reports_dir"] / object_id / "fastp.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_bytes(b"<html>benign-report</html>")
+
+        result = await export_service.export_project(
+            project.id, owner=TEST_OWNER, threshold_bytes=1_000
+        )
+
+        with tarfile.open(result.path) as tar:
+            readme = tar.extractfile("README.md").read().decode()
+            report = tar.extractfile(f"reports/qc/{object_id}/fastp.html").read()
+
+        assert "reports/<category>/<object_id>/" in readme
+        assert "small enough to include" in readme
+        assert "per-file threshold" in readme
+        assert "not included" not in readme.lower()
+        assert "known, deliberate gap" not in readme.lower()
+        assert report == b"<html>benign-report</html>"
+
     async def test_manifest_marks_a_disappeared_report_file_unavailable(
         self, monkeypatch, report_roots
     ):
@@ -777,7 +802,9 @@ class TestExportProject:
         assert [d["job_id"] for d in docs] == ["j-archive-project-scoped"]
         assert docs[0]["duration_ms"] == 7_000
 
-    async def test_archive_contains_no_secrets_no_paths_no_machine_names(self):
+    async def test_archive_contains_no_secrets_no_paths_no_machine_names(
+        self, report_roots
+    ):
         """The assertion that outlives whoever wrote the exporter.
 
         Greps the whole produced archive. This is what keeps the redaction
@@ -796,6 +823,9 @@ class TestExportProject:
         blob.state = BlobState.PRESENT
         await blob.save()
         obj = await make_object(project, "reads.fastq", digest=digest)
+        report_path = report_roots["qc_reports_dir"] / str(obj.id) / "fastp.html"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_bytes(b"<html>benign-report</html>")
 
         # C1: DataObject.source.original_path is a second, nested path field
         # (SourceInfo, set for every register-in-place object by
@@ -829,6 +859,9 @@ class TestExportProject:
             for member in tar.getmembers():
                 if member.isfile():
                     blob += tar.extractfile(member).read()
+            report_bytes = tar.extractfile(f"reports/qc/{obj.id}/fastp.html").read()
+
+        assert report_bytes == b"<html>benign-report</html>"
 
         for forbidden in (
             b"/Users/gio",
