@@ -2043,6 +2043,9 @@ class DifferentialExpressionRequest(BaseModel):
     # change in the output, and a positional pair gets reversed eventually.
     contrast: dict
     threads: int | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.get("/quantify/defaults/{bam_id}")
@@ -2159,6 +2162,7 @@ async def launch_differential_expression(
         design=body.design,
         contrast=body.contrast,
         threads=body.threads,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 

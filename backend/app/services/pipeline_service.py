@@ -1406,6 +1406,8 @@ ASSEMBLY_ERROR_QC_MEM_MB = 8192
 
 QUANTIFY_MEM_MB = 4096
 
+DIFFERENTIAL_EXPRESSION_MEM_MB = 4096
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -4116,6 +4118,7 @@ async def launch_differential_expression(
     design: dict[str, str],
     contrast: dict,
     threads: int | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a differential expression test over N counts objects.
 
@@ -4128,6 +4131,15 @@ async def launch_differential_expression(
     """
     from app.queue import queue
     from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=DIFFERENTIAL_EXPRESSION_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     if not design:
         raise ValidationError("No samples were assigned to a condition.")
@@ -4235,13 +4247,16 @@ async def launch_differential_expression(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=resolved_threads, mem_mb=4096, io=IoClass.LIGHT),
+        resources=JobResources(
+            cpu=resolved_threads, mem_mb=DIFFERENTIAL_EXPRESSION_MEM_MB, io=IoClass.LIGHT
+        ),
         max_attempts=2,
         dedup_key=(
             f"de:{project_id}:{test}:{reference}:"
             f"{_params_fingerprint({k: v for k, v in sorted(design.items())})}"
         ),
         project_id=project_id,
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)
