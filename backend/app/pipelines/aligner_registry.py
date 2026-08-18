@@ -94,6 +94,16 @@ class AlignerSpec:
     # FASTA. STAR's index is tied to the exact reference; Winnowmap requires
     # whole-reference meryl preprocessing.
     chunking_supported: bool = True
+    # True when this aligner's index builder reads a gzip-compressed reference
+    # directly. False means `build_index` must decompress first -- see
+    # `align_handlers._ensure_uncompressed`. Declared per aligner rather than
+    # special-cased at the call site because the failure is silent-by-default:
+    # a builder that cannot read gzip dies partway through a long build with a
+    # tool-specific error, and a newly added aligner inherits whatever the
+    # call site happened to assume. Measured against the binaries this image
+    # ships, on both plain gzip and bgzip: bowtie2-build, bwa-mem2 index and
+    # minimap2 -d accept both; hisat2-build and STAR reject both.
+    builder_accepts_gzip: bool = True
     # Named bundles of parameter values, keyed by preset id. When present, the
     # dialog offers a preset selector instead of (or in addition to) individual
     # biology fields. The value is a dict of param key -> value that gets
@@ -472,6 +482,10 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         index=aligners.layout_for(Aligner.HISAT2),
         params_class=align_params.Hisat2Params,
         builder_tool=tools.hisat2_build,
+        # hisat2-build exits 1 on a compressed reference, deleting the partial
+        # .ht2 files it had already written. Unlike bowtie2-build, which shares
+        # its lineage and does accept gzip.
+        builder_accepts_gzip=False,
         # HISAT2's graph FM index is notably compact -- about 4 GB for human
         # including the transcript index.
         memory_model=MemoryModel(
@@ -557,6 +571,9 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
         index=aligners.layout_for(Aligner.STAR),
         params_class=align_params.StarParams,
         chunking_supported=False,
+        # genomeGenerate reads FASTA and GTF as plain text; a gzip reference
+        # reaches it unusable and it fails with an "is not fasta" error.
+        builder_accepts_gzip=False,
         # ~10 bytes/base: about 30 GB for a 3.1 Gb human genome, which is the
         # figure STAR's own manual gives for the RAM needed to align against
         # human. The index is an uncompressed suffix array held resident, so
