@@ -162,6 +162,22 @@ def _trim_tool(tool: str):
     }[tool]()
 
 
+def _refetch_accession(obj: DataObject) -> str | None:
+    """The accession an offloaded object can be fetched back from.
+
+    Prefers the typed `remote_source`, falling back to `metadata.sra_run`.
+    The fallback is not redundant: `sra_run` is what the download path has
+    always written, so every object downloaded before this feature existed
+    carries the address in metadata and nothing in `remote_source`. Without
+    it the refusal degrades to "fetch it before using it" -- true, but it
+    drops the one detail that tells the user *what* to fetch.
+    """
+    if obj.remote_source is not None:
+        return obj.remote_source.accession
+    run = obj.metadata.get("sra_run")
+    return str(run) if run else None
+
+
 async def _resolve_readable(obj: DataObject) -> tuple[str | None, str | None]:
     """Locate an object's bytes as (digest, path).
 
@@ -176,7 +192,7 @@ async def _resolve_readable(obj: DataObject) -> tuple[str | None, str | None]:
     name the action they can actually take.
     """
     if obj.locality is Locality.REMOTE:
-        accession = obj.remote_source.accession if obj.remote_source else None
+        accession = _refetch_accession(obj)
         where = f" from {accession}" if accession else ""
         raise ValidationError(
             f"{obj.name!r} is stored remotely -- fetch it{where} before using it",
