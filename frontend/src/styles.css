@@ -2975,9 +2975,26 @@ a.btn {
 
 /* --- Database Index page --- */
 
+/* Wider than .help-page's 760px prose measure for the same reason as
+   .software-page: the body of this page is a card grid, not prose, and at
+   760px it seats two 340px columns with the rest of the window left empty
+   (#561). */
+.db-index-doc {
+  max-width: 1400px;
+}
+
 .db-index-doc h1 {
   font-size: 20px;
   margin: 0 0 4px;
+}
+
+/* The page's own sections sit *under* the "Database Index" h1, so they have
+   to read smaller than it. Without this they fall back to the UA's 1.5em and
+   render larger than the page title. Matches .db-footer h2, which had the
+   size only because it was written with an explicit rule. */
+.db-index-doc h2 {
+  font-size: 16px;
+  margin: 0 0 12px;
 }
 .db-intro {
   color: var(--text-dim);
