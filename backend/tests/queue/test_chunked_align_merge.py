@@ -17,6 +17,13 @@ So the contract these tests pin is refusal: `_apply_align_reads_chunked` merges
 only when it resolved a BAM for every sub-job it launched, and otherwise enqueues
 nothing. `bucket_count` in the merged object's facts is a claim about
 completeness, and it must never be a claim the merge could not back up.
+
+Refusing quietly was its own silent failure (#595): the applier returned early,
+`_apply_result` swallowed nothing because nothing was raised, and the
+orchestrator job reported *succeeded* with no alignment to show for it. So the
+refusal now raises `PermanentError`, which fails the job with a reason the user
+can read. Both halves matter -- not merging is what protects the data, and
+raising is what tells anyone it happened.
 """
 
 from types import SimpleNamespace
@@ -25,6 +32,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from beanie import PydanticObjectId
 
+from app.errors import PermanentError
 from app.models import JobState
 from app.queue import results
 
@@ -135,7 +143,7 @@ class TestAPartialSetIsNeverMerged:
         jobs = {str(jid): _sub_job(jid, tmp_path=f"/t/{i}.bam") for i, jid in enumerate(ids)}
         jobs[str(ids[1])] = _sub_job(ids[1], state=JobState.FAILED, tmp_path=None)
 
-        with _with_jobs(jobs):
+        with _with_jobs(jobs), pytest.raises(PermanentError):
             await results._apply_align_reads_chunked(
                 _orchestrator_result(ids), owner="local"
             )
@@ -149,7 +157,7 @@ class TestAPartialSetIsNeverMerged:
         jobs = {str(jid): _sub_job(jid, tmp_path=f"/t/{i}.bam") for i, jid in enumerate(ids)}
         del jobs[str(ids[2])]
 
-        with _with_jobs(jobs):
+        with _with_jobs(jobs), pytest.raises(PermanentError):
             await results._apply_align_reads_chunked(
                 _orchestrator_result(ids), owner="local"
             )
@@ -165,7 +173,7 @@ class TestAPartialSetIsNeverMerged:
         jobs = {str(jid): _sub_job(jid, tmp_path=f"/t/{i}.bam") for i, jid in enumerate(ids)}
         jobs[str(ids[0])] = _sub_job(ids[0], tmp_path=None)
 
-        with _with_jobs(jobs):
+        with _with_jobs(jobs), pytest.raises(PermanentError):
             await results._apply_align_reads_chunked(
                 _orchestrator_result(ids), owner="local"
             )
@@ -181,7 +189,9 @@ class TestAPartialSetIsNeverMerged:
                 raise RuntimeError("connection reset")
             return _sub_job(job_id, tmp_path=f"/t/{job_id}.bam")
 
-        with patch.object(results.Job, "get", AsyncMock(side_effect=_get)):
+        with patch.object(
+            results.Job, "get", AsyncMock(side_effect=_get)
+        ), pytest.raises(PermanentError):
             await results._apply_align_reads_chunked(
                 _orchestrator_result(ids), owner="local"
             )
@@ -189,7 +199,44 @@ class TestAPartialSetIsNeverMerged:
         assert merge_enqueued == []
 
     async def test_no_sub_jobs_at_all_enqueues_nothing(self, merge_enqueued):
-        await results._apply_align_reads_chunked(
-            _orchestrator_result([]), owner="local"
-        )
+        """An orchestrator that launched no buckets has nothing to merge and
+        nothing to show for itself either -- equally a job that must not
+        report success."""
+        with pytest.raises(PermanentError):
+            await results._apply_align_reads_chunked(
+                _orchestrator_result([]), owner="local"
+            )
         assert merge_enqueued == []
+
+
+class TestTheRefusalIsVisibleToTheUser:
+    """#595: not merging protects the data, but the orchestrator job used to
+    report succeeded anyway. These pin the half that reaches a person -- a
+    failed job whose error says how much of the alignment was accounted for.
+    """
+
+    async def test_the_error_counts_resolved_against_expected(self, merge_enqueued):
+        """A count like "3 of 4" is the whole diagnosis: it says the buckets
+        ran and one went missing, which is a different problem from an
+        alignment that never started."""
+        ids = [PydanticObjectId() for _ in range(4)]
+        jobs = {str(jid): _sub_job(jid, tmp_path=f"/t/{i}.bam") for i, jid in enumerate(ids)}
+        del jobs[str(ids[3])]
+
+        with _with_jobs(jobs), pytest.raises(PermanentError) as excinfo:
+            await results._apply_align_reads_chunked(
+                _orchestrator_result(ids), owner="local"
+            )
+
+        message = str(excinfo.value)
+        assert "3" in message and "4" in message
+
+    async def test_the_empty_orchestrator_says_so_distinctly(self, merge_enqueued):
+        """A run that launched nothing must not be described as a partial
+        merge -- the cause is upstream in bucketing, not in a lost BAM."""
+        with pytest.raises(PermanentError) as excinfo:
+            await results._apply_align_reads_chunked(
+                _orchestrator_result([]), owner="local"
+            )
+
+        assert "no bucket" in str(excinfo.value).lower()

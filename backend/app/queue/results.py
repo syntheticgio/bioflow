@@ -12,6 +12,7 @@ from pathlib import Path
 
 from beanie import PydanticObjectId
 
+from app.errors import PermanentError
 from app.logging import get_logger
 from app.models import (
     DataObject,
@@ -1345,13 +1346,19 @@ async def _apply_align_reads_chunked(result: dict, *, owner: str) -> None:
     (it runs in async mode with no DB access to find output objects by sub-job
     id). This applier resolves each succeeded sub-job, collects its BAM path,
     and enqueues the merge handler.
+
+    Raises `PermanentError` when it cannot account for every bucket, which
+    fails the orchestrator job. See the comment on the refusal below.
     """
     from app.queue import queue
 
     sub_job_ids = result.get("sub_job_ids") or []
     if not sub_job_ids:
         log.warning("chunked_orchestrator_no_sub_jobs")
-        return
+        raise PermanentError(
+            "Chunked alignment recorded no bucket sub-jobs, so there is "
+            "nothing to merge."
+        )
 
     bucket_bam_paths: list[str] = []
     unresolved: list[str] = []
@@ -1393,7 +1400,15 @@ async def _apply_align_reads_chunked(result: dict, *, owner: str) -> None:
             resolved=len(bucket_bam_paths),
             unresolved=unresolved,
         )
-        return
+        # Raise rather than return: `_apply_result` lets `PermanentError`
+        # through specifically so an applier can fail the job it is applying.
+        # Returning here left the orchestrator reporting succeeded with no
+        # alignment object -- refusing to merge, and refusing to say so (#595).
+        raise PermanentError(
+            f"Resolved {len(bucket_bam_paths)} of {len(sub_job_ids)} bucket "
+            "alignments; refusing to merge a partial reference. Re-run the "
+            "alignment."
+        )
 
     output_name = result.get("output_name") or "merged.bam"
 
