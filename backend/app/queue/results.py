@@ -1354,11 +1354,13 @@ async def _apply_align_reads_chunked(result: dict, *, owner: str) -> None:
         return
 
     bucket_bam_paths: list[str] = []
+    unresolved: list[str] = []
     for jid in sub_job_ids:
         try:
             job = await Job.get(PydanticObjectId(jid))
         except Exception:
             log.warning("chunked_orchestrator_sub_job_lookup_failed", job_id=jid)
+            unresolved.append(jid)
             continue
         if job is None or job.state != JobState.SUCCEEDED:
             log.warning(
@@ -1366,20 +1368,30 @@ async def _apply_align_reads_chunked(result: dict, *, owner: str) -> None:
                 job_id=jid,
                 state=job.state.value if job else "missing",
             )
+            unresolved.append(jid)
             continue
         job_result = job.result or {}
         output = job_result.get("output") or {}
         tmp_path = output.get("tmp_path")
         if not tmp_path:
             log.warning("chunked_orchestrator_sub_job_no_output_path", job_id=jid)
+            unresolved.append(jid)
             continue
         bucket_bam_paths.append(tmp_path)
 
-    if not bucket_bam_paths:
+    # Every bucket or none. A bucket is a slice of the reference, so merging a
+    # partial set produces a BAM that is structurally valid and missing every
+    # read that mapped to the absent contigs -- with nothing downstream to
+    # notice, since `bucket_count` in the object's facts would claim a
+    # completeness the merge never had. Refusing here costs a rerun; merging
+    # anyway costs a wrong alignment that reads as a right one.
+    if unresolved or not bucket_bam_paths:
         log.error(
-            "chunked_orchestrator_no_bams_found",
+            "chunked_orchestrator_incomplete_buckets",
             sub_job_ids=sub_job_ids,
             expected=len(sub_job_ids),
+            resolved=len(bucket_bam_paths),
+            unresolved=unresolved,
         )
         return
 
