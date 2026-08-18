@@ -36,6 +36,7 @@ export interface VariantRequest {
    *  refused with a 422 naming the download size, in `details.download_bytes`
    *  -- re-post with this set once the user has actually agreed to it. */
   install_optional?: boolean;
+  resource_override?: boolean;
 }
 
 // --- Variant results (vcfstats) ---

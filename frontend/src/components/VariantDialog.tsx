@@ -4,9 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiRequestError } from "../api/client";
 import { formatBytes } from "../lib/format";
 import { ModalBackdrop } from "./ModalBackdrop";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { notify } from "../stores/messageStore";
 import type {
   DataObject,
+  ResourceRefusalDetails,
   VariantCallerName,
   VariantParams,
 } from "../api/types";
@@ -92,6 +94,12 @@ export function VariantDialog({
     tool: string;
     downloadBytes: number | null;
   } | null>(null);
+  // Populated from a 422's `details`, the same reactive path AssembleDialog
+  // uses -- variant calling has no client-side estimate to check pre-flight.
+  // Checked ahead of the install-tool offer below: refuse_if_over_budget runs
+  // before the install-consent check in launch_variant_calling, so a request
+  // can only ever come back with one of these, never both.
+  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
 
   // `selectedTool` wins over the server default, for the same reason it does
   // in AlignDialog: `callerInfo` below is derived from it synchronously, and
@@ -138,6 +146,14 @@ export function VariantDialog({
       navigate("/activity");
     },
     onError: (e: Error) => {
+      // refuse_if_over_budget runs before the install-consent check in
+      // launch_variant_calling, so a refusal and an install offer never
+      // arrive on the same response -- checked first here for the same
+      // reason.
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
+        setRefusal(e.details as unknown as ResourceRefusalDetails);
+        return;
+      }
       // details.needs === "install_tool" is launch_variant_calling's own
       // refusal shape for an on-demand caller that has not been pulled yet
       // (pipeline_service._require_or_offer_install) -- the same
@@ -155,6 +171,25 @@ export function VariantDialog({
       }
       notify.error(e.message);
     },
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchVariantCalling({
+        bam_id: object.id,
+        reference_id: chosenReferenceId,
+        caller,
+        params: overrides,
+        install_optional: installOffer != null,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => notify.error(e.message),
   });
 
   const ready =
@@ -331,6 +366,28 @@ export function VariantDialog({
               . Press "Install and call" to download it and start calling
               variants once it finishes.
             </div>
+          )}
+
+          {refusal && (
+            <ResourceRefusalCard
+              estimateMb={refusal.estimate_mb}
+              budgetMb={refusal.budget_mb}
+              detail={refusal.detail}
+              explanation={
+                refusal.refusal === "declared"
+                  ? `Variant calling reserves ${(refusal.declared_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB budget. ` +
+                    `Nothing about the run changes that number.`
+                  : `Variant calling needs about ${(refusal.estimate_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+              }
+              replan={refusal.replan ?? null}
+              onCancel={onClose}
+              onEdit={() => setRefusal(null)}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
+              onAcceptReplan={() => setRefusal(null)}
+            />
           )}
         </div>
 

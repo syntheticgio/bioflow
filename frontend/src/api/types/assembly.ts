@@ -53,6 +53,7 @@ export interface CompletenessRequest {
   object_id: string;
   lineage?: string | null;
   odb?: string | null;
+  resource_override?: boolean;
 }
 
 export interface LineageDownloadRequest {
@@ -64,6 +65,7 @@ export interface ScaffoldRequest {
   draft_object_id: string;
   reference_object_id?: string | null;
   divergence?: string | null;
+  resource_override?: boolean;
 }
 
 export interface LineageStatus {

@@ -1,11 +1,17 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiRequestError } from "../api/client";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
+import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { notify } from "../stores/messageStore";
-import type { CountsParams, DataObject, Strandedness } from "../api/types";
+import type {
+  CountsParams,
+  DataObject,
+  ResourceRefusalDetails,
+  Strandedness,
+} from "../api/types";
 
 const STRAND_LABELS: Record<Strandedness, string> = {
   0: "Unstranded",
@@ -67,6 +73,9 @@ export function QuantifyDialog({
   );
   const [advanced, setAdvanced] = useState(false);
   const [targetNode, setTargetNode] = useState("");
+  // Populated from a 422's `details`, the same reactive path AssembleDialog
+  // uses -- quantify has no client-side estimate to check pre-flight.
+  const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
 
   const params = {
     ...(defaults?.params as CountsParams | undefined),
@@ -104,6 +113,29 @@ export function QuantifyDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Counting started");
+      onClose();
+      navigate("/activity");
+    },
+    onError: (e: Error) => {
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
+        setRefusal(e.details as unknown as ResourceRefusalDetails);
+        return;
+      }
+      notify.error(e.message);
+    },
+  });
+
+  const launchAnyway = useMutation({
+    mutationFn: () =>
+      api.launchQuantify({
+        bam_id: object.id,
+        annotation_id: chosenAnnotationId,
+        params: overrides,
+        resource_override: true,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      notify.success("Launching without the memory check");
       onClose();
       navigate("/activity");
     },
@@ -314,6 +346,28 @@ export function QuantifyDialog({
                 />
               </label>
             </div>
+          )}
+
+          {refusal && (
+            <ResourceRefusalCard
+              estimateMb={refusal.estimate_mb}
+              budgetMb={refusal.budget_mb}
+              detail={refusal.detail}
+              explanation={
+                refusal.refusal === "declared"
+                  ? `This count reserves ${(refusal.declared_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB budget. ` +
+                    `Nothing about the run changes that number.`
+                  : `This count needs about ${(refusal.estimate_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+              }
+              replan={refusal.replan ?? null}
+              onCancel={onClose}
+              onEdit={() => setRefusal(null)}
+              onLaunchAnyway={() => launchAnyway.mutate()}
+              launchAnywayPending={launchAnyway.isPending}
+              onAcceptReplan={() => setRefusal(null)}
+            />
           )}
         </div>
 
