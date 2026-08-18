@@ -351,6 +351,16 @@ class TestLaunchReachesTheQueue:
                 "spec_for_chemistry",
                 return_value=abyss_installed,
             ),
+            # No memory estimate is mocked here, so this run declares the flat
+            # UNKNOWN_ASSEMBLY_MEM_MB fallback (#478's cleanest case). A
+            # generous admission budget keeps that declaration from being
+            # refused, since this test's purpose is asserting the launch
+            # reaches the queue with the ABySS k-mer default filled in, not
+            # exercising the budget refusal itself.
+            patch(
+                "app.services.pipeline_service.current_admission_budget_mb",
+                AsyncMock(return_value=10_000_000),
+            ),
         ):
             # params=None is the exact shape the Actions-tab card sends --
             # forces launch_assembly through default_assembly_params.
