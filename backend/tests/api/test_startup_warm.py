@@ -25,6 +25,9 @@ def stub_startup(monkeypatch):
     monkeypatch.setattr(main, "close_mongo", _noop)
     monkeypatch.setattr(main, "close_redis", _noop)
     monkeypatch.setattr(main, "load_handlers", lambda: None)
+    # Queries DataObject, so without this it raises
+    # CollectionWasNotInitialized against the stubbed connect_to_mongo above.
+    monkeypatch.setattr(main, "split_platform_from_instrument_model", _noop)
     monkeypatch.setattr(main, "get_redis", lambda: object())
     # Neutralised the same way as warm: a real subscriber would try to call
     # .pubsub() on the stub object above and spend this fixture's tests
