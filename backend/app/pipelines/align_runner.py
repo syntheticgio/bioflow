@@ -672,6 +672,42 @@ def build_flagstat_command(*, samtools_path: str, bam: Path) -> list[str]:
     return [samtools_path, "flagstat", str(bam)]
 
 
+def build_sort_command(
+    *,
+    samtools_path: str,
+    bam: Path,
+    output: Path,
+    threads: int,
+    sort_memory_mb: int,
+    tmp_prefix: Path | None = None,
+) -> list[str]:
+    """Coordinate-sort an existing BAM.
+
+    The align path sorts inside its own pipe (`build_align_command`), so this
+    exists for the one caller that has a BAM on disk already: the chunked
+    merge, which concatenates per-bucket BAMs and must re-sort the result
+    because `samtools merge` preserves each input's order, not a global one.
+
+    Same flags as the pipe's sort stage, deliberately -- the merged BAM is the
+    same artifact the single-shot path produces, and a different `-m` or `-@`
+    here would make chunked alignments sort with a memory budget nobody chose.
+    """
+    argv = [
+        samtools_path,
+        "sort",
+        "-@",
+        str(max(threads - 1, 1)),
+        "-m",
+        f"{sort_memory_mb}M",
+        "-o",
+        str(output),
+    ]
+    if tmp_prefix is not None:
+        argv += ["-T", str(tmp_prefix)]
+    argv.append(str(bam))
+    return argv
+
+
 def build_markdup_command(
     *,
     samtools_path: str,
