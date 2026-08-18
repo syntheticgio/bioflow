@@ -103,7 +103,7 @@ def assemble_reads(ctx: JobContext) -> dict:
         # Set by launch_assembly from the same estimate that decided this run
         # could proceed. None for Flye, and for an ABySS run with no estimate
         # -- the builder floors it either way.
-        bloom_bytes=ctx.payload.get("bloom_bytes"),
+        memory_bytes=ctx.payload.get("memory_bytes"),
     )
 
     if assembler is Assembler.ABYSS:

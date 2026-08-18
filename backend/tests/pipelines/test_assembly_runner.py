@@ -24,7 +24,7 @@ def _abyss_cmd(**kwargs):
         reads=Path("/work/r1.fastq.gz"),
         out_dir=Path("/work/out"),
         params=AbyssParams(k=51, threads=4),
-        bloom_bytes=2 * 1024**3,
+        memory_bytes=2 * 1024**3,
     )
     defaults.update(kwargs)
     return assembly_runner.build_assembly_command(**defaults)
@@ -98,12 +98,12 @@ class TestBuildAssemblyCommand:
 
     def test_abyss_command_always_sets_bloom_budget(self):
         """B is mandatory: without it abyss-pe exits non-zero immediately."""
-        cmd = _abyss_cmd(bloom_bytes=3 * 1024**3)
+        cmd = _abyss_cmd(memory_bytes=3 * 1024**3)
         assert "B=3072M" in cmd
 
     def test_abyss_command_floors_bloom_budget(self):
         """A tiny or absent estimate must not produce an unusable B."""
-        cmd = _abyss_cmd(bloom_bytes=None)
+        cmd = _abyss_cmd(memory_bytes=None)
         assert "B=200M" in cmd
 
     def test_flye_command_unchanged_by_new_keywords(self):

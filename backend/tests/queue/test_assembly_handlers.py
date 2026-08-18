@@ -27,7 +27,7 @@ def test_abyss_job_passes_mate_and_bloom_budget(monkeypatch, tmp_path):
         out_dir=tmp_path / "out",
         params=AbyssParams(k=51, threads=4),
         mate=r2,
-        bloom_bytes=4 * 1024**3,
+        memory_bytes=4 * 1024**3,
     )
     assert f"in={r1} {r2}" in cmd
     assert "B=4096M" in cmd

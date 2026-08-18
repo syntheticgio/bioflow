@@ -37,13 +37,13 @@ def build_assembly_command(
     out_dir: Path,
     params: BaseAssemblyParams,
     mate: Path | None = None,
-    bloom_bytes: int | None = None,
+    memory_bytes: int | None = None,
 ) -> list[str]:
     """The argv for one assembly run.
 
-    `mate` and `bloom_bytes` are ABySS-only and ignored by the Flye builder --
-    a paired long-read assembly is not a thing, and Flye needs no memory
-    ceiling to start.
+    `mate` and `memory_bytes` are read by ABySS (as a Bloom filter budget) and
+    SPAdes (as a memory ceiling) and ignored by the Flye builder -- a paired
+    long-read assembly is not a thing, and Flye needs no memory ceiling to start.
     """
     if assembler is Assembler.FLYE:
         assert isinstance(params, FlyeParams)
@@ -58,7 +58,7 @@ def build_assembly_command(
             out_dir=out_dir,
             params=params,
             mate=mate,
-            bloom_bytes=bloom_bytes,
+            memory_bytes=memory_bytes,
         )
     # Not a fallback: an assembler with no builder here would otherwise
     # produce another tool's command line for this binary.
@@ -88,7 +88,7 @@ def _abyss_command(
     out_dir: Path,
     params: AbyssParams,
     mate: Path | None,
-    bloom_bytes: int | None,
+    memory_bytes: int | None,
 ) -> list[str]:
     """`abyss-pe` takes Make variable assignments, not flags.
 
@@ -97,8 +97,8 @@ def _abyss_command(
     otherwise write into the process's cwd.
     """
     bloom_mb = MIN_BLOOM_MB
-    if bloom_bytes:
-        bloom_mb = max(MIN_BLOOM_MB, int(bloom_bytes / (1024 * 1024)))
+    if memory_bytes:
+        bloom_mb = max(MIN_BLOOM_MB, int(memory_bytes / (1024 * 1024)))
 
     cmd = [
         tool_path,
