@@ -216,7 +216,8 @@ class TestSerialization:
             == "Adapter-contaminated / partial reference"
         )
         assert schema["presets"]["adapter_partial_reference"]["description"] == (
-            "Uses local alignment to tolerate unaligned read ends or a partial reference."
+            "Uses local alignment to tolerate unaligned read ends or a partial reference. "
+            "The insert-size range is a starting point; verify it against the library."
         )
         assert schema["presets"]["adapter_partial_reference"]["values"] == {
             "sensitivity": "--sensitive",
@@ -238,7 +239,8 @@ class TestSerialization:
             == "Structural-variant discovery"
         )
         assert schema["presets"]["structural_variant"]["description"] == (
-            "Preserves discordant and mixed evidence and allows dovetailing mates."
+            "Preserves discordant and mixed evidence and allows dovetailing mates. "
+            "The insert-size range is a starting point; verify it against the library."
         )
         assert schema["presets"]["structural_variant"]["values"] == {
             "sensitivity": "--sensitive",
@@ -260,7 +262,8 @@ class TestSerialization:
             == "Repeat / multi-mapping analysis"
         )
         assert schema["presets"]["repeat_multimapping"]["description"] == (
-            "Reports up to 10 alignments per read; output size can grow substantially."
+            "Reports up to 10 alignments per read; output size can grow substantially. "
+            "The insert-size range is a starting point; verify it against the library."
         )
         assert schema["presets"]["repeat_multimapping"]["values"] == {
             "sensitivity": "--sensitive",

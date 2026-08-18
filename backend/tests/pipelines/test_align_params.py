@@ -47,6 +47,37 @@ class TestSharedValidation:
 
 
 class TestBowtie2:
+    @pytest.mark.parametrize(
+        "preset",
+        [
+            "standard_short_read",
+            "long_insert",
+            "mate_pair",
+            "adapter_partial_reference",
+            "structural_variant",
+            "repeat_multimapping",
+        ],
+    )
+    def test_preset_accepts_every_registry_id(self, preset):
+        params = align_params.from_dict({"aligner": "bowtie2", "preset": preset})
+        assert params.preset == preset
+
+    def test_unknown_non_empty_preset_is_rejected(self):
+        with pytest.raises(ValidationError, match="preset"):
+            align_params.from_dict(
+                {"aligner": "bowtie2", "preset": "not-a-bowtie2-preset"}
+            )
+
+    def test_empty_preset_remains_the_custom_value(self):
+        params = align_params.from_dict({"aligner": "bowtie2", "preset": ""})
+        assert params.preset == ""
+
+    def test_preset_identity_is_serialized_for_provenance(self):
+        params = align_params.from_dict(
+            {"aligner": "bowtie2", "preset": "mate_pair"}
+        )
+        assert params.as_dict()["preset"] == "mate_pair"
+
     def test_sensitivity_defaults_to_sensitive(self):
         p = align_params.from_dict({"aligner": "bowtie2"})
         assert p.sensitivity == "--sensitive"

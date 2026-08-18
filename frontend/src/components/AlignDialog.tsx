@@ -13,6 +13,7 @@ import {
   initialPresetSelection,
   isBowtie2PairOnlyField,
   launchValidationMessage,
+  reconcileParameterSetPreset,
   REPORTING_ERROR_MESSAGE,
   shouldClearPresetOnFieldEdit,
 } from "./alignDialogPresets";
@@ -810,20 +811,17 @@ export function AlignDialog({
             family="aligner"
             currentParams={params as unknown as Record<string, unknown>}
             onApply={(values) => {
-              const nextParams = { ...params, ...values } as Partial<AlignParams>;
-              Object.entries(values).forEach(([k, v]) =>
-                setOverrides((o) => ({
-                  ...o,
-                  [k]: v as AlignParams[keyof AlignParams],
-                })),
-              );
-              setPresetOverride(
-                initialPresetSelection({
-                  aligner,
-                  params: nextParams,
-                  presets: schema?.presets,
-                }),
-              );
+              const reconciled = reconcileParameterSetPreset({
+                aligner,
+                currentParams: params,
+                appliedValues: values,
+                presets: schema?.presets,
+              });
+              setOverrides((current) => ({
+                ...current,
+                ...reconciled.overrides,
+              }));
+              setPresetOverride(reconciled.presetSelection);
               setAppliedValues(values);
             }}
             onAppliedSetChange={(s) => {
