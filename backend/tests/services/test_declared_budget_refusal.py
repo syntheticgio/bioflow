@@ -13,7 +13,7 @@ import pytest
 from beanie import PydanticObjectId
 
 from app.errors import ValidationError
-from app.models import FormatKind, ObjectStatus
+from app.models import FormatKind, ObjectRole, ObjectStatus
 from app.pipelines import resource_estimator
 from app.services import pipeline_service, resource_limit_service
 
@@ -1000,3 +1000,74 @@ async def test_quantify_override_enqueues_with_the_flag(monkeypatch):
             )
     assert captured["resource_override"] is True
     assert captured["resources"].mem_mb == pipeline_service.QUANTIFY_MEM_MB
+
+@pytest.mark.asyncio
+async def test_differential_expression_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(1000)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_differential_expression(
+            project_id=PydanticObjectId(),
+            owner="t",
+            design={},
+            contrast={},
+            resource_override=False,
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_differential_expression_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(1000)
+    )
+    project_id = PydanticObjectId()
+    counts_obj = SimpleNamespace(
+        id=PydanticObjectId(),
+        name="sample1.counts.tsv",
+        format=SimpleNamespace(kind=FormatKind.TEXT),
+        status=ObjectStatus.READY,
+        role=ObjectRole.COUNTS,
+        facts={},
+        metadata={},
+        blob_sha256="w" * 64,
+        project_id=project_id,
+        owner="t",
+        created_at=None,
+    )
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(return_value=counts_obj),
+        ),
+        patch(
+            "app.services.pipeline_service.de_runner.validate_design",
+            lambda samples, **k: None,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("x" * 64, None)),
+        ),
+        patch(
+            "app.services.run_service.create_run",
+            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_differential_expression(
+                project_id=project_id,
+                owner="t",
+                design={str(counts_obj.id): "treated"},
+                contrast={"test": "treated", "reference": "control"},
+                resource_override=True,
+            )
+    assert captured["resource_override"] is True
