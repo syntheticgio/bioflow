@@ -1,4 +1,4 @@
-import type { ObjectRole } from "./object";
+import type { Locality, ObjectRole } from "./object";
 import type { AppliedParameterSetIn } from "./parameter-set";
 import type { MemoryModel, ParamFieldMeta } from "./pipeline";
 
@@ -118,6 +118,8 @@ export interface ReferenceOption {
   name: string;
   size: number;
   role: ObjectRole | null;
+  /** "remote" means picking this reference downloads it first. */
+  locality: Locality;
   indexes: IndexStatus;
   index_ids: Record<string, string>;  // aligner name → sidecar object id, for download links
 }
