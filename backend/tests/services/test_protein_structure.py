@@ -10,13 +10,14 @@ on 2026-08-17, recorded in the design doc. They are the reason a selection
 rule exists at all rather than "take the first result".
 """
 
+import hashlib
 import json
 
 import pytest
 import pytest_asyncio
 
 from app.metadata.protein_headers import ProteinRef, RefKind
-from app.models import ProteinStructureLookup
+from app.models import ProteinSequenceLookup, ProteinStructureLookup
 from app.services import protein_structure
 
 pytestmark = [
@@ -31,6 +32,7 @@ async def clean_cache():
     next one is counting -- same trap and same fix as
     `test_structure_lookup.py`'s fixture of the same name."""
     await ProteinStructureLookup.find_all().delete()
+    await ProteinSequenceLookup.find_all().delete()
 
 
 def _entry(accession, *, pdb=(), reviewed=True, name="Enolase 1"):
@@ -195,3 +197,92 @@ async def test_transport_failure_is_not_cached(monkeypatch):
     assert await ProteinStructureLookup.find_one(
         ProteinStructureLookup.accession == "P00924"
     ) is None
+
+
+# --- Sequence-based resolution (issue #534) ---
+
+
+async def test_sequence_exact_match_resolves(monkeypatch):
+    """#534. A sequence search that hits returns a StructureHit with PDB IDs."""
+    _patch(monkeypatch, [_entry("P00924", pdb=["1EBG", "1EBH"])])
+
+    hit = await protein_structure.resolve_by_sequence("MAVSKVYARSVYDSRGNPTV")
+
+    assert hit is not None
+    assert hit.accession == "P00924"
+    assert hit.pdb_ids == ["1EBG", "1EBH"]
+    assert hit.protein_name == "Enolase 1"
+
+
+async def test_sequence_match_with_no_pdb_is_a_hit_not_a_miss(monkeypatch):
+    """#534 / R28. A match that selects an entry with no PDB entries is still a
+    hit -- the UI distinguishes "no structure deposited" from "nothing
+    matches", and that distinction lives in a non-None return."""
+    _patch(monkeypatch, [_entry("Q00001", pdb=[])])
+
+    hit = await protein_structure.resolve_by_sequence("MAVSKVYARSVYDSRGNPTV")
+
+    assert hit is not None
+    assert hit.pdb_ids == []
+
+
+async def test_sequence_no_match_is_cached(monkeypatch):
+    """#534 / R19. Most de novo sequences have no exact entry in UniProt. An
+    uncached miss would re-query on every view of the same protein."""
+    calls = []
+
+    def empty(url, *, timeout=None):
+        calls.append(url)
+        return json.dumps({"results": []}).encode()
+
+    monkeypatch.setattr(protein_structure, "_get", empty)
+
+    assert await protein_structure.resolve_by_sequence("MKKLLA") is None
+    assert await protein_structure.resolve_by_sequence("MKKLLA") is None
+    assert len(calls) == 1
+
+
+async def test_sequence_outage_is_not_cached(monkeypatch):
+    """#534. An outage must not poison the cache -- a cached failure is
+    indistinguishable from a cached miss, and this collection has no expiry."""
+    def boom(url, *, timeout=None):
+        raise TimeoutError("uniprot unreachable")
+
+    monkeypatch.setattr(protein_structure, "_get", boom)
+
+    assert await protein_structure.resolve_by_sequence("MKKLLA") is None
+    assert (
+        await ProteinSequenceLookup.find_one(
+            ProteinSequenceLookup.sequence_hash
+            == hashlib.sha256(b"MKKLLA").hexdigest()
+        )
+        is None
+    )
+
+
+async def test_sequence_search_uses_sequence_query_field(monkeypatch):
+    """#534. The query must use UniProt's ``sequence:`` field, not the
+    accession query from the accession path."""
+    fake_get = _patch(monkeypatch, [_entry("P00924", pdb=["1EBG"])])
+
+    await protein_structure.resolve_by_sequence("MAVSKVYARSVYDSRGNPTV")
+
+    assert 'sequence%3A%22MAVSKVYARSVYDSRGNPTV%22' in fake_get.last_url
+
+
+async def test_sequence_result_is_cached(monkeypatch):
+    """#534. A successful match is cached; the second call must not hit
+    UniProt again."""
+    fake_get = _patch(monkeypatch, [_entry("P00924", pdb=["1EBG"])])
+    calls = []
+
+    def counting(url, *, timeout=None):
+        calls.append(url)
+        return fake_get(url, timeout=timeout)
+
+    monkeypatch.setattr(protein_structure, "_get", counting)
+
+    await protein_structure.resolve_by_sequence("MAVSKVYARSVYDSRGNPTV")
+    await protein_structure.resolve_by_sequence("MAVSKVYARSVYDSRGNPTV")
+
+    assert len(calls) == 1

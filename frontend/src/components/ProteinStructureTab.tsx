@@ -208,8 +208,15 @@ function RecordStructure({
 
       {state === "no_reference" && (
         <div className="chrom-note">
-          This record's header doesn't name a protein we can look up. Headers
-          from annotation tools usually don't.
+          This record's header doesn't name a protein we can look up, and the
+          underlying file could not be read to try a sequence search.
+        </div>
+      )}
+
+      {state === "no_sequence_match" && (
+        <div className="chrom-note">
+          This record's header names no protein, and its sequence was not found
+          in UniProt.
         </div>
       )}
 

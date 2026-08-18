@@ -53,6 +53,7 @@ from app.models.profile import Profile, ProfileDisplay
 from app.models.project import Project, ProjectCounters
 from app.models.protein_prediction import ProteinPrediction
 from app.models.protein_record import ProteinRecord
+from app.models.protein_sequence_lookup import ProteinSequenceLookup
 from app.models.protein_structure_lookup import ProteinStructureLookup
 from app.models.resource_limits import ResourceLimits
 from app.models.run import (
@@ -98,6 +99,7 @@ ALL_MODELS = [
     Profile,
     ProteinPrediction,
     ProteinRecord,
+    ProteinSequenceLookup,
     ProteinStructureLookup,
     StructureLookup,
     Feedback,
@@ -167,6 +169,7 @@ __all__ = [
     "ProjectCounters",
     "ProteinPrediction",
     "ProteinRecord",
+    "ProteinSequenceLookup",
     "ProteinStructureLookup",
     "ProviderKind",
     "RemoteSource",

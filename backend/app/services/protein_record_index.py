@@ -83,6 +83,59 @@ def _open_binary(path: Path, compression: Compression):
     return open(path, "rb")
 
 
+def read_record_sequence(
+    path: Path, compression: Compression, *, byte_offset: int
+) -> str:
+    """The amino-acid sequence of one record, located by byte offset.
+
+    Seeks into the decompressed stream at ``byte_offset`` (the offset
+    ``scan_records`` records for each record's header line) and reads until the
+    next ``>`` line or EOF.
+
+    For an uncompressed file, ``seek()`` places the read head directly at the
+    header. For gzip, the stream is not seekable, so it is walked from the
+    beginning, counting decompressed bytes -- the same trade-off #477's design
+    doc documents for ``scan_records``'s offsets.
+
+    Strips line endings from each sequence line and concatenates them,
+    matching ``scan_records``'s length accounting (which also strips). Decoding
+    uses ``errors="replace"``, for the same reason ``scan_records`` does: a
+    bad byte must not break a read that has the sequence of a protein we're
+    trying to identify.
+    """
+    seq_lines: list[str] = []
+
+    with _open_binary(path, compression) as fh:
+        if compression not in (Compression.GZIP, Compression.BGZF):
+            fh.seek(byte_offset)
+
+        pos = 0
+        past_header = False
+
+        for raw_line in fh:
+            line_bytes = len(raw_line)
+
+            if not past_header:
+                if compression in (Compression.GZIP, Compression.BGZF):
+                    # Walk from the start, counting decompressed bytes until
+                    # we reach the offset recorded for this record's header.
+                    if pos < byte_offset:
+                        pos += line_bytes
+                        continue
+                # This is the record's header line (the line at byte_offset,
+                # for uncompressed: the line we seeked to). Skip it.
+                past_header = True
+                continue
+
+            line = raw_line.decode("utf-8", errors="replace")
+            if line.startswith(">"):
+                break  # Next record starts here.
+            seq_lines.append(line.strip())
+            pos += line_bytes
+
+    return "".join(seq_lines)
+
+
 def scan_records(
     path: Path, compression: Compression, *, limit: int | None = None
 ) -> Iterator[ScannedRecord]:

@@ -23,13 +23,14 @@ export interface ProteinRecords {
   rows: ProteinRecordRow[];
 }
 
-/** Which of four sentences the viewer shows. Sent by the server rather than
+/** Which of five sentences the viewer shows. Sent by the server rather than
  *  derived here: "no structure deposited" and "UniProt was unreachable" need
  *  different copy and only one of them is retryable. */
 export type ProteinStructureState =
   | "resolved"
   | "no_structure"
   | "no_reference"
+  | "no_sequence_match"
   | "lookup_failed";
 
 export interface ProteinStructure {
