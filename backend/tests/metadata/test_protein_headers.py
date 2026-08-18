@@ -9,6 +9,7 @@ EGFR as an accession and returns nothing useful.
 """
 
 import pytest
+
 from app.metadata.protein_headers import RefKind, parse_header
 
 
