@@ -244,23 +244,57 @@ document, a disposable copy.
 
 ## Stage 5 — The fetch job
 
-- [ ] `fetch_remote` handler in `queue/pipeline_handlers.py`. Model it on
+- [x] `fetch_remote` handler in `queue/pipeline_handlers.py`. Model it on
       `download_sra_run` (`queue/sra_handlers.py:52`): `HandlerMode.SUBPROCESS`,
       `JobClass.USER_INTERACTIVE`, `max_attempts=3` (a failed download is
       usually the network, not the input).
-- [ ] The applier re-attaches the blob to the **existing** object and flips
+- [x] The applier re-attaches the blob to the **existing** object and flips
       `locality` back to `LOCAL`. This is where it differs from
       `_apply_sra_download`, which creates new objects — reuse the ingest path,
       not the object-creation path.
-- [ ] Launch paths enqueue `fetch_remote` and set `depends_on`, reusing the
+- [x] Launch paths enqueue `fetch_remote` and set `depends_on`, reusing the
       `build_index` → `align_reads` pattern at
       `services/pipeline_service.py:1967-2092`.
-- [ ] `dedup_key` so two pipelines needing one remote file produce **one** job.
-- [ ] Tests: `_resolve_readable`'s dedup; a failed fetch fails the dependent
+- [x] `dedup_key` so two pipelines needing one remote file produce **one** job.
+- [x] Tests: `_resolve_readable`'s dedup; a failed fetch fails the dependent
       naming the fetch; refetching content already in the store deduplicates to
       the existing blob rather than creating a second.
 - [ ] `docker compose restart worker` before testing — per CLAUDE.md the worker
-      does not hot-reload, and this stage changes a handler.
+      does not hot-reload, and this stage changes a handler. **Not applicable
+      yet, deliberately.** The 5173 stack's worker bind-mounts the *main*
+      checkout, which does not contain this branch, so restarting it would
+      reload the same code it is already running. The restart becomes
+      necessary the moment this merges. Registration was instead verified
+      directly in a container running this worktree's code: `fetch_remote`
+      loads with SUBPROCESS / USER_INTERACTIVE / max_attempts=3, and its
+      applier is in `_APPLIERS`.
+
+## Stage 5 landed 2026-08-18
+
+Commits `282a82e7` (handler, applier, restore, `ensure_local`) and
+`d0f67777` (align-path wiring). Full suite 5488 passed, 7 skipped.
+
+Three things worth carrying into Stage 6:
+
+**`test_every_registered_handler_is_classified` caught an unclassified
+handler.** `fetch_remote` went into `provenance_walker._NO_NARRATIVE_STEP`:
+it restores bytes an object already had and is not a step in any lineage,
+unlike `download_sra_run`, which creates the object and is a genuine origin.
+This is exactly the hand-maintained-registry trap CLAUDE.md documents, and
+nothing but that test would have caught it.
+
+**`ensure_local` defaults a missing `locality` to LOCAL.** Four existing
+tests drive the align path with `SimpleNamespace` stand-ins and broke on
+attribute access. The defaulting is the correct reading rather than a
+concession: an object without the field predates offloading and is local,
+the same default the model applies to a stored document.
+
+**Only the alignment launch is wired.** Trim, QC, assembly and the rest still
+reach `_resolve_readable` and refuse. That refusal is correct and safe -- it
+names the fetch -- but it means offload-then-trim asks the user to fetch
+manually rather than queueing it. Wiring the remaining launches is
+mechanical (the `for _input in (...)` loop at the align site) and is the
+natural first task after the UI exists to trigger any of this.
 
 ## Stage 6 — Frontend
 
