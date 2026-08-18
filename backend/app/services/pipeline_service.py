@@ -1367,6 +1367,11 @@ JOB_TYPE_ASSEMBLE = "assemble_reads"
 # alongside other work and drive the machine into swap.
 UNKNOWN_ASSEMBLY_MEM_MB = 16384
 
+# Bakta's declared reservation. Named rather than inlined so the launcher and
+# the exhaustiveness test in test_heavy_launcher_overrides.py read the same
+# number.
+ANNOTATE_GENOME_MEM_MB = 16384
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -4980,6 +4985,7 @@ async def launch_annotate_genome(
     *,
     object_id: PydanticObjectId,
     owner: str,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a Bakta genome annotation for one bacterial assembly.
 
@@ -4993,6 +4999,15 @@ async def launch_annotate_genome(
     """
     from app.queue import queue
     from app.services import object_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=ANNOTATE_GENOME_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tools.require(tools.bakta())
 
@@ -5055,11 +5070,12 @@ async def launch_annotate_genome(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=8, mem_mb=16384, io=IoClass.HEAVY),
+        resources=JobResources(cpu=8, mem_mb=ANNOTATE_GENOME_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"annotate_genome:{obj.id}",
         project_id=obj.project_id,
         object_id=obj.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError(
