@@ -11,6 +11,7 @@
 #         ./backend/run-worktree-tests.sh tests/models -v
 #         ./backend/run-worktree-tests.sh            # whole suite
 #         ./backend/run-worktree-tests.sh --with-sshd tests/integration
+#         ./backend/run-worktree-tests.sh --with-node tests/integration
 set -euo pipefail
 
 # --with-sshd: also run a real sshd for tests/integration/test_node_ssh_live.py.
@@ -19,11 +20,31 @@ set -euo pipefail
 # test container has no Docker socket and so cannot start sshd itself. Opt-in
 # rather than always-on: it pulls an image and adds ~10s of startup that the
 # other ~1900 tests have no use for.
+#
+# --with-node: a superset, for tests/integration/test_node_update_live.py. The
+# same sshd, plus a Docker CLI and the host's Docker socket, plus a compose
+# file at the path node_update_service.py hardcodes. That makes it a stand-in
+# for an enrolled compute node: `docker compose pull` and `up -d` run for real
+# against a real daemon over a real SSH transport.
+#
+# The socket means the "node's" daemon is really this machine's daemon, so the
+# isolation is fiction while the Docker behaviour is not. That is the right
+# trade for what these tests assert -- issue #474's check 5 is that `up -d`
+# exits 0 for a container that immediately dies, which is a property of how
+# run_update reads exit codes, not of whose daemon ran the container.
 WITH_SSHD=
-if [ "${1:-}" = "--with-sshd" ]; then
-  WITH_SSHD=1
-  shift
-fi
+WITH_NODE=
+case "${1:-}" in
+  --with-sshd)
+    WITH_SSHD=1
+    shift
+    ;;
+  --with-node)
+    WITH_SSHD=1
+    WITH_NODE=1
+    shift
+    ;;
+esac
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -125,9 +146,15 @@ if [ -n "$WITH_SSHD" ]; then
   # linuxserver/openssh-server listens on 2222 and enables password auth for
   # the user it creates, which is what the provisioning flow starts from: the
   # user's password is used once, to install BioFlow's own key.
+  SSHD_MOUNTS=()
+  if [ -n "$WITH_NODE" ]; then
+    SSHD_MOUNTS=(-v /var/run/docker.sock:/var/run/docker.sock)
+  fi
+
   docker run -d --rm --name "$SSHD_NAME" --network biopipe_default \
     -e USER_NAME=bioflow -e USER_PASSWORD=testpw -e PASSWORD_ACCESS=true \
     -e PUID=1000 -e PGID=1000 \
+    "${SSHD_MOUNTS[@]+"${SSHD_MOUNTS[@]}"}" \
     lscr.io/linuxserver/openssh-server:latest >/dev/null
 
   # Wait for sshd to actually accept connections rather than sleeping a fixed
@@ -147,6 +174,46 @@ if [ -n "$WITH_SSHD" ]; then
     -e BIOFLOW_TEST_SSHD_USER=bioflow
     -e BIOFLOW_TEST_SSHD_PASSWORD=testpw
   )
+
+  if [ -n "$WITH_NODE" ]; then
+    echo "Provisioning the node sidecar..." >&2
+
+    # The Docker CLI and the compose plugin, which the base image has no use
+    # for and so does not ship.
+    docker exec "$SSHD_NAME" apk add --no-cache docker-cli docker-cli-compose \
+      >/dev/null 2>&1
+
+    # The socket is bind-mounted with the host's ownership, which is root on
+    # the Docker Desktop VM and not the uid this image runs sshd's user as.
+    # Widening the mode inside the container is enough and touches nothing on
+    # the host, since the mount is a node in the container's own filesystem.
+    docker exec "$SSHD_NAME" chmod 666 /var/run/docker.sock
+
+    # `run_update` hardcodes INSTALL_DIR=~/.bioflow and always names
+    # `-f ~/.bioflow/docker-compose.yml`, so the path is part of the contract
+    # under test rather than something the test may choose.
+    #
+    # The worker image is alpine running /bin/true: it pulls, it starts, and
+    # it exits 0 immediately. `docker compose up -d` still exits 0 -- which is
+    # exactly the condition issue #474's check 5 exists to catch, and the
+    # reason the verify phase cannot trust the restart phase's exit status.
+    #
+    # HOME is set explicitly: `docker exec -u bioflow` does not read the
+    # user's passwd entry, so `~` would expand to /root and the write would
+    # fail on permissions. The SSH session run_update opens *does* get
+    # /config, so this is what makes the two agree on where ~/.bioflow is.
+    docker exec -u bioflow -e HOME=/config "$SSHD_NAME" sh -c '
+      mkdir -p ~/.bioflow &&
+      cat > ~/.bioflow/docker-compose.yml <<YAML
+services:
+  worker:
+    image: alpine:3.20
+    command: ["/bin/true"]
+YAML
+    '
+
+    SSHD_ENV+=(-e BIOFLOW_TEST_NODE=1)
+  fi
 fi
 
 # Quiet by default, but never on top of a verbosity flag the caller passed.
