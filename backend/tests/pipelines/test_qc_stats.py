@@ -9,9 +9,15 @@ platform default rather than presenting a guess as fact.
 
 import pytest
 
+from app.models.object import SequencingPlatform
 from app.pipelines import qc_stats
 from app.pipelines.align_runner import ReadChemistry
 from app.pipelines.qc_stats import infer_chemistry
+from app.services.pipeline_service import (
+    _PLATFORM_PRESETS,
+    _SAM_PLATFORM_PATTERNS,
+    SamPlatform,
+)
 
 
 class TestPacBio:
@@ -220,3 +226,35 @@ class TestPlatformVocabulary:
         assert not (
             set(qc_stats.LONG_READ_PLATFORMS) & qc_stats.SHORT_READ_PLATFORMS
         )
+
+    def test_every_long_read_key_is_a_sequencing_platform_member(self):
+        """All LONG_READ_PLATFORMS keys are valid SequencingPlatform tags."""
+        for tag in qc_stats.LONG_READ_PLATFORMS:
+            assert tag in SequencingPlatform._value2member_map_, tag
+
+    def test_every_short_read_platform_is_a_sequencing_platform_member(self):
+        """All SHORT_READ_PLATFORMS members are valid SequencingPlatform tags."""
+        for tag in qc_stats.SHORT_READ_PLATFORMS:
+            assert tag in SequencingPlatform._value2member_map_, tag
+
+    def test_every_sam_platform_is_reachable_by_some_pattern(self):
+        """Every SamPlatform member appears in at least one _SAM_PLATFORM_PATTERNS
+        entry's value column -- except CAPILLARY, which is in the SAM spec but
+        nothing in this codebase produces, and DNBSEQ, which is new in this
+        commit and intentionally has no detection pattern yet.
+
+        A pattern that silently misses a platform means the SAM `PL` field is
+        never written for that technology, which downstream tools read as
+        absent and fall back to their own defaults.
+        """
+        covered: set[SamPlatform] = set()
+        for _tokens, platform in _SAM_PLATFORM_PATTERNS:
+            covered.add(platform)
+        expected_uncovered = {SamPlatform.CAPILLARY, SamPlatform.DNBSEQ}
+        uncovered = set(SamPlatform) - covered - expected_uncovered
+        assert not uncovered, f"SamPlatform members not covered by patterns: {uncovered}"
+
+    def test_every_platform_preset_key_is_a_sam_platform_member(self):
+        """All _PLATFORM_PRESETS keys are valid SamPlatform values."""
+        for platform in _PLATFORM_PRESETS:
+            assert platform in SamPlatform._value2member_map_, platform
