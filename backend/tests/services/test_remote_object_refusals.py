@@ -167,3 +167,26 @@ async def test_a_remote_reference_still_appears_in_the_picker():
         "an offloaded reference vanished from the align dialog's picker"
     )
     assert "pending.fna" not in picked, "the picker's READY filter stopped working"
+
+
+async def test_the_accession_falls_back_to_metadata_sra_run():
+    """Every object downloaded before this feature has `sra_run` and no
+    `remote_source`. Found by running Stage 3 against the real database:
+    all 55 SRA-backed objects there carry the accession in metadata only,
+    so without the fallback the refusal drops the one detail that says what
+    to fetch.
+    """
+    obj = _remote(remote_source=None, metadata={"sra_run": "DRR1066343"})
+    with pytest.raises(ValidationError) as excinfo:
+        await _resolve_readable(obj)
+    assert "DRR1066343" in str(excinfo.value)
+
+
+async def test_no_accession_anywhere_still_refuses_cleanly():
+    """A remote object with no recoverable address must still refuse rather
+    than crash on a missing key -- the message just cannot name a target.
+    """
+    obj = _remote(remote_source=None, metadata={})
+    with pytest.raises(ValidationError) as excinfo:
+        await _resolve_readable(obj)
+    assert "stored remotely" in str(excinfo.value)

@@ -992,7 +992,13 @@ def check_local(obj: DataObject, *, verb: str) -> None:
     """
     if obj.locality is not Locality.REMOTE:
         return
-    accession = obj.remote_source.accession if obj.remote_source else None
+    # `remote_source` first, `metadata.sra_run` as the fallback -- see
+    # pipeline_service._refetch_accession for why the fallback matters.
+    accession = (
+        obj.remote_source.accession
+        if obj.remote_source is not None
+        else (str(obj.metadata["sra_run"]) if obj.metadata.get("sra_run") else None)
+    )
     where = f" from {accession}" if accession else ""
     raise ValidationError(
         f"{obj.name!r} is stored remotely -- fetch it{where} before you can {verb} it",
