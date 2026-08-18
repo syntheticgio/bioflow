@@ -80,8 +80,8 @@ async def test_list_exports_returns_a_list(client, two_profiles, tmp_path, monke
     # Create a test archive for profile A
     (exports_dir / f"{prefix}my-project-20240818T120000Z.tar.gz").write_text("fake archive")
     # Create an archive for another profile
-    other_owner = two_profiles["b"].owner_id()
-    (exports_dir / f"{other_owner}__other-project-20240818T120000Z.tar.gz").write_text("fake archive")
+    other = two_profiles["b"].owner_id()
+    (exports_dir / f"{other}__other-project-20240818T120000Z.tar.gz").write_text("fake archive")
 
     resp = await client.get("/api/v1/exports", headers=two_profiles["a_headers"])
     assert resp.status_code == 200
@@ -111,7 +111,9 @@ async def test_list_exports_is_owner_scoped(client, two_profiles, tmp_path, monk
     assert data[0]["name"] == f"{b_owner}__b-project.tar.gz"
 
 
-async def test_download_export_404s_for_another_owners_archive(client, two_profiles, tmp_path, monkeypatch):
+async def test_download_export_404s_for_another_owners_archive(
+    client, two_profiles, tmp_path, monkeypatch
+):
     bioinfo_home = tmp_path / "bio3"
     bioinfo_home.mkdir()
     monkeypatch.setattr(settings, "bioinfo_home", bioinfo_home)
@@ -119,7 +121,6 @@ async def test_download_export_404s_for_another_owners_archive(client, two_profi
     exports_dir.mkdir(parents=True)
 
     a_owner = two_profiles["a"].owner_id()
-    b_owner = two_profiles["b"].owner_id()
     a_file = exports_dir / f"{a_owner}__a-project.tar.gz"
     a_file.write_text("a data")
 
