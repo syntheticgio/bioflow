@@ -30,6 +30,37 @@ LONG_READ_PLATFORMS: dict[str, str] = {
 # two directions cannot drift relative to each other.
 SHORT_TO_SRA_PLATFORM: dict[str, str] = {v: k for k, v in LONG_READ_PLATFORMS.items()}
 
+# Full SAM `PL` -> SRA `PLATFORM` translation, for callers that need a real
+# answer for every platform rather than only the long-read pair.
+# `SHORT_TO_SRA_PLATFORM` above cannot serve this: it is deliberately the
+# inverse of LONG_READ_PLATFORMS, so it has no entry for ILLUMINA and every
+# short-read platform resolves to None there. That is correct for
+# `_qc_platform`, which defaults an unmapped value to ILLUMINA anyway, and
+# wrong for #525's migration, which must tell "this is Illumina" apart from
+# "this is a machine nobody recognizes" -- the second clears the field rather
+# than guessing.
+#
+# Not derived: the two vocabularies genuinely differ in spelling
+# (OXFORD_NANOPORE vs ONT, ION_TORRENT vs IONTORRENT) and in membership --
+# SAM has no BGISEQ, since the spec folded MGI/BGI into DNBSEQ. Both sides
+# are externally owned, so this is CLAUDE.md's third registry case: keys that
+# cannot be derived, pinned instead by an exhaustiveness test over the SAM
+# enum (`test_every_sam_platform_translates`).
+SAM_TO_SRA_PLATFORM: dict[str, str] = {
+    "ILLUMINA": "ILLUMINA",
+    "ONT": "OXFORD_NANOPORE",
+    "PACBIO": "PACBIO_SMRT",
+    "DNBSEQ": "DNBSEQ",
+    "ELEMENT": "ELEMENT",
+    "ULTIMA": "ULTIMA",
+    "SINGULAR": "SINGULAR",
+    "IONTORRENT": "ION_TORRENT",
+    "LS454": "LS454",
+    "SOLID": "SOLID",
+    "HELICOS": "HELICOS",
+    "CAPILLARY": "CAPILLARY",
+}
+
 # SRA PLATFORM tags that take the short-read QC path by default -- i.e. never
 # reach LONG_READ_PLATFORMS. Inclusion rule: a tag belongs here if and only if
 # its instrument family always produces short reads; SRA's PLATFORM vocabulary

@@ -31,6 +31,7 @@ from app.models import (
     RunInputRole,
     RunJobRole,
     RunKind,
+    SequencingPlatform,
     SidecarRole,
 )
 from app.pipelines import (
@@ -380,23 +381,44 @@ def _trim_inputs(reads: DataObject, mate: DataObject | None) -> list[RunInput]:
 # different files.
 _SAM_TO_SRA_PLATFORM = qc_stats.SHORT_TO_SRA_PLATFORM
 
+# The closed vocabulary `metadata.platform` holds since #525. Derived from the
+# enum, so a tag added there is recognized here without a second edit -- the
+# lookup is what tells a real SRA tag apart from an instrument model left in
+# the field by the pre-split code.
+_SRA_PLATFORM_TAGS = frozenset(p.value for p in SequencingPlatform)
+
 
 def _qc_platform(obj: DataObject) -> str:
     """Which QC tool family this file's reads call for.
 
-    Goes through `sam_platform` rather than reading `metadata.platform`
-    directly, because that field holds an instrument model -- "PromethION",
-    "Sequel IIe" -- not a platform name. The substring table that already
-    exists for read groups is the thing that knows those models.
+    Three sources, most authoritative first.
 
-    An SRA download stamps `sra_platform` in facts, which is NCBI's own
-    spelling and needs no inference; it wins when present.
+    `facts.sra_platform` is stamped by an SRA download in NCBI's own
+    spelling and needs no inference, so it wins outright.
+
+    `metadata.platform` comes second: since #525 it is a closed field
+    holding an SRA tag, so it is read directly rather than inferred from.
+    Before that split it held an instrument model, which is why an
+    unrecognized value here falls through to the model rather than being
+    trusted -- an object last written by the old code has a machine name in
+    this field, and the migration cannot reach an object nobody has
+    re-saved.
+
+    `metadata.instrument_model` is last and goes through `sam_platform`,
+    because it holds names like "PromethION" or "Sequel IIe" rather than a
+    platform. The substring table that already exists for read groups is
+    the thing that knows those models.
     """
     recorded = (obj.facts or {}).get("sra_platform")
     if isinstance(recorded, str) and recorded.strip():
         return recorded.strip().upper()
 
-    sam = sam_platform((obj.metadata or {}).get("platform"))
+    metadata = obj.metadata or {}
+    declared = metadata.get("platform")
+    if isinstance(declared, str) and declared.strip().upper() in _SRA_PLATFORM_TAGS:
+        return declared.strip().upper()
+
+    sam = sam_platform(platform_label(metadata))
     return _SAM_TO_SRA_PLATFORM.get(sam, "ILLUMINA")
 
 
@@ -902,6 +924,32 @@ def sam_platform(metadata_platform: str | None) -> SamPlatform | None:
     return None
 
 
+def platform_label(metadata: dict | None) -> str | None:
+    """The best text to hand `sam_platform`, from either shape of metadata.
+
+    Since #525 the machine name lives in `instrument_model` and `platform`
+    holds an SRA tag. `sam_platform` matches on substrings and recognizes
+    both spellings -- "MinION" and "OXFORD_NANOPORE" both contain a needle
+    it knows -- so this only has to decide which field to prefer, not
+    translate between them.
+
+    The instrument model wins because it is the more specific of the two:
+    "Sequel IIe" and "Revio" are both PACBIO_SMRT, and while that
+    distinction does not change the SAM `PL` value today, reading the
+    coarser field first would make it impossible to ever act on.
+
+    Objects written before the split still carry a model in `platform`, and
+    fall through to it unchanged -- the migration cannot reach an object
+    that is not in the database.
+    """
+    metadata = metadata or {}
+    for key in ("instrument_model", "platform"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 def suggested_preset(
     sam_pl: SamPlatform | None, *, chemistry: align_runner.ReadChemistry | None = None
 ) -> str:
@@ -932,7 +980,7 @@ def default_read_group(obj: DataObject) -> dict:
     return {
         "sample": str(sample),
         "library": default_library(metadata, sample=str(sample)),
-        "platform": sam_platform(metadata.get("platform")),
+        "platform": sam_platform(platform_label(metadata)),
     }
 
 
@@ -956,9 +1004,13 @@ def default_library(metadata: dict, *, sample: str) -> str:
         if value:
             return str(value)
 
-    platform = metadata.get("platform")
-    if platform and str(platform).strip():
-        return str(platform).strip()
+    # The instrument model before the platform tag: "NextSeq 550" is a more
+    # informative library name than "ILLUMINA", which after #525 is one of
+    # thirteen values and so distinguishes almost nothing.
+    for key in ("instrument_model", "platform"):
+        value = metadata.get(key)
+        if value and str(value).strip():
+            return str(value).strip()
 
     return sample
 
@@ -1053,7 +1105,7 @@ def default_align_params(obj: DataObject | None = None) -> dict:
     bwa = tools.bwa_mem2()
     aligner = Aligner.BWA_MEM2 if bwa.available else Aligner.MINIMAP2
 
-    platform = sam_platform((obj.metadata or {}).get("platform")) if obj else "ILLUMINA"
+    platform = sam_platform(platform_label(obj.metadata)) if obj else "ILLUMINA"
     preset = suggested_preset(platform, chemistry=read_chemistry(obj))
 
     # Long reads are minimap2's domain regardless of what else is installed:

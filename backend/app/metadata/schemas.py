@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import StrEnum
 
-from app.models import FormatKind, ObjectRole, SequenceType
+from app.models import FormatKind, ObjectRole, SequenceType, SequencingPlatform
 
 
 class FieldType(StrEnum):
@@ -228,8 +228,32 @@ FASTQ_FIELDS: tuple[FieldDef, ...] = (
         "platform",
         "Sequencing platform",
         type=FieldType.ENUM,
-        options=("Illumina NovaSeq", "Illumina NextSeq", "Illumina MiSeq",
-                 "Illumina HiSeq", "Oxford Nanopore", "PacBio", "Element"),
+        # Derived from the enum rather than restated, so NCBI's vocabulary is
+        # spelled once. Closed, unlike almost every other externally-owned
+        # vocabulary here, because NCBI publishes the complete set -- a value
+        # outside it is a genuine mistake rather than a machine this list has
+        # not caught up with. The machine name goes in `instrument_model`.
+        options=tuple(p.value for p in SequencingPlatform),
+        help="Who made the reads, in NCBI's spelling. The specific machine "
+             "goes in Instrument model.",
+        group="Sequencing",
+        suggested=True,
+    ),
+    FieldDef(
+        "instrument_model",
+        "Instrument model",
+        type=FieldType.ENUM,
+        # Suggestions only, and deliberately incomplete: new machines ship
+        # constantly and SRA writes whatever the submitter recorded. These are
+        # the models actually present in this installation's data, which makes
+        # them useful defaults without pretending to be a vocabulary.
+        options=("Illumina NovaSeq X Plus", "Illumina NovaSeq 6000",
+                 "Illumina HiSeq 4000", "Illumina HiSeq 2000",
+                 "Illumina MiSeq", "NextSeq 550",
+                 "MinION", "PromethION", "GridION",
+                 "Sequel IIe", "Revio", "PacBio RS"),
+        help="The specific sequencer, e.g. 'NextSeq 550'. Free text -- an "
+             "unlisted model is stored as typed.",
         group="Sequencing",
         suggested=True,
         open_vocabulary=True,

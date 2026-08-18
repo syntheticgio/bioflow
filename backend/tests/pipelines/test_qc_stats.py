@@ -258,3 +258,35 @@ class TestPlatformVocabulary:
         """All _PLATFORM_PRESETS keys are valid SamPlatform values."""
         for platform in _PLATFORM_PRESETS:
             assert platform in SamPlatform._value2member_map_, platform
+
+    def test_every_sam_platform_translates_to_an_sra_tag(self):
+        """`SAM_TO_SRA_PLATFORM` must cover the whole SAM vocabulary.
+
+        The exhaustiveness test CLAUDE.md's third registry case calls for:
+        both key and value sets are owned outside this repo, so neither can
+        be derived, and a missing key fails silently -- #525's migration
+        would read it as "nobody recognizes this machine" and clear the
+        platform on a file whose platform is perfectly well known. That is
+        exactly what happened on the first run for all four Illumina
+        members, when the migration used the long-read-only inverse.
+        """
+        missing = {p.value for p in SamPlatform} - set(qc_stats.SAM_TO_SRA_PLATFORM)
+        assert not missing, f"SamPlatform members with no SRA translation: {missing}"
+
+    def test_every_translation_target_is_a_sequencing_platform_member(self):
+        """The value column is SRA's vocabulary, so the enum must know it."""
+        for sam, sra in qc_stats.SAM_TO_SRA_PLATFORM.items():
+            assert sra in SequencingPlatform._value2member_map_, f"{sam} -> {sra}"
+
+    def test_the_translation_is_injective(self):
+        """Two SAM platforms mapping to one SRA tag would make the reverse
+        direction ambiguous, and nothing else would say so."""
+        targets = list(qc_stats.SAM_TO_SRA_PLATFORM.values())
+        assert len(targets) == len(set(targets)), f"duplicate targets in {targets}"
+
+    def test_it_agrees_with_the_long_read_inverse_where_both_answer(self):
+        """Two tables now translate SAM to SRA. They must not disagree on
+        the pair they share -- that drift is what #11 removed once already.
+        """
+        for sam, sra in qc_stats.SHORT_TO_SRA_PLATFORM.items():
+            assert qc_stats.SAM_TO_SRA_PLATFORM[sam] == sra
