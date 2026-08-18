@@ -8,6 +8,7 @@ second edit.
 import pytest
 
 from app.models.parameter_set import ParamSpecFamily
+from app.pipelines.aligner_registry import Choice, ParamField
 from app.pipelines.aligners import Aligner
 from app.pipelines.assemblers import Assembler
 from app.services import parameter_set_service as svc
@@ -87,3 +88,76 @@ class TestEveryToolIsResolvable:
     @pytest.mark.parametrize("assembler", list(Assembler))
     def test_every_assembler_resolves(self, assembler):
         svc.spec_fields(ParamSpecFamily.ASSEMBLER, assembler.value)
+
+
+def _int_field(**kw):
+    base = dict(key="threads", label="Threads", kind="int", default=4, help="")
+    return ParamField(**{**base, **kw})
+
+
+class TestResolveRejectionReasons:
+    """One test per reason in the spec's four-reason table. Each mutates a
+    field the way a tool's spec would drift between save and apply."""
+
+    def test_unknown_field(self, monkeypatch):
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (_int_field(),))
+        got = svc.resolve_params(
+            ParamSpecFamily.ALIGNER, "minimap2", {"threads": 8, "gone": 1}
+        )
+        assert got.applied == {"threads": 8}
+        assert [r.reason for r in got.rejected] == [svc.RejectionReason.UNKNOWN_FIELD]
+        assert got.rejected[0].key == "gone"
+
+    def test_wrong_kind(self, monkeypatch):
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (_int_field(),))
+        got = svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"threads": "eight"})
+        assert got.applied == {}
+        assert got.rejected[0].reason is svc.RejectionReason.WRONG_KIND
+
+    def test_out_of_range(self, monkeypatch):
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (_int_field(min=1, max=12),))
+        got = svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"threads": 16})
+        assert got.applied == {}
+        assert got.rejected[0].reason is svc.RejectionReason.OUT_OF_RANGE
+        assert "12" in got.rejected[0].detail
+
+    def test_invalid_choice(self, monkeypatch):
+        field = ParamField(
+            key="preset", label="Preset", kind="select", default="sr", help="",
+            choices=(Choice(value="sr", label="Short read"),),
+        )
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (field,))
+        got = svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"preset": "map-ont"})
+        assert got.applied == {}
+        assert got.rejected[0].reason is svc.RejectionReason.INVALID_CHOICE
+
+    def test_bool_accepts_only_bool(self, monkeypatch):
+        field = ParamField(key="paired", label="Paired", kind="bool", default=True, help="")
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (field,))
+        resolved = svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"paired": False})
+        assert resolved.applied == {"paired": False}
+        assert svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"paired": 1}).rejected
+
+
+class TestResolveDoesNotSanitize:
+    """Regression guard for the spec's decision 6.
+
+    The issue's question 5 asks for `params_sanitizer.sanitize()` on apply.
+    That module is a disclosure boundary for uploaded records, not input
+    validation; applying it here would strip every value containing a path
+    separator and every key outside its fourteen-key allowlist. If someone
+    "fixes" this back, this test fails."""
+
+    def test_keeps_values_sanitize_would_strip(self, monkeypatch):
+        field = ParamField(key="extra_args", label="Extra", kind="text", default="", help="")
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (field,))
+        got = svc.resolve_params(
+            ParamSpecFamily.ALIGNER, "minimap2", {"extra_args": "--junc-bed=/data/ref.bed"}
+        )
+        assert got.applied == {"extra_args": "--junc-bed=/data/ref.bed"}
+        assert got.rejected == []
+
+    def test_sanitize_is_not_imported_by_this_module(self):
+        import inspect
+
+        assert "params_sanitizer" not in inspect.getsource(svc)
