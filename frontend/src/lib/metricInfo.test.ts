@@ -68,3 +68,65 @@ describe("metric info content", () => {
     expect(infoFor("no_such_fact")).toBeUndefined();
   });
 });
+
+/**
+ * The Results tab's headline numbers are written as `<Stat label=… metric=…>`
+ * in component source rather than driven off a key map, so `LABELS` above
+ * cannot see them. They are also the figures most likely to be copied into a
+ * methods section -- Ti/Tv, mean depth, the breadth percentages -- and
+ * several do not mean what their label alone suggests.
+ *
+ * Read from source for the same reason the LABELS partition exists: a `Stat`
+ * added without a `metric` renders perfectly, just with no explanation, and
+ * nothing else in the suite would notice. Scanning the tree catches one added
+ * to a component this file has never heard of, which an enumerated list of
+ * call sites would not.
+ */
+describe("Stat headline coverage", () => {
+  // Read through Vite rather than node:fs: this project has no @types/node,
+  // and `tsc --noEmit` runs over src/ in CI -- a readFileSync here compiles
+  // nowhere even though vitest would happily run it. `query: "?raw"` hands
+  // back each component's source text as a string, eagerly, at transform time.
+  const sources = Object.entries(
+    import.meta.glob("../components/*.tsx", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>,
+  )
+    .map(([path, text]) => ({ name: path.split("/").pop() as string, text }))
+    .filter(({ name }) => name !== "Stat.tsx");
+
+  // Each `<Stat …>` opening tag, whether written on one line or across several.
+  const statTags = (text: string) => text.match(/<Stat\b[^>]*/g) ?? [];
+
+  it("gives every headline stat a metric key", () => {
+    const missing: string[] = [];
+    for (const { name, text } of sources) {
+      for (const tag of statTags(text)) {
+        if (/\bmetric=/.test(tag)) continue;
+        const label = tag.match(/label="([^"]*)"/)?.[1] ?? tag;
+        missing.push(`${name}: ${label}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it("points every stat's metric key at a real entry", () => {
+    const unknown: string[] = [];
+    for (const { name, text } of sources) {
+      for (const tag of statTags(text)) {
+        const key = tag.match(/metric="([^"]*)"/)?.[1];
+        if (key && !(key in METRIC_INFO)) unknown.push(`${name}: ${key}`);
+      }
+    }
+    expect(unknown).toEqual([]);
+  });
+
+  it("finds the stats it is meant to be checking", () => {
+    // Without this the two tests above pass vacuously if the scan breaks --
+    // a renamed directory or a changed tag shape would read as "all clear".
+    const total = sources.reduce((n, s) => n + statTags(s.text).length, 0);
+    expect(total).toBeGreaterThan(5);
+  });
+});
