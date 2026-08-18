@@ -14,6 +14,7 @@ See docs/superpowers/specs/2026-08-17-project-export-archive-design.md.
 """
 
 import asyncio
+import hashlib
 import io
 import json
 import tarfile
@@ -45,6 +46,28 @@ BIOFLOW_EXPORT_VERSION = 1
 DEFAULT_BLOB_THRESHOLD_BYTES = 100 * 1024 * 1024
 
 
+REPORT_ARTIFACT_ROOTS: tuple[tuple[str, str], ...] = (
+    ("qc", "qc_reports_dir"),
+    ("bam_stats", "bam_stats_dir"),
+    ("vcf_stats", "vcf_stats_dir"),
+    ("annotation_stats", "annotation_stats_dir"),
+)
+
+
+@dataclass
+class ExportArtifact:
+    artifact_type: str
+    artifact_id: str
+    category: str
+    source_path: str
+    archive_path: str
+    size: int
+    sha256: str
+    status: str = "present"
+    object_id: str | None = None
+    state: str | None = None
+
+
 @dataclass
 class ExportBundle:
     """Everything in scope for one export, before redaction.
@@ -64,6 +87,65 @@ class ExportBundle:
     run_jobs: list[RunJob] = field(default_factory=list)
     timings: list[JobRunTiming] = field(default_factory=list)
     blobs: list[Blob] = field(default_factory=list)
+    report_artifacts: list[ExportArtifact] = field(default_factory=list)
+
+
+def _hash_file(path: Path) -> tuple[int, str]:
+    hasher = hashlib.sha256()
+    size = 0
+    with path.open("rb") as fh:
+        while chunk := fh.read(64 * 1024):
+            size += len(chunk)
+            hasher.update(chunk)
+    return size, hasher.hexdigest()
+
+
+def collect_report_artifacts(objects: list[DataObject]) -> list[ExportArtifact]:
+    """Collect report files written beside objects, not in the blob store."""
+    artifacts: list[ExportArtifact] = []
+
+    for obj in objects:
+        object_id = str(obj.id)
+        for category, settings_attr in REPORT_ARTIFACT_ROOTS:
+            root = getattr(settings, settings_attr)
+            object_dir = root / object_id
+            if not object_dir.exists() or not object_dir.is_dir():
+                continue
+
+            resolved_object_dir = object_dir.resolve()
+            for path in object_dir.rglob("*"):
+                if path.is_symlink() or not path.is_file():
+                    continue
+
+                try:
+                    resolved = path.resolve()
+                    resolved.relative_to(resolved_object_dir)
+                    size, sha256 = _hash_file(path)
+                except (OSError, ValueError):
+                    continue
+
+                source_path = path.relative_to(object_dir).as_posix()
+                artifacts.append(
+                    ExportArtifact(
+                        artifact_type="report",
+                        artifact_id=f"{object_id}:{source_path}",
+                        object_id=object_id,
+                        category=category,
+                        source_path=source_path,
+                        archive_path=f"reports/{category}/{object_id}/{source_path}",
+                        size=size,
+                        sha256=sha256,
+                    )
+                )
+
+    return sorted(
+        artifacts,
+        key=lambda artifact: (
+            artifact.category,
+            artifact.object_id or "",
+            artifact.source_path,
+        ),
+    )
 
 
 async def collect(project_id: PydanticObjectId, *, owner: str) -> ExportBundle:
@@ -94,6 +176,7 @@ async def collect(project_id: PydanticObjectId, *, owner: str) -> ExportBundle:
 
     blob_ids = sorted({o.blob_sha256 for o in objects if o.blob_sha256 is not None})
     blobs = await Blob.find({"_id": {"$in": blob_ids}}).to_list() if blob_ids else []
+    report_artifacts = await asyncio.to_thread(collect_report_artifacts, objects)
 
     # Timings are keyed by object *or* by project: `executor.py` records
     # `object_id` only for a job that attached to a single object, so
@@ -116,6 +199,7 @@ async def collect(project_id: PydanticObjectId, *, owner: str) -> ExportBundle:
         run_jobs=run_jobs,
         timings=timings,
         blobs=blobs,
+        report_artifacts=report_artifacts,
     )
 
 
