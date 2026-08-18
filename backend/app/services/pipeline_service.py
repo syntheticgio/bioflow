@@ -1394,6 +1394,14 @@ MERYL_ANALYSIS_MEM_MB = 8192
 # 26Mb T. brucei reference OOM-killed at the lower number.
 CONSENSUS_MEM_MB = 8192
 
+# Sized for minimap2's whole-genome alignment, not for RagTag's own graph
+# work -- see the handler's own note.
+SCAFFOLD_MEM_MB = 8192
+
+MISASSEMBLY_QC_MEM_MB = 8192
+
+SYNTENY_MEM_MB = 8192
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -5486,6 +5494,7 @@ async def launch_scaffold(
     owner: str,
     reference_object_id: PydanticObjectId | None = None,
     divergence: str | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a RagTag run: order and orient a draft assembly's contigs
     against a reference.
@@ -5506,6 +5515,15 @@ async def launch_scaffold(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly, run_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=SCAFFOLD_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.ragtag())
 
@@ -5598,11 +5616,12 @@ async def launch_scaffold(
         job_class=JobClass.COMPUTE,
         # Sized for minimap2's whole-genome alignment, not for RagTag's own
         # graph work -- see the handler's own note.
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT),
+        resources=JobResources(cpu=4, mem_mb=SCAFFOLD_MEM_MB, io=IoClass.LIGHT),
         max_attempts=1,
         dedup_key=f"scaffold:{draft.id}:{reference.id}",
         project_id=draft.project_id,
         object_id=draft.id,
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)
@@ -5630,6 +5649,7 @@ async def launch_misassembly_qc(
     draft_object_id: PydanticObjectId,
     owner: str,
     reference_object_id: PydanticObjectId | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a QUAST run: reference-based misassembly QC for one assembly.
 
@@ -5649,6 +5669,15 @@ async def launch_misassembly_qc(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=MISASSEMBLY_QC_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.quast())
 
@@ -5725,11 +5754,12 @@ async def launch_misassembly_qc(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(cpu=4, mem_mb=MISASSEMBLY_QC_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"assess_misassemblies:{draft.id}:{reference.id}",
         project_id=draft.project_id,
         object_id=draft.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError(
@@ -5754,6 +5784,7 @@ async def launch_synteny(
     owner: str,
     reference_object_id: PydanticObjectId | None = None,
     divergence: str | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue a minimap2 run: whole-genome alignment of a draft assembly
     against a reference, for a synteny dot-plot.
@@ -5774,6 +5805,15 @@ async def launch_synteny(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=SYNTENY_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.minimap2())
 
@@ -5850,11 +5890,12 @@ async def launch_synteny(
         owner=owner,
         payload=payload,
         job_class=JobClass.COMPUTE,
-        resources=JobResources(cpu=4, mem_mb=8192, io=IoClass.LIGHT),
+        resources=JobResources(cpu=4, mem_mb=SYNTENY_MEM_MB, io=IoClass.LIGHT),
         max_attempts=1,
         dedup_key=f"analyze_synteny:{draft.id}:{reference.id}",
         project_id=draft.project_id,
         object_id=draft.id,
+        resource_override=resource_override,
     )
     if job is None:
         raise ConflictError(
