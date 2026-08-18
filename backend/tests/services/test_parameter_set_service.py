@@ -61,6 +61,17 @@ class TestEligibleParams:
         got = svc.eligible_params(ParamSpecFamily.ALIGNER, Aligner.MINIMAP2.value, params)
         assert got == {knob: 8}
 
+    def test_drops_only_unset_none_values_after_filtering_to_spec_keys(self):
+        params = {
+            "preset": "map-ont",
+            "kmer_size": None,
+            "window_size": 10,
+            "emit_md": None,
+            "reference_id": "68a1f00000000000000000aa",
+        }
+        got = svc.eligible_params(ParamSpecFamily.ALIGNER, Aligner.MINIMAP2.value, params)
+        assert got == {"preset": "map-ont", "window_size": 10}
+
     def test_empty_params_is_empty(self):
         assert svc.eligible_params(ParamSpecFamily.ALIGNER, Aligner.MINIMAP2.value, {}) == {}
 
@@ -137,6 +148,60 @@ class TestResolveRejectionReasons:
         resolved = svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"paired": False})
         assert resolved.applied == {"paired": False}
         assert svc.resolve_params(ParamSpecFamily.ALIGNER, "minimap2", {"paired": 1}).rejected
+
+    def test_keeps_explicit_false_zero_and_empty_string_values(self, monkeypatch):
+        fields = (
+            ParamField(key="paired", label="Paired", kind="bool", default=True, help=""),
+            ParamField(key="batch_size", label="Batch size", kind="int", default=500, help=""),
+            ParamField(key="extra_args", label="Extra args", kind="text", default="--eqx", help=""),
+        )
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: fields)
+        resolved = svc.resolve_params(
+            ParamSpecFamily.ALIGNER,
+            "minimap2",
+            {"paired": False, "batch_size": 0, "extra_args": ""},
+        )
+        assert resolved.applied == {"paired": False, "batch_size": 0, "extra_args": ""}
+        assert resolved.rejected == []
+
+    def test_applies_float_values_that_match_the_current_spec(self, monkeypatch):
+        field = ParamField(
+            key="secondary_ratio",
+            label="Secondary ratio",
+            kind="float",
+            default=0.8,
+            help="",
+            min=0.0,
+            max=1.0,
+        )
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (field,))
+        resolved = svc.resolve_params(
+            ParamSpecFamily.ALIGNER, "minimap2", {"secondary_ratio": 0.35}
+        )
+        assert resolved.applied == {"secondary_ratio": 0.35}
+        assert resolved.rejected == []
+
+    def test_rejects_invalid_saved_float_values(self, monkeypatch):
+        field = ParamField(
+            key="secondary_ratio",
+            label="Secondary ratio",
+            kind="float",
+            default=0.8,
+            help="",
+            min=0.0,
+            max=1.0,
+        )
+        monkeypatch.setattr(svc, "spec_fields", lambda f, t: (field,))
+        wrong_kind = svc.resolve_params(
+            ParamSpecFamily.ALIGNER, "minimap2", {"secondary_ratio": "0.35"}
+        )
+        out_of_range = svc.resolve_params(
+            ParamSpecFamily.ALIGNER, "minimap2", {"secondary_ratio": 1.2}
+        )
+        assert wrong_kind.applied == {}
+        assert wrong_kind.rejected[0].reason is svc.RejectionReason.WRONG_KIND
+        assert out_of_range.applied == {}
+        assert out_of_range.rejected[0].reason is svc.RejectionReason.OUT_OF_RANGE
 
 
 class TestResolveDoesNotSanitize:

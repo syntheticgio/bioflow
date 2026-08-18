@@ -57,7 +57,7 @@ def eligible_params(
 ) -> dict[str, Any]:
     """`params` narrowed to what a set for this tool may store."""
     keys = preset_eligible_keys(family, tool)
-    return {k: v for k, v in params.items() if k in keys}
+    return {k: v for k, v in params.items() if k in keys and v is not None}
 
 
 def has_parameter_sets(family: ParamSpecFamily, tool: str) -> bool:
@@ -117,6 +117,24 @@ def _check(field: ParamField, value: Any) -> Rejected | None:
             return Rejected(
                 key=field.key, reason=RejectionReason.WRONG_KIND, value=value,
                 detail=f"{field.label} expects a whole number",
+            )
+        if field.min is not None and value < field.min:
+            return Rejected(
+                key=field.key, reason=RejectionReason.OUT_OF_RANGE, value=value,
+                detail=f"{value} is below the current minimum of {field.min}",
+            )
+        if field.max is not None and value > field.max:
+            return Rejected(
+                key=field.key, reason=RejectionReason.OUT_OF_RANGE, value=value,
+                detail=f"{value} exceeds the current maximum of {field.max}",
+            )
+        return None
+
+    if field.kind == "float":
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return Rejected(
+                key=field.key, reason=RejectionReason.WRONG_KIND, value=value,
+                detail=f"{field.label} expects a number",
             )
         if field.min is not None and value < field.min:
             return Rejected(

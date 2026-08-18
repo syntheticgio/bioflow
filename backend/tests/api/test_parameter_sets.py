@@ -78,6 +78,20 @@ class TestSaveDropsIneligibleKeys:
         )
         assert r.json()["params"] == {"threads": 8}
 
+    async def test_unset_none_values_are_not_stored(self, client, two_profiles):
+        a_headers = two_profiles["a_headers"]
+        r = await _create(
+            client,
+            a_headers,
+            params={
+                "preset": "map-ont",
+                "kmer_size": None,
+                "window_size": 10,
+                "emit_md": None,
+            },
+        )
+        assert r.json()["params"] == {"preset": "map-ont", "window_size": 10}
+
 
 class TestUniqueness:
     async def test_same_name_same_tool_collides(self, client, two_profiles):
@@ -142,6 +156,23 @@ class TestResolve:
         assert body["applied"]["threads"] == 8
         assert body["rejected"] == []
         assert body["set"] == {"id": created["id"], "name": "Nanopore fast", "revision": 1}
+
+    async def test_reapplies_saved_float_values(self, client, two_profiles):
+        a_headers = two_profiles["a_headers"]
+        created = (
+            await _create(
+                client,
+                a_headers,
+                params={"secondary_ratio": 0.35},
+            )
+        ).json()
+        body = (
+            await client.post(
+                f"/api/v1/parameter-sets/{created['id']}/resolve", headers=a_headers
+            )
+        ).json()
+        assert body["applied"] == {"secondary_ratio": 0.35}
+        assert body["rejected"] == []
 
     async def test_flags_a_drifted_key(self, client, two_profiles):
         a_headers = two_profiles["a_headers"]
