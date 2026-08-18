@@ -343,10 +343,16 @@ def build_index_command(
             raise ValidationError("minimap2 index requires an output path")
         return [tool_path, "-d", str(output), str(reference)]
 
-    # bowtie2-build / hisat2-build: <reference> <basename>. The basename is
-    # the reference path itself, so the index files land beside it as
-    # `genome.fna.1.bt2` and materialize back under names the layout knows.
-    return [tool_path, str(reference), str(reference)]
+    # bowtie2-build / hisat2-build: <reference> <basename>. The basename
+    # defaults to the reference path itself, so the index files land beside it
+    # as `genome.fna.1.bt2` and materialize back under names the layout knows.
+    #
+    # `output` overrides only the basename, because the two can legitimately
+    # differ: hisat2-build cannot read a gzipped reference, so `build_index`
+    # feeds it a decompressed copy in a scratch directory while the index must
+    # still be written under the *stored* name the layout looks for (#560).
+    basename = output if output is not None else reference
+    return [tool_path, str(reference), str(basename)]
 
 
 def build_faidx_command(*, samtools_path: str, reference: Path) -> list[str]:

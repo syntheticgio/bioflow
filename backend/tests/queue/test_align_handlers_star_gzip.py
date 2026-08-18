@@ -1,9 +1,13 @@
-"""STAR's index build needs a plain-text FASTA/GTF, unlike every other
-aligner materialize() feeds it, which accepts gzip transparently. See
-`align_handlers._ensure_uncompressed` for the failure this guards against:
-an NCBI-downloaded reference (always gzip) reached STAR unusable and it
-failed with "is not fasta" thousands of reads into what looked like a
-routine index build.
+"""Two index builders need a plain-text FASTA/GTF: STAR's `genomeGenerate`
+and `hisat2-build`. See `align_handlers._ensure_uncompressed` for the failures
+this guards against -- an NCBI-downloaded reference (always gzip) reached STAR
+unusable and it failed with "is not fasta", and reached hisat2-build which
+exited 1 partway through, deleting its own partial .ht2 files (#560).
+
+Which builders can cope is declared per aligner by
+`AlignerSpec.builder_accepts_gzip` and asserted in
+`tests/pipelines/test_aligner_registry.py`; this file covers the mechanics of
+the decompression itself.
 """
 
 import gzip
@@ -40,7 +44,7 @@ class TestEnsureUncompressed:
         with gzip.open(gz, "wb") as f:
             f.write(b">chr1\nACGTACGT\n")
 
-        dest_dir = tmp_path / "star-input"
+        dest_dir = tmp_path / "build-input"
         out = _ensure_uncompressed(gz, dest_dir)
 
         assert out.parent == dest_dir
@@ -53,7 +57,7 @@ class TestEnsureUncompressed:
         plain = src_dir / "genome.fna"
         plain.write_bytes(b">chr1\nACGT\n")
 
-        dest_dir = tmp_path / "star-input"
+        dest_dir = tmp_path / "build-input"
         out = _ensure_uncompressed(plain, dest_dir)
 
         assert out == plain

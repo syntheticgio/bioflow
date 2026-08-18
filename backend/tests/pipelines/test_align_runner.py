@@ -320,6 +320,26 @@ class TestIndexCommands:
         )
         assert cmd == ["minimap2", "-d", "/w/g.fna.mmi", "/w/g.fna"]
 
+    def test_bowtie2_defaults_the_basename_to_the_reference(self):
+        cmd = align_runner.build_index_command(
+            aligner=Aligner.BOWTIE2, tool_path="bowtie2-build", reference=Path("/w/g.fna")
+        )
+        assert cmd == ["bowtie2-build", "/w/g.fna", "/w/g.fna"]
+
+    def test_hisat2_basename_can_differ_from_the_input_it_reads(self):
+        """#560: hisat2-build cannot read a gzipped reference, so build_index
+        feeds it a decompressed copy from a scratch directory -- but the index
+        must still be written under the stored name, which is where the layout
+        looks for the files afterwards. Reading from one path and writing to
+        another is the whole point of `output` on this branch."""
+        cmd = align_runner.build_index_command(
+            aligner=Aligner.HISAT2,
+            tool_path="hisat2-build",
+            reference=Path("/w/build-input/g.fna"),
+            output=Path("/w/ref/g.fna.gz"),
+        )
+        assert cmd == ["hisat2-build", "/w/build-input/g.fna", "/w/ref/g.fna.gz"]
+
     def test_minimap2_requires_an_output_path(self):
         with pytest.raises(ValidationError, match="output path"):
             align_runner.build_index_command(
