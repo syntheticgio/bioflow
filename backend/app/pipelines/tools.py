@@ -924,6 +924,7 @@ class Delivery(StrEnum):
 class RecommendationLevel(StrEnum):
     RECOMMENDED = "recommended"
     COMPATIBLE = "compatible"
+    INCOMPATIBLE = "incompatible"
 
 
 @dataclass(frozen=True)
@@ -993,10 +994,11 @@ class ToolMeta:
 
     # --- Tool selection recommendations, keyed on read chemistry. ---
     # Maps a coarse bucket ("short" / "long") to a recommendation level.
-    # Absent keys mean no opinion: the tool is not recommended for that
-    # read type. The frontend renders a "Recommended" badge for RECOMMENDED
-    # and nothing for COMPATIBLE (which is the "works but not first choice"
-    # tier).
+    # Absent keys mean no opinion: the tool is neither recommended nor known
+    # to be incompatible for that read type. The frontend renders a
+    # "Recommended" badge for RECOMMENDED, an "Incompatible" badge for
+    # INCOMPATIBLE, and nothing for COMPATIBLE (which is the "works but not
+    # first choice" tier).
     recommendations: dict[str, str] = field(default_factory=dict, repr=False)
 
 
@@ -1269,6 +1271,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "reference the first time one is needed, then aligns straight into "
             "a sorted BAM."
         ),
+        recommendations={
+            "short": RecommendationLevel.RECOMMENDED.value,
+            "long": RecommendationLevel.INCOMPATIBLE.value,
+        },
     ),
     "minimap2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
@@ -1294,6 +1300,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "PacBio input. Aligns straight into a sorted BAM, with the preset "
             "matching the read type offered as a choice in the align dialog."
         ),
+        recommendations={
+            "short": RecommendationLevel.COMPATIBLE.value,
+            "long": RecommendationLevel.RECOMMENDED.value,
+        },
     ),
     "bowtie2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
@@ -1322,6 +1332,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "runs on demand rather than asking the user to prepare a reference "
             "beforehand."
         ),
+        recommendations={
+            "short": RecommendationLevel.COMPATIBLE.value,
+            "long": RecommendationLevel.INCOMPATIBLE.value,
+        },
     ),
     "hisat2": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
@@ -1349,6 +1363,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "RNA-seq choice. Like bowtie2 its index comes from a separate "
             "hisat2-build binary this application runs on demand."
         ),
+        recommendations={
+            "short": RecommendationLevel.COMPATIBLE.value,
+            "long": RecommendationLevel.INCOMPATIBLE.value,
+        },
     ),
     "star": ToolMeta(
         pipelines=(PipelineType.ALIGN,),
@@ -1382,6 +1400,10 @@ TOOL_META: dict[str, ToolMeta] = {
             "Alignment runs without an annotation file, so junctions are "
             "discovered from the reads rather than read from a GTF."
         ),
+        recommendations={
+            "short": RecommendationLevel.COMPATIBLE.value,
+            "long": RecommendationLevel.INCOMPATIBLE.value,
+        },
     ),
     "samtools": ToolMeta(
         pipelines=(PipelineType.UTILITY, PipelineType.QC),

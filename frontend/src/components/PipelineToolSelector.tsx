@@ -28,11 +28,6 @@ interface Props {
 // already carries for the same reason.
 const LONG_READ_CHEMISTRIES = new Set(["hifi", "clr", "ont_simplex", "ont_duplex"]);
 
-// Aligners this app registers that only handle short reads. minimap2 is the
-// omission -- it covers every chemistry via its presets -- so it is never in
-// this set.
-const SHORT_READ_ONLY_ALIGNERS = new Set(["bwa-mem2", "bowtie2", "hisat2", "star"]);
-
 function longReadChemistry(object: DataObject | undefined): string | null {
   const chemistry = object?.facts?.qc_read_chemistry;
   if (typeof chemistry === "string" && LONG_READ_CHEMISTRIES.has(chemistry)) {
@@ -220,14 +215,17 @@ export function PipelineToolSelector({
           </div>
         )}
 
-        {chemistry && focusedTool && SHORT_READ_ONLY_ALIGNERS.has(focusedTool.name) && (
-          <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
-            QC found this file's chemistry to be {chemistry.replace("_", " ")},
-            which {focusedTool.name} does not align. minimap2 is the aligner
-            that handles it — this file will likely fail if launched with{" "}
-            {focusedTool.name} anyway.
-          </div>
-        )}
+        {chemistry &&
+          focusedTool &&
+          bucket &&
+          focusedTool.recommendations[bucket] === "incompatible" && (
+            <div className="warn-box" style={{ marginBottom: 12, fontSize: 12 }}>
+              QC found this file's chemistry to be {chemistry.replace("_", " ")},
+              which {focusedTool.name} does not align. minimap2 is the aligner
+              that handles it — this file will likely fail if launched with{" "}
+              {focusedTool.name} anyway.
+            </div>
+          )}
 
         {tools.length > 0 && (
           <div className="tool-picker">
@@ -279,6 +277,9 @@ export function PipelineToolSelector({
                     )}
                     {!disabled && bucket && tool.recommendations[bucket] === "recommended" && (
                       <span className="tool-row-badge recommended">Recommended</span>
+                    )}
+                    {!disabled && bucket && tool.recommendations[bucket] === "incompatible" && (
+                      <span className="tool-row-badge incompatible">Incompatible</span>
                     )}
                   </div>
                 );
