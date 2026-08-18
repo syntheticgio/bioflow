@@ -1,3 +1,4 @@
+import type { AppliedParameterSetIn } from "./parameter-set";
 import type { ParamFieldMeta } from "./pipeline";
 
 export type AssemblerName = "flye" | "hifiasm" | "spades";
@@ -31,6 +32,8 @@ export interface AssembleRequest {
   object_id: string;
   params?: Partial<AssemblyParams>;
   resource_override?: boolean;
+  /** Present only when the dialog applied a saved parameter set. */
+  from_parameter_set?: AppliedParameterSetIn;
 }
 
 export interface CompletenessDefaults {

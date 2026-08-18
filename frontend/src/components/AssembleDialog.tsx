@@ -6,6 +6,7 @@ import { notify } from "../stores/messageStore";
 import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
+import { ParameterSetPicker } from "./ParameterSetPicker";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import type {
   AssemblyParams,
@@ -98,6 +99,16 @@ export function AssembleDialog({
   // of estimate_assembly_mb, so the server's refusal is what produces the card.
   const [refusal, setRefusal] = useState<ResourceRefusalDetails | null>(null);
   const [targetNode, setTargetNode] = useState("");
+  // Which saved parameter set (if any) configured this launch, and the
+  // values it resolved to at apply time -- the latter is what
+  // `editedAfterApply` below diffs the current merged params against.
+  const [appliedSet, setAppliedSet] = useState<
+    { setId: string; name: string; revision: number } | null
+  >(null);
+  const [appliedValues, setAppliedValues] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   const params = { ...defaults, ...overrides } as Partial<AssemblyParams>;
   const chemistry = object.facts?.qc_read_chemistry as string | undefined;
@@ -114,9 +125,30 @@ export function AssembleDialog({
   );
   const performance = fields.filter((f) => f.group === "performance");
 
+  // Shallow compare: has anything the applied set resolved changed since it
+  // was applied? Only the keys the set actually touched are checked -- a
+  // field the set never set is not the set's business.
+  const editedAfterApply =
+    appliedValues !== null &&
+    Object.entries(appliedValues).some(
+      ([k, v]) => (params as Record<string, unknown>)[k] !== v,
+    );
+
+  const fromParameterSet = appliedSet
+    ? {
+        set_id: appliedSet.setId,
+        name: appliedSet.name,
+        revision: appliedSet.revision,
+        edited_after_apply: editedAfterApply,
+      }
+    : undefined;
+
   const launch = useMutation({
     mutationFn: () =>
-      api.launchAssembly({ object_id: object.id, params }, targetNode || undefined),
+      api.launchAssembly(
+        { object_id: object.id, params, from_parameter_set: fromParameterSet },
+        targetNode || undefined,
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       notify.success("Assembly started");
@@ -137,6 +169,7 @@ export function AssembleDialog({
       api.launchAssembly({
         object_id: object.id,
         params,
+        from_parameter_set: fromParameterSet,
         resource_override: true,
       }),
     onSuccess: () => {
@@ -232,6 +265,24 @@ export function AssembleDialog({
               </small>
             </label>
           </div>
+
+          {assembler && (
+            <ParameterSetPicker
+              tool={assembler}
+              family="assembler"
+              currentParams={params}
+              onApply={(values) => {
+                Object.entries(values).forEach(([k, v]) =>
+                  setOverrides((o) => ({ ...o, [k]: v })),
+                );
+                setAppliedValues(values);
+              }}
+              onAppliedSetChange={(s) => {
+                setAppliedSet(s);
+                if (!s) setAppliedValues(null);
+              }}
+            />
+          )}
 
           {biology.length > 0 && (
             <div className="trim-fields">

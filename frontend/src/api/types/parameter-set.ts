@@ -27,3 +27,14 @@ export interface ResolveResult {
   rejected: RejectedParam[];
   set: { id: string; name: string; revision: number };
 }
+
+/** Mirrors backend `AppliedParameterSet` (app/models/run.py), snake_cased for
+ *  the wire. Sent on a launch request when the dialog applied a saved set,
+ *  so the run can record which one configured it and whether the user then
+ *  changed anything before launching. */
+export interface AppliedParameterSetIn {
+  set_id: string;
+  name: string;
+  revision: number;
+  edited_after_apply: boolean;
+}

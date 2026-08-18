@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { AlignerParamFields } from "./AlignerParamFields";
 import { ModalBackdrop } from "./ModalBackdrop";
 import { NodeSelector } from "./NodeSelector";
+import { ParameterSetPicker } from "./ParameterSetPicker";
 import { ResourceRefusalCard } from "./ResourceRefusalCard";
 import { isReads } from "./PairEditor";
 import { classify, estimateMb, explain } from "../lib/estimate";
@@ -105,6 +106,16 @@ export function AlignDialog({
   // Reset whenever the band leaves "block" so a fresh refusal re-renders it.
   const [cardDismissed, setCardDismissed] = useState(false);
   const [targetNode, setTargetNode] = useState("");
+  // Which saved parameter set (if any) configured this launch, and the
+  // values it resolved to at apply time -- the latter is what
+  // `editedAfterApply` below diffs the current merged params against.
+  const [appliedSet, setAppliedSet] = useState<
+    { setId: string; name: string; revision: number } | null
+  >(null);
+  const [appliedValues, setAppliedValues] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
 
   // One additional read set: the file itself and, when the run is paired and
   // a mate was found, the mate that rides along with it. The mate is stored
@@ -299,6 +310,24 @@ export function AlignDialog({
   // and a user can still collapse the section once the band returns to "ok".
   const showAdvanced = advanced || band !== "ok";
 
+  // Shallow compare: has anything the applied set resolved changed since it
+  // was applied? Only the keys the set actually touched are checked -- a
+  // field the set never set is not the set's business.
+  const editedAfterApply =
+    appliedValues !== null &&
+    Object.entries(appliedValues).some(
+      ([k, v]) => (params as unknown as Record<string, unknown>)[k] !== v,
+    );
+
+  const fromParameterSet = appliedSet
+    ? {
+        set_id: appliedSet.setId,
+        name: appliedSet.name,
+        revision: appliedSet.revision,
+        edited_after_apply: editedAfterApply,
+      }
+    : undefined;
+
   const launch = useMutation({
     mutationFn: () =>
       api.launchAlignment({
@@ -318,6 +347,7 @@ export function AlignDialog({
         // back to its own default. Send the full merged `params` so the
         // aligner actually chosen in the tool selector is the one that runs.
         params: { ...params, chunked },
+        from_parameter_set: fromParameterSet,
       }, targetNode || undefined),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
@@ -343,6 +373,7 @@ export function AlignDialog({
         })),
         read_group: readGroup,
         params: { ...params, chunked },
+        from_parameter_set: fromParameterSet,
         resource_override: true,
       }),
     onSuccess: () => {
@@ -620,6 +651,27 @@ export function AlignDialog({
               )}
             </label>
           </div>
+        )}
+
+        {aligner && (
+          <ParameterSetPicker
+            tool={aligner}
+            family="aligner"
+            currentParams={params as unknown as Record<string, unknown>}
+            onApply={(values) => {
+              Object.entries(values).forEach(([k, v]) =>
+                setOverrides((o) => ({
+                  ...o,
+                  [k]: v as AlignParams[keyof AlignParams],
+                })),
+              );
+              setAppliedValues(values);
+            }}
+            onAppliedSetChange={(s) => {
+              setAppliedSet(s);
+              if (!s) setAppliedValues(null);
+            }}
+          />
         )}
 
         {schema && (
