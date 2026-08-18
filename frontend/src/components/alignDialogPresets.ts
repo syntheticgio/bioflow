@@ -55,7 +55,11 @@ export function initialPresetSelection({
   params: Partial<AlignParams>;
   presets?: Record<string, AlignerPreset>;
 }): string | null {
-  if (!presets) return null;
+  if (!presets) {
+    return aligner === "bowtie2" && typeof params.preset === "string" && params.preset.length > 0
+      ? params.preset
+      : null;
+  }
   if (aligner === "bowtie2") {
     const defaultPreset = presets[BOWTIE2_DEFAULT_PRESET_ID];
     const explicitPreset = isNamedPreset(presets, params.preset)
@@ -96,11 +100,15 @@ export function reconcileParameterSetPreset({
     params: nextParams,
     presets,
   });
+  const currentPreset =
+    typeof nextParams.preset === "string" ? nextParams.preset : "";
   const preset =
-    aligner === "bowtie2" &&
-    presetSelection != null &&
-    presets?.[presetSelection]
-      ? presetSelection
+    aligner === "bowtie2"
+      ? presets == null
+        ? currentPreset
+        : presetSelection != null && presets[presetSelection]
+          ? presetSelection
+          : ""
       : "";
 
   return {

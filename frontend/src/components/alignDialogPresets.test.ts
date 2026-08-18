@@ -182,6 +182,27 @@ describe("initialPresetSelection", () => {
     });
   });
 
+  it("keeps a saved bowtie2 preset while schema presets are still loading", () => {
+    const currentParams: Partial<AlignParams> = {
+      aligner: "bowtie2",
+      preset: "mate_pair",
+      ...bowtie2Presets.mate_pair.values,
+    };
+
+    const result = reconcileParameterSetPreset({
+      aligner: "bowtie2",
+      currentParams,
+      appliedValues: bowtie2Presets.mate_pair.values,
+      presets: undefined,
+    });
+
+    expect(result.presetSelection).toBe("mate_pair");
+    expect(result.overrides).toEqual({
+      ...bowtie2Presets.mate_pair.values,
+      preset: "mate_pair",
+    });
+  });
+
   it("keeps advanced as the non-bowtie2 free-form mode", () => {
     expect(
       initialPresetSelection({
