@@ -194,6 +194,12 @@ or description, without paging through the whole list.
 **R27.** A user viewing a record whose header named no identifier must be told
 that the header does not name a known protein.
 
+**R27b.** The fallback for such a record is an exact sequence match against
+UniProt (#534): the record's sequence is read from its byte offset and searched
+as `sequence:"` — no BLAST or similarity search. A cached miss (no UniProt
+entry has this exact sequence) is a permanent, non-retryable state.
+UniProt unreachability during the fallback is retryable, same as R22.
+
 **R28.** A user viewing a record that resolved but has no deposited structure
 must be told that no experimental structure exists, phrased so that it does not
 read as a failure. This is the majority outcome and must not look like a bug.
@@ -292,14 +298,15 @@ component so the variants modal and this tab share one implementation (R31).
 That extraction is a separate commit from the feature that consumes it, per
 CLAUDE.md's separable-commits rule.
 
-Four end states are worded distinctly, because the existing modal's clearest
+Five end states are worded distinctly, because the existing modal's clearest
 lesson is that "no structure" is the common case and must not read as a
 failure:
 
 | State | Message | Predict button |
 |---|---|---|
-| Header names no ID (R27) | The header doesn't name a known protein | Offered, disabled |
+| Resolved | Structure found | Offered |
 | Resolved, no PDB entries (R28) | No experimental structure deposited | Offered, disabled |
+| Header names nothing (no sequence match, #534) | The record has no identifiable protein name | Offered, disabled |
 | UniProt unreachable (R22) | Retryable error | Offered, disabled |
 | iCn3D failed to load | Existing offline escape hatch | Offered, disabled |
 
@@ -328,12 +335,15 @@ decision survives.
 
 - **Structure prediction (AlphaFold or equivalent).** Requested as greyed out
   by the issue itself. Follow-up ticket.
-- **Sequence-similarity fallback.** Considered as the resolution strategy and
-  rejected for this ticket: a BLAST-style lookup is a slow external job, and
-  near-matches introduce a confidence problem that identifier resolution does
-  not have. Follow-up ticket. Note that its absence is what makes R27's state
-  common for annotation-tool output such as `>KLLIPMDF_00023 hypothetical
-  protein`, where the prediction path is the real answer.
+- **Sequence-similarity fallback.** The exact-match variant was implemented as a
+  follow-up ([#534](https://github.com/syntheticgio/bioflow/issues/534)): a record
+  whose header names no accession is searched against UniProt by exact sequence.
+  The similarity variant (BLAST-style, near-matches) remains deferred: it is a
+  slow external job, and near-matches introduce a confidence problem that
+  identifier resolution does not have. Follow-up ticket. Note that its absence
+  is what makes R27's state common for annotation-tool output such as
+  `>KLLIPMDF_00023 hypothetical protein`, where the prediction path is the real
+  answer.
 - **Residue highlighting within a structure.** The existing modal already
   defers this for a documented reason: iCn3D's selector needs an explicit
   chain, and multi-chain entries make a guessed chain a confidently wrong
@@ -347,4 +357,6 @@ decision survives.
 1. Structure prediction for a protein with no deposited structure -- makes
    R29's disabled control real.
 2. Sequence-similarity resolution for headers that name no identifier --
-   approach B above, covering annotation-tool output.
+   approach B above, covering annotation-tool output. (The exact-match
+   variant, #534, was implemented: see `ProteinSequenceLookup` and
+   `protein_structure.resolve_by_sequence`.)
