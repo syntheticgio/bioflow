@@ -156,7 +156,7 @@ export function AssembleDialog({
       navigate("/activity");
     },
     onError: (e: Error) => {
-      if (e instanceof ApiRequestError && "estimate_mb" in e.details) {
+      if (e instanceof ApiRequestError && "refusal" in e.details) {
         setRefusal(e.details as unknown as ResourceRefusalDetails);
         return;
       }
@@ -324,10 +324,14 @@ export function AssembleDialog({
               budgetMb={refusal.budget_mb}
               detail={refusal.detail}
               explanation={
-                `This assembly needs about ${refusal.estimate_mb.toLocaleString()} MB, ` +
-                `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
+                refusal.refusal === "declared"
+                  ? `This assembly reserves ${(refusal.declared_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB budget. ` +
+                    `Nothing about the run changes that number.`
+                  : `This assembly needs about ${(refusal.estimate_mb ?? 0).toLocaleString()} MB, ` +
+                    `more than the ${refusal.budget_mb.toLocaleString()} MB available.`
               }
-              replan={refusal.replan}
+              replan={refusal.replan ?? null}
               onCancel={onClose}
               onEdit={() => setRefusal(null)}
               onLaunchAnyway={() => launchAnyway.mutate()}

@@ -161,11 +161,18 @@ export type ReplanResult =
  * shape client-side from its envelope, so both dialogs feed one component.
  */
 export interface ResourceRefusalDetails {
-  estimate_mb: number;
+  /** Which refusal this is. "declared" carries no estimate and no replan:
+   *  nothing about the run changes a fixed reservation, which is why the
+   *  card must render without them. */
+  refusal: "estimate" | "declared";
   budget_mb: number;
-  estimate_source: "measured" | "heuristic" | "declared" | "unknown";
-  detail: string;
-  replan: ReplanResult;
+  /** Present only when refusal === "estimate". */
+  estimate_mb?: number;
+  /** Present only when refusal === "declared". */
+  declared_mb?: number;
+  estimate_source?: "measured" | "heuristic" | "declared" | "unknown";
+  detail?: string;
+  replan?: ReplanResult;
 }
 
 /** Mirrors fastp_runner.TrimParams. Nulls mean "let fastp decide". */

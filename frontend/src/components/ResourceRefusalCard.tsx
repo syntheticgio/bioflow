@@ -8,11 +8,13 @@ import type { ReplanResult } from "../api/types";
  * 422 body. Both produce this same props shape.
  */
 export interface ResourceRefusalCardProps {
-  estimateMb: number;
+  /** Absent for a declared refusal, which has no estimate to report. */
+  estimateMb?: number;
   budgetMb: number;
   /** The prose phrase from memory_estimate.resolve() -- "from 23 previous
-   *  runs on this machine" or "from published tool coefficients". */
-  detail: string;
+   *  runs on this machine" or "from published tool coefficients". Absent
+   *  for a declared refusal. */
+  detail?: string;
   /** The full explanation sentence naming the dominant term. */
   explanation: string;
   /** null while the replan request is still in flight. */
@@ -55,10 +57,12 @@ export function ResourceRefusalCard({
           r_squared is deliberately absent -- resolve() already falls back to
           the heuristic when a measured estimate extrapolates too far, so any
           measured number reaching here is inside its own guard rails. */}
-      <div style={{ marginTop: 4, opacity: 0.85 }}>
-        Estimated {estimateMb.toLocaleString()} MB {detail}, against a{" "}
-        {budgetMb.toLocaleString()} MB budget.
-      </div>
+      {estimateMb !== undefined && (
+        <div style={{ marginTop: 4, opacity: 0.85 }}>
+          Estimated {estimateMb.toLocaleString()} MB {detail}, against a{" "}
+          {budgetMb.toLocaleString()} MB budget.
+        </div>
+      )}
 
       {proposal && (
         <div style={{ marginTop: 8 }}>
