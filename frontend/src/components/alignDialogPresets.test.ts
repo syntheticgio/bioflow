@@ -105,14 +105,14 @@ describe("initialPresetSelection", () => {
     ).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
   });
 
-  it("recomputes from an incomplete bowtie2 seed to the default preset once defaults arrive", () => {
+  it("defaults a fresh bowtie2 seed to the standard preset before defaults arrive", () => {
     expect(
       initialPresetSelection({
         aligner: "bowtie2",
         params: { aligner: "bowtie2" },
         presets: bowtie2Presets,
       }),
-    ).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
+    ).toBe(BOWTIE2_DEFAULT_PRESET_ID);
 
     expect(
       initialPresetSelection({
@@ -144,7 +144,7 @@ describe("initialPresetSelection", () => {
         params: { aligner: "bowtie2" },
         presets: bowtie2Presets,
       }),
-    ).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
+    ).toBe(BOWTIE2_DEFAULT_PRESET_ID);
 
     expect(
       initialPresetSelection({
