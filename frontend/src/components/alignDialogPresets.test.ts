@@ -5,8 +5,9 @@ import {
   ADVANCED_PRESET_VALUE,
   BOWTIE2_CUSTOM_PRESET_VALUE,
   BOWTIE2_DEFAULT_PRESET_ID,
-  hasInsertRangeError,
-  hasReportingError,
+  INSERT_RANGE_ERROR_MESSAGE,
+  REPORTING_ERROR_MESSAGE,
+  launchValidationMessage,
   initialPresetSelection,
   isBowtie2PairOnlyField,
   shouldClearPresetOnFieldEdit,
@@ -104,6 +105,60 @@ describe("initialPresetSelection", () => {
     ).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
   });
 
+  it("recomputes from an incomplete bowtie2 seed to the default preset once defaults arrive", () => {
+    expect(
+      initialPresetSelection({
+        aligner: "bowtie2",
+        params: { aligner: "bowtie2" },
+        presets: bowtie2Presets,
+      }),
+    ).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
+
+    expect(
+      initialPresetSelection({
+        aligner: "bowtie2",
+        params: {
+          aligner: "bowtie2",
+          sensitivity: "--sensitive",
+          local: false,
+          minins: 0,
+          maxins: 500,
+          orientation: "FR",
+          no_mixed: false,
+          no_discordant: false,
+          dovetail: false,
+          no_contain: false,
+          no_overlap: false,
+          report_k: 0,
+          report_all: false,
+        },
+        presets: bowtie2Presets,
+      }),
+    ).toBe(BOWTIE2_DEFAULT_PRESET_ID);
+  });
+
+  it("lets a supplied preset win once delayed defaults are available", () => {
+    expect(
+      initialPresetSelection({
+        aligner: "bowtie2",
+        params: { aligner: "bowtie2" },
+        presets: bowtie2Presets,
+      }),
+    ).toBe(BOWTIE2_CUSTOM_PRESET_VALUE);
+
+    expect(
+      initialPresetSelection({
+        aligner: "bowtie2",
+        params: {
+          aligner: "bowtie2",
+          preset: "mate_pair",
+          ...bowtie2Presets.mate_pair.values,
+        },
+        presets: bowtie2Presets,
+      }),
+    ).toBe("mate_pair");
+  });
+
   it("keeps advanced as the non-bowtie2 free-form mode", () => {
     expect(
       initialPresetSelection({
@@ -123,14 +178,18 @@ describe("initialPresetSelection", () => {
 });
 
 describe("cross-field validation", () => {
-  it("flags minins above maxins", () => {
-    expect(hasInsertRangeError({ minins: 501, maxins: 500 })).toBe(true);
-    expect(hasInsertRangeError({ minins: 500, maxins: 500 })).toBe(false);
+  it("returns the insert-range correction when minins exceeds maxins", () => {
+    expect(launchValidationMessage({ minins: 501, maxins: 500 })).toBe(
+      INSERT_RANGE_ERROR_MESSAGE,
+    );
+    expect(launchValidationMessage({ minins: 500, maxins: 500 })).toBeNull();
   });
 
-  it("flags report_k combined with report_all", () => {
-    expect(hasReportingError({ report_k: 10, report_all: true })).toBe(true);
-    expect(hasReportingError({ report_k: 0, report_all: true })).toBe(false);
+  it("returns the reporting correction when report_k conflicts with report_all", () => {
+    expect(launchValidationMessage({ report_k: 10, report_all: true })).toBe(
+      REPORTING_ERROR_MESSAGE,
+    );
+    expect(launchValidationMessage({ report_k: 0, report_all: true })).toBeNull();
   });
 });
 
