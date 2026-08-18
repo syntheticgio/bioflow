@@ -1182,7 +1182,7 @@ def _as_reference(ref, *, kind=FormatKind.FASTA, role=ObjectRole.REFERENCE):
 CARD_KEYS = {
     "kind", "category", "title", "description",
     "why", "status", "reason", "launch", "requires_install", "prior_runs",
-    "running",
+    "running", "configure",
 }
 
 
@@ -1206,6 +1206,43 @@ class TestSuggestionsFor:
                        references=[_ref("aaa", "ref.fna")]):
             cards = await suggestions_for(_fake_obj())
         assert [c["kind"] for c in cards] == ["preprocess", "align", "assemble"]
+
+    async def test_a_launchable_card_with_a_dialog_carries_configure(self):
+        """The preprocess card opens TrimDialog, so it offers Adjust."""
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db(
+                       references=[_ref("aaa", "ref.fna")]):
+            cards = await suggestions_for(_fake_obj())
+        preprocess = next(c for c in cards if c["kind"] == "preprocess")
+        assert preprocess["configure"] == {"dialog": "trim"}
+
+    async def test_an_unavailable_card_carries_no_configure(self):
+        """No body to seed a dialog with, so no button that opens one.
+
+        The assemble card is always unavailable for a short-read FASTQ, and
+        an unavailable card has `launch` None -- adjusting a run that cannot
+        start is a dead end dressed as a control.
+        """
+        with patch("app.services.suggestion_service.tools.fastp",
+                   return_value=_FakeTool(True)), stub_db(references=[]):
+            cards = await suggestions_for(_fake_obj())
+        assemble = next(c for c in cards if c["kind"] == "assemble")
+        assert assemble["status"] == "unavailable"
+        assert assemble["launch"] is None
+        assert assemble["configure"] is None
+
+    async def test_a_kind_with_no_dialog_carries_no_configure(self):
+        """Twelve kinds have no settings dialog; their cards show Launch alone."""
+        inputs = pipeline_service.AnnotationInputs(
+            ok=True,
+            reference=_ref("aaa", "ref.fna"),
+            annotation=_ref("bbb", "annotation.gff3"),
+        )
+        with installed_csq(True), stub_db(annotation_inputs=inputs):
+            cards = await suggestions_for(_vcf())
+        annotate = next(c for c in cards if c["kind"] == "annotate")
+        assert annotate["launch"] is not None
+        assert annotate["configure"] is None
 
     async def test_a_fastq_never_gets_a_variants_card(self):
         """Variants are called on an alignment, not on reads."""
@@ -2379,6 +2416,46 @@ class TestCardBuilderRegistry:
 
         kinds = [kind for kind, _build in CARD_BUILDERS]
         assert len(kinds) == len(set(kinds))
+
+    def test_configure_dialogs_cover_only_real_kinds(self):
+        """A key here that no builder emits is a dialog nothing can open.
+
+        The partition matters in one direction only: `_CONFIGURE_DIALOGS` is
+        deliberately partial, so a kind missing from it is a card with no
+        Adjust button -- correct for the twelve kinds with no dialog. A key
+        that matches *no* kind is always a bug: a renamed kind silently drops
+        its button, which is the registry-audit failure shape, so hold the
+        keys to CARD_BUILDERS rather than asserting equality.
+        """
+        from app.services.suggestion_service import (
+            _CONFIGURE_DIALOGS,
+            CARD_BUILDERS,
+        )
+
+        kinds = {kind for kind, _build in CARD_BUILDERS}
+        assert set(_CONFIGURE_DIALOGS) <= kinds, (
+            "these _CONFIGURE_DIALOGS keys match no card kind: "
+            f"{sorted(set(_CONFIGURE_DIALOGS) - kinds)}"
+        )
+
+    def test_configure_dialog_names_are_known_to_the_frontend(self):
+        """The dialog name is a contract with `DetailPanel`'s switch.
+
+        Nothing mechanical ties this list to the TSX, so it is written out
+        here: a name added on this side and not the other renders an Adjust
+        button that opens nothing at all.
+        """
+        from app.services.suggestion_service import _CONFIGURE_DIALOGS
+
+        assert set(_CONFIGURE_DIALOGS.values()) == {
+            "trim",
+            "align",
+            "variant",
+            "quantify",
+            "assemble",
+            "scaffold",
+            "completeness",
+        }
 
     def test_every_launch_endpoint_is_a_real_route(self):
         """An AVAILABLE card whose endpoint no route serves 404s on Launch,
