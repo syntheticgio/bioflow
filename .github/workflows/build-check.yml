@@ -45,6 +45,7 @@ jobs:
     name: Frontend (lint + test + build)
     if: ${{ !inputs.skip_frontend }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -90,6 +91,7 @@ jobs:
     name: Launcher (test + build)
     if: ${{ !inputs.skip_launcher }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -127,6 +129,11 @@ jobs:
     name: Backend smoke (ruff + import + ops tests)
     if: ${{ !inputs.skip_backend }}
     runs-on: ubuntu-latest
+    # Default (no timeout-minutes) is GitHub's 360-minute hard cap. A stalled
+    # apt-get mirror in "Install system build dependencies" has hung this job
+    # for over an hour with nothing to fail it (#494) — 15 min gives a real
+    # margin over the ~2-3 min this job normally takes end to end.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
