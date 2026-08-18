@@ -425,6 +425,19 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 ),
             ),
             ParamField(
+                key="minins",
+                label="Minimum insert size",
+                kind="int",
+                default=0,
+                min=0,
+                group="biology",
+                help=(
+                    "The lower bound of bowtie2's -I/-X proper-pair range. "
+                    "Pairs implying a shorter fragment are not counted as "
+                    "properly paired."
+                ),
+            ),
+            ParamField(
                 key="maxins",
                 label="Maximum insert size",
                 kind="int",
@@ -432,9 +445,68 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                 min=1,
                 group="biology",
                 help=(
+                    "The upper bound of bowtie2's -I/-X proper-pair range. "
                     "Pairs implying a longer fragment are not counted as "
-                    "properly paired. Raise it for ChIP-seq or any library "
-                    "with long fragments."
+                    "properly paired."
+                ),
+            ),
+            ParamField(
+                key="orientation",
+                label="Expected pair orientation",
+                kind="select",
+                default="FR",
+                group="biology",
+                help=(
+                    "The expected orientation for a proper pair. A wrong "
+                    "value changes which pairs count as concordant rather "
+                    "than failing."
+                ),
+                choices=[
+                    Choice(
+                        align_params.BOWTIE2_ORIENTATIONS[0],
+                        "FR (paired-end)",
+                    ),
+                    Choice(
+                        align_params.BOWTIE2_ORIENTATIONS[1],
+                        "RF (mate-pair)",
+                    ),
+                    Choice(
+                        align_params.BOWTIE2_ORIENTATIONS[2],
+                        "FF",
+                    ),
+                ],
+            ),
+            ParamField(
+                key="dovetail",
+                label="Allow dovetailing mates",
+                kind="bool",
+                default=False,
+                group="biology",
+                help=(
+                    "Treat pairs whose alignments extend past each other as "
+                    "concordant instead of excluding them."
+                ),
+            ),
+            ParamField(
+                key="no_contain",
+                label="Reject contained mates",
+                kind="bool",
+                default=False,
+                group="biology",
+                help=(
+                    "Exclude pairs where one mate's alignment is contained "
+                    "entirely within the other."
+                ),
+            ),
+            ParamField(
+                key="no_overlap",
+                label="Reject overlapping mates",
+                kind="bool",
+                default=False,
+                group="biology",
+                help=(
+                    "Exclude pairs whose alignments overlap instead of "
+                    "counting them as concordant."
                 ),
             ),
             ParamField(
@@ -473,8 +545,147 @@ REGISTRY: dict[Aligner, AlignerSpec] = {
                     "a specific analysis needs multi-mapping reads."
                 ),
             ),
+            ParamField(
+                key="report_all",
+                label="Report all alignments (-a)",
+                kind="bool",
+                default=False,
+                group="biology",
+                help=(
+                    "Reports every alignment, which can greatly increase "
+                    "output size, and cannot be combined with report_k."
+                ),
+            ),
             *_SHARED_FIELDS,
         ),
+        presets={
+            "standard_short_read": {
+                "label": "Standard short-read DNA",
+                "description": (
+                    "Conservative paired-end defaults; check insert sizes "
+                    "against the library."
+                ),
+                "values": {
+                    "sensitivity": "--sensitive",
+                    "local": False,
+                    "minins": 0,
+                    "maxins": 500,
+                    "orientation": "FR",
+                    "no_mixed": False,
+                    "no_discordant": False,
+                    "dovetail": False,
+                    "no_contain": False,
+                    "no_overlap": False,
+                    "report_k": 0,
+                    "report_all": False,
+                },
+            },
+            "long_insert": {
+                "label": "Long-insert paired-end",
+                "description": (
+                    "Broad starting range for long-insert libraries; check "
+                    "the library distribution."
+                ),
+                "values": {
+                    "sensitivity": "--sensitive",
+                    "local": False,
+                    "minins": 500,
+                    "maxins": 20000,
+                    "orientation": "FR",
+                    "no_mixed": False,
+                    "no_discordant": False,
+                    "dovetail": False,
+                    "no_contain": False,
+                    "no_overlap": False,
+                    "report_k": 0,
+                    "report_all": False,
+                },
+            },
+            "mate_pair": {
+                "label": "Mate-pair",
+                "description": (
+                    "RF mate-pair starting values; confirm orientation and "
+                    "insert range for the protocol."
+                ),
+                "values": {
+                    "sensitivity": "--sensitive",
+                    "local": False,
+                    "minins": 500,
+                    "maxins": 20000,
+                    "orientation": "RF",
+                    "no_mixed": False,
+                    "no_discordant": False,
+                    "dovetail": False,
+                    "no_contain": False,
+                    "no_overlap": False,
+                    "report_k": 0,
+                    "report_all": False,
+                },
+            },
+            "adapter_partial_reference": {
+                "label": "Adapter-contaminated / partial reference",
+                "description": (
+                    "Uses local alignment to tolerate unaligned read ends or "
+                    "a partial reference."
+                ),
+                "values": {
+                    "sensitivity": "--sensitive",
+                    "local": True,
+                    "minins": 0,
+                    "maxins": 500,
+                    "orientation": "FR",
+                    "no_mixed": False,
+                    "no_discordant": False,
+                    "dovetail": False,
+                    "no_contain": False,
+                    "no_overlap": False,
+                    "report_k": 0,
+                    "report_all": False,
+                },
+            },
+            "structural_variant": {
+                "label": "Structural-variant discovery",
+                "description": (
+                    "Preserves discordant and mixed evidence and allows "
+                    "dovetailing mates."
+                ),
+                "values": {
+                    "sensitivity": "--sensitive",
+                    "local": False,
+                    "minins": 0,
+                    "maxins": 500,
+                    "orientation": "FR",
+                    "no_mixed": False,
+                    "no_discordant": False,
+                    "dovetail": True,
+                    "no_contain": False,
+                    "no_overlap": False,
+                    "report_k": 0,
+                    "report_all": False,
+                },
+            },
+            "repeat_multimapping": {
+                "label": "Repeat / multi-mapping analysis",
+                "description": (
+                    "Reports up to 10 alignments per read; output size can "
+                    "grow substantially."
+                ),
+                "values": {
+                    "sensitivity": "--sensitive",
+                    "local": False,
+                    "minins": 0,
+                    "maxins": 500,
+                    "orientation": "FR",
+                    "no_mixed": False,
+                    "no_discordant": False,
+                    "dovetail": False,
+                    "no_contain": False,
+                    "no_overlap": False,
+                    "report_k": 10,
+                    "report_all": False,
+                },
+            },
+        },
     ),
     Aligner.HISAT2: AlignerSpec(
         aligner=Aligner.HISAT2,
