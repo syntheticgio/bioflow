@@ -298,6 +298,15 @@ class ProteinRecordsOut(BaseModel):
     total: int
     # The file held more records than the cap, so this list is incomplete (R6).
     truncated: bool
+    # Whether protein indexing has ever run for this object at all, not
+    # whether *this* query matched anything. `ingest_headers` only indexes
+    # when the object's role is already `protein` at ingest time -- a role
+    # set afterward, via the metadata edit UI, leaves this false forever with
+    # no re-ingest trigger. Without this field, an empty `rows` list is
+    # indistinguishable from "never indexed" and from "no rows matched this
+    # search", and the client needs to tell those apart to explain the empty
+    # state rather than just show it.
+    indexed: bool
     rows: list[ProteinRecordOut]
 
 

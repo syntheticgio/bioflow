@@ -13,6 +13,13 @@ export interface ProteinRecords {
   total: number;
   /** The file held more records than the index cap, so this list is partial. */
   truncated: boolean;
+  /** Whether protein indexing has ever run for this object. False means the
+   *  object's role was likely set to Protein after ingest, rather than at
+   *  ingest time -- ingest is the only place indexing runs, so there is no
+   *  automatic re-index to catch it up. An empty `rows` with `indexed: false`
+   *  needs different copy than an empty `rows` with `indexed: true`, which
+   *  just means the current search matched nothing. */
+  indexed: boolean;
   rows: ProteinRecordRow[];
 }
 

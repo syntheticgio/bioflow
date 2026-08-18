@@ -34,6 +34,19 @@ def fasta_file(tmp_path):
     return path
 
 
+@pytest.fixture
+def crlf_fasta_file(tmp_path):
+    """Same content as FASTA, but with CRLF line endings throughout.
+
+    Written in binary mode with `\\r\\n` explicit, so nothing on the writing
+    side normalizes it back to LF before the test can exercise the reader.
+    """
+    path = tmp_path / "proteins_crlf.faa"
+    crlf = FASTA.replace("\n", "\r\n")
+    path.write_bytes(crlf.encode("utf-8"))
+    return path
+
+
 def test_scan_reads_identifier_description_and_length(fasta_file):
     records = list(index_mod.scan_records(fasta_file, Compression.NONE))
 
@@ -54,6 +67,20 @@ def test_scan_records_byte_offsets_that_point_at_the_header(fasta_file):
     """The offset must land on the '>' so a later reader can seek to it."""
     raw = fasta_file.read_bytes()
     for record in index_mod.scan_records(fasta_file, Compression.NONE):
+        assert raw[record.byte_offset : record.byte_offset + 1] == b">"
+
+
+def test_scan_records_byte_offsets_that_point_at_the_header_crlf(crlf_fasta_file):
+    """CRLF regression (finding 1): universal-newline translation in text mode
+    silently drops the `\\r` from each line before `len(line.encode(...))`
+    ever sees it, undercounting every offset after the first CRLF line. Raw
+    bytes are the only thing that can't be fooled by that translation, so the
+    offsets are checked against `read_bytes()`, not a text-mode re-read.
+    """
+    raw = crlf_fasta_file.read_bytes()
+    records = list(index_mod.scan_records(crlf_fasta_file, Compression.NONE))
+    assert len(records) == 3
+    for record in records:
         assert raw[record.byte_offset : record.byte_offset + 1] == b">"
 
 

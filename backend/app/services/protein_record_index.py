@@ -11,12 +11,22 @@ The scan is a generator. The cap bounds rows, but a list comprehension over a
 120,000-record proteome would still hold every record in memory at once before
 the cap could apply.
 
-`parsers._open_text` is imported despite the underscore. It is four lines of
-compression dispatch, and the alternative -- a second copy here -- is a pair
-that drifts the day a compression format is added. Reading is the only thing
-borrowed; nothing in this module writes through it.
+The scan reads its own decompressed byte stream rather than going through
+`parsers._open_text`, on purpose: that helper opens in text mode, which
+applies universal-newline translation (`\r\n` -> `\n`, silently dropping a
+byte per CRLF line) and `errors="replace"` (an invalid byte becomes U+FFFD,
+which is 3 bytes in UTF-8 -- 2 bytes more than whatever it replaced). Either
+transformation happens before a caller's code ever sees the line, so
+`len(line.encode("utf-8"))` computed from the text-mode string does not
+reflect the file's real byte layout, and `byte_offset` -- stored specifically
+so a later reader can seek directly to one record -- would be silently wrong.
+Reading raw bytes here and decoding each line ourselves (also with
+`errors="replace"`, for the same reason `_open_text` uses it: a bad file must
+not break ingestion) keeps the offsets exact while keeping the same
+tolerance for malformed input.
 """
 
+import gzip
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +36,6 @@ from beanie import PydanticObjectId
 from app.logging import get_logger
 from app.metadata.protein_headers import RefKind, parse_header
 from app.models import Compression, ProteinRecord
-from app.storage.parsers import _open_text
 
 log = get_logger(__name__)
 
@@ -61,6 +70,19 @@ class IndexResult:
     truncated: bool
 
 
+def _open_binary(path: Path, compression: Compression):
+    """The decompressed byte stream, undecoded.
+
+    Mirrors `parsers._open_text`'s compression dispatch but stops short of
+    text mode, so nothing here is subject to universal-newline translation or
+    replacement-character re-encoding -- see the module docstring for why
+    that distinction is the whole point.
+    """
+    if compression in (Compression.GZIP, Compression.BGZF):
+        return gzip.open(path, "rb")
+    return open(path, "rb")
+
+
 def scan_records(
     path: Path, compression: Compression, *, limit: int | None = None
 ) -> Iterator[ScannedRecord]:
@@ -77,6 +99,13 @@ def scan_records(
     that wants random access into a `.gz` has to decompress to reach them.
     That limitation is acceptable here because nothing in this ticket seeks --
     the offsets are recorded for the follow-ups.
+
+    Lines are read and counted as raw bytes, split on `b"\\n"` exactly as they
+    sit in the decompressed stream -- a `\\r` before it (CRLF) stays part of
+    the line's byte length, and each line is decoded independently with
+    `errors="replace"` only for the text fields, never for the offset. That
+    keeps a CRLF file's or a non-UTF-8 file's offsets exact even though the
+    identifier/description text can still contain U+FFFD, same as before.
     """
     cap = MAX_INDEXED_RECORDS if limit is None else limit
     ordinal = 0
@@ -95,9 +124,10 @@ def scan_records(
             ref_accession=ref.accession if ref else None,
         )
 
-    with _open_text(path, compression) as fh:
-        for line in fh:
-            line_bytes = len(line.encode("utf-8"))
+    with _open_binary(path, compression) as fh:
+        for raw_line in fh:
+            line_bytes = len(raw_line)
+            line = raw_line.decode("utf-8", errors="replace")
             if line.startswith(">"):
                 if pending is not None:
                     yield finish(pending)

@@ -164,6 +164,41 @@ async def test_reports_no_records_for_a_file_that_has_none(
     assert resp.json()["rows"] == []
 
 
+async def test_indexed_is_false_when_indexing_has_never_run(
+    client, non_protein_object, two_profiles
+):
+    """Finding 2: a role set to Protein after ingest never triggers indexing,
+    so the endpoint must say "never indexed" rather than let an empty `rows`
+    read as "no records match your search" -- the two need different copy on
+    the client and this field is what tells them apart.
+    """
+    resp = await client.get(
+        f"/api/v1/objects/{non_protein_object.id}/protein-records",
+        headers=two_profiles["a_headers"],
+    )
+    assert resp.status_code == 200
+    assert resp.json()["indexed"] is False
+
+
+async def test_indexed_is_true_once_the_ingest_fact_is_set(
+    client, seeded, two_profiles
+):
+    """`seeded` inserts ProteinRecord rows directly without going through
+    ingest_headers, so its object never got the `protein_records_indexed`
+    fact -- setting it here isolates the field under test from the row count,
+    which a fixture with the fact set and zero rows would conflate.
+    """
+    seeded.facts["protein_records_indexed"] = 12
+    await seeded.save()
+
+    resp = await client.get(
+        f"/api/v1/objects/{seeded.id}/protein-records",
+        headers=two_profiles["a_headers"],
+    )
+    assert resp.status_code == 200
+    assert resp.json()["indexed"] is True
+
+
 async def test_unknown_object_is_a_404(client, two_profiles):
     resp = await client.get(
         f"/api/v1/objects/{PydanticObjectId()}/protein-records",
