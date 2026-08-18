@@ -63,9 +63,9 @@ def eligible_params(
 def has_parameter_sets(family: ParamSpecFamily, tool: str) -> bool:
     """Whether this tool has enough declared parameters to be worth saving.
 
-    `AssemblerSpec.fields` defaults to `()`, and HIFIASM and SPADES take that
-    default today. Such a tool resolves without raising but has no eligible
-    keys, so a set saved against it would store nothing and apply nothing --
+    `AssemblerSpec.fields` defaults to `()`, and HIFIASM takes that default
+    today. Such a tool resolves without raising but has no eligible keys, so
+    a set saved against it would store nothing and apply nothing --
     silently. The UI asks this before rendering a picker, so a tool that can
     only save an empty set never offers to.
     """

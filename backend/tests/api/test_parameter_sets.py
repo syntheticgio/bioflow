@@ -125,7 +125,7 @@ class TestSupported:
         a_headers = two_profiles["a_headers"]
         r = await client.get(
             "/api/v1/parameter-sets/supported",
-            params={"family": "assembler", "tool": "spades"},
+            params={"family": "assembler", "tool": "hifiasm"},
             headers=a_headers,
         )
         assert r.json() == {"supported": False}
