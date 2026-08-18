@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.api.deps import OwnerDep
 from app.errors import NotFoundError
 from app.logging import get_logger
-from app.models import PipelineRun, RunJob
+from app.models import AppliedParameterSet, PipelineRun, RunJob
 from app.services import run_service
 
 log = get_logger(__name__)
@@ -33,6 +33,9 @@ class RunOut(BaseModel):
     outputs: list[str]
     created_at: datetime
     updated_at: datetime
+    # Which saved parameter set configured this run, if any. None is the
+    # common case (configured by hand) -- see PipelineRun.from_parameter_set.
+    from_parameter_set: AppliedParameterSet | None = None
 
     @classmethod
     def of(cls, run: PipelineRun, status: str) -> "RunOut":
@@ -55,6 +58,7 @@ class RunOut(BaseModel):
             outputs=[str(o) for o in run.outputs],
             created_at=run.created_at,
             updated_at=run.updated_at,
+            from_parameter_set=run.from_parameter_set,
         )
 
 

@@ -124,8 +124,10 @@ class AppliedParameterSet(BaseModel):
 
     `revision` and `edited_after_apply` are what make that question answerable
     rather than merely groupable. Thirty runs sharing `(set_id, revision)` with
-    `edited_after_apply` false were genuinely configured identically; without
-    both fields the grouping would look authoritative while meaning nothing.
+    `edited_after_apply` false were configured identically in every field the
+    set specifies; a manual edit to a field the set does not cover is not
+    reflected here. Without both fields the grouping would look authoritative
+    while meaning nothing.
     """
 
     set_id: PydanticObjectId
