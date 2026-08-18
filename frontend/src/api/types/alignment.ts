@@ -1,4 +1,5 @@
 import type { ObjectRole } from "./object";
+import type { AppliedParameterSetIn } from "./parameter-set";
 import type { MemoryModel, ParamFieldMeta } from "./pipeline";
 
 export type AlignerName =
@@ -140,6 +141,8 @@ export interface AlignRequest {
   // "Launch anyway" from the refusal card. Skips the enqueue-time BLOCK and
   // persists on the job, where claim.lua admits it only as sole occupant.
   resource_override?: boolean;
+  /** Present only when the dialog applied a saved parameter set. */
+  from_parameter_set?: AppliedParameterSetIn;
 }
 
 /** Alignment statistics read from `samtools flagstat` during index_bam. */
