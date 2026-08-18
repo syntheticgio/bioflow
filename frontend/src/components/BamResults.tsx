@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { api } from "../api/client";
+import { InfoMarker } from "./InfoMarker";
 import { NodeSelector } from "./NodeSelector";
 import { Stat } from "./Stat";
 import type {
@@ -142,7 +143,10 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               {f.insert_size_histogram && f.insert_size_histogram.length > 0 && (
                 <div style={{ flex: "1 1 300px" }}>
-                  <div className="section-title">Insert size</div>
+                  <div className="section-title">
+                    Insert size
+                    <InfoMarker metric="ui.chart_insert_size" />
+                  </div>
                   <Histogram
                     data={f.insert_size_histogram}
                     xKey="insert_size"
@@ -155,6 +159,7 @@ export function BamResults({ obj }: { obj: ObjectDetailData }) {
                 <div style={{ flex: "1 1 300px" }}>
                   <div className="section-title">
                     Mapping quality{starScale ? " (STAR scale)" : ""}
+                    <InfoMarker metric="ui.chart_mapq" />
                   </div>
                   {/* Without this a reader has no way to see that these bars
                       are locus counts and the next BAM's are phred scores. */}
@@ -233,16 +238,36 @@ function SummaryRow({ summary }: { summary?: BamStatsFacts["bam_stats_summary"] 
   if (!summary) return null;
   return (
     <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 12, marginTop: 8 }}>
-      <Stat label="Contigs" value={summary.total_contigs.toLocaleString()} />
-      <Stat label="Mean depth" value={`${summary.mean_depth.toFixed(1)}×`} />
+      <Stat
+        label="Contigs"
+        metric="ui.bam_total_contigs"
+        value={summary.total_contigs.toLocaleString()}
+      />
+      <Stat
+        label="Mean depth"
+        metric="ui.bam_mean_depth"
+        value={`${summary.mean_depth.toFixed(1)}×`}
+      />
       {summary.pct_covered_1x != null && (
-        <Stat label="≥1×" value={`${summary.pct_covered_1x.toFixed(1)}%`} />
+        <Stat
+          label="≥1×"
+          metric="ui.bam_pct_covered"
+          value={`${summary.pct_covered_1x.toFixed(1)}%`}
+        />
       )}
       {summary.pct_covered_10x != null && (
-        <Stat label="≥10×" value={`${summary.pct_covered_10x.toFixed(1)}%`} />
+        <Stat
+          label="≥10×"
+          metric="ui.bam_pct_covered"
+          value={`${summary.pct_covered_10x.toFixed(1)}%`}
+        />
       )}
       {summary.pct_covered_30x != null && (
-        <Stat label="≥30×" value={`${summary.pct_covered_30x.toFixed(1)}%`} />
+        <Stat
+          label="≥30×"
+          metric="ui.bam_pct_covered"
+          value={`${summary.pct_covered_30x.toFixed(1)}%`}
+        />
       )}
     </div>
   );

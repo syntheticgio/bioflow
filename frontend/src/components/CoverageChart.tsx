@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { InfoMarker } from "./InfoMarker";
 import type { CoverageBoundary, CumulativeCoveragePoint } from "../api/types";
 
 /**
@@ -46,6 +47,7 @@ export function BirdsEyeCoverageChart({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 11, color: "var(--text-faint)" }}>
           Coverage across the reference
+          <InfoMarker metric="ui.chart_birds_eye_coverage" />
         </div>
         <label style={{ fontSize: 11, color: "var(--text-faint)", cursor: "pointer" }}>
           <input
@@ -136,6 +138,7 @@ export function CumulativeCoverageChart({ curve }: { curve: CumulativeCoveragePo
     <div>
       <div style={{ fontSize: 11, color: "var(--text-faint)" }}>
         Fraction of reference at or above depth
+        <InfoMarker metric="ui.chart_cumulative_coverage" />
       </div>
       <svg width="100%" viewBox={`0 0 ${w} ${h}`} style={{ maxWidth: w, display: "block", marginTop: 4 }}>
         {[0, 0.25, 0.5, 0.75, 1].map((f) => (

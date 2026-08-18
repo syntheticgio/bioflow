@@ -11,6 +11,7 @@ import {
 import { AnnotationFeatureTable } from "./AnnotationFeatureTable";
 import { AnnotationTrack } from "./AnnotationTrack";
 import { FactsColumns } from "./FactsColumns";
+import { InfoMarker } from "./InfoMarker";
 import { NodeSelector } from "./NodeSelector";
 import { OnDemandCompute } from "./OnDemandCompute";
 
@@ -104,13 +105,19 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
               <FactsColumns>
                 {f.annotation_type_counts && (
                   <div className="section">
-                    <div className="section-title">Features by type</div>
+                    <div className="section-title">
+                      Features by type
+                      <InfoMarker metric="ui.annotation_type_counts" />
+                    </div>
                     <FeatureTypeChart counts={f.annotation_type_counts} />
                   </div>
                 )}
                 {f.annotation_biotype_counts && (
                   <div className="section">
-                    <div className="section-title">Features by biotype</div>
+                    <div className="section-title">
+                      Features by biotype
+                      <InfoMarker metric="ui.annotation_biotype_counts" />
+                    </div>
                     <BiotypeChart counts={f.annotation_biotype_counts} />
                   </div>
                 )}
@@ -120,11 +127,17 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
             {contigs.length > 0 && (
               <>
                 <div className="section">
-                  <div className="section-title">Feature density</div>
+                  <div className="section-title">
+                    Feature density
+                    <InfoMarker metric="ui.chart_feature_density" />
+                  </div>
                   <FeatureDensityChart contigs={contigs} />
                 </div>
                 <div className="section">
-                  <div className="section-title">Annotated coverage</div>
+                  <div className="section-title">
+                    Annotated coverage
+                    <InfoMarker metric="ui.chart_annotation_coverage" />
+                  </div>
                   {f.annotation_contig_lengths_known === false ? (
                     // Blank bars with no explanation read as a broken chart.
                     // The sequence lengths coverage divides by come from the
@@ -150,7 +163,10 @@ export function AnnotationResults({ obj }: { obj: ObjectDetailData }) {
 
             {f.annotation_length_histogram && (
               <div className="section">
-                <div className="section-title">Feature lengths</div>
+                <div className="section-title">
+                  Feature lengths
+                  <InfoMarker metric="ui.chart_feature_lengths" />
+                </div>
                 <LengthHistogram bins={f.annotation_length_histogram} />
               </div>
             )}

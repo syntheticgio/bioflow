@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import type { ObjectDetail as ObjectDetailData, VcfStatsFacts } from "../api/types";
 import { AiSummary } from "./AiSummary";
 import { FactsColumns } from "./FactsColumns";
+import { InfoMarker } from "./InfoMarker";
 import { NodeSelector } from "./NodeSelector";
 import { OnDemandCompute } from "./OnDemandCompute";
 import { Stat } from "./Stat";
@@ -102,7 +103,10 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
 
                 {f.vcf_stats_density_bins && f.vcf_stats_density_bounds && (
                   <div className="section">
-                    <div className="section-title">Variant density</div>
+                    <div className="section-title">
+                      Variant density
+                      <InfoMarker metric="ui.chart_variant_density" />
+                    </div>
                     <VariantDensityChart
                       bins={f.vcf_stats_density_bins}
                       boundaries={f.vcf_stats_density_bounds}
@@ -120,7 +124,10 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
                 <div className="qc-charts">
                   {f.vcf_stats_qual_histogram && f.vcf_stats_qual_histogram.length > 0 && (
                     <div className="qc-chart">
-                      <div className="section-title">QUAL</div>
+                      <div className="section-title">
+                        QUAL
+                        <InfoMarker metric="ui.chart_vcf_qual" />
+                      </div>
                       <DistributionChart
                         buckets={f.vcf_stats_qual_histogram}
                         label="QUAL"
@@ -130,7 +137,10 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
                   )}
                   {f.vcf_stats_depth_histogram && f.vcf_stats_depth_histogram.length > 0 && (
                     <div className="qc-chart">
-                      <div className="section-title">Depth</div>
+                      <div className="section-title">
+                        Depth
+                        <InfoMarker metric="ui.chart_vcf_depth" />
+                      </div>
                       <DistributionChart
                         buckets={f.vcf_stats_depth_histogram}
                         label="depth"
@@ -143,14 +153,20 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
                 <FactsColumns>
                   {f.vcf_stats_substitutions && f.vcf_stats_substitutions.length > 0 && (
                     <div className="section">
-                      <div className="section-title">Substitution types</div>
+                      <div className="section-title">
+                        Substitution types
+                        <InfoMarker metric="ui.vcf_substitutions" />
+                      </div>
                       <SubstitutionsTable rows={f.vcf_stats_substitutions} />
                     </div>
                   )}
 
                   {f.vcf_stats_filters && f.vcf_stats_filters.length > 0 && (
                     <div className="section">
-                      <div className="section-title">Filters</div>
+                      <div className="section-title">
+                        Filters
+                        <InfoMarker metric="ui.vcf_filters" />
+                      </div>
                       <FiltersTable rows={f.vcf_stats_filters} />
                     </div>
                   )}
@@ -158,7 +174,10 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
 
                 {f.vcf_stats_contigs && f.vcf_stats_contigs.length > 0 && (
                   <div className="section">
-                    <div className="section-title">Per-contig counts</div>
+                    <div className="section-title">
+                      Per-contig counts
+                      <InfoMarker metric="ui.vcf_per_contig" />
+                    </div>
                     <table className="trim-table">
                       <thead>
                         <tr>
@@ -205,15 +224,31 @@ export function VariantResults({ obj }: { obj: ObjectDetailData }) {
 function SummaryRow({ summary }: { summary: NonNullable<VcfStatsFacts["vcf_stats_summary"]> }) {
   return (
     <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-      <Stat label="Variants" value={summary.variants.toLocaleString()} />
-      <Stat label="SNPs" value={summary.snps.toLocaleString()} />
-      <Stat label="Indels" value={summary.indels.toLocaleString()} />
-      <Stat label="Ti/Tv" value={summary.ti_tv.toFixed(2)} />
+      <Stat
+        label="Variants"
+        metric="ui.vcf_variants"
+        value={summary.variants.toLocaleString()}
+      />
+      <Stat label="SNPs" metric="ui.vcf_snps" value={summary.snps.toLocaleString()} />
+      <Stat
+        label="Indels"
+        metric="ui.vcf_indels"
+        value={summary.indels.toLocaleString()}
+      />
+      <Stat label="Ti/Tv" metric="ui.vcf_ti_tv" value={summary.ti_tv.toFixed(2)} />
       {summary.pass_pct != null && (
-        <Stat label="PASS" value={`${summary.pass_pct.toFixed(1)}%`} />
+        <Stat
+          label="PASS"
+          metric="ui.vcf_pass_pct"
+          value={`${summary.pass_pct.toFixed(1)}%`}
+        />
       )}
       {summary.multiallelic > 0 && (
-        <Stat label="Multiallelic" value={summary.multiallelic.toLocaleString()} />
+        <Stat
+          label="Multiallelic"
+          metric="ui.vcf_multiallelic"
+          value={summary.multiallelic.toLocaleString()}
+        />
       )}
     </div>
   );
