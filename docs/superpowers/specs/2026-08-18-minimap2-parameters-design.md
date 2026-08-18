@@ -84,21 +84,27 @@ provenance readable and makes exact command tests reliable.
 
 ### Make secondary-alignment semantics explicit
 
-The secondary-alignment mode is tri-state:
+The secondary-alignment mode is tri-state in the UI and optional in the
+parameter model:
 
-- tool default: emit no `--secondary` flag;
+- tool default (`None` internally): emit no `--secondary` flag;
 - enabled: emit `--secondary=yes`;
 - disabled: emit `--secondary=no`.
 
+The `cs` mode follows the same rule: the UI's "none" choice is `None`
+internally and emits no flag; "short" emits `--cs`, and "long" emits
+`--cs=long`. The boolean `-Y` and `--MD` controls are also optional booleans:
+unchecked means `None` and emits no override, while checked emits the flag.
 `-N` and `-p` are emitted only when explicitly configured. Help text must
 explain that those values matter when secondary alignments are enabled.
 
 ### Keep saved parameter sets safe
 
 Parameter-set eligibility continues to derive from `ParamField` metadata. New
-optional fields that are unset are not persisted as explicit overrides. A
-saved set therefore cannot accidentally replace a later read-type preset's
-tool defaults with values the user never selected.
+optional fields that are unset are represented as `None` internally and are
+not persisted as explicit overrides. A saved set therefore cannot accidentally
+replace a later read-type preset's tool defaults with values the user never
+selected.
 
 Existing drift detection remains in force: obsolete, invalid, or incompatible
 saved values are reported visibly rather than silently discarded.
@@ -201,4 +207,3 @@ the worktree stack manually with `./ops/worktree-up.sh` on port 5273:
 6. Run backend tests and perform manual UI verification.
 7. Update alignment documentation if the final help text introduces a new
    user-facing convention.
-
