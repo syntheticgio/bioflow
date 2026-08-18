@@ -645,7 +645,25 @@ def _prefix_aligner_argv(
         argv.append(params.sensitivity)
         if params.local:
             argv.append("--local")
-        argv += ["-X", str(params.maxins)]
+        if params.report_all:
+            argv.append("-a")
+        if r2 is not None:
+            if params.minins > 0:
+                argv += ["-I", str(params.minins)]
+            argv += ["-X", str(params.maxins)]
+            argv.append(
+                {
+                    "FR": "--fr",
+                    "RF": "--rf",
+                    "FF": "--ff",
+                }[params.orientation]
+            )
+            if params.dovetail:
+                argv.append("--dovetail")
+            if params.no_contain:
+                argv.append("--no-contain")
+            if params.no_overlap:
+                argv.append("--no-overlap")
         if params.no_mixed:
             argv.append("--no-mixed")
         if params.no_discordant:
