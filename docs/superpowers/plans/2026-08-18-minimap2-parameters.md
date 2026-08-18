@@ -37,7 +37,7 @@
 - Test: `backend/tests/pipelines/test_align_params.py`
 
 **Interfaces:**
-- `Minimap2Params` gains optional `kmer_size`, `window_size`, `min_chain_score`, `max_gap`, `secondary_ratio`, `max_secondary`, `batch_size`, and boolean/select output controls `secondary_mode`, `soft_clip_supplementary`, `cs_mode`, and `emit_md`.
+- `Minimap2Params` gains optional `kmer_size`, `window_size`, `min_chain_score`, `max_gap`, `secondary_ratio`, `max_secondary`, `batch_size`, and optional boolean/select output controls `secondary_mode`, `soft_clip_supplementary`, `cs_mode`, and `emit_md`.
 - `from_dict(data: dict) -> Minimap2Params` validates choices and numeric bounds.
 - `as_dict() -> dict` omits unset Minimap2-only numeric overrides while retaining existing shared fields.
 
@@ -48,9 +48,9 @@ Use this contract in the tests:
 ```python
 params = align_params.from_dict({"aligner": "minimap2"})
 assert params.kmer_size is None
-assert params.secondary_mode == "default"
-assert params.cs_mode == "none"
-assert params.emit_md is False
+assert params.secondary_mode is None
+assert params.cs_mode is None
+assert params.emit_md is None
 
 original = align_params.from_dict({
     "aligner": "minimap2", "preset": "map-ont",
@@ -63,7 +63,7 @@ assert align_params.from_dict(original.as_dict()) == original
 ```
 
 - [ ] Run `./backend/run-worktree-tests.sh tests/pipelines/test_align_params.py -q` and verify the new tests fail.
-- [ ] Implement the fields with `None` defaults for numeric overrides, choices `default/enabled/disabled` and `none/short/long`, explicit bounds, and conditional numeric parsing.
+- [ ] Implement the fields with `None` defaults for numeric and optional boolean overrides. Normalize the UI sentinel choices `default` and `none` to `None` in the model, retain choices `default/enabled/disabled` and `none/short/long` in the schema, and use explicit bounds and conditional numeric parsing.
 - [ ] Run the same focused test command and verify it passes.
 - [ ] Commit with `git commit -m "feat(pipelines): validate curated minimap2 parameters"`.
 
@@ -83,8 +83,8 @@ assert align_params.from_dict(original.as_dict()) == original
 
 - [ ] Add a failing schema test asserting the keys `preset`, `kmer_size`, `window_size`, `min_chain_score`, `max_gap`, `secondary_ratio`, `max_secondary`, `secondary_mode`, `batch_size`, `soft_clip_supplementary`, `cs_mode`, and `emit_md`; assert correct kinds/groups and non-empty help.
 - [ ] Run `./backend/run-worktree-tests.sh tests/api/test_pipelines_align_schema.py -q` and verify failure.
-- [ ] Add the fields to the Minimap2 `AlignerSpec.fields` tuple. Group sensitivity fields under biology and batch/output controls under performance. Use nullable numeric defaults and choices matching Task 1.
-- [ ] Add optional keys to `AlignParams` and render nullable int/float fields as empty inputs; convert empty input back to `undefined`. Keep the generic schema-driven form and add only the copy needed to explain that blank uses the selected preset's default.
+- [ ] Add the fields to the Minimap2 `AlignerSpec.fields` tuple. Group sensitivity fields under biology and batch/output controls under performance. Use nullable numeric/boolean defaults and choices matching Task 1.
+- [ ] Add optional keys to `AlignParams` and render nullable int/float fields as empty inputs; convert empty input back to `undefined`. Map the `default`/`none` select sentinels back to `undefined`, and leave unchecked optional checkboxes undefined. Keep the generic schema-driven form and add only the copy needed to explain that blank uses the selected preset's default.
 - [ ] Run `./backend/run-worktree-tests.sh tests/api/test_pipelines_align_schema.py -q` and `cd frontend && npm run build`.
 - [ ] Commit with `git commit -m "feat(ui): expose curated minimap2 fields in the align dialog"`.
 
@@ -101,7 +101,7 @@ assert align_params.from_dict(original.as_dict()) == original
 - [ ] Add failing tests proving no advanced flags appear for unset fields and all configured fields appear once. Cover `-k`, `-w`, `-m`, `-g`, `-p`, `-N`, `--secondary=no`, `-K`, `-Y`, `--cs=long`, and `--MD`. Add separate tests for `secondary_mode="enabled"` and `cs_mode="short"`.
 - [ ] Run `./backend/run-worktree-tests.sh tests/pipelines/test_align_runner.py -q` and verify failure.
 - [ ] Append flags in this order: `-k`, `-w`, `-m`, `-g`; then `-p`, `-N`, and `--secondary=...`; then `-K`, `-Y`, `--cs[=long]`, and `--MD`; then existing read-group and paths.
-- [ ] Emit nothing for unset numeric values, `secondary_mode="default"`, `cs_mode="none"`, or `emit_md=False`. Preserve all other aligners.
+- [ ] Emit nothing for unset numeric/boolean values, `secondary_mode=None`, or `cs_mode=None`; emit the selected secondary mode, `cs` mode, `-Y`, and `--MD` only when explicitly configured. Preserve all other aligners.
 - [ ] Run `./backend/run-worktree-tests.sh tests/pipelines/test_align_runner.py tests/pipelines/test_align_params.py -q`.
 - [ ] Commit with `git commit -m "feat(pipelines): pass curated minimap2 flags"`.
 
@@ -116,9 +116,9 @@ assert align_params.from_dict(original.as_dict()) == original
 - `eligible_params(family, tool, params)` filters schema-declared keys and removes only `None` values.
 - `resolve_params(family, tool, params)` continues returning existing drift rejection reasons.
 
-- [ ] Add a failing test that `{"preset": "map-ont", "kmer_size": None, "window_size": 10, "emit_md": False}` becomes `{"preset": "map-ont", "window_size": 10, "emit_md": False}`.
+- [ ] Add a failing test that `{"preset": "map-ont", "kmer_size": None, "window_size": 10, "emit_md": None}` becomes `{"preset": "map-ont", "window_size": 10}`.
 - [ ] Run `./backend/run-worktree-tests.sh tests/services/test_parameter_set_service.py -q` and verify failure.
-- [ ] Filter `None` after the existing schema-key intersection. Do not filter `False`, `0`, or valid empty strings.
+- [ ] Filter `None` after the existing schema-key intersection. Do not filter explicit `False`, `0`, or valid empty strings when those values are represented by a field that is not optional.
 - [ ] Add resolution coverage for explicit values and invalid saved values.
 - [ ] Run `./backend/run-worktree-tests.sh tests/services/test_parameter_set_service.py tests/api/test_parameter_sets.py -q`.
 - [ ] Commit with `git commit -m "fix(pipelines): omit unset minimap2 overrides from presets"`.
