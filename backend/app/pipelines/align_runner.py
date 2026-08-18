@@ -511,6 +511,36 @@ def _aligner_argv(
     if aligner is Aligner.MINIMAP2:
         # -a emits SAM rather than PAF, which samtools sort requires.
         argv = [aligner_path, "-a", "-x", params.preset, "-t", str(params.threads)]
+
+        if params.kmer_size is not None:
+            argv += ["-k", str(params.kmer_size)]
+        if params.window_size is not None:
+            argv += ["-w", str(params.window_size)]
+        if params.min_chain_score is not None:
+            argv += ["-m", str(params.min_chain_score)]
+        if params.max_gap is not None:
+            argv += ["-g", str(params.max_gap)]
+
+        if params.secondary_ratio is not None:
+            argv += ["-p", str(params.secondary_ratio)]
+        if params.max_secondary is not None:
+            argv += ["-N", str(params.max_secondary)]
+        if params.secondary_mode == "enabled":
+            argv.append("--secondary=yes")
+        elif params.secondary_mode == "disabled":
+            argv.append("--secondary=no")
+
+        if params.batch_size is not None:
+            argv += ["-K", str(params.batch_size)]
+        if params.soft_clip_supplementary:
+            argv.append("-Y")
+        if params.cs_mode == "short":
+            argv.append("--cs")
+        elif params.cs_mode == "long":
+            argv.append("--cs=long")
+        if params.emit_md:
+            argv.append("--MD")
+
         argv += ["-R", read_group.as_sam_header(), str(reference), str(r1)]
         if r2 is not None:
             argv.append(str(r2))
