@@ -1389,6 +1389,11 @@ COMPLETENESS_MEM_MB = 8192
 
 MERYL_ANALYSIS_MEM_MB = 8192
 
+# Matches the handler's own budget (see reference_assembly_handlers.
+# consensus_from_alignment): 8192, not 4096, after a real run against a
+# 26Mb T. brucei reference OOM-killed at the lower number.
+CONSENSUS_MEM_MB = 8192
+
 
 def refuse_if_over_budget(
     *, declared_mb: int, budget_mb: int, resource_override: bool
@@ -5152,6 +5157,7 @@ async def launch_consensus(
     min_quality: int | None = None,
     min_freq: float | None = None,
     min_depth: int | None = None,
+    resource_override: bool = False,
 ) -> Job:
     """Queue an iVar consensus run against one alignment.
 
@@ -5166,6 +5172,15 @@ async def launch_consensus(
     """
     from app.queue import queue
     from app.services import object_service, reference_assembly, run_service
+
+    # Hoisted above the enqueue for the same reason as launch_assembly: a
+    # declaration the budget can never satisfy is unclaimable, and claim.lua
+    # has no starvation escape (#478, #527).
+    refuse_if_over_budget(
+        declared_mb=CONSENSUS_MEM_MB,
+        budget_mb=await current_admission_budget_mb(),
+        resource_override=resource_override,
+    )
 
     tool = tools.require(tools.ivar())
 
@@ -5257,11 +5272,12 @@ async def launch_consensus(
         # 4096, after a real run against a 26Mb T. brucei reference
         # OOM-killed at the lower number. io=HEAVY: I/O against a
         # high-coverage amplicon BAM is the other real cost.
-        resources=JobResources(cpu=2, mem_mb=8192, io=IoClass.HEAVY),
+        resources=JobResources(cpu=2, mem_mb=CONSENSUS_MEM_MB, io=IoClass.HEAVY),
         max_attempts=1,
         dedup_key=f"consensus:{bam.id}:{primer_bed_object_id or 'noprimers'}",
         project_id=bam.project_id,
         object_id=bam.id,
+        resource_override=resource_override,
     )
     if job is None:
         await run_service.discard_run(run.id, owner=run.owner)

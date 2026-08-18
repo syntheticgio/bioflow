@@ -1560,6 +1560,9 @@ class ConsensusRequest(BaseModel):
     min_quality: int | None = None
     min_freq: float | None = None
     min_depth: int | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/consensus", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1573,6 +1576,7 @@ async def launch_consensus_route(body: ConsensusRequest, owner: OwnerDep) -> Job
         min_quality=body.min_quality,
         min_freq=body.min_freq,
         min_depth=body.min_depth,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
