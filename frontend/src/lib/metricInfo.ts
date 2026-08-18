@@ -448,6 +448,228 @@ export const METRIC_INFO: Record<string, MetricInfo> = {
     description:
       "Contig length against the percentage of the assembly covered. Nx measures against the assembly's own size; NGx measures against the expected genome size, so an NGx curve that stops short of the axis is showing you the fraction of the genome the assembly never reached.",
   },
+
+  // ---- Results tab: alignment coverage ------------------------------------
+  "ui.bam_mean_depth": {
+    term: "Mean depth",
+    description:
+      "How many reads cover the average reference base. It is the headline number for whether a call set can be trusted, but it says nothing about evenness — a genome half-covered at 60× and half at 0× reports the same mean as one evenly covered at 30×, which is what the ≥1×/≥10×/≥30× figures beside it exist to separate.",
+    computed:
+      "A length-weighted mean of the per-contig mean depths, so a long chromosome counts for more than a short scaffold rather than each contig counting once.",
+  },
+  "ui.bam_pct_covered": {
+    term: "Breadth of coverage",
+    description:
+      "The percentage of the reference covered to at least the stated depth. 1× is \"sequenced at all\"; 10× and 30× are the conventional floors for calling a heterozygous and a somatic variant. A high mean depth next to a low ≥10× means the reads piled up somewhere rather than spreading out.",
+    computed:
+      "Measured over the 1,000 bins the coverage strip is drawn from, not per base — each bin holds the mean depth of its slice of the reference, so this is the fraction of bins whose average clears the threshold. A short, deeply covered region inside a mostly empty bin does not lift it over.",
+  },
+  "ui.bam_total_contigs": {
+    term: "Contigs",
+    description:
+      "How many sequences the reference this BAM was aligned against declares. It is a property of the reference rather than of the alignment: a chromosome-level genome shows tens, a fragmented draft shows thousands, and the per-contig table below is that many rows long.",
+    computed: "Counted from the BAM's own index, which lists every reference sequence in the header whether or not any read aligned to it.",
+  },
+  "ui.bam_contig_table": {
+    term: "Per-contig detail",
+    description:
+      "Every reference sequence with its length, aligned read count, breadth, mean depth, and mean mapping quality. This is where an alignment that looks healthy overall comes apart — a single contig at a fraction of the genome's mean depth is a deletion, a mis-assembly, or a contig the sample simply does not have.",
+    computed:
+      "Coverage and mean depth here are per base from samtools coverage, unlike the binned ≥N× figures in the headline row, so the two can disagree slightly on a very unevenly covered contig.",
+  },
+  "ui.chart_birds_eye_coverage": {
+    term: "Coverage across the reference",
+    description:
+      "Mean depth along the whole reference, contigs laid end to end. Flat is healthy; a spike is a repeat or a high-copy contaminant collecting reads from elsewhere, and a gap is a region the library never reached.",
+    computed:
+      "1,000 bins regardless of genome size, so each bar is 3 Mb of a human genome and 5 bp of a plasmid. Any contig shorter than one bin still gets its own bin rather than disappearing.",
+  },
+  "ui.chart_cumulative_coverage": {
+    term: "Cumulative coverage",
+    description:
+      "The fraction of the reference at or above each depth. It answers \"did I sequence deeply enough\" directly, which a mean cannot: the curve's shape distinguishes even coverage from a mix of very deep and uncovered regions that average to the same number.",
+    computed: "Computed over the same 1,000 bins as the coverage strip.",
+  },
+  "ui.chart_contig_depth": {
+    term: "Depth by contig",
+    description:
+      "Mean depth per contig against the genome-wide mean. Contigs far below the line have less material in the sample than the reference expects; far above usually means repeat content or a plasmid present in many copies.",
+  },
+  "ui.chart_depth_histogram": {
+    term: "Depth distribution",
+    description:
+      "How many reference positions sit at each depth. A single tight peak is a uniform library; a long right tail is coverage bias, and a second peak flags contamination or a large copy-number change. None of that survives the averaging in the coverage strip, which is why this chart is separate.",
+    computed:
+      "60 buckets spanning zero to three times the mean depth, so an amplicon panel and a 30× genome both get a readable curve. Everything beyond that span lands in one overflow bucket at the right rather than being dropped.",
+  },
+  "ui.chart_insert_size": {
+    term: "Insert size",
+    description:
+      "The distribution of distances between paired reads, which is the fragment length the library preparation produced. A peak below the combined read length means the pairs overlap, and adapter read-through follows.",
+  },
+  "ui.chart_mapq": {
+    term: "Mapping quality",
+    description:
+      "How confidently each read was placed. A large bar at zero is reads the aligner could not place uniquely — repeats and multi-mapping — and those are what most downstream tools discard first.",
+    computed:
+      "The scale is the aligner's, not a shared one. Under STAR the value encodes the number of loci a read mapped to rather than a phred-scaled probability, so a STAR BAM's bars are not comparable with a BWA BAM's; the chart says so when it detects that scale.",
+  },
+
+  // ---- Results tab: variants ---------------------------------------------
+  "ui.vcf_variants": {
+    term: "Variants",
+    description:
+      "How many records the VCF holds — sites, not alleles. A multiallelic site with three alternates counts once here and once again under Multiallelic, which is why SNPs plus Indels need not add up to this total.",
+    computed:
+      "bcftools stats' record count. Sites the caller emitted with no ALT are included in it.",
+  },
+  "ui.vcf_snps": {
+    term: "SNPs",
+    description:
+      "Single-base substitutions. In a whole-genome call set these are the large majority; a set where indels approach them in number usually points at an alignment or filtering problem rather than at biology.",
+    computed:
+      "bcftools' own SNP site count, which classifies by site and not by allele.",
+  },
+  "ui.vcf_indels": {
+    term: "Indels",
+    description:
+      "Sites where an allele's length differs from the reference. They are harder to call than substitutions and are where callers disagree most, so a large indel count relative to SNPs is worth checking against the caller's own filters before trusting it.",
+  },
+  "ui.vcf_ti_tv": {
+    term: "Ti/Tv",
+    description:
+      "Transitions (A↔G, C↔T) divided by transversions. Transitions are chemically more likely, so a real call set is not near 0.5 — the value expected by chance. Around 2.0–2.1 is normal for whole-genome data and around 3.0 for exome, where the coding sequence is enriched for them. A number drifting toward 0.5 means false positives are diluting the real calls, which makes this the fastest read on whether the filtering was strict enough.",
+    computed:
+      "From bcftools stats over substitutions in the whole file. The expected value depends on the assay, so compare it against runs of the same kind rather than against a single fixed target.",
+  },
+  "ui.vcf_pass_pct": {
+    term: "PASS",
+    description:
+      "The share of records the caller's own filters passed. Shown only when the file uses FILTER at all: bcftools call stamps every record with '.', and reporting that as either 0% or 100% would assert a filtering result that never happened.",
+    computed: "PASS records over total records, from the FILTER tally of the whole file.",
+  },
+  "ui.vcf_multiallelic": {
+    term: "Multiallelic",
+    description:
+      "Sites carrying more than one alternate allele. They are one record here but several events biologically, and many downstream tools need them split first — a high count is a signal to normalise before doing anything else with the file.",
+  },
+  "ui.chart_variant_density": {
+    term: "Variant density",
+    description:
+      "Where variants sit across the reference, contigs laid end to end. Clusters are worth a look: a dense block is often a repetitive or poorly-aligned region generating calls rather than a genuinely variable one.",
+    computed:
+      "Bar heights use a square-root scale, not a straight count. Variant density is severely long-tailed, and a linear scale renders everything but the peaks as a flat line. Read it as where the variants are, not as an exact ratio between bars; hover for the real count.",
+  },
+  "ui.chart_vcf_qual": {
+    term: "QUAL distribution",
+    description:
+      "The caller's confidence score across the call set. A large mass at low QUAL is the population most filters remove, and where it sits relative to the filter threshold shows how much the call set would change if that threshold moved.",
+    computed: "From bcftools stats, which tallies this over SNPs.",
+  },
+  "ui.chart_vcf_depth": {
+    term: "Depth distribution",
+    description:
+      "Read depth at called sites. The peak should sit near the alignment's mean depth; calls far above it are usually in collapsed repeats, where reads from several loci pile onto one.",
+    computed:
+      "Counted per site rather than per genotype, so a file the caller never genotyped still draws a real distribution instead of an empty one.",
+  },
+  "ui.vcf_substitutions": {
+    term: "Substitution types",
+    description:
+      "Counts for each of the twelve possible base changes. The pairs that make up Ti/Tv dominate a healthy set; an unusual excess of C→A is the classic signature of oxidative damage during library preparation rather than of real variation.",
+  },
+  "ui.vcf_filters": {
+    term: "Filters",
+    description:
+      "How many records carry each FILTER value the file uses. \"No filter applied\" means the record carries '.', which is what a caller that never filters emits — different from a record that was assessed and passed.",
+  },
+  "ui.vcf_per_contig": {
+    term: "Per-contig counts",
+    description:
+      "Variants per contig, with a per-kb rate that makes contigs of different lengths comparable. An outlier rate is usually a difficult region rather than a variable one.",
+    computed:
+      "SNPs and indels here are classified by site the same way bcftools classifies them, so these columns sum to the headline row above rather than drifting from it on files with multiallelic sites. A site whose alleles are all the same length but longer than one base is an MNP and appears only in the total.",
+  },
+
+  // ---- Results tab: differential expression --------------------------------
+  "ui.de_contrast": {
+    term: "Contrast",
+    description:
+      "Which two conditions were compared, and how many samples each contributed. Every fold change below is the test condition relative to the reference, so reading the direction of a result depends on this row.",
+  },
+  "ui.de_genes_tested": {
+    term: "Genes tested",
+    description:
+      "How many genes carry an adjusted p-value, out of all the genes in the count matrix. The difference is not a failure: DESeq2 drops genes with too few reads to say anything about, and testing them anyway would cost statistical power across every gene that remains.",
+    computed:
+      "Counted as the rows where padj is set. Genes filtered out show an em dash in the table rather than a p-value of 1.0, which would claim they were tested and found unremarkable.",
+  },
+  "ui.de_significant": {
+    term: "Significant genes",
+    description:
+      "Genes whose adjusted p-value clears the run's alpha, split by direction. The adjustment is what makes this count meaningful — an unadjusted list of 20,000 tests contains a thousand results at p < 0.05 by chance alone.",
+    computed:
+      "Split by the sign of the log₂ fold change, so \"up\" means up in the test condition relative to the reference.",
+  },
+  "ui.chart_sample_pca": {
+    term: "Sample clustering",
+    description:
+      "Samples projected onto their first two principal components. This is the plot that can invalidate everything below it: a replicate sitting with the wrong group means the contrast tested a design the samples do not match, and no amount of reading the p-value table reveals that.",
+    computed:
+      "Computed on log₂(normalised count + 1) over the most variable genes, then projected by SVD. The axis percentages say how much of the total variance each component carries — a low pair means the samples do not separate cleanly in two dimensions, not that the plot is wrong.",
+  },
+  "ui.chart_volcano": {
+    term: "Volcano plot",
+    description:
+      "Significance against effect size, one point per gene. The interesting corners are top-left and top-right: large change and strong evidence. A gene high on the y-axis with a small fold change is a reliable but tiny difference.",
+    computed:
+      "Coloured points clear both the run's alpha and a two-fold change. The y-axis is −log₁₀(padj), clamped to the smallest non-zero p-value present, because padj underflows to zero on strong results and an infinity would blank the plot.",
+  },
+  "ui.chart_ma": {
+    term: "MA plot",
+    description:
+      "Fold change against expression level. A funnel widening to the left is the expected shape and the point of the plot: at low counts a ratio is mostly noise, so the largest apparent changes there are the least trustworthy.",
+    computed: "Base mean on a log₁₀ axis, since expression spans several orders of magnitude.",
+  },
+  "ui.de_gene_table": {
+    term: "Gene results",
+    description:
+      "Every tested gene with its mean count, log₂ fold change, standard error, and adjusted p-value. Sorted by significance by default. A large fold change with a large standard error beside it is one or two samples driving the result.",
+    computed:
+      "Mean count is DESeq2's baseMean — the average of normalised counts across all samples in both conditions, not raw reads.",
+  },
+
+  // ---- Results tab: annotation ---------------------------------------------
+  "ui.annotation_type_counts": {
+    term: "Features by type",
+    description:
+      "How many features of each type the file declares, in its own vocabulary. A GFF3 gene model nests gene, mRNA, exon and CDS rows describing the same locus, so these counts overlap by design and do not sum to a number of genes.",
+  },
+  "ui.annotation_biotype_counts": {
+    term: "Features by biotype",
+    description:
+      "The biological classification each feature carries, where the file records one — protein_coding, lncRNA, pseudogene and the rest. A BED file or a peak call has none, and the block simply does not appear rather than showing zeros.",
+  },
+  "ui.chart_feature_density": {
+    term: "Feature density",
+    description:
+      "Features per megabase for each sequence, which makes sequences of very different lengths comparable. An unannotated scaffold and a densely annotated chromosome are both normal; a chromosome far below its neighbours is usually an incomplete annotation rather than a sparse one.",
+    computed: "Only sequences whose length is known from the reference get a rate; the rest are shown by count.",
+  },
+  "ui.chart_annotation_coverage": {
+    term: "Annotated coverage",
+    description:
+      "The fraction of each sequence lying under at least one feature. Overlapping features are counted once, so a densely nested gene model does not report more than 100%.",
+    computed:
+      "Needs sequence lengths, which come from the annotation's reference rather than from the annotation itself — except for GenBank, which states them on its own LOCUS lines. With no matching reference in the project the chart is replaced by a note rather than drawn empty.",
+  },
+  "ui.chart_feature_lengths": {
+    term: "Feature lengths",
+    description:
+      "How many features fall in each length band. The shape identifies the file as much as its name does: exon-scale peaks near a few hundred bases, gene-scale spans running into tens of kilobases.",
+    computed:
+      "Ten bands with edges at 100, 250, 500 bp and so on up to 100 kb, plus an overflow band above that. Length is the feature's own span, so a gene row's introns are included in it.",
+  },
 };
 
 /**
