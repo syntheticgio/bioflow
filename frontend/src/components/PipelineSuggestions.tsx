@@ -201,6 +201,7 @@ export function PipelineSuggestions({
    */
   function busyFor(card: PipelineSuggestion): boolean {
     if (card.running) return true;
+    if (refusals[card.kind]) return true;
     const rec = launched[card.kind];
     return rec != null && dataUpdatedAt <= rec.at;
   }
@@ -286,11 +287,14 @@ export function PipelineSuggestions({
                   opens a form with one field. The asymmetry is the honest
                   rendering: twelve of the nineteen kinds have no dialog.
 
-                  Not disabled by `busy`. A running job is a reason not to
-                  launch a second one, but adjusting settings is how a user
-                  sets up the *next* run -- and the dialog has its own guard
-                  on submit. It is gated on `runnable` for the same reason
-                  Launch is: an unavailable card has no body to seed with. */}
+                  Not disabled by `busy` for a *running* job -- adjusting
+                  settings is how a user sets up the *next* run, and the
+                  dialog has its own guard on submit. It's gated on
+                  `runnable` for the same reason Launch is: an unavailable
+                  card has no body to seed with. It IS disabled while this
+                  card has an open refusal, though: the refusal card's own
+                  Edit button already offers this exact path, and a second
+                  live button to the same dialog is a redundant one. */}
               {card.configure && onConfigure && (
                 <button
                   type="button"
@@ -298,7 +302,7 @@ export function PipelineSuggestions({
                   onClick={() =>
                     onConfigure(card.configure!.dialog, card.launch!.body)
                   }
-                  disabled={!runnable}
+                  disabled={!runnable || Boolean(refusals[card.kind])}
                   title="Open this run's settings before starting it"
                 >
                   Adjust…
@@ -326,15 +330,22 @@ export function PipelineSuggestions({
                 // A card with no dialog has no parameters to edit, so this
                 // exit is the same as dismissing. Where the server named a
                 // dialog, send the user there instead -- the same handler
-                // the Adjust button uses.
+                // the Adjust button uses. The button always reads "Edit
+                // parameters" (ResourceRefusalCard is frozen), so the
+                // dismiss-only branch has to say in a toast what just
+                // happened -- otherwise the card just vanishes with no
+                // explanation for what looked like an "open settings" click.
                 onEdit={() =>
                   card.configure && onConfigure
                     ? onConfigure(card.configure.dialog, card.launch!.body)
-                    : setRefusals((m) => {
+                    : (setRefusals((m) => {
                         const next = { ...m };
                         delete next[card.kind];
                         return next;
-                      })
+                      }),
+                      notify.error(
+                        "No settings to adjust for this run — raise the memory budget in Settings, or use Launch anyway.",
+                      ))
                 }
                 onLaunchAnyway={() => launchAnyway.mutate(card)}
                 launchAnywayPending={launchAnyway.isPending}
