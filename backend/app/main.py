@@ -14,6 +14,7 @@ from app.db.redis_client import close_redis, connect_to_redis, get_redis
 from app.errors import StorageUnavailableError, register_exception_handlers
 from app.logging import configure_logging, get_logger
 from app.mcp.server import mount_mcp_app
+from app.metadata.platform_migration import split_platform_from_instrument_model
 from app.pipelines import tool_cache
 from app.queue.registry import load_handlers
 from app.services.agent_service import agent_service
@@ -78,6 +79,10 @@ async def lifespan(app: FastAPI):
     from app.services.ai.migration import seed_legacy_provider
 
     await seed_legacy_provider()
+
+    # #525 split `metadata.platform` into a closed platform tag and an open
+    # `instrument_model`. Carries existing rows across; a no-op once done.
+    await split_platform_from_instrument_model()
 
     await connect_to_redis()
 
