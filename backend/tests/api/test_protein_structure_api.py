@@ -1,7 +1,7 @@
-"""One record's structure, and the four states it can be in.
+"""One record's structure, and the six states it can be in.
 
 The states are explicit in the response rather than inferred from nulls,
-because the UI says four genuinely different things and a client deriving
+because the UI says six genuinely different things and a client deriving
 them from `accession is None` gets "no structure deposited" and "header names
 nothing" backwards -- which is exactly the confusion the existing variants
 modal's comments warn about.
@@ -187,7 +187,7 @@ async def test_lookup_failure_is_distinct_from_no_structure(
     """R22. An outage is retryable; "no structure deposited" is not."""
 
     async def fake_resolve(ref):
-        return None
+        raise protein_structure.ProteinStructureUnavailable("uniprot unreachable")
 
     monkeypatch.setattr(protein_structure, "resolve", fake_resolve)
 
@@ -198,6 +198,29 @@ async def test_lookup_failure_is_distinct_from_no_structure(
 
     assert resp.status_code == 200
     assert resp.json()["state"] == "lookup_failed"
+
+
+async def test_zero_candidate_is_its_own_state(
+    client, records, two_profiles, monkeypatch
+):
+    """A query that succeeded and matched nothing is permanent -- the UI must
+    not offer a retry for it, so it cannot share lookup_failed's state.
+    lookup_failed means the request to UniProt itself failed."""
+
+    async def fake_resolve(ref):
+        return None
+
+    monkeypatch.setattr(protein_structure, "resolve", fake_resolve)
+
+    resp = await client.get(
+        f"/api/v1/objects/{records.id}/protein-records/0/structure",
+        headers=two_profiles["a_headers"],
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["state"] == "no_candidate"
+    assert resp.json()["accession"] is None
+    assert resp.json()["pdb_ids"] == []
 
 
 async def test_unknown_ordinal_is_a_404(client, records, two_profiles):

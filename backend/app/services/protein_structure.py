@@ -28,6 +28,7 @@ Uses stdlib urllib rather than httpx, matching `uniprot.py` and
 import asyncio
 import hashlib
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -50,14 +51,26 @@ _TIMEOUT_SECONDS = 20.0
 _MAX_CANDIDATES = 10
 
 
+class ProteinStructureUnavailable(Exception):
+    """UniProt could not be queried at all: timeout, refused connection, or an
+    unreadable response.
+
+    Raised rather than returned as None, because None already means the
+    opposite situation -- a query that succeeded and matched nothing. That one
+    is a permanent answer and gets cached as a negative row; this one is
+    transient, must not be cached, and is the only outcome the UI offers a
+    retry for.
+    """
+
+
 @dataclass(frozen=True)
 class StructureHit:
     """One accession resolved, with whatever structures it has.
 
     An empty `pdb_ids` is a successful resolution, not a failure. The UI says
-    "no experimental structure has been deposited" for that, and "this header
-    doesn't name a known protein" for a None return -- two different sentences
-    that must not be collapsed into one.
+    "no experimental structure has been deposited" for that, and "this
+    accession matched nothing in UniProt" for a None return -- two different
+    sentences that must not be collapsed into one.
     """
 
     accession: str
@@ -143,10 +156,12 @@ def _choose(entries: list) -> StructureHit | None:
 async def resolve(ref: ProteinRef) -> StructureHit | None:
     """The structures for one accession, or None if it resolved to nothing.
 
-    None covers an unresolvable accession and a UniProt outage alike. They are
-    distinguished in the log, not in the return type, because the UI can act on
-    neither -- matching the contract `structure_lookup.resolve_structure`
-    states for the same reason.
+    None means the query succeeded and matched nothing -- an unresolvable
+    accession, a permanent answer that is cached as a negative row. The same
+    None covers a query UniProt rejected outright (HTTP 400, e.g. an invalid
+    accession format): also permanent for this accession, cached the same way.
+    A UniProt outage is a different situation with a different remedy (retry),
+    so it raises ProteinStructureUnavailable rather than returning None.
     """
     cached = await ProteinStructureLookup.find_one(
         ProteinStructureLookup.accession == ref.accession
@@ -175,6 +190,21 @@ async def resolve(ref: ProteinRef) -> StructureHit | None:
             _get, f"{_SEARCH_URL}?{query}", timeout=_TIMEOUT_SECONDS
         )
         results = json.loads(raw).get("results", [])
+    except urllib.error.HTTPError as exc:
+        if exc.code != 400:
+            raise ProteinStructureUnavailable(str(exc)) from exc
+        # A 400 is UniProt rejecting the query itself -- an invalid accession
+        # format, for instance. That is a permanent answer for this accession,
+        # the same shape as an empty result list, so it flows into the same
+        # _choose/_remember path and is cached as a negative. Any other 4xx
+        # (429 rate-limit in particular) and every 5xx is a real outage and
+        # raises like everything below.
+        log.info(
+            "protein_structure_query_rejected",
+            accession=ref.accession,
+            error=str(exc),
+        )
+        results = []
     except Exception as exc:
         # Deliberately not cached. A cached failure is indistinguishable from a
         # cached "no structure", and this collection has no expiry -- so an
@@ -182,7 +212,7 @@ async def resolve(ref: ProteinRef) -> StructureHit | None:
         log.info(
             "protein_structure_lookup_failed", accession=ref.accession, error=str(exc)
         )
-        return None
+        raise ProteinStructureUnavailable(str(exc)) from exc
 
     hit = _choose(results if isinstance(results, list) else [])
     await _remember(ref.accession, hit)

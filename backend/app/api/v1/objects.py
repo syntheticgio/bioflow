@@ -275,14 +275,26 @@ async def get_protein_record_structure(
             identifier=record.identifier,
             state=ProteinStructureState.LOOKUP_FAILED,
         )
-    hit = await protein_structure.resolve(
-        ProteinRef(kind=record.ref_kind, accession=record.ref_accession)
-    )
-    if hit is None:
+    try:
+        hit = await protein_structure.resolve(
+            ProteinRef(kind=record.ref_kind, accession=record.ref_accession)
+        )
+    except protein_structure.ProteinStructureUnavailable:
+        # A real outage: the one outcome worth a retry. A query that
+        # succeeded and matched nothing returns None instead, and the UI
+        # must not offer a retry for that -- the answer is permanent and
+        # already cached.
         return ProteinStructureOut(
             identifier=record.identifier,
             state=ProteinStructureState.LOOKUP_FAILED,
         )
+
+    if hit is None:
+        return ProteinStructureOut(
+            identifier=record.identifier,
+            state=ProteinStructureState.NO_CANDIDATE,
+        )
+
     return ProteinStructureOut(
         identifier=record.identifier,
         state=ProteinStructureState.RESOLVED

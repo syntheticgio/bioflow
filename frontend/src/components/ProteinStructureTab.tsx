@@ -220,6 +220,14 @@ function RecordStructure({
         </div>
       )}
 
+      {/* no_candidate is the permanent sibling of lookup_failed above: UniProt
+          was reached and returned nothing for this accession, so a retry would
+          only re-read a cached answer -- no button. */}
+      {state === "no_candidate" && (
+        <div className="chrom-note">
+          This accession didn't match any protein in UniProt.
+        </div>
+      )}
       {state === "no_structure" && (
         <div className="chrom-note">
           No experimental structure has been deposited for{" "}

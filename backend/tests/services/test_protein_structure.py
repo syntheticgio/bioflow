@@ -12,6 +12,7 @@ rule exists at all rather than "take the first result".
 
 import hashlib
 import json
+import urllib.error
 
 import pytest
 import pytest_asyncio
@@ -164,20 +165,57 @@ async def test_a_miss_is_cached_too(monkeypatch):
     assert len(calls) == 1
 
 
-async def test_transport_failure_returns_none_and_does_not_raise(monkeypatch):
-    """R35. A UniProt outage reports "no structure", never a 500."""
+async def test_query_rejected_400_is_a_cached_miss(monkeypatch):
+    """A 400 is UniProt saying the query is invalid -- measured: an accession
+    outside its format (ZZ999999) gets "invalid format", not an empty list.
+    That is a permanent answer for the accession, not an outage: it must not
+    raise (the UI would offer a retry that can never help) and it is cached,
+    like an empty result list."""
+
+    def bad_request(url, *, timeout=None):
+        raise urllib.error.HTTPError(url, 400, "Bad Request", None, None)
+
+    monkeypatch.setattr(protein_structure, "_get", bad_request)
+    ref = ProteinRef(kind=RefKind.UNIPROT, accession="ZZ999999")
+
+    assert await protein_structure.resolve(ref) is None
+    assert await protein_structure.resolve(ref) is None
+
+    cached = await ProteinStructureLookup.find_one(
+        ProteinStructureLookup.accession == "ZZ999999"
+    )
+    assert cached is not None and cached.resolved_accession is None
+
+
+async def test_non_400_http_error_still_raises_unavailable(monkeypatch):
+    """A 429 or 5xx is a real outage, not a rejected query: retryable, and not
+    cached (the 400 branch above must not swallow it)."""
+
+    def rate_limited(url, *, timeout=None):
+        raise urllib.error.HTTPError(url, 429, "Too Many Requests", None, None)
+
+    monkeypatch.setattr(protein_structure, "_get", rate_limited)
+
+    with pytest.raises(protein_structure.ProteinStructureUnavailable):
+        await protein_structure.resolve(
+            ProteinRef(kind=RefKind.UNIPROT, accession="P00924")
+        )
+
+
+async def test_transport_failure_raises_unavailable(monkeypatch):
+    """R35. A UniProt outage is a retryable state, never a 500 -- and never a
+    None, which would read as a permanent zero-candidate answer and be
+    cached as one."""
 
     def boom(url, *, timeout=None):
         raise TimeoutError("uniprot unreachable")
 
     monkeypatch.setattr(protein_structure, "_get", boom)
 
-    assert (
+    with pytest.raises(protein_structure.ProteinStructureUnavailable):
         await protein_structure.resolve(
             ProteinRef(kind=RefKind.UNIPROT, accession="P00924")
         )
-        is None
-    )
 
 
 async def test_transport_failure_is_not_cached(monkeypatch):
@@ -192,7 +230,8 @@ async def test_transport_failure_is_not_cached(monkeypatch):
 
     monkeypatch.setattr(protein_structure, "_get", boom)
     ref = ProteinRef(kind=RefKind.UNIPROT, accession="P00924")
-    await protein_structure.resolve(ref)
+    with pytest.raises(protein_structure.ProteinStructureUnavailable):
+        await protein_structure.resolve(ref)
 
     assert await ProteinStructureLookup.find_one(
         ProteinStructureLookup.accession == "P00924"
