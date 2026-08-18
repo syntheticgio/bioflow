@@ -4532,10 +4532,10 @@ async def launch_assembly(
         "reads_name": reads.name,
         "assembler": parsed.assembler.value,
         "params": parsed.as_dict(),
-        # The tool's mandatory Bloom filter budget, derived from the same
-        # estimate that decided this run could proceed -- one number, not two
-        # that must agree.
-        "bloom_bytes": (estimate * 1024 * 1024) if estimate else None,
+        # The memory ceiling for this run, derived from the same estimate that
+        # decided it could proceed -- one number, not two that must agree.
+        # ABySS spends it as a Bloom filter budget; SPAdes as `-m`.
+        "memory_bytes": (estimate * 1024 * 1024) if estimate else None,
     }
     if digest:
         payload["reads_sha256"] = digest
