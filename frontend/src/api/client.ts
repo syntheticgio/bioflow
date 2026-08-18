@@ -38,6 +38,7 @@ import type {
   GeneralSettings,
   JobLog,
   JobSummary,
+  JobTypeInfo,
   LineageDownloadRequest,
   LineageStatus,
   LocalDatabaseEntry,
@@ -655,7 +656,9 @@ export const api = {
 
   retryJob: (id: string) => request<JobSummary>(`/jobs/${id}/retry`, { method: "POST" }),
 
-  jobTypes: () => request<Record<string, unknown>>("/jobs/types"),
+  /** Handler metadata by job type. `default_class` is what tells a sweep
+   *  (maintenance) apart from the user's own work -- see `isMaintenance`. */
+  jobTypes: () => request<Record<string, JobTypeInfo>>("/jobs/types"),
 
   /** Aggregated computation cost, for the Reference → Metrics page. */
   metrics: () => request<MetricsStats>("/jobs/metrics"),

@@ -207,3 +207,17 @@ export interface DeletionPreview {
   active_jobs: ActiveJob[];
   blocked: boolean;
 }
+
+/**
+ * What `/jobs/types` reports for one handler.
+ *
+ * `default_class` is the handler's declared class, which is what tells a
+ * maintenance sweep apart from the user's own work -- a job's runtime
+ * `job_class` does not, since `scheduler.run_now` promotes a hand-fired sweep
+ * to `user_interactive`. See `isMaintenance` in lib/runFormat.
+ */
+export interface JobTypeInfo {
+  mode?: string;
+  default_class?: JobClass;
+  resources?: Record<string, unknown>;
+}

@@ -1,6 +1,7 @@
 import type {
   BlockedReason,
   JobSummary,
+  JobTypeInfo,
   RunKind,
   RunStatus,
   RunSummary,
@@ -274,6 +275,68 @@ export function waitingReason(
   return "waiting for a free slot";
 }
 
+/**
+ * What each maintenance sweep is, in words.
+ *
+ * These jobs have no file to name -- they act on the whole library -- so
+ * `jobLabel` had nothing to fall back to but the handler's own type string,
+ * and the activity page listed rows reading `gc_blobs` and `verify_files`
+ * (#556). Pressing "Clean up storage now" toasts "Progress is in Activity",
+ * which is only true if the thing the user finds there is recognisable as the
+ * cleanup they asked for.
+ *
+ * Deliberately *not* exhaustive over the backend's maintenance handlers. This
+ * is the "intentionally partial" registry shape CLAUDE.md describes: an entry
+ * here is a claim that we have a good name for the sweep, and a type with no
+ * entry falls back to its token rather than to a guessed phrase. What must
+ * stay in step is `MAINTENANCE_TYPES` below, which decides *placement* --
+ * that one is checked against the API.
+ */
+export const MAINTENANCE_LABELS: Record<string, string> = {
+  gc_blobs: "Storage cleanup",
+  verify_files: "File verification",
+  verify_blob: "File verification",
+  reap_uploads: "Abandoned upload cleanup",
+  reap_report_dirs: "Report cleanup",
+  reap_pipeline_scratch: "Scratch cleanup",
+  sweep_storage_drift: "Storage drift check",
+};
+
+/** The readable name for a maintenance sweep, or undefined if it is not one. */
+export function maintenanceLabel(type: string): string | undefined {
+  return MAINTENANCE_LABELS[type];
+}
+
+/**
+ * The maintenance job types this build knows without asking the API.
+ *
+ * Used only until `/jobs/types` resolves, so a cold cache does not dump every
+ * sweep back into the main list for the first second of a page load. The API
+ * map is authoritative once it arrives -- which is what keeps a sweep added
+ * to the backend from silently landing in the biological work, the failure
+ * this list would otherwise reintroduce.
+ */
+const KNOWN_MAINTENANCE_TYPES = new Set(Object.keys(MAINTENANCE_LABELS));
+
+/**
+ * Whether a job is the installation's own housekeeping rather than the user's
+ * biological work.
+ *
+ * Keyed on the job *type*, not on `job.job_class`. `scheduler.run_now`
+ * re-classes a hand-fired sweep as `user_interactive` on purpose -- someone is
+ * watching it -- so reading the runtime class would file the one sweep the
+ * user actually asked for under pipeline work, which is precisely the job
+ * #556 is about finding.
+ */
+export function isMaintenance(
+  job: Pick<JobSummary, "type">,
+  types?: Record<string, JobTypeInfo>,
+): boolean {
+  const known = types?.[job.type];
+  if (known) return known.default_class === "maintenance";
+  return KNOWN_MAINTENANCE_TYPES.has(job.type);
+}
+
 /** The file a job is about, falling back to its type. */
 export function jobLabel(job: JobSummary): string {
   const payload = job.payload as Record<string, unknown>;
@@ -282,7 +345,9 @@ export function jobLabel(job: JobSummary): string {
     const mate = payload.r2_name;
     return typeof mate === "string" && mate ? `${name} + ${mate}` : name;
   }
-  return job.type;
+  // A sweep names no file, so its type is all `jobLabel` used to have. Prefer
+  // the phrase over the token when we have one.
+  return maintenanceLabel(job.type) ?? job.type;
 }
 
 /** A ledger line, from either kind of run. */
