@@ -36,6 +36,16 @@ function paramsMatchPreset(
   );
 }
 
+function hasAnyPresetManagedValue(
+  params: Partial<AlignParams>,
+  preset: AlignerPreset | undefined,
+): boolean {
+  if (!preset) return false;
+  return Object.keys(preset.values).some((key) =>
+    Object.prototype.hasOwnProperty.call(params, key),
+  );
+}
+
 export function initialPresetSelection({
   aligner,
   params,
@@ -48,7 +58,9 @@ export function initialPresetSelection({
   if (!presets) return null;
   if (isNamedPreset(presets, params.preset)) return params.preset;
   if (aligner === "bowtie2") {
-    return paramsMatchPreset(params, presets[BOWTIE2_DEFAULT_PRESET_ID])
+    const defaultPreset = presets[BOWTIE2_DEFAULT_PRESET_ID];
+    return !hasAnyPresetManagedValue(params, defaultPreset) ||
+      paramsMatchPreset(params, defaultPreset)
       ? BOWTIE2_DEFAULT_PRESET_ID
       : BOWTIE2_CUSTOM_PRESET_VALUE;
   }
