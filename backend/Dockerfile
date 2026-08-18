@@ -121,11 +121,11 @@ RUN apt-get update \
 # Debian packages it (2.9.5, ~37MB) and its dependencies are minimap2 and
 # samtools, both already above. hifiasm is not packaged at all and would need
 # a source build with the same arm64 SIMD problem bwa-mem2 has.
-# abyss is the short-read assembler (2.3.10, paired-end de Bruijn). SPAdes
-# would be the better choice on isolates but is NOT packaged for trixie --
-# verified 2026-08-17, `apt-cache policy spades` has no candidate -- and needs
-# a vendored upstream tarball. See #519 and
-# docs/superpowers/specs/2026-08-17-short-read-assembly-design.md.
+# abyss is the short-read assembler (2.3.10, paired-end de Bruijn) and stays
+# the default for short reads. SPAdes is the better choice on isolates and is
+# now installed too -- not from apt (trixie has no candidate, verified
+# 2026-08-17) and not from a single vendored tarball either, since upstream
+# publishes no Linux-arm64 binary. See the SPAdes layer below.
 # See docs/superpowers/specs/2026-08-01-de-novo-assembly-design.md.
 # bcftools and tabix are separate packages from samtools -- installing samtools
 # does not bring htslib's command-line tools along. bcftools does the
@@ -257,6 +257,23 @@ COPY scripts/install-clair3.sh /srv/scripts/install-clair3.sh
 RUN chmod +x /srv/scripts/install-clair3.sh \
     && CLAIR3_VERSION="${CLAIR3_VERSION}" /srv/scripts/install-clair3.sh \
     && rm -rf /tmp/bin
+
+# --- SPAdes ----------------------------------------------------------------
+#
+# The better short-read assembler on bacterial isolates, and the reason this
+# is its own late layer is size: ~193MB built, ~196MB vendored. An edit above
+# should not reinstall it.
+#
+# Not packaged for trixie, and -- unlike every other vendored tool here --
+# with no Linux-arm64 release asset either, so the install script branches on
+# architecture: prebuilt binary on amd64, source build on arm64. See
+# scripts/install-spades.sh's header and
+# docs/superpowers/specs/2026-08-18-spades-short-read-assembly-design.md.
+ARG SPADES_VERSION=4.3.0
+COPY scripts/install-spades.sh /srv/scripts/install-spades.sh
+RUN chmod +x /srv/scripts/install-spades.sh \
+    && SPADES_VERSION="${SPADES_VERSION}" \
+       /srv/scripts/install-spades.sh
 
 # --- NCBI Datasets CLI ------------------------------------------------------
 #
