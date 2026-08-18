@@ -1619,6 +1619,9 @@ class ScaffoldRequest(BaseModel):
     # pass this rather than lean on the launch's own fallback.
     reference_object_id: PydanticObjectId | None = None
     divergence: str | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/scaffold", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1633,6 +1636,7 @@ async def launch_scaffold_route(body: ScaffoldRequest, owner: OwnerDep) -> JobOu
         reference_object_id=body.reference_object_id,
         divergence=body.divergence,
         owner=owner,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
@@ -1646,6 +1650,9 @@ class MisassemblyQcRequest(BaseModel):
     # to supply it -- it only offers this pipeline when exactly one
     # candidate exists.
     reference_object_id: PydanticObjectId | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/misassemblies", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1659,6 +1666,7 @@ async def launch_misassembly_qc_route(
         draft_object_id=body.draft_object_id,
         reference_object_id=body.reference_object_id,
         owner=owner,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 
@@ -1671,6 +1679,9 @@ class SyntenyRequest(BaseModel):
     # rather than lean on the launch's own single-candidate fallback.
     reference_object_id: PydanticObjectId | None = None
     divergence: str | None = None
+    # "Launch anyway" from the refusal card. Skips the declared-budget refusal
+    # and persists on the job, where claim.lua admits it as sole occupant.
+    resource_override: bool = False
 
 
 @router.post("/synteny", response_model=JobOut, status_code=status.HTTP_201_CREATED)
@@ -1684,6 +1695,7 @@ async def launch_synteny_route(body: SyntenyRequest, owner: OwnerDep) -> JobOut:
         reference_object_id=body.reference_object_id,
         divergence=body.divergence,
         owner=owner,
+        resource_override=body.resource_override,
     )
     return JobOut.of(job)
 

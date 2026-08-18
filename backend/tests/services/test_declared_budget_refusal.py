@@ -668,3 +668,186 @@ async def test_consensus_override_enqueues_with_the_flag(monkeypatch):
                 bam_object_id=bam.id, owner="t", resource_override=True
             )
     assert captured["resource_override"] is True
+
+def _reference_fixture(project_id):
+    return SimpleNamespace(
+        id=PydanticObjectId(),
+        name="ref.fasta",
+        format=SimpleNamespace(kind=FormatKind.FASTA),
+        status=ObjectStatus.READY,
+        role=None,
+        facts={},
+        metadata={},
+        blob_sha256="n" * 64,
+        project_id=project_id,
+        owner="t",
+    )
+
+
+@pytest.mark.asyncio
+async def test_scaffold_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_scaffold(
+            draft_object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_scaffold_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    draft = _draft_assembly_fixture()
+    reference = _reference_fixture(draft.project_id)
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=[draft, reference]),
+        ),
+        patch(
+            "app.services.reference_assembly.check_draft_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.reference_assembly.check_reference_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("o" * 64, None)),
+        ),
+        patch(
+            "app.services.run_service.create_run",
+            AsyncMock(return_value=SimpleNamespace(id="run1", owner="t")),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_scaffold(
+                draft_object_id=draft.id,
+                owner="t",
+                reference_object_id=reference.id,
+                resource_override=True,
+            )
+    assert captured["resource_override"] is True
+
+
+@pytest.mark.asyncio
+async def test_misassembly_qc_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_misassembly_qc(
+            draft_object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_misassembly_qc_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    draft = _draft_assembly_fixture()
+    reference = _reference_fixture(draft.project_id)
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=[draft, reference]),
+        ),
+        patch(
+            "app.services.reference_assembly.check_draft_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.reference_assembly.check_reference_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("p" * 64, None)),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_misassembly_qc(
+                draft_object_id=draft.id,
+                owner="t",
+                reference_object_id=reference.id,
+                resource_override=True,
+            )
+    assert captured["resource_override"] is True
+
+
+@pytest.mark.asyncio
+async def test_synteny_refuses_over_budget(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    with pytest.raises(ValidationError) as excinfo:
+        await pipeline_service.launch_synteny(
+            draft_object_id=PydanticObjectId(), owner="t", resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+
+
+@pytest.mark.asyncio
+async def test_synteny_override_enqueues_with_the_flag(monkeypatch):
+    monkeypatch.setattr(
+        pipeline_service, "current_admission_budget_mb", _budget_of(5600)
+    )
+    draft = _draft_assembly_fixture()
+    reference = _reference_fixture(draft.project_id)
+    captured = {}
+
+    async def _fake_enqueue(job_type, **kwargs):
+        captured.update(kwargs)
+        return None
+
+    with (
+        patch("app.queue.queue.enqueue", _fake_enqueue),
+        _no_tool_check(),
+        patch(
+            "app.services.object_service.get_object",
+            AsyncMock(side_effect=[draft, reference]),
+        ),
+        patch(
+            "app.services.reference_assembly.check_draft_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.reference_assembly.check_reference_assembly",
+            lambda obj: obj,
+        ),
+        patch(
+            "app.services.pipeline_service._resolve_readable",
+            AsyncMock(return_value=("q" * 64, None)),
+        ),
+    ):
+        with pytest.raises(Exception):
+            await pipeline_service.launch_synteny(
+                draft_object_id=draft.id,
+                owner="t",
+                reference_object_id=reference.id,
+                resource_override=True,
+            )
+    assert captured["resource_override"] is True
