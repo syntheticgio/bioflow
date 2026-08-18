@@ -85,3 +85,19 @@ def test_min_declared_floor_can_exceed_a_small_budget():
             budget_mb=tiny_budget,
             resource_override=False,
         )
+
+
+def test_declared_refusal_is_tagged_for_the_frontend():
+    """R4: the card is routed by this key, not by sniffing estimate_mb.
+
+    #478 shipped without it, so AssembleDialog's `"estimate_mb" in details`
+    guard was false for every declared refusal and the escape hatch the
+    message promises never rendered.
+    """
+    with pytest.raises(ValidationError) as excinfo:
+        pipeline_service.refuse_if_over_budget(
+            declared_mb=16384, budget_mb=5600, resource_override=False
+        )
+    assert excinfo.value.details["refusal"] == "declared"
+    assert excinfo.value.details["declared_mb"] == 16384
+    assert excinfo.value.details["budget_mb"] == 5600
