@@ -215,11 +215,10 @@ jobs:
           MONGO_INITDB_ROOT_USERNAME: root
           MONGO_INITDB_ROOT_PASSWORD: example
         options: >-
-          --health-cmd "mongosh --quiet --eval 'db.adminCommand("ping")'"
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        cmd: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     steps:
       - uses: actions/checkout@v7
 
@@ -237,6 +236,23 @@ jobs:
       - name: Install backend dev dependencies
         run: pip install -e 'backend/.[dev]'
 
+      - name: Start MongoDB with replica set
+        run: |
+          docker run -d --name mongo \
+            --network-alias mongo \
+            -p 27017:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME=root \
+            -e MONGO_INITDB_ROOT_PASSWORD=example \
+            mongo:7 --replSet rs0 --bind_ip_all
+          # Wait for MongoDB to accept connections
+          for i in $(seq 1 30); do
+            if docker exec mongo mongosh --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; then
+              echo "MongoDB is ready"
+              break
+            fi
+            sleep 1
+          done
+
       - name: Install mongosh
         # No Mongo shell on the base image; needed to init the replica set.
         run: |
@@ -245,10 +261,13 @@ jobs:
       - name: Initialize replica set
         run: |
           # Wait for the primary to accept connections, then initiate.
-          until mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true"             --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
+          until mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true" \
+            --quiet --eval 'db.adminCommand("ping")' >/dev/null 2>&1; do
             sleep 1
           done
-          mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true"             --quiet             --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
+          mongosh "mongodb://root:example@localhost:27017/admin?directConnection=true" \
+            --quiet \
+            --eval 'rs.initiate({_id: "rs0", members: [{_id: 0, host: "localhost:27017"}]})'
           sleep 3
 
       - name: Run full test suite
