@@ -51,6 +51,19 @@ def test_spades_declares_contigs_as_required_output():
     assert kinds[OutputKind.GRAPH].filename == "assembly_graph_with_scaffolds.gfa"
 
 
+def test_spades_does_not_declare_scaffolds_fasta():
+    """`harvest()` returns dict[OutputKind, Path] keyed by kind, and there is
+    no separate OutputKind.SCAFFOLDS -- a scaffolds.fasta Output would share
+    OutputKind.CONTIGS with the required contigs.fasta entry and silently
+    lose that collision, declaring an output the pipeline can never actually
+    deliver. The fix is not declaring it at all.
+    """
+    spec = assembler_registry.spec_for(Assembler.SPADES)
+    filenames = {o.filename for o in spec.outputs}
+    assert "scaffolds.fasta" not in filenames
+    assert filenames == {"contigs.fasta", "assembly_graph_with_scaffolds.gfa"}
+
+
 def test_spades_offers_exactly_the_three_modes():
     assert assembler_registry.modes_for(Assembler.SPADES) == frozenset(
         {"isolate", "careful", "standard"}
