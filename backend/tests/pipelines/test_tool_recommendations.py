@@ -2,9 +2,12 @@
 
 `ToolMeta.recommendations` is what the frontend's tool picker renders as the
 "Recommended" badge, and -- more consequentially -- what it *auto-selects*
-when a dialog opens (`PipelineToolSelector.tsx` picks the first tool whose
-recommendation for the reads' bucket is "recommended"). Until this module
-existed, nothing tested any of it: a typo'd bucket key, a flipped level, or a
+when a dialog opens. `PipelineToolSelector.tsx` takes the recommended tool
+that names the reads' bucket in `default_for`, falling back to the first
+recommended one; before #588 there was no `default_for` and the fallback was
+the only rule, so a bucket with two recommended tools resolved by whichever
+this registry happened to list first. Until this module existed, nothing
+tested any of it: a typo'd bucket key, a flipped level, or a
 deleted entry changed which tool a user's trim or QC run defaults to, with
 every other test staying green.
 
@@ -146,9 +149,10 @@ class TestPerPipelineBuckets:
             )
 
     def test_qc_has_at_least_one_recommendation_per_bucket(self):
-        """QC currently carries two RECOMMENDED for short reads (fastp and
-        fastqc), so exact-one cannot be asserted -- but zero would mean the
-        QC dialog silently loses its default for that read type."""
+        """QC carries two RECOMMENDED for short reads (fastp and fastqc) on
+        purpose -- `run_qc` runs both as a pair -- so exact-one is the wrong
+        assertion here, unlike trim. Zero would mean the QC dialog silently
+        loses its default for that read type."""
         qc = self._tools_for("qc")
         for bucket in VALID_BUCKETS:
             recommended = [
@@ -157,6 +161,60 @@ class TestPerPipelineBuckets:
                 if meta.recommendations.get(bucket) == RecommendationLevel.RECOMMENDED.value
             ]
             assert recommended, f"qc/{bucket} has no RECOMMENDED tool left"
+
+    def test_every_bucket_with_a_tie_names_exactly_one_default(self):
+        """Wherever a picker family has more than one RECOMMENDED tool in a
+        bucket, exactly one of them must set `default_for` for that bucket.
+
+        Without it the frontend's auto-select takes whichever came first in
+        TOOL_META's dict order, so an unrelated reordering of the registry
+        silently changes which tool a dialog opens on (#588).
+        """
+        families = {p for meta in TOOL_META.values() for p in meta.pipelines}
+        for family in families:
+            members = self._tools_for(family.value)
+            for bucket in VALID_BUCKETS:
+                recommended = [
+                    name
+                    for name, meta in members.items()
+                    if meta.recommendations.get(bucket)
+                    == RecommendationLevel.RECOMMENDED.value
+                ]
+                if len(recommended) < 2:
+                    continue
+                defaults = [
+                    name for name in recommended if bucket in TOOL_META[name].default_for
+                ]
+                assert len(defaults) == 1, (
+                    f"{family.value}/{bucket} has {len(recommended)} RECOMMENDED "
+                    f"tools ({recommended}) but {len(defaults)} marked default "
+                    f"({defaults}) -- auto-select would fall back to dict order"
+                )
+
+    def test_default_for_buckets_are_ones_the_tool_recommends(self):
+        """`default_for` breaks a tie between RECOMMENDED tools, so naming a
+        bucket the tool does not recommend (or is incompatible with) would
+        promote it over the tools that are actually recommended there."""
+        for name, meta in TOOL_META.items():
+            for bucket in meta.default_for:
+                assert bucket in VALID_BUCKETS, (
+                    f"{name} is default for bucket {bucket!r}, which "
+                    "chemistryBucket() never produces"
+                )
+                assert (
+                    meta.recommendations.get(bucket)
+                    == RecommendationLevel.RECOMMENDED.value
+                ), (
+                    f"{name} is default for {bucket!r} without being "
+                    "RECOMMENDED there"
+                )
+
+    def test_qc_short_defaults_to_fastp(self):
+        """The pinned resolution of #588. fastp is the tool `run_qc` cannot
+        finish without -- FastQC is the optional extra whose absence the
+        handler tolerates -- so it is the honest default of the two."""
+        assert "short" in TOOL_META["fastp"].default_for
+        assert "short" not in TOOL_META["fastqc"].default_for
 
 
 class TestApiPassthrough:

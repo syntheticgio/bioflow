@@ -120,14 +120,24 @@ export function PipelineToolSelector({
 
   const tools = (data?.tools ?? []).filter((t) => t.pipelines.includes(pipeline));
 
-  // Auto-select the first recommended tool when data loads, if nothing selected yet
+  // Auto-select the recommended tool when data loads, if nothing selected yet.
+  //
+  // A family can legitimately have two recommended tools for one bucket --
+  // QC recommends both fastp and fastqc for short reads, because run_qc runs
+  // them as a pair. Taking the first match would then make the dialog's
+  // default depend on the order the backend's registry happens to serialize
+  // (#588), so a tool naming this bucket in `default_for` wins over one that
+  // is merely recommended.
   useEffect(() => {
     if (selected != null) return;
     if (!data) return;
     const bucket = chemistryBucket(object);
-    const recommended = tools.find(
-      (t) => bucket && t.recommendations[bucket] === "recommended",
-    );
+    const recommendedTools = bucket
+      ? tools.filter((t) => t.recommendations[bucket] === "recommended")
+      : [];
+    const recommended =
+      recommendedTools.find((t) => bucket && t.default_for?.includes(bucket)) ??
+      recommendedTools[0];
     if (recommended) {
       onSelect(recommended.name);
       return;
