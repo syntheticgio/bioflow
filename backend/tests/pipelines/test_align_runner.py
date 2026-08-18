@@ -45,6 +45,10 @@ def align_cmd(**kw) -> list[str]:
     return align_runner.build_align_command(**{**base, **kw})
 
 
+def aligner_stage(**kw) -> str:
+    return align_cmd(**kw)[-1].split(" | samtools sort ", 1)[0]
+
+
 class TestPipefail:
     """The design calls for this explicitly, and it is testable for real."""
 
@@ -116,6 +120,71 @@ class TestAlignCommand:
     def test_minimap2_emits_sam_not_paf(self):
         """samtools sort cannot read PAF, which is minimap2's default output."""
         assert " -a " in align_cmd()[-1]
+
+    def test_minimap2_omits_advanced_flags_when_unset(self):
+        script = aligner_stage(params=AlignParams())
+        for fragment in (
+            "-k ",
+            "-w ",
+            "-m ",
+            "-g ",
+            "-p ",
+            "-N ",
+            "--secondary=",
+            "-K ",
+            " -Y ",
+            " --cs",
+            " --MD",
+        ):
+            assert fragment not in script
+
+    def test_minimap2_appends_all_explicit_advanced_flags_once_in_stable_order(self):
+        script = aligner_stage(
+            params=AlignParams(
+                preset=Preset.MAP_ONT,
+                kmer_size=19,
+                window_size=10,
+                min_chain_score=40,
+                max_gap=5000,
+                secondary_ratio=0.8,
+                max_secondary=10,
+                secondary_mode="disabled",
+                batch_size=1000000,
+                soft_clip_supplementary=True,
+                cs_mode="long",
+                emit_md=True,
+            )
+        )
+        expected = [
+            "-k 19",
+            "-w 10",
+            "-m 40",
+            "-g 5000",
+            "-p 0.8",
+            "-N 10",
+            "--secondary=no",
+            "-K 1000000",
+            "-Y",
+            "--cs=long",
+            "--MD",
+            "-R '@RG",
+            "/w/genome.fna",
+            "/w/r1.fq.gz",
+        ]
+        for fragment in expected:
+            assert script.count(fragment) == 1
+        positions = [script.index(fragment) for fragment in expected]
+        assert positions == sorted(positions)
+
+    def test_minimap2_emits_enabled_secondary_mode_only_when_requested(self):
+        script = aligner_stage(params=AlignParams(secondary_mode="enabled"))
+        assert script.count("--secondary=yes") == 1
+        assert "--secondary=no" not in script
+
+    def test_minimap2_emits_short_cs_mode_only_when_requested(self):
+        script = aligner_stage(params=AlignParams(cs_mode="short"))
+        assert script.count("--cs") == 1
+        assert "--cs=long" not in script
 
 
 class TestMarkdupCommand:
