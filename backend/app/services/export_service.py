@@ -388,16 +388,18 @@ def _plan_artifacts(
 def build_manifest(
     bundle: ExportBundle, *, threshold_bytes: int
 ) -> tuple[str, list[ExportArtifact]]:
-    """Render data-manifest.tsv and decide which blobs' bytes to pack.
+    """Render data-manifest.tsv and decide which artifact bytes to pack.
 
-    Every blob in scope gets a row, including those whose bytes are left
-    out -- the last column says which. That distinction is the manifest's
-    whole value: the recipient can tell "not sent" from "does not exist",
-    and knows exactly what to ask for.
+    Every blob and report file in scope gets a row, including those whose
+    bytes are left out -- the last column says which. That distinction is
+    the manifest's whole value: the recipient can tell "not sent" from
+    "does not exist", and knows exactly what to ask for.
 
     Written as TSV, readable with cut and grep on a machine with no Mongo,
     no Docker, and no BioFlow. The recipient is the one person guaranteed
-    not to have the app. Same shape as ops/backup.sh's manifest.
+    not to have the app. Same shape as ops/backup.sh's manifest. The
+    threshold is per file, so a small report artifact can be packed even
+    when a sibling report file is too large.
     """
     rows, included = _plan_artifacts(bundle, threshold_bytes=threshold_bytes)
     return _render_manifest_rows(rows), included
@@ -468,7 +470,8 @@ versions and parameters, producing which results.
   are in this archive. Readable with `cut` and `grep`.
 - `metadata/` — the underlying records as JSON.
 - `blobs/` — the bytes of files small enough to include.
-- `reports/` — QC and other sidecar files small enough to include.
+- `reports/<category>/<object_id>/` — QC and other sidecar files small
+  enough to include, grouped by report type and object.
 
 ## What it is not
 
@@ -479,7 +482,8 @@ and preserves record identity so that an importer remains possible later.
 **Large files may still be excluded.** `data-manifest.tsv` is the source of
 truth: each blob or report file is marked `included`, `excluded`,
 `unavailable`, or `error`, so the recipient can tell "too large", "gone
-before packing", and "failed while packing" apart from one another.
+before packing", and "failed while packing" apart from one another. The
+per-file threshold applies independently to each artifact.
 
 ## What was removed
 
